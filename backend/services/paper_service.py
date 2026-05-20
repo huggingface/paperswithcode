@@ -44,6 +44,7 @@ from backend.models.api import (
     MethodSummary,
     BenchmarkSummary,
     VersionComparison,
+    AuthorLink,
 )
 from backend.utils.urls import (
     get_arxiv_abs_url,
@@ -92,6 +93,7 @@ class PaperService:
         unique_ids = list(dict.fromkeys(int(paper_id) for paper_id in paper_ids))
         relation_data = {
             "authors": defaultdict(list),
+            "author_links": defaultdict(list),
             "tasks": defaultdict(list),
             "methods": defaultdict(list),
             "repositories": defaultdict(list),
@@ -103,14 +105,17 @@ class PaperService:
             return relation_data
 
         author_rows = (
-            self.db.query(PaperAuthor.paper_id, DBAuthor.name)
+            self.db.query(PaperAuthor.paper_id, DBAuthor.name, DBAuthor.hf_username)
             .join(DBAuthor, PaperAuthor.author_id == DBAuthor.id)
             .filter(PaperAuthor.paper_id.in_(unique_ids))
             .order_by(PaperAuthor.paper_id, PaperAuthor.author_order)
             .all()
         )
-        for paper_id, author_name in author_rows:
+        for paper_id, author_name, hf_username in author_rows:
             relation_data["authors"][paper_id].append(author_name)
+            relation_data["author_links"][paper_id].append(
+                AuthorLink(name=author_name, hf_username=hf_username)
+            )
 
         task_rows = (
             self.db.query(PaperTask.paper_id, DBTask)
@@ -282,6 +287,7 @@ class PaperService:
             )
 
         authors = relation_data["authors"].get(db_paper.id, [])
+        author_links = relation_data["author_links"].get(db_paper.id, [])
 
         # Source-aware URL construction. ArXiv rows derive abs/pdf URLs from
         # `arxiv_id` + `version`. External rows use `source_url` for the
@@ -333,6 +339,7 @@ class PaperService:
             "title": db_paper.title,
             "abstract": db_paper.abstract or "",
             "authors": authors,
+            "author_links": author_links,
             "published": db_paper.date_published,
             "conference": db_paper.conference,
             "conference_url_abs": db_paper.conference_url_abs,

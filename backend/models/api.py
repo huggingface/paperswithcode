@@ -63,6 +63,14 @@ class Paper(BaseModel):
         description="Paper abstract or summary (may be empty for external rows)",
     )
     authors: List[str] = Field(..., description="List of paper authors")
+    author_links: List["AuthorLink"] = Field(
+        default_factory=list,
+        description=(
+            "Per-author entries parallel to `authors`, carrying the HF "
+            "username when the author is mapped to a Hugging Face profile. "
+            "Used by the frontend to link names to huggingface.co/{user}."
+        ),
+    )
 
     # Publication information
     published: Optional[date] = Field(None, description="Paper publication date")
@@ -305,6 +313,21 @@ class ValidationErrorResponse(BaseModel):
 
 
 # Author models
+
+
+class AuthorLink(BaseModel):
+    """Minimal author entry used inline on Paper responses.
+
+    Parallels `Paper.authors` and carries an optional `hf_username` so the
+    frontend can link author names to their Hugging Face profile.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    name: str = Field(..., description="Author display name")
+    hf_username: Optional[str] = Field(
+        None, description="Hugging Face username, when the author is mapped to a HF profile"
+    )
 
 
 class Author(BaseModel):

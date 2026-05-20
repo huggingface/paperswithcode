@@ -319,8 +319,12 @@ const PaperDetailView: React.FC = () => {
   })();
 
   const AUTHOR_LIMIT = 12;
+  const authorEntries = paper.authors.map((name, i) => ({
+    name,
+    hf_username: paper.author_links?.[i]?.hf_username ?? null,
+  }));
   const visibleAuthors =
-    showAllAuthors || paper.authors.length <= AUTHOR_LIMIT ? paper.authors : paper.authors.slice(0, AUTHOR_LIMIT);
+    showAllAuthors || authorEntries.length <= AUTHOR_LIMIT ? authorEntries : authorEntries.slice(0, AUTHOR_LIMIT);
 
   return (
     <div className="page">
@@ -381,7 +385,18 @@ const PaperDetailView: React.FC = () => {
           <div className="detail-authors">
             {visibleAuthors.map((a, i) => (
               <React.Fragment key={i}>
-                <a>{a}</a>
+                {a.hf_username ? (
+                  <a
+                    href={`https://huggingface.co/${a.hf_username}`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title={`@${a.hf_username} on Hugging Face`}
+                  >
+                    {a.name}
+                  </a>
+                ) : (
+                  <a>{a.name}</a>
+                )}
                 {i < visibleAuthors.length - 1 ? ", " : ""}
               </React.Fragment>
             ))}
