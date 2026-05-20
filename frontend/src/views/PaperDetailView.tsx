@@ -251,6 +251,7 @@ const PaperDetailView: React.FC = () => {
   const hfArtifactViewer = paper.arxiv_id
     ? {
         isLoading: hfLoading,
+        paperHref: `https://huggingface.co/papers/${paper.arxiv_id.replace(/v\d+$/, "")}`,
         rows: [
           {
             label: "Models",
@@ -275,6 +276,7 @@ const PaperDetailView: React.FC = () => {
       }
     : {
         isLoading: false,
+        paperHref: null,
         rows: [
           {
             label: "Models",
@@ -856,6 +858,7 @@ interface HfRowProps {
 
 interface HuggingFaceArtifactsViewer {
   isLoading: boolean;
+  paperHref: string | null;
   rows: HfRowProps[];
   footer: string | null;
 }
@@ -863,7 +866,18 @@ interface HuggingFaceArtifactsViewer {
 const HuggingFaceArtifactsCard: React.FC<{ viewer: HuggingFaceArtifactsViewer }> = ({ viewer }) => (
   <div className="sidebar-card">
     <div className="sidebar-card-title">
-      <span>🤗 Hugging Face</span>
+      {viewer.paperHref ? (
+        <a
+          href={viewer.paperHref}
+          target="_blank"
+          rel="noopener noreferrer"
+          style={{ color: "inherit", textDecoration: "none" }}
+        >
+          🤗 Hugging Face
+        </a>
+      ) : (
+        <span>🤗 Hugging Face</span>
+      )}
     </div>
     {viewer.isLoading ? (
       <Skeleton className="h-16 w-full" />
