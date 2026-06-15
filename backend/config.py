@@ -65,6 +65,17 @@ class Settings(BaseSettings):
         default=500, description="Maximum page size for paginated responses"
     )
 
+    # Trending ranking mode for the papers feed:
+    #   "github"    -> rank by official GitHub repo star velocity (current/default;
+    #                  the instant rollback path).
+    #   "composite" -> rank by papers.trending_score (GitHub velocity + Hugging Face
+    #                  artifact trending), computed by calculate_paper_trending_scores.
+    # Set PWC_TRENDING_RANKING_MODE=composite to switch the public feed.
+    trending_ranking_mode: str = Field(
+        default="github",
+        description="Papers trending ranking mode: 'github' or 'composite'",
+    )
+
     # ArXiv configuration
     arxiv_base_url: str = Field(
         default="https://arxiv.org", description="ArXiv base URL"

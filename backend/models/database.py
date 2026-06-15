@@ -117,6 +117,29 @@ class Paper(Base):
     hf_datasets: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
     hf_spaces: Mapped[Optional[List[str]]] = mapped_column(ARRAY(Text), nullable=True)
 
+    # Composite trending score (GitHub star velocity + Hugging Face artifact
+    # trending). Computed by the calculate_paper_trending_scores cron and only
+    # consumed for ranking when PWC_TRENDING_RANKING_MODE=composite. The
+    # GitHub-only path keeps reading repositories.trending_score, so this column
+    # can stay populated-but-unused for an instant rollback.
+    trending_score: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
+    trending_score_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Normalized 0-1.5 components retained for debugging odd rankings.
+    github_trending_component: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
+    hf_trending_component: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
+    # When this paper was last scanned for linked Hugging Face artifacts.
+    hf_artifacts_scanned_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
@@ -152,6 +175,9 @@ class Paper(Base):
     )
     evaluations: Mapped[List["Evaluation"]] = relationship(
         "Evaluation", back_populates="paper"
+    )
+    hf_artifacts: Mapped[List["HfArtifact"]] = relationship(
+        "HfArtifact", secondary="paper_hf_artifacts", back_populates="papers"
     )
 
     # Constraints
@@ -195,6 +221,9 @@ class Paper(Base):
             "methods_scanned_at",
             postgresql_where=text("methods_scanned_at IS NULL"),
         ),
+        Index("idx_papers_trending_score", "trending_score"),
+        Index("idx_papers_trending_score_updated_at", "trending_score_updated_at"),
+        Index("idx_papers_hf_artifacts_scanned_at", "hf_artifacts_scanned_at"),
     )
 
     def __repr__(self) -> str:
@@ -617,6 +646,85 @@ class RepositoryStarHistory(Base):
 
     def __repr__(self) -> str:
         return f"<RepositoryStarHistory(id={self.id}, repository_id={self.repository_id}, stars={self.num_stars}, snapshot_at='{self.snapshot_at}')>"
+
+
+class HfArtifact(Base):
+    """
+    Normalized Hugging Face artifact (model, dataset, or space) with Hub
+    popularity metrics. The relationship to papers is handled through the
+    PaperHfArtifact junction table.
+
+    `trending_score` is the Hugging Face Hub trendingScore (fetched via the
+    `expand[]=trendingScore` parameter). These rows feed the composite paper
+    trending score; they do not affect the GitHub-only ranking.
+    """
+
+    __tablename__ = "hf_artifacts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # One of: 'model', 'dataset', 'space'.
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)
+    # Hugging Face repo id, e.g. 'deepseek-ai/DeepSeek-V4-Pro'.
+    repo_id: Mapped[str] = mapped_column(Text, nullable=False)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+
+    trending_score: Mapped[Optional[float]] = mapped_column(
+        Numeric(12, 4), nullable=True
+    )
+    likes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    downloads: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    fetched_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    papers: Mapped[List["Paper"]] = relationship(
+        "Paper", secondary="paper_hf_artifacts", back_populates="hf_artifacts"
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "kind IN ('model', 'dataset', 'space')",
+            name="hf_artifacts_kind_check",
+        ),
+        UniqueConstraint("kind", "repo_id", name="uq_hf_artifacts_kind_repo"),
+        Index("idx_hf_artifacts_trending_score", "trending_score"),
+        Index("idx_hf_artifacts_fetched_at", "fetched_at"),
+        Index("idx_hf_artifacts_kind", "kind"),
+    )
+
+    def __repr__(self) -> str:
+        return (
+            f"<HfArtifact(id={self.id}, kind='{self.kind}', "
+            f"repo_id='{self.repo_id}', trending_score={self.trending_score})>"
+        )
+
+
+class PaperHfArtifact(Base):
+    """Junction table linking papers to Hugging Face artifacts."""
+
+    __tablename__ = "paper_hf_artifacts"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    hf_artifact_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("hf_artifacts.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_paper_hf_artifacts_paper", "paper_id"),
+        Index("idx_paper_hf_artifacts_artifact", "hf_artifact_id"),
+    )
 
 
 class ProjectPage(Base):

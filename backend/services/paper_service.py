@@ -831,6 +831,136 @@ class PaperService:
         except Exception as e:
             raise DatabaseError(f"Error fetching papers: {str(e)}")
 
+    # GitHub-only ranking (default + rollback path): rank papers by the EMA
+    # star velocity of their best official repository. Two-step dedup: pick the
+    # best official repo per paper, then keep one paper per repo (most recently
+    # published) so the feed never shows duplicate repo cards.
+    _TRENDING_SQL_GITHUB = text("""
+        WITH paper_trending AS (
+            SELECT DISTINCT ON (p.id)
+                p.id as paper_id,
+                p.date_published,
+                r.id as repository_id,
+                r.trending_score,
+                r.num_stars
+            FROM papers p
+            LEFT JOIN paper_repositories pr
+                ON p.id = pr.paper_id
+                AND pr.is_official = TRUE
+            LEFT JOIN repositories r
+                ON pr.repository_id = r.id
+                AND r.trending_score IS NOT NULL
+                AND r.trending_score_updated_at >= (NOW() - INTERVAL '24 hours')
+            WHERE (:search_term IS NOT NULL OR r.id IS NOT NULL)
+                AND (:search_term IS NULL OR p.title ILIKE :search_term OR p.abstract ILIKE :search_term)
+                AND (:published_after IS NULL OR p.date_published >= :published_after)
+                AND (:published_before IS NULL OR p.date_published <= :published_before)
+                AND (:conference IS NULL OR p.conference ILIKE :conference)
+                AND (:latest_only = FALSE OR p.is_latest_version = TRUE)
+            ORDER BY p.id, r.trending_score DESC NULLS LAST, r.num_stars DESC NULLS LAST
+        ),
+        ranked_by_repo AS (
+            SELECT
+                paper_id,
+                trending_score,
+                num_stars,
+                ROW_NUMBER() OVER (
+                    PARTITION BY repository_id
+                    ORDER BY date_published DESC NULLS LAST, paper_id DESC
+                ) as repo_paper_rank
+            FROM paper_trending
+        )
+        SELECT
+            paper_id,
+            COUNT(*) OVER() as total_count
+        FROM ranked_by_repo
+        WHERE repo_paper_rank = 1
+        ORDER BY trending_score DESC NULLS LAST, num_stars DESC
+        LIMIT :limit OFFSET :offset
+    """)
+
+    # Composite ranking: rank papers by papers.trending_score (GitHub velocity +
+    # Hugging Face artifact trending) computed by the calculate_paper_trending_scores
+    # cron. Papers with HF-only signal have a NULL repository_id and are NOT deduped
+    # together (the `repository_id IS NULL` branch keeps every one of them); papers
+    # sharing the same official repo are still deduped to the most recent paper.
+    _TRENDING_SQL_COMPOSITE = text("""
+        WITH paper_pool AS (
+            SELECT DISTINCT ON (p.id)
+                p.id as paper_id,
+                p.date_published,
+                p.trending_score,
+                r.id as repository_id,
+                r.num_stars
+            FROM papers p
+            LEFT JOIN paper_repositories pr
+                ON p.id = pr.paper_id
+                AND pr.is_official = TRUE
+            LEFT JOIN repositories r
+                ON pr.repository_id = r.id
+            WHERE p.trending_score IS NOT NULL
+                AND p.trending_score_updated_at >= (NOW() - INTERVAL '24 hours')
+                AND (:search_term IS NULL OR p.title ILIKE :search_term OR p.abstract ILIKE :search_term)
+                AND (:published_after IS NULL OR p.date_published >= :published_after)
+                AND (:published_before IS NULL OR p.date_published <= :published_before)
+                AND (:conference IS NULL OR p.conference ILIKE :conference)
+                AND (:latest_only = FALSE OR p.is_latest_version = TRUE)
+            ORDER BY p.id, r.num_stars DESC NULLS LAST
+        ),
+        ranked_by_repo AS (
+            SELECT
+                paper_id,
+                trending_score,
+                num_stars,
+                repository_id,
+                ROW_NUMBER() OVER (
+                    PARTITION BY repository_id
+                    ORDER BY date_published DESC NULLS LAST, paper_id DESC
+                ) as repo_paper_rank
+            FROM paper_pool
+        )
+        SELECT
+            paper_id,
+            COUNT(*) OVER() as total_count
+        FROM ranked_by_repo
+        WHERE repository_id IS NULL OR repo_paper_rank = 1
+        ORDER BY trending_score DESC NULLS LAST, num_stars DESC NULLS LAST, paper_id DESC
+        LIMIT :limit OFFSET :offset
+    """)
+
+    def _build_trending_query(
+        self,
+        mode: str,
+        search: Optional[str],
+        published_after: Optional[str],
+        published_before: Optional[str],
+        conference: Optional[str],
+        latest_only: bool,
+        page: int,
+        page_size: int,
+    ):
+        """Return ``(sql, params)`` for the requested trending ranking mode.
+
+        ``mode`` is the configured ``PWC_TRENDING_RANKING_MODE``. Anything other
+        than ``"composite"`` falls back to the GitHub-only ranking, so an unset
+        or invalid value keeps the current (safe) behavior.
+        """
+        sql = (
+            self._TRENDING_SQL_COMPOSITE
+            if mode == "composite"
+            else self._TRENDING_SQL_GITHUB
+        )
+        params = {
+            "search_term": f"%{search}%" if search else None,
+            "published_after": published_after,
+            "published_before": published_before,
+            "conference": f"%{conference}%" if conference else None,
+            "latest_only": latest_only,
+            "limit": page_size,
+            "offset": (page - 1) * page_size,
+        }
+        return sql, params
+
     def _get_trending_papers(
         self,
         page: int = 1,
@@ -843,86 +973,35 @@ class PaperService:
         include_resources: bool = False,
     ) -> Papers:
         """
-        Get papers sorted by official repository trending score.
+        Get papers sorted by trending score.
 
-        This uses the EMA-based trending scores calculated by the hourly CRON job.
-        Only repositories marked official for a paper contribute to that paper's
-        ranking.
+        The ranking depends on ``PWC_TRENDING_RANKING_MODE``:
+        - ``github`` (default/rollback): EMA star velocity of the paper's best
+          official repository (``repositories.trending_score``).
+        - ``composite``: the paper-level composite score (GitHub velocity +
+          Hugging Face artifact trending) computed by the
+          ``calculate_paper_trending_scores`` cron (``papers.trending_score``).
 
         Args:
             Same as get_papers()
 
         Returns:
-            Paginated Papers response sorted by official repository trending score
+            Paginated Papers response sorted by the active trending score
         """
         try:
-            # Two-step dedup: first pick the best official repo per paper,
-            # then ensure each repository contributes at most one paper. When
-            # multiple latest papers share the same GitHub repo (e.g. v1/v2
-            # papers both flagged latest, or unrelated papers wired to the
-            # same code release), we keep only the most recently published
-            # paper so the trending feed never shows duplicate repo cards.
-            sql_query = text("""
-                WITH paper_trending AS (
-                    SELECT DISTINCT ON (p.id)
-                        p.id as paper_id,
-                        p.date_published,
-                        r.id as repository_id,
-                        r.trending_score,
-                        r.num_stars
-                    FROM papers p
-                    LEFT JOIN paper_repositories pr
-                        ON p.id = pr.paper_id
-                        AND pr.is_official = TRUE
-                    LEFT JOIN repositories r
-                        ON pr.repository_id = r.id
-                        AND r.trending_score IS NOT NULL
-                        AND r.trending_score_updated_at >= (NOW() - INTERVAL '24 hours')
-                    WHERE (:search_term IS NOT NULL OR r.id IS NOT NULL)
-                        AND (:search_term IS NULL OR p.title ILIKE :search_term OR p.abstract ILIKE :search_term)
-                        AND (:published_after IS NULL OR p.date_published >= :published_after)
-                        AND (:published_before IS NULL OR p.date_published <= :published_before)
-                        AND (:conference IS NULL OR p.conference ILIKE :conference)
-                        AND (:latest_only = FALSE OR p.is_latest_version = TRUE)
-                    ORDER BY p.id, r.trending_score DESC NULLS LAST, r.num_stars DESC NULLS LAST
-                ),
-                ranked_by_repo AS (
-                    SELECT
-                        paper_id,
-                        trending_score,
-                        num_stars,
-                        ROW_NUMBER() OVER (
-                            PARTITION BY repository_id
-                            ORDER BY date_published DESC NULLS LAST, paper_id DESC
-                        ) as repo_paper_rank
-                    FROM paper_trending
-                )
-                SELECT
-                    paper_id,
-                    COUNT(*) OVER() as total_count
-                FROM ranked_by_repo
-                WHERE repo_paper_rank = 1
-                ORDER BY trending_score DESC NULLS LAST, num_stars DESC
-                LIMIT :limit OFFSET :offset
-            """)
-
-            # Prepare query parameters
-            search_param = f"%{search}%" if search else None
-            conference_param = f"%{conference}%" if conference else None
+            sql_query, query_params = self._build_trending_query(
+                mode=self.settings.trending_ranking_mode,
+                search=search,
+                published_after=published_after,
+                published_before=published_before,
+                conference=conference,
+                latest_only=latest_only,
+                page=page,
+                page_size=page_size,
+            )
 
             # Execute the query to get paper IDs
-            result = self.db.execute(
-                sql_query,
-                {
-                    "search_term": search_param,
-                    "published_after": published_after,
-                    "published_before": published_before,
-                    "conference": conference_param,
-                    "latest_only": latest_only,
-                    "limit": page_size,
-                    "offset": (page - 1) * page_size,
-                },
-            ).fetchall()
+            result = self.db.execute(sql_query, query_params).fetchall()
 
             if not result:
                 # No trending data available yet

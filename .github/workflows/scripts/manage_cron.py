@@ -129,6 +129,8 @@ def show_job_status(job_name: str = None, date: str = None):
                             "update_citations": "update_citations_hourly",
                             "extract_urls": "extract_urls_hourly",
                             "calculate_trending_scores": "calculate_trending_scores",
+                            "update_hf_artifacts": "update_hf_artifacts",
+                            "calculate_paper_trending_scores": "calculate_paper_trending_scores",
                             "link_methods_by_references": "link_methods_by_references_weekly",
                             "link_papers_by_task_keywords": "link_papers_by_task_keywords_weekly",
                         }

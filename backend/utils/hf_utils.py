@@ -142,6 +142,142 @@ def classify_hf_artifact_url(url: str) -> Optional[HfArtifactKind]:
     return None
 
 
+def hf_artifact_repo_id(url: str) -> Optional[tuple[HfArtifactKind, str]]:
+    """Return ``(kind, repo_id)`` for a Hugging Face artifact URL, or None.
+
+    The ``repo_id`` is the canonical Hub id used by the API, e.g.
+    ``deepseek-ai/DeepSeek-V4-Pro`` for a model, ``squad`` or
+    ``org/name`` for a dataset, ``org/name`` for a space (the
+    ``datasets/`` and ``spaces/`` prefixes are stripped).
+    """
+    normalized = normalize_hf_artifact_url(url)
+    if normalized is None:
+        return None
+    kind = classify_hf_artifact_url(normalized)
+    if kind is None:
+        return None
+
+    path = urlparse(normalized).path.lstrip("/")
+    segments = [seg for seg in path.split("/") if seg]
+    if kind in ("dataset", "space"):
+        # Drop the leading 'datasets'/'spaces' segment.
+        repo_segments = segments[1:]
+    else:
+        repo_segments = segments
+    # Repo ids are 'namespace/name' (2 segments) or a bare canonical name.
+    repo_id = "/".join(repo_segments[:2])
+    if not repo_id:
+        return None
+    return kind, repo_id
+
+
+def _hf_api_path_for_kind(kind: HfArtifactKind) -> str:
+    return {"model": "models", "dataset": "datasets", "space": "spaces"}[kind]
+
+
+def fetch_hf_artifact_metrics(
+    kind: HfArtifactKind,
+    repo_id: str,
+    *,
+    token: Optional[str] = None,
+    timeout: float = 15.0,
+) -> Optional[dict]:
+    """Fetch Hub popularity metrics for one artifact.
+
+    Uses ``expand[]=trendingScore`` (plus likes/downloads) on the model/dataset/
+    space detail endpoint. Returns ``{"trending_score", "likes", "downloads"}``
+    or None when the artifact cannot be fetched (404, transient error, etc.).
+    """
+    import requests
+
+    base = _hf_api_path_for_kind(kind)
+    url = f"https://huggingface.co/api/{base}/{repo_id}"
+    params = [
+        ("expand[]", "trendingScore"),
+        ("expand[]", "likes"),
+        ("expand[]", "downloads"),
+    ]
+
+    headers = build_hf_headers(token=token, user_agent={"is_ci": "true"})
+    try:
+        response = requests.get(url, params=params, headers=headers, timeout=timeout)
+    except Exception:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    data = response.json()
+    if not isinstance(data, dict):
+        return None
+    return {
+        "trending_score": data.get("trendingScore"),
+        "likes": data.get("likes"),
+        "downloads": data.get("downloads"),
+    }
+
+
+def fetch_hf_artifacts_for_arxiv(
+    arxiv_id: str,
+    *,
+    token: Optional[str] = None,
+    timeout: float = 15.0,
+) -> list[tuple[HfArtifactKind, str, str]]:
+    """Discover HF artifacts linked to an arXiv paper via the Hub arxiv endpoint.
+
+    Returns a list of ``(kind, repo_id, url)`` tuples. The Hub groups artifacts
+    under ``models`` / ``datasets`` / ``spaces`` keys at
+    ``https://huggingface.co/api/arxiv/{id}/repos``.
+    """
+    import requests
+
+    canonical = re.sub(r"v\d+$", "", arxiv_id.strip())
+    url = f"https://huggingface.co/api/arxiv/{canonical}/repos"
+    headers = build_hf_headers(token=token, user_agent={"is_ci": "true"})
+    try:
+        response = requests.get(url, headers=headers, timeout=timeout)
+    except Exception:
+        return []
+
+    if response.status_code != 200:
+        return []
+
+    data = response.json()
+    if not isinstance(data, dict):
+        return []
+
+    kind_by_key: dict[str, HfArtifactKind] = {
+        "models": "model",
+        "datasets": "dataset",
+        "spaces": "space",
+    }
+    out: list[tuple[HfArtifactKind, str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    for key, kind in kind_by_key.items():
+        entries = data.get(key)
+        if not isinstance(entries, list):
+            continue
+        for entry in entries:
+            repo_id = None
+            if isinstance(entry, dict):
+                repo_id = entry.get("id") or entry.get("repoId")
+            elif isinstance(entry, str):
+                repo_id = entry
+            if not repo_id:
+                continue
+            key_tuple = (kind, repo_id)
+            if key_tuple in seen:
+                continue
+            seen.add(key_tuple)
+            base = _hf_api_path_for_kind(kind)
+            if kind == "model":
+                artifact_url = f"https://huggingface.co/{repo_id}"
+            else:
+                artifact_url = f"https://huggingface.co/{base}/{repo_id}"
+            out.append((kind, repo_id, artifact_url))
+    return out
+
+
 async def get_user_organizations(username: str) -> list[str]:
     """
     Get all organizations that a Hugging Face user belongs to by parsing their HF profile page.

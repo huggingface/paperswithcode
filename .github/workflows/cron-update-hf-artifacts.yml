@@ -1,0 +1,46 @@
+name: Cron - Update Hugging Face Artifacts
+
+on:
+  schedule:
+    - cron: "30 * * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron-update-hf-artifacts
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Load SSH key into agent
+        uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Add VPS to known_hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -z "$VPS_HOST" ] || [[ "$VPS_HOST" == *"://"* || "$VPS_HOST" == *"@"* || "$VPS_HOST" == *"/"* || "$VPS_HOST" =~ [[:space:]] ]]; then
+            echo "VPS_HOST must be a bare hostname or IP address, without user, scheme, path, or whitespace."
+            exit 1
+          fi
+          if ! timeout 10 bash -c "cat < /dev/null > /dev/tcp/$VPS_HOST/22"; then
+            echo "Cannot reach VPS_HOST on TCP port 22 from the GitHub runner."
+            exit 1
+          fi
+          if ! ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts; then
+            echo "Failed to scan VPS host key. Check VPS_HOST is a hostname/IP only and port 22 is reachable."
+            exit 1
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Run update_hf_artifacts on VPS
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+              '/root/python_projects/paperswithcode/.github/workflows/scripts/run_hf_artifacts.sh'
