@@ -40,7 +40,10 @@ jobs:
           chmod 600 ~/.ssh/known_hosts
 
       - name: Run update_hf_artifacts on VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           ssh -o StrictHostKeyChecking=yes \
-              "${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }}" \
+              "${VPS_USER}@${VPS_HOST}" \
               '/root/python_projects/paperswithcode/.github/workflows/scripts/run_hf_artifacts.sh'
