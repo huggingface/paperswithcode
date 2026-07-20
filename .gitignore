@@ -72,10 +72,16 @@ thumbnail_cache/
 # Claude Design uploads
 frontend/design-paperswithcode/project/uploads/
 
-# design-sync (claude.ai/design) — staged scripts, build output, machine state
+# design-sync (claude.ai/design) — staged scripts, build output, machine state.
+# NOTE: only machine-state SUBPATHS of .design-sync/ are ignored; the durable set
+# (config.json, NOTES.md, conventions.md, previews/, overrides/) IS committed so the
+# sync anchor and authored previews survive across machines. Ignoring all of
+# .design-sync/ is what silently lost the config on an earlier run.
 .ds-sync/
 ds-bundle/
-.design-sync/
+.design-sync/.cache/
+.design-sync/learnings/
+.design-sync/node_modules
 frontend/.ds-tailwind.css
 frontend/.ds-ui-barrel.ts
 frontend/tailwind.sync.config.ts
