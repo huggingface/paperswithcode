@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sys
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -23,6 +24,7 @@ from backend.services.codex_add_evals_service import (
     _launch_error,
 )
 from backend.utils.auth import require_hf_admin
+from jobs import curation_api
 from jobs.curation_api import USER_AGENT as HELPER_USER_AGENT
 
 
@@ -163,7 +165,168 @@ def test_dedicated_app_exposes_remote_callback_routes():
     assert "/api/v1/admin/codex-enrich-paper/jobs" in paths
     assert "/api/v1/admin/codex-curation/jobs" in paths
     assert "/api/v1/admin/codex-curation/jobs/{job_id}/context" in paths
+    assert "/api/v1/admin/codex-curation/jobs/{job_id}/leaderboards" in paths
     assert "/api/v1/chat/models" not in paths
+
+
+def test_scoped_worker_can_search_configured_leaderboards(monkeypatch):
+    from backend.routers import codex_curation_callbacks
+
+    settings = get_settings().model_copy(update={"codex_jobs_enabled": True})
+    inventory = [
+        {
+            "dataset": {"id": 340, "name": "GenEval", "slug": "geneval"},
+            "task": {"id": 19, "name": "Image generation", "slug": "image-generation"},
+            "supports_harness": False,
+            "metrics": [
+                {
+                    "id": 101,
+                    "name": "GenEval Score",
+                    "direction": "higher_is_better",
+                    "scale": "0-1",
+                    "recent_values": [{"model_name": "Example", "value": "0.90"}],
+                }
+            ],
+        }
+    ]
+    monkeypatch.setattr(
+        codex_curation_callbacks, "_callback_job", lambda *_args: object()
+    )
+    monkeypatch.setattr(
+        codex_curation_callbacks,
+        "_leaderboard_inventory",
+        lambda _db, query: inventory if query == "GenEval" else [],
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: SimpleNamespace()
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/admin/codex-curation/jobs/{_job().id}/leaderboards?q=GenEval",
+            headers={"Authorization": "Bearer scoped-token"},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["leaderboards"] == inventory
+
+
+def test_curation_helper_exposes_leaderboard_search(monkeypatch):
+    calls = []
+    monkeypatch.setattr(curation_api, "request", lambda path: calls.append(path))
+    monkeypatch.setattr(sys, "argv", ["curation_api.py", "leaderboards", "DPG-Bench"])
+
+    curation_api.main()
+
+    assert calls == ["leaderboards?q=DPG-Bench"]
+
+
+def test_empty_add_evals_apply_is_an_explicit_no_op(monkeypatch):
+    from backend.routers import codex_curation_callbacks
+
+    settings = get_settings().model_copy(update={"codex_jobs_enabled": True})
+    row = SimpleNamespace(
+        kind="add-evals", status="running", applied_at=None, paper_id=42
+    )
+
+    class Database:
+        commits = 0
+
+        def commit(self):
+            self.commits += 1
+
+    database = Database()
+    monkeypatch.setattr(codex_curation_callbacks, "_callback_job", lambda *_args: row)
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: database
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/admin/codex-curation/jobs/{_job().id}/apply",
+            headers={"Authorization": "Bearer scoped-token"},
+            json={"evaluations": []},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "no_changes",
+        "evaluations_created": 0,
+        "evaluations_updated": 0,
+    }
+    assert row.applied_at is None
+    assert database.commits == 0
+
+
+def test_scoped_worker_can_apply_discovered_evaluation(monkeypatch):
+    from backend.routers import codex_curation_callbacks
+
+    settings = get_settings().model_copy(update={"codex_jobs_enabled": True})
+    row = SimpleNamespace(
+        kind="add-evals", status="running", applied_at=None, paper_id=42
+    )
+    created = []
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def one_or_none(self):
+            return None
+
+    class Database:
+        commits = 0
+
+        def query(self, _model):
+            return Query()
+
+        def commit(self):
+            self.commits += 1
+
+    class FakeEvaluationService:
+        def __init__(self, _db):
+            pass
+
+        def create_evaluation(self, **values):
+            created.append(values)
+
+    database = Database()
+    monkeypatch.setattr(codex_curation_callbacks, "_callback_job", lambda *_args: row)
+    monkeypatch.setattr(
+        codex_curation_callbacks, "EvaluationService", FakeEvaluationService
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: database
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/admin/codex-curation/jobs/{_job().id}/apply",
+            headers={"Authorization": "Bearer scoped-token"},
+            json={
+                "evaluations": [
+                    {
+                        "paper_id": 42,
+                        "task_id": 19,
+                        "dataset_id": 340,
+                        "model_name": "Useful Model",
+                        "metrics": {"GenEval Score": 0.9},
+                        "best_metric": "GenEval Score",
+                        "source_url": "https://arxiv.org/abs/2601.00001",
+                    }
+                ]
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "status": "applied",
+        "evaluations_created": 1,
+        "evaluations_updated": 0,
+    }
+    assert created[0]["dataset_id"] == 340
+    assert row.applied_at is not None
+    assert database.commits == 1
 
 
 def test_admin_can_list_curation_queue(monkeypatch):

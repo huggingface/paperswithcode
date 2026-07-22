@@ -38,6 +38,8 @@ def main() -> None:
     sub.add_parser("context")
     taxonomy = sub.add_parser("taxonomy")
     taxonomy.add_argument("query")
+    leaderboards = sub.add_parser("leaderboards")
+    leaderboards.add_argument("query")
     apply = sub.add_parser("apply")
     apply.add_argument("json_file")
     args = parser.parse_args()
@@ -45,6 +47,8 @@ def main() -> None:
         request("context")
     elif args.command == "taxonomy":
         request(f"taxonomy?q={urllib.parse.quote(args.query)}")
+    elif args.command == "leaderboards":
+        request(f"leaderboards?q={urllib.parse.quote(args.query)}")
     else:
         with open(args.json_file, encoding="utf-8") as handle:
             request("apply", "POST", json.load(handle))

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -14,12 +15,16 @@ from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
 from backend.models.api import EvaluationCreateRequest
 from backend.models.database import (
+    Dataset,
     Evaluation,
     Method,
+    Metric,
     Paper,
     PaperRepository,
     Repository,
     Task,
+    TaskDataset,
+    TaskDatasetMetric,
 )
 from backend.services.codex_add_evals_service import (
     CodexPaperJob,
@@ -73,6 +78,112 @@ def _callback_job(
     if row is None:
         raise HTTPException(status_code=401, detail="Invalid job bearer token")
     return row
+
+
+def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
+    """Return configured leaderboard IDs and score-scale evidence for a benchmark name."""
+    normalized_query = re.sub(r"[^a-z0-9]", "", query.lower())
+
+    def match_quality(dataset: Dataset) -> str:
+        names = [dataset.name, dataset.slug or "", dataset.full_name or ""]
+        normalized_names = [re.sub(r"[^a-z0-9]", "", name.lower()) for name in names]
+        if normalized_query in normalized_names:
+            return "exact"
+        if any(
+            name.startswith(normalized_query) or normalized_query.startswith(name)
+            for name in normalized_names
+        ):
+            return "close"
+        return "fuzzy"
+
+    flexible = "%" + "%".join(query.replace("_", "-").replace("-", " ").split()) + "%"
+    matches = (
+        db.query(Dataset, Task, TaskDataset, Metric)
+        .join(TaskDataset, TaskDataset.dataset_id == Dataset.id)
+        .join(Task, Task.id == TaskDataset.task_id)
+        .join(
+            TaskDatasetMetric,
+            (TaskDatasetMetric.task_id == Task.id)
+            & (TaskDatasetMetric.dataset_id == Dataset.id),
+        )
+        .join(Metric, Metric.id == TaskDatasetMetric.metric_id)
+        .filter(
+            or_(
+                Dataset.name.ilike(f"%{query}%"),
+                Dataset.full_name.ilike(f"%{query}%"),
+                Dataset.slug.ilike(flexible),
+                Dataset.name.ilike(flexible),
+            )
+        )
+        .order_by(Dataset.name, Task.name, Metric.name)
+        .limit(200)
+        .all()
+    )
+    matches.sort(
+        key=lambda row: (
+            {"exact": 0, "close": 1, "fuzzy": 2}[match_quality(row[0])],
+            row[0].name,
+            row[1].name,
+            row[3].name,
+        )
+    )
+
+    grouped: dict[tuple[int, int], dict] = {}
+    for dataset, task, task_dataset, metric in matches:
+        key = (int(task.id), int(dataset.id))
+        if key not in grouped:
+            if len(grouped) == 30:
+                continue
+            grouped[key] = {
+                "dataset": {
+                    "id": int(dataset.id),
+                    "name": dataset.name,
+                    "slug": dataset.slug,
+                    "full_name": dataset.full_name,
+                    "split_name": dataset.split_name,
+                    "variant_type": dataset.variant_type,
+                    "description": (
+                        dataset.short_description or dataset.description or ""
+                    )[:1_000]
+                    or None,
+                    "warning": dataset.warning,
+                },
+                "task": {"id": int(task.id), "name": task.name, "slug": task.slug},
+                "match_quality": match_quality(dataset),
+                "supports_harness": bool(task_dataset.supports_harness),
+                "metrics": [],
+            }
+        if key not in grouped:
+            continue
+
+        examples = (
+            db.query(Evaluation)
+            .filter(
+                Evaluation.task_id == task.id,
+                Evaluation.dataset_id == dataset.id,
+                Evaluation.best_metric == metric.name,
+            )
+            .order_by(Evaluation.created_at.desc(), Evaluation.id.desc())
+            .limit(5)
+            .all()
+        )
+        grouped[key]["metrics"].append(
+            {
+                "id": int(metric.id),
+                "name": metric.name,
+                "direction": metric.direction,
+                "scale": metric.scale,
+                "recent_values": [
+                    {
+                        "model_name": example.model_name,
+                        "value": example.metrics.get(metric.name),
+                    }
+                    for example in examples
+                    if metric.name in example.metrics
+                ],
+            }
+        )
+    return list(grouped.values())
 
 
 @router.get("", response_model=CodexPaperJobsResponse)
@@ -166,6 +277,20 @@ def search_taxonomy(
     }
 
 
+@router.get("/{job_id}/leaderboards")
+def search_leaderboards(
+    job_id: uuid.UUID,
+    q: str = Query(min_length=1, max_length=120),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Search only existing, fully configured leaderboards for a scoped worker."""
+    _require_enabled(settings)
+    _callback_job(job_id, authorization, db)
+    return {"query": q, "leaderboards": _leaderboard_inventory(db, q)}
+
+
 @router.post("/{job_id}/apply")
 def apply_mutation(
     job_id: uuid.UUID,
@@ -180,6 +305,8 @@ def apply_mutation(
         raise HTTPException(
             status_code=409, detail="This job may no longer apply mutations"
         )
+    created = 0
+    updated = 0
     if row.kind == "add-evals":
         if body.enrich is not None:
             raise HTTPException(
@@ -206,6 +333,7 @@ def apply_mutation(
             values = item.model_dump()
             if existing is None:
                 evaluation_service.create_evaluation(**values)
+                created += 1
             else:
                 values.pop("paper_id")
                 evaluation_service.update_evaluation(
@@ -216,6 +344,7 @@ def apply_mutation(
                     num_parameters_set=True,
                     hf_model_url_set=True,
                 )
+                updated += 1
     else:
         if body.evaluations:
             raise HTTPException(
@@ -245,9 +374,15 @@ def apply_mutation(
         if mutation.urls_extracted is not None:
             paper.urls_extracted = mutation.urls_extracted
         db.commit()
-    row.applied_at = datetime.now(UTC)
-    db.commit()
-    return {"status": "applied"}
+    changed = row.kind == "enrich-paper" or created + updated > 0
+    if changed:
+        row.applied_at = datetime.now(UTC)
+        db.commit()
+    return {
+        "status": "applied" if changed else "no_changes",
+        "evaluations_created": created,
+        "evaluations_updated": updated,
+    }
 
 
 @router.post("/{job_id}/complete", response_model=CodexPaperJob)
