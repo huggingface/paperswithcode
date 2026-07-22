@@ -35,6 +35,10 @@ write a JSON payload containing only `evaluations` (each has this job's
 `paper_id`) and submit it with `python jobs/curation_api.py apply payload.json`.
 Use only configured leaderboard IDs and exact metric names returned by the
 `leaderboards` command; IDs from papers or web sources are not database IDs.
+Evaluate every configured metric independently. When the source reports more
+than one configured metric for the same task/dataset pair, submit one row per
+metric (for example, both Word Accuracy and NED for CVTG), selecting the
+paper's best eligible model variant for each metric.
 Never invent IDs, create benchmark metadata, or import comparator rows. Submit
 an empty evaluation list only when none of the paper's own results match a
 configured leaderboard. The helper will report `no_changes`; do not describe
