@@ -32,6 +32,7 @@ from backend.services.codex_add_evals_service import (
     codex_paper_job_service,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.paper_thumbnail_service import regenerate_paper_thumbnail
 from backend.services.paper_service import PaperService
 from backend.utils.auth import require_hf_admin
 
@@ -49,6 +50,7 @@ class EnrichPaperMutation(BaseModel):
     repositories: list[CurationLink] | None = None
     project_pages: list[CurationLink] | None = None
     thumbnail_url: str | None = None
+    regenerate_thumbnail: bool = False
     urls_extracted: bool | None = None
 
 
@@ -292,7 +294,7 @@ def search_leaderboards(
 
 
 @router.post("/{job_id}/apply")
-def apply_mutation(
+async def apply_mutation(
     job_id: uuid.UUID,
     body: ApplyMutationRequest,
     authorization: str | None = Header(default=None),
@@ -307,6 +309,7 @@ def apply_mutation(
         )
     created = 0
     updated = 0
+    thumbnail_result = None
     if row.kind == "add-evals":
         if body.enrich is not None:
             raise HTTPException(
@@ -374,15 +377,36 @@ def apply_mutation(
         if mutation.urls_extracted is not None:
             paper.urls_extracted = mutation.urls_extracted
         db.commit()
+        if mutation.regenerate_thumbnail:
+            thumbnail_result = await regenerate_paper_thumbnail(
+                db, str(row.paper_id), force=True
+            )
     changed = row.kind == "enrich-paper" or created + updated > 0
     if changed:
         row.applied_at = datetime.now(UTC)
         db.commit()
-    return {
+    response = {
         "status": "applied" if changed else "no_changes",
         "evaluations_created": created,
         "evaluations_updated": updated,
     }
+    if thumbnail_result is not None:
+        response["thumbnail"] = {
+            "status": "regenerated",
+            "thumbnail_url": thumbnail_result.thumbnail_url,
+            "previous_dimensions": (
+                [thumbnail_result.previous.width, thumbnail_result.previous.height]
+                if thumbnail_result.previous
+                else None
+            ),
+            "generated_dimensions": [
+                thumbnail_result.generated.width,
+                thumbnail_result.generated.height,
+            ],
+            "success": thumbnail_result.success,
+            "warnings": list(thumbnail_result.warnings),
+        }
+    return response
 
 
 @router.post("/{job_id}/complete", response_model=CodexPaperJob)

@@ -329,6 +329,74 @@ def test_scoped_worker_can_apply_discovered_evaluation(monkeypatch):
     assert database.commits == 1
 
 
+def test_scoped_enrichment_can_regenerate_thumbnail(monkeypatch):
+    from backend.routers import codex_curation_callbacks
+
+    settings = get_settings().model_copy(update={"codex_jobs_enabled": True})
+    row = SimpleNamespace(
+        kind="enrich-paper", status="running", applied_at=None, paper_id=42
+    )
+    paper = SimpleNamespace(thumbnail_url=None, urls_extracted=False)
+    generated = SimpleNamespace(
+        thumbnail_url="/api/thumbnails/2601_00001_v1.jpg?fit=fit9&v=123",
+        previous=SimpleNamespace(width=400, height=282),
+        generated=SimpleNamespace(width=400, height=550),
+        success=True,
+        warnings=(),
+    )
+    calls = []
+
+    class Database:
+        commits = 0
+
+        def get(self, _model, paper_id):
+            assert paper_id == 42
+            return paper
+
+        def commit(self):
+            self.commits += 1
+
+    async def fake_regenerate(db, paper_reference, *, force):
+        calls.append((db, paper_reference, force))
+        return generated
+
+    database = Database()
+    monkeypatch.setattr(codex_curation_callbacks, "_callback_job", lambda *_args: row)
+    monkeypatch.setattr(
+        codex_curation_callbacks,
+        "regenerate_paper_thumbnail",
+        fake_regenerate,
+    )
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: database
+
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/admin/codex-curation/jobs/{_job().id}/apply",
+            headers={"Authorization": "Bearer scoped-token"},
+            json={
+                "enrich": {
+                    "regenerate_thumbnail": True,
+                    "urls_extracted": True,
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.json()["thumbnail"] == {
+        "status": "regenerated",
+        "thumbnail_url": "/api/thumbnails/2601_00001_v1.jpg?fit=fit9&v=123",
+        "previous_dimensions": [400, 282],
+        "generated_dimensions": [400, 550],
+        "success": True,
+        "warnings": [],
+    }
+    assert paper.urls_extracted
+    assert calls == [(database, "42", True)]
+    assert row.applied_at is not None
+
+
 def test_admin_can_list_curation_queue(monkeypatch):
     from backend.routers import codex_curation_callbacks
 

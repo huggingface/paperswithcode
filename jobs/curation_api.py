@@ -11,7 +11,12 @@ import urllib.request
 USER_AGENT = "PapersWithCode-Curation/1.0 (+https://paperswithcode.co)"
 
 
-def request(path: str, method: str = "GET", payload: dict | None = None) -> None:
+def request(
+    path: str,
+    method: str = "GET",
+    payload: dict | None = None,
+    timeout: int = 30,
+) -> None:
     base = os.environ["PWC_CURATION_API_URL"].rstrip("/")
     job_id = os.environ["PWC_CURATION_JOB_ID"]
     token = os.environ["PWC_CURATION_JOB_TOKEN"]
@@ -27,7 +32,7 @@ def request(path: str, method: str = "GET", payload: dict | None = None) -> None
             },
             method=method,
         ),
-        timeout=30,
+        timeout=timeout,
     )
     print(response.read().decode())
 
@@ -51,7 +56,7 @@ def main() -> None:
         request(f"leaderboards?q={urllib.parse.quote(args.query)}")
     else:
         with open(args.json_file, encoding="utf-8") as handle:
-            request("apply", "POST", json.load(handle))
+            request("apply", "POST", json.load(handle), timeout=300)
 
 
 if __name__ == "__main__":
