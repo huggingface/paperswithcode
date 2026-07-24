@@ -9,8 +9,9 @@ from backend.chat_sandbox_worker.image import app, image
 
 
 def main() -> int:
-    built = image.build(app)
-    built.publish(IMAGE_PUBLISH_NAME)
+    with app.run():
+        built = image.build(app)
+        built.publish(IMAGE_PUBLISH_NAME)
     print(built.object_id)
     return 0
 

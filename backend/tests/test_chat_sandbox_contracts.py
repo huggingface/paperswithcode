@@ -13,6 +13,7 @@ from backend.chat_sandbox_worker.contract import (
     MODAL_IMAGE_ID,
 )
 from backend.chat_sandbox_worker.prompt import render, sha256
+from backend.chat_sandbox_worker import publish_image
 from backend.chat_sandbox_worker.protocol import (
     ProtocolError,
     WorkerEventValidator,
@@ -150,6 +151,46 @@ def test_prompt_and_manifest_share_eight_round_contract():
     assert json.dumps(production["chat_runtime"]).count("pwc-chat") == 0
     assert IMAGE_PUBLISH_NAME == "pwc-chat-v1"
     assert MODAL_IMAGE_ID == ""
+
+
+def test_image_publication_initializes_modal_app(monkeypatch, capsys):
+    events: list[str] = []
+
+    class Run:
+        def __enter__(self):
+            events.append("enter")
+
+        def __exit__(self, *_args):
+            events.append("exit")
+
+    class App:
+        def run(self):
+            return Run()
+
+    class Built:
+        object_id = "im-test"
+
+        def publish(self, name):
+            assert events == ["enter", "build"]
+            events.append(f"publish:{name}")
+
+    class Image:
+        def build(self, _app):
+            assert events == ["enter"]
+            events.append("build")
+            return Built()
+
+    monkeypatch.setattr(publish_image, "app", App())
+    monkeypatch.setattr(publish_image, "image", Image())
+
+    assert publish_image.main() == 0
+    assert events == [
+        "enter",
+        "build",
+        f"publish:{IMAGE_PUBLISH_NAME}",
+        "exit",
+    ]
+    assert capsys.readouterr().out == "im-test\n"
 
 
 def test_capability_is_exactly_scoped_and_metered():
