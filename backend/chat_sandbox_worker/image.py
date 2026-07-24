@@ -11,6 +11,7 @@ from pathlib import Path
 import modal
 
 from backend.chat_sandbox_worker.contract import (
+    BASE_IMAGE,
     PWC_CLI_VERSION,
     SDK_VERSION,
 )
@@ -22,7 +23,7 @@ STANDALONE = REPOSITORY / "standalone_cli"
 
 app = modal.App("pwc-chat-sandbox-v1")
 image = (
-    modal.Image.debian_slim(python_version="3.12")
+    modal.Image.from_registry(BASE_IMAGE)
     .apt_install("bash", "ripgrep", "jq", "coreutils", "util-linux", "procps")
     .pip_install(f"claude-agent-sdk=={SDK_VERSION}")
     .run_commands(

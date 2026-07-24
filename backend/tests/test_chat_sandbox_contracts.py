@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from backend.chat_sandbox_worker.contract import (
+    BASE_IMAGE,
     IMAGE_PUBLISH_NAME,
     MODAL_IMAGE_ID,
 )
@@ -150,6 +151,7 @@ def test_prompt_and_manifest_share_eight_round_contract():
     assert production["chat_runtime"]["enabled"] is False
     assert json.dumps(production["chat_runtime"]).count("pwc-chat") == 0
     assert IMAGE_PUBLISH_NAME == "pwc-chat-v1"
+    assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID == ""
 
 
