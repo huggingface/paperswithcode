@@ -651,7 +651,7 @@ def parser_for(program: str) -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    program = Path(sys.argv[0]).name
+    program = os.environ.get("PWC_DEPLOY_PROGRAM", Path(sys.argv[0]).name)
     parser = parser_for(program)
     args = parser.parse_args()
     try:

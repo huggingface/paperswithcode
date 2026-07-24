@@ -31,6 +31,15 @@ def bundle_runtime_contract(staging: Path, source: Path) -> None:
     shutil.copytree(staging / "backend", source / "backend")
 
 
+def deployment_wrapper(command: str) -> str:
+    return (
+        "#!/bin/sh\n"
+        "export PYTHONPATH=/usr/local/lib/paperswithcode-deploy\n"
+        f"export PWC_DEPLOY_PROGRAM={command}\n"
+        'exec /usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cli.py "$@"\n'
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="install-deploy-tools")
     parser.add_argument("source", help="exact commit or ref to install")
@@ -84,11 +93,7 @@ def main() -> int:
         os.replace(source, INSTALL_ROOT)
         for command in COMMANDS:
             wrapper = BIN_ROOT / command
-            wrapper.write_text(
-                "#!/bin/sh\n"
-                "export PYTHONPATH=/usr/local/lib/paperswithcode-deploy\n"
-                'exec /usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cli.py "$@"\n'
-            )
+            wrapper.write_text(deployment_wrapper(command))
             wrapper.chmod(0o755)
         for command, module in {"pwc-nginx": "nginx_tool.py"}.items():
             wrapper = BIN_ROOT / command

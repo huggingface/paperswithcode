@@ -14,6 +14,7 @@ import deploy.cli as deploy_cli
 from deploy.install_deploy_tools import (
     RUNTIME_CONTRACT_PATHS,
     bundle_runtime_contract,
+    deployment_wrapper,
 )
 from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
 from backend.config import Settings
@@ -53,6 +54,33 @@ def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
         env={**os.environ, "PYTHONPATH": str(source)},
     )
     assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.parametrize(
+    ("command", "expected"),
+    [
+        ("pwc-deploy", "{production,staging} source"),
+        ("pwc-rollback", "{production,staging}"),
+    ],
+)
+def test_installed_wrapper_preserves_command_parser(
+    command: str,
+    expected: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+):
+    wrapper = deployment_wrapper(command)
+    assert f"export PWC_DEPLOY_PROGRAM={command}\n" in wrapper
+    monkeypatch.setenv("PWC_DEPLOY_PROGRAM", command)
+    monkeypatch.setattr(sys, "argv", ["cli.py", "--help"])
+
+    with pytest.raises(SystemExit) as exc:
+        deploy_cli.main()
+
+    output = capsys.readouterr().out
+    assert exc.value.code == 0
+    assert f"usage: {command}" in output
+    assert expected in output
 
 
 def make_bundle(root: Path, *, chat: bool) -> Path:
