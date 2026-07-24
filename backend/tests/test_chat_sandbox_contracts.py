@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import json
 import asyncio
+import importlib
+import os
+import sys
 import uuid
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from pathlib import Path
 
 import pytest
@@ -41,6 +45,46 @@ from backend.services.chat_session_store_gateway import (
 )
 from backend.chat_sandbox_worker.tool_policy import ToolBudget, bound_tool_output
 from deploy.release import build_manifest
+
+
+def test_broker_accepts_claude_messages_beta_query(monkeypatch):
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(
+            write_fd,
+            json.dumps(
+                {
+                    "capability": "test-capability",
+                    "gateway_url": "https://gateway.example.test/api/internal/chat-gateway",
+                    "session_id": str(uuid.uuid4()),
+                    "turn_id": str(uuid.uuid4()),
+                }
+            ).encode(),
+        )
+    finally:
+        os.close(write_fd)
+    monkeypatch.setenv("PWC_BROKER_CONFIG_FD", str(read_fd))
+    sys.modules.pop("backend.chat_sandbox_worker.broker", None)
+    broker = importlib.import_module("backend.chat_sandbox_worker.broker")
+
+    class Request:
+        path = "/v1/messages?beta=true"
+        headers = {"Content-Length": "2", "Content-Type": "application/json"}
+        rfile = BytesIO(b"{}")
+        forwarded: list[tuple[str, bytes]] = []
+        error: int | None = None
+
+        def _forward(self, path, body, **_kwargs):
+            self.forwarded.append((path, body))
+
+        def send_error(self, status):
+            self.error = status
+
+    request = Request()
+    broker.Handler.do_POST(request)
+
+    assert request.forwarded == [("v1/messages", b"{}")]
+    assert request.error is None
 
 
 def test_generic_tool_projection_and_event_are_v2_raw_text():

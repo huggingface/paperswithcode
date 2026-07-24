@@ -84,10 +84,11 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         length = min(int(self.headers.get("Content-Length", "0")), 512 * 1024)
         body = self.rfile.read(length)
-        if self.path == "/session-store":
+        path = urlsplit(self.path).path
+        if path == "/session-store":
             self._forward("session-store", body)
             return
-        if self.path == "/v1/messages":
+        if path == "/v1/messages":
             self._forward(
                 "v1/messages",
                 body,
