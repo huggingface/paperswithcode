@@ -23,7 +23,7 @@ def test_complete_parser_omits_mutation_and_auth_commands():
 
 def test_installer_downloads_from_this_repository_release_origin():
     installer = (ROOT / "install.py").read_text()
-    assert "github.com/huggingface/paperswithcode/releases/download" in installer
+    assert "github.com/huggingface/pwc-cli/releases/download" in installer
     assert "github.com/paperswithcode/paperswithcode.co" not in installer
 
 

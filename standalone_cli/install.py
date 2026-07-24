@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--prefix", type=Path, default=Path.home() / ".local")
     parser.add_argument(
         "--release-origin",
-        default="https://github.com/huggingface/paperswithcode/releases/download",
+        default="https://github.com/huggingface/pwc-cli/releases/download",
     )
     args = parser.parse_args()
     machine = platform.machine().lower()
