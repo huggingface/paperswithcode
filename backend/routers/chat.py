@@ -6,13 +6,22 @@ import asyncio
 import contextlib
 import hashlib
 import logging
+import re
 import time
 import uuid
 from collections import defaultdict, deque
 
 from claude_agent_sdk import fork_session_via_store
 from claude_agent_sdk._internal.session_store import project_key_for_directory
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    HTTPException,
+    Query,
+    Request,
+    Response,
+)
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -29,7 +38,8 @@ from backend.models.chat import (
     sse_event,
 )
 from backend.models.database import ChatMessageRecord, ChatSession
-from backend.services.chat_agent_service import stream_agent_events
+from backend.services.chat_citation_service import cited_route_ids, resolve_citations
+from backend.services.chat_sandbox_service import SandboxError, SandboxSessionManager
 from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
@@ -41,6 +51,10 @@ from backend.services.chat_title_service import (
     fallback_title,
     normalize_title,
     stream_title,
+)
+from backend.services.chat_turn_runner import (
+    ChatTurnRunner,
+    create_chat_turn_runner,
 )
 from backend.services.chat_transcript_recovery import reconcile_spooled_session
 from backend.services.postgres_sdk_session_store import PostgresSDKSessionStore
@@ -60,21 +74,27 @@ def _log_background_task_result(task: asyncio.Task) -> None:
         logger.warning("chat background task failed error=%s", type(exc).__name__)
 
 
-class _AdmissionControl:
-    def __init__(self) -> None:
-        self._active = 0
-        self._lock = asyncio.Lock()
+def _prewarm_sandbox(settings: Settings, session_id: uuid.UUID) -> None:
+    try:
+        asyncio.run(SandboxSessionManager(settings).ensure_ready(session_id))
+    except Exception as exc:
+        # First-turn ensure_ready remains authoritative and retryable. Prewarm
+        # failure is an optimization miss, never a session-creation failure.
+        logger.warning(
+            "chat sandbox prewarm failed session_id=%s error=%s",
+            session_id,
+            type(exc).__name__,
+        )
 
-    async def try_acquire(self, maximum: int) -> bool:
-        async with self._lock:
-            if self._active >= maximum:
-                return False
-            self._active += 1
-            return True
+
+class _AdmissionControl:
+    """Compatibility seam; durable admission is enforced transactionally."""
+
+    async def try_acquire(self, _maximum: int) -> bool:
+        return True
 
     async def release(self) -> None:
-        async with self._lock:
-            self._active = max(0, self._active - 1)
+        return
 
 
 class _PrincipalRateLimiter:
@@ -103,7 +123,9 @@ _rate_limiter = _PrincipalRateLimiter()
 
 def _raise(exc: ChatServiceError) -> None:
     raise HTTPException(
-        status_code=exc.status_code, detail={"code": exc.code, "message": str(exc)}
+        status_code=exc.status_code,
+        detail={"code": exc.code, "message": str(exc)},
+        headers={"Retry-After": "5"} if exc.status_code == 429 else None,
     )
 
 
@@ -164,6 +186,7 @@ def list_models(
 @router.post("/sessions", response_model=ChatSessionSummary, status_code=201)
 def create_session(
     body: CreateSessionRequest,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
@@ -174,6 +197,8 @@ def create_session(
         )
         db.commit()
         db.refresh(session)
+        if session.execution_backend == "modal_cli":
+            background_tasks.add_task(_prewarm_sandbox, settings, session.id)
         return _summary(session)
     except ChatServiceError as exc:
         db.rollback()
@@ -245,17 +270,21 @@ def update_session(
 
 
 @router.delete("/sessions/{session_id}", status_code=204)
-def delete_session(
+async def delete_session(
     session_id: uuid.UUID,
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     try:
-        ChatSessionService(db, settings).delete_session(
+        sandbox_id, snapshot_id = ChatSessionService(db, settings).delete_session(
             owner_from_user(user), session_id
         )
         db.commit()
+        if sandbox_id or snapshot_id:
+            await SandboxSessionManager(settings).cleanup_deleted(
+                sandbox_id, snapshot_id
+            )
         return Response(status_code=204)
     except ChatServiceError as exc:
         db.rollback()
@@ -290,13 +319,18 @@ async def _prepare_replacement(
     old_id = admission.sdk_session_id
     if not admission.is_replacement or old_id is None:
         return old_id
-    project_key = project_key_for_directory(settings.chat_agent_cwd)
+    session_directory = (
+        "/workspace"
+        if getattr(admission, "execution_backend", "local_mcp") == "modal_cli"
+        else settings.chat_agent_cwd
+    )
+    project_key = project_key_for_directory(session_directory)
     replacement_id: uuid.UUID | None = None
     if admission.resume_boundary_id:
         result = await fork_session_via_store(
             store,
             str(old_id),
-            directory=settings.chat_agent_cwd,
+            directory=session_directory,
             up_to_message_id=str(admission.resume_boundary_id),
         )
         replacement_id = uuid.UUID(result.session_id)
@@ -373,7 +407,6 @@ async def stream_chat(
             detail="Chat capacity is currently occupied",
             headers={"Retry-After": "5"},
         )
-
     owner = owner_from_user(user)
     retry_after = await _rate_limiter.check(
         owner.hf_user_id,
@@ -436,7 +469,20 @@ async def stream_chat(
         store = PostgresSDKSessionStore()
         research_task: asyncio.Task | None = None
         title_task: asyncio.Task | None = None
+        runner: ChatTurnRunner | None = None
         mirror_recovery: tuple[str, uuid.UUID] | None = None
+
+        def completed_projection() -> list[dict]:
+            partial = [
+                block
+                for block in blocks
+                if block.get("kind") != "tool" or block.get("status") not in {"running"}
+            ]
+            partial_answer = "".join(answer_parts)
+            if partial_answer.strip():
+                partial.append({"kind": "answer", "text": partial_answer, "done": True})
+            return partial
+
         try:
             yield sse_event(
                 "stream_start", request_id=request_id, session_id=admission.session_id
@@ -473,19 +519,31 @@ async def stream_chat(
                 return
 
             queue: asyncio.Queue = asyncio.Queue()
+            runner = create_chat_turn_runner(
+                settings=settings,
+                owner=owner,
+                admission=admission,
+                prompt=body.message,
+                request_id=request_id,
+                resume_id=resume_id,
+                store=store,
+            )
 
             async def produce_research() -> None:
                 try:
-                    async for event in stream_agent_events(
-                        body.message,
-                        settings,
-                        model_route=admission.model_route,
-                        session_store=store,
-                        resume=str(resume_id) if resume_id else None,
-                    ):
+                    assert runner is not None
+                    async for event in runner.events():
                         await queue.put(event)
                 except asyncio.CancelledError:
                     raise
+                except SandboxError as exc:
+                    await queue.put(
+                        {
+                            "type": "error",
+                            "message": str(exc),
+                            "code": exc.code,
+                        }
+                    )
                 except Exception as exc:
                     logger.warning(
                         "chat research producer failed session_id=%s error=%s",
@@ -542,7 +600,7 @@ async def stream_chat(
                             admission.session_id,
                             admission.turn_id,
                             sdk_id,
-                            project_key_for_directory(settings.chat_agent_cwd),
+                            project_key_for_directory(runner.sdk_directory),
                         )
                         db.commit()
                     continue
@@ -587,21 +645,46 @@ async def stream_chat(
                     blocks.append(reasoning)
                     reasoning = None
                 elif kind == "tool_call":
+                    legacy_tool = event["name"] == "search_papers"
                     tool = {
                         "kind": "tool",
+                        "schema_version": 1 if legacy_tool else 2,
                         "id": event["id"],
                         "name": event["name"],
                         "args": event["args"],
-                        "status": "done",
-                        "hits": 0,
+                        "status": "done" if legacy_tool else "running",
                         "took_ms": 0,
-                        "results": [],
                     }
+                    if legacy_tool:
+                        tool.update({"hits": 0, "results": []})
+                    else:
+                        tool.update(
+                            {
+                                "content": [],
+                                "metadata": {
+                                    "exit_code": None,
+                                    "output_truncated": False,
+                                },
+                            }
+                        )
                     blocks.append(tool)
                     tools[event["id"]] = tool
                 elif kind == "tool_result":
                     tool = tools.get(event["id"])
-                    if tool:
+                    if tool and event.get("status") is not None:
+                        tool.update(
+                            {
+                                "status": event["status"],
+                                "took_ms": event["took_ms"],
+                                "content": event["content"],
+                                "metadata": event.get("metadata")
+                                or {
+                                    "exit_code": None,
+                                    "output_truncated": False,
+                                },
+                            }
+                        )
+                    elif tool:
                         tool.update(
                             {
                                 "hits": event["hits"],
@@ -609,7 +692,7 @@ async def stream_chat(
                                 "results": event["results"],
                             }
                         )
-                    for result in event["results"]:
+                    for result in event.get("results") or []:
                         metadata = result.get("metadata", {})
                         citations.append(
                             {
@@ -633,27 +716,53 @@ async def stream_chat(
                 elif kind == "answer_delta":
                     answer_parts.append(event["text"])
                 elif kind == "error":
-                    partial_blocks = list(blocks)
-                    if reasoning and reasoning["text"].strip():
-                        partial_blocks.append(reasoning)
-                    partial_answer = "".join(answer_parts)
-                    if partial_answer.strip():
-                        partial_blocks.append(
-                            {"kind": "answer", "text": partial_answer, "done": True}
-                        )
                     _persist_failure(
                         owner,
                         settings,
                         admission,
                         event.get("code") or "provider_error",
                         False,
-                        partial_blocks,
+                        completed_projection(),
                     )
                     terminal = "error"
                 elif kind == "done":
                     answer = "".join(answer_parts)
                     blocks.append({"kind": "answer", "text": answer, "done": True})
                     with db_manager.session_local() as db:
+                        resolved_citations = resolve_citations(
+                            db,
+                            "\n".join(
+                                block.get("text", "")
+                                for block in blocks
+                                if block.get("kind") in {"reasoning", "answer"}
+                            ),
+                        )
+                        if resolved_citations:
+                            citations = resolved_citations
+                        else:
+                            cited = {
+                                match
+                                for match in re.findall(
+                                    r"\]\(paper:([^) \t\n]{1,200})\)",
+                                    "\n".join(
+                                        block.get("text", "")
+                                        for block in blocks
+                                        if block.get("kind") in {"reasoning", "answer"}
+                                    ),
+                                )
+                            }
+                            citations = [
+                                item for item in citations if item["route_id"] in cited
+                            ]
+                        citations_by_id = {item["route_id"]: item for item in citations}
+                        for block in blocks:
+                            if block.get("kind") not in {"reasoning", "answer"}:
+                                continue
+                            block["citations"] = [
+                                citations_by_id[route_id]
+                                for route_id in cited_route_ids(block.get("text", ""))
+                                if route_id in citations_by_id
+                            ]
                         ChatSessionService(db, settings).complete_turn(
                             owner,
                             admission,
@@ -664,11 +773,11 @@ async def stream_chat(
                             event.get("finish_reason", "success"),
                         )
                         db.commit()
+                    event["citations"] = citations
                     terminal = event.get("finish_reason", "success")
                 yield sse_event(kind, **event)
                 last_write = time.monotonic()
                 if kind in ("done", "error"):
-                    research_task.cancel()
                     continue
             with contextlib.suppress(asyncio.CancelledError):
                 await research_task
@@ -698,9 +807,18 @@ async def stream_chat(
                 with contextlib.suppress(asyncio.CancelledError):
                     await title_task
         except asyncio.CancelledError:
+            if runner and research_task and not research_task.done():
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(runner.cancel())
             await asyncio.shield(
                 asyncio.to_thread(
-                    _persist_failure, owner, settings, admission, "interrupted", True
+                    _persist_failure,
+                    owner,
+                    settings,
+                    admission,
+                    "interrupted",
+                    True,
+                    completed_projection(),
                 )
             )
             raise
@@ -718,6 +836,12 @@ async def stream_chat(
                 code="persistence_error",
             )
         finally:
+            if runner and research_task and not research_task.done():
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(runner.cancel())
+            if runner:
+                with contextlib.suppress(Exception):
+                    await asyncio.shield(runner.close())
             if research_task and not research_task.done():
                 research_task.cancel()
             if research_task:
@@ -727,7 +851,6 @@ async def stream_chat(
                 # Title persistence is independent of the client connection and
                 # research result. Its own short timeout bounds this detached task.
                 title_task.add_done_callback(_log_background_task_result)
-            await _admission.release()
             logger.info(
                 "chat request complete request_id=%s principal=%s duration_ms=%.1f finish=%s",
                 request_id,
@@ -735,6 +858,7 @@ async def stream_chat(
                 (time.perf_counter() - started) * 1000,
                 terminal,
             )
+            await _admission.release()
 
     return StreamingResponse(
         event_stream(),

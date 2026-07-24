@@ -259,10 +259,26 @@ All configuration is handled through environment variables with the `PWC_` prefi
 | `PWC_MAX_PAGE_SIZE` | 500 | Maximum pagination size |
 | `PWC_APP_DOMAIN` | paperswithcode.ai | Domain for URL generation |
 | `PWC_HF_TOKEN` | | Hugging Face API token (increases rate limits) |
+| `PWC_CHAT_ENABLED` | false | Enable the authenticated SSE research-chat endpoint |
+| `PWC_CHAT_MODEL` | zai-org/GLM-5.2:together | Exact HF Inference Providers model and provider route |
+| `PWC_CHAT_MAX_TURNS` | 8 | Maximum Agent SDK tool-use round trips |
+| `PWC_CHAT_MAX_SEARCH_CALLS` | 2 | Maximum paper searches per chat request |
+| `PWC_CHAT_TIMEOUT_SECONDS` | 180 | Legacy local-MCP request timeout |
+| `PWC_CHAT_MAX_CONCURRENCY` | 1 | Active chat streams allowed per backend process |
+| `PWC_CHAT_GATEWAY_URL` | | Dedicated capability-authenticated sandbox gateway |
+| `PWC_CHAT_MAX_TOOL_CALLS` | 12 | Maximum built-in tool calls per Modal turn |
+| `PWC_CHAT_MAX_DIRECT_SEARCH_CALLS` | 4 | Maximum direct `pwc search` calls per Modal turn |
+| `PWC_CHAT_SANDBOX_READY_TIMEOUT_SECONDS` | 30 | Modal sandbox readiness deadline |
+| `PWC_CHAT_AGENT_TIMEOUT_SECONDS` | 180 | Complete Agent SDK turn deadline |
+| `PWC_CHAT_BASH_TIMEOUT_SECONDS` | 30 | Per-Bash-call deadline |
+| `PWC_CHAT_HF_BILL_TO` | | Optional HF organization slug billed for chat inference |
+| `PWC_CHAT_REQUESTS_PER_MINUTE` | 5 | Process-local per-user request ceiling |
+| `PWC_CHAT_REQUESTS_PER_DAY` | 50 | Process-local per-user daily request ceiling |
 | `PWC_THUMBNAIL_STORAGE_BACKEND` | local | Thumbnail storage backend: `local` or `hf_bucket` |
 | `PWC_THUMBNAIL_HF_BUCKET_ID` | | Private Hugging Face bucket ID for thumbnail storage |
 | `PWC_THUMBNAIL_HF_BUCKET_PREFIX` | thumbnails | Prefix inside the thumbnail bucket |
 | `PWC_THUMBNAIL_TEMP_CACHE_DIR` | ./thumbnail_cache | Small local cache for bucket-backed thumbnail responses |
+| `PWC_PAPER_MARKDOWN_HF_BUCKET_ID` | huggingface/pwc-papers-content | Private paper Markdown bucket |
 | `PWC_GITHUB_TOKEN` | | GitHub API token (increases rate limits) |
 
 ## Production Deployment

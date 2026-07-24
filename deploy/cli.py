@@ -144,6 +144,43 @@ def _extract_commit(sha: str, destination: Path) -> None:
         tar.extractall(destination, filter="data")
 
 
+def _chat_descriptor_from_source(source: Path, environment: str) -> dict | None:
+    if environment != "staging":
+        return None
+    script = """
+import json
+from backend.chat_sandbox_worker.contract import (
+    DEFAULT_BACKEND, MODAL_IMAGE_ID, NEW_CHAT_MODAL_PERCENTAGE,
+    PWC_CLI_VERSION, WORKER_CONTRACT_VERSION,
+)
+from backend.chat_sandbox_worker.prompt import sha256
+print(json.dumps({
+    "enabled": True,
+    "new_chat_modal_percentage": NEW_CHAT_MODAL_PERCENTAGE,
+    "default_backend": DEFAULT_BACKEND,
+    "modal_image_version": MODAL_IMAGE_ID,
+    "pwc_cli_version": PWC_CLI_VERSION,
+    "worker_contract_version": WORKER_CONTRACT_VERSION,
+    "system_prompt_sha256": sha256(),
+}, sort_keys=True))
+"""
+    environment_values = {
+        "PATH": os.defpath,
+        "PYTHONPATH": str(source),
+        "PYTHONNOUSERSITE": "1",
+    }
+    output = subprocess.check_output(
+        [sys.executable, "-c", script],
+        cwd=source,
+        env=environment_values,
+        text=True,
+    )
+    descriptor = json.loads(output)
+    if not isinstance(descriptor, dict):
+        raise DeployError("source chat runtime descriptor is invalid")
+    return descriptor
+
+
 def prepare_release(sha: str, environment: str) -> Path:
     target = RELEASES / release_id(sha, environment)
     if target.exists():
@@ -200,8 +237,13 @@ def prepare_release(sha: str, environment: str) -> Path:
                 "release contains forbidden artifacts: "
                 + ", ".join(str(path.relative_to(source)) for path in forbidden[:10])
             )
+        descriptor = _chat_descriptor_from_source(source, environment)
         (source / "release.json").write_text(
-            json.dumps(build_manifest(sha, environment), indent=2) + "\n",
+            json.dumps(
+                build_manifest(sha, environment, chat_descriptor=descriptor),
+                indent=2,
+            )
+            + "\n",
             encoding="utf-8",
         )
         validate_manifest(source, environment)
@@ -226,16 +268,29 @@ def sync_runtime(release: Path) -> bool:
     return True
 
 
+def sync_runtime_with_recovery(release: Path, previous_lock_hash: str) -> bool:
+    try:
+        return sync_runtime(release)
+    except (subprocess.CalledProcessError, OSError):
+        if previous_lock_hash:
+            restore_runtime(previous_lock_hash)
+        raise
+
+
 def restore_runtime(lock_hash: str) -> None:
     for environment in ENVIRONMENTS:
-        current = read_pointers(ENVIRONMENTS_ROOT / environment).current
-        if current and sha256_file(current / "uv.lock") == lock_hash:
-            env = os.environ.copy()
-            env["UV_PROJECT_ENVIRONMENT"] = str(VENV)
-            run(["uv", "sync", "--frozen", "--project", str(current)], env=env)
-            RUNTIME_LOCK.write_text(lock_hash + "\n", encoding="utf-8")
-            return
-    raise DeployError("cannot find an active release for the previous runtime lock")
+        pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+        for release in (pointers.current, pointers.previous):
+            if release and sha256_file(release / "uv.lock") == lock_hash:
+                env = os.environ.copy()
+                env["UV_PROJECT_ENVIRONMENT"] = str(VENV)
+                run(
+                    ["uv", "sync", "--frozen", "--project", str(release)],
+                    env=env,
+                )
+                RUNTIME_LOCK.write_text(lock_hash + "\n", encoding="utf-8")
+                return
+    raise DeployError("cannot find a retained release for the previous runtime lock")
 
 
 def free_candidate_port() -> int:
@@ -281,17 +336,7 @@ def qualify(release: Path, environment: str) -> None:
         "--setenv",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
         str(VENV / "bin" / "python"),
-        "-m",
-        "uvicorn",
-        "backend.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--workers",
-        "1",
-        "--log-level",
-        "warning",
+        str(release / "deploy" / "run_backend.py"),
     ]
     run(command)
     try:
@@ -332,7 +377,12 @@ def _unit(environment: str) -> str:
     return f"paperswithcode-backend@{environment}.service"
 
 
-def activate(release: Path, environment: str) -> None:
+def activate(
+    release: Path,
+    environment: str,
+    *,
+    previous_runtime_lock: str = "",
+) -> None:
     root = ENVIRONMENTS_ROOT / environment
     pointers = read_pointers(root)
     if pointers.current == release:
@@ -340,18 +390,17 @@ def activate(release: Path, environment: str) -> None:
     if pointers.current:
         atomic_symlink(pointers.current, root / "previous")
     atomic_symlink(release, root / "current")
-    run(["systemctl", "restart", _unit(environment)])
-    manifest = validate_manifest(release, environment)
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        ready = _read_json(f"http://127.0.0.1:{PORTS[environment]}/internal/ready")
-        if ready and ready.get("release_id") == manifest["release_id"]:
-            break
-        time.sleep(0.5)
-    else:
-        rollback_after_failed_activation(environment, release)
-        raise DeployError("live readiness failed; automatic rollback completed")
     try:
+        run(["systemctl", "restart", _unit(environment)])
+        manifest = validate_manifest(release, environment)
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            ready = _read_json(f"http://127.0.0.1:{PORTS[environment]}/internal/ready")
+            if ready and ready.get("release_id") == manifest["release_id"]:
+                break
+            time.sleep(0.5)
+        else:
+            raise DeployError("live readiness failed")
         run(
             [
                 str(VENV / "bin" / "python"),
@@ -366,17 +415,28 @@ def activate(release: Path, environment: str) -> None:
                 str(release),
             ]
         )
-    except subprocess.CalledProcessError as exc:
-        rollback_after_failed_activation(environment, release)
-        raise DeployError("public smoke failed; automatic rollback completed") from exc
+    except (DeployError, subprocess.CalledProcessError, OSError) as exc:
+        rollback_after_failed_activation(
+            environment,
+            release,
+            previous_runtime_lock=previous_runtime_lock,
+        )
+        raise DeployError("activation failed; automatic rollback completed") from exc
 
 
-def rollback_after_failed_activation(environment: str, failed: Path) -> None:
+def rollback_after_failed_activation(
+    environment: str,
+    failed: Path,
+    *,
+    previous_runtime_lock: str = "",
+) -> None:
     root = ENVIRONMENTS_ROOT / environment
     pointers = read_pointers(root)
     if not pointers.previous:
         raise DeployError("activation failed and no previous release exists")
     atomic_symlink(pointers.previous, root / "current")
+    if previous_runtime_lock:
+        restore_runtime(previous_runtime_lock)
     run(["systemctl", "restart", _unit(environment)])
     log_event(
         "automatic-rollback",
@@ -427,7 +487,7 @@ def deploy(args: argparse.Namespace) -> int:
     old_runtime_lock = (
         RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else ""
     )
-    dependency_change = sync_runtime(release)
+    dependency_change = sync_runtime_with_recovery(release, old_runtime_lock)
     current = read_pointers(ENVIRONMENTS_ROOT / args.environment).current
     print(
         json.dumps(
@@ -457,7 +517,11 @@ def deploy(args: argparse.Namespace) -> int:
         if dependency_change and old_runtime_lock:
             restore_runtime(old_runtime_lock)
         raise
-    activate(release, args.environment)
+    activate(
+        release,
+        args.environment,
+        previous_runtime_lock=old_runtime_lock if dependency_change else "",
+    )
     cleanup_releases()
     log_event("deploy", args.environment, "success", git_sha=sha, source=args.source)
     print(f"deployed {args.source} ({sha}) to {args.environment}")
@@ -474,21 +538,32 @@ def rollback(args: argparse.Namespace) -> int:
         raise DeployError("current and previous releases are required for rollback")
     validate_manifest(pointers.previous, args.environment)
     old_current = pointers.current
+    old_runtime_lock = (
+        RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else ""
+    )
+    dependency_change = sync_runtime_with_recovery(pointers.previous, old_runtime_lock)
     atomic_symlink(pointers.previous, root / "current")
     atomic_symlink(old_current, root / "previous")
-    run(["systemctl", "restart", _unit(args.environment)])
-    expected = validate_manifest(pointers.previous)["release_id"]
-    deadline = time.monotonic() + 45
-    while time.monotonic() < deadline:
-        ready = _read_json(f"http://127.0.0.1:{PORTS[args.environment]}/internal/ready")
-        if ready and ready.get("release_id") == expected:
-            break
-        time.sleep(0.5)
-    else:
+    try:
+        run(["systemctl", "restart", _unit(args.environment)])
+        expected = validate_manifest(pointers.previous)["release_id"]
+        deadline = time.monotonic() + 45
+        while time.monotonic() < deadline:
+            ready = _read_json(
+                f"http://127.0.0.1:{PORTS[args.environment]}/internal/ready"
+            )
+            if ready and ready.get("release_id") == expected:
+                break
+            time.sleep(0.5)
+        else:
+            raise DeployError("rollback target failed readiness")
+    except (DeployError, subprocess.CalledProcessError, OSError) as exc:
         atomic_symlink(old_current, root / "current")
         atomic_symlink(pointers.previous, root / "previous")
+        if dependency_change and old_runtime_lock:
+            restore_runtime(old_runtime_lock)
         run(["systemctl", "restart", _unit(args.environment)])
-        raise DeployError("rollback target failed readiness; restored original release")
+        raise DeployError("rollback target failed; restored original release") from exc
     log_event(
         "rollback",
         args.environment,

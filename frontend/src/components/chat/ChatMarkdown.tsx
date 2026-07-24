@@ -130,7 +130,8 @@ export const ChatMarkdown: React.FC<{
   text: string;
   streaming?: boolean;
   papers: Record<string, ChatPaperHit>;
-}> = ({ text, streaming, papers }) => {
+  validCitationIds?: Set<string>;
+}> = ({ text, streaming, papers, validCitationIds }) => {
   const source = streaming ? withholdPartialCitation(text) : text;
 
   return (
@@ -142,22 +143,16 @@ export const ChatMarkdown: React.FC<{
         a: ({ href, children }) => {
           if (href?.startsWith("paper:")) {
             const routeId = href.slice("paper:".length);
+            if (!papers[routeId] && !validCitationIds?.has(routeId)) {
+              return <span className="chat-invalid-citation">{children}</span>;
+            }
             return (
               <PaperCitation routeId={routeId} paper={papers[routeId]}>
                 {children}
               </PaperCitation>
             );
           }
-          return (
-            <a
-              className="chat-paper-link"
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              {children}
-            </a>
-          );
+          return <span>{children}</span>;
         },
       }}
     >

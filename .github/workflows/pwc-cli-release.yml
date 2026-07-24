@@ -1,0 +1,61 @@
+name: Publish pwc CLI
+
+on:
+  push:
+    tags:
+      - "pwc-cli-*"
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            target: linux-x86_64
+          - runner: macos-13
+            target: darwin-x86_64
+          - runner: macos-14
+            target: darwin-arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Build one-file client
+        shell: bash
+        run: |
+          python standalone_cli/scripts/check_contract.py
+          uv venv standalone_cli/.venv
+          uv pip install --python standalone_cli/.venv/bin/python pyinstaller ./standalone_cli
+          standalone_cli/.venv/bin/pyinstaller \
+            --onefile \
+            --name "pwc-${GITHUB_REF_NAME#pwc-cli-}-${{ matrix.target }}" \
+            --paths standalone_cli/src \
+            standalone_cli/entrypoint.py
+          artifact="dist/pwc-${GITHUB_REF_NAME#pwc-cli-}-${{ matrix.target }}"
+          shasum -a 256 "$artifact" > "$artifact.sha256"
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: dist/pwc-*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pwc-${{ matrix.target }}
+          path: dist/pwc-*
+
+  release:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/pwc-*
+          fail_on_unmatched_files: true

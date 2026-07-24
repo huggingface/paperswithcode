@@ -21,6 +21,15 @@ def validate(production: str, staging: str) -> list[str]:
         failures.append("staging exposes Vite/HMR")
     if "location = /_admin_check" not in staging or "internal;" not in staging:
         failures.append("staging admin-check is not internal")
+    gateway_host = "server_name chat-gateway.staging.paperswithcode.co;"
+    if gateway_host not in staging:
+        failures.append("staging chat gateway hostname is missing")
+    for endpoint in ("catalog", "session-store", "v1/messages"):
+        location = f"location = /api/internal/chat-gateway/{endpoint}"
+        if location not in staging:
+            failures.append(f"staging chat gateway {endpoint} route is missing")
+    if "client_max_body_size 512k;" not in staging:
+        failures.append("staging chat gateway body limit is missing")
     if staging.count("location / {") != 1 or production.count("location / {") != 1:
         failures.append("ambiguous catch-all location")
     return failures

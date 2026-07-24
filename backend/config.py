@@ -215,10 +215,37 @@ class Settings(BaseSettings):
     chat_agent_cwd: str = Field(default="/tmp/pwc-chat-agent")
     chat_recovery_spool_dir: str = Field(default="/tmp/pwc-chat-recovery")
     chat_recovery_spool_max_sessions: int = Field(default=20, ge=1, le=100)
-    chat_max_turns: int = Field(default=6, ge=1, le=12)
+    chat_max_turns: int = Field(default=8, ge=1, le=12)
     chat_max_search_calls: int = Field(default=2, ge=1, le=5)
-    chat_timeout_seconds: float = Field(default=60, gt=0, le=300)
+    chat_timeout_seconds: float = Field(default=180, gt=0, le=300)
     chat_max_concurrency: int = Field(default=1, ge=1, le=8)
+    chat_default_backend: str = Field(
+        default="local_mcp", pattern=r"^(local_mcp|modal_cli)$"
+    )
+    chat_new_chat_modal_percentage: int = Field(default=0, ge=0, le=100)
+    chat_modal_image_version: str = Field(default="", max_length=255)
+    chat_pwc_cli_version: str = Field(default="", max_length=64)
+    chat_worker_contract_version: str = Field(default="", max_length=64)
+    chat_system_prompt_sha256: str = Field(default="", pattern=r"^(?:[0-9a-f]{64})?$")
+    chat_max_tool_calls: int = Field(default=12, ge=1, le=24)
+    chat_max_direct_search_calls: int = Field(default=4, ge=1, le=8)
+    chat_sandbox_ready_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    chat_agent_timeout_seconds: float = Field(default=180, gt=0, le=600)
+    chat_bash_timeout_seconds: float = Field(default=30, gt=0, le=120)
+    chat_cancel_grace_seconds: float = Field(default=2, ge=0, le=10)
+    chat_tool_result_max_bytes: int = Field(default=24 * 1024, ge=1024)
+    chat_turn_tool_output_max_bytes: int = Field(default=96 * 1024, ge=4096)
+    chat_sandbox_cpu: float = Field(default=1, gt=0, le=8)
+    chat_sandbox_memory_mib: int = Field(default=2048, ge=512, le=16384)
+    chat_sandbox_writable_bytes: int = Field(
+        default=512 * 1024 * 1024, ge=64 * 1024 * 1024
+    )
+    chat_sandbox_pids_max: int = Field(default=64, ge=16, le=512)
+    chat_sandbox_warm_seconds: int = Field(default=300, ge=0, le=3600)
+    chat_sandbox_max_warm: int = Field(default=10, ge=0, le=1000)
+    chat_workspace_snapshots_enabled: bool = Field(default=False)
+    chat_workspace_snapshot_inactivity_days: int = Field(default=30, ge=1, le=90)
+    chat_gateway_url: str = Field(default="", max_length=1000)
     chat_require_auth: bool = Field(default=True)
     chat_show_reasoning: bool = Field(default=True)
     chat_hf_bill_to: str = Field(
@@ -316,7 +343,10 @@ class Settings(BaseSettings):
 
     @property
     def is_deployed(self) -> bool:
-        return self.environment.lower() in {"production", "staging"}
+        return (
+            self.environment.lower() in {"production", "staging"}
+            and self.release_id != "development"
+        )
 
     @property
     def frontend_dist_path(self) -> Path:

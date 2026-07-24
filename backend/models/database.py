@@ -1483,6 +1483,9 @@ class ChatSession(Base):
         DateTime(timezone=True), nullable=True
     )
     selected_model: Mapped[str] = mapped_column(String(255), nullable=False)
+    execution_backend: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="local_mcp"
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -1518,7 +1521,17 @@ class ChatSession(Base):
     messages: Mapped[list["ChatMessageRecord"]] = relationship(
         back_populates="session", cascade="all, delete-orphan", passive_deletes=True
     )
+    sandbox_lease: Mapped[Optional["ChatSandboxLease"]] = relationship(
+        back_populates="session",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+        uselist=False,
+    )
     __table_args__ = (
+        CheckConstraint(
+            "execution_backend IN ('local_mcp', 'modal_cli')",
+            name="chat_sessions_execution_backend_check",
+        ),
         Index(
             "idx_chat_sessions_owner_updated",
             "hf_user_id",
@@ -1561,6 +1574,17 @@ class ChatMessageRecord(Base):
     status: Mapped[str] = mapped_column(String(24), nullable=False)
     model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     model_route: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    app_release_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    sandbox_image_version: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    worker_contract_version: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
+    pwc_cli_version: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    system_prompt_sha256: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True
+    )
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     attempt_count: Mapped[int] = mapped_column(
         Integer, nullable=False, server_default="1"
@@ -1594,6 +1618,112 @@ class ChatMessageRecord(Base):
             "turn_id",
             unique=True,
             postgresql_where=text("role = 'user' AND status <> 'superseded'"),
+        ),
+    )
+
+
+class ChatSandboxLease(Base):
+    """Durable ownership and recoverable state for one per-chat sandbox."""
+
+    __tablename__ = "chat_sandbox_leases"
+
+    chat_session_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    modal_sandbox_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, unique=True
+    )
+    app_release_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    image_version: Mapped[str] = mapped_column(String(255), nullable=False)
+    worker_contract_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(
+        String(24), nullable=False, server_default="starting"
+    )
+    lease_token_hash: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    last_activity_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    workspace_snapshot_id: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    snapshot_image_version: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True
+    )
+    snapshot_updated_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    workspace_dirty: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
+    failure_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    session: Mapped[ChatSession] = relationship(back_populates="sandbox_lease")
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('starting','ready','busy','idle','terminating','terminated','failed')",
+            name="chat_sandbox_leases_state_check",
+        ),
+        Index("idx_chat_sandbox_leases_state_activity", "state", "last_activity_at"),
+    )
+
+
+class ChatTurnCapability(Base):
+    """Hash-only, short-lived authorization held by the isolated broker."""
+
+    __tablename__ = "chat_turn_capabilities"
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    chat_session_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    sdk_session_id: Mapped[Optional[str]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    owner_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    model: Mapped[str] = mapped_column(String(255), nullable=False)
+    scopes: Mapped[list] = mapped_column(JSONB, nullable=False)
+    nonce: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    provider_requests: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    provider_tokens: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    gateway_calls: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    catalog_search_calls: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    __table_args__ = (
+        Index(
+            "idx_chat_turn_capabilities_scope",
+            "chat_session_id",
+            "turn_id",
+            "expires_at",
         ),
     )
 

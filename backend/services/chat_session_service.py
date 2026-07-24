@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import contextlib
+import hashlib
 import json
 import uuid
 from dataclasses import dataclass
@@ -65,6 +66,12 @@ class TurnAdmission:
     is_replacement: bool = False
     prompt_revision: int = 1
     title_should_generate: bool = False
+    execution_backend: str = "local_mcp"
+    app_release_id: str = ""
+    image_version: str = ""
+    worker_contract_version: str = ""
+    pwc_cli_version: str = ""
+    system_prompt_sha256: str = ""
 
 
 def owner_from_user(user: dict) -> ChatOwner:
@@ -136,13 +143,26 @@ class ChatSessionService:
                 409,
                 "Delete a chat before creating another",
             )
+        session_id = uuid.uuid4()
+        allocation_bucket = (
+            int.from_bytes(hashlib.sha256(session_id.bytes).digest()[:4], "big") % 100
+        )
+        if self.settings.chat_new_chat_modal_percentage == 0:
+            execution_backend = self.settings.chat_default_backend
+        else:
+            execution_backend = (
+                "modal_cli"
+                if allocation_bucket < self.settings.chat_new_chat_modal_percentage
+                else "local_mcp"
+            )
         session = ChatSession(
-            id=uuid.uuid4(),
+            id=session_id,
             hf_user_id=owner.hf_user_id,
             hf_username=owner.hf_username,
             title="New chat",
             title_status="pending",
             selected_model=model,
+            execution_backend=execution_backend,
             updated_at=_now(),
         )
         self.db.add(session)
@@ -283,6 +303,7 @@ class ChatSessionService:
                         followups=list(assistant.followups or []),
                     ),
                     prompt_revision=existing.revision,
+                    execution_backend=session.execution_backend,
                 )
             if (
                 existing.status == "generating"
@@ -315,6 +336,50 @@ class ChatSessionService:
                 "chat_transcript_degraded",
                 409,
                 "This chat is awaiting transcript recovery and cannot be resumed",
+            )
+
+        self.db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(f"chat-user:{owner.hf_user_id}", 0)
+                )
+            )
+        )
+        self.db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended("chat-global-active-turns", 0)
+                )
+            )
+        )
+        other_active = self.db.scalar(
+            select(func.count())
+            .select_from(ChatSession)
+            .where(
+                ChatSession.hf_user_id == owner.hf_user_id,
+                ChatSession.id != session.id,
+                ChatSession.active_turn_id.is_not(None),
+                ChatSession.active_turn_expires_at > func.now(),
+            )
+        )
+        if other_active:
+            raise ChatServiceError(
+                "chat_capacity", 429, "Another research response is already running"
+            )
+        active_total = (
+            self.db.scalar(
+                select(func.count())
+                .select_from(ChatSession)
+                .where(
+                    ChatSession.active_turn_id.is_not(None),
+                    ChatSession.active_turn_expires_at > func.now(),
+                )
+            )
+            or 0
+        )
+        if active_total >= self.settings.chat_max_concurrency:
+            raise ChatServiceError(
+                "chat_capacity", 429, "Research capacity is currently occupied"
             )
 
         recovered_expired_lease = False
@@ -468,6 +533,27 @@ class ChatSessionService:
             status="generating",
             model=model,
             model_route=route,
+            app_release_id=self.settings.release_id,
+            sandbox_image_version=(
+                self.settings.chat_modal_image_version
+                if session.execution_backend == "modal_cli"
+                else None
+            ),
+            worker_contract_version=(
+                self.settings.chat_worker_contract_version
+                if session.execution_backend == "modal_cli"
+                else None
+            ),
+            pwc_cli_version=(
+                self.settings.chat_pwc_cli_version
+                if session.execution_backend == "modal_cli"
+                else None
+            ),
+            system_prompt_sha256=(
+                self.settings.chat_system_prompt_sha256
+                if session.execution_backend == "modal_cli"
+                else None
+            ),
             last_attempted_at=now,
         )
         self.db.add(message)
@@ -489,6 +575,12 @@ class ChatSessionService:
                 and session.title_source != "user"
                 and (prior is None or prior.content.strip() != text.strip())
             ),
+            execution_backend=session.execution_backend,
+            app_release_id=self.settings.release_id,
+            image_version=self.settings.chat_modal_image_version,
+            worker_contract_version=self.settings.chat_worker_contract_version,
+            pwc_cli_version=self.settings.chat_pwc_cli_version,
+            system_prompt_sha256=self.settings.chat_system_prompt_sha256,
         )
 
     def bind_sdk_session(
@@ -568,7 +660,7 @@ class ChatSessionService:
         if not user_message or session.active_turn_id != admission.turn_id:
             raise ChatServiceError("stale_turn", 409, "The chat turn lease changed")
         validated_blocks = [
-            block.model_dump(mode="json")
+            block.model_dump(mode="json", exclude_defaults=True)
             for block in DISPLAY_BLOCKS_ADAPTER.validate_python(display_blocks)
         ]
         validated_citations = [
@@ -603,6 +695,11 @@ class ChatSessionService:
             status="complete",
             model=admission.selected_model,
             model_route=admission.model_route,
+            app_release_id=admission.app_release_id or None,
+            sandbox_image_version=admission.image_version or None,
+            worker_contract_version=admission.worker_contract_version or None,
+            pwc_cli_version=admission.pwc_cli_version or None,
+            system_prompt_sha256=admission.system_prompt_sha256 or None,
         )
         self.db.add(assistant)
         user_message.status = "complete"
@@ -631,7 +728,7 @@ class ChatSessionService:
             message.error_code = code
             if display_blocks:
                 validated_blocks = [
-                    block.model_dump(mode="json")
+                    block.model_dump(mode="json", exclude_defaults=True)
                     for block in DISPLAY_BLOCKS_ADAPTER.validate_python(display_blocks)
                 ]
                 if _payload_bytes(validated_blocks) > 256_000:
@@ -702,7 +799,9 @@ class ChatSessionService:
         session.updated_at = _now()
         return normalized
 
-    def delete_session(self, owner: ChatOwner, session_id: uuid.UUID) -> None:
+    def delete_session(
+        self, owner: ChatOwner, session_id: uuid.UUID
+    ) -> tuple[str | None, str | None]:
         session = self.db.execute(
             select(ChatSession)
             .where(
@@ -711,7 +810,7 @@ class ChatSessionService:
             .with_for_update()
         ).scalar_one_or_none()
         if session is None:
-            return
+            return None, None
         if (
             session.active_turn_id
             and session.active_turn_expires_at
@@ -733,4 +832,13 @@ class ChatSessionService:
                     ChatSDKSessionSummary.sdk_session_id == session.sdk_session_id,
                 )
             )
+        sandbox_id = (
+            session.sandbox_lease.modal_sandbox_id if session.sandbox_lease else None
+        )
+        snapshot_id = (
+            session.sandbox_lease.workspace_snapshot_id
+            if session.sandbox_lease
+            else None
+        )
         self.db.delete(session)
+        return sandbox_id, snapshot_id

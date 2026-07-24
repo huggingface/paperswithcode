@@ -6,6 +6,8 @@ PapersWithCode API, starting with the Paper endpoints. It integrates with the
 PostgreSQL database and provides compatible API responses.
 """
 
+import asyncio
+import contextlib
 import logging
 import time
 from contextlib import asynccontextmanager
@@ -90,7 +92,41 @@ async def lifespan(app: FastAPI):
         if not settings.hf_token:
             raise RuntimeError("PWC_HF_TOKEN is required when chat is enabled")
 
+    maintenance_task = None
+    if (
+        settings.is_deployed
+        and settings.environment == "staging"
+        and settings.chat_enabled
+    ):
+        from backend.services.chat_sandbox_service import SandboxSessionManager
+
+        async def maintain_sandboxes() -> None:
+            manager = SandboxSessionManager(settings)
+            while True:
+                await asyncio.sleep(60)
+                for operation in (
+                    manager.reconcile,
+                    manager.reap_idle,
+                    manager.enforce_warm_cap,
+                    manager.expire_inactive_snapshots,
+                ):
+                    try:
+                        await operation()
+                    except Exception as error:
+                        logging.getLogger(__name__).warning(
+                            "chat sandbox maintenance failed operation=%s error=%s",
+                            operation.__name__,
+                            type(error).__name__,
+                        )
+
+        maintenance_task = asyncio.create_task(maintain_sandboxes())
+
     yield
+
+    if maintenance_task:
+        maintenance_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await maintenance_task
 
     # Shutdown
     print("🛑 Shutting down PapersWithCode API server")
@@ -233,6 +269,7 @@ def create_app() -> FastAPI:
         codex_add_evals,
         codex_enrich_paper,
         codex_curation_callbacks,
+        research_catalog,
     )
 
     app.include_router(auth.router, prefix="/api/v1", tags=["auth"])
@@ -240,6 +277,7 @@ def create_app() -> FastAPI:
     app.include_router(preferences.router, prefix="/api/v1", tags=["preferences"])
     app.include_router(pending_edits.router, prefix="/api/v1", tags=["pending_edits"])
     app.include_router(papers.router, prefix="/api/v1", tags=["papers"])
+    app.include_router(research_catalog.router, prefix="/api/v1", tags=["research"])
     # External-resource ingestion endpoints share the `/papers` prefix because
     # the resulting rows live in the same `papers` table.
     app.include_router(
@@ -257,6 +295,9 @@ def create_app() -> FastAPI:
     app.include_router(organizations.router, prefix="/api/v1", tags=["organizations"])
     if settings.chat_enabled:
         app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
+        from backend.chat_gateway_app import app as chat_gateway_app
+
+        app.mount("/api/internal/chat-gateway", chat_gateway_app)
     app.include_router(codex_add_evals.router, prefix="/api/v1", tags=["admin"])
     app.include_router(codex_enrich_paper.router, prefix="/api/v1", tags=["admin"])
     app.include_router(
@@ -282,7 +323,26 @@ def create_app() -> FastAPI:
 
     @app.get("/internal/ready", include_in_schema=False)
     async def internal_ready():
-        features = validate_runtime(settings)
+        try:
+            features = validate_runtime(settings)
+            if settings.environment == "staging" and settings.chat_enabled:
+                from backend.database.connection import db_manager
+                from backend.services.chat_sandbox_service import (
+                    SandboxSessionManager,
+                )
+                from backend.services.runtime_validation import validate_chat_schema
+
+                with db_manager.session_local() as db:
+                    validate_chat_schema(db)
+                await SandboxSessionManager(settings).validate_image_reference()
+        except Exception as error:
+            return JSONResponse(
+                {
+                    "status": "not_ready",
+                    "reason": str(error)[:200],
+                },
+                status_code=503,
+            )
         route_paths = {route.path for route in app.routes}
         has_chat_routes = any(path.startswith("/api/v1/chat") for path in route_paths)
         if has_chat_routes != settings.chat_enabled:

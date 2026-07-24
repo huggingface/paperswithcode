@@ -22,6 +22,7 @@ export interface ChatSessionDetail extends ChatSession {
     revision: number;
     status: string;
     display_blocks: ChatBlock[];
+    citations: Array<{ route_id: string; title: string; source_url: string | null }>;
     followups: string[];
     error_code: string | null;
   }>;
@@ -84,7 +85,11 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
   const restoreBlocks = (blocks: ChatBlock[]): ChatBlock[] => blocks.map((block) => block.kind === "reasoning"
     ? { ...block, active: false, open: false }
     : block.kind === "tool"
-      ? { ...block, status: "done" as const, open: false }
+      ? {
+          ...block,
+          status: block.status === "running" ? "error" as const : block.status,
+          open: block.status === "error" || block.status === "denied" || block.status === "running",
+        }
       : { ...block, done: true as const });
   const failureMessage = (code: string | null): string => {
     if (code === "provider_error") return "The model provider failed before completing the response. You can edit and retry your question.";
@@ -100,6 +105,7 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
         role: "assistant",
         blocks: restoreBlocks(message.display_blocks),
         followups: message.followups,
+        citations: message.citations,
         streaming: false,
       }];
     }

@@ -28,6 +28,8 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_paper_relations.sql` + `run_add_paper_relations.py` | `paper_relations` table |
 | `add_pending_paper_edits.sql` + `run_add_pending_paper_edits.py` | pending edit queue |
 | `add_user_bookmarks.sql` + `run_add_user_bookmarks.py` | user bookmarks |
+| `add_chat_sessions.sql` | Authenticated chat sessions, UI messages, and opaque Agent SDK transcript storage |
+| `add_chat_sandbox_runtime.sql` | Staging-only additive immutable chat backend selection, runtime provenance, sandbox leases, and hash-only turn capabilities; run as PostgreSQL superuser with `search_path=staging,public` before activating the bridge |
 | `add_external_resources_schema.sql` + `run_add_external_resources_schema.py` | external resources |
 | `add_trending_score.sql` + `run_add_trending_score.py` + `update_trending_view_for_ema.sql` | repository (GitHub) trending scores |
 | `add_paper_hf_trending.sql` + `run_add_paper_hf_trending.py` | composite paper trending: `hf_artifacts`, `paper_hf_artifacts`, and `papers.trending_score`/components (rollback: `rollback_paper_hf_trending.sql`) |
@@ -41,6 +43,7 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_task_datasets_featured_rank.sql` | `task_datasets.featured_rank` |
 | `add_tasks_is_visible.sql` | `tasks.is_visible` |
 | `add_task_sister_tasks.sql` + `run_add_task_sister_tasks.py` | `task_sister_tasks` table (explicit sister tasks) |
+| `add_task_recommended_frameworks.sql` | Ordered task-to-repository framework recommendations, with initial image-classification and object-detection data |
 | `add_paper_tasks_source.sql` | `paper_tasks.source` |
 | `add_methods_scanned_at_to_papers.sql` | `papers.methods_scanned_at` |
 | `add_method_source_paper_id.sql` | `methods.source_paper_id` |

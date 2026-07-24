@@ -62,6 +62,9 @@ export function useChat(options: UseChatOptions) {
       case "stream_start":
         if (event.session_id) optionsRef.current.onSessionId(event.session_id);
         break;
+      case "sandbox_start":
+      case "sandbox_ready":
+        break;
       case "session_title_start":
         titleRef.current = "";
         break;
@@ -86,7 +89,11 @@ export function useChat(options: UseChatOptions) {
         addBlock({ kind: "tool", id: event.id, name: event.name, args: event.args, status: "running", open: false });
         break;
       case "tool_result":
-        patchBlock((block) => block.kind === "tool" && block.id === event.id, (block) => block.kind === "tool" ? { ...block, status: "done", hits: event.hits, took_ms: event.took_ms, results: event.results } : block);
+        patchBlock((block) => block.kind === "tool" && block.id === event.id, (block) => block.kind === "tool"
+          ? event.status
+            ? { ...block, schema_version: 2, status: event.status, took_ms: event.took_ms, content: event.content, metadata: event.metadata, open: event.status !== "success" }
+            : { ...block, status: "done", hits: event.hits, took_ms: event.took_ms, results: event.results }
+          : block);
         break;
       case "answer_delta":
         patchLast((message) => {
@@ -97,7 +104,7 @@ export function useChat(options: UseChatOptions) {
         });
         break;
       case "done":
-        patchLast((message) => ({ ...message, streaming: false, followups: event.followups, finishReason: event.finish_reason, blocks: (message.blocks ?? []).map((block) => block.kind === "answer" ? { ...block, done: true } : block) }));
+        patchLast((message) => ({ ...message, streaming: false, followups: event.followups, finishReason: event.finish_reason, citations: event.citations, blocks: (message.blocks ?? []).map((block) => block.kind === "answer" ? { ...block, done: true } : block) }));
         break;
       case "error":
         patchLast((message) => ({ ...message, streaming: false, error: event.message }));
@@ -157,7 +164,20 @@ export function useChat(options: UseChatOptions) {
     abortRef.current = null;
     busyRef.current = false;
     setBusy(false);
-    setMessages((previous) => previous.at(-1)?.role === "assistant" ? previous.slice(0, -1) : previous);
+    setMessages((previous) => {
+      const last = previous.at(-1);
+      if (last?.role !== "assistant") return previous;
+      const completed = (last.blocks ?? []).flatMap((block): ChatBlock[] => {
+        if (block.kind === "tool" && block.status === "running") return [];
+        if (block.kind === "reasoning" && block.active) return [];
+        if (block.kind === "answer") return [{ ...block, done: true }];
+        return [block];
+      });
+      return [
+        ...previous.slice(0, -1),
+        { ...last, blocks: completed, streaming: false, finishReason: "stopped" },
+      ];
+    });
     optionsRef.current.onInterrupted(promptRef.current);
     window.setTimeout(optionsRef.current.onSettled, 250);
   }, []);

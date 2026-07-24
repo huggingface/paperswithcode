@@ -8,7 +8,13 @@ import os
 import re
 from pathlib import Path
 
+from sqlalchemy import text
+
 from backend.config import Settings
+from backend.services.chat_runtime_contract import (
+    dedicated_gateway_hostname,
+    require_immutable_image_id,
+)
 
 _ASSET_RE = re.compile(
     r"""(?:src|href)=["'](?P<path>/assets/[^"'?#]+\.(?:js|css))(?:[?#][^"']*)?["']"""
@@ -114,6 +120,12 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
             raise RuntimeError(
                 "production catalog mutations and CRON must remain enabled"
             )
+        if (
+            settings.chat_default_backend != "local_mcp"
+            or settings.chat_new_chat_modal_percentage != 0
+            or settings.chat_modal_image_version
+        ):
+            raise RuntimeError("production contains an active chat runtime descriptor")
     else:
         if settings.catalog_mutations_enabled:
             raise RuntimeError("staging catalog mutations must be disabled")
@@ -126,7 +138,83 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
         fingerprint = hashlib.sha256(settings.jwt_secret.encode()).hexdigest()
         if fingerprint == settings.production_jwt_fingerprint:
             raise RuntimeError("staging must not reuse the production JWT secret")
+        if not settings.chat_enabled:
+            raise RuntimeError("staging chat feature must be enabled")
+        if not all(
+            (
+                settings.chat_modal_image_version,
+                settings.chat_pwc_cli_version,
+                settings.chat_worker_contract_version,
+                settings.chat_system_prompt_sha256,
+            )
+        ):
+            raise RuntimeError("staging chat runtime descriptor is incomplete")
+        try:
+            require_immutable_image_id(settings.chat_modal_image_version)
+            dedicated_gateway_hostname(settings.chat_gateway_url)
+        except ValueError as error:
+            raise RuntimeError(f"staging chat runtime is invalid: {error}") from error
+        if not settings.hf_token:
+            raise RuntimeError("staging chat model gateway requires an HF token")
+        from backend.chat_sandbox_worker.prompt import sha256 as prompt_sha256
+
+        effective_prompt_hash = prompt_sha256(
+            max_turns=settings.chat_max_turns,
+            max_calls=settings.chat_max_tool_calls,
+            max_searches=settings.chat_max_direct_search_calls,
+        )
+        if settings.chat_system_prompt_sha256 != effective_prompt_hash:
+            raise RuntimeError("staging chat prompt and execution limits disagree")
+
+    manifest_path = Path(settings.frontend_dist_dir).parent / "release.json"
+    if not manifest_path.is_file():
+        raise RuntimeError("release.json is missing")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    runtime = manifest.get("chat_runtime")
+    expected_runtime = {
+        "enabled": settings.chat_enabled,
+        "new_chat_modal_percentage": settings.chat_new_chat_modal_percentage,
+        "default_backend": settings.chat_default_backend,
+        "modal_image_version": settings.chat_modal_image_version,
+        "pwc_cli_version": settings.chat_pwc_cli_version,
+        "worker_contract_version": settings.chat_worker_contract_version,
+        "system_prompt_sha256": settings.chat_system_prompt_sha256,
+    }
+    if runtime != expected_runtime or manifest.get("release_id") != settings.release_id:
+        raise RuntimeError("running chat runtime differs from the release manifest")
 
     if settings.thumbnail_mutations_enabled:
         raise RuntimeError("deployed web services must not mutate thumbnails")
     return validate_frontend_dist(settings)
+
+
+def validate_chat_schema(db) -> None:
+    """Fail readiness when the additive staging chat runtime schema is absent."""
+
+    rows = dict(
+        db.execute(
+            text(
+                """
+                SELECT name, to_regclass(name)::text
+                FROM (VALUES
+                    ('chat_sessions'),
+                    ('chat_messages'),
+                    ('chat_sandbox_leases'),
+                    ('chat_turn_capabilities')
+                ) AS required(name)
+                """
+            )
+        ).all()
+    )
+    missing = [name for name, resolved in rows.items() if resolved is None]
+    execution_backend = db.execute(
+        text(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_name = 'chat_sessions'
+              AND column_name = 'execution_backend'
+            """
+        )
+    ).first()
+    if missing or execution_backend is None:
+        raise RuntimeError("required chat sandbox schema is missing")

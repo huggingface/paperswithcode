@@ -613,6 +613,7 @@ def test_chat_endpoint_stream_contract(monkeypatch):
         is_replacement=False,
         prompt_revision=1,
         title_should_generate=True,
+        execution_backend="local_mcp",
     )
 
     class FakeDB:
@@ -644,7 +645,24 @@ def test_chat_endpoint_stream_contract(monkeypatch):
     settings = get_settings()
     monkeypatch.setattr(settings, "chat_enabled", True)
     monkeypatch.setattr(settings, "hf_token", "test-token")
-    monkeypatch.setattr(chat_router, "stream_agent_events", fake_stream)
+
+    class FakeRunner:
+        sdk_directory = settings.chat_agent_cwd
+
+        def events(self):
+            return fake_stream("", settings)
+
+        async def cancel(self):
+            return None
+
+        async def close(self):
+            return None
+
+    monkeypatch.setattr(
+        chat_router,
+        "create_chat_turn_runner",
+        lambda **_kwargs: FakeRunner(),
+    )
     monkeypatch.setattr(chat_router, "stream_title", fake_title)
     monkeypatch.setattr(chat_router, "ChatSessionService", FakeService)
     monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)

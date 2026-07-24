@@ -82,27 +82,58 @@ class ReasoningDisplayBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["reasoning"]
     text: str = Field(max_length=20_000)
+    citations: list[CitationSnapshot] = Field(default_factory=list, max_length=20)
+
+
+class ToolTextContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    type: Literal["text"] = "text"
+    text: str = Field(max_length=24_900)
+    truncated: bool = False
+
+
+class ToolResultMetadata(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    exit_code: int | None = None
+    output_truncated: bool = False
 
 
 class ToolDisplayBlock(BaseModel):
+    """Browser projection for both historical search and generic v2 tools."""
+
     model_config = ConfigDict(extra="forbid")
     kind: Literal["tool"]
+    schema_version: Literal[1, 2] = 1
     id: str = Field(max_length=200)
-    name: Literal["search_papers"]
+    name: str = Field(min_length=1, max_length=64)
     args: dict[str, object]
-    status: Literal["done"]
-    hits: int = Field(ge=0, le=10_000)
-    took_ms: int = Field(ge=0, le=600_000)
-    results: list[ChatPaperHit] = Field(max_length=10)
+    status: Literal["running", "done", "success", "error", "denied"]
+    took_ms: int = Field(default=0, ge=0, le=600_000)
+    content: list[ToolTextContent] = Field(default_factory=list, max_length=1)
+    metadata: ToolResultMetadata = Field(default_factory=ToolResultMetadata)
+    # Legacy v1 search projection. Retained until local_mcp history is retired.
+    hits: int | None = Field(default=None, ge=0, le=10_000)
+    results: list[ChatPaperHit] | None = Field(default=None, max_length=10)
 
     @field_validator("args")
     @classmethod
     def validate_args(cls, value: dict[str, object]) -> dict[str, object]:
-        if set(value) - {"query", "top_k", "mode"}:
-            raise ValueError("Unsupported search tool arguments")
         if len(json.dumps(value, ensure_ascii=False).encode()) > 2_000:
-            raise ValueError("Search tool arguments are too large")
+            raise ValueError("Tool arguments are too large")
         return value
+
+    @model_validator(mode="after")
+    def validate_schema(self) -> "ToolDisplayBlock":
+        if self.schema_version == 1:
+            if self.name != "search_papers":
+                raise ValueError("Legacy tool blocks must be search_papers")
+            if set(self.args) - {"query", "top_k", "mode"}:
+                raise ValueError("Unsupported search tool arguments")
+            if self.hits is None or self.results is None:
+                raise ValueError("Legacy search blocks require hits and results")
+        elif self.name not in {"Bash", "Read", "Grep"}:
+            raise ValueError("Generic tool name must be Bash, Read, or Grep")
+        return self
 
 
 class AnswerDisplayBlock(BaseModel):
@@ -110,6 +141,7 @@ class AnswerDisplayBlock(BaseModel):
     kind: Literal["answer"]
     text: str = Field(max_length=80_000)
     done: Literal[True] = True
+    citations: list[CitationSnapshot] = Field(default_factory=list, max_length=20)
 
 
 DisplayBlock = Annotated[
@@ -206,9 +238,36 @@ class ToolCallEvent(_StrictEvent):
 class ToolResultEvent(_StrictEvent):
     type: Literal["tool_result"]
     id: str
-    hits: int
+    status: Literal["success", "error", "denied"] | None = None
     took_ms: int
-    results: list[ChatPaperHit]
+    content: list[ToolTextContent] | None = None
+    metadata: ToolResultMetadata | None = None
+    # Legacy local_mcp shape.
+    hits: int | None = None
+    results: list[ChatPaperHit] | None = None
+
+    @model_validator(mode="after")
+    def validate_shape(self) -> "ToolResultEvent":
+        legacy = self.hits is not None or self.results is not None
+        generic = self.status is not None or self.content is not None
+        if legacy == generic:
+            raise ValueError("Tool result must be exactly one of legacy or generic")
+        if legacy and (self.hits is None or self.results is None):
+            raise ValueError("Legacy tool result requires hits and results")
+        if generic and (self.status is None or self.content is None):
+            raise ValueError("Generic tool result requires status and content")
+        return self
+
+
+class SandboxStartEvent(_StrictEvent):
+    type: Literal["sandbox_start"]
+    session_id: uuid.UUID
+
+
+class SandboxReadyEvent(_StrictEvent):
+    type: Literal["sandbox_ready"]
+    session_id: uuid.UUID
+    cold_start_ms: int = Field(ge=0, le=600_000)
 
 
 class AnswerDeltaEvent(_StrictEvent):
@@ -220,6 +279,7 @@ class DoneEvent(_StrictEvent):
     type: Literal["done"]
     followups: list[str] = Field(default_factory=list)
     finish_reason: str = "success"
+    citations: list[CitationSnapshot] = Field(default_factory=list, max_length=20)
 
 
 class ErrorEvent(_StrictEvent):
@@ -250,6 +310,8 @@ ChatEvent = Annotated[
         ReasoningEndEvent,
         ToolCallEvent,
         ToolResultEvent,
+        SandboxStartEvent,
+        SandboxReadyEvent,
         AnswerDeltaEvent,
         DoneEvent,
         ErrorEvent,
