@@ -32,6 +32,7 @@ image = (
         "groupadd --system pwc-chat && useradd --system --gid pwc-chat --create-home --home-dir /home/pwc-chat pwc-chat",
         "mkdir -p /opt/pwc/backend/chat_sandbox_worker /workspace /home/pwc-chat/.claude /var/empty/pwc-broker",
         "chown -R pwc-chat:pwc-chat /workspace /home/pwc-chat",
+        "chown pwc-broker:pwc-broker /var/empty/pwc-broker",
         "chmod 0755 /opt/pwc /opt/pwc/backend /opt/pwc/backend/chat_sandbox_worker",
         "chmod 0700 /workspace /home/pwc-chat /home/pwc-chat/.claude /var/empty/pwc-broker",
     )
@@ -43,8 +44,11 @@ image = (
         ignore=lambda path: path.name
         in {"image.py", "publish_image.py", "__pycache__"},
     )
+    .add_local_file(WORKER / "CLI_GUIDE.md", "/opt/pwc/CLI_GUIDE.md", copy=True)
     .add_local_file(STANDALONE / "install.py", "/opt/pwc/install-pwc.py", copy=True)
     .run_commands(
+        "chmod -R a+rX /opt/pwc/backend",
+        "chmod 0644 /opt/pwc/CLI_GUIDE.md /opt/pwc/install-pwc.py",
         f"python /opt/pwc/install-pwc.py --version {PWC_CLI_VERSION} --prefix /usr/local",
         "pwc version",
         "pwc --help >/dev/null",

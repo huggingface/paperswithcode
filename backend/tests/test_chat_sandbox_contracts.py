@@ -159,6 +159,17 @@ def test_prompt_and_manifest_share_eight_round_contract():
     assert MODAL_IMAGE_ID == "im-QM6QldxXdK5qWAvPbr9iEA"
 
 
+def test_image_makes_copied_worker_readable_and_installs_guide():
+    source = (
+        Path(__file__).resolve().parents[1] / "chat_sandbox_worker" / "image.py"
+    ).read_text()
+
+    assert 'WORKER / "CLI_GUIDE.md", "/opt/pwc/CLI_GUIDE.md"' in source
+    assert '"chmod -R a+rX /opt/pwc/backend"' in source
+    assert '"chmod 0644 /opt/pwc/CLI_GUIDE.md /opt/pwc/install-pwc.py"' in source
+    assert '"chown pwc-broker:pwc-broker /var/empty/pwc-broker"' in source
+
+
 def test_image_publication_initializes_modal_app(monkeypatch, capsys):
     events: list[str] = []
 
