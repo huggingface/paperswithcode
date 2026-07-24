@@ -87,6 +87,17 @@ def test_broker_accepts_claude_messages_beta_query(monkeypatch):
     assert request.error is None
 
 
+def test_supervisor_launch_read_does_not_consume_worker_frame():
+    read_fd, write_fd = os.pipe()
+    try:
+        os.write(write_fd, b"private-launch\nworker-frame\n")
+        assert supervisor._readline_unbuffered(read_fd, 64) == b"private-launch\n"
+        assert os.read(read_fd, 64) == b"worker-frame\n"
+    finally:
+        os.close(read_fd)
+        os.close(write_fd)
+
+
 def test_generic_tool_projection_and_event_are_v2_raw_text():
     block = DISPLAY_BLOCKS_ADAPTER.validate_python(
         [

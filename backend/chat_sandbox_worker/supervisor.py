@@ -52,6 +52,21 @@ def _safe_environment(home: str) -> dict[str, str]:
     return environment
 
 
+def _readline_unbuffered(fd: int, maximum_bytes: int) -> bytes:
+    """Read exactly one line without prefetching bytes from the next frame."""
+    line = bytearray()
+    while len(line) < maximum_bytes:
+        chunk = os.read(fd, 1)
+        if not chunk:
+            break
+        line.extend(chunk)
+        if chunk == b"\n":
+            return bytes(line)
+    if len(line) >= maximum_bytes:
+        raise RuntimeError("Private supervisor launch frame is too large")
+    return bytes(line)
+
+
 def _wait_for_broker(process: subprocess.Popen, timeout: float = 10) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -89,7 +104,7 @@ def _harden_proc() -> None:
 def main() -> int:
     _not_dumpable()
     _harden_proc()
-    launch = sys.stdin.buffer.readline(64 * 1024)
+    launch = _readline_unbuffered(sys.stdin.fileno(), 64 * 1024)
     if not launch.startswith(SUPERVISOR_PREFIX):
         raise RuntimeError("Missing private supervisor launch frame")
     config = json.loads(launch[len(SUPERVISOR_PREFIX) :])
