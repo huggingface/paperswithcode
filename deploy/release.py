@@ -19,6 +19,7 @@ from backend.chat_sandbox_worker.contract import (
 from backend.services.chat_runtime_contract import require_immutable_image_id
 
 ENVIRONMENTS = ("production", "staging")
+FEATURE_CONTRACT_VERSION = 3
 
 
 def sha256_file(path: Path) -> str:
@@ -32,7 +33,23 @@ def sha256_file(path: Path) -> str:
 def profile_features(environment: str) -> dict[str, bool]:
     if environment not in ENVIRONMENTS:
         raise ValueError(f"unsupported environment: {environment}")
-    return {"chat": environment == "staging"}
+    return {
+        "chat": environment == "staging",
+        # Catalog curation runs only in production, where the API owns the
+        # writable catalog and the controls remain protected by HF admin auth.
+        "codex_add_evals": environment == "production",
+        "codex_enrich_paper": environment == "production",
+    }
+
+
+def _profile_features_v2(environment: str) -> dict[str, bool]:
+    if environment not in ENVIRONMENTS:
+        raise ValueError(f"unsupported environment: {environment}")
+    return {
+        "chat": environment == "staging",
+        "codex_add_evals": False,
+        "codex_enrich_paper": False,
+    }
 
 
 def chat_runtime(
@@ -85,6 +102,7 @@ def build_manifest(
         "git_sha": git_sha,
         "built_at": datetime.now(timezone.utc).isoformat(),
         "build_profile": environment,
+        "feature_contract_version": FEATURE_CONTRACT_VERSION,
         "backend_features": features,
         "frontend_features": features,
         "chat_runtime": chat_runtime(environment, chat_descriptor),
@@ -95,28 +113,48 @@ def build_manifest(
 def validate_manifest(release_dir: Path, environment: str | None = None) -> dict:
     manifest_path = release_dir / "release.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    required = {
+    legacy_required = {
         "release_id",
         "git_sha",
         "built_at",
         "build_profile",
         "backend_features",
         "frontend_features",
-        "chat_runtime",
         "frontend_entrypoint",
     }
-    if set(manifest) != required:
+    versioned_required = legacy_required | {"feature_contract_version"}
+    bridge_required = versioned_required | {"chat_runtime"}
+    profile = manifest.get("build_profile")
+    if set(manifest) == legacy_required:
+        expected = {"chat": profile == "staging"}
+    elif set(manifest) == versioned_required:
+        version = manifest["feature_contract_version"]
+        if version == 2:
+            expected = _profile_features_v2(profile)
+        elif version == FEATURE_CONTRACT_VERSION:
+            expected = profile_features(profile)
+        else:
+            raise ValueError("unsupported release feature contract version")
+    elif set(manifest) == bridge_required:
+        if manifest["feature_contract_version"] != FEATURE_CONTRACT_VERSION:
+            raise ValueError("unsupported release feature contract version")
+        expected = profile_features(profile)
+    else:
         raise ValueError("release.json has an unexpected schema")
-    profile = manifest["build_profile"]
     if environment is not None and profile != environment:
         raise ValueError("release profile does not match target environment")
-    expected = profile_features(profile)
     if (
         manifest["backend_features"] != expected
         or manifest["frontend_features"] != expected
     ):
         raise ValueError("release feature manifests do not match the build profile")
-    runtime = manifest["chat_runtime"]
+    if manifest["release_id"] != release_id(manifest["git_sha"], profile):
+        raise ValueError("release ID does not match SHA and profile")
+    if manifest["frontend_entrypoint"] != "frontend-dist/index.html":
+        raise ValueError("unsupported frontend entrypoint")
+    runtime = manifest.get("chat_runtime")
+    if runtime is None:
+        return _validate_release_files(release_dir, manifest, expected)
     if not isinstance(runtime, dict) or set(runtime) != {
         "enabled",
         "new_chat_modal_percentage",
@@ -156,11 +194,12 @@ def validate_manifest(release_dir: Path, environment: str | None = None) -> dict
             raise ValueError("chat runtime system prompt hash is invalid")
         if runtime["enabled"] is not True:
             raise ValueError("staging chat runtime must be enabled")
-    if manifest["release_id"] != release_id(manifest["git_sha"], profile):
-        raise ValueError("release ID does not match SHA and profile")
-    if manifest["frontend_entrypoint"] != "frontend-dist/index.html":
-        raise ValueError("unsupported frontend entrypoint")
+    return _validate_release_files(release_dir, manifest, expected)
 
+
+def _validate_release_files(
+    release_dir: Path, manifest: dict, expected: dict[str, bool]
+) -> dict:
     features = json.loads(
         (release_dir / "frontend-dist" / "features.json").read_text(encoding="utf-8")
     )

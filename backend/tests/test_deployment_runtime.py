@@ -174,6 +174,47 @@ def test_release_manifest_rejects_feature_mismatch(tmp_path: Path):
         validate_manifest(release, "production")
 
 
+@pytest.mark.parametrize(
+    ("environment", "version", "features"),
+    [
+        (
+            "staging",
+            2,
+            {
+                "chat": True,
+                "codex_add_evals": False,
+                "codex_enrich_paper": False,
+            },
+        ),
+        (
+            "production",
+            3,
+            {
+                "chat": False,
+                "codex_add_evals": True,
+                "codex_enrich_paper": True,
+            },
+        ),
+    ],
+)
+def test_pre_bridge_versioned_manifest_remains_valid(
+    tmp_path: Path, environment: str, version: int, features: dict[str, bool]
+):
+    release = make_bundle(tmp_path, chat=environment == "staging")
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.pop("chat_runtime")
+    manifest["feature_contract_version"] = version
+    manifest["backend_features"] = features
+    manifest["frontend_features"] = features
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "frontend-dist" / "features.json").write_text(json.dumps(features))
+
+    assert (
+        validate_manifest(release, environment)["release_id"] == manifest["release_id"]
+    )
+
+
 def test_staging_manifest_requires_immutable_modal_image(tmp_path: Path):
     release = make_bundle(tmp_path, chat=True)
     manifest_path = release / "release.json"
