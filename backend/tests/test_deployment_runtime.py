@@ -1,12 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
+import subprocess
+import sys
 from argparse import Namespace
 from pathlib import Path
 
 import pytest
 
 import deploy.cli as deploy_cli
+from deploy.install_deploy_tools import (
+    RUNTIME_CONTRACT_PATHS,
+    bundle_runtime_contract,
+)
 from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
 from backend.config import Settings
 from backend.services.runtime_validation import validate_runtime
@@ -14,6 +22,37 @@ from deploy.cli import _chat_descriptor_from_source
 from deploy.nginx_validate import validate as validate_nginx
 from deploy.release import atomic_symlink, build_manifest, validate_manifest
 from deploy.smoke_test import validate_local_bundle
+
+
+def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
+    repository = Path(__file__).resolve().parents[2]
+    staging = tmp_path / "staging"
+    source = staging / "deploy"
+    source.mkdir(parents=True)
+    shutil.copy2(repository / "deploy" / "release.py", source / "release.py")
+    for relative in RUNTIME_CONTRACT_PATHS:
+        origin = repository / relative
+        target = staging / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(origin, target)
+
+    bundle_runtime_contract(staging, source)
+
+    for relative in RUNTIME_CONTRACT_PATHS:
+        backend_relative = Path(relative).relative_to("backend")
+        assert (source / "backend" / backend_relative).is_file()
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import release; assert release.chat_runtime('staging')['enabled']",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        env={**os.environ, "PYTHONPATH": str(source)},
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def make_bundle(root: Path, *, chat: bool) -> Path:

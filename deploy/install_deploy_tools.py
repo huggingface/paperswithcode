@@ -15,6 +15,20 @@ from pathlib import Path
 INSTALL_ROOT = Path("/usr/local/lib/paperswithcode-deploy")
 BIN_ROOT = Path("/usr/local/sbin")
 COMMANDS = ("pwc-deploy", "pwc-rollback", "pwc-status", "pwc-cleanup")
+RUNTIME_CONTRACT_PATHS = (
+    "backend/__init__.py",
+    "backend/chat_sandbox_worker/__init__.py",
+    "backend/chat_sandbox_worker/CLI_GUIDE.md",
+    "backend/chat_sandbox_worker/contract.py",
+    "backend/chat_sandbox_worker/prompt.py",
+    "backend/services/__init__.py",
+    "backend/services/chat_runtime_contract.py",
+)
+
+
+def bundle_runtime_contract(staging: Path, source: Path) -> None:
+    """Vendor the backend modules imported by the installed release tooling."""
+    shutil.copytree(staging / "backend", source / "backend")
 
 
 def main() -> int:
@@ -37,13 +51,21 @@ def main() -> int:
         archive = staging / "deploy.tar"
         with archive.open("wb") as handle:
             subprocess.run(
-                ["git", "archive", "--format=tar", sha, "deploy"],
+                [
+                    "git",
+                    "archive",
+                    "--format=tar",
+                    sha,
+                    "deploy",
+                    *RUNTIME_CONTRACT_PATHS,
+                ],
                 cwd=repo,
                 stdout=handle,
                 check=True,
             )
         subprocess.run(["tar", "-xf", str(archive), "-C", str(staging)], check=True)
         source = staging / "deploy"
+        bundle_runtime_contract(staging, source)
         (source / "installed.json").write_text(
             json.dumps(
                 {
