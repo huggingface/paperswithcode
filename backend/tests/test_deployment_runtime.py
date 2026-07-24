@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 import deploy.cli as deploy_cli
+from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
 from backend.config import Settings
 from backend.services.runtime_validation import validate_runtime
 from deploy.cli import _chat_descriptor_from_source
@@ -147,7 +148,7 @@ def test_staging_manifest_requires_immutable_modal_image(tmp_path: Path):
 def test_chat_descriptor_is_extracted_from_selected_source():
     source = Path(__file__).resolve().parents[2]
     descriptor = _chat_descriptor_from_source(source, "staging")
-    assert descriptor["modal_image_version"] == ""
+    assert descriptor["modal_image_version"] == MODAL_IMAGE_ID
     assert descriptor["worker_contract_version"] == "1"
     assert _chat_descriptor_from_source(source, "production") is None
 

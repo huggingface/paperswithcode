@@ -8,8 +8,7 @@ BASE_IMAGE = (
     "python:3.12-slim-bookworm@"
     "sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b"
 )
-# Set this to the immutable ``im-...`` ID emitted by publish_image.py in the
-# follow-up bridge commit. An unpublished source revision must not deploy.
-MODAL_IMAGE_ID = ""
+# Immutable image emitted by publish_image.py for the v1 worker contract.
+MODAL_IMAGE_ID = "im-0akM3shXyaXVLpGQopkeX2"
 DEFAULT_BACKEND = "local_mcp"
 NEW_CHAT_MODAL_PERCENTAGE = 0
