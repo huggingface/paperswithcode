@@ -4,7 +4,11 @@
 from __future__ import annotations
 
 import os
+import sys
 from pathlib import Path
+
+RELEASE_ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(RELEASE_ROOT))
 
 try:
     from deploy.release import validate_manifest
@@ -51,7 +55,7 @@ def configure_release_environment(release: Path) -> dict:
 
 
 def main() -> None:
-    configure_release_environment(Path.cwd())
+    configure_release_environment(RELEASE_ROOT)
     python = Path("/srv/paperswithcode/.venv/bin/python")
     os.execv(python, [str(python), "-m", "uvicorn", "backend.main:app"])
 

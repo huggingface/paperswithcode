@@ -28,6 +28,7 @@ from deploy.release import (
     validate_manifest,
 )
 from deploy.run_backend import configure_release_environment
+from deploy.run_backend import RELEASE_ROOT
 from deploy.smoke_test import validate_local_bundle
 
 
@@ -270,6 +271,11 @@ def test_run_backend_derives_features_from_release(
     assert os.environ["PWC_CODEX_ADD_EVALS_ENABLED"] == "true"
     assert os.environ["PWC_CODEX_ENRICH_PAPER_ENABLED"] == "true"
     assert os.environ["PWC_CODEX_JOBS_ENABLED"] == "true"
+
+
+def test_run_backend_prepends_immutable_release_root():
+    assert sys.path[0] == str(RELEASE_ROOT)
+    assert RELEASE_ROOT == Path(__file__).resolve().parents[2]
 
 
 @pytest.mark.parametrize("environment", ["production", "staging"])
