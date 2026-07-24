@@ -14,6 +14,7 @@ from backend.chat_sandbox_worker.contract import (
     MODAL_APP_NAME,
     MODAL_IMAGE_ID,
 )
+from backend.chat_sandbox_worker import supervisor
 from backend.chat_sandbox_worker.prompt import render, sha256
 from backend.chat_sandbox_worker import publish_image
 from backend.chat_sandbox_worker.protocol import (
@@ -215,6 +216,29 @@ def test_immutable_modal_image_uses_supported_constructor(monkeypatch):
     )
 
     assert asyncio.run(resolve_modal_image("im-test")) is sentinel
+
+
+def test_supervisor_tolerates_unsupported_proc_remount(monkeypatch):
+    monkeypatch.setattr(
+        supervisor.Path,
+        "read_text",
+        lambda *_args, **_kwargs: "none /proc proc rw 0 0\n",
+    )
+
+    class Result:
+        returncode = 32
+
+    calls: list[list[str]] = []
+
+    def run(command, **options):
+        calls.append(command)
+        assert options["check"] is False
+        return Result()
+
+    monkeypatch.setattr(supervisor.subprocess, "run", run)
+
+    supervisor._harden_proc()
+    assert calls == [["mount", "-o", "remount,hidepid=2,nosuid,nodev", "/proc"]]
 
 
 def test_resource_probe_treats_ephemeral_disk_as_provider_managed(monkeypatch):

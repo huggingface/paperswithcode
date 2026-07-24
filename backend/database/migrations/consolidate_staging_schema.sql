@@ -81,6 +81,7 @@ ALTER DEFAULT PRIVILEGES FOR ROLE pwc_staging_owner IN SCHEMA staging
 REVOKE ALL ON public.user_bookmarks, public.user_preferences,
     public.pending_paper_edits, public.paper_curation_jobs FROM pwc_staging;
 ALTER ROLE pwc_staging SET search_path = staging, public;
+ALTER ROLE pwc_staging RESET default_transaction_read_only;
 ALTER ROLE pwc_staging SET statement_timeout = '30s';
 ALTER ROLE pwc_staging CONNECTION LIMIT 10;
 

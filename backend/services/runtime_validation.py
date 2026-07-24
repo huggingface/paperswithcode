@@ -216,6 +216,8 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
 def validate_chat_schema(db) -> None:
     """Fail readiness when the additive staging chat runtime schema is absent."""
 
+    if db.execute(text("SHOW transaction_read_only")).scalar_one() != "off":
+        raise RuntimeError("staging chat database connection is read-only")
     rows = dict(
         db.execute(
             text(

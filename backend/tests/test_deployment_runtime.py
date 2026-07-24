@@ -19,7 +19,7 @@ from deploy.install_deploy_tools import (
 )
 from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
 from backend.config import Settings
-from backend.services.runtime_validation import validate_runtime
+from backend.services.runtime_validation import validate_chat_schema, validate_runtime
 from deploy.cli import _chat_descriptor_from_source
 from deploy.nginx_validate import validate as validate_nginx
 from deploy.release import (
@@ -299,6 +299,50 @@ def test_staging_runtime_accepts_directory_snapshot_feature(tmp_path: Path):
     settings = deployed_settings(tmp_path, release, "staging")
     settings.chat_workspace_snapshots_enabled = True
     assert validate_runtime(settings) == profile_features("staging")
+
+
+class _ChatSchemaResult:
+    def __init__(self, *, scalar=None, rows=None, first=None):
+        self._scalar = scalar
+        self._rows = rows
+        self._first = first
+
+    def scalar_one(self):
+        return self._scalar
+
+    def all(self):
+        return self._rows
+
+    def first(self):
+        return self._first
+
+
+class _ChatSchemaDB:
+    def __init__(self, transaction_read_only: str):
+        self.transaction_read_only = transaction_read_only
+
+    def execute(self, statement):
+        sql = str(statement)
+        if "SHOW transaction_read_only" in sql:
+            return _ChatSchemaResult(scalar=self.transaction_read_only)
+        if "to_regclass" in sql:
+            names = (
+                "chat_sessions",
+                "chat_messages",
+                "chat_sandbox_leases",
+                "chat_turn_capabilities",
+            )
+            return _ChatSchemaResult(rows=[(name, name) for name in names])
+        return _ChatSchemaResult(first=(1,))
+
+
+def test_chat_schema_rejects_read_only_staging_connection():
+    with pytest.raises(RuntimeError, match="database connection is read-only"):
+        validate_chat_schema(_ChatSchemaDB("on"))
+
+
+def test_chat_schema_accepts_writable_staging_connection():
+    validate_chat_schema(_ChatSchemaDB("off"))
 
 
 def test_deployed_runtime_rejects_source_shell(tmp_path: Path):

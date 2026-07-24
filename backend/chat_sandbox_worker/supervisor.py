@@ -73,12 +73,15 @@ def _harden_proc() -> None:
         options = proc_line.split()[3].split(",")
         if "hidepid=2" in options:
             return
+    # Modal sandboxes do not grant mount(2), so hidepid is defense in depth.
+    # The broker still runs under a distinct UID, marks itself non-dumpable,
+    # receives its capability over an inherited FD, and has no secrets in argv.
     subprocess.run(
         ["mount", "-o", "remount,hidepid=2,nosuid,nodev", "/proc"],
-        check=True,
+        check=False,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,
-        stderr=sys.stderr,
+        stderr=subprocess.DEVNULL,
     )
 
 
