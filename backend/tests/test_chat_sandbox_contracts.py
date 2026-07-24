@@ -11,6 +11,7 @@ from io import BytesIO
 from pathlib import Path
 
 import pytest
+from claude_agent_sdk import StreamEvent
 
 from backend.chat_sandbox_worker.contract import (
     BASE_IMAGE,
@@ -19,6 +20,7 @@ from backend.chat_sandbox_worker.contract import (
     MODAL_IMAGE_ID,
 )
 from backend.chat_sandbox_worker import supervisor
+from backend.chat_sandbox_worker.sdk_adapter import SDKEventAdapter as WorkerSDKAdapter
 from backend.chat_sandbox_worker.prompt import render, sha256
 from backend.chat_sandbox_worker import publish_image
 from backend.chat_sandbox_worker.protocol import (
@@ -46,6 +48,7 @@ from backend.services.chat_session_store_gateway import (
 from backend.chat_sandbox_worker.tool_policy import ToolBudget, bound_tool_output
 from backend.chat_gateway_app import (
     MAX_PROVIDER_OUTPUT_TOKENS,
+    MAX_PROVIDER_TURN_TOKENS,
     _output_tokens_allowed,
 )
 from deploy.release import build_manifest
@@ -104,8 +107,57 @@ def test_supervisor_launch_read_does_not_consume_worker_frame():
 
 def test_gateway_accepts_claude_output_token_limit_and_rejects_larger():
     assert MAX_PROVIDER_OUTPUT_TOKENS == 32_000
+    assert MAX_PROVIDER_TURN_TOKENS >= 8 * MAX_PROVIDER_OUTPUT_TOKENS
     assert _output_tokens_allowed(32_000)
     assert not _output_tokens_allowed(32_001)
+
+
+def test_worker_adapter_assembles_streamed_tool_arguments():
+    adapter = WorkerSDKAdapter(show_reasoning=True)
+    messages = [
+        StreamEvent(
+            uuid="1",
+            session_id="session",
+            event={
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "tool-1",
+                    "name": "Bash",
+                    "input": {},
+                },
+            },
+        ),
+        StreamEvent(
+            uuid="2",
+            session_id="session",
+            event={
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {
+                    "type": "input_json_delta",
+                    "partial_json": '{"command":"pwc search on-device"}',
+                },
+            },
+        ),
+        StreamEvent(
+            uuid="3",
+            session_id="session",
+            event={"type": "content_block_stop", "index": 0},
+        ),
+    ]
+
+    events = [event for message in messages for event in adapter.feed(message)]
+
+    assert events == [
+        {
+            "type": "tool_call",
+            "id": "tool-1",
+            "name": "Bash",
+            "args": {"command": "pwc search on-device"},
+        }
+    ]
 
 
 def test_generic_tool_projection_and_event_are_v2_raw_text():

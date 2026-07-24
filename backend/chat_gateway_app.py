@@ -27,6 +27,7 @@ from backend.services.chat_session_store_gateway import (
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 MAX_PROVIDER_OUTPUT_TOKENS = 32_000
+MAX_PROVIDER_TURN_TOKENS = 512_000
 
 
 class CatalogRequest(BaseModel):
@@ -164,7 +165,7 @@ async def messages(
             row,
             request_tokens=max(1, len(raw) // 4) + maximum_tokens,
             maximum_requests=16,
-            maximum_tokens=128_000,
+            maximum_tokens=MAX_PROVIDER_TURN_TOKENS,
         )
         db.commit()
     except CapabilityError:

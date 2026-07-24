@@ -38,11 +38,14 @@ class SDKEventAdapter:
         if not tool_id or tool_id in self.emitted_tool_ids:
             return []
         value = block.get("input")
-        if not isinstance(value, dict):
+        fragments = "".join(block.get("fragments", []))
+        if fragments:
             try:
-                value = json.loads("".join(block.get("fragments", [])) or "{}")
+                value = json.loads(fragments)
             except json.JSONDecodeError:
                 return []
+        elif not isinstance(value, dict):
+            value = {}
         self.emitted_tool_ids.add(tool_id)
         return [
             {
@@ -70,7 +73,7 @@ class SDKEventAdapter:
                 self.tool_blocks[index] = {
                     "id": block.get("id"),
                     "name": block.get("name"),
-                    "input": block.get("input"),
+                    "input": block.get("input") if block.get("input") else None,
                     "fragments": [],
                 }
             elif block_kind == "text":
