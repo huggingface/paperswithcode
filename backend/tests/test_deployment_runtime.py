@@ -238,7 +238,7 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
         chat_worker_contract_version=runtime["worker_contract_version"],
         chat_system_prompt_sha256=runtime["system_prompt_sha256"],
         chat_gateway_url=(
-            "https://chat-gateway.staging.paperswithcode.co/api/internal/chat-gateway"
+            "https://chat-gateway-staging.paperswithcode.co/api/internal/chat-gateway"
             if environment == "staging"
             else ""
         ),
@@ -393,7 +393,7 @@ def test_nginx_cross_environment_references_are_rejected():
         " upstream pwc_staging_backend { server 127.0.0.1:8001; } location / { }",
         "root /srv/paperswithcode/environments/staging/current/frontend-dist;"
         " location = /_admin_check { internal; } location / { }"
-        " server_name chat-gateway.staging.paperswithcode.co;"
+        " server_name chat-gateway-staging.paperswithcode.co;"
         " client_max_body_size 512k;"
         " location = /api/internal/chat-gateway/catalog { }"
         " location = /api/internal/chat-gateway/session-store { }"

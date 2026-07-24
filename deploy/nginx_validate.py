@@ -21,7 +21,7 @@ def validate(production: str, staging: str) -> list[str]:
         failures.append("staging exposes Vite/HMR")
     if "location = /_admin_check" not in staging or "internal;" not in staging:
         failures.append("staging admin-check is not internal")
-    gateway_host = "server_name chat-gateway.staging.paperswithcode.co;"
+    gateway_host = "server_name chat-gateway-staging.paperswithcode.co;"
     if gateway_host not in staging:
         failures.append("staging chat gateway hostname is missing")
     for endpoint in ("catalog", "session-store", "v1/messages"):

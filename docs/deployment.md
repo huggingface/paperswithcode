@@ -82,10 +82,10 @@ The sandbox chat bridge has additional fail-closed prerequisites:
 2. Build the Modal image from that committed source, then commit the emitted
    immutable `im-...` image ID as `MODAL_IMAGE_ID`. A source revision with an
    empty ID cannot pass release validation.
-3. Provision TLS for `chat-gateway.staging.paperswithcode.co`, install the
+3. Provision TLS for `chat-gateway-staging.paperswithcode.co`, install the
    committed nginx template with the explicit `pwc-nginx staging` lifecycle,
    and set `PWC_CHAT_GATEWAY_URL` to
-   `https://chat-gateway.staging.paperswithcode.co/api/internal/chat-gateway`.
+   `https://chat-gateway-staging.paperswithcode.co/api/internal/chat-gateway`.
    The dedicated host exposes only the three capability-authenticated gateway
    routes.
 4. Apply `add_chat_sandbox_runtime.sql` as PostgreSQL superuser with
