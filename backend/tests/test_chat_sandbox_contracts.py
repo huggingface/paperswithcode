@@ -325,6 +325,30 @@ def test_workspace_snapshot_provider_only_snapshots_workspace():
     assert calls == [("/workspace", 55, 30 * 24 * 60 * 60)]
 
 
+def test_workspace_snapshot_restore_uses_supported_image_constructor(monkeypatch):
+    image = object()
+    mounted: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        "backend.services.chat_sandbox_service.modal.Image.from_id",
+        lambda image_id: image if image_id == "im-snapshot" else None,
+    )
+
+    class AsyncCall:
+        def __init__(self, function):
+            self.aio = function
+
+    async def mount(path, mounted_image):
+        mounted.append((path, mounted_image))
+
+    class Sandbox:
+        mount_image = AsyncCall(mount)
+
+    provider = WorkspaceSnapshotProvider()
+    asyncio.run(provider.restore(Sandbox(), "im-snapshot"))
+    assert mounted == [("/workspace", image)]
+
+
 def test_sandbox_cancel_correlates_to_original_run_request():
     writes: list[bytes] = []
 

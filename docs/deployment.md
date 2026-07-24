@@ -107,7 +107,7 @@ sudo systemd-run --quiet --wait --pipe --collect \
   --working-directory=/srv/paperswithcode/environments/staging/current \
   --property=EnvironmentFile=/etc/paperswithcode/staging.env \
   /srv/paperswithcode/.venv/bin/python \
-  backend/scripts/qualify_chat_sandbox.py \
+  -m backend.scripts.qualify_chat_sandbox \
   --release-dir /srv/paperswithcode/environments/staging/current \
   --starts 100 --parallel 4 --snapshot-samples 3 --resource-probes \
   --confirm QUALIFY_STAGING_SANDBOX

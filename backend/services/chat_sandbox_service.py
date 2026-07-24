@@ -129,7 +129,7 @@ class WorkspaceSnapshotProvider:
         return image.object_id
 
     async def restore(self, sandbox, snapshot_id: str) -> None:
-        image = await modal.Image.from_id.aio(snapshot_id)
+        image = modal.Image.from_id(snapshot_id)
         await sandbox.mount_image.aio("/workspace", image)
 
     async def delete(self, _snapshot_id: str) -> None:
