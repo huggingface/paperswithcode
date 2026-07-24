@@ -83,6 +83,65 @@ def test_installed_wrapper_preserves_command_parser(
     assert expected in output
 
 
+def test_production_sha_resolves_from_bare_main_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "source"
+    origin = tmp_path / "origin.git"
+    repository = tmp_path / "repository.git"
+    source.mkdir()
+
+    def git(*arguments: str, cwd: Path | None = None) -> subprocess.CompletedProcess:
+        return subprocess.run(
+            ["git", *arguments],
+            cwd=cwd,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+    git("init", "--initial-branch=main", cwd=source)
+    git("config", "user.name", "Deployment Test", cwd=source)
+    git("config", "user.email", "deployment-test@example.invalid", cwd=source)
+    (source / "README.md").write_text("test\n")
+    git("add", "README.md", cwd=source)
+    git("commit", "-m", "Initial commit", cwd=source)
+    sha = git("rev-parse", "HEAD", cwd=source).stdout.strip()
+    git("clone", "--bare", str(source), str(origin))
+    git("init", "--bare", str(repository))
+    git("--git-dir", str(repository), "remote", "add", "origin", str(origin))
+    git(
+        "--git-dir",
+        str(repository),
+        "config",
+        "remote.origin.fetch",
+        "+refs/heads/*:refs/heads/*",
+    )
+    monkeypatch.setattr(deploy_cli, "REPOSITORY", repository)
+
+    assert deploy_cli.resolve_sha(sha, "production") == sha
+    assert (
+        git(
+            "--git-dir", str(repository), "rev-parse", "--verify", "refs/heads/main"
+        ).stdout.strip()
+        == sha
+    )
+    missing_remote_ref = subprocess.run(
+        [
+            "git",
+            "--git-dir",
+            str(repository),
+            "rev-parse",
+            "--verify",
+            "refs/remotes/origin/main",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert missing_remote_ref.returncode != 0
+
+
 def make_bundle(root: Path, *, chat: bool) -> Path:
     release = root / ("release-staging" if chat else "release-production")
     dist = release / "frontend-dist"

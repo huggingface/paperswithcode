@@ -106,6 +106,24 @@ def resolve_sha(source: str, environment: str) -> str:
     if len(sha) != 40:
         raise DeployError(f"could not resolve an exact commit from {source!r}")
     if environment == "production":
+        main_ref = "refs/remotes/origin/main"
+        if (
+            subprocess.run(
+                [
+                    "git",
+                    "--git-dir",
+                    str(REPOSITORY),
+                    "rev-parse",
+                    "--verify",
+                    main_ref,
+                ],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            != 0
+        ):
+            main_ref = "refs/heads/main"
         ancestry = subprocess.run(
             [
                 "git",
@@ -114,7 +132,7 @@ def resolve_sha(source: str, environment: str) -> str:
                 "merge-base",
                 "--is-ancestor",
                 sha,
-                "refs/remotes/origin/main",
+                main_ref,
             ],
             check=False,
         )
