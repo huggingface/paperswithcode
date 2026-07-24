@@ -58,10 +58,19 @@ def validate_frontend_dist(settings: Settings) -> dict[str, bool]:
     if not features_path.is_file():
         raise RuntimeError("frontend features.json is missing")
     features = json.loads(features_path.read_text(encoding="utf-8"))
-    if features != {"chat": settings.chat_enabled}:
+    expected_features = {
+        "chat": settings.chat_enabled,
+        "codex_add_evals": (
+            settings.codex_jobs_enabled and settings.codex_add_evals_enabled
+        ),
+        "codex_enrich_paper": (
+            settings.codex_jobs_enabled and settings.codex_enrich_paper_enabled
+        ),
+    }
+    if features != expected_features:
         raise RuntimeError(
             "frontend/backend feature mismatch: "
-            f"frontend={features!r} backend={{'chat': {settings.chat_enabled!r}}}"
+            f"frontend={features!r} backend={expected_features!r}"
         )
     return features
 
@@ -89,11 +98,10 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
             f"{settings.environment}"
         )
 
-    _resolved_absolute("FRONTEND_DIST_DIR", settings.frontend_dist_dir)
+    if not Path(settings.frontend_dist_dir).is_absolute():
+        raise RuntimeError("PWC_FRONTEND_DIST_DIR must be absolute")
     writable = {
         "RUNTIME_DATA_DIR": settings.runtime_data_dir,
-        "CRON_LOG_DIR": settings.cron_log_dir,
-        "CRON_LOCK_DIR": settings.cron_lock_dir,
         "CODEX_ADD_EVALS_SPOOL_DIR": settings.codex_add_evals_spool_dir,
         "CHAT_AGENT_CWD": settings.chat_agent_cwd,
         "CHAT_RECOVERY_SPOOL_DIR": settings.chat_recovery_spool_dir,
@@ -102,6 +110,14 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
         path = _resolved_absolute(name, value)
         if not path.is_dir() or not os.access(path, os.W_OK | os.X_OK):
             raise RuntimeError(f"PWC_{name} must be an existing writable directory")
+
+    for name, value in {
+        "CRON_LOG_DIR": settings.cron_log_dir,
+        "CRON_LOCK_DIR": settings.cron_lock_dir,
+    }.items():
+        path = _resolved_absolute(name, value)
+        if not path.is_dir() or not os.access(path, os.R_OK | os.X_OK):
+            raise RuntimeError(f"PWC_{name} must be an existing readable directory")
 
     thumbnail_store = _resolved_absolute(
         "THUMBNAIL_TEMP_CACHE_DIR", settings.thumbnail_temp_cache_dir
@@ -119,6 +135,15 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
         if not settings.catalog_mutations_enabled or not settings.cron_enabled:
             raise RuntimeError(
                 "production catalog mutations and CRON must remain enabled"
+            )
+        if settings.codex_jobs_enabled and (
+            not settings.codex_jobs_namespace
+            or not settings.codex_jobs_token
+            or not settings.codex_jobs_openai_api_key
+            or not settings.github_token
+        ):
+            raise RuntimeError(
+                "production Codex jobs require namespace, HF, OpenAI, and GitHub credentials"
             )
         if (
             settings.chat_default_backend != "local_mcp"

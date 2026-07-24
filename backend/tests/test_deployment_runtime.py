@@ -21,7 +21,13 @@ from backend.config import Settings
 from backend.services.runtime_validation import validate_runtime
 from deploy.cli import _chat_descriptor_from_source
 from deploy.nginx_validate import validate as validate_nginx
-from deploy.release import atomic_symlink, build_manifest, validate_manifest
+from deploy.release import (
+    atomic_symlink,
+    build_manifest,
+    profile_features,
+    validate_manifest,
+)
+from deploy.run_backend import configure_release_environment
 from deploy.smoke_test import validate_local_bundle
 
 
@@ -142,6 +148,27 @@ def test_production_sha_resolves_from_bare_main_ref(
     assert missing_remote_ref.returncode != 0
 
 
+def test_candidate_overrides_follow_environment_file(tmp_path: Path):
+    release = tmp_path / "release"
+    manifest = {"release_id": "a" * 12 + "-production"}
+    command = deploy_cli.candidate_start_command(
+        release, "production", manifest, 8123, "candidate-test"
+    )
+
+    environment_file = command.index(
+        f"EnvironmentFile={deploy_cli.CONFIG_ROOT / 'production.env'}"
+    )
+    env_command = command.index("/usr/bin/env")
+    python = command.index(str(deploy_cli.VENV / "bin" / "python"))
+    assert environment_file < env_command < python
+    assert command[env_command + 1 : python] == [
+        "UVICORN_PORT=8123",
+        f"PWC_RELEASE_ID={manifest['release_id']}",
+        f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
+    ]
+    assert "--setenv" not in command
+
+
 def make_bundle(root: Path, *, chat: bool) -> Path:
     release = root / ("release-staging" if chat else "release-production")
     dist = release / "frontend-dist"
@@ -153,11 +180,11 @@ def make_bundle(root: Path, *, chat: bool) -> Path:
         '<script type="module" src="/assets/app-abc123.js"></script>'
         '<link rel="stylesheet" href="/assets/app-abc123.css">'
     )
-    (dist / "features.json").write_text(json.dumps({"chat": chat}))
     (release / "backend").mkdir()
     (release / "backend" / "main.py").write_text("")
     sha = "a" * 40
     environment = "staging" if chat else "production"
+    (dist / "features.json").write_text(json.dumps(profile_features(environment)))
     descriptor = None
     if environment == "staging":
         descriptor = {
@@ -215,6 +242,13 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
             if environment == "staging"
             else ""
         ),
+        codex_jobs_enabled=environment == "production",
+        codex_add_evals_enabled=environment == "production",
+        codex_enrich_paper_enabled=environment == "production",
+        codex_jobs_namespace="test" if environment == "production" else "",
+        codex_jobs_token="test-only" if environment == "production" else "",
+        codex_jobs_openai_api_key=("test-only" if environment == "production" else ""),
+        github_token="test-only" if environment == "production" else "",
         hf_token="test-only-hf-token" if environment == "staging" else "",
         catalog_mutations_enabled=environment == "production",
         thumbnail_mutations_enabled=False,
@@ -223,11 +257,26 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
     )
 
 
+def test_run_backend_derives_features_from_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    release = make_bundle(tmp_path, chat=False)
+    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
+
+    manifest = configure_release_environment(release)
+
+    assert manifest["build_profile"] == "production"
+    assert os.environ["PWC_CHAT_ENABLED"] == "false"
+    assert os.environ["PWC_CODEX_ADD_EVALS_ENABLED"] == "true"
+    assert os.environ["PWC_CODEX_ENRICH_PAPER_ENABLED"] == "true"
+    assert os.environ["PWC_CODEX_JOBS_ENABLED"] == "true"
+
+
 @pytest.mark.parametrize("environment", ["production", "staging"])
 def test_deployed_runtime_validation(tmp_path: Path, environment: str):
     release = make_bundle(tmp_path, chat=environment == "staging")
     settings = deployed_settings(tmp_path, release, environment)
-    assert validate_runtime(settings) == {"chat": environment == "staging"}
+    assert validate_runtime(settings) == profile_features(environment)
 
 
 def test_deployed_runtime_rejects_relative_path(tmp_path: Path):
@@ -242,7 +291,7 @@ def test_staging_runtime_accepts_directory_snapshot_feature(tmp_path: Path):
     release = make_bundle(tmp_path, chat=True)
     settings = deployed_settings(tmp_path, release, "staging")
     settings.chat_workspace_snapshots_enabled = True
-    assert validate_runtime(settings) == {"chat": True}
+    assert validate_runtime(settings) == profile_features("staging")
 
 
 def test_deployed_runtime_rejects_source_shell(tmp_path: Path):

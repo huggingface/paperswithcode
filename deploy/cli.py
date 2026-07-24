@@ -330,12 +330,15 @@ def _read_json(url: str, timeout: int = 2) -> dict | None:
         return None
 
 
-def qualify(release: Path, environment: str) -> None:
-    manifest = validate_manifest(release, environment)
-    port = free_candidate_port()
-    unit = f"pwc-candidate-{environment}-{os.getpid()}"
+def candidate_start_command(
+    release: Path,
+    environment: str,
+    manifest: dict,
+    port: int,
+    unit: str,
+) -> list[str]:
     user = f"pwc-{environment}"
-    command = [
+    return [
         "systemd-run",
         "--unit",
         unit,
@@ -347,15 +350,20 @@ def qualify(release: Path, environment: str) -> None:
         str(release),
         "--property",
         f"EnvironmentFile={CONFIG_ROOT / (environment + '.env')}",
-        "--setenv",
-        f"PWC_PORT={port}",
-        "--setenv",
+        "/usr/bin/env",
+        f"UVICORN_PORT={port}",
         f"PWC_RELEASE_ID={manifest['release_id']}",
-        "--setenv",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
         str(VENV / "bin" / "python"),
         str(release / "deploy" / "run_backend.py"),
     ]
+
+
+def qualify(release: Path, environment: str) -> None:
+    manifest = validate_manifest(release, environment)
+    port = free_candidate_port()
+    unit = f"pwc-candidate-{environment}-{os.getpid()}"
+    command = candidate_start_command(release, environment, manifest, port, unit)
     run(command)
     try:
         deadline = time.monotonic() + 45
