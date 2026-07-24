@@ -93,7 +93,9 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    the new tables to `pwc_staging_owner`, grants `pwc_staging`, and revokes the
    production application role.
 5. Keep `PWC_CHAT_WORKSPACE_SNAPSHOTS_ENABLED=false` until directory snapshot
-   qualification passes.
+   qualification passes. V1 uses Modal's isolated, automatically reclaimed
+   ephemeral disk; PID and memory ceilings remain hard qualification probes,
+   while disk capacity is provider-managed until bounded snapshots are enabled.
 
 Before any non-zero rollout, deploy two distinct zero-percent bridge commits so
 both `current` and `previous` understand `modal_cli`. Then run the operator-only
