@@ -237,9 +237,6 @@ class Settings(BaseSettings):
     chat_turn_tool_output_max_bytes: int = Field(default=96 * 1024, ge=4096)
     chat_sandbox_cpu: float = Field(default=1, gt=0, le=8)
     chat_sandbox_memory_mib: int = Field(default=2048, ge=512, le=16384)
-    chat_sandbox_writable_bytes: int = Field(
-        default=512 * 1024 * 1024, ge=64 * 1024 * 1024
-    )
     chat_sandbox_pids_max: int = Field(default=64, ge=16, le=512)
     chat_sandbox_warm_seconds: int = Field(default=300, ge=0, le=3600)
     chat_sandbox_max_warm: int = Field(default=10, ge=0, le=1000)

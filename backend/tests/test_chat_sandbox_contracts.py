@@ -22,7 +22,7 @@ from backend.chat_sandbox_worker.protocol import (
     decode_frame,
     encode_frame,
 )
-from backend.scripts.qualify_chat_sandbox import Sample, summarize
+from backend.scripts.qualify_chat_sandbox import QualificationRunner, Sample, summarize
 from backend.models.chat import DISPLAY_BLOCKS_ADAPTER, sse_event
 from backend.models.database import ChatTurnCapability
 from backend.services.chat_capability_service import (
@@ -215,6 +215,28 @@ def test_immutable_modal_image_uses_supported_constructor(monkeypatch):
     )
 
     assert asyncio.run(resolve_modal_image("im-test")) is sentinel
+
+
+def test_resource_probe_treats_ephemeral_disk_as_provider_managed(monkeypatch):
+    settings = type(
+        "Settings",
+        (),
+        {"chat_sandbox_pids_max": 64, "chat_sandbox_memory_mib": 2048},
+    )()
+    runner = QualificationRunner(settings, starts=1, parallel=1, snapshot_samples=0)
+    probes: list[str] = []
+
+    async def record(name, *_command, **_options):
+        probes.append(name)
+
+    monkeypatch.setattr(runner, "_resource_probe", record)
+
+    assert asyncio.run(runner.run_resource_probes()) == {
+        "pids": "enforced",
+        "disk": "provider_managed_ephemeral",
+        "memory": "enforced",
+    }
+    assert probes == ["pids", "memory"]
 
 
 def test_capability_is_exactly_scoped_and_metered():

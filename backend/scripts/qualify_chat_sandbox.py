@@ -390,18 +390,6 @@ raise SystemExit(0 if limit_observed else 2)
             expect_success=True,
             timeout=45,
         )
-        disk_mib = self.settings.chat_sandbox_writable_bytes // (1024 * 1024) + 64
-        await self._resource_probe(
-            "disk",
-            "dd",
-            "if=/dev/zero",
-            "of=/workspace/qualification-disk-fill",
-            "bs=1M",
-            f"count={disk_mib}",
-            "status=none",
-            expect_success=False,
-            timeout=90,
-        )
         allocation_mib = self.settings.chat_sandbox_memory_mib + 512
         memory_probe = (
             "import time; "
@@ -416,7 +404,11 @@ raise SystemExit(0 if limit_observed else 2)
             expect_success=False,
             timeout=30,
         )
-        return {"pids": "enforced", "disk": "enforced", "memory": "enforced"}
+        return {
+            "pids": "enforced",
+            "disk": "provider_managed_ephemeral",
+            "memory": "enforced",
+        }
 
     async def run(
         self, *, resource_probes: bool

@@ -120,10 +120,12 @@ Last updated: 2026-07-23
     before persistence, mark it explicitly, and give the agent a stable hint to
     narrow, filter, or paginate rather than silently dropping content.
 28. **Sandbox resource envelope:** start staging qualification at one vCPU,
-    2 GiB RAM, 512 MiB combined writable `/workspace` and `/tmp` storage, and 64
-    processes per sandbox. Treat these as configurable hard ceilings, verify
-    Modal/runtime enforcement in the spike, and terminate on limit breach or
-    uncertain state.
+    2 GiB RAM, and 64 agent processes. Treat those as configurable hard
+    ceilings and verify Modal/runtime enforcement in the spike. Use Modal's
+    provider-managed ephemeral disk for v1: disk exhaustion is scoped to the
+    disposable sandbox and terminates that chat runtime, but is not a rollout
+    gate while workspace snapshots remain disabled. Before enabling snapshots,
+    add and qualify a separate maximum snapshot input size.
 29. **Snapshot retention:** expire and delete a chat's workspace snapshot after
     30 days without chat activity. Keep the chat transcript under its normal
     retention policy; resuming after snapshot expiry recreates an empty
@@ -369,13 +371,14 @@ write-capable credentials.
 /tmp/                     bounded scratch
 ```
 
-Run non-root with explicit CPU, memory, disk, PID, and lifetime limits. Start
-qualification at one vCPU, 2 GiB RAM, 512 MiB combined writable workspace/temp
-storage, and 64 processes. The immutable image does not count toward the writable
-quota. Verify whether Modal enforces each ceiling natively; add image/runtime
-enforcement where necessary and fail the spike if a required boundary cannot be
-made reliable. Only home, workspace, and temp are writable. Never share a
-writable Modal Volume between users or sessions.
+Run non-root with explicit CPU, memory, agent-PID, and lifetime limits. Start
+qualification at one vCPU, 2 GiB RAM, and 64 agent processes. Verify those
+ceilings through Modal or the worker runtime and fail the spike if a required
+boundary cannot be made reliable. V1 uses Modal's isolated, automatically
+reclaimed ephemeral disk rather than treating an application-selected disk size
+as a hard gate. Keep snapshots disabled until a bounded snapshot-input policy is
+implemented and qualified. Only home, workspace, and temp are writable. Never
+share a writable Modal Volume between users or sessions.
 
 The Modal image is an independently published immutable artifact, not assembled
 from the live checkout by the staging service. Build it from committed source,
@@ -1287,7 +1290,6 @@ Proposed configuration includes:
 - `chat_turn_tool_output_max_bytes=98304`;
 - `chat_sandbox_cpu=1`;
 - `chat_sandbox_memory_mib=2048`;
-- `chat_sandbox_writable_bytes=536870912`;
 - `chat_sandbox_pids_max=64`;
 - `chat_workspace_snapshot_inactivity_days=30`;
 - broker-side per-turn request and token ceilings.

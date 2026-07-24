@@ -108,10 +108,6 @@ async def create_isolated_sandbox(
         readiness_probe=modal.sandbox.Probe.with_exec(
             "test", "-x", "/usr/local/bin/pwc"
         ),
-        experimental_options={
-            "pids_limit": settings.chat_sandbox_pids_max,
-            "ephemeral_disk_bytes": settings.chat_sandbox_writable_bytes,
-        },
     )
 
 
