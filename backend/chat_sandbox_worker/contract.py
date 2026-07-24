@@ -3,6 +3,7 @@
 WORKER_CONTRACT_VERSION = "1"
 SDK_VERSION = "0.2.115"
 PWC_CLI_VERSION = "0.1.1"
+MODAL_APP_NAME = "pwc-chat-sandbox-v1"
 IMAGE_PUBLISH_NAME = "pwc-chat-v1"
 BASE_IMAGE = (
     "python:3.12-slim-bookworm@"

@@ -12,6 +12,7 @@ import modal
 
 from backend.chat_sandbox_worker.contract import (
     BASE_IMAGE,
+    MODAL_APP_NAME,
     PWC_CLI_VERSION,
     SDK_VERSION,
 )
@@ -21,7 +22,7 @@ REPOSITORY = Path(__file__).resolve().parents[2]
 WORKER = Path(__file__).resolve().parent
 STANDALONE = REPOSITORY / "standalone_cli"
 
-app = modal.App("pwc-chat-sandbox-v1")
+app = modal.App(MODAL_APP_NAME)
 image = (
     modal.Image.from_registry(BASE_IMAGE)
     .apt_install("bash", "ripgrep", "jq", "coreutils", "util-linux", "procps")

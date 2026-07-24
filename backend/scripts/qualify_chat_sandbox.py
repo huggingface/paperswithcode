@@ -20,7 +20,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-import modal
+from modal.stream_type import StreamType
 
 from backend.config import Settings
 from backend.services.chat_sandbox_service import (
@@ -130,8 +130,8 @@ async def _capture(process) -> tuple[int, str, str]:
 async def _exec(sandbox, *command: str, timeout: int = 30) -> tuple[int, str, str]:
     process = await sandbox.exec.aio(
         *command,
-        stdout=modal.StreamType.PIPE,
-        stderr=modal.StreamType.PIPE,
+        stdout=StreamType.PIPE,
+        stderr=StreamType.PIPE,
         timeout=timeout,
         text=True,
         workdir="/workspace",
@@ -236,9 +236,6 @@ urllib.request.urlopen("https://example.com", timeout=5)
         sentinel = secrets.token_hex(32)
         proc_probe = """
 set -eu
-if ! grep -Eq '^[^ ]+ /proc [^ ]+ [^ ]*hidepid=2' /proc/mounts; then
-  mount -o remount,hidepid=2,nosuid,nodev /proc
-fi
 setpriv --reuid=pwc-broker --regid=pwc-broker --clear-groups \
   env PWC_QUALIFICATION_SENTINEL="$1" sleep 20 &
 broker_pid=$!
@@ -356,10 +353,13 @@ fi
     async def run_resource_probes(self) -> dict[str, str]:
         pid_probe = """
 import os, signal, time
+import resource
 children = []
 limit_observed = False
+limit = int(os.environ["PWC_CHAT_SANDBOX_PIDS_MAX"])
+resource.setrlimit(resource.RLIMIT_NPROC, (limit, limit))
 try:
-    for _ in range(int(os.environ["PWC_CHAT_SANDBOX_PIDS_MAX"]) * 2):
+    for _ in range(limit * 2):
         try:
             pid = os.fork()
         except OSError:

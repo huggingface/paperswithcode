@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import modal
+from modal.stream_type import StreamType
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -24,6 +25,7 @@ from backend.chat_sandbox_worker.protocol import (
     decode_frame,
     encode_frame,
 )
+from backend.chat_sandbox_worker.contract import MODAL_APP_NAME
 from backend.chat_sandbox_worker.supervisor import SUPERVISOR_PREFIX
 from backend.config import Settings
 from backend.database.connection import db_manager
@@ -47,8 +49,8 @@ class RunningWorker:
 
 async def resolve_modal_image(image_reference: str):
     if image_reference.startswith("im-"):
-        return await modal.Image.from_id.aio(image_reference)
-    return await modal.Image.from_name.aio(image_reference)
+        return modal.Image.from_id(image_reference)
+    return modal.Image.from_name(image_reference)
 
 
 def sandbox_environment(settings: Settings) -> dict[str, str]:
@@ -79,7 +81,7 @@ async def create_isolated_sandbox(
             "gateway_unavailable", "The research gateway is not configured"
         ) from error
     app, image = await asyncio.gather(
-        modal.App.lookup.aio("pwc-chat-sandbox-v1", create_if_missing=False),
+        modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False),
         resolve_modal_image(settings.chat_modal_image_version),
     )
     return await modal.Sandbox.create.aio(
@@ -164,8 +166,8 @@ class SandboxSessionManager:
 
     async def validate_image_reference(self) -> None:
         try:
-            image = await resolve_modal_image(self.settings.chat_modal_image_version)
-            await image.hydrate.aio()
+            await modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False)
+            await resolve_modal_image(self.settings.chat_modal_image_version)
         except Exception as error:
             raise SandboxError(
                 "sandbox_image_unresolved",
@@ -385,8 +387,8 @@ class SandboxSessionManager:
             "python",
             "-m",
             "backend.chat_sandbox_worker.supervisor",
-            stdout=modal.StreamType.PIPE,
-            stderr=modal.StreamType.PIPE,
+            stdout=StreamType.PIPE,
+            stderr=StreamType.PIPE,
             timeout=round(self.settings.chat_agent_timeout_seconds + 15),
             workdir="/workspace",
             text=False,

@@ -11,6 +11,7 @@ import pytest
 from backend.chat_sandbox_worker.contract import (
     BASE_IMAGE,
     IMAGE_PUBLISH_NAME,
+    MODAL_APP_NAME,
     MODAL_IMAGE_ID,
 )
 from backend.chat_sandbox_worker.prompt import render, sha256
@@ -30,6 +31,7 @@ from backend.services.chat_capability_service import (
     _digest,
 )
 from backend.services.chat_sandbox_service import WorkspaceSnapshotProvider
+from backend.services.chat_sandbox_service import resolve_modal_image
 from backend.services.chat_sandbox_service import RunningWorker, SandboxSessionManager
 from backend.services.chat_session_store_gateway import (
     ChatSessionStoreGateway,
@@ -151,12 +153,19 @@ def test_prompt_and_manifest_share_eight_round_contract():
     assert production["chat_runtime"]["enabled"] is False
     assert json.dumps(production["chat_runtime"]).count("pwc-chat") == 0
     assert IMAGE_PUBLISH_NAME == "pwc-chat-v1"
+    assert MODAL_APP_NAME == "pwc-chat-sandbox-v1"
     assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID == "im-0akM3shXyaXVLpGQopkeX2"
 
 
 def test_image_publication_initializes_modal_app(monkeypatch, capsys):
     events: list[str] = []
+
+    class Lookup:
+        async def aio(self, name, *, create_if_missing):
+            assert name == MODAL_APP_NAME
+            assert create_if_missing is True
+            events.append("lookup")
 
     class Run:
         def __enter__(self):
@@ -173,26 +182,39 @@ def test_image_publication_initializes_modal_app(monkeypatch, capsys):
         object_id = "im-test"
 
         def publish(self, name):
-            assert events == ["enter", "build"]
+            assert events == ["lookup", "enter", "build"]
             events.append(f"publish:{name}")
 
     class Image:
         def build(self, _app):
-            assert events == ["enter"]
+            assert events == ["lookup", "enter"]
             events.append("build")
             return Built()
 
     monkeypatch.setattr(publish_image, "app", App())
     monkeypatch.setattr(publish_image, "image", Image())
+    monkeypatch.setattr(publish_image.modal.App, "lookup", Lookup())
 
     assert publish_image.main() == 0
     assert events == [
+        "lookup",
         "enter",
         "build",
         f"publish:{IMAGE_PUBLISH_NAME}",
         "exit",
     ]
     assert capsys.readouterr().out == "im-test\n"
+
+
+def test_immutable_modal_image_uses_supported_constructor(monkeypatch):
+    sentinel = object()
+
+    monkeypatch.setattr(
+        "backend.services.chat_sandbox_service.modal.Image.from_id",
+        lambda image_id: sentinel if image_id == "im-test" else None,
+    )
+
+    assert asyncio.run(resolve_modal_image("im-test")) is sentinel
 
 
 def test_capability_is_exactly_scoped_and_metered():
