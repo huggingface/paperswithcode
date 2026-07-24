@@ -42,6 +42,7 @@ def _safe_environment(home: str) -> dict[str, str]:
         "PATH": "/usr/local/bin:/usr/bin:/bin",
         "PYTHONUNBUFFERED": "1",
         "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONPATH": "/opt/pwc",
         "HOME": home,
         "LANG": "C.UTF-8",
     }

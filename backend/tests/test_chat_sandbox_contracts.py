@@ -241,6 +241,18 @@ def test_supervisor_tolerates_unsupported_proc_remount(monkeypatch):
     assert calls == [["mount", "-o", "remount,hidepid=2,nosuid,nodev", "/proc"]]
 
 
+def test_supervisor_child_environment_preserves_packaged_worker_path(monkeypatch):
+    monkeypatch.setenv("PWC_CHAT_MAX_TURNS", "8")
+    monkeypatch.setenv("PYTHONPATH", "/untrusted")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "must-not-pass")
+
+    environment = supervisor._safe_environment("/var/empty/pwc-broker")
+
+    assert environment["PYTHONPATH"] == "/opt/pwc"
+    assert environment["PWC_CHAT_MAX_TURNS"] == "8"
+    assert "ANTHROPIC_API_KEY" not in environment
+
+
 def test_resource_probe_treats_ephemeral_disk_as_provider_managed(monkeypatch):
     settings = type(
         "Settings",
