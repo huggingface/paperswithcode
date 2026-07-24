@@ -11,6 +11,7 @@ from pathlib import Path
 import pytest
 
 import deploy.cli as deploy_cli
+import deploy.smoke_test as smoke_test
 from deploy.install_deploy_tools import (
     RUNTIME_CONTRACT_PATHS,
     bundle_runtime_contract,
@@ -391,6 +392,36 @@ def test_smoke_bundle_parser_catches_missing_asset(tmp_path: Path):
     assert any(
         "missing asset" in item for item in validate_local_bundle(release, False)
     )
+
+
+def test_staging_smoke_accepts_versioned_feature_manifest(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    assert validate_local_bundle(release, True) == []
+
+
+def test_staging_candidate_smoke_leaves_spa_to_nginx(monkeypatch):
+    requested: list[str] = []
+
+    def request(url: str, *, allow_redirects: bool = True):
+        requested.append(url)
+        if url.endswith("/health"):
+            return 200, {}, b'{"release_id":"release-staging"}'
+        if url.endswith("/api/v1/chat/sessions"):
+            return 401, {}, b""
+        raise AssertionError(f"unexpected candidate request: {url}")
+
+    monkeypatch.setattr(smoke_test, "request", request)
+
+    assert (
+        smoke_test.run_http_smoke(
+            "staging",
+            "http://127.0.0.1:8100",
+            expected_release="release-staging",
+            candidate=True,
+        )
+        == []
+    )
+    assert all(not url.endswith("/chat") for url in requested)
 
 
 def test_nginx_cross_environment_references_are_rejected():

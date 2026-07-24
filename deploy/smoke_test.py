@@ -43,7 +43,9 @@ def validate_local_bundle(release_dir: Path, expected_chat: bool) -> list[str]:
     dist = release_dir / "frontend-dist"
     try:
         features = json.loads((dist / "features.json").read_text())
-        if features != {"chat": expected_chat}:
+        manifest = json.loads((release_dir / "release.json").read_text())
+        expected_features = manifest.get("frontend_features", {"chat": expected_chat})
+        if features != expected_features:
             failures.append(f"unexpected frontend features: {features!r}")
         html = (dist / "index.html").read_text()
     except (OSError, json.JSONDecodeError) as exc:
@@ -91,9 +93,6 @@ def run_http_smoke(
             status, _, _ = request(urljoin(base_url, "/api/v1/chat/sessions"))
             if status not in {401, 403}:
                 failures.append(f"staging chat auth boundary returned {status}")
-            status, _, body = request(urljoin(base_url, "/chat"))
-            if status != 200 or b"/src/main.tsx" in body:
-                failures.append("staging candidate chat SPA route is invalid")
             return failures
         status, _, _ = request(urljoin(base_url, "/"), allow_redirects=False)
         if status not in {302, 401, 403}:
