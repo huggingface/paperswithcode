@@ -26,6 +26,7 @@ from backend.services.chat_session_store_gateway import (
 )
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+MAX_PROVIDER_OUTPUT_TOKENS = 32_000
 
 
 class CatalogRequest(BaseModel):
@@ -47,6 +48,10 @@ def _bearer(authorization: Annotated[str, Header()]) -> str:
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Invalid capability")
     return token
+
+
+def _output_tokens_allowed(value: int) -> bool:
+    return 1 <= value <= MAX_PROVIDER_OUTPUT_TOKENS
 
 
 def _scope(
@@ -151,7 +156,7 @@ async def messages(
         maximum_tokens = int(payload.get("max_tokens", 0))
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         raise HTTPException(status_code=422, detail="Invalid model request") from None
-    if maximum_tokens < 1 or maximum_tokens > 16_384:
+    if not _output_tokens_allowed(maximum_tokens):
         raise HTTPException(status_code=422, detail="max_tokens is out of range")
     row = _scope(token, "model", x_pwc_session, x_pwc_turn, db, model=model)
     try:

@@ -44,6 +44,10 @@ from backend.services.chat_session_store_gateway import (
     SessionStoreGatewayError,
 )
 from backend.chat_sandbox_worker.tool_policy import ToolBudget, bound_tool_output
+from backend.chat_gateway_app import (
+    MAX_PROVIDER_OUTPUT_TOKENS,
+    _output_tokens_allowed,
+)
 from deploy.release import build_manifest
 
 
@@ -96,6 +100,12 @@ def test_supervisor_launch_read_does_not_consume_worker_frame():
     finally:
         os.close(read_fd)
         os.close(write_fd)
+
+
+def test_gateway_accepts_claude_output_token_limit_and_rejects_larger():
+    assert MAX_PROVIDER_OUTPUT_TOKENS == 32_000
+    assert _output_tokens_allowed(32_000)
+    assert not _output_tokens_allowed(32_001)
 
 
 def test_generic_tool_projection_and_event_are_v2_raw_text():
