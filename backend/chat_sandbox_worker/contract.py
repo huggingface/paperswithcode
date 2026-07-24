@@ -11,5 +11,5 @@ BASE_IMAGE = (
 )
 # Immutable image emitted by publish_image.py for the v1 worker contract.
 MODAL_IMAGE_ID = "im-eTn4zmjmCdkev4ksL1qX5U"
-DEFAULT_BACKEND = "local_mcp"
-NEW_CHAT_MODAL_PERCENTAGE = 0
+DEFAULT_BACKEND = "modal_cli"
+NEW_CHAT_MODAL_PERCENTAGE = 100

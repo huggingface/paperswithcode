@@ -214,7 +214,7 @@ def test_prompt_and_manifest_share_eight_round_contract():
     assert "--json only" in prompt
     manifest = build_manifest("a" * 40, "staging")
     assert manifest["chat_runtime"]["system_prompt_sha256"] == sha256()
-    assert manifest["chat_runtime"]["new_chat_modal_percentage"] == 0
+    assert manifest["chat_runtime"]["new_chat_modal_percentage"] == 100
     production = build_manifest("b" * 40, "production")
     assert production["chat_runtime"]["enabled"] is False
     assert json.dumps(production["chat_runtime"]).count("pwc-chat") == 0
