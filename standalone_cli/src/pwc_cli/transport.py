@@ -10,6 +10,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any
 
+from pwc_cli import __version__
+
 DEFAULT_API_URL = "https://paperswithcode.co/api/v1"
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 
@@ -55,7 +57,7 @@ class Client:
             url += f"?{query}"
         headers = {
             "Accept": "application/json, text/plain;q=0.9",
-            "User-Agent": "pwc-cli/0.1.0",
+            "User-Agent": f"pwc-cli/{__version__}",
         }
         if self.credential:
             headers["Authorization"] = f"Bearer {self.credential}"
