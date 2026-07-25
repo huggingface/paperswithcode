@@ -7,6 +7,7 @@ import { chipColors, hueFromSlug } from "@/lib/colors";
 import { displayTaskName } from "@/lib/transform";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 
 const taskKey = (value?: string) => value?.trim().toLowerCase().replace(/[\s_]+/g, "-") ?? "";
 
@@ -159,6 +160,7 @@ const TagsIndexView: React.FC = () => {
                     </Link>
                   );
                 })}
+                <TaxonomySuggestionTile kind="task" />
               </div>
             </section>
           );
