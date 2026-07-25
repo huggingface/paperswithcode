@@ -1847,6 +1847,22 @@ a.paper-resource.is-link:focus-visible {
 }
 .tag-cell:nth-child(3n) { border-right: none; }
 .tag-cell:hover { background: var(--bg-elevated); }
+.taxonomy-suggestion-cell {
+  appearance: none;
+  width: 100%;
+  border-top: 0;
+  border-left: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  text-align: left;
+}
+.taxonomy-suggestion-cell .name {
+  font-style: italic;
+}
+.taxonomy-suggestion-icon {
+  width: 14px;
+  height: 14px;
+}
 .tag-cell .name {
   font-family: var(--serif);
   font-size: 18px;

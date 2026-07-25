@@ -548,7 +548,7 @@ class PendingEditService:
     def submit(
         self,
         *,
-        paper_id: int,
+        paper_id: Optional[int],
         hf_username: str,
         edit_type: str,
         proposed_payload: Any,
@@ -558,17 +558,36 @@ class PendingEditService:
                 f"Unsupported edit_type: {edit_type}. Allowed: {sorted(EDIT_TYPES)}"
             )
 
-        paper_exists = self.db.query(DBPaper.id).filter(DBPaper.id == paper_id).first()
-        if not paper_exists:
-            raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
+        is_taxonomy_suggestion = edit_type in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+        )
+        if paper_id is None and not is_taxonomy_suggestion:
+            raise PendingEditError(
+                "paper_id is required unless submitting a taxonomy suggestion"
+            )
+        if paper_id is not None:
+            paper_exists = (
+                self.db.query(DBPaper.id).filter(DBPaper.id == paper_id).first()
+            )
+            if not paper_exists:
+                raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
 
         normalized_payload = self._validate_payload(edit_type, proposed_payload)
-        current_payload = self._build_snapshot(paper_id, edit_type)
+        current_payload = (
+            {} if paper_id is None else self._build_snapshot(paper_id, edit_type)
+        )
 
         if self._is_noop(edit_type, normalized_payload, current_payload):
             raise PendingEditError("Submission does not contain any changes.")
 
-        is_author = self.is_linked_author(paper_id, hf_username)
+        is_author = (
+            self.is_linked_author(paper_id, hf_username)
+            if paper_id is not None
+            else False
+        )
 
         row = PendingPaperEdit(
             paper_id=paper_id,
@@ -651,6 +670,13 @@ class PendingEditService:
                 f"Pending edit {edit_id} is already {row.status}"
             )
 
+        if row.paper_id is None and row.edit_type not in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+        ):
+            raise PendingEditError("This edit is missing its paper_id")
         self._apply_payload(row.edit_type, row.paper_id, row.proposed_payload)
 
         row.status = "approved"
@@ -689,8 +715,15 @@ class PendingEditService:
     # ----------------------------------------------------------------
 
     def _apply_payload(
-        self, edit_type: str, paper_id: int, payload: Dict[str, Any]
+        self, edit_type: str, paper_id: Optional[int], payload: Dict[str, Any]
     ) -> None:
+        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
+            # Taxonomy suggestions are informational. Approving simply marks the
+            # row reviewed; an admin creates the actual entry (task, method,
+            # benchmark, or metric) by hand.
+            return
+        if paper_id is None:
+            raise PendingEditError("This edit is missing its paper_id")
         if edit_type == "tasks":
             PaperService(self.db).update_paper_tasks(
                 paper_id, list(payload.get("task_ids", []))
@@ -726,11 +759,6 @@ class PendingEditService:
             return
         if edit_type == "evaluations":
             self._apply_evaluations(paper_id, payload)
-            return
-        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
-            # Taxonomy suggestions are informational. Approving simply marks the
-            # row reviewed; an admin creates the actual entry (task, method,
-            # benchmark, or metric) by hand.
             return
         raise PendingEditError(f"Unsupported edit_type: {edit_type}")
 

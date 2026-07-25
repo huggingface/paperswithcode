@@ -1809,7 +1809,8 @@ class PendingPaperEdit(Base):
     """Edit submissions from non-admin Hugging Face users.
 
     Each row records a proposed change to one of the paper-page edit surfaces
-    (tasks, methods, evaluation results, GitHub repositories, project pages).
+    (tasks, methods, evaluation results, GitHub repositories, project pages),
+    or an unscoped taxonomy suggestion submitted from a directory page.
     Admin direct edits bypass this table and continue to mutate live data
     through the existing admin endpoints. Approval of a pending row replays
     ``proposed_payload`` through the same backend mutation services.
@@ -1823,10 +1824,10 @@ class PendingPaperEdit(Base):
     __tablename__ = "pending_paper_edits"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    paper_id: Mapped[int] = mapped_column(
+    paper_id: Mapped[Optional[int]] = mapped_column(
         BigInteger,
         ForeignKey("papers.id", ondelete="CASCADE"),
-        nullable=False,
+        nullable=True,
     )
     hf_username: Mapped[str] = mapped_column(String(255), nullable=False)
     is_author: Mapped[bool] = mapped_column(

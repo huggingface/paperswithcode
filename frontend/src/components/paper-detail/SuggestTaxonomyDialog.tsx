@@ -21,7 +21,8 @@ type TaxonomyKind = "task" | "method" | "benchmark" | "metric";
 interface SuggestTaxonomyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  paperId: string;
+  /** Omitted for suggestions submitted from a taxonomy directory page. */
+  paperId?: string;
   kind: TaxonomyKind;
 }
 
@@ -73,7 +74,7 @@ export function SuggestTaxonomyDialog({
   const suggestMutation = useMutation({
     mutationFn: async () =>
       submitPendingPaperEdit({
-        paper_id: parseInt(paperId),
+        paper_id: paperId ? parseInt(paperId) : null,
         edit_type: KIND_EDIT_TYPE[kind],
         proposed_payload: {
           name: name.trim(),
