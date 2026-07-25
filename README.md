@@ -43,15 +43,25 @@ We use [uv](https://docs.astral.sh/uv/) to handle Python package management. It 
 pip install uv
 ```
 
-Next, clone the repo and install the package:
+Install the standalone, read-only `pwc` CLI directly from the repository with
+either uv or pipx:
+
+```bash
+uv tool install 'git+https://github.com/huggingface/paperswithcode.git#subdirectory=standalone_cli'
+# or
+pipx install 'git+https://github.com/huggingface/paperswithcode.git#subdirectory=standalone_cli'
+```
+
+For repository development, clone the full project and let uv install its
+dependencies:
 
 ```bash
 git clone https://github.com/huggingface/paperswithcode.git
 cd paperswithcode
-uv add paperswithcode
+uv sync
 ```
 
-After that, you can use `uv run --env-file backend/keys.env` to run everything.
+After that, use `uv run --env-file backend/keys.env` to run repository commands.
 
 ### PwC CLI
 

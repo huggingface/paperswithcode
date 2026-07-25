@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import sys
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 
@@ -11,6 +13,13 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pwc_cli.cli import build_parser, main  # noqa: E402
 from pwc_cli.transport import Response  # noqa: E402
+
+INSTALLER_SPEC = importlib.util.spec_from_file_location(
+    "pwc_cli_installer", ROOT / "install.py"
+)
+assert INSTALLER_SPEC and INSTALLER_SPEC.loader
+installer = importlib.util.module_from_spec(INSTALLER_SPEC)
+INSTALLER_SPEC.loader.exec_module(installer)
 
 
 def test_complete_parser_omits_mutation_and_auth_commands():
@@ -22,9 +31,115 @@ def test_complete_parser_omits_mutation_and_auth_commands():
 
 
 def test_installer_downloads_from_this_repository_release_origin():
-    installer = (ROOT / "install.py").read_text()
-    assert "github.com/huggingface/pwc-cli/releases/download" in installer
-    assert "github.com/paperswithcode/paperswithcode.co" not in installer
+    source = (ROOT / "install.py").read_text()
+    assert "github.com/huggingface/pwc-cli/releases/download" in source
+    assert "github.com/paperswithcode/paperswithcode.co" not in source
+
+
+def test_installer_version_pin_is_optional_and_explicit_pin_skips_lookup(monkeypatch):
+    assert installer.parse_args([]).version is None
+    monkeypatch.setattr(
+        installer, "_open", lambda _url: (_ for _ in ()).throw(AssertionError())
+    )
+    assert installer.resolve_version("1.2.3", "unused") == "1.2.3"
+
+
+def test_installer_resolves_valid_latest_release_tag(monkeypatch):
+    class Response(io.BytesIO):
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    monkeypatch.setattr(
+        installer,
+        "_open",
+        lambda _url: Response(b'{"tag_name": "pwc-cli-1.2.3"}'),
+    )
+    assert installer.resolve_version(None, "https://example.test/latest") == "1.2.3"
+
+
+def test_installer_release_lookup_network_error_is_one_line_exit_3(monkeypatch, capsys):
+    monkeypatch.setattr(
+        installer.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            urllib.error.URLError("offline\nnow")
+        ),
+    )
+    assert installer.main([]) == 3
+    assert capsys.readouterr().err == "pwc installer: network error: offline now\n"
+
+
+def test_installer_artifact_and_checksum_network_errors_exit_3(
+    monkeypatch, tmp_path, capsys
+):
+    monkeypatch.setattr(installer.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(installer.platform, "machine", lambda: "x86_64")
+
+    monkeypatch.setattr(
+        installer,
+        "_download",
+        lambda *_args: (_ for _ in ()).throw(installer.NetworkError("artifact")),
+    )
+    assert installer.main(["--version", "1.2.3", "--prefix", str(tmp_path)]) == 3
+    assert capsys.readouterr().err == "pwc installer: network error: artifact\n"
+
+    monkeypatch.setattr(
+        installer, "_download", lambda _url, destination: destination.write_bytes(b"x")
+    )
+    monkeypatch.setattr(
+        installer,
+        "_read_checksum",
+        lambda *_args: (_ for _ in ()).throw(installer.NetworkError("checksum")),
+    )
+    assert installer.main(["--version", "1.2.3", "--prefix", str(tmp_path)]) == 3
+    assert capsys.readouterr().err == "pwc installer: network error: checksum\n"
+
+
+def test_installer_reports_path_and_persistent_instruction(tmp_path, capsys):
+    bin_directory = tmp_path / ".local" / "bin"
+    installer.report_path(bin_directory, f"/usr/bin:{bin_directory}")
+    captured = capsys.readouterr()
+    assert captured.out == f"{bin_directory} is on PATH\n"
+    assert captured.err == ""
+
+    installer.report_path(bin_directory, "/usr/bin")
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == (
+        f"warning: {bin_directory} is not on PATH\n"
+        f'Add this to ~/.profile: export PATH={bin_directory}:"$PATH"\n'
+    )
+
+
+def test_installer_default_path_instruction_uses_expandable_home(capsys):
+    installer.report_path(Path.home() / ".local" / "bin", "/usr/bin")
+    assert capsys.readouterr().err == (
+        "warning: ~/.local/bin is not on PATH\n"
+        'Add this to ~/.profile: export PATH="$HOME/.local/bin:$PATH"\n'
+    )
+
+
+def test_installer_replaces_binary_atomically(tmp_path):
+    artifact = tmp_path / "artifact"
+    artifact.write_bytes(b"new executable")
+    destination = tmp_path / "bin" / "pwc"
+    destination.parent.mkdir()
+    destination.write_bytes(b"old executable")
+
+    installer._install_atomically(artifact, destination)
+
+    assert destination.read_bytes() == b"new executable"
+    assert destination.stat().st_mode & 0o111
+    assert list(destination.parent.iterdir()) == [destination]
+
+
+def test_benchmark_limit_alias_preserves_page_size_destination():
+    parser = build_parser()
+    assert parser.parse_args(["benchmark", "list", "--limit", "7"]).page_size == 7
+    assert parser.parse_args(["benchmark", "list", "--page-size", "8"]).page_size == 8
 
 
 def test_top_level_version_is_offline_and_stable():

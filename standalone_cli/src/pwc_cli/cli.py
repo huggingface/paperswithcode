@@ -385,7 +385,14 @@ def build_parser() -> argparse.ArgumentParser:
         "list", help="list and filter benchmarks"
     )
     benchmarks.add_argument("--page", type=_page, default=1)
-    benchmarks.add_argument("--page-size", type=_page_size, default=50)
+    benchmarks.add_argument(
+        "--page-size",
+        "--limit",
+        dest="page_size",
+        type=_page_size,
+        default=50,
+        help="results per page, 1-100 (default: 50)",
+    )
     benchmarks.add_argument("--search")
     benchmarks.add_argument("--task")
     benchmarks.add_argument("--include-descendants", action="store_true")

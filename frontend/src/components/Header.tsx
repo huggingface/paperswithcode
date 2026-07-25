@@ -30,6 +30,15 @@ interface HeaderProps {
 const FEEDBACK_URL =
   "https://github.com/huggingface/paperswithcode-feedback/issues";
 
+const NAV_LINKS = [
+  { to: "/", label: "Trending", end: true },
+  { to: "/tasks", label: "Browse state-of-the-art", end: false },
+  { to: "/methods", label: "Methods", end: false },
+  { to: "/frameworks", label: "Frameworks", end: false },
+  { to: "/conferences", label: "Conferences", end: false },
+  { to: "/submit", label: "Submit", end: false },
+] as const;
+
 // Apple devices use Cmd as the primary modifier; everyone else (Windows,
 // Linux, ChromeOS, …) uses Ctrl. `navigator.userAgentData` is the modern
 // signal but isn't available on Safari, so fall back to the legacy
@@ -73,24 +82,16 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
             </span>
           </NavLink>
           <nav className="nav">
-            <NavLink to="/" end className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Trending
-            </NavLink>
-            <NavLink to="/tasks" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Browse state-of-the-art
-            </NavLink>
-            <NavLink to="/methods" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Methods
-            </NavLink>
-            <NavLink to="/frameworks" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Frameworks
-            </NavLink>
-            <NavLink to="/conferences" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Conferences
-            </NavLink>
-            <NavLink to="/submit" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Submit
-            </NavLink>
+            {NAV_LINKS.map(({ to, label, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}
+              >
+                {label}
+              </NavLink>
+            ))}
           </nav>
           <div className="header-spacer"></div>
           <a
@@ -151,24 +152,17 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
               <HeaderIcon name="search" size={14} />
               <span>Search papers, authors, domains…</span>
             </button>
-            <NavLink to="/" end className="mobile-nav-link" onClick={closeMobile}>
-              Trending
-            </NavLink>
-            <NavLink to="/tasks" className="mobile-nav-link" onClick={closeMobile}>
-              Browse state-of-the-art
-            </NavLink>
-            <NavLink to="/methods" className="mobile-nav-link" onClick={closeMobile}>
-              Methods
-            </NavLink>
-            <NavLink to="/frameworks" className="mobile-nav-link" onClick={closeMobile}>
-              Frameworks
-            </NavLink>
-            <NavLink to="/conferences" className="mobile-nav-link" onClick={closeMobile}>
-              Conferences
-            </NavLink>
-            <NavLink to="/submit" className="mobile-nav-link" onClick={closeMobile}>
-              Submit
-            </NavLink>
+            {NAV_LINKS.map(({ to, label, end }) => (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                className="mobile-nav-link"
+                onClick={closeMobile}
+              >
+                {label}
+              </NavLink>
+            ))}
             <a
               className="mobile-nav-link"
               href={FEEDBACK_URL}

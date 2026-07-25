@@ -67,7 +67,7 @@ backend/database/evaluations_setup/_mmteb_top50_preview/
 product-photography-engine/
 
 # Thumbnails
-thumbnail_cache/
+thumbnail_cache
 
 # Claude Design uploads
 frontend/design-paperswithcode/project/uploads/
@@ -79,6 +79,7 @@ ds-bundle/
 frontend/.ds-tailwind.css
 frontend/.ds-ui-barrel.ts
 frontend/tailwind.sync.config.ts
+frontend/*.tsbuildinfo
 
 # Local build rollback snapshots
 frontend/dist.rollback-*/

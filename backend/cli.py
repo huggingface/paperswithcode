@@ -13,21 +13,22 @@ from pathlib import Path
 
 from sqlalchemy import text
 
+from backend.cli_admin import (
+    register_admin_commands,
+)
+from backend.cli_papers import (
+    register_paper_commands,
+    register_search_command,
+)
 from backend.database.connection import db_manager
+from backend.services.cron_health import build_cron_dashboard
+from backend.services.cron_registry import get_cron_job, list_cron_jobs
+from backend.services.cron_token_probe import TOKEN_PROBES, probe_cron_token
+from backend.services.embedding_contracts import EmbeddingRunManifest
 from backend.services.entity_image_service import add_entity_image
 from backend.services.github_issue_body_service import generate_github_issue_draft
 from backend.services.github_issue_publish_service import publish_github_issue
 from backend.services.method_admin_service import add_or_update_method
-from backend.services.cron_health import build_cron_dashboard
-from backend.services.cron_registry import get_cron_job, list_cron_jobs
-from backend.services.cron_token_probe import TOKEN_PROBES, probe_cron_token
-from backend.services.paper_lineage_service import (
-    add_lineage_chain,
-    get_paper_lineage,
-    remove_lineage_edge,
-)
-from backend.services.paper_thumbnail_service import regenerate_paper_thumbnail
-from backend.services.embedding_contracts import EmbeddingRunManifest
 from backend.services.paper_embedding_pipeline import (
     activate_generation,
     build_generation_index,
@@ -38,6 +39,12 @@ from backend.services.paper_embedding_pipeline import (
     import_embeddings,
     mark_generation_ready,
 )
+from backend.services.paper_lineage_service import (
+    add_lineage_chain,
+    get_paper_lineage,
+    remove_lineage_edge,
+)
+from backend.services.paper_thumbnail_service import regenerate_paper_thumbnail
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +53,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Papers with Code maintenance CLI",
     )
     commands = parser.add_subparsers(dest="command", required=True)
+
+    register_search_command(commands)
 
     github_issue = commands.add_parser(
         "github-issue",
@@ -182,8 +191,10 @@ def build_parser() -> argparse.ArgumentParser:
     method_add.add_argument("--json", action="store_true")
     method_add.set_defaults(handler=add_method)
 
-    paper = commands.add_parser("paper", help="Manage paper metadata")
-    paper_commands = paper.add_subparsers(dest="paper_command", required=True)
+    register_admin_commands(commands)
+
+    paper_commands = register_paper_commands(commands)
+
     lineage = paper_commands.add_parser(
         "lineage",
         help="Manage directed predecessor/successor paper links",
