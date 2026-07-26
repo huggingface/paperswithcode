@@ -676,6 +676,16 @@ export interface PendingPaperEditsResponse {
   results: PendingPaperEdit[];
 }
 
+export interface TrendPoint {
+  month: string;
+  percent: number;
+}
+
+export interface TrendsResponse {
+  code_availability: TrendPoint[];
+  hf_artifacts: TrendPoint[];
+}
+
 class ApiClient {
   private baseUrl: string;
 
@@ -1646,6 +1656,10 @@ class ApiClient {
   async getCronStatus(): Promise<CronJobsResponse> {
     return this.request<CronJobsResponse>('/cron/status', { cache: 'no-store' });
   }
+
+  async getResearchTrends(): Promise<TrendsResponse> {
+    return this.request<TrendsResponse>('/stats/trends');
+  }
 }
 
 // Create and export a singleton instance
@@ -1711,6 +1725,7 @@ export const getThumbnailStatus = apiClient.getThumbnailStatus.bind(apiClient);
 export const getMetrics = apiClient.getMetrics.bind(apiClient);
 export const getMetric = apiClient.getMetric.bind(apiClient);
 export const getMetricDirections = apiClient.getMetricDirections.bind(apiClient);
+export const getResearchTrends = apiClient.getResearchTrends.bind(apiClient);
 export const healthCheck = apiClient.healthCheck.bind(apiClient);
 export const getMyBookmarkIds = apiClient.getMyBookmarkIds.bind(apiClient);
 export const getMyBookmarks = apiClient.getMyBookmarks.bind(apiClient);

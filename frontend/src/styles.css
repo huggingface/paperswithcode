@@ -27,6 +27,9 @@
   --info-text: oklch(0.42 0.10 240);
   --info-border: oklch(0.86 0.07 230);
 
+  --trend-code: #33639E;
+  --trend-hf: #AA7D24;
+
   --serif: 'Newsreader', Georgia, serif;
   --sans: 'Inter', -apple-system, sans-serif;
   --mono: 'JetBrains Mono', ui-monospace, monospace;
@@ -59,6 +62,9 @@
   --info-bg: oklch(0.25 0.04 230);
   --info-text: oklch(0.80 0.08 235);
   --info-border: oklch(0.43 0.07 230);
+
+  --trend-code: #5C8FD6;
+  --trend-hf: #B3831F;
 
   color-scheme: dark;
 }
