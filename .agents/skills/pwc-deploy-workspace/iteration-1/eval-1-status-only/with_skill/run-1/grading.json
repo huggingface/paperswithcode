@@ -1,0 +1,24 @@
+{
+  "expectations": [
+    {
+      "text": "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+      "passed": true,
+      "evidence": "The first command is pwc-status, followed by topology_audit.py --json described as corroborating read-only evidence."
+    },
+    {
+      "text": "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+      "passed": true,
+      "evidence": "It explicitly excludes all listed mutations and contains only three read-only commands."
+    },
+    {
+      "text": "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state.",
+      "passed": true,
+      "evidence": "It uses sudo pwc-cron status and its report template contains current and previous for both environments."
+    }
+  ],
+  "summary": {"passed": 3, "failed": 0, "total": 3, "pass_rate": 1.0},
+  "execution_metrics": {"total_tool_calls": 0, "errors_encountered": 0, "output_chars": 2425},
+  "timing": {"total_duration_seconds": 0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}
+}

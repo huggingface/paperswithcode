@@ -50,7 +50,9 @@ before an explicitly authorized release. Currently:
 
 Use `pwc-deploy` for a complete backend-plus-frontend release. Nginx changes use
 the separate `pwc-nginx` command. The retired service scripts never mutate live
-state.
+state. Scheduled work must use the installed `pwc-cron` allowlist; never run a
+production job from `.github/workflows/scripts/` or source `backend/keys.env`
+into a deployed process.
 
 After any release, smoke-test `/health`, `/`, one SPA route, and one API route.
 Restore the previous release if validation fails.

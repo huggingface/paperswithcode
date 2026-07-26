@@ -17,6 +17,7 @@ END $$;
 CREATE SCHEMA IF NOT EXISTS staging AUTHORIZATION pwc_staging_owner;
 ALTER SCHEMA staging OWNER TO pwc_staging_owner;
 GRANT USAGE ON SCHEMA public, staging TO pwc_staging;
+REVOKE CREATE ON SCHEMA public FROM pwc_staging;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO pwc_staging;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO pwc_staging;
 

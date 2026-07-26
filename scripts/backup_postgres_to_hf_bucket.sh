@@ -3,6 +3,7 @@ set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PWC_BACKUP_ENV_FILE:-}"
+CREDENTIAL_ENV_FILE="${PWC_BACKUP_CREDENTIAL_ENV_FILE:-}"
 BACKUP_DIR="${PWC_POSTGRES_BACKUP_DIR:-/var/lib/paperswithcode/production/backups}"
 REMOTE_BUCKET=""
 REMOTE_PREFIX="postgres"
@@ -126,6 +127,13 @@ main() {
         set -a
         # shellcheck disable=SC1090
         source "$ENV_FILE"
+        set +a
+    fi
+    if [[ -n "$CREDENTIAL_ENV_FILE" ]]; then
+        [[ -f "$CREDENTIAL_ENV_FILE" ]] || die "Missing credential env file: $CREDENTIAL_ENV_FILE"
+        set -a
+        # shellcheck disable=SC1090
+        source "$CREDENTIAL_ENV_FILE"
         set +a
     fi
 

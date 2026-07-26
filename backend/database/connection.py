@@ -29,11 +29,16 @@ class DatabaseManager:
     def engine(self) -> Engine:
         """Get the SQLAlchemy engine."""
         if self._engine is None:
+            options = f"-c search_path={self.settings.db_search_path}"
+            # The staging role defaults to read-only for every ad hoc login.
+            # The application explicitly opts its connections into read/write
+            # transactions; PostgreSQL privileges still limit those writes to
+            # the staging-owned schema.
+            if self.settings.environment == "staging":
+                options += " -c default_transaction_read_only=off"
             self._engine = create_engine(
                 self.settings.database_url,
-                connect_args={
-                    "options": f"-c search_path={self.settings.db_search_path}"
-                },
+                connect_args={"options": options},
                 poolclass=QueuePool,
                 # Kept small per-process: the API runs multiple uvicorn workers
                 # in production and shares Postgres with the CRON scripts, so a

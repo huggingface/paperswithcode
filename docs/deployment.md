@@ -51,6 +51,17 @@ candidate on `8100-8199`, runs smoke checks, moves only the selected pointer,
 restarts only that backend, and rolls back automatically on a failed live
 check.
 
+For the one-time migration from a legacy service, qualify without moving the
+pointer, then stop the legacy owner and activate the already-qualified release:
+
+```bash
+sudo pwc-deploy production <main-sha> \
+  --qualify-only --confirm DEPLOY_PRODUCTION
+```
+
+`--defer-public-smoke` exists only for the initial bootstrap before nginx points
+at the immutable root. It is not a normal release option.
+
 Rollback:
 
 ```bash
@@ -121,6 +132,18 @@ environment values, commands, prompts, credentials, or tool output. Full model,
 SDK compaction, resume, edit/retry, and citation qualification still runs
 through authenticated staging chats before increasing the rollout percentage.
 
+## Release cleanup
+
+Remove releases not referenced by either environment's `current` or `previous`
+pointer:
+
+```bash
+sudo pwc-cleanup --confirm CLEAN_RELEASES
+```
+
+The union of those four pointers is the complete retention set. Never remove a
+release directory by hand.
+
 ## Invariants
 
 `release.json` stores the full SHA, build profile, build time, frontend
@@ -135,6 +158,15 @@ Production and staging use host-only `pwc_session` and
 `pwc_staging_session` cookies, distinct JWT secrets, and the shared OAuth
 client with host-validated callback state.
 
+Codex add-evals and enrich-paper buttons are enabled only in production and
+remain protected by Hugging Face admin authentication in both the frontend and
+API. Production owns the writable catalog and receives the remote-job
+credentials through its protected environment. Staging keeps both controls
+disabled because its catalog role is read-only and it has no job credentials.
+Each release launcher derives the non-secret capability flags from that
+release's validated manifest, so rolling back also restores the matching
+frontend/backend feature state.
+
 ## Scheduled work and backup
 
 GitHub Actions calls `sudo /usr/local/sbin/pwc-cron <registered-job>`. The
@@ -142,8 +174,20 @@ launcher runs as `pwc-cron`, loads production plus CRON-only configuration,
 resolves `production/current`, records its release ID, and uses absolute
 lock/log directories.
 
+```bash
+sudo pwc-cron status
+pwc cron health refresh_paper_embeddings --strict --json
+```
+
 `pwc-postgres-backup.timer` remains at 03:15 UTC. It runs the backup script from
-`production/current` as `pwc-cron` and includes both `public` and `staging`.
+`production/current` as `pwc-cron`, dumps both `public` and `staging` with the
+read-only `pwc_backup` role, verifies the local checksum and remote object
+listing, keeps three local dumps, and keeps thirty remote dumps.
+
+The hourly GitHub Actions monitor uses the same
+`deploy/smoke_test.py --monitor-subset` implementation as releases. It checks
+the production SPA and hashed asset MIME types plus the staging health/auth
+boundary without creating an authenticated session.
 
 ## Development
 

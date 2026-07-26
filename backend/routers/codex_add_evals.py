@@ -1,4 +1,4 @@
-"""Staging-only admin endpoints for paper evaluation curation jobs."""
+"""Admin endpoints for paper evaluation curation jobs."""
 
 from __future__ import annotations
 

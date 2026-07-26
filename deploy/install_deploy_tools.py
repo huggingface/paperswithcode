@@ -35,7 +35,7 @@ def deployment_wrapper(command: str) -> str:
     return (
         "#!/bin/sh\n"
         "export PYTHONPATH=/usr/local/lib/paperswithcode-deploy\n"
-        f"export PWC_DEPLOY_PROGRAM={command}\n"
+        f"export PWC_DEPLOY_COMMAND={command}\n"
         'exec /usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cli.py "$@"\n'
     )
 

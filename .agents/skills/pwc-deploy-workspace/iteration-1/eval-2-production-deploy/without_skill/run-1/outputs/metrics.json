@@ -1,0 +1,12 @@
+{
+  "files_created": 2,
+  "operational_commands_executed": 0,
+  "live_state_inspections_performed": 0,
+  "runbook_phases": 6,
+  "explicit_release_gates": 6,
+  "rollback_gate_checks": 5,
+  "success_handoff_fields": 16,
+  "failure_handoff_fields": 14,
+  "protected_staging_only_features": 2,
+  "authorized_production_mutations": 1
+}

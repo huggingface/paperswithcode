@@ -1,0 +1,290 @@
+{
+  "metadata": {
+    "skill_name": "pwc-deploy",
+    "skill_path": "/root/python_projects/pwc-consolidation-release/.agents/skills/pwc-deploy",
+    "executor_model": "GPT-5",
+    "analyzer_model": "GPT-5",
+    "timestamp": "2026-07-23T15:46:03Z",
+    "evals_run": [
+      1,
+      2,
+      3
+    ],
+    "runs_per_configuration": 1
+  },
+  "runs": [
+    {
+      "eval_id": 1,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 3,
+        "failed": 0,
+        "total": 3,
+        "time_seconds": 0,
+        "tokens": 2425,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+          "passed": true,
+          "evidence": "The first command is pwc-status, followed by topology_audit.py --json described as corroborating read-only evidence."
+        },
+        {
+          "text": "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+          "passed": true,
+          "evidence": "It explicitly excludes all listed mutations and contains only three read-only commands."
+        },
+        {
+          "text": "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state.",
+          "passed": true,
+          "evidence": "It uses sudo pwc-cron status and its report template contains current and previous for both environments."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 0,
+        "tokens": 8712,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response resolves and verifies the exact 40-character SHA is reachable from origin/main before deployment.",
+          "passed": true,
+          "evidence": "The provenance gate uses rev-parse and merge-base --is-ancestor against origin/main and requires exact equality."
+        },
+        {
+          "text": "The production command is sudo pwc-deploy production 0123456789abcdef0123456789abcdef01234567 --confirm DEPLOY_PRODUCTION.",
+          "passed": true,
+          "evidence": "The exact command appears as the sole authorized mutation."
+        },
+        {
+          "text": "The response does not manually move pointers, restart systemd, rebuild frontend/dist, or reload nginx.",
+          "passed": true,
+          "evidence": "It explicitly forbids those actions and delegates build, qualification, activation, smoke, and automatic rollback to pwc-deploy."
+        },
+        {
+          "text": "The post-deploy checks cover current/previous, release identity, SPA/assets, paper/API behavior, and production chat/Sandbox absence.",
+          "passed": true,
+          "evidence": "All listed checks appear in the post-deploy evidence gate and handoff template."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "with_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.75,
+        "passed": 3,
+        "failed": 1,
+        "total": 4,
+        "time_seconds": 0,
+        "tokens": 2181,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response inspects pwc-status and confirms a staging previous target before rollback.",
+          "passed": true,
+          "evidence": "It starts with pwc-status and has an explicit gate requiring staging/previous and its full SHA."
+        },
+        {
+          "text": "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+          "passed": true,
+          "evidence": "It uses exactly sudo pwc-rollback staging."
+        },
+        {
+          "text": "The response does not manually change symlinks or restart services.",
+          "passed": true,
+          "evidence": "It explicitly prohibits pointer changes and service restarts."
+        },
+        {
+          "text": "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation.",
+          "passed": false,
+          "evidence": "It treats the user's precautionary reload request as sufficient and proposes pwc-nginx staging despite identifying no checked-in nginx change."
+        }
+      ],
+      "notes": [
+        "Unjustified nginx lifecycle action"
+      ]
+    },
+    {
+      "eval_id": 1,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.3333,
+        "passed": 1,
+        "failed": 2,
+        "total": 3,
+        "time_seconds": 0,
+        "tokens": 5364,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+          "passed": false,
+          "evidence": "Although pwc-status is first, topology_audit is omitted and the response expands into direct symlink, process, nginx, filesystem, timer, cron, and workflow inspection."
+        },
+        {
+          "text": "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+          "passed": true,
+          "evidence": "The proposed commands are read-only and the response explicitly prohibits the listed mutations."
+        },
+        {
+          "text": "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state.",
+          "passed": false,
+          "evidence": "It does not use pwc-cron status and instead attempts to infer provenance from generic systemd, crontab, and workflow scans."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 2,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 1.0,
+        "passed": 4,
+        "failed": 0,
+        "total": 4,
+        "time_seconds": 0,
+        "tokens": 10615,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response resolves and verifies the exact 40-character SHA is reachable from origin/main before deployment.",
+          "passed": true,
+          "evidence": "It validates the commit object and uses merge-base --is-ancestor against origin/main."
+        },
+        {
+          "text": "The production command is sudo pwc-deploy production 0123456789abcdef0123456789abcdef01234567 --confirm DEPLOY_PRODUCTION.",
+          "passed": true,
+          "evidence": "The exact required command is present."
+        },
+        {
+          "text": "The response does not manually move pointers, restart systemd, rebuild frontend/dist, or reload nginx.",
+          "passed": true,
+          "evidence": "It prohibits these mutations and uses only read-only pointer inspection around pwc-deploy."
+        },
+        {
+          "text": "The post-deploy checks cover current/previous, release identity, SPA/assets, paper/API behavior, and production chat/Sandbox absence.",
+          "passed": true,
+          "evidence": "The runbook covers pointer state, release metadata, root/paper/API smoke, assets through the deploy contract, and both feature-absence boundaries."
+        }
+      ],
+      "notes": []
+    },
+    {
+      "eval_id": 3,
+      "configuration": "without_skill",
+      "run_number": 1,
+      "result": {
+        "pass_rate": 0.25,
+        "passed": 1,
+        "failed": 3,
+        "total": 4,
+        "time_seconds": 0,
+        "tokens": 2244,
+        "tool_calls": 0,
+        "errors": 0
+      },
+      "expectations": [
+        {
+          "text": "The response inspects pwc-status and confirms a staging previous target before rollback.",
+          "passed": false,
+          "evidence": "It runs pwc-status but does not gate the rollback on an explicit staging previous target."
+        },
+        {
+          "text": "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+          "passed": false,
+          "evidence": "It proposes pwc-rollback staging without sudo and defers exact syntax to --help."
+        },
+        {
+          "text": "The response does not manually change symlinks or restart services.",
+          "passed": true,
+          "evidence": "It uses the rollback interface and explicitly avoids direct lifecycle mutation."
+        },
+        {
+          "text": "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation.",
+          "passed": false,
+          "evidence": "It correctly declines the precautionary reload but does not provide the explicit confirmed pwc-nginx staging interface for a real checked-in change."
+        }
+      ],
+      "notes": []
+    }
+  ],
+  "run_summary": {
+    "with_skill": {
+      "pass_rate": {
+        "mean": 0.9167,
+        "stddev": 0.1443,
+        "min": 0.75,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "tokens": {
+        "mean": 4439.3333,
+        "stddev": 3702.2486,
+        "min": 2181,
+        "max": 8712
+      }
+    },
+    "without_skill": {
+      "pass_rate": {
+        "mean": 0.5278,
+        "stddev": 0.4111,
+        "min": 0.25,
+        "max": 1.0
+      },
+      "time_seconds": {
+        "mean": 0.0,
+        "stddev": 0.0,
+        "min": 0,
+        "max": 0
+      },
+      "tokens": {
+        "mean": 6074.3333,
+        "stddev": 4230.4657,
+        "min": 2244,
+        "max": 10615
+      }
+    },
+    "delta": {
+      "pass_rate": "+0.39",
+      "time_seconds": "+0.0",
+      "tokens": "-1635"
+    }
+  },
+  "notes": [
+    "The skill improved mean assertion pass rate from 52.8% to 91.7%, with the clearest gain on stable status and rollback interfaces.",
+    "The production-deploy eval passed in both configurations, so its assertions validate correctness but do not discriminate skill value in this sample.",
+    "The skill-guided rollback eval exposed one real gap: it accepted a precautionary nginx reload without evidence of a checked-in nginx change.",
+    "The harness did not expose executor timing/token telemetry; the displayed token field is output-character count and time is intentionally zero."
+  ]
+}

@@ -3,11 +3,31 @@
 ## Overview
 
 - Engine: PostgreSQL 16 (`paperswithcode_hf` database)
-- Default application role: `paperswithcode_user`
+- Production application role: `paperswithcode_user`
+- Staging role: `pwc_staging` (read-only `public`, owner of writable
+  `staging` state through `search_path=staging,public`)
+- Backup role: `pwc_backup` (`pg_read_all_data`, no application writes)
 - Superuser (system managed): `postgres`
-- Connection settings are loaded from `backend/keys.env`
+- Deployed connection settings are loaded from
+  `/etc/paperswithcode/{production,staging}.env`; `backend/keys.env` is for
+  explicit local development only.
 
 Use `uv run --env-file backend/keys.env …` for any script that touches the database.
+
+Production and staging share the live research catalog in `public`. Private
+staging chat, bookmark, preference, pending-edit, and workflow state lives in
+`staging` and is owned by the staging environment. Never grant `pwc_staging`
+write access to `public`, and never qualify staging by reusing the production
+application role.
+
+Read-only isolation audit:
+
+```bash
+sudo python deploy/audit_staging_db.py
+```
+
+The audit proves catalog reads, rejects a catalog update, performs
+transaction-rolled-back staging state writes, and verifies both search paths.
 
 ## Local Development Access
 
@@ -77,7 +97,8 @@ uv run --env-file backend/keys.env python backend/database/papers_setup/add_hf_p
 PGPASSWORD="$PWC_DB_PASSWORD" psql -h localhost -U paperswithcode_user -d paperswithcode_hf \
   -c "UPDATE methods SET image_url = 'https://example.com/image.png' WHERE name ILIKE 'function calling';"
 
-# Grant permissions after creating tables as postgres
+# Grant permissions after creating production catalog tables as postgres.
+# Do not grant these to pwc_staging.
 sudo -u postgres psql -d paperswithcode_hf -c "GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO paperswithcode_user;"
 sudo -u postgres psql -d paperswithcode_hf -c "GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO paperswithcode_user;"
 ```

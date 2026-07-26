@@ -13,6 +13,11 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import urljoin
 
+try:
+    from deploy.release import profile_features
+except ModuleNotFoundError:
+    from release import profile_features  # type: ignore[no-redef]
+
 ASSET_RE = re.compile(
     r"""(?:src|href)=["'](?P<url>/assets/[^"'?#]+\.(?P<kind>js|css))(?:[?#][^"']*)?["']"""
 )
@@ -38,13 +43,18 @@ def request(url: str, *, allow_redirects: bool = True) -> tuple[int, dict, bytes
         return exc.code, dict(exc.headers), exc.read()
 
 
-def validate_local_bundle(release_dir: Path, expected_chat: bool) -> list[str]:
+def validate_local_bundle(
+    release_dir: Path, expected_features: dict[str, bool] | bool
+) -> list[str]:
     failures: list[str] = []
     dist = release_dir / "frontend-dist"
     try:
         features = json.loads((dist / "features.json").read_text())
-        manifest = json.loads((release_dir / "release.json").read_text())
-        expected_features = manifest.get("frontend_features", {"chat": expected_chat})
+        if isinstance(expected_features, bool):
+            manifest = json.loads((release_dir / "release.json").read_text())
+            expected_features = manifest.get(
+                "frontend_features", {"chat": expected_features}
+            )
         if features != expected_features:
             failures.append(f"unexpected frontend features: {features!r}")
         html = (dist / "index.html").read_text()
@@ -171,7 +181,7 @@ def main() -> int:
     failures = []
     if args.release_dir:
         failures.extend(
-            validate_local_bundle(args.release_dir, args.environment == "staging")
+            validate_local_bundle(args.release_dir, profile_features(args.environment))
         )
     failures.extend(
         run_http_smoke(

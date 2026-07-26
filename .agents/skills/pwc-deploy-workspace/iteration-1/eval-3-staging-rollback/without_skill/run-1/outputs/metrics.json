@@ -1,0 +1,11 @@
+{
+  "files_created": 2,
+  "response_lines": 37,
+  "response_words": 313,
+  "proposed_commands": 8,
+  "operational_commands_executed": 0,
+  "live_state_inspections": 0,
+  "external_changes": 0,
+  "explicit_smoke_tests": 4,
+  "nginx_reload_recommended": false
+}

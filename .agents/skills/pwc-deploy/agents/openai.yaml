@@ -1,0 +1,4 @@
+interface:
+  display_name: "Papers With Code Deploy"
+  short_description: "Safely deploy and inspect immutable PwC releases"
+  default_prompt: "Use $pwc-deploy to inspect status and deploy an approved Papers With Code release."

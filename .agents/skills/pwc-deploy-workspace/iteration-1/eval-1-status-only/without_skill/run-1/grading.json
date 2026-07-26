@@ -1,0 +1,24 @@
+{
+  "expectations": [
+    {
+      "text": "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+      "passed": false,
+      "evidence": "Although pwc-status is first, topology_audit is omitted and the response expands into direct symlink, process, nginx, filesystem, timer, cron, and workflow inspection."
+    },
+    {
+      "text": "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+      "passed": true,
+      "evidence": "The proposed commands are read-only and the response explicitly prohibits the listed mutations."
+    },
+    {
+      "text": "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state.",
+      "passed": false,
+      "evidence": "It does not use pwc-cron status and instead attempts to infer provenance from generic systemd, crontab, and workflow scans."
+    }
+  ],
+  "summary": {"passed": 1, "failed": 2, "total": 3, "pass_rate": 0.3333},
+  "execution_metrics": {"total_tool_calls": 0, "errors_encountered": 0, "output_chars": 5364},
+  "timing": {"total_duration_seconds": 0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}
+}

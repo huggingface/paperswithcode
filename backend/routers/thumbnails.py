@@ -7,8 +7,10 @@ Provides endpoints for:
 - Managing thumbnail cache
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import FileResponse
+from pathlib import Path
+
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager, get_database_session
@@ -23,6 +25,18 @@ from backend.utils.exceptions import PaperNotFoundError
 router = APIRouter(prefix="/thumbnails", tags=["thumbnails"])
 
 MISSING_THUMBNAIL_HEADERS = {"Cache-Control": "no-store"}
+THUMBNAIL_HEADERS = {
+    "Cache-Control": "public, s-maxage=604800, max-age=604800",
+}
+
+
+def _thumbnail_response(path: Path) -> Response:
+    """Return a concrete body so HTTP middleware cannot drop file-send frames."""
+    return Response(
+        content=path.read_bytes(),
+        media_type="image/jpeg",
+        headers=THUMBNAIL_HEADERS,
+    )
 
 
 def get_thumbnail_service() -> ThumbnailService:
@@ -45,11 +59,7 @@ def serve_custom_thumbnail(
                 detail="Thumbnail not available",
                 headers=MISSING_THUMBNAIL_HEADERS,
             )
-        return FileResponse(
-            path=thumbnail_path,
-            media_type="image/jpeg",
-            headers={"Cache-Control": "public, s-maxage=604800, max-age=604800"},
-        )
+        return _thumbnail_response(thumbnail_path)
     except HTTPException:
         raise
     except Exception:
@@ -84,11 +94,7 @@ def serve_thumbnail(
             headers=MISSING_THUMBNAIL_HEADERS,
         )
 
-    return FileResponse(
-        path=thumbnail_path,
-        media_type="image/jpeg",
-        headers={"Cache-Control": "public, s-maxage=604800, max-age=604800"},
-    )
+    return _thumbnail_response(thumbnail_path)
 
 
 @router.post("/generate/{paper_id}")

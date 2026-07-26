@@ -2,10 +2,10 @@
 
 ## Cron Job Overview
 
-All jobs live in `.github/workflows/scripts/`. GitHub Actions invokes the
-installed `pwc-cron` launcher, which executes them from `production/current`.
-The `uv run --env-file backend/keys.env …` form below is for explicit local
-diagnostics only.
+Job implementations live in `.github/workflows/scripts/`, but production never
+executes them from a checkout. GitHub Actions invokes the installed
+`pwc-cron` launcher, which pins execution to `production/current`, runs as
+`pwc-cron`, enforces an allowlist and timeout, and records release provenance.
 
 | Schedule | Script | Purpose |
 | --- | --- | --- |
@@ -17,24 +17,28 @@ diagnostics only.
 | `30 4 * * *` | `.github/workflows/scripts/daily/preload_thumbnails.py` | Generate and upload missing paper thumbnails to the HF bucket. |
 | `0 5 * * *` | `.github/workflows/scripts/daily/mirror_thumbnails_to_disk.py` | Mirror the entire thumbnail bucket prefix down to the VPS local cache so `/api/thumbnails/{filename}` always serves from local disk. |
 
-Useful commands:
+Useful production commands:
 
 ```bash
-uv run --env-file backend/keys.env .github/workflows/scripts/manage_cron.py summary
-uv run --env-file backend/keys.env .github/workflows/scripts/manage_cron.py status update_github_stars
-uv run --env-file backend/keys.env .github/workflows/scripts/manage_cron.py test update_citations
-uv run --env-file backend/keys.env .github/workflows/scripts/manage_cron.py cleanup
+sudo pwc-cron status
+pwc cron health
+pwc cron health refresh_paper_embeddings --strict --json
+journalctl -u 'run-u*.service' --since today
 ```
 
 ## Admin Dashboard
 
 - Route: `/admin-dashboard` on the frontend (linked from the admin user menu). The old `/cron-dashboard` URL redirects here.
 - Backend endpoints: `/api/v1/cron/status`, `/api/v1/cron/job/{name}`, `/api/v1/cron/health`.
-- Paper curation queue endpoint: `/api/v1/admin/codex-curation/jobs`, with paper links, requester, action, HF Job link, mutation status, report/error, and full-history status counts.
-- Auto-refreshes CRON health every 30 seconds and active paper curation state every 10 seconds (toggleable).
-- Pulls data from log files in `.github/workflows/scripts/logs/` and merges with crontab discovery.
+- Codex add-evals/enrich controls and their remote-job queue are intentionally
+  disabled during the environment migration. Staging cannot mutate the shared
+  catalog and production does not expose the retired write-capable sidecar.
+- Auto-refreshes CRON health every 30 seconds (toggleable).
+- Pulls production CRON health from
+  `/var/lib/paperswithcode/production/cron-logs`.
 
-Use the dashboard to ensure health score stays ≥80%.  For command-line visibility, rely on `.github/workflows/scripts/manage_cron.py`.
+Use the dashboard to ensure health score stays ≥80%. For command-line
+visibility, use `pwc cron health` and `pwc-cron status`.
 
 Deployed scheduled jobs run through `sudo /usr/local/sbin/pwc-cron <job>` from
 the immutable `production/current` release. Use `pwc cron health`, `pwc-status`,
@@ -123,8 +127,7 @@ file on local disk and never has to do a per-request HF download. To run it
 manually (e.g. for first-time bootstrap):
 
 ```bash
-PYTHONPATH=.github/workflows uv run --env-file backend/keys.env \
-    python -m scripts.daily.mirror_thumbnails_to_disk
+sudo pwc-cron mirror_thumbnails_to_disk
 ```
 
 ## Troubleshooting Checklist
@@ -132,8 +135,8 @@ PYTHONPATH=.github/workflows uv run --env-file backend/keys.env \
 | Issue | Resolution |
 | --- | --- |
 | Trending endpoint empty | Verify GitHub stars job is running and trending scores have at least two snapshots; check `repositories.trending_score_updated_at`. |
-| Cron dashboard shows “Unknown” | Ensure log file exists (`.github/workflows/scripts/logs/<job>_YYYYMMDD.log`) and job is scheduled in crontab. |
-| AI URL extraction stalls | Inspect `.github/workflows/scripts/logs/extract_urls_*.log` for CAPTCHA hits; consider slowing batch size or updating API key in `backend/keys.env`. |
+| Cron dashboard shows “Unknown” | Run `pwc-cron status`, inspect `/var/lib/paperswithcode/production/cron-logs`, and check the matching GitHub Actions run. |
+| AI URL extraction stalls | Inspect production CRON health and the matching immutable-release job logs; do not rerun it from the checkout. |
 | Pending edits not landing in DB | Confirm the submitter is signed in (HF session cookie); the `POST /api/v1/me/paper-edits` endpoint requires `require_user`. Then run `SELECT * FROM pending_paper_edits WHERE status='pending' ORDER BY created_at DESC LIMIT 10;` to inspect recent submissions. |
 
 ## Pending Paper Edits Review
@@ -222,7 +225,7 @@ Each `proposed_payload` matches the underlying admin mutation endpoint:
   - `create` &rarr; `{ "op": "create", "data": { task_id, dataset_id, metrics, best_metric, ... } }`
   - `update` &rarr; `{ "op": "update", "evaluation_id": int, "data": { ... } }`
   - `delete` &rarr; `{ "op": "delete", "evaluation_id": int }`
-| Cron logs filling disk | Run `uv run --env-file backend/keys.env .github/workflows/scripts/manage_cron.py cleanup`; default policy keeps 30 days. |
+| Cron logs filling disk | Verify `systemd-tmpfiles` policy; production CRON logs are bounded to 30 days. Use `pwc-status` to include disk usage in the audit. |
 
 _Last updated: 7 November 2025_
 ## Durable chat sessions (staging)
@@ -234,9 +237,10 @@ checks. User-confirmed deletion removes live rows immediately; verified
 disaster-recovery backups expire under the normal 30-day remote rotation and
 are not a product undo mechanism.
 
-Before enabling durable chat, confirm the backup target reports
-`"private": true` and is organization-owned. The daily backup service must use
-the dedicated `PWC_POSTGRES_BACKUP_HF_TOKEN`, not the inference token. The
+Before enabling durable chat, confirm the backup target reports `"private":
+true` and is organization-owned. The daily backup service receives its
+organization-authorized bucket credential only through
+`production-cron.env`; neither application identity can read that overlay. The
 target is selected with `PWC_POSTGRES_BACKUP_BUCKET`.
 
 Content-free storage checks:

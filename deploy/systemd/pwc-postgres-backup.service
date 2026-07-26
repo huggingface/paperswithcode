@@ -17,4 +17,4 @@ PrivateTmp=true
 ProtectHome=true
 ProtectSystem=strict
 ReadOnlyPaths=/srv/paperswithcode
-ReadWritePaths=/var/lib/paperswithcode/production/backups /var/lib/paperswithcode/production/cron-logs
+ReadWritePaths=/var/lib/paperswithcode/production/backups /var/lib/paperswithcode/production/cron-logs /var/lib/paperswithcode/production/hf-cache

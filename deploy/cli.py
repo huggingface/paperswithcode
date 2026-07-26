@@ -46,10 +46,11 @@ REPOSITORY = Path(os.environ.get("PWC_DEPLOY_REPOSITORY", APP_ROOT / "repository
 RELEASES = APP_ROOT / "releases"
 ENVIRONMENTS_ROOT = APP_ROOT / "environments"
 VENV = APP_ROOT / ".venv"
+PYTHON_RUNTIME = APP_ROOT / "python-runtime"
 RUNTIME_LOCK = APP_ROOT / "runtime-lock.sha256"
 CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode"))
 LOG_ROOT = Path(os.environ.get("PWC_DEPLOY_LOG_ROOT", "/var/log/paperswithcode/deploy"))
-MIN_FREE_BYTES = int(os.environ.get("PWC_DEPLOY_MIN_FREE_BYTES", str(1536**3)))
+MIN_FREE_BYTES = int(os.environ.get("PWC_DEPLOY_MIN_FREE_BYTES", str(1536 * 1024**2)))
 PORTS = {"production": 8000, "staging": 8001}
 PUBLIC_URLS = {
     "production": "https://paperswithcode.co",
@@ -199,9 +200,22 @@ print(json.dumps({
     return descriptor
 
 
+def frontend_feature_environment(environment: str) -> dict[str, str]:
+    features = profile_features(environment)
+    return {
+        "VITE_CHAT_ENABLED": "1" if features["chat"] else "0",
+        "VITE_CHAT_LIVE": "1" if features["chat"] else "0",
+        "VITE_CODEX_ADD_EVALS_ENABLED": ("1" if features["codex_add_evals"] else "0"),
+        "VITE_CODEX_ENRICH_PAPER_ENABLED": (
+            "1" if features["codex_enrich_paper"] else "0"
+        ),
+    }
+
+
 def prepare_release(sha: str, environment: str) -> Path:
     target = RELEASES / release_id(sha, environment)
     if target.exists():
+        make_release_readable(target)
         validate_manifest(target, environment)
         return target
     check_capacity()
@@ -213,27 +227,12 @@ def prepare_release(sha: str, environment: str) -> Path:
         _extract_commit(sha, source)
         frontend = source / "frontend"
         build_env = os.environ.copy()
-        build_env.update(
-            {
-                "VITE_CHAT_ENABLED": "1" if environment == "staging" else "0",
-                "VITE_CHAT_LIVE": "1" if environment == "staging" else "0",
-                "VITE_CODEX_ADD_EVALS_ENABLED": (
-                    "1" if environment == "staging" else "0"
-                ),
-                "VITE_CODEX_ENRICH_PAPER_ENABLED": (
-                    "1" if environment == "staging" else "0"
-                ),
-            }
-        )
+        build_env.update(frontend_feature_environment(environment))
         run(["npm", "ci"], cwd=frontend, env=build_env)
         run(
             ["npm", "run", "build", "--", "--mode", environment],
             cwd=frontend,
             env=build_env,
-        )
-        features = profile_features(environment)
-        (frontend / "dist" / "features.json").write_text(
-            json.dumps(features, sort_keys=True) + "\n", encoding="utf-8"
         )
         shutil.move(str(frontend / "dist"), str(source / "frontend-dist"))
         shutil.rmtree(frontend / "node_modules")
@@ -266,22 +265,38 @@ def prepare_release(sha: str, environment: str) -> Path:
         )
         validate_manifest(source, environment)
         os.replace(source, target)
-        for path in sorted(target.rglob("*"), reverse=True):
-            path.chmod(path.stat().st_mode & ~0o222)
-        target.chmod(0o555)
+        make_release_readable(target)
         return target
     finally:
         shutil.rmtree(build_root, ignore_errors=True)
+
+
+def make_release_readable(release: Path) -> None:
+    for path in sorted(release.rglob("*"), reverse=True):
+        if path.is_symlink():
+            continue
+        if path.is_dir():
+            path.chmod(0o555)
+            continue
+        executable = bool(path.stat().st_mode & 0o111)
+        path.chmod(0o555 if executable else 0o444)
+    release.chmod(0o555)
 
 
 def sync_runtime(release: Path) -> bool:
     wanted = sha256_file(release / "uv.lock")
     current = RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else ""
     if current == wanted and (VENV / "bin" / "python").is_file():
+        make_runtime_readable()
         return False
     env = os.environ.copy()
     env["UV_PROJECT_ENVIRONMENT"] = str(VENV)
-    run(["uv", "sync", "--frozen", "--project", str(release)], env=env)
+    previous_umask = os.umask(0o022)
+    try:
+        run(["uv", "sync", "--frozen", "--project", str(release)], env=env)
+    finally:
+        os.umask(previous_umask)
+    make_runtime_readable()
     RUNTIME_LOCK.write_text(wanted + "\n", encoding="utf-8")
     return True
 
@@ -295,6 +310,36 @@ def sync_runtime_with_recovery(release: Path, previous_lock_hash: str) -> bool:
         raise
 
 
+def make_runtime_readable() -> None:
+    config = VENV / "pyvenv.cfg"
+    lines = config.read_text(encoding="utf-8").splitlines()
+    home_line = next(line for line in lines if line.startswith("home = "))
+    source_root = Path(home_line.split("=", 1)[1].strip()).parent
+    if source_root != PYTHON_RUNTIME:
+        if not PYTHON_RUNTIME.exists():
+            temporary = PYTHON_RUNTIME.with_name(
+                f".{PYTHON_RUNTIME.name}.new-{os.getpid()}"
+            )
+            shutil.copytree(source_root, temporary, symlinks=True)
+            os.replace(temporary, PYTHON_RUNTIME)
+        updated = [
+            line.replace(str(source_root), str(PYTHON_RUNTIME)) for line in lines
+        ]
+        config.write_text("\n".join(updated) + "\n", encoding="utf-8")
+    versioned = f"python{sys.version_info.major}.{sys.version_info.minor}"
+    base_launcher = PYTHON_RUNTIME / "bin" / versioned
+    for name in ("python", "python3", versioned):
+        launcher = VENV / "bin" / name
+        launcher.unlink(missing_ok=True)
+        launcher.symlink_to(base_launcher)
+    for path in VENV.rglob("*"):
+        if path.is_symlink():
+            continue
+        mode = path.stat().st_mode
+        path.chmod(mode | (0o555 if path.is_dir() else 0o444))
+    VENV.chmod(VENV.stat().st_mode | 0o555)
+
+
 def restore_runtime(lock_hash: str) -> None:
     for environment in ENVIRONMENTS:
         pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
@@ -306,6 +351,7 @@ def restore_runtime(lock_hash: str) -> None:
                     ["uv", "sync", "--frozen", "--project", str(release)],
                     env=env,
                 )
+                make_runtime_readable()
                 RUNTIME_LOCK.write_text(lock_hash + "\n", encoding="utf-8")
                 return
     raise DeployError("cannot find a retained release for the previous runtime lock")
@@ -351,9 +397,22 @@ def candidate_start_command(
         "--property",
         f"EnvironmentFile={CONFIG_ROOT / (environment + '.env')}",
         "/usr/bin/env",
-        f"UVICORN_PORT={port}",
+        f"PWC_PORT={port}",
         f"PWC_RELEASE_ID={manifest['release_id']}",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
+        f"PWC_CHAT_ENABLED={'true' if manifest['backend_features']['chat'] else 'false'}",
+        (
+            "PWC_CODEX_ADD_EVALS_ENABLED="
+            f"{'true' if manifest['backend_features'].get('codex_add_evals', False) else 'false'}"
+        ),
+        (
+            "PWC_CODEX_ENRICH_PAPER_ENABLED="
+            f"{'true' if manifest['backend_features'].get('codex_enrich_paper', False) else 'false'}"
+        ),
+        (
+            "PWC_CODEX_JOBS_ENABLED="
+            f"{'true' if manifest['backend_features'].get('codex_add_evals', False) or manifest['backend_features'].get('codex_enrich_paper', False) else 'false'}"
+        ),
         str(VENV / "bin" / "python"),
         str(release / "deploy" / "run_backend.py"),
     ]
@@ -403,15 +462,48 @@ def _unit(environment: str) -> str:
     return f"paperswithcode-backend@{environment}.service"
 
 
+def wait_for_release(environment: str, expected_release: str) -> bool:
+    deadline = time.monotonic() + 45
+    while time.monotonic() < deadline:
+        ready = _read_json(f"http://127.0.0.1:{PORTS[environment]}/internal/ready")
+        if ready and ready.get("release_id") == expected_release:
+            return True
+        time.sleep(0.5)
+    return False
+
+
+def smoke_public(release: Path, environment: str, expected_release: str) -> None:
+    run(
+        [
+            str(VENV / "bin" / "python"),
+            str(release / "deploy" / "smoke_test.py"),
+            "--environment",
+            environment,
+            "--base-url",
+            PUBLIC_URLS[environment],
+            "--expected-release",
+            expected_release,
+            "--release-dir",
+            str(release),
+        ]
+    )
+
+
 def activate(
     release: Path,
     environment: str,
     *,
     previous_runtime_lock: str = "",
+    defer_public_smoke: bool = False,
 ) -> None:
     root = ENVIRONMENTS_ROOT / environment
     pointers = read_pointers(root)
     if pointers.current == release:
+        manifest = validate_manifest(release, environment)
+        if not wait_for_release(environment, manifest["release_id"]):
+            raise DeployError("active release failed readiness")
+        if not defer_public_smoke:
+            smoke_public(release, environment, manifest["release_id"])
         return
     if pointers.current:
         atomic_symlink(pointers.current, root / "previous")
@@ -419,28 +511,10 @@ def activate(
     try:
         run(["systemctl", "restart", _unit(environment)])
         manifest = validate_manifest(release, environment)
-        deadline = time.monotonic() + 45
-        while time.monotonic() < deadline:
-            ready = _read_json(f"http://127.0.0.1:{PORTS[environment]}/internal/ready")
-            if ready and ready.get("release_id") == manifest["release_id"]:
-                break
-            time.sleep(0.5)
-        else:
+        if not wait_for_release(environment, manifest["release_id"]):
             raise DeployError("live readiness failed")
-        run(
-            [
-                str(VENV / "bin" / "python"),
-                str(release / "deploy" / "smoke_test.py"),
-                "--environment",
-                environment,
-                "--base-url",
-                PUBLIC_URLS[environment],
-                "--expected-release",
-                manifest["release_id"],
-                "--release-dir",
-                str(release),
-            ]
-        )
+        if not defer_public_smoke:
+            smoke_public(release, environment, manifest["release_id"])
     except (DeployError, subprocess.CalledProcessError, OSError) as exc:
         rollback_after_failed_activation(
             environment,
@@ -459,11 +533,23 @@ def rollback_after_failed_activation(
     root = ENVIRONMENTS_ROOT / environment
     pointers = read_pointers(root)
     if not pointers.previous:
-        raise DeployError("activation failed and no previous release exists")
+        (root / "current").unlink(missing_ok=True)
+        subprocess.run(["systemctl", "stop", _unit(environment)], check=False)
+        log_event(
+            "automatic-rollback",
+            environment,
+            "initial-activation-removed",
+            failed_release=failed.name,
+        )
+        return
     atomic_symlink(pointers.previous, root / "current")
     if previous_runtime_lock:
         restore_runtime(previous_runtime_lock)
     run(["systemctl", "restart", _unit(environment)])
+    restored = validate_manifest(pointers.previous, environment)
+    if not wait_for_release(environment, restored["release_id"]):
+        raise DeployError("automatic rollback target failed readiness")
+    smoke_public(pointers.previous, environment, restored["release_id"])
     log_event(
         "automatic-rollback",
         environment,
@@ -515,6 +601,10 @@ def deploy(args: argparse.Namespace) -> int:
     )
     dependency_change = sync_runtime_with_recovery(release, old_runtime_lock)
     current = read_pointers(ENVIRONMENTS_ROOT / args.environment).current
+    if args.defer_public_smoke and current is not None:
+        raise DeployError(
+            "--defer-public-smoke is only valid for initial environment bootstrap"
+        )
     print(
         json.dumps(
             {
@@ -543,11 +633,35 @@ def deploy(args: argparse.Namespace) -> int:
         if dependency_change and old_runtime_lock:
             restore_runtime(old_runtime_lock)
         raise
+    if args.qualify_only:
+        log_event(
+            "qualify",
+            args.environment,
+            "success",
+            git_sha=sha,
+            source=args.source,
+        )
+        print(f"qualified {args.source} ({sha}) for {args.environment}")
+        return 0
     activate(
         release,
         args.environment,
         previous_runtime_lock=old_runtime_lock if dependency_change else "",
+        defer_public_smoke=args.defer_public_smoke,
     )
+    if args.defer_public_smoke:
+        log_event(
+            "deploy-bootstrap",
+            args.environment,
+            "awaiting-public-smoke",
+            git_sha=sha,
+            source=args.source,
+        )
+        print(
+            f"{args.environment} activated locally; "
+            "apply nginx, then re-run this deploy"
+        )
+        return 0
     cleanup_releases()
     log_event("deploy", args.environment, "success", git_sha=sha, source=args.source)
     print(f"deployed {args.source} ({sha}) to {args.environment}")
@@ -570,26 +684,25 @@ def rollback(args: argparse.Namespace) -> int:
     dependency_change = sync_runtime_with_recovery(pointers.previous, old_runtime_lock)
     atomic_symlink(pointers.previous, root / "current")
     atomic_symlink(old_current, root / "previous")
+    run(["systemctl", "restart", _unit(args.environment)])
+    expected = validate_manifest(pointers.previous)["release_id"]
     try:
-        run(["systemctl", "restart", _unit(args.environment)])
-        expected = validate_manifest(pointers.previous)["release_id"]
-        deadline = time.monotonic() + 45
-        while time.monotonic() < deadline:
-            ready = _read_json(
-                f"http://127.0.0.1:{PORTS[args.environment]}/internal/ready"
-            )
-            if ready and ready.get("release_id") == expected:
-                break
-            time.sleep(0.5)
-        else:
+        if not wait_for_release(args.environment, expected):
             raise DeployError("rollback target failed readiness")
+        smoke_public(pointers.previous, args.environment, expected)
     except (DeployError, subprocess.CalledProcessError, OSError) as exc:
         atomic_symlink(old_current, root / "current")
         atomic_symlink(pointers.previous, root / "previous")
         if dependency_change and old_runtime_lock:
             restore_runtime(old_runtime_lock)
         run(["systemctl", "restart", _unit(args.environment)])
-        raise DeployError("rollback target failed; restored original release") from exc
+        original = validate_manifest(old_current, args.environment)
+        if not wait_for_release(args.environment, original["release_id"]):
+            raise DeployError("rollback failed and original release did not recover")
+        smoke_public(old_current, args.environment, original["release_id"])
+        raise DeployError(
+            "rollback target failed smoke; restored original release"
+        ) from exc
     log_event(
         "rollback",
         args.environment,
@@ -663,6 +776,8 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.add_argument("environment", choices=ENVIRONMENTS)
         parser.add_argument("source")
         parser.add_argument("--confirm")
+        parser.add_argument("--defer-public-smoke", action="store_true")
+        parser.add_argument("--qualify-only", action="store_true")
         parser.set_defaults(handler=deploy)
     elif program.endswith("pwc-rollback"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
@@ -677,7 +792,7 @@ def parser_for(program: str) -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    program = os.environ.get("PWC_DEPLOY_PROGRAM", Path(sys.argv[0]).name)
+    program = os.environ.get("PWC_DEPLOY_COMMAND", Path(sys.argv[0]).name)
     parser = parser_for(program)
     args = parser.parse_args()
     try:

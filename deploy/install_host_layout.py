@@ -13,6 +13,7 @@ from pathlib import Path
 APP_ROOT = Path("/srv/paperswithcode")
 STATE_ROOT = Path("/var/lib/paperswithcode")
 LOG_ROOT = Path("/var/log/paperswithcode")
+CONFIG_ROOT = Path("/etc/paperswithcode")
 REPO = Path(__file__).resolve().parents[1]
 
 
@@ -47,6 +48,14 @@ def main() -> int:
     for user in ("pwc-production", "pwc-staging", "pwc-cron"):
         ensure_user(user)
     for path in (
+        APP_ROOT,
+        APP_ROOT / "environments",
+        STATE_ROOT,
+        LOG_ROOT,
+    ):
+        ensure_dir(path, "root", "root", 0o755)
+    ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
+    for path in (
         APP_ROOT / "releases",
         APP_ROOT / "environments" / "production",
         APP_ROOT / "environments" / "staging",
@@ -66,16 +75,35 @@ def main() -> int:
             0o750,
         )
     ensure_dir(STATE_ROOT / "shared", "root", "root", 0o755)
+    ensure_dir(
+        STATE_ROOT / "shared" / "thumbnails",
+        "pwc-cron",
+        "pwc-cron",
+        0o755,
+    )
     ensure_dir(LOG_ROOT / "deploy", "root", "root", 0o750)
     for path in (
         STATE_ROOT / "production" / "cron-logs",
         STATE_ROOT / "production" / "cron-locks",
-        STATE_ROOT / "production" / "backups",
     ):
-        ensure_dir(path, "pwc-cron", "pwc-cron", 0o750)
+        ensure_dir(path, "pwc-cron", "pwc-production", 0o750)
+    ensure_dir(
+        STATE_ROOT / "production" / "backups",
+        "pwc-cron",
+        "pwc-cron",
+        0o750,
+    )
+    ensure_dir(
+        STATE_ROOT / "production" / "hf-cache",
+        "pwc-cron",
+        "pwc-cron",
+        0o750,
+    )
     for path in (
         STATE_ROOT / "staging" / "chat-agent",
         STATE_ROOT / "staging" / "chat-recovery-spool",
+        STATE_ROOT / "staging" / "cron-locks",
+        STATE_ROOT / "staging" / "cron-logs",
         STATE_ROOT / "staging" / "recovery-spool",
         STATE_ROOT / "staging" / "codex-work",
     ):

@@ -142,8 +142,8 @@ class Settings(BaseSettings):
         description="API token required for administrative endpoints",
     )
 
-    # Codex curation jobs. Disabled on the main API; isolated staging and
-    # production sidecars opt in through their systemd environments.
+    # Codex curation jobs. Immutable production releases may opt in; staging
+    # remains disabled because its catalog role is read-only.
     codex_add_evals_enabled: bool = Field(default=False)
     codex_enrich_paper_enabled: bool = Field(default=False)
     codex_add_evals_timeout_seconds: int = Field(default=3600, ge=60, le=7200)

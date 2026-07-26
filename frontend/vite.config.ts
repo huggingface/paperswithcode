@@ -15,6 +15,16 @@ export default defineConfig(({ mode }) => {
       .trim()
       .toLowerCase(),
   );
+  const codexAddEvalsEnabled = ["1", "true", "yes"].includes(
+    String(process.env.VITE_CODEX_ADD_EVALS_ENABLED ?? env.VITE_CODEX_ADD_EVALS_ENABLED ?? "")
+      .trim()
+      .toLowerCase(),
+  );
+  const codexEnrichPaperEnabled = ["1", "true", "yes"].includes(
+    String(process.env.VITE_CODEX_ENRICH_PAPER_ENABLED ?? env.VITE_CODEX_ENRICH_PAPER_ENABLED ?? "")
+      .trim()
+      .toLowerCase(),
+  );
   const hmrHost = env.VITE_HMR_HOST;
   const hmrProtocol = env.VITE_HMR_PROTOCOL as "ws" | "wss" | undefined;
   const hmrClientPort = env.VITE_HMR_CLIENT_PORT
@@ -69,7 +79,11 @@ export default defineConfig(({ mode }) => {
         writeBundle() {
           fs.writeFileSync(
             path.resolve(__dirname, "dist/features.json"),
-            `${JSON.stringify({ chat: chatEnabled }, null, 2)}\n`,
+            `${JSON.stringify({
+              chat: chatEnabled,
+              codex_add_evals: codexAddEvalsEnabled,
+              codex_enrich_paper: codexEnrichPaperEnabled,
+            }, null, 2)}\n`,
           );
         },
       },

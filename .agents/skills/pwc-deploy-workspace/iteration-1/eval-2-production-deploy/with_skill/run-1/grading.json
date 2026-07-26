@@ -1,0 +1,29 @@
+{
+  "expectations": [
+    {
+      "text": "The response resolves and verifies the exact 40-character SHA is reachable from origin/main before deployment.",
+      "passed": true,
+      "evidence": "The provenance gate uses rev-parse and merge-base --is-ancestor against origin/main and requires exact equality."
+    },
+    {
+      "text": "The production command is sudo pwc-deploy production 0123456789abcdef0123456789abcdef01234567 --confirm DEPLOY_PRODUCTION.",
+      "passed": true,
+      "evidence": "The exact command appears as the sole authorized mutation."
+    },
+    {
+      "text": "The response does not manually move pointers, restart systemd, rebuild frontend/dist, or reload nginx.",
+      "passed": true,
+      "evidence": "It explicitly forbids those actions and delegates build, qualification, activation, smoke, and automatic rollback to pwc-deploy."
+    },
+    {
+      "text": "The post-deploy checks cover current/previous, release identity, SPA/assets, paper/API behavior, and production chat/Sandbox absence.",
+      "passed": true,
+      "evidence": "All listed checks appear in the post-deploy evidence gate and handoff template."
+    }
+  ],
+  "summary": {"passed": 4, "failed": 0, "total": 4, "pass_rate": 1.0},
+  "execution_metrics": {"total_tool_calls": 0, "errors_encountered": 0, "output_chars": 8712},
+  "timing": {"total_duration_seconds": 0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}
+}

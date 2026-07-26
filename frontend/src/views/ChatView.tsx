@@ -394,7 +394,7 @@ const ChatView: React.FC = () => {
             setRouteLoadAttempt((attempt) => attempt + 1);
           }}>Try again</button>
         </div> : isEmpty ? <div className="chat-empty"><div className="chat-empty-inner">
-          <div className="chat-empty-eyebrow">AI research assistant</div>
+          <div className="chat-empty-eyebrow">AI research assistant · Staging preview</div>
           <h1 className="chat-empty-title">Ask <em>Papers With Code</em></h1>
           <p className="chat-empty-sub">Answers are grounded in a live hybrid search over papers, tasks, and benchmarks — with citations you can follow.</p>
           <Composer onSend={send} busy={chat.busy} onStop={chat.stop} autoFocus draft={draft} onDraftChange={setDraft} models={models} selectedModel={selectedModel} onModelChange={(model) => void changeModel(model)} />

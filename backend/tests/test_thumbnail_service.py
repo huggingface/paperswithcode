@@ -211,6 +211,17 @@ def test_is_thumbnail_valid_accepts_portrait_thumbnail(tmp_path: Path):
     assert is_thumbnail_valid(path) is True
 
 
+def test_save_thumbnail_makes_shared_cache_file_publicly_readable(tmp_path: Path):
+    path = tmp_path / "thumbnail.jpg"
+    path.touch(mode=0o600)
+    service = ThumbnailService.__new__(ThumbnailService)
+    service.thumbnail_quality = 85
+
+    service._save_thumbnail(Image.new("RGB", (400, 550), "white"), path)
+
+    assert path.stat().st_mode & 0o777 == 0o644
+
+
 def test_normalize_external_pdf_url_converts_github_blob_to_raw():
     service = ThumbnailService.__new__(ThumbnailService)
 

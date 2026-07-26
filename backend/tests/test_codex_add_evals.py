@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import uuid
 import sys
 from datetime import UTC, datetime
@@ -22,6 +23,7 @@ from backend.services.codex_add_evals_service import (
     CURATOR_BOOTSTRAP_COMMAND,
     _git_revision,
     _launch_error,
+    _release_git_revision,
 )
 from backend.utils.auth import require_hf_admin
 from jobs.curation_api import USER_AGENT as HELPER_USER_AGENT
@@ -70,6 +72,12 @@ def test_git_revision_can_be_pinned_for_remote_jobs(monkeypatch):
     assert _git_revision() == "published-curation-revision"
 
 
+def test_release_manifest_pins_remote_worker_revision(tmp_path):
+    revision = "a" * 40
+    (tmp_path / "release.json").write_text(json.dumps({"git_sha": revision}))
+    assert _release_git_revision(tmp_path) == revision
+
+
 def test_remote_job_bootstrap_uses_public_image_and_pinned_runner():
     settings = get_settings()
     assert settings.codex_jobs_image == "node:22-bookworm"
@@ -102,6 +110,20 @@ def test_remote_callbacks_identify_the_service_to_cloudflare():
     assert HELPER_USER_AGENT.startswith("PapersWithCode-Curation/")
     runner = Path("jobs/run_paper_curation.py").read_text(encoding="utf-8")
     assert '"User-Agent": USER_AGENT' in runner
+
+
+def test_remote_add_evals_requires_configured_leaderboard_search():
+    skill = Path(".agents/skills/remote-paper-curation/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+    runner = Path("jobs/run_paper_curation.py").read_text(encoding="utf-8")
+    normalized_skill = " ".join(skill.split())
+    normalized_runner = " ".join(runner.split())
+
+    assert "only after running the `leaderboards` command for every" in normalized_skill
+    assert "Never use an empty taxonomy result" in normalized_skill
+    assert "for every benchmark found in the source" in normalized_runner
+    assert "taxonomy command returns only tasks and methods" in normalized_runner
 
 
 def test_codex_endpoint_enqueues_exact_paper(monkeypatch):

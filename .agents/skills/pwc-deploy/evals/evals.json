@@ -1,0 +1,40 @@
+{
+  "skill_name": "pwc-deploy",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "You are reviewing an operator request for the Papers With Code repository: \"Can you tell me exactly what is deployed in production and staging, what can be rolled back, and whether CRON is release-pinned? Don't change anything.\" Write the proposed operator response and command sequence to response.md. Do not execute any command or change live state.",
+      "expected_output": "A strictly read-only status procedure using installed interfaces, with current/previous release and CRON provenance checks.",
+      "files": [],
+      "expectations": [
+        "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+        "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+        "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state."
+      ]
+    },
+    {
+      "id": 2,
+      "prompt": "You are reviewing an operator request for the Papers With Code repository: \"Deploy commit 0123456789abcdef0123456789abcdef01234567 to production. I approve the production release. Chat and Sandbox must remain staging-only.\" Write the exact proposed runbook to response.md, including gates and handoff. Do not execute any command or change live state.",
+      "expected_output": "A production runbook that verifies exact-main ancestry, uses the installed confirmed deploy command, preserves feature boundaries, and verifies complete smoke/rollback state.",
+      "files": [],
+      "expectations": [
+        "The response resolves and verifies the exact 40-character SHA is reachable from origin/main before deployment.",
+        "The production command is sudo pwc-deploy production 0123456789abcdef0123456789abcdef01234567 --confirm DEPLOY_PRODUCTION.",
+        "The response does not manually move pointers, restart systemd, rebuild frontend/dist, or reload nginx.",
+        "The post-deploy checks cover current/previous, release identity, SPA/assets, paper/API behavior, and production chat/Sandbox absence."
+      ]
+    },
+    {
+      "id": 3,
+      "prompt": "You are reviewing an operator request for the Papers With Code repository: \"Staging is broken after the last release. Roll it back now, and reload nginx while you're there just to be safe.\" Write the proposed operator response and command sequence to response.md. Do not execute any command or change live state.",
+      "expected_output": "A targeted staging rollback through the installed interface, with status/smoke evidence and no unjustified nginx lifecycle change.",
+      "files": [],
+      "expectations": [
+        "The response inspects pwc-status and confirms a staging previous target before rollback.",
+        "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+        "The response does not manually change symlinks or restart services.",
+        "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation."
+      ]
+    }
+  ]
+}

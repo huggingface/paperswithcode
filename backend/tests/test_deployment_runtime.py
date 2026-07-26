@@ -11,16 +11,20 @@ from pathlib import Path
 import pytest
 
 import deploy.cli as deploy_cli
+import deploy.configure_host_env as configure_host_env
+import deploy.cron_launcher as cron_launcher
+import deploy.run_backend as run_backend
 import deploy.smoke_test as smoke_test
+from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
+from backend.config import Settings
+from backend.services.runtime_validation import validate_chat_schema, validate_runtime
+from deploy.cli import _chat_descriptor_from_source
+from deploy.cli import parser_for
 from deploy.install_deploy_tools import (
     RUNTIME_CONTRACT_PATHS,
     bundle_runtime_contract,
     deployment_wrapper,
 )
-from backend.chat_sandbox_worker.contract import MODAL_IMAGE_ID
-from backend.config import Settings
-from backend.services.runtime_validation import validate_chat_schema, validate_runtime
-from deploy.cli import _chat_descriptor_from_source
 from deploy.nginx_validate import validate as validate_nginx
 from deploy.release import (
     atomic_symlink,
@@ -28,8 +32,7 @@ from deploy.release import (
     profile_features,
     validate_manifest,
 )
-from deploy.run_backend import configure_release_environment
-from deploy.run_backend import RELEASE_ROOT
+from deploy.run_backend import RELEASE_ROOT, configure_release_environment
 from deploy.smoke_test import validate_local_bundle
 
 
@@ -78,8 +81,8 @@ def test_installed_wrapper_preserves_command_parser(
     capsys: pytest.CaptureFixture[str],
 ):
     wrapper = deployment_wrapper(command)
-    assert f"export PWC_DEPLOY_PROGRAM={command}\n" in wrapper
-    monkeypatch.setenv("PWC_DEPLOY_PROGRAM", command)
+    assert f"export PWC_DEPLOY_COMMAND={command}\n" in wrapper
+    monkeypatch.setenv("PWC_DEPLOY_COMMAND", command)
     monkeypatch.setattr(sys, "argv", ["cli.py", "--help"])
 
     with pytest.raises(SystemExit) as exc:
@@ -152,7 +155,10 @@ def test_production_sha_resolves_from_bare_main_ref(
 
 def test_candidate_overrides_follow_environment_file(tmp_path: Path):
     release = tmp_path / "release"
-    manifest = {"release_id": "a" * 12 + "-production"}
+    manifest = {
+        "release_id": "a" * 12 + "-production",
+        "backend_features": profile_features("production"),
+    }
     command = deploy_cli.candidate_start_command(
         release, "production", manifest, 8123, "candidate-test"
     )
@@ -164,9 +170,13 @@ def test_candidate_overrides_follow_environment_file(tmp_path: Path):
     python = command.index(str(deploy_cli.VENV / "bin" / "python"))
     assert environment_file < env_command < python
     assert command[env_command + 1 : python] == [
-        "UVICORN_PORT=8123",
+        "PWC_PORT=8123",
         f"PWC_RELEASE_ID={manifest['release_id']}",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
+        "PWC_CHAT_ENABLED=false",
+        "PWC_CODEX_ADD_EVALS_ENABLED=true",
+        "PWC_CODEX_ENRICH_PAPER_ENABLED=true",
+        "PWC_CODEX_JOBS_ENABLED=true",
     ]
     assert "--setenv" not in command
 
@@ -181,6 +191,9 @@ def make_bundle(root: Path, *, chat: bool) -> Path:
     (dist / "index.html").write_text(
         '<script type="module" src="/assets/app-abc123.js"></script>'
         '<link rel="stylesheet" href="/assets/app-abc123.css">'
+    )
+    (dist / "features.json").write_text(
+        json.dumps(profile_features("staging" if chat else "production"))
     )
     (release / "backend").mkdir()
     (release / "backend" / "main.py").write_text("")
@@ -356,7 +369,9 @@ def test_deployed_runtime_rejects_source_shell(tmp_path: Path):
 
 def test_release_manifest_rejects_feature_mismatch(tmp_path: Path):
     release = make_bundle(tmp_path, chat=False)
-    (release / "frontend-dist" / "features.json").write_text('{"chat": true}')
+    features = profile_features("production")
+    features["codex_add_evals"] = False
+    (release / "frontend-dist" / "features.json").write_text(json.dumps(features))
     with pytest.raises(ValueError, match="features.json"):
         validate_manifest(release, "production")
 
@@ -430,12 +445,162 @@ def test_staging_runtime_rejects_public_gateway_origin(tmp_path: Path):
         validate_runtime(settings)
 
 
+def test_legacy_release_manifest_remains_a_valid_rollback_target(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=False)
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.pop("feature_contract_version")
+    manifest.pop("chat_runtime")
+    manifest["backend_features"] = {"chat": False}
+    manifest["frontend_features"] = {"chat": False}
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "frontend-dist" / "features.json").write_text(
+        json.dumps({"chat": False})
+    )
+
+    assert validate_manifest(release, "production")["git_sha"] == "a" * 40
+
+
+def test_v2_release_manifest_remains_a_valid_rollback_target(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=False)
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["feature_contract_version"] = 2
+    manifest.pop("chat_runtime")
+    manifest["backend_features"] = {
+        "chat": False,
+        "codex_add_evals": False,
+        "codex_enrich_paper": False,
+    }
+    manifest["frontend_features"] = manifest["backend_features"]
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "frontend-dist" / "features.json").write_text(
+        json.dumps(manifest["backend_features"])
+    )
+
+    assert validate_manifest(release, "production")["git_sha"] == "a" * 40
+
+
+def test_modal_bridge_manifest_remains_a_valid_rollback_target(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=False)
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest["chat_runtime"] = {
+        "enabled": False,
+        "new_chat_modal_percentage": 0,
+        "default_backend": "local_mcp",
+        "modal_image_version": "",
+        "pwc_cli_version": "",
+        "worker_contract_version": "",
+        "system_prompt_sha256": "",
+    }
+    manifest_path.write_text(json.dumps(manifest))
+
+    assert validate_manifest(release, "production")["git_sha"] == "a" * 40
+
+
+def test_staging_profile_keeps_unmediated_catalog_actions_hidden():
+    assert profile_features("staging") == {
+        "chat": True,
+        "codex_add_evals": False,
+        "codex_enrich_paper": False,
+    }
+
+
+def test_production_profile_enables_admin_catalog_actions():
+    assert profile_features("production") == {
+        "chat": False,
+        "codex_add_evals": True,
+        "codex_enrich_paper": True,
+    }
+
+
+@pytest.mark.parametrize(
+    ("environment", "expected"),
+    [
+        (
+            "production",
+            {
+                "VITE_CHAT_ENABLED": "0",
+                "VITE_CHAT_LIVE": "0",
+                "VITE_CODEX_ADD_EVALS_ENABLED": "1",
+                "VITE_CODEX_ENRICH_PAPER_ENABLED": "1",
+            },
+        ),
+        (
+            "staging",
+            {
+                "VITE_CHAT_ENABLED": "1",
+                "VITE_CHAT_LIVE": "1",
+                "VITE_CODEX_ADD_EVALS_ENABLED": "0",
+                "VITE_CODEX_ENRICH_PAPER_ENABLED": "0",
+            },
+        ),
+    ],
+)
+def test_frontend_build_flags_follow_release_profile(environment: str, expected: dict):
+    assert deploy_cli.frontend_feature_environment(environment) == expected
+
+
+def test_production_codex_jobs_require_all_credentials(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=False)
+    settings = deployed_settings(tmp_path, release, "production")
+    settings.codex_jobs_token = ""
+    with pytest.raises(RuntimeError, match="production Codex jobs require"):
+        validate_runtime(settings)
+
+
+def test_backend_launcher_uses_release_specific_feature_flags(
+    tmp_path: Path, monkeypatch
+):
+    release = make_bundle(tmp_path, chat=False)
+    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
+    run_backend.configure_release_environment(release)
+    assert os.environ["PWC_CODEX_JOBS_ENABLED"] == "true"
+    assert os.environ["PWC_CODEX_ADD_EVALS_ENABLED"] == "true"
+    assert os.environ["PWC_CODEX_ENRICH_PAPER_ENABLED"] == "true"
+
+
+def test_backend_launcher_disables_features_for_legacy_rollback(
+    tmp_path: Path, monkeypatch
+):
+    release = make_bundle(tmp_path, chat=False)
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    manifest.pop("feature_contract_version")
+    manifest.pop("chat_runtime")
+    manifest["backend_features"] = {"chat": False}
+    manifest["frontend_features"] = {"chat": False}
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "frontend-dist" / "features.json").write_text(
+        json.dumps({"chat": False})
+    )
+    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
+    run_backend.configure_release_environment(release)
+    assert os.environ["PWC_CODEX_JOBS_ENABLED"] == "false"
+    assert os.environ["PWC_CODEX_ADD_EVALS_ENABLED"] == "false"
+    assert os.environ["PWC_CODEX_ENRICH_PAPER_ENABLED"] == "false"
+
+
 def test_smoke_bundle_parser_catches_missing_asset(tmp_path: Path):
     release = make_bundle(tmp_path, chat=False)
     (release / "frontend-dist" / "assets" / "app-abc123.js").unlink()
     assert any(
-        "missing asset" in item for item in validate_local_bundle(release, False)
+        "missing asset" in item
+        for item in validate_local_bundle(release, profile_features("production"))
     )
+
+
+def test_smoke_script_runs_from_outside_repository(tmp_path: Path):
+    script = Path(__file__).parents[2] / "deploy" / "smoke_test.py"
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        cwd=tmp_path,
+        check=False,
+        text=True,
+        capture_output=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 def test_staging_smoke_accepts_versioned_feature_manifest(tmp_path: Path):
@@ -522,6 +687,13 @@ def test_activation_rollback_restores_runtime_before_restart(
         "log_event",
         lambda *_args, **_kwargs: events.append("logged"),
     )
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda *_args, **_kwargs: {"release_id": "previous"},
+    )
+    monkeypatch.setattr(deploy_cli, "wait_for_release", lambda *_args: True)
+    monkeypatch.setattr(deploy_cli, "smoke_public", lambda *_args: None)
 
     deploy_cli.rollback_after_failed_activation(
         "staging", failed, previous_runtime_lock="old-lock"
@@ -603,3 +775,137 @@ def test_runtime_sync_failure_restores_previous_lock(
         deploy_cli.sync_runtime_with_recovery(tmp_path, "old-lock")
 
     assert events == ["sync", ("restore", "old-lock")]
+
+
+@pytest.mark.parametrize(
+    ("program", "arguments", "handler"),
+    [
+        ("pwc-deploy", ["staging", "abc123"], "deploy"),
+        ("pwc-rollback", ["staging"], "rollback"),
+        ("pwc-cleanup", ["--confirm", "CLEAN_RELEASES"], "cleanup_command"),
+        ("pwc-status", [], "status"),
+    ],
+)
+def test_installed_deployment_command_dispatch(program, arguments, handler):
+    args = parser_for(program).parse_args(arguments)
+    assert args.handler.__name__ == handler
+
+
+def test_environment_config_directory_is_search_only(tmp_path: Path, monkeypatch):
+    config = tmp_path / "paperswithcode" / "staging.env"
+    monkeypatch.setattr(configure_host_env.os, "chown", lambda *_: None)
+    monkeypatch.setattr(
+        configure_host_env.grp,
+        "getgrnam",
+        lambda _group: type("Group", (), {"gr_gid": 123})(),
+    )
+
+    configure_host_env.write_env(config, {"KEY": "KEY=value"}, "pwc-staging")
+
+    assert config.parent.stat().st_mode & 0o777 == 0o711
+    assert config.stat().st_mode & 0o777 == 0o640
+
+
+def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
+    values = configure_host_env.production_codex_values(
+        {
+            "OPENAI_API_KEY": "OPENAI_API_KEY=openai-secret",
+            "PWC_HF_TOKEN": "PWC_HF_TOKEN=hf-secret",
+        },
+        "nielsr",
+    )
+    assert values == {
+        "PWC_CODEX_ADD_EVALS_ENABLED": "false",
+        "PWC_CODEX_ENRICH_PAPER_ENABLED": "false",
+        "PWC_CODEX_JOBS_ENABLED": "false",
+        "PWC_CODEX_JOBS_NAMESPACE": "nielsr",
+        "PWC_CODEX_JOBS_OPENAI_API_KEY": "openai-secret",
+        "PWC_CODEX_JOBS_TOKEN": "hf-secret",
+    }
+
+
+def test_cron_jobs_declare_bounded_execution_contracts():
+    assert cron_launcher.COMMANDS
+    for spec in cron_launcher.COMMANDS.values():
+        assert spec.command
+        assert spec.timeout in {"30m", "50m", "2h", "6h"}
+        assert spec.mutates_shared_data is True
+        assert spec.idempotency
+        assert spec.health_job
+
+
+def test_cron_status_reports_exact_production_release(
+    tmp_path: Path, monkeypatch, capsys
+):
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "release.json").write_text(
+        json.dumps(
+            {
+                "release_id": "a" * 12 + "-production",
+                "git_sha": "a" * 40,
+            }
+        )
+    )
+    monkeypatch.setattr(cron_launcher, "CURRENT", current)
+    monkeypatch.setattr(cron_launcher.sys, "argv", ["pwc-cron", "status"])
+
+    assert cron_launcher.main() == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["environment"] == "production"
+    assert status["release_id"] == "a" * 12 + "-production"
+    assert status["git_sha"] == "a" * 40
+    assert status["jobs"]["refresh_paper_embeddings"]["timeout"] == "6h"
+
+
+def test_shared_runtime_is_made_service_readable(tmp_path: Path, monkeypatch):
+    runtime = tmp_path / ".venv"
+    package = runtime / "lib" / "package.py"
+    base = tmp_path / "base-python"
+    neutral_base = tmp_path / "python-runtime"
+    interpreter = base / "bin" / "python3.12"
+    package.parent.mkdir(parents=True)
+    (runtime / "bin").mkdir()
+    interpreter.parent.mkdir(parents=True)
+    package.write_text("value = 1\n")
+    interpreter.write_text("python")
+    interpreter.chmod(0o755)
+    (runtime / "bin" / "python").symlink_to(interpreter)
+    (runtime / "pyvenv.cfg").write_text(f"home = {base / 'bin'}\n")
+    runtime.chmod(0o700)
+    package.parent.chmod(0o700)
+    package.chmod(0o600)
+    monkeypatch.setattr(deploy_cli, "VENV", runtime)
+    monkeypatch.setattr(deploy_cli, "PYTHON_RUNTIME", neutral_base)
+
+    deploy_cli.make_runtime_readable()
+
+    assert runtime.stat().st_mode & 0o055 == 0o055
+    assert package.parent.stat().st_mode & 0o055 == 0o055
+    assert package.stat().st_mode & 0o044 == 0o044
+    assert (runtime / "bin" / "python").resolve() == (
+        neutral_base / "bin" / "python3.12"
+    )
+    assert str(neutral_base) in (runtime / "pyvenv.cfg").read_text()
+
+
+def test_immutable_release_is_world_readable(tmp_path: Path):
+    release = tmp_path / "release"
+    package = release / "backend"
+    module = package / "main.py"
+    script = release / "scripts" / "job.sh"
+    package.mkdir(parents=True)
+    script.parent.mkdir()
+    module.write_text("app = object()\n")
+    script.write_text("#!/bin/sh\n")
+    package.chmod(0o700)
+    module.chmod(0o600)
+    script.chmod(0o700)
+
+    deploy_cli.make_release_readable(release)
+
+    assert release.stat().st_mode & 0o555 == 0o555
+    assert package.stat().st_mode & 0o555 == 0o555
+    assert module.stat().st_mode & 0o444 == 0o444
+    assert script.stat().st_mode & 0o555 == 0o555
+    assert module.stat().st_mode & 0o222 == 0

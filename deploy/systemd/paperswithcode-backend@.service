@@ -2,6 +2,8 @@
 Description=Papers With Code backend (%i)
 After=network-online.target postgresql.service postgresql@16-main.service
 Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
 
 [Service]
 Type=simple
@@ -12,8 +14,6 @@ EnvironmentFile=/etc/paperswithcode/%i.env
 ExecStart=/srv/paperswithcode/.venv/bin/python deploy/run_backend.py
 Restart=on-failure
 RestartSec=3
-StartLimitIntervalSec=60
-StartLimitBurst=5
 TimeoutStartSec=60
 TimeoutStopSec=30
 KillSignal=SIGTERM

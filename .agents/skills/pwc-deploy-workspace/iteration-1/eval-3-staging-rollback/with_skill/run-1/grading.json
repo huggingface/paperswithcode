@@ -1,0 +1,29 @@
+{
+  "expectations": [
+    {
+      "text": "The response inspects pwc-status and confirms a staging previous target before rollback.",
+      "passed": true,
+      "evidence": "It starts with pwc-status and has an explicit gate requiring staging/previous and its full SHA."
+    },
+    {
+      "text": "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+      "passed": true,
+      "evidence": "It uses exactly sudo pwc-rollback staging."
+    },
+    {
+      "text": "The response does not manually change symlinks or restart services.",
+      "passed": true,
+      "evidence": "It explicitly prohibits pointer changes and service restarts."
+    },
+    {
+      "text": "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation.",
+      "passed": false,
+      "evidence": "It treats the user's precautionary reload request as sufficient and proposes pwc-nginx staging despite identifying no checked-in nginx change."
+    }
+  ],
+  "summary": {"passed": 3, "failed": 1, "total": 4, "pass_rate": 0.75},
+  "execution_metrics": {"total_tool_calls": 0, "errors_encountered": 0, "output_chars": 2181},
+  "timing": {"total_duration_seconds": 0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": ["Unjustified nginx lifecycle action"], "workarounds": []}
+}

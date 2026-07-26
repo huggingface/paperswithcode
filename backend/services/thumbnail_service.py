@@ -682,6 +682,11 @@ class ThumbnailService:
             image.save(
                 cache_path, "JPEG", quality=self.thumbnail_quality, optimize=True
             )
+            # The shared cache is written by cron/admin processes but served by
+            # the unprivileged production backend. Thumbnail contents are
+            # public, so make every generated JPEG readable across service users
+            # regardless of the writer's umask.
+            cache_path.chmod(0o644)
         except Exception as e:
             raise ThumbnailGenerationError(f"Failed to save thumbnail: {str(e)}")
 

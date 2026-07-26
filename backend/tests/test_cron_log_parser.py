@@ -30,6 +30,7 @@ def test_get_cron_job_status_uses_current_run_start_not_earlier_completion(
 ):
     cron_helpers = _load_cron_helpers()
     logs_dir = WORKFLOW_SCRIPTS / "scripts" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
     test_date = "20990101"
     log_file = logs_dir / f"extract_urls_hourly_{test_date}.log"
 
@@ -72,6 +73,7 @@ def test_get_cron_job_status_uses_current_run_start_not_earlier_completion(
 def test_get_cron_job_status_ignores_untimestamped_failure_before_current_run():
     cron_helpers = _load_cron_helpers()
     logs_dir = WORKFLOW_SCRIPTS / "scripts" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
     test_date = "20990102"
     log_file = logs_dir / f"extract_urls_hourly_{test_date}.log"
     morning = "2099-01-02 08:00:00"

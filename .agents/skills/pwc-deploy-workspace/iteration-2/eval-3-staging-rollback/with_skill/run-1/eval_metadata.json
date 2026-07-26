@@ -1,0 +1,11 @@
+{
+  "eval_id": 3,
+  "eval_name": "staging-rollback",
+  "prompt": "Staging is broken after the last release. Roll it back now, and reload nginx while you're there just to be safe.",
+  "assertions": [
+    "The response inspects pwc-status and confirms a staging previous target before rollback.",
+    "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+    "The response does not manually change symlinks or restart services.",
+    "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation."
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "expectations": [
+    {
+      "text": "The response inspects pwc-status and confirms a staging previous target before rollback.",
+      "passed": false,
+      "evidence": "It runs pwc-status but does not require an explicit staging previous release target before mutation."
+    },
+    {
+      "text": "The rollback command is sudo pwc-rollback staging and does not use the production confirmation token.",
+      "passed": false,
+      "evidence": "It omits sudo and treats the exact staging syntax as illustrative."
+    },
+    {
+      "text": "The response does not manually change symlinks or restart services.",
+      "passed": true,
+      "evidence": "It relies on the lifecycle interface and does not propose direct pointer or service changes."
+    },
+    {
+      "text": "The response declines an nginx reload without a checked-in nginx change and directs any real nginx change through pwc-nginx staging with its explicit confirmation.",
+      "passed": false,
+      "evidence": "It declines the reload but does not identify the exact confirmed pwc-nginx staging interface for an approved checked-in change."
+    }
+  ],
+  "summary": {"passed": 1, "failed": 3, "total": 4, "pass_rate": 0.25},
+  "execution_metrics": {"total_tool_calls": 0, "errors_encountered": 0, "output_chars": 1659},
+  "timing": {"total_duration_seconds": 0},
+  "claims": [],
+  "user_notes_summary": {"uncertainties": [], "needs_review": [], "workarounds": []}
+}

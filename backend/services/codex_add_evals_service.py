@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import secrets
 import subprocess
@@ -85,13 +86,26 @@ def _launch_error(exc: Exception) -> str:
     return f"Could not launch Hugging Face Job ({type(exc).__name__})."
 
 
+def _release_git_revision(root: Path) -> str | None:
+    try:
+        manifest = json.loads((root / "release.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    revision = manifest.get("git_sha")
+    return revision if isinstance(revision, str) and len(revision) == 40 else None
+
+
 def _git_revision() -> str:
     configured_revision = os.getenv("PWC_CODEX_JOBS_GIT_SHA", "").strip()
     if configured_revision:
         return configured_revision
+    root = Path(__file__).parents[2]
+    release_revision = _release_git_revision(root)
+    if release_revision:
+        return release_revision
     try:
         return subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], text=True, cwd=Path(__file__).parents[2]
+            ["git", "rev-parse", "HEAD"], text=True, cwd=root
         ).strip()
     except (OSError, subprocess.CalledProcessError):
         return "HEAD"

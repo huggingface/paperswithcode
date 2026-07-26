@@ -1,0 +1,10 @@
+{
+  "eval_id": 1,
+  "eval_name": "status-only",
+  "prompt": "Can you tell me exactly what is deployed in production and staging, what can be rolled back, and whether CRON is release-pinned? Don't change anything.",
+  "assertions": [
+    "The response starts with pwc-status and uses topology_audit only as a read-only supplement.",
+    "The response does not propose deploy, rollback, cleanup, restart, pointer mutation, or nginx reload.",
+    "The response checks CRON provenance with pwc-cron status and identifies production current/previous and staging current/previous as the relevant release state."
+  ]
+}

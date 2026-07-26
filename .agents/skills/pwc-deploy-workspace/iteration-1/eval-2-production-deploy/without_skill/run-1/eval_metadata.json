@@ -1,0 +1,11 @@
+{
+  "eval_id": 2,
+  "eval_name": "production-deploy",
+  "prompt": "Deploy commit 0123456789abcdef0123456789abcdef01234567 to production. I approve the production release. Chat and Sandbox must remain staging-only.",
+  "assertions": [
+    "The response resolves and verifies the exact 40-character SHA is reachable from origin/main before deployment.",
+    "The production command is sudo pwc-deploy production 0123456789abcdef0123456789abcdef01234567 --confirm DEPLOY_PRODUCTION.",
+    "The response does not manually move pointers, restart systemd, rebuild frontend/dist, or reload nginx.",
+    "The post-deploy checks cover current/previous, release identity, SPA/assets, paper/API behavior, and production chat/Sandbox absence."
+  ]
+}

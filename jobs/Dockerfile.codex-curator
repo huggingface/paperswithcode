@@ -1,0 +1,10 @@
+FROM node:22-bookworm
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl git python3 ca-certificates \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -LsSf https://astral.sh/uv/install.sh | sh \
+    && npm install --global @openai/codex
+
+ENV PATH="/root/.local/bin:${PATH}"
+WORKDIR /runner
+COPY jobs/run_paper_curation.py /runner/run_paper_curation.py
