@@ -590,6 +590,7 @@ def test_chat_endpoint_requires_authentication(monkeypatch):
 
 def test_chat_endpoint_stream_contract(monkeypatch):
     from backend.routers import chat as chat_router
+    from backend.services import chat_stream_service
 
     async def fake_stream(_prompt, _settings, **_kwargs):
         yield {"type": "answer_delta", "text": "hello"}
@@ -659,12 +660,13 @@ def test_chat_endpoint_stream_contract(monkeypatch):
             return None
 
     monkeypatch.setattr(
-        chat_router,
+        chat_stream_service,
         "create_chat_turn_runner",
         lambda **_kwargs: FakeRunner(),
     )
-    monkeypatch.setattr(chat_router, "stream_title", fake_title)
+    monkeypatch.setattr(chat_stream_service, "stream_title", fake_title)
     monkeypatch.setattr(chat_router, "ChatSessionService", FakeService)
+    monkeypatch.setattr(chat_stream_service, "ChatSessionService", FakeService)
     monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)
     monkeypatch.setattr(chat_router, "_admission", chat_router._AdmissionControl())
     monkeypatch.setattr(

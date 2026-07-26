@@ -14,7 +14,7 @@ class ProtocolError(RuntimeError):
 
 
 class WorkerEventValidator:
-    """Reject duplicate terminals and uncorrelated tool results."""
+    """Validate the event sequence emitted by one worker process."""
 
     allowed = {
         "worker_ready",
@@ -36,11 +36,18 @@ class WorkerEventValidator:
         self.tools: set[str] = set()
         self.results: set[str] = set()
         self.terminal = False
+        self.worker_done = False
 
-    def accept(self, event: dict[str, Any]) -> None:
+    def accept(
+        self, event: dict[str, Any], *, allow_terminal_less_stop: bool = False
+    ) -> None:
         kind = event.get("type")
         if kind not in self.allowed:
             raise ProtocolError("Unknown worker event type")
+        if self.worker_done:
+            raise ProtocolError("Worker event followed worker completion")
+        if self.terminal and kind in {"done", "error"}:
+            raise ProtocolError("Duplicate terminal worker event")
         if self.terminal and kind != "worker_done":
             raise ProtocolError("Worker event followed a terminal event")
         if kind == "tool_call":
@@ -54,9 +61,22 @@ class WorkerEventValidator:
                 raise ProtocolError("Uncorrelated or duplicate tool result")
             self.results.add(tool_id)
         elif kind in {"done", "error"}:
-            if self.terminal:
-                raise ProtocolError("Duplicate terminal worker event")
             self.terminal = True
+        elif kind == "worker_done":
+            status = event.get("status")
+            if status not in {"complete", "stopped"}:
+                raise ProtocolError("Invalid worker completion status")
+            if status == "complete" and not self.terminal:
+                raise ProtocolError(
+                    "Worker completed without a semantic terminal event"
+                )
+            if (
+                status == "stopped"
+                and not self.terminal
+                and not allow_terminal_less_stop
+            ):
+                raise ProtocolError("Worker stopped without a correlated cancellation")
+            self.worker_done = True
 
 
 def encode_frame(payload: dict[str, Any]) -> bytes:

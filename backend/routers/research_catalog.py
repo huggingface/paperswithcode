@@ -9,7 +9,8 @@ from sqlalchemy.orm import Session
 from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
 from backend.services.paper_lineage_service import get_paper_lineage
-from backend.services.paper_markdown_service import read_paper_markdown
+from backend.services.paper_markdown_service import read_paper_markdown_bounded
+from backend.utils.auth import require_user
 
 router = APIRouter(prefix="/research", tags=["research"])
 _MARKDOWN_MAX_BYTES = 256 * 1024
@@ -18,30 +19,27 @@ _MARKDOWN_MAX_BYTES = 256 * 1024
 @router.get("/papers/{paper_id}/read", response_class=PlainTextResponse)
 def read_paper(
     paper_id: str = Path(min_length=1, max_length=64),
+    user: dict = Depends(require_user),
     settings: Settings = Depends(get_settings),
 ) -> PlainTextResponse:
+    del user
     try:
-        markdown = read_paper_markdown(
+        markdown, truncated = read_paper_markdown_bounded(
             paper_id,
             bucket_id=settings.paper_markdown_hf_bucket_id,
             token=settings.hf_token or None,
+            max_bytes=_MARKDOWN_MAX_BYTES,
         )
     except ValueError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
-    raw = markdown.encode("utf-8")
-    truncated = len(raw) > _MARKDOWN_MAX_BYTES
     if truncated:
-        raw = raw[:_MARKDOWN_MAX_BYTES]
-        while raw:
-            try:
-                markdown = raw.decode("utf-8")
-                break
-            except UnicodeDecodeError as error:
-                raw = raw[: error.start]
         markdown += "\n\n[document truncated; request a narrower catalog view]\n"
     return PlainTextResponse(
         markdown,
-        headers={"X-PWC-Truncated": "1" if truncated else "0"},
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-PWC-Truncated": "1" if truncated else "0",
+        },
     )
 
 

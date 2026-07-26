@@ -41,10 +41,18 @@ class SandboxError(RuntimeError):
         self.uncertain = uncertain
 
 
-@dataclass(frozen=True)
+@dataclass
 class RunningWorker:
     process: object
     request_id: str
+    cancel_requested: bool = False
+
+
+@dataclass(frozen=True)
+class StartClaim:
+    token_hash: str
+    stale_sandbox_id: str | None
+    snapshot_id: str | None
 
 
 async def resolve_modal_image(image_reference: str):
@@ -178,79 +186,148 @@ class SandboxSessionManager:
             query = query.with_for_update()
         return db.execute(query).scalar_one_or_none()
 
+    @staticmethod
+    def _token_hash(token: str) -> str:
+        return hashlib.sha256(token.encode()).hexdigest()
+
+    def _claim_start(
+        self,
+        lease: ChatSandboxLease,
+        *,
+        creation_token: str,
+        now: datetime,
+    ) -> StartClaim:
+        snapshot_id = None
+        if (
+            self.settings.chat_workspace_snapshots_enabled
+            and lease.workspace_snapshot_id
+            and lease.snapshot_image_version == self.settings.chat_modal_image_version
+        ):
+            snapshot_id = lease.workspace_snapshot_id
+        elif lease.workspace_snapshot_id:
+            lease.workspace_snapshot_id = None
+            lease.snapshot_image_version = None
+            lease.snapshot_updated_at = None
+
+        token_hash = self._token_hash(creation_token)
+        claim = StartClaim(token_hash, lease.modal_sandbox_id, snapshot_id)
+        lease.state = "starting"
+        lease.modal_sandbox_id = None
+        lease.app_release_id = self.settings.release_id
+        lease.image_version = self.settings.chat_modal_image_version
+        lease.worker_contract_version = self.settings.chat_worker_contract_version
+        lease.lease_token_hash = token_hash
+        lease.lease_expires_at = now + timedelta(
+            seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
+        )
+        lease.failure_code = None
+        lease.updated_at = now
+        return claim
+
+    @staticmethod
+    def _unexpired(lease: ChatSandboxLease, now: datetime) -> bool:
+        expires_at = lease.lease_expires_at
+        if expires_at is None:
+            return False
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=UTC)
+        return expires_at > now
+
+    def _finish_owned_operation(
+        self,
+        chat_session_id: uuid.UUID,
+        *,
+        token_hash: str,
+        expected_state: str,
+        expected_sandbox_id: str | None,
+        state: str,
+        failure_code: str | None,
+        clear_sandbox: bool,
+    ) -> bool:
+        with self.session_factory() as db, db.begin():
+            lease = self._lease(db, chat_session_id, lock=True)
+            if not (
+                lease
+                and lease.state == expected_state
+                and lease.lease_token_hash == token_hash
+                and lease.modal_sandbox_id == expected_sandbox_id
+            ):
+                return False
+            if clear_sandbox:
+                lease.modal_sandbox_id = None
+            lease.state = state
+            lease.failure_code = failure_code
+            lease.lease_token_hash = None
+            lease.lease_expires_at = None
+            lease.updated_at = datetime.now(UTC)
+            return True
+
     async def ensure_ready(
         self, chat_session_id: uuid.UUID
     ) -> tuple[object, int, bool]:
         started = time.perf_counter()
-        creation_token = secrets.token_urlsafe(24)
-        stale_sandbox_id: str | None = None
-        snapshot_id: str | None = None
-        with self.session_factory() as db, db.begin():
-            lease = self._lease(db, chat_session_id, lock=True)
-            compatible = bool(
-                lease
-                and lease.image_version == self.settings.chat_modal_image_version
-                and lease.worker_contract_version
-                == self.settings.chat_worker_contract_version
-            )
-            if (
-                lease
-                and compatible
-                and lease.modal_sandbox_id
-                and lease.state in {"ready", "idle", "busy"}
-            ):
-                sandbox_id = lease.modal_sandbox_id
-            else:
-                sandbox_id = None
-                if lease is None:
+        deadline = time.monotonic() + self.settings.chat_sandbox_ready_timeout_seconds
+        claim: StartClaim | None = None
+        sandbox_id: str | None = None
+        while claim is None and sandbox_id is None:
+            creation_token = secrets.token_urlsafe(24)
+            now = datetime.now(UTC)
+            waiting_for_owner = False
+            with self.session_factory() as db, db.begin():
+                lease = self._lease(db, chat_session_id, lock=True)
+                compatible = bool(
+                    lease
+                    and lease.image_version == self.settings.chat_modal_image_version
+                    and lease.worker_contract_version
+                    == self.settings.chat_worker_contract_version
+                )
+                if (
+                    lease
+                    and compatible
+                    and lease.modal_sandbox_id
+                    and lease.state in {"ready", "idle", "busy"}
+                ):
+                    sandbox_id = lease.modal_sandbox_id
+                elif (
+                    lease
+                    and compatible
+                    and lease.state == "starting"
+                    and lease.lease_token_hash
+                    and self._unexpired(lease, now)
+                ):
+                    waiting_for_owner = True
+                elif lease is None:
+                    token_hash = self._token_hash(creation_token)
                     lease = ChatSandboxLease(
                         chat_session_id=chat_session_id,
                         app_release_id=self.settings.release_id,
                         image_version=self.settings.chat_modal_image_version,
                         worker_contract_version=self.settings.chat_worker_contract_version,
                         state="starting",
-                        lease_token_hash=hashlib.sha256(
-                            creation_token.encode()
-                        ).hexdigest(),
-                        lease_expires_at=datetime.now(UTC)
+                        lease_token_hash=token_hash,
+                        lease_expires_at=now
                         + timedelta(
                             seconds=self.settings.chat_sandbox_ready_timeout_seconds
                             + 15
                         ),
-                        last_activity_at=datetime.now(UTC),
+                        last_activity_at=now,
                     )
                     db.add(lease)
+                    claim = StartClaim(token_hash, None, None)
                 else:
-                    stale_sandbox_id = lease.modal_sandbox_id
-                    if (
-                        self.settings.chat_workspace_snapshots_enabled
-                        and lease.workspace_snapshot_id
-                        and lease.snapshot_image_version
-                        == self.settings.chat_modal_image_version
-                    ):
-                        snapshot_id = lease.workspace_snapshot_id
-                    elif lease.workspace_snapshot_id:
-                        lease.workspace_snapshot_id = None
-                        lease.snapshot_image_version = None
-                        lease.snapshot_updated_at = None
-                    lease.state = "starting"
-                    lease.modal_sandbox_id = None
-                    lease.app_release_id = self.settings.release_id
-                    lease.image_version = self.settings.chat_modal_image_version
-                    lease.worker_contract_version = (
-                        self.settings.chat_worker_contract_version
+                    claim = self._claim_start(
+                        lease, creation_token=creation_token, now=now
                     )
-                    lease.lease_token_hash = hashlib.sha256(
-                        creation_token.encode()
-                    ).hexdigest()
-                    lease.lease_expires_at = datetime.now(UTC) + timedelta(
-                        seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
+            if waiting_for_owner:
+                if time.monotonic() >= deadline:
+                    raise SandboxError(
+                        "sandbox_timeout", "Secure workspace startup timed out"
                     )
-                    lease.failure_code = None
+                await asyncio.sleep(0.05)
 
-        if stale_sandbox_id:
+        if claim and claim.stale_sandbox_id:
             try:
-                stale = await modal.Sandbox.from_id.aio(stale_sandbox_id)
+                stale = await modal.Sandbox.from_id.aio(claim.stale_sandbox_id)
                 await stale.terminate.aio(wait=False)
             except Exception:
                 pass
@@ -274,17 +351,20 @@ class SandboxSessionManager:
                 pass
             with self.session_factory() as db, db.begin():
                 lease = self._lease(db, chat_session_id, lock=True)
-                if lease and lease.modal_sandbox_id == sandbox_id:
-                    lease.modal_sandbox_id = None
-                    lease.state = "starting"
-                    if (
-                        self.settings.chat_workspace_snapshots_enabled
-                        and lease.workspace_snapshot_id
-                        and lease.snapshot_image_version
-                        == self.settings.chat_modal_image_version
-                    ):
-                        snapshot_id = lease.workspace_snapshot_id
+                if (
+                    lease
+                    and lease.modal_sandbox_id == sandbox_id
+                    and lease.state in {"ready", "idle", "busy"}
+                ):
+                    claim = self._claim_start(
+                        lease,
+                        creation_token=secrets.token_urlsafe(24),
+                        now=datetime.now(UTC),
+                    )
+            if claim is None:
+                return await self.ensure_ready(chat_session_id)
 
+        assert claim is not None
         try:
             async with asyncio.timeout(
                 self.settings.chat_sandbox_ready_timeout_seconds
@@ -300,24 +380,31 @@ class SandboxSessionManager:
                         "image": self.settings.chat_modal_image_version,
                     },
                 )
-                if snapshot_id:
+                if claim.snapshot_id:
                     try:
-                        await self.snapshots.restore(sandbox, snapshot_id)
+                        await self.snapshots.restore(sandbox, claim.snapshot_id)
                     except Exception:
-                        snapshot_id = None
                         with self.session_factory() as db, db.begin():
                             lease = self._lease(db, chat_session_id, lock=True)
-                            if lease:
+                            if (
+                                lease
+                                and lease.state == "starting"
+                                and lease.lease_token_hash == claim.token_hash
+                            ):
                                 lease.workspace_snapshot_id = None
                                 lease.snapshot_image_version = None
                                 lease.snapshot_updated_at = None
         except TimeoutError as error:
-            self._mark_failed(chat_session_id, "sandbox_timeout")
+            self._mark_start_failed(
+                chat_session_id, claim.token_hash, "sandbox_timeout"
+            )
             raise SandboxError(
                 "sandbox_timeout", "Secure workspace startup timed out"
             ) from error
         except Exception as error:
-            self._mark_failed(chat_session_id, "sandbox_start_failed")
+            self._mark_start_failed(
+                chat_session_id, claim.token_hash, "sandbox_start_failed"
+            )
             raise SandboxError(
                 "sandbox_start_failed", "Secure workspace startup failed"
             ) from error
@@ -328,8 +415,9 @@ class SandboxSessionManager:
             lease = self._lease(db, chat_session_id, lock=True)
             if (
                 lease
-                and lease.lease_token_hash
-                == hashlib.sha256(creation_token.encode()).hexdigest()
+                and lease.state == "starting"
+                and lease.lease_token_hash == claim.token_hash
+                and lease.modal_sandbox_id is None
             ):
                 lease.modal_sandbox_id = sandbox_id
                 lease.state = "ready"
@@ -346,14 +434,18 @@ class SandboxSessionManager:
             )
         return sandbox, round((time.perf_counter() - started) * 1000), True
 
-    def _mark_failed(self, chat_session_id: uuid.UUID, code: str) -> None:
-        with self.session_factory() as db, db.begin():
-            lease = self._lease(db, chat_session_id, lock=True)
-            if lease:
-                lease.state = "failed"
-                lease.failure_code = code
-                lease.lease_token_hash = None
-                lease.lease_expires_at = None
+    def _mark_start_failed(
+        self, chat_session_id: uuid.UUID, token_hash: str, code: str
+    ) -> bool:
+        return self._finish_owned_operation(
+            chat_session_id,
+            token_hash=token_hash,
+            expected_state="starting",
+            expected_sandbox_id=None,
+            state="failed",
+            failure_code=code,
+            clear_sandbox=False,
+        )
 
     async def run_turn(
         self,
@@ -389,7 +481,8 @@ class SandboxSessionManager:
             workdir="/workspace",
             text=False,
         )
-        self._processes[turn_id] = RunningWorker(process, request_id)
+        running_worker = RunningWorker(process, request_id)
+        self._processes[turn_id] = running_worker
         launch = {
             "capability": capability.token,
             "gateway_url": self.settings.chat_gateway_url,
@@ -434,7 +527,10 @@ class SandboxSessionManager:
                         event = decode_frame(line)
                         if event.get("request_id") != request_id:
                             raise ProtocolError("Uncorrelated worker frame")
-                        validator.accept(event)
+                        validator.accept(
+                            event,
+                            allow_terminal_less_stop=running_worker.cancel_requested,
+                        )
                         if event["type"] == "worker_done":
                             terminal = True
                             continue
@@ -482,6 +578,7 @@ class SandboxSessionManager:
         running = self._processes.get(turn_id)
         if running is None:
             return False
+        running.cancel_requested = True
         process = running.process
         process.stdin.write(
             encode_frame(
@@ -504,24 +601,34 @@ class SandboxSessionManager:
         self, chat_session_id: uuid.UUID, *, failure_code: str | None = None
     ) -> None:
         sandbox_id: str | None = None
+        token_hash: str | None = None
         with self.session_factory() as db, db.begin():
             lease = self._lease(db, chat_session_id, lock=True)
             if lease:
                 sandbox_id = lease.modal_sandbox_id
+                token_hash = self._token_hash(secrets.token_urlsafe(24))
                 lease.state = "terminating"
                 lease.failure_code = failure_code
+                lease.lease_token_hash = token_hash
+                lease.lease_expires_at = datetime.now(UTC) + timedelta(
+                    seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
+                )
         if sandbox_id:
             try:
                 sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
                 await sandbox.terminate.aio(wait=False)
             except Exception:
                 pass
-        with self.session_factory() as db, db.begin():
-            lease = self._lease(db, chat_session_id, lock=True)
-            if lease:
-                lease.modal_sandbox_id = None
-                lease.state = "failed" if failure_code else "terminated"
-                lease.updated_at = datetime.now(UTC)
+        if token_hash:
+            self._finish_owned_operation(
+                chat_session_id,
+                token_hash=token_hash,
+                expected_state="terminating",
+                expected_sandbox_id=sandbox_id,
+                state="failed" if failure_code else "terminated",
+                failure_code=failure_code,
+                clear_sandbox=True,
+            )
 
     async def cleanup_deleted(
         self, sandbox_id: str | None, snapshot_id: str | None
@@ -565,6 +672,7 @@ class SandboxSessionManager:
         return sum(results)
 
     async def snapshot_and_terminate(self, chat_session_id: uuid.UUID) -> bool:
+        token_hash = self._token_hash(secrets.token_urlsafe(24))
         with self.session_factory() as db, db.begin():
             lease = self._lease(db, chat_session_id, lock=True)
             if lease is None or lease.state != "idle" or not lease.modal_sandbox_id:
@@ -574,6 +682,10 @@ class SandboxSessionManager:
                 self.settings.chat_workspace_snapshots_enabled and lease.workspace_dirty
             )
             lease.state = "terminating"
+            lease.lease_token_hash = token_hash
+            lease.lease_expires_at = datetime.now(UTC) + timedelta(
+                seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
+            )
         if should_snapshot and sandbox_id:
             try:
                 sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
@@ -584,6 +696,7 @@ class SandboxSessionManager:
                         lease
                         and lease.state == "terminating"
                         and lease.modal_sandbox_id == sandbox_id
+                        and lease.lease_token_hash == token_hash
                     ):
                         lease.workspace_snapshot_id = snapshot_id
                         lease.snapshot_image_version = (
@@ -600,16 +713,15 @@ class SandboxSessionManager:
             await sandbox.terminate.aio(wait=False)
         except Exception:
             pass
-        with self.session_factory() as db, db.begin():
-            lease = self._lease(db, chat_session_id, lock=True)
-            if (
-                lease
-                and lease.state == "terminating"
-                and lease.modal_sandbox_id == sandbox_id
-            ):
-                lease.modal_sandbox_id = None
-                lease.state = "terminated"
-                lease.updated_at = datetime.now(UTC)
+        self._finish_owned_operation(
+            chat_session_id,
+            token_hash=token_hash,
+            expected_state="terminating",
+            expected_sandbox_id=sandbox_id,
+            state="terminated",
+            failure_code=None,
+            clear_sandbox=True,
+        )
         return True
 
     async def enforce_warm_cap(self) -> int:
@@ -652,6 +764,7 @@ class SandboxSessionManager:
                         ChatSandboxLease.chat_session_id,
                         ChatSandboxLease.modal_sandbox_id,
                         ChatSandboxLease.state,
+                        ChatSandboxLease.lease_token_hash,
                     ).where(
                         (ChatSandboxLease.state == "starting")
                         & (
@@ -663,14 +776,25 @@ class SandboxSessionManager:
                 ).all()
             )
         repaired = 0
-        for session_id, sandbox_id, state in candidates:
+        for session_id, sandbox_id, state, token_hash in candidates:
             if state == "starting":
-                self._mark_failed(session_id, "sandbox_start_failed")
-                repaired += 1
+                if token_hash and self._mark_start_failed(
+                    session_id, token_hash, "sandbox_start_failed"
+                ):
+                    repaired += 1
                 continue
             if not sandbox_id:
-                self._mark_failed(session_id, "sandbox_lost")
-                repaired += 1
+                with self.session_factory() as db, db.begin():
+                    lease = self._lease(db, session_id, lock=True)
+                    if (
+                        lease
+                        and lease.state == state
+                        and lease.modal_sandbox_id is None
+                    ):
+                        lease.state = "failed"
+                        lease.failure_code = "sandbox_lost"
+                        lease.updated_at = datetime.now(UTC)
+                        repaired += 1
                 continue
             try:
                 sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
@@ -678,12 +802,18 @@ class SandboxSessionManager:
             except Exception:
                 alive = False
             if not alive:
-                self._mark_failed(session_id, "sandbox_lost")
                 with self.session_factory() as db, db.begin():
                     lease = self._lease(db, session_id, lock=True)
-                    if lease:
+                    if (
+                        lease
+                        and lease.state == state
+                        and lease.modal_sandbox_id == sandbox_id
+                    ):
                         lease.modal_sandbox_id = None
-                repaired += 1
+                        lease.state = "failed"
+                        lease.failure_code = "sandbox_lost"
+                        lease.updated_at = datetime.now(UTC)
+                        repaired += 1
         return repaired
 
     async def expire_inactive_snapshots(self) -> int:

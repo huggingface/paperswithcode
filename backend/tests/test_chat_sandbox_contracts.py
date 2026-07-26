@@ -245,19 +245,54 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
     assert budget.output_bytes == 48
 
 
-def test_worker_protocol_rejects_uncorrelated_and_duplicate_results():
+def test_worker_protocol_accepts_complete_turn_after_one_terminal():
     frame = {"v": 1, "type": "run_turn", "request_id": "r"}
     assert decode_frame(encode_frame(frame)) == frame
     validator = WorkerEventValidator()
-    with pytest.raises(ProtocolError):
+    validator.accept({"type": "tool_call", "id": "t"})
+    validator.accept({"type": "tool_result", "id": "t"})
+    validator.accept({"type": "done"})
+    validator.accept({"type": "worker_done", "status": "complete"})
+
+
+def test_worker_protocol_rejects_invalid_result_and_terminal_sequences():
+    validator = WorkerEventValidator()
+    with pytest.raises(ProtocolError, match="Uncorrelated"):
         validator.accept({"type": "tool_result", "id": "missing"})
     validator.accept({"type": "tool_call", "id": "t"})
     validator.accept({"type": "tool_result", "id": "t"})
     with pytest.raises(ProtocolError):
         validator.accept({"type": "tool_result", "id": "t"})
     validator.accept({"type": "done"})
-    with pytest.raises(ProtocolError):
+    with pytest.raises(ProtocolError, match="followed a terminal"):
         validator.accept({"type": "answer_delta", "text": "late"})
+    with pytest.raises(ProtocolError, match="Duplicate terminal"):
+        validator.accept({"type": "error"})
+
+
+def test_worker_protocol_requires_terminal_before_successful_completion():
+    validator = WorkerEventValidator()
+
+    with pytest.raises(ProtocolError, match="without a semantic terminal"):
+        validator.accept({"type": "worker_done", "status": "complete"})
+    with pytest.raises(ProtocolError, match="Invalid worker completion status"):
+        validator.accept({"type": "worker_done", "status": "unknown"})
+
+
+def test_worker_protocol_allows_terminal_less_correlated_cancellation():
+    validator = WorkerEventValidator()
+    with pytest.raises(ProtocolError, match="without a correlated cancellation"):
+        validator.accept({"type": "worker_done", "status": "stopped"})
+
+    validator.accept(
+        {"type": "worker_done", "status": "stopped"},
+        allow_terminal_less_stop=True,
+    )
+
+    with pytest.raises(ProtocolError, match="followed worker completion"):
+        validator.accept({"type": "worker_done", "status": "stopped"})
+    with pytest.raises(ProtocolError, match="followed worker completion"):
+        validator.accept({"type": "done"})
 
 
 def test_prompt_and_manifest_share_eight_round_contract():
@@ -542,9 +577,11 @@ def test_sandbox_cancel_correlates_to_original_run_request():
     manager = SandboxSessionManager.__new__(SandboxSessionManager)
     manager.settings = type("Settings", (), {"chat_cancel_grace_seconds": 1})()
     turn_id = uuid.uuid4()
-    manager._processes = {turn_id: RunningWorker(Process(), "original-request")}
+    running = RunningWorker(Process(), "original-request")
+    manager._processes = {turn_id: running}
 
     assert asyncio.run(manager.cancel(uuid.uuid4(), turn_id))
+    assert running.cancel_requested
     assert decode_frame(writes[0].rstrip(b"\n"))["request_id"] == ("original-request")
 
 

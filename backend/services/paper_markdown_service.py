@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from huggingface_hub import download_bucket_files
+from huggingface_hub import HfFileSystem, download_bucket_files
 from huggingface_hub.errors import EntryNotFoundError
 
 
@@ -55,3 +55,42 @@ def read_paper_markdown(
             f"Markdown for paper {normalized} was not found in "
             f"hf://buckets/{bucket_id.strip()}/{bucket_key}"
         ) from error
+
+
+def read_paper_markdown_bounded(
+    arxiv_id: str,
+    *,
+    bucket_id: str,
+    token: str | None,
+    max_bytes: int,
+) -> tuple[str, bool]:
+    """Read at most ``max_bytes`` from a paper Markdown object.
+
+    The extra byte distinguishes an exact-size document from a truncated one
+    without downloading the rest of a private bucket object.
+    """
+    normalized = normalize_markdown_arxiv_id(arxiv_id)
+    if not bucket_id.strip():
+        raise ValueError("PWC_PAPER_MARKDOWN_HF_BUCKET_ID is not configured")
+    if max_bytes < 1:
+        raise ValueError("max_bytes must be positive")
+
+    bucket_key = paper_markdown_bucket_key(normalized)
+    path = f"hf://buckets/{bucket_id.strip()}/{bucket_key}"
+    try:
+        filesystem = HfFileSystem(token=token)
+        with filesystem.open(path, "rb", block_size=0) as handle:
+            raw = handle.read(max_bytes + 1)
+    except (EntryNotFoundError, FileNotFoundError) as error:
+        raise ValueError(
+            f"Markdown for paper {normalized} was not found in {path}"
+        ) from error
+
+    truncated = len(raw) > max_bytes
+    raw = raw[:max_bytes]
+    while raw:
+        try:
+            return raw.decode("utf-8"), truncated
+        except UnicodeDecodeError as error:
+            raw = raw[: error.start]
+    return "", truncated
