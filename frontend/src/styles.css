@@ -307,6 +307,21 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   font-family: var(--serif);
   font-style: italic;
 }
+.trend-chart {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) max-content;
+  align-items: start;
+  gap: 24px;
+  margin: 0;
+  width: 100%;
+}
+.trend-chart-visual {
+  position: relative;
+  min-width: 0;
+}
+.trend-chart-table {
+  margin-top: 30px;
+}
 .feedback-link {
   display: inline-flex;
   align-items: center;
@@ -3944,6 +3959,13 @@ html { scroll-behavior: smooth; }
     gap: 16px;
   }
   .feed-title { font-size: 26px; }
+  .trend-chart {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+  }
+  .trend-chart-table {
+    margin-top: 10px;
+  }
   .tag-hero { padding: 32px 0 24px; margin-bottom: 24px; }
   .tag-hero-title { font-size: 30px; }
   .method-hero-title { font-size: 30px; }

@@ -97,16 +97,17 @@ const TrendChart: React.FC<TrendChartProps> = ({
   const gradientId = `trend-gradient-${id}`;
 
   return (
-    <figure style={{ margin: 0, position: "relative", width: "100%" }}>
-      <svg
-        viewBox={`0 0 ${W} ${H}`}
-        width="100%"
-        role="img"
-        aria-label={`${yLabel} by ${xLabel.toLowerCase()}, from ${formatTrendMonth(data[0].month)} (${data[0].percent}%) to ${formatTrendMonth(data[count - 1].month)} (${data[count - 1].percent}%)`}
-        style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
-        onPointerMove={onPointerMove}
-        onPointerLeave={() => setHoveredIndex(null)}
-      >
+    <figure className="trend-chart">
+      <div className="trend-chart-visual">
+        <svg
+          viewBox={`0 0 ${W} ${H}`}
+          width="100%"
+          role="img"
+          aria-label={`${yLabel} by ${xLabel.toLowerCase()}, from ${formatTrendMonth(data[0].month)} (${data[0].percent}%) to ${formatTrendMonth(data[count - 1].month)} (${data[count - 1].percent}%)`}
+          style={{ display: "block", overflow: "visible", cursor: "crosshair" }}
+          onPointerMove={onPointerMove}
+          onPointerLeave={() => setHoveredIndex(null)}
+        >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%" style={{ stopColor: color, stopOpacity: 0.26 }} />
@@ -202,62 +203,63 @@ const TrendChart: React.FC<TrendChartProps> = ({
             />
           </>
         )}
-      </svg>
+        </svg>
 
-      {hoveredIndex != null && (
-        <div
-          style={{
-            position: "absolute",
-            left: `${(xAt(hoveredIndex) / W) * 100}%`,
-            top: `${(yAt(data[hoveredIndex].percent) / H) * 100}%`,
-            transform: "translate(-50%, calc(-100% - 14px))",
-            background: "var(--bg-elevated)",
-            border: "1px solid var(--hairline)",
-            borderRadius: 6,
-            boxShadow: "0 8px 26px rgba(0,0,0,.13)",
-            padding: "7px 12px",
-            pointerEvents: "none",
-            whiteSpace: "nowrap",
-            zIndex: 3,
-          }}
-        >
+        {hoveredIndex != null && (
           <div
             style={{
-              fontFamily: "var(--serif)",
-              fontStyle: "italic",
-              color: "var(--ink-faint)",
-              fontSize: 13,
-              marginBottom: 2,
+              position: "absolute",
+              left: `${(xAt(hoveredIndex) / W) * 100}%`,
+              top: `${(yAt(data[hoveredIndex].percent) / H) * 100}%`,
+              transform: "translate(-50%, calc(-100% - 14px))",
+              background: "var(--bg-elevated)",
+              border: "1px solid var(--hairline)",
+              borderRadius: 6,
+              boxShadow: "0 8px 26px rgba(0,0,0,.13)",
+              padding: "7px 12px",
+              pointerEvents: "none",
+              whiteSpace: "nowrap",
+              zIndex: 3,
             }}
           >
-            {formatTrendMonth(data[hoveredIndex].month)}
-          </div>
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: 7,
-              fontFamily: "var(--mono)",
-              fontWeight: 600,
-              fontSize: 15,
-              color: "var(--ink)",
-            }}
-          >
-            <span
+            <div
               style={{
-                width: 8,
-                height: 8,
-                borderRadius: 2,
-                background: color,
-                display: "inline-block",
+                fontFamily: "var(--serif)",
+                fontStyle: "italic",
+                color: "var(--ink-faint)",
+                fontSize: 13,
+                marginBottom: 2,
               }}
-            />
-            {data[hoveredIndex].percent}%
+            >
+              {formatTrendMonth(data[hoveredIndex].month)}
+            </div>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 7,
+                fontFamily: "var(--mono)",
+                fontWeight: 600,
+                fontSize: 15,
+                color: "var(--ink)",
+              }}
+            >
+              <span
+                style={{
+                  width: 8,
+                  height: 8,
+                  borderRadius: 2,
+                  background: color,
+                  display: "inline-block",
+                }}
+              />
+              {data[hoveredIndex].percent}%
+            </div>
           </div>
-        </div>
-      )}
+        )}
+      </div>
 
-      <details style={{ marginTop: 10 }}>
+      <details className="trend-chart-table">
         <summary
           style={{
             fontFamily: "var(--mono)",
