@@ -45,7 +45,7 @@ const KIND_NAME_PLACEHOLDER: Record<TaxonomyKind, string> = {
   method: "e.g. Rotary Position Embedding",
   benchmark: "e.g. ImageNet (ReaL)",
   metric: "e.g. Top-5 Accuracy",
-  conference: "e.g. International Conference on Machine Learning 2027",
+  conference: "e.g. International Conference on Machine Learning 2026",
 };
 
 const KIND_DESCRIPTION_PLACEHOLDER: Record<TaxonomyKind, string> = {
@@ -182,7 +182,7 @@ export function SuggestTaxonomyDialog({
                   id="suggest-dates"
                   value={dates}
                   maxLength={DATES_MAX}
-                  placeholder="e.g. May 3–7, 2027"
+                  placeholder="e.g. May 3–7, 2026"
                   onChange={(e) => setDates(e.target.value)}
                 />
               </div>
