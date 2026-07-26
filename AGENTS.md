@@ -10,6 +10,9 @@ Guidance for agents working in this repository.
 - During routine development, do not restart or stop services, kill processes,
   rebuild/repoint the production frontend, or reload nginx. Deploy only when the
   user explicitly requests a production release.
+- When a requested change is explicitly scoped to staging, treat approval to
+  implement it as approval to deploy the completed, validated change to staging;
+  do not wait for a separate deployment request.
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
