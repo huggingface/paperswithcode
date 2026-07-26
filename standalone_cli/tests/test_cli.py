@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from pwc_cli.cli import build_parser, main  # noqa: E402
-from pwc_cli.transport import Response  # noqa: E402
+from pwc_cli.transport import Client, Response  # noqa: E402
 
 INSTALLER_SPEC = importlib.util.spec_from_file_location(
     "pwc_cli_installer", ROOT / "install.py"
@@ -199,11 +199,14 @@ def test_json_schema_and_errors_use_stable_streams(monkeypatch):
 
 
 def test_paper_read_supports_markdown_and_versioned_json(monkeypatch):
+    paths = []
+
     class Client:
         def __init__(self):
             pass
 
-        def get(self, _path, _params=None):
+        def get(self, path, params=None):
+            paths.append((path, params))
             return Response(b"# Paper\n\nBody", {})
 
     monkeypatch.setattr("pwc_cli.cli.Client", Client)
@@ -220,3 +223,36 @@ def test_paper_read_supports_markdown_and_versioned_json(monkeypatch):
         "schema_version": "v1",
         "data": {"paper": "2501.01234", "markdown": "# Paper\n\nBody"},
     }
+    assert paths == [
+        ("research/papers/2501.01234/read", None),
+        ("research/papers/2501.01234/read", None),
+    ]
+
+
+def test_transport_is_anonymous_by_default(monkeypatch):
+    requests = []
+
+    class HTTPResponse(io.BytesIO):
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            self.close()
+
+    def fake_urlopen(request, *, timeout):
+        requests.append(request)
+        assert timeout == 30
+        return HTTPResponse(b"# Public paper\n")
+
+    monkeypatch.delenv("PWC_API_URL", raising=False)
+    monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
+
+    response = Client("https://example.test/api/v1").get(
+        "research/papers/2501.01234/read"
+    )
+
+    assert response.body == b"# Public paper\n"
+    assert requests[0].full_url.endswith("/api/v1/research/papers/2501.01234/read")
+    assert requests[0].get_header("Authorization") is None

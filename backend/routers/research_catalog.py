@@ -10,19 +10,19 @@ from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
 from backend.services.paper_lineage_service import get_paper_lineage
 from backend.services.paper_markdown_service import read_paper_markdown_bounded
-from backend.utils.auth import require_user
 
 router = APIRouter(prefix="/research", tags=["research"])
 _MARKDOWN_MAX_BYTES = 256 * 1024
+_PUBLIC_MARKDOWN_CACHE_CONTROL = (
+    "public, max-age=3600, s-maxage=86400, stale-while-revalidate=604800"
+)
 
 
 @router.get("/papers/{paper_id}/read", response_class=PlainTextResponse)
 def read_paper(
     paper_id: str = Path(min_length=1, max_length=64),
-    user: dict = Depends(require_user),
     settings: Settings = Depends(get_settings),
 ) -> PlainTextResponse:
-    del user
     try:
         markdown, truncated = read_paper_markdown_bounded(
             paper_id,
@@ -37,7 +37,7 @@ def read_paper(
     return PlainTextResponse(
         markdown,
         headers={
-            "Cache-Control": "private, no-store",
+            "Cache-Control": _PUBLIC_MARKDOWN_CACHE_CONTROL,
             "X-PWC-Truncated": "1" if truncated else "0",
         },
     )

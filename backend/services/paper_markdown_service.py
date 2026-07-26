@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from functools import lru_cache
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
@@ -75,22 +76,39 @@ def read_paper_markdown_bounded(
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
 
-    bucket_key = paper_markdown_bucket_key(normalized)
-    path = f"hf://buckets/{bucket_id.strip()}/{bucket_key}"
-    try:
-        filesystem = HfFileSystem(token=token)
-        with filesystem.open(path, "rb", block_size=0) as handle:
-            raw = handle.read(max_bytes + 1)
-    except (EntryNotFoundError, FileNotFoundError) as error:
-        raise ValueError(
-            f"Markdown for paper {normalized} was not found in {path}"
-        ) from error
+    raw, truncated = _read_paper_markdown_bytes(
+        normalized,
+        bucket_id.strip(),
+        token,
+        max_bytes,
+    )
 
-    truncated = len(raw) > max_bytes
-    raw = raw[:max_bytes]
     while raw:
         try:
             return raw.decode("utf-8"), truncated
         except UnicodeDecodeError as error:
             raw = raw[: error.start]
     return "", truncated
+
+
+@lru_cache(maxsize=128)
+def _read_paper_markdown_bytes(
+    normalized_arxiv_id: str,
+    bucket_id: str,
+    token: str | None,
+    max_bytes: int,
+) -> tuple[bytes, bool]:
+    """Fetch one bounded public artifact and retain hot reads in-process."""
+    bucket_key = paper_markdown_bucket_key(normalized_arxiv_id)
+    path = f"hf://buckets/{bucket_id}/{bucket_key}"
+    try:
+        filesystem = HfFileSystem(token=token)
+        with filesystem.open(path, "rb", block_size=0) as handle:
+            raw = handle.read(max_bytes + 1)
+    except (EntryNotFoundError, FileNotFoundError) as error:
+        raise ValueError(
+            f"Markdown for paper {normalized_arxiv_id} was not found in {path}"
+        ) from error
+
+    truncated = len(raw) > max_bytes
+    return raw[:max_bytes], truncated

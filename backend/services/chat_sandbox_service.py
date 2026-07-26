@@ -187,6 +187,18 @@ class SandboxSessionManager:
         return db.execute(query).scalar_one_or_none()
 
     @staticmethod
+    def _lock_start_claim(db: Session, chat_session_id: uuid.UUID) -> None:
+        """Serialize start claims even before the lease row exists."""
+
+        db.execute(
+            select(
+                func.pg_advisory_xact_lock(
+                    func.hashtextextended(f"chat-sandbox:{chat_session_id}", 0)
+                )
+            )
+        )
+
+    @staticmethod
     def _token_hash(token: str) -> str:
         return hashlib.sha256(token.encode()).hexdigest()
 
@@ -274,6 +286,7 @@ class SandboxSessionManager:
             now = datetime.now(UTC)
             waiting_for_owner = False
             with self.session_factory() as db, db.begin():
+                self._lock_start_claim(db, chat_session_id)
                 lease = self._lease(db, chat_session_id, lock=True)
                 compatible = bool(
                     lease

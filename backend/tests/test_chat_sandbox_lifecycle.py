@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import asyncio
+import threading
+import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -37,6 +40,45 @@ class _DB(_Context):
 
     def execute(self, _query):
         return _Result(list(self.rows))
+
+
+class _LeaseStore:
+    def __init__(self):
+        self.lease = None
+        self.add_calls = 0
+        self.advisory_lock = threading.Lock()
+        self.first_missing_read = threading.Event()
+
+
+class _Transaction(_Context):
+    def __init__(self, db):
+        self.db = db
+
+    def __exit__(self, error_type, *_args):
+        if error_type is None and self.db.pending is not None:
+            self.db.store.lease = self.db.pending
+        if self.db.holds_advisory_lock:
+            self.db.store.advisory_lock.release()
+        return False
+
+
+class _TransactionalDB(_Context):
+    def __init__(self, store):
+        self.store = store
+        self.pending = None
+        self.holds_advisory_lock = False
+
+    def begin(self):
+        return _Transaction(self)
+
+    def add(self, value):
+        self.store.add_calls += 1
+        self.pending = value
+
+    def execute(self, _query):
+        self.store.advisory_lock.acquire()
+        self.holds_advisory_lock = True
+        return _Result([])
 
 
 class _AsyncCall:
@@ -155,6 +197,56 @@ def test_concurrent_startup_waits_for_the_existing_owner(monkeypatch):
         assert create_calls == 1
 
     asyncio.run(run())
+
+
+def test_concurrent_startup_single_flights_initial_lease_insert(monkeypatch):
+    store = _LeaseStore()
+    manager = _manager(None)
+    manager.session_factory = lambda: _TransactionalDB(store)
+
+    def read_lease(_db, _session_id, *, lock):
+        assert lock is True
+        lease = store.lease
+        if lease is None and not store.first_missing_read.is_set():
+            store.first_missing_read.set()
+            time.sleep(0.1)
+        return lease
+
+    manager._lease = read_lease
+    created = _Sandbox("sb-created")
+    create_calls = 0
+    create_lock = threading.Lock()
+
+    async def create(*_args, **_kwargs):
+        nonlocal create_calls
+        with create_lock:
+            create_calls += 1
+        return created
+
+    async def from_id(sandbox_id):
+        assert sandbox_id == "sb-created"
+        return created
+
+    monkeypatch.setattr(chat_sandbox_service, "create_isolated_sandbox", create)
+    monkeypatch.setattr(
+        chat_sandbox_service.modal.Sandbox,
+        "from_id",
+        _AsyncCall(from_id),
+    )
+
+    session_id = uuid.uuid4()
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        owner = pool.submit(asyncio.run, manager.ensure_ready(session_id))
+        assert store.first_missing_read.wait(timeout=1)
+        waiter = pool.submit(asyncio.run, manager.ensure_ready(session_id))
+        owner_result = owner.result(timeout=3)
+        waiter_result = waiter.result(timeout=3)
+
+    assert store.add_calls == 1
+    assert create_calls == 1
+    assert {owner_result[2], waiter_result[2]} == {True, False}
+    assert store.lease.state == "ready"
+    assert store.lease.modal_sandbox_id == "sb-created"
 
 
 def test_stale_termination_cannot_clear_a_successor_lease(monkeypatch):
