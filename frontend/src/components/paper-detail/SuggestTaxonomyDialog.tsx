@@ -28,6 +28,9 @@ interface SuggestTaxonomyDialogProps {
 
 const NAME_MAX = 200;
 const DESCRIPTION_MAX = 2000;
+const DATES_MAX = 200;
+const VENUE_MAX = 300;
+const URL_MAX = 500;
 
 const KIND_EDIT_TYPE: Record<TaxonomyKind, PendingEditType> = {
   task: "new_task",
@@ -64,6 +67,9 @@ export function SuggestTaxonomyDialog({
 }: SuggestTaxonomyDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [dates, setDates] = useState("");
+  const [venue, setVenue] = useState("");
+  const [url, setUrl] = useState("");
   const { toast } = useToast();
 
   const label = kind;
@@ -72,19 +78,35 @@ export function SuggestTaxonomyDialog({
     if (!open) {
       setName("");
       setDescription("");
+      setDates("");
+      setVenue("");
+      setUrl("");
     }
   }, [open]);
 
   const suggestMutation = useMutation({
-    mutationFn: async () =>
-      submitPendingPaperEdit({
+    mutationFn: async () => {
+      const proposedPayload: Record<string, string> = {
+        name: name.trim(),
+      };
+      if (kind === "conference") {
+        Object.entries({
+          description: description.trim(),
+          dates: dates.trim(),
+          venue: venue.trim(),
+          url: url.trim(),
+        }).forEach(([key, value]) => {
+          if (value) proposedPayload[key] = value;
+        });
+      } else {
+        proposedPayload.description = description.trim();
+      }
+      return submitPendingPaperEdit({
         paper_id: paperId ? parseInt(paperId) : null,
         edit_type: KIND_EDIT_TYPE[kind],
-        proposed_payload: {
-          name: name.trim(),
-          description: description.trim(),
-        },
-      }),
+        proposed_payload: proposedPayload,
+      });
+    },
     onSuccess: () => {
       toast({
         title: "Suggestion submitted for review",
@@ -115,11 +137,13 @@ export function SuggestTaxonomyDialog({
     },
   });
 
-  const canSubmit = name.trim().length > 0 && description.trim().length > 0;
+  const canSubmit =
+    name.trim().length > 0 &&
+    (kind === "conference" || description.trim().length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Suggest a new {label}</DialogTitle>
           <DialogDescription>
@@ -139,7 +163,9 @@ export function SuggestTaxonomyDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="suggest-description">Description</Label>
+            <Label htmlFor="suggest-description">
+              Description{kind === "conference" ? " (optional)" : ""}
+            </Label>
             <Textarea
               id="suggest-description"
               value={description}
@@ -148,6 +174,42 @@ export function SuggestTaxonomyDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          {kind === "conference" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-dates">Dates (optional)</Label>
+                <Input
+                  id="suggest-dates"
+                  value={dates}
+                  maxLength={DATES_MAX}
+                  placeholder="e.g. May 3–7, 2027"
+                  onChange={(e) => setDates(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-venue">Venue (optional)</Label>
+                <Input
+                  id="suggest-venue"
+                  value={venue}
+                  maxLength={VENUE_MAX}
+                  placeholder="e.g. Vancouver Convention Centre, Canada"
+                  onChange={(e) => setVenue(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-url">URL (optional)</Label>
+                <Input
+                  id="suggest-url"
+                  type="url"
+                  inputMode="url"
+                  value={url}
+                  maxLength={URL_MAX}
+                  placeholder="https://example.org/conference"
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+            </>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

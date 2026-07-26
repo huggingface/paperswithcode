@@ -415,6 +415,39 @@ class PendingEditService:
                 raise PendingEditError(
                     "Suggestion 'name' must be at most 200 characters"
                 )
+
+            if edit_type == "new_conference":
+                normalized_payload = {"name": normalized_name}
+                optional_limits = {
+                    "description": 2000,
+                    "dates": 200,
+                    "venue": 300,
+                    "url": 500,
+                }
+                for field, max_length in optional_limits.items():
+                    value = payload.get(field)
+                    if value is None:
+                        continue
+                    if not isinstance(value, str):
+                        raise PendingEditError(f"Suggestion '{field}' must be a string")
+                    normalized_value = value.strip()
+                    if not normalized_value:
+                        continue
+                    if len(normalized_value) > max_length:
+                        raise PendingEditError(
+                            f"Suggestion '{field}' must be at most "
+                            f"{max_length} characters"
+                        )
+                    normalized_payload[field] = normalized_value
+                url = normalized_payload.get("url")
+                if url and not (
+                    url.startswith("http://") or url.startswith("https://")
+                ):
+                    raise PendingEditError(
+                        "Suggestion 'url' must start with http:// or https://"
+                    )
+                return normalized_payload
+
             if not isinstance(description, str):
                 raise PendingEditError("Suggestion 'description' must be a string")
             normalized_description = description.strip()
