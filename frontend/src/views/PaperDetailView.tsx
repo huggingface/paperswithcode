@@ -621,7 +621,7 @@ const PaperDetailView: React.FC = () => {
           {
             label: "Spaces",
             href: hfArtifactRowHref(
-              `https://huggingface.co/spaces?arxivIds=${canonicalArxivId}`,
+              `https://huggingface.co/papers/${canonicalArxivId}`,
               explicitHfArtifacts.spaces,
             ),
             count: hfArtifactCount(explicitHfArtifacts.spaces, hfRepos?.spaceUrls, hfRepos?.spaces),
