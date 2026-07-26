@@ -27,7 +27,8 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_entity_image_data.sql` + `run_add_entity_image_data.py` | DB-backed `image_data`/`image_mime_type` on `tasks`/`methods`/`conferences` (bulk backfill from `data/entity_image_seeds/`; single-file import via `backend/database/import_entity_image.py`) |
 | `add_paper_relations.sql` + `run_add_paper_relations.py` | `paper_relations` table |
 | `add_pending_paper_edits.sql` + `run_add_pending_paper_edits.py` | pending edit queue |
-| `allow_taxonomy_suggestions_without_paper.sql` | nullable paper association for task/method suggestions submitted from taxonomy directories |
+| `allow_taxonomy_suggestions_without_paper.sql` | nullable paper association for suggestions submitted from taxonomy directories |
+| `add_conference_suggestion_edit_type.sql` | conference suggestions submitted from the conference directory |
 | `add_user_bookmarks.sql` + `run_add_user_bookmarks.py` | user bookmarks |
 | `add_chat_sessions.sql` | Authenticated chat sessions, UI messages, and opaque Agent SDK transcript storage |
 | `add_chat_sandbox_runtime.sql` | Staging-only additive immutable chat backend selection, runtime provenance, sandbox leases, and hash-only turn capabilities; run as PostgreSQL superuser with `search_path=staging,public` before activating the bridge |

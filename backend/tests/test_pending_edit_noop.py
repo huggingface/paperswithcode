@@ -179,6 +179,22 @@ def test_submit_directory_taxonomy_suggestion_without_paper_succeeds(db_session)
     assert reviewed.status == "approved"
 
 
+def test_submit_directory_conference_suggestion_without_paper_succeeds(db_session):
+    row = PendingEditService(db_session).submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_conference",
+        proposed_payload={
+            "name": "Conference on Long-context Research 2027",
+            "description": "A conference focused on long-context AI research.",
+        },
+    )
+
+    assert row.id is not None
+    assert row.paper_id is None
+    assert row.proposed_payload["name"] == "Conference on Long-context Research 2027"
+
+
 def test_submit_non_taxonomy_edit_without_paper_rejects(db_session):
     with pytest.raises(PendingEditError, match="paper_id is required"):
         PendingEditService(db_session).submit(

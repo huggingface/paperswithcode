@@ -6,7 +6,7 @@ import { SuggestTaxonomyDialog } from "@/components/paper-detail/SuggestTaxonomy
 import { useAuth } from "@/lib/authContext";
 
 interface TaxonomySuggestionTileProps {
-  kind: "task" | "method";
+  kind: "task" | "method" | "conference";
 }
 
 export function TaxonomySuggestionTile({ kind }: TaxonomySuggestionTileProps) {

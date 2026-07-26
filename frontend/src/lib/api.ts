@@ -645,7 +645,8 @@ export type PendingEditType =
   | 'new_task'
   | 'new_method'
   | 'new_benchmark'
-  | 'new_metric';
+  | 'new_metric'
+  | 'new_conference';
 
 export type PendingEditStatus = 'pending' | 'approved' | 'rejected';
 

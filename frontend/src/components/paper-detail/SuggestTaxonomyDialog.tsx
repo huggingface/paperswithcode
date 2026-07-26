@@ -16,7 +16,7 @@ import { useMutation } from "@tanstack/react-query";
 import { submitPendingPaperEdit, type PendingEditType } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
-type TaxonomyKind = "task" | "method" | "benchmark" | "metric";
+type TaxonomyKind = "task" | "method" | "benchmark" | "metric" | "conference";
 
 interface SuggestTaxonomyDialogProps {
   open: boolean;
@@ -34,6 +34,7 @@ const KIND_EDIT_TYPE: Record<TaxonomyKind, PendingEditType> = {
   method: "new_method",
   benchmark: "new_benchmark",
   metric: "new_metric",
+  conference: "new_conference",
 };
 
 const KIND_NAME_PLACEHOLDER: Record<TaxonomyKind, string> = {
@@ -41,6 +42,7 @@ const KIND_NAME_PLACEHOLDER: Record<TaxonomyKind, string> = {
   method: "e.g. Rotary Position Embedding",
   benchmark: "e.g. ImageNet (ReaL)",
   metric: "e.g. Top-5 Accuracy",
+  conference: "e.g. International Conference on Machine Learning 2027",
 };
 
 const KIND_DESCRIPTION_PLACEHOLDER: Record<TaxonomyKind, string> = {
@@ -50,6 +52,8 @@ const KIND_DESCRIPTION_PLACEHOLDER: Record<TaxonomyKind, string> = {
     "Briefly describe this benchmark, the task it belongs to, and where it comes from.",
   metric:
     "Briefly describe this metric and whether higher or lower is better.",
+  conference:
+    "Briefly describe this conference, including its research focus and edition.",
 };
 
 export function SuggestTaxonomyDialog({

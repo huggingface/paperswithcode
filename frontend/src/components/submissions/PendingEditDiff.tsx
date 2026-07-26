@@ -490,7 +490,7 @@ function TaxonomySuggestionDiff({
   kind,
   proposedPayload,
 }: {
-  kind: "task" | "method" | "benchmark" | "metric";
+  kind: "task" | "method" | "benchmark" | "metric" | "conference";
   proposedPayload: JsonRecord;
 }) {
   const name = typeof proposedPayload.name === "string" ? proposedPayload.name : "";
@@ -621,6 +621,8 @@ export function PendingEditDiff({ editType, currentPayload, proposedPayload }: P
     content = <TaxonomySuggestionDiff kind="benchmark" proposedPayload={proposedPayload} />;
   } else if (editType === "new_metric") {
     content = <TaxonomySuggestionDiff kind="metric" proposedPayload={proposedPayload} />;
+  } else if (editType === "new_conference") {
+    content = <TaxonomySuggestionDiff kind="conference" proposedPayload={proposedPayload} />;
   } else {
     content = (
       <div className="submission-empty submission-empty-warn">

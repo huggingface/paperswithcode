@@ -46,6 +46,7 @@ EDIT_TYPES = frozenset(
         "new_method",
         "new_benchmark",
         "new_metric",
+        "new_conference",
     }
 )
 STATUSES = frozenset({"pending", "approved", "rejected"})
@@ -242,7 +243,13 @@ class PendingEditService:
             return self._snapshot_source_url(paper_id)
         if edit_type == "hf_artifacts":
             return self._snapshot_hf_artifacts(paper_id)
-        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
+        if edit_type in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+            "new_conference",
+        ):
             # Suggestions for brand-new taxonomy entries have no existing live
             # state to diff against.
             return {}
@@ -390,7 +397,13 @@ class PendingEditService:
                 "hf_spaces": spaces,
             }
 
-        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
+        if edit_type in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+            "new_conference",
+        ):
             name = payload.get("name")
             description = payload.get("description")
             if not isinstance(name, str):
@@ -532,7 +545,13 @@ class PendingEditService:
                     return False
             return True
 
-        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
+        if edit_type in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+            "new_conference",
+        ):
             # Suggestions for new taxonomy entries are never a no-op; there is
             # no existing entry to compare against.
             return False
@@ -563,6 +582,7 @@ class PendingEditService:
             "new_method",
             "new_benchmark",
             "new_metric",
+            "new_conference",
         )
         if paper_id is None and not is_taxonomy_suggestion:
             raise PendingEditError(
@@ -675,6 +695,7 @@ class PendingEditService:
             "new_method",
             "new_benchmark",
             "new_metric",
+            "new_conference",
         ):
             raise PendingEditError("This edit is missing its paper_id")
         self._apply_payload(row.edit_type, row.paper_id, row.proposed_payload)
@@ -717,10 +738,16 @@ class PendingEditService:
     def _apply_payload(
         self, edit_type: str, paper_id: Optional[int], payload: Dict[str, Any]
     ) -> None:
-        if edit_type in ("new_task", "new_method", "new_benchmark", "new_metric"):
+        if edit_type in (
+            "new_task",
+            "new_method",
+            "new_benchmark",
+            "new_metric",
+            "new_conference",
+        ):
             # Taxonomy suggestions are informational. Approving simply marks the
             # row reviewed; an admin creates the actual entry (task, method,
-            # benchmark, or metric) by hand.
+            # benchmark, metric, or conference) by hand.
             return
         if paper_id is None:
             raise PendingEditError("This edit is missing its paper_id")
