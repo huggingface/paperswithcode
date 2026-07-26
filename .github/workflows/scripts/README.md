@@ -14,6 +14,7 @@ directory with `uv run --env-file backend/keys.env ...`.
 | `cron-extract-urls.yml` | `45 * * * *` | `.github/workflows/scripts/run_extract_urls_hourly.sh` | `.github/workflows/scripts/hourly/extract_urls.py` |
 | `cron-import-hf-daily-papers.yml` | `0 * * * *` | direct `uv run` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `cron-refresh-paper-embeddings.yml` | `15 * * * *` | `.github/workflows/scripts/run_refresh_paper_embeddings.sh` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
+| `cron-update-hf-artifacts.yml` | `30 * * * *` | `pwc-cron update_hf_artifacts` | `.github/workflows/scripts/hourly/update_hf_artifacts.py` |
 | `cron-link-methods-by-references.yml` | `0 4 * * 0` | `.github/workflows/scripts/run_link_methods_by_references_weekly.sh` | `.github/workflows/scripts/weekly/link_methods_by_references.py` |
 | `cron-link-papers-by-task-keywords.yml` | `0 5 * * 0` | `.github/workflows/scripts/run_link_papers_by_task_keywords_weekly.sh` | `.github/workflows/scripts/weekly/link_papers_by_task_keywords.py` |
 
@@ -78,12 +79,22 @@ VPS supplies the endpoint URL and `PWC_HF_TOKEN` from `backend/keys.env`.
 The backfill and maintenance scripts are not scheduled by GitHub Actions:
 
 ```bash
+uv run --env-file backend/keys.env python .github/workflows/scripts/hourly/update_hf_artifacts.py --backfill
+
 PYTHONPATH=.github/workflows uv run --env-file backend/keys.env python -m scripts.backfill.backfill_hf_papers
 PYTHONPATH=.github/workflows uv run --env-file backend/keys.env python -m scripts.backfill.backfill_hf_papers --max-papers 200
 
 PYTHONPATH=.github/workflows uv run --env-file backend/keys.env python -m scripts.maintenance.cleanup_invalid_repositories --dry-run
 ./.github/workflows/scripts/maintenance/run_cleanup_invalid_repositories.sh --limit 100
 ```
+
+The Hugging Face artifact backfill requires `PWC_HF_TOKEN` in
+`backend/keys.env`, or `HF_TOKEN` in the process environment. Each invocation
+processes at most 4,000 previously unscanned latest-version arXiv papers
+published since January 2021 (the start of the public trend series), and commits
+after every paper. Re-run it until it reports zero papers needing discovery.
+Valid empty Hub responses are checkpointed; rate limits and transient failures
+are retried and remain unscanned if all retries fail.
 
 Keep these manual unless a production schedule is intentionally added.
 

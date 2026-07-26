@@ -18,17 +18,24 @@ Scope is limited to papers published in the last 6 months (latest version), the
 same population the trending feed surfaces, to keep API usage and RAM bounded.
 
 Schedule: Hourly. Dependencies: PostgreSQL, optional PWC_HF_TOKEN.
+
+Pass ``--backfill`` to scan historical latest-version arXiv papers whose
+``hf_artifacts_scanned_at`` value is NULL. Backfill mode only runs discovery
+and is safely resumable by invoking it again.
 """
 
+import argparse
 import gc
+import os
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from sqlalchemy import text
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.utils.hf_utils import (
+    HfArtifactDiscoveryError,
     fetch_hf_artifact_metrics,
     fetch_hf_artifacts_for_arxiv,
     hf_artifact_repo_id,
@@ -36,6 +43,9 @@ from backend.utils.hf_utils import (
 
 # Population: latest-version papers published within this window.
 RECENT_WINDOW_DAYS = 180
+# The public HF artifact trend series starts here. Older papers are outside the
+# chart population and do not need historical discovery.
+BACKFILL_START_DATE = date(2021, 1, 1)
 # Re-scan a paper's artifact links / refresh artifact metrics at most this often.
 DISCOVERY_THRESHOLD_HOURS = 12
 REFRESH_THRESHOLD_HOURS = 12
@@ -92,6 +102,25 @@ def get_papers_needing_discovery(session, batch_size: int, recent_cutoff) -> lis
         },
     ).fetchall()
     return rows
+
+
+def get_papers_needing_backfill(session, batch_size: int) -> list:
+    """Historical arXiv papers that have never had a conclusive Hub scan."""
+    query = text("""
+        SELECT id, source, arxiv_id, hf_models, hf_datasets, hf_spaces
+        FROM papers
+        WHERE is_latest_version = TRUE
+          AND source = 'arxiv'
+          AND arxiv_id IS NOT NULL
+          AND date_published >= :start_date
+          AND hf_artifacts_scanned_at IS NULL
+        ORDER BY date_published ASC, id ASC
+        LIMIT :batch_size
+    """)
+    return session.execute(
+        query,
+        {"batch_size": batch_size, "start_date": BACKFILL_START_DATE},
+    ).fetchall()
 
 
 def collect_paper_artifacts(row, hf_token) -> list:
@@ -162,24 +191,50 @@ def sync_paper_links(session, paper_id: int, artifact_ids: list):
         )
 
 
-def run_discovery_phase(session, hf_token, recent_cutoff, start_time) -> dict:
+def run_discovery_phase(
+    session,
+    hf_token,
+    recent_cutoff,
+    start_time,
+    *,
+    backfill: bool = False,
+    batch_size: int = MAX_PAPERS_PER_RUN,
+    api_delay_seconds: float = API_DELAY_SECONDS,
+    max_runtime_seconds: float = MAX_RUNTIME_SECONDS,
+) -> dict:
     """Phase A: discover and sync paper->artifact links."""
     log("-" * 80)
-    log("Phase A: artifact discovery")
-    papers = get_papers_needing_discovery(session, MAX_PAPERS_PER_RUN, recent_cutoff)
+    log(
+        "Phase A: historical artifact backfill"
+        if backfill
+        else "Phase A: artifact discovery"
+    )
+    if backfill:
+        papers = get_papers_needing_backfill(session, batch_size)
+    else:
+        papers = get_papers_needing_discovery(session, batch_size, recent_cutoff)
     log(f"Papers needing discovery: {len(papers)}")
 
     papers_processed = 0
+    papers_failed = 0
     links_created = 0
     for row in papers:
-        if time.time() - start_time > MAX_RUNTIME_SECONDS:
+        if time.time() - start_time > max_runtime_seconds:
             log("Runtime limit reached during discovery - stopping")
             break
         if check_memory_usage() < MIN_MEMORY_MB:
             log("Low memory during discovery - stopping")
             break
 
-        artifacts = collect_paper_artifacts(row, hf_token)
+        try:
+            artifacts = collect_paper_artifacts(row, hf_token)
+        except HfArtifactDiscoveryError as exc:
+            session.rollback()
+            papers_failed += 1
+            log(f"Discovery failed for paper {row.id} ({row.arxiv_id}): {exc}")
+            time.sleep(api_delay_seconds)
+            continue
+
         artifact_ids = []
         for kind, repo_id, url in artifacts:
             artifact_ids.append(upsert_artifact(session, kind, repo_id, url))
@@ -200,7 +255,7 @@ def run_discovery_phase(session, hf_token, recent_cutoff, start_time) -> dict:
 
         # Sleep only when we actually hit the network (arxiv rows).
         if row.source == "arxiv" and row.arxiv_id:
-            time.sleep(API_DELAY_SECONDS)
+            time.sleep(api_delay_seconds)
 
         if papers_processed % 100 == 0:
             log(
@@ -211,9 +266,13 @@ def run_discovery_phase(session, hf_token, recent_cutoff, start_time) -> dict:
 
     log(
         f"Phase A complete: {papers_processed} papers scanned, "
-        f"{links_created} links synced"
+        f"{links_created} links synced, {papers_failed} failed"
     )
-    return {"papers_processed": papers_processed, "links_created": links_created}
+    return {
+        "papers_processed": papers_processed,
+        "papers_failed": papers_failed,
+        "links_created": links_created,
+    }
 
 
 def get_artifacts_needing_refresh(session, batch_size: int, recent_cutoff) -> list:
@@ -308,33 +367,96 @@ def run_refresh_phase(session, hf_token, recent_cutoff, start_time) -> dict:
     return {"refreshed": refreshed, "failed": failed}
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--backfill",
+        action="store_true",
+        help=(
+            "Scan historical latest-version arXiv papers that have never been "
+            "scanned, then exit without refreshing artifact metrics"
+        ),
+    )
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=MAX_PAPERS_PER_RUN,
+        help=f"Maximum papers to scan per invocation (default: {MAX_PAPERS_PER_RUN})",
+    )
+    parser.add_argument(
+        "--api-delay-seconds",
+        type=float,
+        default=API_DELAY_SECONDS,
+        help=f"Delay between paper lookups (default: {API_DELAY_SECONDS})",
+    )
+    parser.add_argument(
+        "--max-runtime-seconds",
+        type=float,
+        default=MAX_RUNTIME_SECONDS,
+        help=f"Stop cleanly after this many seconds (default: {MAX_RUNTIME_SECONDS})",
+    )
+    args = parser.parse_args()
+    if args.batch_size <= 0:
+        parser.error("--batch-size must be greater than zero")
+    if args.api_delay_seconds < 0:
+        parser.error("--api-delay-seconds cannot be negative")
+    if args.max_runtime_seconds <= 0:
+        parser.error("--max-runtime-seconds must be greater than zero")
+    return args
+
+
 def main():
+    args = parse_args()
     log("=" * 80)
-    log("Starting Hugging Face Artifact Refresh")
+    log(
+        "Starting Hugging Face Artifact Historical Backfill"
+        if args.backfill
+        else "Starting Hugging Face Artifact Refresh"
+    )
     log("=" * 80)
 
     settings = get_settings()
-    hf_token = settings.hf_token or None
+    hf_token = settings.hf_token or os.environ.get("HF_TOKEN") or None
     recent_cutoff = (datetime.now() - timedelta(days=RECENT_WINDOW_DAYS)).date()
 
     log("Configuration:")
+    log(f"  - Mode: {'historical backfill' if args.backfill else 'hourly refresh'}")
     log(f"  - Recent window: {RECENT_WINDOW_DAYS} days (cutoff {recent_cutoff})")
+    if args.backfill:
+        log(f"  - Backfill starts: {BACKFILL_START_DATE}")
+    log(f"  - Paper batch size: {args.batch_size}")
     log(f"  - Discovery threshold: {DISCOVERY_THRESHOLD_HOURS}h")
     log(f"  - Refresh threshold: {REFRESH_THRESHOLD_HOURS}h")
     log(f"  - HF token: {'set' if hf_token else 'not set (anonymous)'}")
+    if args.backfill and not hf_token:
+        raise RuntimeError("PWC_HF_TOKEN or HF_TOKEN is required for backfill mode")
 
     session = None
     start_time = time.time()
     try:
         session = db_manager.session_local()
-        discovery = run_discovery_phase(session, hf_token, recent_cutoff, start_time)
-        refresh = run_refresh_phase(session, hf_token, recent_cutoff, start_time)
+        discovery = run_discovery_phase(
+            session,
+            hf_token,
+            recent_cutoff,
+            start_time,
+            backfill=args.backfill,
+            batch_size=args.batch_size,
+            api_delay_seconds=args.api_delay_seconds,
+            max_runtime_seconds=args.max_runtime_seconds,
+        )
+        refresh = (
+            {"refreshed": 0, "failed": 0}
+            if args.backfill
+            else run_refresh_phase(session, hf_token, recent_cutoff, start_time)
+        )
 
         elapsed = (time.time() - start_time) / 60
         log("=" * 80)
         log("Hugging Face Artifact Refresh Completed successfully")
         log("=" * 80)
         log(f"Papers scanned: {discovery['papers_processed']}")
+        log(f"Papers failed: {discovery['papers_failed']}")
         log(f"Links synced: {discovery['links_created']}")
         log(f"Artifacts refreshed: {refresh['refreshed']}")
         log(f"Artifacts failed: {refresh['failed']}")

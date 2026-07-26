@@ -1,13 +1,18 @@
-import re
-import aiohttp
 import asyncio
+import re
+import time
 from typing import Literal, Optional
 from urllib.parse import urlparse, urlunparse
 
+import aiohttp
 from huggingface_hub.utils import build_hf_headers
 
 
 HfArtifactKind = Literal["model", "dataset", "space"]
+
+
+class HfArtifactDiscoveryError(RuntimeError):
+    """The Hub could not conclusively answer an arXiv artifact lookup."""
 
 
 _HF_NON_ARTIFACT_PATHS = {
@@ -222,29 +227,95 @@ def fetch_hf_artifacts_for_arxiv(
     *,
     token: Optional[str] = None,
     timeout: float = 15.0,
+    max_retries: int = 3,
+    retry_backoff_seconds: float = 1.0,
 ) -> list[tuple[HfArtifactKind, str, str]]:
     """Discover HF artifacts linked to an arXiv paper via the Hub arxiv endpoint.
 
     Returns a list of ``(kind, repo_id, url)`` tuples. The Hub groups artifacts
     under ``models`` / ``datasets`` / ``spaces`` keys at
     ``https://huggingface.co/api/arxiv/{id}/repos``.
+
+    A successful response containing empty lists returns ``[]``. Request
+    failures and invalid responses raise ``HfArtifactDiscoveryError`` so callers
+    do not persist a transient Hub failure as a conclusive negative result.
     """
     import requests
 
     canonical = re.sub(r"v\d+$", "", arxiv_id.strip())
     url = f"https://huggingface.co/api/arxiv/{canonical}/repos"
     headers = build_hf_headers(token=token, user_agent={"is_ci": "true"})
-    try:
-        response = requests.get(url, headers=headers, timeout=timeout)
-    except Exception:
-        return []
+    response = None
+    data = None
+    for attempt in range(max_retries + 1):
+        try:
+            response = requests.get(url, headers=headers, timeout=timeout)
+        except requests.RequestException as exc:
+            if attempt == max_retries:
+                raise HfArtifactDiscoveryError(
+                    f"Hub request failed for arXiv {canonical}"
+                ) from exc
+            time.sleep(retry_backoff_seconds * (2**attempt))
+            continue
 
-    if response.status_code != 200:
-        return []
+        if response.status_code != 200:
+            retryable = response.status_code == 429 or response.status_code >= 500
+            if not retryable or attempt == max_retries:
+                raise HfArtifactDiscoveryError(
+                    f"Hub returned HTTP {response.status_code} for arXiv {canonical}"
+                )
 
-    data = response.json()
-    if not isinstance(data, dict):
-        return []
+            retry_after = response.headers.get("Retry-After")
+            rate_limit = response.headers.get("RateLimit", "")
+            delay = None
+            if retry_after:
+                try:
+                    delay = float(retry_after)
+                except ValueError:
+                    pass
+            if delay is None:
+                reset_match = re.search(
+                    r"(?:^|[;,])\s*t\s*=\s*(\d+(?:\.\d+)?)", rate_limit
+                )
+                if reset_match:
+                    delay = float(reset_match.group(1))
+            if delay is None:
+                delay = retry_backoff_seconds * (2**attempt)
+            time.sleep(max(delay, 0.0))
+            continue
+
+        try:
+            data = response.json()
+        except ValueError as exc:
+            if attempt == max_retries:
+                raise HfArtifactDiscoveryError(
+                    f"Hub returned invalid JSON for arXiv {canonical}"
+                ) from exc
+            time.sleep(retry_backoff_seconds * (2**attempt))
+            continue
+
+        if not isinstance(data, dict):
+            if attempt == max_retries:
+                raise HfArtifactDiscoveryError(
+                    f"Hub returned an invalid payload for arXiv {canonical}"
+                )
+            time.sleep(retry_backoff_seconds * (2**attempt))
+            continue
+        if not all(
+            isinstance(data.get(key), list) for key in ("models", "datasets", "spaces")
+        ):
+            if attempt == max_retries:
+                raise HfArtifactDiscoveryError(
+                    f"Hub returned an incomplete payload for arXiv {canonical}"
+                )
+            time.sleep(retry_backoff_seconds * (2**attempt))
+            continue
+        break
+
+    if data is None:
+        raise HfArtifactDiscoveryError(
+            f"Hub did not return a result for arXiv {canonical}"
+        )
 
     kind_by_key: dict[str, HfArtifactKind] = {
         "models": "model",
