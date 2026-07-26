@@ -39,7 +39,11 @@ from backend.services.chat_capability_service import (
 )
 from backend.services.chat_sandbox_service import WorkspaceSnapshotProvider
 from backend.services.chat_sandbox_service import resolve_modal_image
-from backend.services.chat_sandbox_service import RunningWorker, SandboxSessionManager
+from backend.services.chat_sandbox_service import (
+    RunningWorker,
+    SandboxSessionManager,
+    WorkerClaim,
+)
 from backend.services.chat_session_store_gateway import (
     ChatSessionStoreGateway,
     SessionStoreCommand,
@@ -577,7 +581,11 @@ def test_sandbox_cancel_correlates_to_original_run_request():
     manager = SandboxSessionManager.__new__(SandboxSessionManager)
     manager.settings = type("Settings", (), {"chat_cancel_grace_seconds": 1})()
     turn_id = uuid.uuid4()
-    running = RunningWorker(Process(), "original-request")
+    running = RunningWorker(
+        Process(),
+        "original-request",
+        WorkerClaim("sandbox-id", "worker-token"),
+    )
     manager._processes = {turn_id: running}
 
     assert asyncio.run(manager.cancel(uuid.uuid4(), turn_id))

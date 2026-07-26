@@ -41,10 +41,17 @@ class SandboxError(RuntimeError):
         self.uncertain = uncertain
 
 
+@dataclass(frozen=True)
+class WorkerClaim:
+    sandbox_id: str
+    token_hash: str
+
+
 @dataclass
 class RunningWorker:
     process: object
     request_id: str
+    claim: WorkerClaim
     cancel_requested: bool = False
 
 
@@ -460,6 +467,79 @@ class SandboxSessionManager:
             clear_sandbox=False,
         )
 
+    def _claim_worker(self, chat_session_id: uuid.UUID, sandbox_id: str) -> WorkerClaim:
+        claim = WorkerClaim(
+            sandbox_id=sandbox_id,
+            token_hash=self._token_hash(secrets.token_urlsafe(24)),
+        )
+        with self.session_factory() as db, db.begin():
+            lease = self._lease(db, chat_session_id, lock=True)
+            if not (
+                lease
+                and lease.state in {"ready", "idle"}
+                and lease.modal_sandbox_id == claim.sandbox_id
+                and lease.lease_token_hash is None
+            ):
+                raise SandboxError("sandbox_lost", "Secure workspace is unavailable")
+            lease.state = "busy"
+            lease.lease_token_hash = claim.token_hash
+            lease.lease_expires_at = None
+            lease.last_activity_at = datetime.now(UTC)
+            lease.updated_at = datetime.now(UTC)
+        return claim
+
+    def _release_worker(self, chat_session_id: uuid.UUID, claim: WorkerClaim) -> bool:
+        with self.session_factory() as db, db.begin():
+            lease = self._lease(db, chat_session_id, lock=True)
+            if not (
+                lease
+                and lease.state == "busy"
+                and lease.modal_sandbox_id == claim.sandbox_id
+                and lease.lease_token_hash == claim.token_hash
+            ):
+                return False
+            lease.state = "idle"
+            lease.lease_token_hash = None
+            lease.lease_expires_at = None
+            lease.last_activity_at = datetime.now(UTC)
+            # A completed turn may have changed /workspace through arbitrary
+            # Bash, so conservatively mark it dirty.
+            lease.workspace_dirty = True
+            lease.updated_at = datetime.now(UTC)
+            return True
+
+    async def _terminate_worker(
+        self,
+        chat_session_id: uuid.UUID,
+        claim: WorkerClaim,
+        *,
+        failure_code: str,
+    ) -> bool:
+        termination_token_hash = self._token_hash(secrets.token_urlsafe(24))
+        with self.session_factory() as db, db.begin():
+            lease = self._lease(db, chat_session_id, lock=True)
+            if not (
+                lease
+                and lease.state == "busy"
+                and lease.modal_sandbox_id == claim.sandbox_id
+                and lease.lease_token_hash == claim.token_hash
+            ):
+                return False
+            lease.state = "terminating"
+            lease.failure_code = failure_code
+            lease.lease_token_hash = termination_token_hash
+            lease.lease_expires_at = datetime.now(UTC) + timedelta(
+                seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
+            )
+            lease.updated_at = datetime.now(UTC)
+        await self._terminate_owned_sandbox(
+            chat_session_id,
+            sandbox_id=claim.sandbox_id,
+            token_hash=termination_token_hash,
+            failure_code=failure_code,
+        )
+        return True
+
     async def run_turn(
         self,
         *,
@@ -478,56 +558,53 @@ class SandboxSessionManager:
             "session_id": str(chat_session_id),
             "cold_start_ms": cold_start_ms,
         }
-        with self.session_factory() as db, db.begin():
-            lease = self._lease(db, chat_session_id, lock=True)
-            if lease is None or lease.state not in {"ready", "idle"}:
-                raise SandboxError("sandbox_lost", "Secure workspace is unavailable")
-            lease.state = "busy"
-            lease.last_activity_at = datetime.now(UTC)
-        process = await sandbox.exec.aio(
-            "python",
-            "-m",
-            "backend.chat_sandbox_worker.supervisor",
-            stdout=StreamType.PIPE,
-            stderr=StreamType.PIPE,
-            timeout=round(self.settings.chat_agent_timeout_seconds + 15),
-            workdir="/workspace",
-            text=False,
-        )
-        running_worker = RunningWorker(process, request_id)
-        self._processes[turn_id] = running_worker
-        launch = {
-            "capability": capability.token,
-            "gateway_url": self.settings.chat_gateway_url,
-            "session_id": str(chat_session_id),
-            "turn_id": str(turn_id),
-        }
-        run = {
-            "v": 1,
-            "type": "run_turn",
-            "request_id": request_id,
-            "chat_session_id": str(chat_session_id),
-            "prompt": prompt,
-            "model": model,
-            "resume": resume,
-        }
-        process.stdin.write(
-            SUPERVISOR_PREFIX
-            + json.dumps(launch, separators=(",", ":")).encode()
-            + b"\n"
-            + encode_frame(run)
-        )
-        await process.stdin.drain.aio()
-
-        async def drain_stderr() -> None:
-            async for _chunk in process.stderr:
-                pass
-
-        stderr_task = asyncio.create_task(drain_stderr())
+        claim = self._claim_worker(chat_session_id, sandbox.object_id)
+        running_worker: RunningWorker | None = None
+        stderr_task: asyncio.Task | None = None
         buffer = b""
         terminal = False
         validator = WorkerEventValidator()
         try:
+            process = await sandbox.exec.aio(
+                "python",
+                "-m",
+                "backend.chat_sandbox_worker.supervisor",
+                stdout=StreamType.PIPE,
+                stderr=StreamType.PIPE,
+                timeout=round(self.settings.chat_agent_timeout_seconds + 15),
+                workdir="/workspace",
+                text=False,
+            )
+            running_worker = RunningWorker(process, request_id, claim)
+            self._processes[turn_id] = running_worker
+            launch = {
+                "capability": capability.token,
+                "gateway_url": self.settings.chat_gateway_url,
+                "session_id": str(chat_session_id),
+                "turn_id": str(turn_id),
+            }
+            run = {
+                "v": 1,
+                "type": "run_turn",
+                "request_id": request_id,
+                "chat_session_id": str(chat_session_id),
+                "prompt": prompt,
+                "model": model,
+                "resume": resume,
+            }
+            process.stdin.write(
+                SUPERVISOR_PREFIX
+                + json.dumps(launch, separators=(",", ":")).encode()
+                + b"\n"
+                + encode_frame(run)
+            )
+            await process.stdin.drain.aio()
+
+            async def drain_stderr() -> None:
+                async for _chunk in process.stderr:
+                    pass
+
+            stderr_task = asyncio.create_task(drain_stderr())
             async with asyncio.timeout(self.settings.chat_agent_timeout_seconds):
                 async for chunk in process.stdout:
                     buffer += chunk
@@ -568,23 +645,18 @@ class SandboxSessionManager:
                 "sandbox_worker_failed", "The worker protocol failed", uncertain=True
             ) from error
         finally:
-            stderr_task.cancel()
-            with contextlib.suppress(asyncio.CancelledError, Exception):
-                await stderr_task
+            if stderr_task:
+                stderr_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await stderr_task
             self._processes.pop(turn_id, None)
             if not terminal:
-                await self.terminate(
-                    chat_session_id, failure_code="sandbox_worker_failed"
+                await self._terminate_worker(
+                    chat_session_id,
+                    claim,
+                    failure_code="sandbox_worker_failed",
                 )
-            else:
-                with self.session_factory() as db, db.begin():
-                    lease = self._lease(db, chat_session_id, lock=True)
-                    if lease:
-                        lease.state = "idle"
-                        lease.last_activity_at = datetime.now(UTC)
-                        # A completed turn may have changed /workspace through
-                        # arbitrary Bash, so conservatively mark it dirty.
-                        lease.workspace_dirty = True
+            elif self._release_worker(chat_session_id, claim):
                 await self.enforce_warm_cap()
 
     async def cancel(self, chat_session_id: uuid.UUID, turn_id: uuid.UUID) -> bool:
@@ -607,7 +679,11 @@ class SandboxSessionManager:
             async with asyncio.timeout(self.settings.chat_cancel_grace_seconds):
                 await process.wait.aio()
         except TimeoutError:
-            await self.terminate(chat_session_id, failure_code="cancel_timeout")
+            await self._terminate_worker(
+                chat_session_id,
+                running.claim,
+                failure_code="cancel_timeout",
+            )
         return True
 
     async def terminate(
@@ -626,22 +702,37 @@ class SandboxSessionManager:
                 lease.lease_expires_at = datetime.now(UTC) + timedelta(
                     seconds=self.settings.chat_sandbox_ready_timeout_seconds + 15
                 )
+        if token_hash:
+            await self._terminate_owned_sandbox(
+                chat_session_id,
+                sandbox_id=sandbox_id,
+                token_hash=token_hash,
+                failure_code=failure_code,
+            )
+
+    async def _terminate_owned_sandbox(
+        self,
+        chat_session_id: uuid.UUID,
+        *,
+        sandbox_id: str | None,
+        token_hash: str,
+        failure_code: str | None,
+    ) -> None:
         if sandbox_id:
             try:
                 sandbox = await modal.Sandbox.from_id.aio(sandbox_id)
                 await sandbox.terminate.aio(wait=False)
             except Exception:
                 pass
-        if token_hash:
-            self._finish_owned_operation(
-                chat_session_id,
-                token_hash=token_hash,
-                expected_state="terminating",
-                expected_sandbox_id=sandbox_id,
-                state="failed" if failure_code else "terminated",
-                failure_code=failure_code,
-                clear_sandbox=True,
-            )
+        self._finish_owned_operation(
+            chat_session_id,
+            token_hash=token_hash,
+            expected_state="terminating",
+            expected_sandbox_id=sandbox_id,
+            state="failed" if failure_code else "terminated",
+            failure_code=failure_code,
+            clear_sandbox=True,
+        )
 
     async def cleanup_deleted(
         self, sandbox_id: str | None, snapshot_id: str | None

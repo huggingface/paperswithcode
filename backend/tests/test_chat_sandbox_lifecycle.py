@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 from backend.services import chat_sandbox_service
-from backend.services.chat_sandbox_service import SandboxSessionManager
+from backend.services.chat_sandbox_service import SandboxSessionManager, WorkerClaim
 
 
 class _Context:
@@ -323,3 +323,64 @@ def test_reconcile_does_not_mark_a_replaced_sandbox_lost(monkeypatch):
         assert lease.modal_sandbox_id == "sb-new"
 
     asyncio.run(run())
+
+
+def test_stale_failed_worker_cannot_terminate_a_successor(monkeypatch):
+    async def run():
+        lease = _lease(state="busy", sandbox_id="sb-old")
+        lease.lease_token_hash = "worker-old"
+        manager = _manager(lease)
+        stale_claim = WorkerClaim("sb-old", "worker-old")
+        provider_calls = 0
+
+        async def from_id(_sandbox_id):
+            nonlocal provider_calls
+            provider_calls += 1
+            return _Sandbox("sb-old")
+
+        monkeypatch.setattr(
+            chat_sandbox_service.modal.Sandbox,
+            "from_id",
+            _AsyncCall(from_id),
+        )
+
+        lease.state = "busy"
+        lease.modal_sandbox_id = "sb-new"
+        lease.lease_token_hash = "worker-new"
+
+        assert not await manager._terminate_worker(
+            uuid.uuid4(),
+            stale_claim,
+            failure_code="sandbox_worker_failed",
+        )
+        assert lease.state == "busy"
+        assert lease.modal_sandbox_id == "sb-new"
+        assert lease.lease_token_hash == "worker-new"
+        assert provider_calls == 0
+
+    asyncio.run(run())
+
+
+def test_stale_successful_worker_cannot_release_a_successor_or_termination():
+    lease = _lease(state="busy", sandbox_id="sb-old")
+    lease.lease_token_hash = "worker-old"
+    manager = _manager(lease)
+    stale_claim = WorkerClaim("sb-old", "worker-old")
+    session_id = uuid.uuid4()
+
+    lease.modal_sandbox_id = "sb-new"
+    lease.lease_token_hash = "worker-new"
+    assert not manager._release_worker(session_id, stale_claim)
+    assert lease.state == "busy"
+    assert lease.modal_sandbox_id == "sb-new"
+    assert lease.lease_token_hash == "worker-new"
+    assert not lease.workspace_dirty
+
+    lease.state = "terminating"
+    lease.modal_sandbox_id = "sb-old"
+    lease.lease_token_hash = "termination-new"
+    assert not manager._release_worker(session_id, stale_claim)
+    assert lease.state == "terminating"
+    assert lease.modal_sandbox_id == "sb-old"
+    assert lease.lease_token_hash == "termination-new"
+    assert not lease.workspace_dirty
