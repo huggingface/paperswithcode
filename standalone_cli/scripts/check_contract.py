@@ -20,6 +20,7 @@ COMMANDS = (
     "paper trending",
     "paper related",
     "paper lineage list",
+    "benchmark",
     "benchmark list",
     "version",
 )
@@ -41,6 +42,8 @@ def parser_commands() -> set[str]:
                     for item in child._actions
                 )
                 if nested:
+                    if "handler" in child._defaults:
+                        discovered.add(command)
                     visit(child, command)
                 else:
                     discovered.add(command)

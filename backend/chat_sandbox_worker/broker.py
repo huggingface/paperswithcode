@@ -7,12 +7,14 @@ import json
 import os
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, unquote, urlsplit
 
 _PAPER_INFO = re.compile(r"^/api/v1/papers/([^/]+)$")
 _PAPER_RELATED = re.compile(r"^/api/v1/papers/([^/]+)/related$")
 _PAPER_READ = re.compile(r"^/api/v1/research/papers/([^/]+)/read$")
 _PAPER_LINEAGE = re.compile(r"^/api/v1/research/papers/([^/]+)/lineage$")
+_BENCHMARK_TRENDS = re.compile(r"^/api/v1/tasks/([^/]+)/trending-benchmarks$")
+_BENCHMARK_EVALUATIONS = re.compile(r"^/api/v1/datasets/([^/]+)/evaluations/$")
 
 
 def _load_config() -> dict:
@@ -137,6 +139,23 @@ class Handler(BaseHTTPRequestHandler):
                 "order_dir": "desc"
                 if (query.get("ordering") or "").startswith("-")
                 else "asc",
+            }
+        elif match := _BENCHMARK_TRENDS.match(parsed.path):
+            operation = "benchmark_trending"
+            arguments = {
+                "task": unquote(match.group(1)),
+                "limit": query.get("limit", 100),
+                "min_recent_papers": query.get("min_recent_papers", 0),
+                "include_descendants": query.get("include_descendants") == "true",
+                "is_open": query.get("is_open"),
+            }
+        elif match := _BENCHMARK_EVALUATIONS.match(parsed.path):
+            operation = "benchmark_evaluations"
+            arguments = {
+                "dataset": unquote(match.group(1)),
+                "page": query.get("page", 1),
+                "page_size": query.get("page_size", 100),
+                "is_open": query.get("is_open"),
             }
         elif match := _PAPER_RELATED.match(parsed.path):
             operation = "paper_related"

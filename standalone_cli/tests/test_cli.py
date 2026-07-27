@@ -142,6 +142,142 @@ def test_benchmark_limit_alias_preserves_page_size_destination():
     assert parser.parse_args(["benchmark", "list", "--page-size", "8"]).page_size == 8
 
 
+def test_benchmark_detail_parser_matches_requested_command_shape():
+    args = build_parser().parse_args(
+        ["benchmark", "--name", "SWE-Bench Pro", "--limit", "5"]
+    )
+
+    assert args.name == "SWE-Bench Pro"
+    assert args.limit == 5
+
+
+def test_task_benchmark_list_uses_frontend_trending_order(monkeypatch):
+    calls = []
+    payload = {
+        "task_id": "18",
+        "task_slug": "ocr",
+        "recent_days": 90,
+        "results": [
+            {
+                "id": "2",
+                "name": "Recent OCR",
+                "recent_paper_count": 4,
+                "all_time_paper_count": 5,
+                "trend_score": 1.3333,
+                "best_model_name": "Reader 2",
+            },
+            {
+                "id": "1",
+                "name": "Classic OCR",
+                "recent_paper_count": 1,
+                "all_time_paper_count": 20,
+                "trend_score": 0.3333,
+                "best_model_name": "Reader 1",
+            },
+        ],
+    }
+
+    class Client:
+        def __init__(self):
+            pass
+
+        def get(self, path, params):
+            calls.append((path, params))
+            return Response(json.dumps(payload).encode(), {})
+
+    monkeypatch.setattr("pwc_cli.cli.Client", Client)
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert main(["benchmark", "list", "--task", "OCR"]) == 0
+
+    assert calls[0][0] == "tasks/OCR/trending-benchmarks"
+    assert calls[0][1]["min_recent_papers"] == 0
+    assert output.getvalue().splitlines()[1:3] == [
+        "2\tRecent OCR\t4\t1.3333\tReader 2",
+        "1\tClassic OCR\t1\t0.3333\tReader 1",
+    ]
+
+
+def test_benchmark_detail_renders_merged_markdown_leaderboard(monkeypatch):
+    calls = []
+    benchmark_payload = {
+        "count": 1,
+        "results": [
+            {
+                "id": "42",
+                "name": "SWE-Bench Pro",
+                "slug": "swe-bench-pro",
+                "description": "A coding-agent benchmark.",
+            }
+        ],
+    }
+    evaluations_payload = {
+        "count": 2,
+        "results": [
+            {
+                "id": "1",
+                "paper_id": "9",
+                "task_id": "3",
+                "dataset_id": "42",
+                "model_name": "Agent | One",
+                "metrics": {"Resolved": 55.5},
+                "best_metric": "Resolved",
+                "best_rank": 1,
+                "paper_title": "An Agent Paper",
+                "paper_arxiv_id": "2601.12345",
+                "paper_published_date": "2026-01-20",
+                "task_name": "Coding Agents",
+                "is_open": False,
+            },
+            {
+                "id": "2",
+                "paper_id": "9",
+                "task_id": "3",
+                "dataset_id": "42",
+                "model_name": "Agent | One",
+                "metrics": {"Pass@1": 50},
+                "best_metric": "Pass@1",
+                "best_rank": 2,
+                "paper_title": "An Agent Paper",
+                "paper_arxiv_id": "2601.12345",
+                "paper_published_date": "2026-01-20",
+                "task_name": "Coding Agents",
+                "is_open": False,
+            },
+        ],
+    }
+
+    class Client:
+        def __init__(self):
+            pass
+
+        def get(self, path, params):
+            calls.append((path, params))
+            payload = benchmark_payload if path == "datasets/" else evaluations_payload
+            return Response(json.dumps(payload).encode(), {})
+
+    monkeypatch.setattr("pwc_cli.cli.Client", Client)
+    output = io.StringIO()
+    with redirect_stdout(output):
+        assert main(["benchmark", "--name", "SWE-Bench Pro"]) == 0
+
+    rendered = output.getvalue()
+    assert "# SWE-Bench Pro" in rendered
+    assert "Agent \\| One" in rendered
+    assert "Resolved: 55.5, Pass@1: 50" in rendered
+    assert "[An Agent Paper](https://paperswithcode.co/paper/2601.12345)" in rendered
+    assert "2026-01-20" in rendered
+    assert calls[1] == (
+        "datasets/42/evaluations/",
+        {
+            "page": 1,
+            "page_size": 100,
+            "ordering": "best_rank",
+            "is_open": None,
+        },
+    )
+
+
 def test_top_level_version_is_offline_and_stable():
     output = io.StringIO()
     with redirect_stdout(output):

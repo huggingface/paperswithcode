@@ -279,6 +279,19 @@ def test_trending_benchmarks_default_to_ninety_days(db_session):
     assert established.featured_rank == 1
 
 
+def test_trending_benchmarks_resolve_exact_task_name(db_session):
+    today = date(2026, 7, 27)
+    _seed_benchmark_trends(db_session, today)
+
+    response = BenchmarkTrendService(db_session).get_trending_benchmarks(
+        "OCR",
+        today=today,
+    )
+
+    assert response.task_slug == "ocr-trends"
+    assert response.results[0].name == "RisingBench"
+
+
 def test_trending_benchmarks_endpoint_exposes_default_window(client):
     today = datetime.now(UTC).date()
     db = TestingSessionLocal()

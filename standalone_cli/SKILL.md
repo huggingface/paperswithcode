@@ -18,7 +18,8 @@ pwc paper recent --limit 10
 pwc paper trending --limit 20
 pwc paper related 2501.01234 --limit 4
 pwc paper lineage list 2501.01234
-pwc benchmark list --task image-classification
+pwc benchmark list --task OCR
+pwc benchmark --name "SWE-Bench Pro"
 pwc version
 ```
 

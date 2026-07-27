@@ -7,6 +7,7 @@ import json
 import sys
 from datetime import date
 from typing import Any, Callable
+from urllib.parse import quote
 
 from pwc_cli import API_CONTRACT_VERSION, __version__
 from pwc_cli.transport import Client, ResponseError, TransportError
@@ -234,12 +235,70 @@ def paper_lineage(args: argparse.Namespace, client: Client) -> int:
     for relationship in ("predecessors", "successors"):
         for item in payload.get(relationship) or []:
             print(
-                f"{relationship[:-1]}: {_clean(item.get('reference'))}\t{_clean(item.get('title'))}"
+                f"{relationship[:-1]}: {_clean(item.get('reference'))}"
+                f"\t{_clean(item.get('title'))}"
             )
     return 0
 
 
 def benchmark_list(args: argparse.Namespace, client: Client) -> int:
+    if args.task and args.order_by in (None, "trending"):
+        trend_payload = client.get(
+            f"tasks/{quote(args.task, safe='')}/trending-benchmarks",
+            {
+                "limit": 100,
+                "min_recent_papers": 0,
+                "include_descendants": args.include_descendants,
+                "is_open": args.is_open,
+            },
+        ).json()
+        if not isinstance(trend_payload, dict) or not isinstance(
+            trend_payload.get("results"), list
+        ):
+            raise ResponseError("API response did not contain benchmark trends")
+        items = [
+            item
+            for item in trend_payload["results"]
+            if isinstance(item, dict)
+            and (
+                not args.search
+                or args.search.casefold()
+                in " ".join(
+                    str(item.get(field) or "")
+                    for field in ("name", "full_name", "slug")
+                ).casefold()
+            )
+            and (
+                args.min_eval_count is None
+                or int(item.get("all_time_paper_count") or 0) >= args.min_eval_count
+            )
+        ]
+        start = (args.page - 1) * args.page_size
+        payload = {
+            **trend_payload,
+            "count": len(items),
+            "results": items[start : start + args.page_size],
+        }
+
+        def render_trends(rows: list[dict[str, Any]]) -> None:
+            print("id\tname\trecent_papers\ttrend_score\tbest_model")
+            for item in rows:
+                print(
+                    "\t".join(
+                        (
+                            _clean(item.get("id")),
+                            _clean(item.get("name")),
+                            _clean(item.get("recent_paper_count")),
+                            _clean(item.get("trend_score")),
+                            _clean(item.get("best_model_name")),
+                        )
+                    )
+                )
+
+        return _emit_page(payload, args, render_trends)
+
+    if args.order_by == "trending":
+        raise ResponseError("--order-by trending requires --task")
     ordering = f"-{args.order_by}" if args.order_dir == "desc" else args.order_by
     payload = client.get(
         "datasets/",
@@ -251,7 +310,7 @@ def benchmark_list(args: argparse.Namespace, client: Client) -> int:
             "include_descendants": args.include_descendants,
             "min_eval_count": args.min_eval_count,
             "is_open": args.is_open,
-            "ordering": ordering,
+            "ordering": ordering or "name",
         },
     ).json()
 
@@ -272,6 +331,169 @@ def benchmark_list(args: argparse.Namespace, client: Client) -> int:
     return _emit_page(payload, args, render)
 
 
+def _benchmark_match(name: str, items: list[dict[str, Any]]) -> dict[str, Any] | None:
+    target = name.strip().casefold()
+    for field in ("name", "full_name", "slug", "id"):
+        for item in items:
+            if str(item.get(field) or "").strip().casefold() == target:
+                return item
+    return None
+
+
+def _merged_evaluations(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    merged: dict[tuple[str, ...], dict[str, Any]] = {}
+    for item in items:
+        key = tuple(
+            str(item.get(field) or "")
+            for field in (
+                "paper_id",
+                "task_id",
+                "dataset_id",
+                "model_name",
+                "harness",
+            )
+        )
+        existing = merged.get(key)
+        if existing is None:
+            existing = {**item, "metrics": dict(item.get("metrics") or {})}
+            merged[key] = existing
+            continue
+        existing["metrics"].update(item.get("metrics") or {})
+        ranks = [
+            rank
+            for rank in (existing.get("best_rank"), item.get("best_rank"))
+            if isinstance(rank, int)
+        ]
+        existing["best_rank"] = min(ranks) if ranks else None
+        if not existing.get("best_metric") and item.get("best_metric"):
+            existing["best_metric"] = item["best_metric"]
+    return sorted(
+        merged.values(),
+        key=lambda item: (
+            item.get("best_rank")
+            if isinstance(item.get("best_rank"), int)
+            else sys.maxsize,
+            str(item.get("model_name") or "").casefold(),
+            str(item.get("paper_id") or ""),
+        ),
+    )
+
+
+def _markdown_text(value: object) -> str:
+    return (
+        str(value or "—")
+        .replace("\\", "\\\\")
+        .replace("|", "\\|")
+        .replace("\r", " ")
+        .replace("\n", " ")
+    )
+
+
+def _metric_summary(item: dict[str, Any]) -> str:
+    metrics = item.get("metrics") or {}
+    if not isinstance(metrics, dict) or not metrics:
+        return "—"
+    best_metric = item.get("best_metric")
+    names = sorted(
+        metrics,
+        key=lambda name: (
+            0 if name == best_metric else 1,
+            str(name).casefold(),
+        ),
+    )
+    return ", ".join(f"{name}: {metrics[name]}" for name in names)
+
+
+def _paper_markdown(item: dict[str, Any]) -> str:
+    title = _markdown_text(
+        item.get("paper_title")
+        or item.get("paper_arxiv_id")
+        or f"Paper {item.get('paper_id')}"
+    )
+    reference = item.get("paper_arxiv_id") or item.get("paper_id")
+    if not reference:
+        return title
+    url = f"https://paperswithcode.co/paper/{quote(str(reference), safe='.')}"
+    return f"[{title}]({url})"
+
+
+def benchmark_detail(args: argparse.Namespace, client: Client) -> int:
+    if not args.name:
+        raise ResponseError("benchmark inspection requires --name")
+    search_payload = client.get(
+        "datasets/",
+        {"q": args.name, "page": 1, "page_size": 100},
+    ).json()
+    candidates, _total = _rows(search_payload)
+    benchmark = _benchmark_match(args.name, candidates)
+    if benchmark is None:
+        suggestions = ", ".join(
+            str(item.get("name")) for item in candidates[:3] if item.get("name")
+        )
+        suffix = f"; closest results: {suggestions}" if suggestions else ""
+        raise ResponseError(f"Benchmark not found: {args.name}{suffix}")
+
+    evaluations_payload = client.get(
+        f"datasets/{quote(str(benchmark['id']), safe='')}/evaluations/",
+        {
+            "page": 1,
+            "page_size": 100,
+            "ordering": "best_rank",
+            "is_open": args.is_open,
+        },
+    ).json()
+    evaluations, total = _rows(evaluations_payload)
+    rows = _merged_evaluations(evaluations)[: args.limit]
+    data = {
+        "benchmark": benchmark,
+        "count": total if total is not None else len(evaluations),
+        "results": rows,
+    }
+    if args.json:
+        print(
+            json.dumps(
+                {"schema_version": API_CONTRACT_VERSION, "data": data},
+                ensure_ascii=False,
+                separators=(",", ":"),
+            )
+        )
+        return 0
+
+    title = _markdown_text(benchmark.get("name"))
+    full_name = benchmark.get("full_name")
+    print(f"# {title}")
+    if full_name and str(full_name).casefold() != str(benchmark.get("name")).casefold():
+        print(f"\n{_markdown_text(full_name)}")
+    if benchmark.get("description"):
+        print(f"\n{_markdown_text(benchmark['description'])}")
+    slug = benchmark.get("slug") or benchmark.get("id")
+    benchmark_url = f"https://paperswithcode.co/benchmark/{quote(str(slug), safe='-')}"
+    print(f"\n[View benchmark]({benchmark_url})")
+    print(f"\nTop {len(rows)} of {data['count']} evaluation rows.\n")
+    print("| Rank | Model | Scores | Task | Paper | Published | Open |")
+    print("| ---: | --- | --- | --- | --- | --- | :---: |")
+    for item in rows:
+        model = item.get("model_name") or "—"
+        if item.get("harness"):
+            model = f"{model} ({item['harness']})"
+        print(
+            "| "
+            + " | ".join(
+                (
+                    _markdown_text(item.get("best_rank")),
+                    _markdown_text(model),
+                    _markdown_text(_metric_summary(item)),
+                    _markdown_text(item.get("task_name")),
+                    _paper_markdown(item),
+                    _markdown_text(item.get("paper_published_date")),
+                    "yes" if item.get("is_open", True) else "no",
+                )
+            )
+            + " |"
+        )
+    return 0
+
+
 def version(_args: argparse.Namespace, _client: Client) -> int:
     print(f"pwc {__version__}\tapi {API_CONTRACT_VERSION}")
     return 0
@@ -287,7 +509,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = Parser(
         prog="pwc",
         description="Read-only Papers With Code research CLI",
-        epilog='Examples:\n  pwc search "small VLMs" --limit 10\n  pwc paper info 2501.01234\n  pwc benchmark list --task image-classification',
+        epilog=(
+            'Examples:\n  pwc search "small VLMs" --limit 10\n'
+            "  pwc paper info 2501.01234\n"
+            "  pwc benchmark list --task OCR\n"
+            '  pwc benchmark --name "SWE-Bench Pro"'
+        ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
@@ -378,9 +605,19 @@ def build_parser() -> argparse.ArgumentParser:
     lineage_list.set_defaults(handler=paper_lineage)
 
     benchmark = commands.add_parser("benchmark", help="inspect benchmarks")
-    benchmark_commands = benchmark.add_subparsers(
-        dest="benchmark_command", required=True
+    benchmark.add_argument(
+        "--name", help="exact benchmark name, full name, slug, or ID"
     )
+    benchmark.add_argument(
+        "--limit",
+        type=_limit(),
+        default=20,
+        help="maximum leaderboard rows, 1-100 (default: 20)",
+    )
+    benchmark.add_argument("--is-open", choices=("true", "false"))
+    _json(benchmark)
+    benchmark.set_defaults(handler=benchmark_detail)
+    benchmark_commands = benchmark.add_subparsers(dest="benchmark_command")
     benchmarks = benchmark_commands.add_parser(
         "list", help="list and filter benchmarks"
     )
@@ -400,8 +637,8 @@ def build_parser() -> argparse.ArgumentParser:
     benchmarks.add_argument("--is-open", choices=("true", "false"))
     benchmarks.add_argument(
         "--order-by",
-        choices=("name", "full_name", "created_at", "paper_count"),
-        default="name",
+        choices=("trending", "name", "full_name", "created_at", "paper_count"),
+        help="defaults to trending for task lists and name otherwise",
     )
     benchmarks.add_argument("--order-dir", choices=("asc", "desc"), default="asc")
     _json(benchmarks)

@@ -2,7 +2,7 @@
 
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, case, func
+from sqlalchemy import and_, case, func, or_
 from sqlalchemy.orm import Session
 
 from backend.models.api import (
@@ -180,9 +180,21 @@ class BenchmarkTrendService:
         if str(task_id).isdigit():
             task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
         else:
-            task = self.db.query(DBTask).filter(DBTask.slug == task_id).first()
+            task = (
+                self.db.query(DBTask)
+                .filter(
+                    or_(
+                        func.lower(DBTask.slug) == str(task_id).lower(),
+                        func.lower(DBTask.name) == str(task_id).lower(),
+                    )
+                )
+                .order_by(DBTask.id)
+                .first()
+            )
         if task is None:
-            raise PaperNotFoundError(f"Task with ID or slug '{task_id}' not found")
+            raise PaperNotFoundError(
+                f"Task with ID, slug, or name '{task_id}' not found"
+            )
         return task
 
     def _history_by_dataset(

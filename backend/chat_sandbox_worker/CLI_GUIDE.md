@@ -13,6 +13,7 @@ pwc paper trending
 pwc paper related PAPER
 pwc paper lineage list PAPER
 pwc benchmark list --task TASK
+pwc benchmark --name "BENCHMARK"
 ```
 
 Run `pwc COMMAND --help` or `pwc paper COMMAND --help` when a flag is unclear.

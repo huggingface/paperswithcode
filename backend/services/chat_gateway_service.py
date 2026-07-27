@@ -7,11 +7,13 @@ from typing import Any
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.models.database import Task
+from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.dataset_service import DatasetService
+from backend.services.evaluation_service import EvaluationService
 from backend.services.paper_lineage_service import get_paper_lineage
 from backend.services.paper_markdown_service import read_paper_markdown
 from backend.services.paper_service import PaperService
-from backend.models.database import Task
 
 CATALOG_OPERATIONS = frozenset(
     {
@@ -24,6 +26,8 @@ CATALOG_OPERATIONS = frozenset(
         "paper_related",
         "paper_lineage_list",
         "benchmark_list",
+        "benchmark_trending",
+        "benchmark_evaluations",
     }
 )
 
@@ -40,6 +44,14 @@ def _boolean(value: Any) -> bool:
     return value is True or (
         isinstance(value, str) and value.strip().lower() in {"1", "true", "yes"}
     )
+
+
+def _optional_boolean(value: Any) -> bool | None:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return None
+    return {"true": True, "false": False}.get(str(value).lower())
 
 
 class ChatGatewayService:
@@ -128,14 +140,7 @@ class ChatGatewayService:
                         .filter(Task.slug == str(task)[:255])
                         .scalar()
                     )
-            open_value = arguments.get("is_open")
-            is_open = (
-                open_value
-                if isinstance(open_value, bool)
-                else {"true": True, "false": False}.get(str(open_value).lower())
-                if open_value is not None
-                else None
-            )
+            is_open = _optional_boolean(arguments.get("is_open"))
             return _dump(
                 DatasetService(self.db).get_datasets(
                     page=max(1, min(int(arguments.get("page", 1)), 100)),
@@ -151,6 +156,31 @@ class ChatGatewayService:
                         else None
                     ),
                     is_open=is_open,
+                )
+            )
+        if operation == "benchmark_trending":
+            is_open = _optional_boolean(arguments.get("is_open"))
+            return _dump(
+                BenchmarkTrendService(self.db).get_trending_benchmarks(
+                    str(arguments["task"])[:255],
+                    limit=max(1, min(int(arguments.get("limit", 100)), 100)),
+                    min_recent_papers=max(
+                        0, int(arguments.get("min_recent_papers", 0))
+                    ),
+                    include_descendants=_boolean(arguments.get("include_descendants")),
+                    is_open=is_open,
+                )
+            )
+        if operation == "benchmark_evaluations":
+            is_open = _optional_boolean(arguments.get("is_open"))
+            return _dump(
+                EvaluationService(self.db).get_evaluations(
+                    page=max(1, min(int(arguments.get("page", 1)), 100)),
+                    page_size=max(1, min(int(arguments.get("page_size", 100)), 100)),
+                    dataset_id=int(arguments["dataset"]),
+                    is_open=is_open,
+                    order_by="best_rank",
+                    order_dir="asc",
                 )
             )
         raise ValueError("Catalog operation is not available through this gateway")
