@@ -269,6 +269,7 @@ def create_app() -> FastAPI:
         codex_add_evals,
         codex_enrich_paper,
         codex_curation_callbacks,
+        stats,
         research_catalog,
     )
 
@@ -293,6 +294,7 @@ def create_app() -> FastAPI:
     app.include_router(metrics.router, prefix="/api/v1", tags=["metrics"])
     app.include_router(conferences.router, prefix="/api/v1", tags=["conferences"])
     app.include_router(organizations.router, prefix="/api/v1", tags=["organizations"])
+    app.include_router(stats.router, prefix="/api/v1", tags=["stats"])
     if settings.chat_enabled:
         app.include_router(chat.router, prefix="/api/v1", tags=["chat"])
         from backend.chat_gateway_app import app as chat_gateway_app

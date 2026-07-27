@@ -34,7 +34,6 @@ const NAV_LINKS = [
   { to: "/", label: "Trending", end: true },
   { to: "/tasks", label: "Browse state-of-the-art", end: false },
   { to: "/methods", label: "Methods", end: false },
-  { to: "/frameworks", label: "Frameworks", end: false },
   { to: "/conferences", label: "Conferences", end: false },
   { to: "/submit", label: "Submit", end: false },
 ] as const;

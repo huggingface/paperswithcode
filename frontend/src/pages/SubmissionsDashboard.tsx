@@ -39,6 +39,7 @@ const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
   "new_method",
   "new_benchmark",
   "new_metric",
+  "new_conference",
 ];
 const COUNT_STATUSES: PendingEditStatus[] = ["pending", "approved", "rejected"];
 
@@ -165,8 +166,13 @@ function SubmissionCard({
   const [adminNote, setAdminNote] = React.useState(submission.admin_note ?? "");
   const queryClient = useQueryClient();
   const { toast } = useToast();
-  const routeIdentifier = paperRouteIdentifier(paper, submission.paper_id);
-  const paperTitle = paper?.title || `Paper #${submission.paper_id}`;
+  const isDirectorySuggestion = submission.paper_id == null;
+  const routeIdentifier = isDirectorySuggestion
+    ? null
+    : paperRouteIdentifier(paper, submission.paper_id);
+  const paperTitle = isDirectorySuggestion
+    ? "Taxonomy directory"
+    : paper?.title || `Paper #${submission.paper_id}`;
   const avatarUrl = `https://huggingface.co/${encodeURIComponent(submission.hf_username)}/avatar`;
   const isPending = submission.status === "pending";
 
@@ -178,12 +184,14 @@ function SubmissionCard({
     (reviewed: PendingPaperEdit) => {
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdit", reviewed.id] });
-      queryClient.invalidateQueries({ queryKey: ["paper", String(reviewed.paper_id)] });
-      queryClient.invalidateQueries({ queryKey: ["paper-summary", String(reviewed.paper_id)] });
+      if (reviewed.paper_id != null) {
+        queryClient.invalidateQueries({ queryKey: ["paper", String(reviewed.paper_id)] });
+        queryClient.invalidateQueries({ queryKey: ["paper-summary", String(reviewed.paper_id)] });
+      }
       if (paper?.arxiv_id) {
         queryClient.invalidateQueries({ queryKey: ["paper-arxiv", paper.arxiv_id] });
       }
-      if (reviewed.edit_type === "evaluations") {
+      if (reviewed.edit_type === "evaluations" && reviewed.paper_id != null) {
         queryClient.invalidateQueries({ queryKey: ["evaluations", "paper", String(reviewed.paper_id)] });
       }
     },
@@ -241,17 +249,25 @@ function SubmissionCard({
       <header className="submission-card-header">
         <div className="submission-card-top">
           <div>
-            <a
-              href={`/paper/${encodeURIComponent(routeIdentifier)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="submission-title"
-            >
-              {paperTitle}
-            </a>
+            {routeIdentifier ? (
+              <a
+                href={`/paper/${encodeURIComponent(routeIdentifier)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="submission-title"
+              >
+                {paperTitle}
+              </a>
+            ) : (
+              <div className="submission-title">{paperTitle}</div>
+            )}
             <div className="submission-meta">
               <span>#{submission.id}</span>
-              <span>Paper #{submission.paper_id}</span>
+              <span>
+                {isDirectorySuggestion
+                  ? "Directory suggestion"
+                  : `Paper #${submission.paper_id}`}
+              </span>
               <span>{formatRelativeTime(submission.created_at)}</span>
             </div>
           </div>
@@ -379,7 +395,14 @@ export default function SubmissionsDashboard() {
   });
 
   const paperIds = React.useMemo(
-    () => Array.from(new Set((listQuery.data?.results ?? []).map((row) => row.paper_id))).sort((a, b) => a - b),
+    () =>
+      Array.from(
+        new Set(
+          (listQuery.data?.results ?? [])
+            .map((row) => row.paper_id)
+            .filter((paperId): paperId is number => paperId != null),
+        ),
+      ).sort((a, b) => a - b),
     [listQuery.data?.results],
   );
 
@@ -523,7 +546,11 @@ export default function SubmissionsDashboard() {
               <SubmissionCard
                 key={submission.id}
                 submission={submission}
-                paper={papersById.get(submission.paper_id)}
+                paper={
+                  submission.paper_id == null
+                    ? undefined
+                    : papersById.get(submission.paper_id)
+                }
               />
             ))}
           </div>

@@ -52,6 +52,7 @@ const TagsIndexView = React.lazy(() => import("@/views/TagsIndexView"));
 const TagBrowseView = React.lazy(() => import("@/views/TagBrowseView"));
 const MethodsIndexView = React.lazy(() => import("@/views/MethodsIndexView"));
 const FrameworksIndexView = React.lazy(() => import("@/views/FrameworksIndexView"));
+const TrendsView = React.lazy(() => import("@/views/TrendsView"));
 const ConferencesIndexView = React.lazy(() => import("@/views/ConferencesIndexView"));
 const AiDeadlinesView = React.lazy(() => import("@/views/AiDeadlinesView"));
 const ConferenceDetailView = React.lazy(() => import("@/views/ConferenceDetailView"));
@@ -219,6 +220,7 @@ const Shell: React.FC = () => {
             <Route path="/methods" element={<MethodsIndexView />} />
             <Route path="/methods/:methodSlug" element={<MethodDetailView />} />
             <Route path="/frameworks" element={<FrameworksIndexView />} />
+            <Route path="/trends" element={<TrendsView />} />
             <Route path="/conferences" element={<ConferencesIndexView />} />
             <Route path="/ai-deadlines" element={<AiDeadlinesView />} />
             <Route path="/conferences/:confSlug" element={<ConferenceDetailView />} />

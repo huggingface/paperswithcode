@@ -644,6 +644,8 @@ def test_staging_candidate_smoke_leaves_spa_to_nginx(monkeypatch):
         requested.append(url)
         if url.endswith("/health"):
             return 200, {}, b'{"release_id":"release-staging"}'
+        if url.endswith("/api/v1/papers/1"):
+            return 404, {}, b'{"detail":"Paper not found"}'
         if url.endswith("/api/v1/chat/sessions"):
             return 401, {}, b""
         raise AssertionError(f"unexpected candidate request: {url}")
@@ -660,6 +662,26 @@ def test_staging_candidate_smoke_leaves_spa_to_nginx(monkeypatch):
         == []
     )
     assert all(not url.endswith("/chat") for url in requested)
+
+
+def test_staging_candidate_smoke_rejects_numeric_paper_server_error(monkeypatch):
+    def request(url: str, *, allow_redirects: bool = True):
+        if url.endswith("/health"):
+            return 200, {}, b'{"release_id":"release-staging"}'
+        if url.endswith("/api/v1/papers/1"):
+            return 500, {}, b"Internal Server Error"
+        if url.endswith("/api/v1/chat/sessions"):
+            return 401, {}, b""
+        raise AssertionError(f"unexpected candidate request: {url}")
+
+    monkeypatch.setattr(smoke_test, "request", request)
+
+    assert smoke_test.run_http_smoke(
+        "staging",
+        "http://127.0.0.1:8100",
+        expected_release="release-staging",
+        candidate=True,
+    ) == ["numeric paper API returned 500"]
 
 
 def test_nginx_cross_environment_references_are_rejected():

@@ -350,6 +350,39 @@ export interface TrendingTasksResponse {
   baseline_days: number;
 }
 
+export interface BenchmarkTrendPoint {
+  start_date: string;
+  end_date: string;
+  paper_count: number;
+}
+
+export interface TrendingBenchmark {
+  id: string;
+  name: string;
+  slug?: string | null;
+  full_name?: string | null;
+  featured_rank?: number | null;
+  recent_paper_count: number;
+  baseline_paper_count: number;
+  all_time_paper_count: number;
+  trend_score: number;
+  rate_change?: number | null;
+  latest_reported_on?: string | null;
+  best_model_name?: string | null;
+  history: BenchmarkTrendPoint[];
+}
+
+export interface TrendingBenchmarksResponse {
+  task_id: string;
+  task_slug: string;
+  signal: "evaluation_reports";
+  recent_days: number;
+  baseline_days: number;
+  bucket_days: number;
+  generated_on: string;
+  results: TrendingBenchmark[];
+}
+
 export interface Method {
   id: string;
   name: string;
@@ -633,7 +666,7 @@ export interface PaperSubmitResponse {
   latest_version?: string | null;
 }
 
-/** Which paper-page surface a pending edit targets. */
+/** Which paper-page surface or taxonomy directory a pending edit targets. */
 export type PendingEditType =
   | 'tasks'
   | 'methods'
@@ -645,13 +678,14 @@ export type PendingEditType =
   | 'new_task'
   | 'new_method'
   | 'new_benchmark'
-  | 'new_metric';
+  | 'new_metric'
+  | 'new_conference';
 
 export type PendingEditStatus = 'pending' | 'approved' | 'rejected';
 
 export interface PendingPaperEdit {
   id: number;
-  paper_id: number;
+  paper_id: number | null;
   hf_username: string;
   is_author: boolean;
   edit_type: PendingEditType;
@@ -666,7 +700,7 @@ export interface PendingPaperEdit {
 }
 
 export interface PendingPaperEditSubmitPayload {
-  paper_id: number;
+  paper_id: number | null;
   edit_type: PendingEditType;
   proposed_payload: Record<string, unknown>;
 }
@@ -674,6 +708,16 @@ export interface PendingPaperEditSubmitPayload {
 export interface PendingPaperEditsResponse {
   count: number;
   results: PendingPaperEdit[];
+}
+
+export interface TrendPoint {
+  month: string;
+  percent: number;
+}
+
+export interface TrendsResponse {
+  code_availability: TrendPoint[];
+  hf_artifacts: TrendPoint[];
 }
 
 class ApiClient {
@@ -1193,6 +1237,31 @@ class ApiClient {
     return this.request<TaskPage>(endpoint);
   }
 
+  async getTrendingBenchmarks(taskId: string, params?: {
+    limit?: number;
+    recent_days?: number;
+    baseline_days?: number;
+    min_recent_papers?: number;
+    include_descendants?: boolean;
+    bucket_days?: number;
+    history_buckets?: number;
+    is_open?: boolean;
+  }): Promise<TrendingBenchmarksResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.append('limit', params.limit.toString());
+    if (params?.recent_days !== undefined) searchParams.append('recent_days', params.recent_days.toString());
+    if (params?.baseline_days !== undefined) searchParams.append('baseline_days', params.baseline_days.toString());
+    if (params?.min_recent_papers !== undefined) searchParams.append('min_recent_papers', params.min_recent_papers.toString());
+    if (params?.include_descendants !== undefined) searchParams.append('include_descendants', params.include_descendants.toString());
+    if (params?.bucket_days !== undefined) searchParams.append('bucket_days', params.bucket_days.toString());
+    if (params?.history_buckets !== undefined) searchParams.append('history_buckets', params.history_buckets.toString());
+    if (params?.is_open !== undefined) searchParams.append('is_open', params.is_open.toString());
+
+    const queryString = searchParams.toString();
+    const endpoint = `/tasks/${encodeURIComponent(taskId)}/trending-benchmarks${queryString ? `?${queryString}` : ''}`;
+    return this.request<TrendingBenchmarksResponse>(endpoint);
+  }
+
   async getTaskPapers(taskId: string, params?: {
     page?: number;
     page_size?: number;
@@ -1646,6 +1715,10 @@ class ApiClient {
   async getCronStatus(): Promise<CronJobsResponse> {
     return this.request<CronJobsResponse>('/cron/status', { cache: 'no-store' });
   }
+
+  async getResearchTrends(): Promise<TrendsResponse> {
+    return this.request<TrendsResponse>('/stats/trends');
+  }
 }
 
 // Create and export a singleton instance
@@ -1711,6 +1784,7 @@ export const getThumbnailStatus = apiClient.getThumbnailStatus.bind(apiClient);
 export const getMetrics = apiClient.getMetrics.bind(apiClient);
 export const getMetric = apiClient.getMetric.bind(apiClient);
 export const getMetricDirections = apiClient.getMetricDirections.bind(apiClient);
+export const getResearchTrends = apiClient.getResearchTrends.bind(apiClient);
 export const healthCheck = apiClient.healthCheck.bind(apiClient);
 export const getMyBookmarkIds = apiClient.getMyBookmarkIds.bind(apiClient);
 export const getMyBookmarks = apiClient.getMyBookmarks.bind(apiClient);

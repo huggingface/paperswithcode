@@ -16,6 +16,8 @@ interface SignInToEditDialogProps {
   sectionLabel: string;
   /** Path to return the user to after sign-in (usually the current paper URL). */
   returnTo: string;
+  /** Use directory-specific copy for taxonomy suggestions. */
+  taxonomySuggestion?: boolean;
 }
 
 export function SignInToEditDialog({
@@ -23,15 +25,19 @@ export function SignInToEditDialog({
   onOpenChange,
   sectionLabel,
   returnTo,
+  taxonomySuggestion = false,
 }: SignInToEditDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md">
         <DialogHeader>
-          <DialogTitle>Sign in to edit {sectionLabel}</DialogTitle>
+          <DialogTitle>
+            Sign in to {taxonomySuggestion ? "suggest" : "edit"} {sectionLabel}
+          </DialogTitle>
           <DialogDescription>
-            Anyone can suggest edits to a paper page. Sign in with your Hugging
-            Face account first so an admin can review your submission.
+            {taxonomySuggestion
+              ? "Sign in with your Hugging Face account so an admin can review your suggestion."
+              : "Anyone can suggest edits to a paper page. Sign in with your Hugging Face account first so an admin can review your submission."}
           </DialogDescription>
         </DialogHeader>
         <div className="flex justify-center pt-2">
