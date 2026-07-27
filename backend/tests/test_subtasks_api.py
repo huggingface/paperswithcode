@@ -10,6 +10,8 @@ benchmarks live under per-capability subtasks (World Knowledge, Math,
 Reasoning, Coding, ...).
 """
 
+from datetime import UTC, date, datetime, timedelta
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import BigInteger, create_engine
@@ -18,8 +20,8 @@ from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from backend.main import create_app
 from backend.database.connection import get_database_session
+from backend.main import create_app
 from backend.models.database import (
     Base,
     Dataset as DBDataset,
@@ -30,6 +32,7 @@ from backend.models.database import (
     TaskDataset,
     TaskDatasetMetric,
 )
+from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.dataset_service import DatasetService
 from backend.services.evaluation_service import EvaluationService
 
@@ -186,6 +189,115 @@ def _seed_lm_with_subtasks(db):
     )
 
     db.commit()
+
+
+def _seed_benchmark_trends(db, today):
+    task = DBTask(id=50, name="OCR", slug="ocr-trends", level=0)
+    rising = DBDataset(id=500, name="RisingBench", slug="rising-bench")
+    established = DBDataset(id=501, name="EstablishedBench", slug="established-bench")
+    db.add_all([task, rising, established])
+    db.add_all(
+        [
+            TaskDataset(task_id=50, dataset_id=500),
+            TaskDataset(task_id=50, dataset_id=501, featured_rank=1),
+        ]
+    )
+
+    papers = []
+    evaluations = []
+    evaluation_id = 5000
+    paper_id = 500
+
+    def add_reports(dataset_id, ages):
+        nonlocal evaluation_id, paper_id
+        for age in ages:
+            papers.append(
+                DBPaper(
+                    id=paper_id,
+                    title=f"Paper {paper_id}",
+                    abstract="",
+                    arxiv_id=f"2607.{paper_id:05d}",
+                    version="v1",
+                    is_latest_version=True,
+                    date_published=today - timedelta(days=age),
+                )
+            )
+            evaluations.append(
+                DBEvaluation(
+                    id=evaluation_id,
+                    paper_id=paper_id,
+                    task_id=50,
+                    dataset_id=dataset_id,
+                    model_name=f"Model {paper_id}",
+                    metrics={"Accuracy": 1},
+                    best_metric="Accuracy",
+                )
+            )
+            evaluation_id += 1
+            paper_id += 1
+
+    add_reports(500, [2, 8, 15, 22])
+    add_reports(501, [3, 45, 120, 145, 170, 200, 230])
+
+    # A second metric row from the same paper must not inflate reporting count.
+    evaluations.append(
+        DBEvaluation(
+            id=evaluation_id,
+            paper_id=500,
+            task_id=50,
+            dataset_id=500,
+            model_name="Model 500",
+            metrics={"F1": 1},
+            best_metric="F1",
+        )
+    )
+    db.add_all(papers)
+    db.add_all(evaluations)
+    db.commit()
+
+
+def test_trending_benchmarks_default_to_ninety_days(db_session):
+    today = date(2026, 7, 27)
+    _seed_benchmark_trends(db_session, today)
+
+    response = BenchmarkTrendService(db_session).get_trending_benchmarks(
+        "ocr-trends",
+        today=today,
+    )
+
+    assert response.recent_days == 90
+    assert [item.name for item in response.results] == [
+        "RisingBench",
+        "EstablishedBench",
+    ]
+    rising, established = response.results
+    assert rising.recent_paper_count == 4
+    assert rising.all_time_paper_count == 4
+    assert rising.best_model_name == "Model 500"
+    assert established.recent_paper_count == 2
+    assert established.baseline_paper_count == 5
+    assert established.featured_rank == 1
+
+
+def test_trending_benchmarks_endpoint_exposes_default_window(client):
+    today = datetime.now(UTC).date()
+    db = TestingSessionLocal()
+    try:
+        _seed_benchmark_trends(db, today)
+    finally:
+        db.close()
+
+    response = client.get("/api/v1/tasks/ocr-trends/trending-benchmarks")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["task_slug"] == "ocr-trends"
+    assert body["signal"] == "evaluation_reports"
+    assert body["recent_days"] == 90
+    assert body["baseline_days"] == 180
+    assert body["results"][0]["name"] == "RisingBench"
+    assert body["results"][0]["best_model_name"] == "Model 500"
+    assert len(body["results"][0]["history"]) == 6
 
 
 def test_create_evaluation_on_child_task_validates_against_child_leaderboard(

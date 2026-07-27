@@ -1176,6 +1176,85 @@ class TrendingTasks(BaseModel):
     )
 
 
+class BenchmarkTrendPoint(BaseModel):
+    """One time bucket in a benchmark reporting-frequency sparkline."""
+
+    start_date: date = Field(..., description="Exclusive start of this bucket")
+    end_date: date = Field(..., description="Inclusive end of this bucket")
+    paper_count: int = Field(
+        ..., description="Distinct papers reporting an evaluation in this bucket"
+    )
+
+
+class TrendingBenchmark(BaseModel):
+    """Recent evaluation-reporting activity for one task benchmark."""
+
+    id: str = Field(..., description="Benchmark dataset ID")
+    name: str = Field(..., description="Benchmark name")
+    slug: Optional[str] = Field(None, description="Benchmark URL slug")
+    full_name: Optional[str] = Field(None, description="Expanded benchmark name")
+    featured_rank: Optional[int] = Field(
+        None, description="Existing manually curated task-page rank, if any"
+    )
+    recent_paper_count: int = Field(
+        ..., description="Distinct reporting papers in the recent window"
+    )
+    baseline_paper_count: int = Field(
+        ..., description="Distinct reporting papers in the preceding baseline window"
+    )
+    all_time_paper_count: int = Field(
+        ..., description="Distinct reporting papers across all publication dates"
+    )
+    trend_score: float = Field(
+        ...,
+        description="Recent reporting velocity normalized to papers per 30 days",
+    )
+    rate_change: Optional[float] = Field(
+        None,
+        description=(
+            "Recent reporting velocity divided by baseline velocity. Null when "
+            "the benchmark has no baseline reports"
+        ),
+    )
+    latest_reported_on: Optional[date] = Field(
+        None, description="Publication date of the newest reporting paper"
+    )
+    best_model_name: Optional[str] = Field(
+        None,
+        description="Top-ranked model on this benchmark for the scoped task",
+    )
+    history: List[BenchmarkTrendPoint] = Field(
+        default_factory=list,
+        description="Chronological reporting-paper counts for sparkline rendering",
+    )
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def ensure_string_id(cls, v):
+        return str(v)
+
+
+class TrendingBenchmarks(BaseModel):
+    """Trending benchmarks for a task, with reproducible window metadata."""
+
+    task_id: str = Field(..., description="Resolved task ID")
+    task_slug: str = Field(..., description="Resolved task slug")
+    signal: str = Field(
+        default="evaluation_reports",
+        description="Evidence source used to calculate the ranking",
+    )
+    recent_days: int = Field(..., description="Length of the recent window")
+    baseline_days: int = Field(..., description="Length of the preceding window")
+    bucket_days: int = Field(..., description="Length of each history bucket")
+    generated_on: date = Field(..., description="Date used as the window endpoint")
+    results: List[TrendingBenchmark] = Field(default_factory=list)
+
+    @field_validator("task_id", mode="before")
+    @classmethod
+    def ensure_string_task_id(cls, v):
+        return str(v)
+
+
 class AreaWithTasks(BaseModel):
     """
     Research area together with its tasks and aggregated paper counts.
