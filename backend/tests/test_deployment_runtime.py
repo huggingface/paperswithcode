@@ -258,13 +258,18 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
             if environment == "staging"
             else ""
         ),
-        codex_jobs_enabled=environment == "production",
-        codex_add_evals_enabled=environment == "production",
-        codex_enrich_paper_enabled=environment == "production",
-        codex_jobs_namespace="test" if environment == "production" else "",
-        codex_jobs_token="test-only" if environment == "production" else "",
-        codex_jobs_openai_api_key=("test-only" if environment == "production" else ""),
-        github_token="test-only" if environment == "production" else "",
+        codex_jobs_enabled=True,
+        codex_add_evals_enabled=True,
+        codex_enrich_paper_enabled=True,
+        codex_jobs_namespace="test",
+        codex_jobs_token="test-only",
+        codex_jobs_openai_api_key="test-only",
+        codex_jobs_api_url=(
+            "https://staging.paperswithcode.co/api/v1"
+            if environment == "staging"
+            else "https://paperswithcode.co/api/v1"
+        ),
+        github_token="test-only",
         hf_token="test-only-hf-token" if environment == "staging" else "",
         catalog_mutations_enabled=environment == "production",
         thumbnail_mutations_enabled=False,
@@ -500,11 +505,11 @@ def test_modal_bridge_manifest_remains_a_valid_rollback_target(tmp_path: Path):
     assert validate_manifest(release, "production")["git_sha"] == "a" * 40
 
 
-def test_staging_profile_keeps_unmediated_catalog_actions_hidden():
+def test_staging_profile_inherits_admin_catalog_actions():
     assert profile_features("staging") == {
         "chat": True,
-        "codex_add_evals": False,
-        "codex_enrich_paper": False,
+        "codex_add_evals": True,
+        "codex_enrich_paper": True,
     }
 
 
@@ -533,8 +538,8 @@ def test_production_profile_enables_admin_catalog_actions():
             {
                 "VITE_CHAT_ENABLED": "1",
                 "VITE_CHAT_LIVE": "1",
-                "VITE_CODEX_ADD_EVALS_ENABLED": "0",
-                "VITE_CODEX_ENRICH_PAPER_ENABLED": "0",
+                "VITE_CODEX_ADD_EVALS_ENABLED": "1",
+                "VITE_CODEX_ENRICH_PAPER_ENABLED": "1",
             },
         ),
     ],
@@ -543,11 +548,12 @@ def test_frontend_build_flags_follow_release_profile(environment: str, expected:
     assert deploy_cli.frontend_feature_environment(environment) == expected
 
 
-def test_production_codex_jobs_require_all_credentials(tmp_path: Path):
-    release = make_bundle(tmp_path, chat=False)
-    settings = deployed_settings(tmp_path, release, "production")
+@pytest.mark.parametrize("environment", ["production", "staging"])
+def test_codex_jobs_require_all_credentials(tmp_path: Path, environment: str):
+    release = make_bundle(tmp_path, chat=environment == "staging")
+    settings = deployed_settings(tmp_path, release, environment)
     settings.codex_jobs_token = ""
-    with pytest.raises(RuntimeError, match="production Codex jobs require"):
+    with pytest.raises(RuntimeError, match="Codex jobs require"):
         validate_runtime(settings)
 
 

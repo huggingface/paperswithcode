@@ -127,6 +127,25 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
             "PWC_THUMBNAIL_CACHE_DIR must be an existing readable directory"
         )
 
+    if settings.codex_jobs_enabled:
+        if (
+            not settings.codex_jobs_namespace
+            or not settings.codex_jobs_token
+            or not settings.codex_jobs_openai_api_key
+            or not settings.github_token
+        ):
+            raise RuntimeError(
+                "Codex jobs require namespace, HF, OpenAI, and GitHub credentials"
+            )
+        expected_api_url = {
+            "production": "https://paperswithcode.co/api/v1",
+            "staging": "https://staging.paperswithcode.co/api/v1",
+        }[settings.environment]
+        if settings.codex_jobs_api_url.rstrip("/") != expected_api_url:
+            raise RuntimeError(
+                f"{settings.environment} Codex jobs must target {expected_api_url}"
+            )
+
     if settings.environment == "production":
         if settings.chat_enabled:
             raise RuntimeError(
@@ -135,15 +154,6 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
         if not settings.catalog_mutations_enabled or not settings.cron_enabled:
             raise RuntimeError(
                 "production catalog mutations and CRON must remain enabled"
-            )
-        if settings.codex_jobs_enabled and (
-            not settings.codex_jobs_namespace
-            or not settings.codex_jobs_token
-            or not settings.codex_jobs_openai_api_key
-            or not settings.github_token
-        ):
-            raise RuntimeError(
-                "production Codex jobs require namespace, HF, OpenAI, and GitHub credentials"
             )
         if (
             settings.chat_default_backend != "local_mcp"

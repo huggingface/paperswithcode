@@ -97,6 +97,7 @@ def main() -> int:
     parser.add_argument("--legacy-env", type=Path, required=True)
     parser.add_argument("--codex-jobs-namespace", required=True)
     parser.add_argument("--production-codex-only", action="store_true")
+    parser.add_argument("--staging-codex-too", action="store_true")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo")
@@ -124,8 +125,24 @@ def main() -> int:
             production_codex_values(legacy, args.codex_jobs_namespace),
         )
         write_env(CONFIG_ROOT / "production.env", production, "pwc-production")
-        print("installed production Codex credentials")
+        if args.staging_codex_too:
+            staging = assign(
+                read_lines(CONFIG_ROOT / "staging.env"),
+                {
+                    **production_codex_values(legacy, args.codex_jobs_namespace),
+                    "PWC_CODEX_JOBS_API_URL": (
+                        "https://staging.paperswithcode.co/api/v1"
+                    ),
+                    "PWC_GITHUB_TOKEN": decoded_value(legacy["PWC_GITHUB_TOKEN"]),
+                },
+            )
+            write_env(CONFIG_ROOT / "staging.env", staging, "pwc-staging")
+            print("installed production and staging Codex credentials")
+        else:
+            print("installed production Codex credentials")
         return 0
+    if args.staging_codex_too:
+        parser.error("--staging-codex-too requires --production-codex-only")
 
     current_staging = read_lines(CONFIG_ROOT / "staging.env")
     current_cron = read_lines(CONFIG_ROOT / "production-cron.env")
@@ -181,6 +198,7 @@ def main() -> int:
     staging = assign(
         staging,
         {
+            **production_codex_values(legacy, args.codex_jobs_namespace),
             "PWC_CATALOG_MUTATIONS_ENABLED": "false",
             "PWC_CHAT_AGENT_CWD": "/var/lib/paperswithcode/staging/chat-agent",
             "PWC_CHAT_ENABLED": "true",
@@ -196,8 +214,7 @@ def main() -> int:
             "PWC_CODEX_ADD_EVALS_WORK_DIR": (
                 "/var/lib/paperswithcode/staging/codex-work"
             ),
-            "PWC_CODEX_ENRICH_PAPER_ENABLED": "false",
-            "PWC_CODEX_JOBS_ENABLED": "false",
+            "PWC_CODEX_JOBS_API_URL": ("https://staging.paperswithcode.co/api/v1"),
             "PWC_CRON_ENABLED": "false",
             "PWC_CRON_LOCK_DIR": "/var/lib/paperswithcode/staging/cron-locks",
             "PWC_CRON_LOG_DIR": "/var/lib/paperswithcode/staging/cron-logs",
@@ -208,6 +225,7 @@ def main() -> int:
             "PWC_FRONTEND_DIST_DIR": (
                 "/srv/paperswithcode/environments/staging/current/frontend-dist"
             ),
+            "PWC_GITHUB_TOKEN": decoded_value(legacy["PWC_GITHUB_TOKEN"]),
             "PWC_JWT_SECRET": staging_jwt,
             "PWC_PRODUCTION_JWT_FINGERPRINT": hashlib.sha256(
                 production_jwt.encode()
