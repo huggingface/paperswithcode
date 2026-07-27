@@ -945,9 +945,17 @@ const BenchmarkDetailView: React.FC = () => {
                   <span>{sortedRows.length} evaluations</span>
                 )}
               </span>
+            </div>
+            {dataset.description && (
+              <p className="bm-description">{dataset.description}</p>
+            )}
+          </div>
+
+          {(dataset.hf_url || benchmarkTrend) && (
+            <aside className="bm-hero-aside">
               {dataset.hf_url && (
                 <a
-                  className="bm-action-btn"
+                  className="bm-action-btn bm-hf-action"
                   href={dataset.hf_url}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -955,56 +963,50 @@ const BenchmarkDetailView: React.FC = () => {
                   <span aria-hidden="true">🤗</span> View on Hugging Face
                 </a>
               )}
-            </div>
-          </div>
-
-          {benchmarkTrend && (
-            <aside className="bm-benchmark-trend" aria-label={`${dataset.name} reporting trend`}>
-              <div className="bm-benchmark-trend-head">
-                <span>Reporting activity</span>
-                <span>{benchmarkTrendsQ.data?.recent_days || 90} days</span>
-              </div>
-              <BenchmarkTrendSparkline
-                history={benchmarkTrend.history}
-                benchmarkName={benchmarkTrend.name}
-              />
-              <div className="bm-benchmark-trend-summary">
-                <span>
-                  <strong>{benchmarkTrend.recent_paper_count}</strong>{" "}
-                  {benchmarkTrend.recent_paper_count === 1 ? "paper" : "papers"} reporting
-                </span>
-                {benchmarkTrend.rate_change == null ? (
-                  benchmarkTrend.recent_paper_count > 0 && (
-                    <span className="benchmark-trend-change is-new">new</span>
-                  )
-                ) : (
-                  <span
-                    className={`benchmark-trend-change ${
-                      benchmarkTrend.rate_change >= 1 ? "is-up" : "is-down"
-                    }`}
-                  >
-                    {benchmarkTrend.rate_change >= 1 ? "↑" : "↓"}{" "}
-                    {benchmarkTrend.rate_change.toFixed(1)}×
-                  </span>
-                )}
-              </div>
-              {primaryTask && (
-                <Link
-                  className="bm-benchmark-trend-link"
-                  to={`/tasks/${primaryTask.slug || primaryTask.id}`}
-                >
-                  View {primaryTask.name} benchmarks →
-                </Link>
+              {benchmarkTrend && (
+                <div className="bm-benchmark-trend" aria-label={`${dataset.name} reporting trend`}>
+                  <div className="bm-benchmark-trend-head">
+                    <span>Reporting activity</span>
+                    <span>{benchmarkTrendsQ.data?.recent_days || 90} days</span>
+                  </div>
+                  <BenchmarkTrendSparkline
+                    history={benchmarkTrend.history}
+                    benchmarkName={benchmarkTrend.name}
+                    interactive
+                  />
+                  <div className="bm-benchmark-trend-summary">
+                    <span>
+                      <strong>{benchmarkTrend.recent_paper_count}</strong>{" "}
+                      {benchmarkTrend.recent_paper_count === 1 ? "paper" : "papers"} reporting
+                    </span>
+                    {benchmarkTrend.rate_change == null ? (
+                      benchmarkTrend.recent_paper_count > 0 && (
+                        <span className="benchmark-trend-change is-new">new</span>
+                      )
+                    ) : (
+                      <span
+                        className={`benchmark-trend-change ${
+                          benchmarkTrend.rate_change >= 1 ? "is-up" : "is-down"
+                        }`}
+                      >
+                        {benchmarkTrend.rate_change >= 1 ? "↑" : "↓"}{" "}
+                        {benchmarkTrend.rate_change.toFixed(1)}×
+                      </span>
+                    )}
+                  </div>
+                  {primaryTask && (
+                    <Link
+                      className="bm-benchmark-trend-link"
+                      to={`/tasks/${primaryTask.slug || primaryTask.id}`}
+                    >
+                      View {primaryTask.name} benchmarks →
+                    </Link>
+                  )}
+                </div>
               )}
             </aside>
           )}
         </div>
-
-        {dataset.description && (
-          <p style={{ fontFamily: "var(--serif)", color: "var(--ink-soft)", maxWidth: 760, marginBottom: 16 }}>
-            {dataset.description}
-          </p>
-        )}
 
         {preferences.hide_closed_source_evals && hiddenClosedEvals.length > 0 && (
           <div className="bm-hidden-closed-notice">
