@@ -633,7 +633,7 @@ export interface PaperSubmitResponse {
   latest_version?: string | null;
 }
 
-/** Which paper-page surface a pending edit targets. */
+/** Which paper-page surface or taxonomy directory a pending edit targets. */
 export type PendingEditType =
   | 'tasks'
   | 'methods'
@@ -645,13 +645,14 @@ export type PendingEditType =
   | 'new_task'
   | 'new_method'
   | 'new_benchmark'
-  | 'new_metric';
+  | 'new_metric'
+  | 'new_conference';
 
 export type PendingEditStatus = 'pending' | 'approved' | 'rejected';
 
 export interface PendingPaperEdit {
   id: number;
-  paper_id: number;
+  paper_id: number | null;
   hf_username: string;
   is_author: boolean;
   edit_type: PendingEditType;
@@ -666,7 +667,7 @@ export interface PendingPaperEdit {
 }
 
 export interface PendingPaperEditSubmitPayload {
-  paper_id: number;
+  paper_id: number | null;
   edit_type: PendingEditType;
   proposed_payload: Record<string, unknown>;
 }

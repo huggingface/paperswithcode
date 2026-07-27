@@ -158,6 +158,75 @@ def test_submit_methods_change_succeeds(db_session, paper_fixture):
     assert row.id is not None
 
 
+def test_submit_directory_taxonomy_suggestion_without_paper_succeeds(db_session):
+    service = PendingEditService(db_session)
+    row = service.submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_task",
+        proposed_payload={
+            "name": "Long-context Retrieval",
+            "description": "Retrieving evidence from very long contexts.",
+        },
+    )
+
+    assert row.id is not None
+    assert row.paper_id is None
+    assert row.is_author is False
+    assert row.current_payload == {}
+
+    reviewed = service.approve(edit_id=row.id, reviewer_username="admin")
+    assert reviewed.status == "approved"
+
+
+def test_submit_directory_conference_suggestion_without_paper_succeeds(db_session):
+    row = PendingEditService(db_session).submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_conference",
+        proposed_payload={
+            "name": "Conference on Long-context Research 2027",
+            "dates": " May 3–7, 2027 ",
+            "venue": " Vancouver Convention Centre ",
+            "url": "https://example.org/conference",
+        },
+    )
+
+    assert row.id is not None
+    assert row.paper_id is None
+    assert row.proposed_payload == {
+        "name": "Conference on Long-context Research 2027",
+        "dates": "May 3–7, 2027",
+        "venue": "Vancouver Convention Centre",
+        "url": "https://example.org/conference",
+    }
+
+
+def test_submit_directory_conference_suggestion_rejects_invalid_url(db_session):
+    with pytest.raises(PendingEditError, match="must start with http"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="new_conference",
+            proposed_payload={
+                "name": "Conference on Long-context Research 2027",
+                "url": "example.org/conference",
+            },
+        )
+    _no_rows_created(db_session)
+
+
+def test_submit_non_taxonomy_edit_without_paper_rejects(db_session):
+    with pytest.raises(PendingEditError, match="paper_id is required"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="tasks",
+            proposed_payload={"task_ids": [1]},
+        )
+    _no_rows_created(db_session)
+
+
 def test_submit_repositories_noop_rejects(db_session, paper_fixture):
     service = PendingEditService(db_session)
     with pytest.raises(PendingEditError, match="does not contain any changes"):

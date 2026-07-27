@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { fetchTrends } from "@/lib/trends";
 
 const sectionStyle: React.CSSProperties = {
+  maxWidth: 960,
   padding: "48px 0 8px",
   borderTop: "1px solid var(--hairline)",
   marginTop: 48,
@@ -61,7 +62,7 @@ const TrendsView: React.FC = () => {
   });
 
   return (
-    <div className="page" style={{ maxWidth: 960 }}>
+    <div className="page">
       <div className="feed-header">
         <div>
           <h1 className="feed-title">

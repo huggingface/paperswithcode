@@ -490,12 +490,15 @@ function TaxonomySuggestionDiff({
   kind,
   proposedPayload,
 }: {
-  kind: "task" | "method" | "benchmark" | "metric";
+  kind: "task" | "method" | "benchmark" | "metric" | "conference";
   proposedPayload: JsonRecord;
 }) {
   const name = typeof proposedPayload.name === "string" ? proposedPayload.name : "";
   const description =
     typeof proposedPayload.description === "string" ? proposedPayload.description : "";
+  const dates = typeof proposedPayload.dates === "string" ? proposedPayload.dates : "";
+  const venue = typeof proposedPayload.venue === "string" ? proposedPayload.venue : "";
+  const url = typeof proposedPayload.url === "string" ? proposedPayload.url : "";
 
   return (
     <div className="submission-diff-columns">
@@ -513,6 +516,30 @@ function TaxonomySuggestionDiff({
           <EmptyInline>No description provided</EmptyInline>
         )}
       </DiffColumn>
+      {kind === "conference" && (
+        <>
+          <DiffColumn title="Dates">
+            {dates || <EmptyInline>No dates provided</EmptyInline>}
+          </DiffColumn>
+          <DiffColumn title="Venue">
+            {venue || <EmptyInline>No venue provided</EmptyInline>}
+          </DiffColumn>
+          <DiffColumn title="URL">
+            {url ? (
+              <a
+                className="submission-url-link"
+                href={url}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {url}
+              </a>
+            ) : (
+              <EmptyInline>No URL provided</EmptyInline>
+            )}
+          </DiffColumn>
+        </>
+      )}
     </div>
   );
 }
@@ -621,6 +648,8 @@ export function PendingEditDiff({ editType, currentPayload, proposedPayload }: P
     content = <TaxonomySuggestionDiff kind="benchmark" proposedPayload={proposedPayload} />;
   } else if (editType === "new_metric") {
     content = <TaxonomySuggestionDiff kind="metric" proposedPayload={proposedPayload} />;
+  } else if (editType === "new_conference") {
+    content = <TaxonomySuggestionDiff kind="conference" proposedPayload={proposedPayload} />;
   } else {
     content = (
       <div className="submission-empty submission-empty-warn">

@@ -6,6 +6,7 @@ import { apiClient } from "@/lib/api";
 import type { Conference } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 
 const formatDateRange = (start?: string, end?: string) => {
   if (!start) return null;
@@ -154,6 +155,7 @@ const ConferencesIndexView: React.FC = () => {
                     </Link>
                   );
                 })}
+                <TaxonomySuggestionTile kind="conference" />
               </div>
             </section>
           );
