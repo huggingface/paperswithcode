@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import { Github, Pin, Trophy } from "lucide-react";
+import { Github, Trophy } from "lucide-react";
 
 import { MethodChip, PaperCard } from "@/components";
 import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
@@ -386,11 +386,6 @@ const TagBrowseView: React.FC = () => {
                     <div className="benchmark-trend-benchmark" role="cell">
                       <div className="bench-row-name">{benchmark.name}</div>
                       <div className="bench-row-sub">
-                        {benchmark.featured_rank != null && (
-                          <span className="bench-pin">
-                            <Pin size={11} className="bench-pin-icon" /> pinned
-                          </span>
-                        )}
                         <span>
                           <strong>{benchmark.all_time_paper_count}</strong> reporting papers
                         </span>
@@ -470,11 +465,6 @@ const TagBrowseView: React.FC = () => {
                             <div className="bench-row-main">
                               <div className="bench-row-name">{d.name}</div>
                               <div className="bench-row-sub">
-                                {d.featured_rank != null && (
-                                  <span className="bench-pin">
-                                    <Pin size={11} className="bench-pin-icon" /> pinned
-                                  </span>
-                                )}
                                 {d.paper_count != null && (
                                   <span>
                                     <strong>{d.paper_count}</strong> ENTRIES

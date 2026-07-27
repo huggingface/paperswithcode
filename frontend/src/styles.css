@@ -2967,20 +2967,6 @@ a.paper-resource.is-link:focus-visible {
 }
 .bench-row-sub strong { color: var(--ink-soft); font-weight: 600; }
 .bench-row-sub .dot-sep { color: var(--hairline-strong); }
-.bench-pin {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: var(--accent-soft);
-  color: var(--accent-text);
-  font-family: var(--mono);
-  font-size: 9.5px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.bench-pin-icon { flex-shrink: 0; }
 .bench-row-sota { text-align: right; }
 .bench-row-sota-value {
   font-family: var(--serif);
