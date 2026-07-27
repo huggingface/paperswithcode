@@ -170,6 +170,7 @@ def test_candidate_overrides_follow_environment_file(tmp_path: Path):
     python = command.index(str(deploy_cli.VENV / "bin" / "python"))
     assert environment_file < env_command < python
     assert command[env_command + 1 : python] == [
+        "UVICORN_PORT=8123",
         "PWC_PORT=8123",
         f"PWC_RELEASE_ID={manifest['release_id']}",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",

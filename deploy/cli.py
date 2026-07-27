@@ -397,6 +397,7 @@ def candidate_start_command(
         "--property",
         f"EnvironmentFile={CONFIG_ROOT / (environment + '.env')}",
         "/usr/bin/env",
+        f"UVICORN_PORT={port}",
         f"PWC_PORT={port}",
         f"PWC_RELEASE_ID={manifest['release_id']}",
         f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
