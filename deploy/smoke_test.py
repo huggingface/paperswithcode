@@ -100,6 +100,9 @@ def run_http_smoke(
 
     if environment == "staging":
         if candidate:
+            status, _, _ = request(urljoin(base_url, "/api/v1/papers/1"))
+            if status not in {200, 404}:
+                failures.append(f"numeric paper API returned {status}")
             status, _, _ = request(urljoin(base_url, "/api/v1/chat/sessions"))
             if status not in {401, 403}:
                 failures.append(f"staging chat auth boundary returned {status}")
