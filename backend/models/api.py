@@ -9,7 +9,7 @@ to our database schema. The main differences from the original API:
 """
 
 from datetime import date, datetime
-from typing import List, Optional
+from typing import List, Optional, Union
 
 from pydantic import BaseModel, Field, field_validator
 from pydantic import ConfigDict
@@ -1541,6 +1541,17 @@ class TaskCreateRequest(BaseModel):
     image_credit: Optional[str] = Field(None, description="Image credit/attribution")
 
 
+class DatasetLeaderboardSummary(BaseModel):
+    """Small task-scoped leaderboard projection for fast benchmark headers."""
+
+    task_id: str = Field(..., description="Task ID for this leaderboard")
+    task_slug: Optional[str] = Field(None, description="Task slug for this leaderboard")
+    metric: str = Field(..., description="Primary metric shown by default")
+    value: Union[str, int, float] = Field(..., description="Best metric value")
+    model_name: str = Field(..., description="Best model or paper display name")
+    evaluation_id: str = Field(..., description="Evaluation row supplying the summary")
+
+
 class Dataset(BaseModel):
     """
     Dataset object matching the original PapersWithCode API specification.
@@ -1651,6 +1662,13 @@ class Dataset(BaseModel):
     best_model_name: Optional[str] = Field(
         None,
         description="Top-ranked model on this benchmark for the scoped task",
+    )
+    leaderboard_summary: Optional[DatasetLeaderboardSummary] = Field(
+        None,
+        description=(
+            "Cached task-scoped best metric/value/model projection. Present only "
+            "when the dataset detail request includes a resolvable task."
+        ),
     )
 
     # Allowed metrics for this dataset

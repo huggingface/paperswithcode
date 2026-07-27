@@ -425,6 +425,14 @@ export interface Dataset {
   featured_rank?: number | null;
   supports_harness?: boolean;
   best_model_name?: string | null;
+  leaderboard_summary?: {
+    task_id: string;
+    task_slug?: string | null;
+    metric: string;
+    value: string | number;
+    model_name: string;
+    evaluation_id: string;
+  } | null;
   introducing_paper_id?: string;
   introducing_paper_title?: string;
   paper_url?: string;
@@ -1393,12 +1401,20 @@ class ApiClient {
 
   async getDatasetBySlug(
     slug: string,
-    options?: { include_paper?: boolean },
+    options?: {
+      include_paper?: boolean;
+      task?: string;
+      is_open?: boolean;
+    },
   ): Promise<Dataset> {
     // Pass `include_paper=true` from BenchmarkDetailView so the response
     // already embeds the introducing paper (arxiv_id, title, published) and
     // the page doesn't have to issue a second GET /papers/{id}.
-    const qs = options?.include_paper ? "?include_paper=true" : "";
+    const params = new URLSearchParams();
+    if (options?.include_paper) params.set("include_paper", "true");
+    if (options?.task) params.set("task", options.task);
+    if (options?.is_open !== undefined) params.set("is_open", String(options.is_open));
+    const qs = params.size ? `?${params.toString()}` : "";
     return this.request<Dataset>(`/datasets/${slug}${qs}`);
   }
 

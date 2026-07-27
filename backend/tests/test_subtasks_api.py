@@ -411,6 +411,62 @@ def test_task_benchmark_best_model_can_be_scoped_to_open_rows(client):
     assert open_mmlu["best_model_name"] == "GPT-x"
 
 
+def test_dataset_detail_embeds_task_scoped_leaderboard_summary(client):
+    db = TestingSessionLocal()
+    _seed_lm_with_subtasks(db)
+    db.close()
+
+    response = client.get(
+        "/api/v1/datasets/mmlu?include_paper=true&task=world-knowledge"
+    )
+
+    assert response.status_code == 200
+    summary = response.json()["leaderboard_summary"]
+    assert summary == {
+        "task_id": "2",
+        "task_slug": "world-knowledge",
+        "metric": "Accuracy",
+        "value": "90.0",
+        "model_name": "GPT-y",
+        "evaluation_id": "11",
+    }
+    assert response.headers["cache-control"] == (
+        "public, max-age=60, stale-while-revalidate=300"
+    )
+
+
+def test_dataset_detail_summary_respects_open_source_filter(client):
+    db = TestingSessionLocal()
+    _seed_lm_with_subtasks(db)
+    db.query(DBEvaluation).filter(DBEvaluation.id == 11).update({"is_open": False})
+    db.commit()
+    db.close()
+
+    response = client.get("/api/v1/datasets/mmlu?task=world-knowledge&is_open=true")
+
+    assert response.status_code == 200
+    summary = response.json()["leaderboard_summary"]
+    assert summary["model_name"] == "GPT-x"
+    assert summary["value"] == "85.0"
+
+
+def test_dataset_detail_summary_respects_lower_is_better_metrics(client):
+    db = TestingSessionLocal()
+    _seed_lm_with_subtasks(db)
+    db.query(DBMetric).filter(DBMetric.name == "Accuracy").update(
+        {"direction": "lower_is_better"}
+    )
+    db.commit()
+    db.close()
+
+    response = client.get("/api/v1/datasets/mmlu?task=2")
+
+    assert response.status_code == 200
+    summary = response.json()["leaderboard_summary"]
+    assert summary["model_name"] == "GPT-x"
+    assert summary["value"] == "85.0"
+
+
 def test_get_evaluations_with_include_descendants_rolls_up_subtask_evals(client):
     """The /evaluations API supports include_descendants for parent tasks."""
     db = TestingSessionLocal()

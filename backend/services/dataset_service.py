@@ -12,6 +12,7 @@ from sqlalchemy import func, desc, asc, or_, case, cast, String
 from backend.models.database import (
     Dataset as DBDataset,
     Evaluation as DBEvaluation,
+    Metric as DBMetric,
     TaskDataset,
     Task as DBTask,
     Paper as DBPaper,
@@ -21,6 +22,7 @@ from backend.models.api import (
     Datasets,
     DatasetCreateRequest,
     DatasetUpdateRequest,
+    DatasetLeaderboardSummary,
     IntroducingPaper,
 )
 from backend.utils.exceptions import DatabaseError
@@ -30,6 +32,18 @@ from backend.utils.task_hierarchy import collect_descendant_task_ids
 # Separator unlikely to collide with real data, used to build the logical
 # leaderboard-row key (see `_leaderboard_row_count`).
 _ROW_KEY_SEP = "\x1f"
+
+
+def _parse_metric_value(raw_value) -> Optional[float]:
+    """Match leaderboard rank parsing for numeric and uncertainty values."""
+    if raw_value is None:
+        return None
+    try:
+        if isinstance(raw_value, str) and "±" in raw_value:
+            raw_value = raw_value.split("±", 1)[0].strip()
+        return float(raw_value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _leaderboard_row_count():
@@ -168,6 +182,104 @@ class DatasetService:
             if metric == primary_metric.get(dataset_id) and model_name:
                 best_models.setdefault(dataset_id, model_name)
         return best_models
+
+    def _leaderboard_summary_for_dataset(
+        self,
+        dataset_id: int,
+        task_id: int,
+        is_open: Optional[bool] = None,
+    ) -> Optional[DatasetLeaderboardSummary]:
+        """Return the small default-metric SOTA projection for one leaderboard.
+
+        The benchmark page chooses its default metric from the metric represented
+        by the most evaluation rows. Reuse that established rule, then rank the
+        lightweight metric payload directly so the initial dataset response does
+        not need to serialize every evaluation and its related paper metadata.
+        """
+        task = (
+            self.db.query(DBTask.id, DBTask.slug).filter(DBTask.id == task_id).first()
+        )
+        if not task:
+            return None
+
+        metric_counts = self.db.query(
+            DBEvaluation.best_metric,
+            func.count(DBEvaluation.id).label("n"),
+        ).filter(
+            DBEvaluation.dataset_id == dataset_id,
+            DBEvaluation.task_id == task_id,
+            DBEvaluation.best_metric.isnot(None),
+        )
+        if is_open is not None:
+            metric_counts = metric_counts.filter(DBEvaluation.is_open == is_open)
+        primary_metric_row = (
+            metric_counts.group_by(DBEvaluation.best_metric)
+            .order_by(desc("n"), asc(DBEvaluation.best_metric))
+            .first()
+        )
+        if not primary_metric_row:
+            return None
+        primary_metric = primary_metric_row[0]
+
+        rows = (
+            self.db.query(
+                DBEvaluation.id,
+                DBEvaluation.model_name,
+                DBEvaluation.metrics,
+                DBEvaluation.best_rank,
+                DBPaper.title,
+            )
+            .join(DBPaper, DBPaper.id == DBEvaluation.paper_id)
+            .filter(
+                DBEvaluation.dataset_id == dataset_id,
+                DBEvaluation.task_id == task_id,
+            )
+        )
+        if is_open is not None:
+            rows = rows.filter(DBEvaluation.is_open == is_open)
+        rows = rows.order_by(
+            asc(DBEvaluation.best_rank).nulls_last(),
+            asc(DBEvaluation.id),
+        ).all()
+
+        candidates = []
+        for evaluation_id, model_name, metrics, best_rank, paper_title in rows:
+            raw_value = (metrics or {}).get(primary_metric)
+            numeric_value = _parse_metric_value(raw_value)
+            display_name = model_name or paper_title
+            if numeric_value is None or raw_value is None or not display_name:
+                continue
+            candidates.append(
+                (
+                    numeric_value,
+                    best_rank if best_rank is not None else float("inf"),
+                    evaluation_id,
+                    raw_value,
+                    display_name,
+                )
+            )
+        if not candidates:
+            return None
+
+        direction = (
+            self.db.query(DBMetric.direction)
+            .filter(DBMetric.name == primary_metric)
+            .scalar()
+            or "higher_is_better"
+        )
+        if direction == "lower_is_better":
+            best = min(candidates, key=lambda row: (row[0], row[1], row[2]))
+        else:
+            best = min(candidates, key=lambda row: (-row[0], row[1], row[2]))
+
+        return DatasetLeaderboardSummary(
+            task_id=str(task.id),
+            task_slug=task.slug,
+            metric=primary_metric,
+            value=best[3],
+            model_name=best[4],
+            evaluation_id=str(best[2]),
+        )
 
     def get_datasets(
         self,
@@ -453,7 +565,11 @@ class DatasetService:
         )
 
     def get_dataset(
-        self, dataset_id: int, include_paper: bool = False
+        self,
+        dataset_id: int,
+        include_paper: bool = False,
+        task_id: Optional[int] = None,
+        is_open: Optional[bool] = None,
     ) -> Optional[Dataset]:
         """
         Get a specific dataset by ID.
@@ -462,6 +578,9 @@ class DatasetService:
             dataset_id: Dataset ID
             include_paper: When True, embed a lightweight `introducing_paper`
                 projection (arxiv_id, title, published) in the response.
+            task_id: When set, embed a lightweight leaderboard summary for
+                this task-dataset pair.
+            is_open: Optional source-availability filter for the summary.
 
         Returns:
             Dataset object or None if not found
@@ -544,6 +663,14 @@ class DatasetService:
                 dataset_dict["introducing_paper"] = self._fetch_introducing_paper(
                     db_dataset.introducing_paper_id
                 )
+            if task_id is not None:
+                dataset_dict["leaderboard_summary"] = (
+                    self._leaderboard_summary_for_dataset(
+                        db_dataset.id,
+                        task_id,
+                        is_open=is_open,
+                    )
+                )
 
             return Dataset(**dataset_dict)
 
@@ -551,7 +678,11 @@ class DatasetService:
             raise DatabaseError(f"Failed to retrieve dataset: {str(e)}")
 
     def get_dataset_by_slug(
-        self, slug: str, include_paper: bool = False
+        self,
+        slug: str,
+        include_paper: bool = False,
+        task_id: Optional[int] = None,
+        is_open: Optional[bool] = None,
     ) -> Optional[Dataset]:
         """
         Get a specific dataset by slug.
@@ -560,6 +691,9 @@ class DatasetService:
             slug: Dataset slug
             include_paper: When True, embed a lightweight `introducing_paper`
                 projection (arxiv_id, title, published) in the response.
+            task_id: When set, embed a lightweight leaderboard summary for
+                this task-dataset pair.
+            is_open: Optional source-availability filter for the summary.
 
         Returns:
             Dataset object or None if not found
@@ -640,6 +774,14 @@ class DatasetService:
             if include_paper:
                 dataset_dict["introducing_paper"] = self._fetch_introducing_paper(
                     db_dataset.introducing_paper_id
+                )
+            if task_id is not None:
+                dataset_dict["leaderboard_summary"] = (
+                    self._leaderboard_summary_for_dataset(
+                        db_dataset.id,
+                        task_id,
+                        is_open=is_open,
+                    )
                 )
 
             return Dataset(**dataset_dict)

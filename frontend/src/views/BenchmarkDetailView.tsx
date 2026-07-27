@@ -632,8 +632,18 @@ const BenchmarkDetailView: React.FC = () => {
   // Fetching the dataset with `include_paper=true` collapses the previous
   // dataset → paper waterfall into a single round trip.  See PLAN.md §5.
   const datasetQ = useQuery({
-    queryKey: ["dataset", datasetSlug, "with-paper"],
-    queryFn: () => apiClient.getDatasetBySlug(datasetSlug!, { include_paper: true }),
+    queryKey: [
+      "dataset",
+      datasetSlug,
+      "with-paper",
+      taskSlugFromQuery,
+      preferences.hide_closed_source_evals ? "open" : "all",
+    ],
+    queryFn: () => apiClient.getDatasetBySlug(datasetSlug!, {
+      include_paper: true,
+      task: taskSlugFromQuery,
+      is_open: preferences.hide_closed_source_evals ? true : undefined,
+    }),
     enabled: !!datasetSlug,
     staleTime: 10 * 60 * 1000,
   });
@@ -831,14 +841,21 @@ const BenchmarkDetailView: React.FC = () => {
     () => computeSeries(mergedTaskEvals, activeMetric, arrow),
     [mergedTaskEvals, activeMetric, arrow],
   );
-  // The dataset metadata arrives before the leaderboard's dependent queries.
-  // Do not present that transient empty client state as a real "0 evaluations"
-  // result in the header. Cached query data still renders immediately.
-  const isSummaryLoading =
-    evalsQ.isPending ||
-    datasetTasksQ.isPending ||
-    directionsQ.isPending ||
-    (!!currentTaskId && leaderboardMetricsQ.isPending);
+  // Dataset detail embeds a tiny, HTTP-cacheable summary when the URL supplies
+  // task context. Render it immediately while the full leaderboard loads, then
+  // reconcile with the client-computed result once all dependencies resolve.
+  const initialSummary = datasetQ.data?.leaderboard_summary;
+  const isFullSummaryReady =
+    evalsQ.isSuccess &&
+    datasetTasksQ.isSuccess &&
+    directionsQ.isSuccess &&
+    (!currentTaskId || leaderboardMetricsQ.isSuccess);
+  const displayedMetric = isFullSummaryReady ? activeMetric : initialSummary?.metric;
+  const displayedSota = isFullSummaryReady ? sota : initialSummary?.value;
+  const displayedSotaModel = isFullSummaryReady
+    ? sotaModel
+    : initialSummary?.model_name;
+  const isSummaryLoading = !isFullSummaryReady && !initialSummary;
 
   // Bring the highlighted leaderboard row into view once the evaluations
   // query resolves. Guarded by a ref so subsequent metric switches don't
@@ -972,15 +989,15 @@ const BenchmarkDetailView: React.FC = () => {
             />
           ) : (
             <span>
-              {activeMetric && (
+              {displayedMetric && (
                 <>
-                  <span className="metric-tag">{activeMetric}</span>
+                  <span className="metric-tag">{displayedMetric}</span>
                   <span style={{ color: "var(--hairline-strong)", margin: "0 8px" }}>·</span>
                 </>
               )}
-              {sotaModel ? (
+              {displayedSotaModel ? (
                 <span>
-                  Best: <span className="best-name">{formatMetricValue(sota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{sotaModel}</span>
+                  Best: <span className="best-name">{formatMetricValue(displayedSota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{displayedSotaModel}</span>
                 </span>
               ) : (
                 <span>{sortedRows.length} evaluations</span>

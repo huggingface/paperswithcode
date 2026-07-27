@@ -8,10 +8,11 @@ User submission (`require_user`, lives under ``/me``) and admin review
 
 from __future__ import annotations
 
+import base64
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
@@ -114,7 +115,18 @@ class PendingEditReviewRequest(BaseModel):
 
 
 def _to_response(row: PendingPaperEdit) -> PendingEditResponse:
-    return PendingEditResponse.model_validate(row)
+    response = PendingEditResponse.model_validate(row)
+    image = response.proposed_payload.get("image")
+    if not isinstance(image, dict) or "data_url" not in image:
+        return response
+
+    safe_payload = dict(response.proposed_payload)
+    safe_payload["image"] = {
+        "file_name": image.get("file_name"),
+        "mime_type": image.get("mime_type"),
+        "url": f"/api/v1/admin/paper-edits/{row.id}/image",
+    }
+    return response.model_copy(update={"proposed_payload": safe_payload})
 
 
 # ---------------------------------------------------------------------------
@@ -208,6 +220,36 @@ def get_pending_paper_edit(
     except PendingEditNotFoundError as exc:
         raise HTTPException(status_code=404, detail=str(exc))
     return _to_response(row)
+
+
+@router.get(
+    "/admin/paper-edits/{edit_id}/image",
+    summary="View an uploaded taxonomy-suggestion image",
+    tags=["pending_edits"],
+)
+def get_pending_paper_edit_image(
+    edit_id: int = Path(..., ge=1),
+    _admin: dict = Depends(require_admin),
+    db: Session = Depends(get_database_session),
+) -> Response:
+    try:
+        row = PendingEditService(db).get(edit_id)
+    except PendingEditNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+
+    image = row.proposed_payload.get("image")
+    if not isinstance(image, dict):
+        raise HTTPException(status_code=404, detail="Suggestion image not found")
+    mime_type = image.get("mime_type")
+    data_url = image.get("data_url")
+    prefix = f"data:{mime_type};base64,"
+    if not isinstance(data_url, str) or not data_url.startswith(prefix):
+        raise HTTPException(status_code=404, detail="Suggestion image not found")
+    return Response(
+        content=base64.b64decode(data_url[len(prefix) :]),
+        media_type=mime_type,
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post(

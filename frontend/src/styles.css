@@ -2405,18 +2405,33 @@ a.paper-resource.is-link:focus-visible {
 .task-research-trends {
   max-width: 760px;
   margin: -8px 0 28px;
-  padding: 18px 20px 16px;
   border-left: 2px solid var(--accent);
   background: var(--bg-elevated);
 }
+.task-research-trends-item {
+  border-bottom: 0;
+}
+.task-research-trends-trigger {
+  padding: 18px 20px;
+  color: var(--accent-text);
+}
+.task-research-trends-trigger:hover {
+  text-decoration: none;
+}
+.task-research-trends-trigger svg {
+  width: 16px;
+  height: 16px;
+}
 .task-research-trends-title {
-  margin-bottom: 10px;
   font-family: var(--mono);
   font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--accent-text);
+}
+.task-research-trends-content {
+  padding: 0 20px 16px;
 }
 .task-research-trends ul {
   margin: 0;

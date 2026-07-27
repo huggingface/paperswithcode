@@ -3,8 +3,9 @@
 -- Extends the pending_paper_edits edit_type check constraint so signed-in
 -- users can suggest brand-new taxonomy entries (a new task or a new method)
 -- from a paper page. These suggestions are paper-scoped and carry a
--- {"name": ..., "description": ...} payload. Approval/rejection only updates
--- the row status; nothing is auto-created (admins create the entry manually).
+-- payload with a required name plus optional description, image metadata, and
+-- source fields. Approval/rejection only updates the row status; nothing is
+-- auto-created (admins create the entry manually).
 --
 -- Idempotent: safe to re-run.
 

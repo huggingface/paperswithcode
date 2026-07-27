@@ -26,6 +26,7 @@ from backend.models.database import (
     Repository as DBRepository,
     Task as DBTask,
 )
+from backend.routers.pending_edits import _to_response
 from backend.services.pending_edit_service import (
     PendingEditError,
     PendingEditService,
@@ -177,6 +178,73 @@ def test_submit_directory_taxonomy_suggestion_without_paper_succeeds(db_session)
 
     reviewed = service.approve(edit_id=row.id, reviewer_username="admin")
     assert reviewed.status == "approved"
+
+
+def test_submit_task_suggestion_allows_omitted_description(db_session):
+    row = PendingEditService(db_session).submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_task",
+        proposed_payload={"name": "Long-context Retrieval"},
+    )
+
+    assert row.proposed_payload == {"name": "Long-context Retrieval"}
+
+
+def test_submit_method_suggestion_accepts_image_and_sources(db_session):
+    image_data_url = (
+        "data:image/png;base64,"
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4"
+        "//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+    )
+    row = PendingEditService(db_session).submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_method",
+        proposed_payload={
+            "name": "New Attention",
+            "description": " ",
+            "image": {
+                "file_name": " attention.png ",
+                "mime_type": "image/png",
+                "data_url": image_data_url,
+            },
+            "image_credit": " Example Research Group ",
+            "source": " New Attention, Example et al. ",
+        },
+    )
+
+    assert row.proposed_payload == {
+        "name": "New Attention",
+        "image": {
+            "file_name": "attention.png",
+            "mime_type": "image/png",
+            "data_url": image_data_url,
+        },
+        "image_credit": "Example Research Group",
+        "source": "New Attention, Example et al.",
+    }
+    response = _to_response(row)
+    assert response.proposed_payload["image"] == {
+        "file_name": "attention.png",
+        "mime_type": "image/png",
+        "url": f"/api/v1/admin/paper-edits/{row.id}/image",
+    }
+    assert row.proposed_payload["image"]["data_url"] == image_data_url
+
+
+def test_submit_method_suggestion_rejects_oversized_source(db_session):
+    with pytest.raises(PendingEditError, match="at most 1000"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="new_method",
+            proposed_payload={
+                "name": "New Attention",
+                "source": "x" * 1001,
+            },
+        )
+    _no_rows_created(db_session)
 
 
 def test_submit_directory_conference_suggestion_without_paper_succeeds(db_session):

@@ -6,6 +6,7 @@ paper associations, and evaluation data.
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from typing import Optional
 
@@ -158,6 +159,19 @@ def get_dataset(
             "/papers/{id}.  Used by the benchmark detail page."
         ),
     ),
+    task: Optional[str] = Query(
+        None,
+        description=(
+            "Task ID or slug used to embed a lightweight leaderboard summary."
+        ),
+    ),
+    is_open: Optional[bool] = Query(
+        None,
+        description=(
+            "When task-scoped, select the summary from only open-source or "
+            "only closed-source evaluation rows."
+        ),
+    ),
     db: Session = Depends(get_database_session),
 ):
     """
@@ -170,18 +184,41 @@ def get_dataset(
     - `/api/v1/datasets/123` - Get dataset with ID 123
     - `/api/v1/datasets/coco` - Get dataset with slug "coco"
     - `/api/v1/datasets/coco?include_paper=true` - Also embed the introducing paper
+    - `/api/v1/datasets/coco?task=object-detection` - Also embed the leaderboard summary
     """
     try:
         service = DatasetService(db)
+        task_id = None
+        if task:
+            try:
+                task_id = int(task)
+            except ValueError:
+                from backend.models.database import Task as DBTask
+
+                task_obj = (
+                    db.query(DBTask)
+                    .filter(func.lower(DBTask.slug) == task.lower())
+                    .first()
+                )
+                if task_obj:
+                    task_id = task_obj.id
 
         # Try to parse as integer ID first
         try:
             dataset_id_int = int(dataset_id)
-            dataset = service.get_dataset(dataset_id_int, include_paper=include_paper)
+            dataset = service.get_dataset(
+                dataset_id_int,
+                include_paper=include_paper,
+                task_id=task_id,
+                is_open=is_open,
+            )
         except ValueError:
             # Not an integer, treat as slug
             dataset = service.get_dataset_by_slug(
-                dataset_id, include_paper=include_paper
+                dataset_id,
+                include_paper=include_paper,
+                task_id=task_id,
+                is_open=is_open,
             )
 
         if not dataset:

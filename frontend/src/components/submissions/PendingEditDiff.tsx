@@ -11,6 +11,7 @@ import {
   type PendingEditType,
   type Task,
 } from "@/lib/api";
+import { assetUrl } from "@/lib/apiUrl";
 
 type JsonRecord = Record<string, unknown>;
 
@@ -499,6 +500,18 @@ function TaxonomySuggestionDiff({
   const dates = typeof proposedPayload.dates === "string" ? proposedPayload.dates : "";
   const venue = typeof proposedPayload.venue === "string" ? proposedPayload.venue : "";
   const url = typeof proposedPayload.url === "string" ? proposedPayload.url : "";
+  const image = asRecord(proposedPayload.image);
+  const imageDataUrl =
+    typeof image.data_url === "string" && image.data_url.startsWith("data:image/")
+      ? image.data_url
+      : "";
+  const imageUrl =
+    typeof image.url === "string" ? assetUrl(image.url) ?? "" : imageDataUrl;
+  const imageFileName =
+    typeof image.file_name === "string" ? image.file_name : "Suggested image";
+  const imageCredit =
+    typeof proposedPayload.image_credit === "string" ? proposedPayload.image_credit : "";
+  const source = typeof proposedPayload.source === "string" ? proposedPayload.source : "";
 
   return (
     <div className="submission-diff-columns">
@@ -516,6 +529,44 @@ function TaxonomySuggestionDiff({
           <EmptyInline>No description provided</EmptyInline>
         )}
       </DiffColumn>
+      {(kind === "task" || kind === "method") && (
+        <>
+          <DiffColumn title="Image">
+            {imageUrl ? (
+              <img
+                src={imageUrl}
+                alt={imageFileName}
+                className="max-h-64 max-w-full rounded-md border border-border object-contain"
+              />
+            ) : (
+              <EmptyInline>No image provided</EmptyInline>
+            )}
+          </DiffColumn>
+          <DiffColumn title="Image source">
+            {imageCredit || <EmptyInline>No image source provided</EmptyInline>}
+          </DiffColumn>
+        </>
+      )}
+      {kind === "method" && (
+        <DiffColumn title="Source">
+          {source ? (
+            source.startsWith("http://") || source.startsWith("https://") ? (
+              <a
+                className="submission-url-link"
+                href={source}
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                {source}
+              </a>
+            ) : (
+              <span className="submission-field-value">{source}</span>
+            )
+          ) : (
+            <EmptyInline>No source provided</EmptyInline>
+          )}
+        </DiffColumn>
+      )}
       {kind === "conference" && (
         <>
           <DiffColumn title="Dates">

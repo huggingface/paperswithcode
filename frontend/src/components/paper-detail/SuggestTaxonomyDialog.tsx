@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, Loader2 } from "lucide-react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
+import { Check, ImagePlus, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -31,6 +31,15 @@ const DESCRIPTION_MAX = 2000;
 const DATES_MAX = 200;
 const VENUE_MAX = 300;
 const URL_MAX = 500;
+const IMAGE_SOURCE_MAX = 1000;
+const IMAGE_MAX_BYTES = 2 * 1024 * 1024;
+const ACCEPTED_IMAGE_TYPES = ["image/jpeg", "image/png", "image/webp", "image/gif"];
+
+interface SuggestionImage {
+  file_name: string;
+  mime_type: string;
+  data_url: string;
+}
 
 const KIND_EDIT_TYPE: Record<TaxonomyKind, PendingEditType> = {
   task: "new_task",
@@ -70,9 +79,15 @@ export function SuggestTaxonomyDialog({
   const [dates, setDates] = useState("");
   const [venue, setVenue] = useState("");
   const [url, setUrl] = useState("");
+  const [image, setImage] = useState<SuggestionImage | null>(null);
+  const [imageSource, setImageSource] = useState("");
+  const [source, setSource] = useState("");
+  const [imageError, setImageError] = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const label = kind;
+  const supportsImage = kind === "task" || kind === "method";
 
   useEffect(() => {
     if (!open) {
@@ -81,12 +96,49 @@ export function SuggestTaxonomyDialog({
       setDates("");
       setVenue("");
       setUrl("");
+      setImage(null);
+      setImageSource("");
+      setSource("");
+      setImageError("");
     }
   }, [open]);
 
+  const selectImage = (file?: File) => {
+    if (!file) return;
+    setImageError("");
+    if (!ACCEPTED_IMAGE_TYPES.includes(file.type)) {
+      setImageError("Choose a JPEG, PNG, WebP, or GIF image.");
+      return;
+    }
+    if (file.size > IMAGE_MAX_BYTES) {
+      setImageError("Image must be 2 MB or smaller.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") {
+        setImageError("Could not read that image.");
+        return;
+      }
+      setImage({
+        file_name: file.name,
+        mime_type: file.type,
+        data_url: reader.result,
+      });
+    };
+    reader.onerror = () => setImageError("Could not read that image.");
+    reader.readAsDataURL(file);
+  };
+
+  const handleImageDrop = (event: DragEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    selectImage(event.dataTransfer.files[0]);
+  };
+
   const suggestMutation = useMutation({
     mutationFn: async () => {
-      const proposedPayload: Record<string, string> = {
+      const proposedPayload: Record<string, unknown> = {
         name: name.trim(),
       };
       if (kind === "conference") {
@@ -99,7 +151,17 @@ export function SuggestTaxonomyDialog({
           if (value) proposedPayload[key] = value;
         });
       } else {
-        proposedPayload.description = description.trim();
+        const normalizedDescription = description.trim();
+        if (normalizedDescription) {
+          proposedPayload.description = normalizedDescription;
+        }
+        if (supportsImage) {
+          if (image) proposedPayload.image = image;
+          if (imageSource.trim()) proposedPayload.image_credit = imageSource.trim();
+        }
+        if (kind === "method" && source.trim()) {
+          proposedPayload.source = source.trim();
+        }
       }
       return submitPendingPaperEdit({
         paper_id: paperId ? parseInt(paperId) : null,
@@ -139,7 +201,10 @@ export function SuggestTaxonomyDialog({
 
   const canSubmit =
     name.trim().length > 0 &&
-    (kind === "conference" || description.trim().length > 0);
+    (kind === "task" ||
+      kind === "method" ||
+      kind === "conference" ||
+      description.trim().length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -164,7 +229,10 @@ export function SuggestTaxonomyDialog({
           </div>
           <div className="space-y-2">
             <Label htmlFor="suggest-description">
-              Description{kind === "conference" ? " (optional)" : ""}
+              Description
+              {kind === "task" || kind === "method" || kind === "conference"
+                ? " (optional)"
+                : ""}
             </Label>
             <Textarea
               id="suggest-description"
@@ -174,6 +242,84 @@ export function SuggestTaxonomyDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          {supportsImage && (
+            <>
+              <div className="space-y-2">
+                <Label>Image (optional)</Label>
+                <input
+                  ref={fileInputRef}
+                  className="sr-only"
+                  type="file"
+                  accept={ACCEPTED_IMAGE_TYPES.join(",")}
+                  onChange={(event) => selectImage(event.target.files?.[0])}
+                />
+                {image ? (
+                  <div className="relative overflow-hidden rounded-md border border-border bg-muted/30">
+                    <img
+                      src={image.data_url}
+                      alt="Selected suggestion"
+                      className="max-h-48 w-full object-contain"
+                    />
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      size="sm"
+                      className="absolute right-2 top-2 h-8 px-2"
+                      onClick={() => {
+                        setImage(null);
+                        if (fileInputRef.current) fileInputRef.current.value = "";
+                      }}
+                    >
+                      <X className="mr-1 h-4 w-4" />
+                      Remove
+                    </Button>
+                    <div className="truncate border-t border-border px-3 py-2 text-xs text-muted-foreground">
+                      {image.file_name}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    className="flex w-full flex-col items-center justify-center rounded-md border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground transition-colors hover:border-foreground/50 hover:text-foreground"
+                    onClick={() => fileInputRef.current?.click()}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={handleImageDrop}
+                  >
+                    <ImagePlus className="mb-2 h-6 w-6" />
+                    <span>Drop an image here, or click to choose one</span>
+                    <span className="mt-1 text-xs">JPEG, PNG, WebP, or GIF · max 2 MB</span>
+                  </button>
+                )}
+                {imageError && (
+                  <p className="text-sm text-destructive" role="alert">
+                    {imageError}
+                  </p>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-image-source">Image source (optional)</Label>
+                <Input
+                  id="suggest-image-source"
+                  value={imageSource}
+                  maxLength={IMAGE_SOURCE_MAX}
+                  placeholder="Creator, publication, or source URL"
+                  onChange={(event) => setImageSource(event.target.value)}
+                />
+              </div>
+              {kind === "method" && (
+                <div className="space-y-2">
+                  <Label htmlFor="suggest-method-source">Source (optional)</Label>
+                  <Input
+                    id="suggest-method-source"
+                    value={source}
+                    maxLength={IMAGE_SOURCE_MAX}
+                    placeholder="Paper title, arXiv URL, or project page"
+                    onChange={(event) => setSource(event.target.value)}
+                  />
+                </div>
+              )}
+            </>
+          )}
           {kind === "conference" && (
             <>
               <div className="space-y-2">

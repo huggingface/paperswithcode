@@ -9,9 +9,13 @@ direct edits and approved submissions go through the same code path.
 
 from __future__ import annotations
 
+import base64
+import binascii
 from datetime import datetime, timezone
+from io import BytesIO
 from typing import Any, Dict, List, Optional, Tuple
 
+from PIL import Image, UnidentifiedImageError
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
@@ -50,6 +54,13 @@ EDIT_TYPES = frozenset(
     }
 )
 STATUSES = frozenset({"pending", "approved", "rejected"})
+SUGGESTION_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+SUGGESTION_IMAGE_FORMATS = {
+    "GIF": "image/gif",
+    "JPEG": "image/jpeg",
+    "PNG": "image/png",
+    "WEBP": "image/webp",
+}
 
 
 class PendingEditError(Exception):
@@ -260,6 +271,57 @@ class PendingEditService:
     # ----------------------------------------------------------------
 
     @staticmethod
+    def _normalize_suggestion_image(image: Any) -> Dict[str, str]:
+        if not isinstance(image, dict):
+            raise PendingEditError("Suggestion 'image' must be an object")
+
+        file_name = image.get("file_name")
+        mime_type = image.get("mime_type")
+        data_url = image.get("data_url")
+        if not isinstance(file_name, str) or not file_name.strip():
+            raise PendingEditError(
+                "Suggestion image file name must be a non-empty string"
+            )
+        normalized_file_name = file_name.strip()
+        if len(normalized_file_name) > 255:
+            raise PendingEditError(
+                "Suggestion image file name must be at most 255 characters"
+            )
+        if mime_type not in SUGGESTION_IMAGE_FORMATS.values():
+            raise PendingEditError("Suggestion image must be a JPEG, PNG, WebP, or GIF")
+        if not isinstance(data_url, str):
+            raise PendingEditError("Suggestion image data must be a string")
+
+        prefix = f"data:{mime_type};base64,"
+        if not data_url.startswith(prefix):
+            raise PendingEditError("Suggestion image data does not match its MIME type")
+        try:
+            content = base64.b64decode(data_url[len(prefix) :], validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise PendingEditError("Suggestion image data is not valid base64") from exc
+        if not content:
+            raise PendingEditError("Suggestion image must not be empty")
+        if len(content) > SUGGESTION_IMAGE_MAX_BYTES:
+            raise PendingEditError("Suggestion image must be 2 MB or smaller")
+
+        try:
+            with Image.open(BytesIO(content)) as opened_image:
+                detected_mime = SUGGESTION_IMAGE_FORMATS.get(opened_image.format or "")
+                opened_image.verify()
+        except (UnidentifiedImageError, OSError, SyntaxError) as exc:
+            raise PendingEditError(
+                "Suggestion image is not a valid supported image"
+            ) from exc
+        if detected_mime != mime_type:
+            raise PendingEditError("Suggestion image data does not match its MIME type")
+
+        return {
+            "file_name": normalized_file_name,
+            "mime_type": mime_type,
+            "data_url": data_url,
+        }
+
+    @staticmethod
     def _is_valid_evaluation_create_data(data: Dict[str, Any]) -> bool:
         task_id = data.get("task_id")
         dataset_id = data.get("dataset_id")
@@ -448,18 +510,57 @@ class PendingEditService:
                     )
                 return normalized_payload
 
-            if not isinstance(description, str):
-                raise PendingEditError("Suggestion 'description' must be a string")
-            normalized_description = description.strip()
-            if not normalized_description:
-                raise PendingEditError(
-                    "Suggestion 'description' must be a non-empty string"
+            normalized_payload = {"name": normalized_name}
+            if description is not None:
+                if not isinstance(description, str):
+                    raise PendingEditError("Suggestion 'description' must be a string")
+                normalized_description = description.strip()
+                if normalized_description:
+                    if len(normalized_description) > 2000:
+                        raise PendingEditError(
+                            "Suggestion 'description' must be at most 2000 characters"
+                        )
+                    normalized_payload["description"] = normalized_description
+
+            if edit_type in ("new_benchmark", "new_metric"):
+                if "description" not in normalized_payload:
+                    raise PendingEditError(
+                        "Suggestion 'description' must be a non-empty string"
+                    )
+                return normalized_payload
+
+            image = payload.get("image")
+            if image is not None:
+                normalized_payload["image"] = (
+                    PendingEditService._normalize_suggestion_image(image)
                 )
-            if len(normalized_description) > 2000:
-                raise PendingEditError(
-                    "Suggestion 'description' must be at most 2000 characters"
-                )
-            return {"name": normalized_name, "description": normalized_description}
+
+            image_credit = payload.get("image_credit")
+            if image_credit is not None:
+                if not isinstance(image_credit, str):
+                    raise PendingEditError("Suggestion 'image_credit' must be a string")
+                normalized_image_credit = image_credit.strip()
+                if normalized_image_credit:
+                    if len(normalized_image_credit) > 1000:
+                        raise PendingEditError(
+                            "Suggestion 'image_credit' must be at most 1000 characters"
+                        )
+                    normalized_payload["image_credit"] = normalized_image_credit
+
+            if edit_type == "new_method":
+                source = payload.get("source")
+                if source is not None:
+                    if not isinstance(source, str):
+                        raise PendingEditError("Suggestion 'source' must be a string")
+                    normalized_source = source.strip()
+                    if normalized_source:
+                        if len(normalized_source) > 1000:
+                            raise PendingEditError(
+                                "Suggestion 'source' must be at most 1000 characters"
+                            )
+                        normalized_payload["source"] = normalized_source
+
+            return normalized_payload
 
         if edit_type == "evaluations":
             operations = payload.get("operations")
