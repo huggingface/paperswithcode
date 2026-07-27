@@ -37,6 +37,18 @@ Guidance for agents working in this repository.
   TanStack Query for server state.
 - Never reload nginx during development.
 
+## Staging releases
+
+- After pushing changes intended for staging, always use the Codex thread tools
+  to locate the pinned thread whose title is exactly `deploy to staging` and
+  send it a deployment request.
+- Include the remote branch, exact commit SHA, a concise change summary, and
+  relevant staging smoke-test routes in the request. Explicitly scope the
+  request to staging and do not request or imply a production promotion.
+- Do not deploy staging directly from the development thread. If the pinned
+  thread is missing or unavailable, report that instead of silently skipping
+  the handoff.
+
 ## Production releases
 
 Production topology can change, so inspect the active processes and nginx config
