@@ -2916,6 +2916,8 @@ a.paper-resource.is-link:focus-visible {
 }
 .benchmark-trend-row .bench-row-best {
   width: 100%;
+  justify-content: flex-start;
+  text-align: left;
 }
 .bench-row-best-empty {
   color: var(--ink-faint);
