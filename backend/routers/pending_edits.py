@@ -42,6 +42,7 @@ EditType = Literal[
     "new_method",
     "new_benchmark",
     "new_metric",
+    "new_conference",
 ]
 StatusLiteral = Literal["pending", "approved", "rejected"]
 
@@ -55,7 +56,13 @@ router = APIRouter()
 
 
 class PendingEditSubmitRequest(BaseModel):
-    paper_id: int = Field(..., description="Database paper ID being edited")
+    paper_id: Optional[int] = Field(
+        default=None,
+        description=(
+            "Database paper ID being edited. May be omitted only for "
+            "directory-level taxonomy suggestions."
+        ),
+    )
     edit_type: EditType = Field(
         ..., description="Which paper-page surface the edit targets"
     )
@@ -75,7 +82,7 @@ class PendingEditResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
-    paper_id: int
+    paper_id: Optional[int]
     hf_username: str
     is_author: bool
     edit_type: EditType
@@ -119,7 +126,7 @@ def _to_response(row: PendingPaperEdit) -> PendingEditResponse:
     "/me/paper-edits",
     response_model=PendingEditResponse,
     status_code=status.HTTP_201_CREATED,
-    summary="Submit a paper-page edit for admin review",
+    summary="Submit a paper-page edit or taxonomy suggestion for admin review",
     tags=["pending_edits"],
 )
 def submit_pending_paper_edit(

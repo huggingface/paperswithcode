@@ -6,6 +6,7 @@ import { apiClient } from "@/lib/api";
 import type { Method } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by paper_count desc
@@ -139,6 +140,7 @@ const MethodsIndexView: React.FC = () => {
                     </div>
                   </Link>
                 ))}
+                <TaxonomySuggestionTile kind="method" />
               </div>
             </section>
           );

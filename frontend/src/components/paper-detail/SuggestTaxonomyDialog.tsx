@@ -16,23 +16,28 @@ import { useMutation } from "@tanstack/react-query";
 import { submitPendingPaperEdit, type PendingEditType } from "@/lib/api";
 import { useToast } from "@/hooks/use-toast";
 
-type TaxonomyKind = "task" | "method" | "benchmark" | "metric";
+type TaxonomyKind = "task" | "method" | "benchmark" | "metric" | "conference";
 
 interface SuggestTaxonomyDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  paperId: string;
+  /** Omitted for suggestions submitted from a taxonomy directory page. */
+  paperId?: string;
   kind: TaxonomyKind;
 }
 
 const NAME_MAX = 200;
 const DESCRIPTION_MAX = 2000;
+const DATES_MAX = 200;
+const VENUE_MAX = 300;
+const URL_MAX = 500;
 
 const KIND_EDIT_TYPE: Record<TaxonomyKind, PendingEditType> = {
   task: "new_task",
   method: "new_method",
   benchmark: "new_benchmark",
   metric: "new_metric",
+  conference: "new_conference",
 };
 
 const KIND_NAME_PLACEHOLDER: Record<TaxonomyKind, string> = {
@@ -40,6 +45,7 @@ const KIND_NAME_PLACEHOLDER: Record<TaxonomyKind, string> = {
   method: "e.g. Rotary Position Embedding",
   benchmark: "e.g. ImageNet (ReaL)",
   metric: "e.g. Top-5 Accuracy",
+  conference: "e.g. International Conference on Machine Learning 2026",
 };
 
 const KIND_DESCRIPTION_PLACEHOLDER: Record<TaxonomyKind, string> = {
@@ -49,6 +55,8 @@ const KIND_DESCRIPTION_PLACEHOLDER: Record<TaxonomyKind, string> = {
     "Briefly describe this benchmark, the task it belongs to, and where it comes from.",
   metric:
     "Briefly describe this metric and whether higher or lower is better.",
+  conference:
+    "Briefly describe this conference, including its research focus and edition.",
 };
 
 export function SuggestTaxonomyDialog({
@@ -59,6 +67,9 @@ export function SuggestTaxonomyDialog({
 }: SuggestTaxonomyDialogProps) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [dates, setDates] = useState("");
+  const [venue, setVenue] = useState("");
+  const [url, setUrl] = useState("");
   const { toast } = useToast();
 
   const label = kind;
@@ -67,19 +78,35 @@ export function SuggestTaxonomyDialog({
     if (!open) {
       setName("");
       setDescription("");
+      setDates("");
+      setVenue("");
+      setUrl("");
     }
   }, [open]);
 
   const suggestMutation = useMutation({
-    mutationFn: async () =>
-      submitPendingPaperEdit({
-        paper_id: parseInt(paperId),
-        edit_type: KIND_EDIT_TYPE[kind],
-        proposed_payload: {
-          name: name.trim(),
+    mutationFn: async () => {
+      const proposedPayload: Record<string, string> = {
+        name: name.trim(),
+      };
+      if (kind === "conference") {
+        Object.entries({
           description: description.trim(),
-        },
-      }),
+          dates: dates.trim(),
+          venue: venue.trim(),
+          url: url.trim(),
+        }).forEach(([key, value]) => {
+          if (value) proposedPayload[key] = value;
+        });
+      } else {
+        proposedPayload.description = description.trim();
+      }
+      return submitPendingPaperEdit({
+        paper_id: paperId ? parseInt(paperId) : null,
+        edit_type: KIND_EDIT_TYPE[kind],
+        proposed_payload: proposedPayload,
+      });
+    },
     onSuccess: () => {
       toast({
         title: "Suggestion submitted for review",
@@ -110,11 +137,13 @@ export function SuggestTaxonomyDialog({
     },
   });
 
-  const canSubmit = name.trim().length > 0 && description.trim().length > 0;
+  const canSubmit =
+    name.trim().length > 0 &&
+    (kind === "conference" || description.trim().length > 0);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Suggest a new {label}</DialogTitle>
           <DialogDescription>
@@ -134,7 +163,9 @@ export function SuggestTaxonomyDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="suggest-description">Description</Label>
+            <Label htmlFor="suggest-description">
+              Description{kind === "conference" ? " (optional)" : ""}
+            </Label>
             <Textarea
               id="suggest-description"
               value={description}
@@ -143,6 +174,42 @@ export function SuggestTaxonomyDialog({
               onChange={(e) => setDescription(e.target.value)}
             />
           </div>
+          {kind === "conference" && (
+            <>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-dates">Dates (optional)</Label>
+                <Input
+                  id="suggest-dates"
+                  value={dates}
+                  maxLength={DATES_MAX}
+                  placeholder="e.g. May 3–7, 2026"
+                  onChange={(e) => setDates(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-venue">Venue (optional)</Label>
+                <Input
+                  id="suggest-venue"
+                  value={venue}
+                  maxLength={VENUE_MAX}
+                  placeholder="e.g. Vancouver Convention Centre, Canada"
+                  onChange={(e) => setVenue(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="suggest-url">URL (optional)</Label>
+                <Input
+                  id="suggest-url"
+                  type="url"
+                  inputMode="url"
+                  value={url}
+                  maxLength={URL_MAX}
+                  placeholder="https://example.org/conference"
+                  onChange={(e) => setUrl(e.target.value)}
+                />
+              </div>
+            </>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
