@@ -3042,19 +3042,12 @@ a.paper-resource.is-link:focus-visible {
 
 /* === BENCHMARK DETAIL PAGE === */
 .bm-page { max-width: calc(50vw + 600px); margin: 0 auto; }
-.bm-hero-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
-  gap: 42px;
-  align-items: start;
-  margin-bottom: 18px;
-}
-.bm-hero-copy { min-width: 0; }
-.bm-hero-aside {
+.bm-title-row {
   display: flex;
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+  margin-bottom: 8px;
 }
 .bm-title {
   font-family: var(--serif);
@@ -3063,8 +3056,35 @@ a.paper-resource.is-link:focus-visible {
   letter-spacing: -0.015em;
   line-height: 1.05;
   color: var(--ink);
-  margin-bottom: 8px;
+  margin-bottom: 0;
   text-wrap: balance;
+}
+.bm-title-trend {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  flex: 0 0 auto;
+  color: var(--ink-faint);
+}
+.bm-title-trend .benchmark-trend-sparkline {
+  width: 72px;
+  height: 28px;
+}
+.bm-title-trend .benchmark-trend-axis {
+  display: none;
+}
+.bm-title-trend-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.bm-title-trend-summary strong {
+  color: var(--ink-soft);
+  font-size: 10px;
 }
 .bm-subtitle {
   display: flex;
@@ -3074,7 +3094,7 @@ a.paper-resource.is-link:focus-visible {
   font-family: var(--serif);
   font-size: 15px;
   color: var(--ink-soft);
-  margin-bottom: 0;
+  margin-bottom: 14px;
 }
 .bm-subtitle .metric-tag {
   font-family: var(--mono);
@@ -3089,7 +3109,7 @@ a.paper-resource.is-link:focus-visible {
 }
 .bm-description {
   max-width: 760px;
-  margin: 28px 0 0;
+  margin: 0 0 18px;
   font-family: var(--serif);
   color: var(--ink-soft);
 }
@@ -3115,60 +3135,6 @@ a.paper-resource.is-link:focus-visible {
 }
 .bm-action-btn:hover { border-color: var(--ink); }
 .bm-action-btn svg { display: block; }
-.bm-hf-action {
-  align-self: flex-end;
-}
-.bm-benchmark-trend {
-  padding: 12px 14px 11px;
-  border: 1px solid var(--hairline);
-  border-radius: 7px;
-  background: var(--bg-elevated);
-}
-.bm-benchmark-trend-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-bottom: 5px;
-  font-family: var(--mono);
-  font-size: 9px;
-  font-weight: 600;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-.bm-benchmark-trend .benchmark-trend-sparkline {
-  width: 100%;
-  height: 112px;
-}
-.bm-benchmark-trend-summary {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-top: 4px;
-  font-family: var(--mono);
-  font-size: 9px;
-  color: var(--ink-faint);
-}
-.bm-benchmark-trend-summary strong {
-  color: var(--ink);
-  font-size: 11px;
-}
-.bm-benchmark-trend-link {
-  display: block;
-  margin-top: 8px;
-  padding-top: 7px;
-  border-top: 1px solid var(--hairline);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--mono);
-  font-size: 8.5px;
-  letter-spacing: 0.025em;
-  color: var(--accent-text);
-}
-.bm-benchmark-trend-link:hover { text-decoration: underline; }
 
 .bm-card {
   border: 1px solid var(--hairline);
@@ -4273,15 +4239,11 @@ html { scroll-behavior: smooth; }
 
   /* Benchmark leaderboard: reclaim horizontal space and let the wide table
    * scroll inside the card instead of overflowing the viewport. */
-  .bm-hero-row {
-    grid-template-columns: 1fr;
-    gap: 12px;
+  .bm-title-row {
+    align-items: flex-end;
+    flex-wrap: wrap;
+    gap: 8px 12px;
   }
-  .bm-benchmark-trend {
-    width: min(100%, 360px);
-  }
-  .bm-hf-action { align-self: flex-start; }
-  .bm-description { margin-top: 20px; }
   .bm-title { font-size: 30px; }
   .bm-card { padding: 18px 14px 20px; }
   .bm-card-head {

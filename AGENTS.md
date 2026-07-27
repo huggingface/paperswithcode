@@ -40,6 +40,18 @@ Guidance for agents working in this repository.
   TanStack Query for server state.
 - Never reload nginx during development.
 
+## Publishing changes
+
+- When the user asks to commit or push completed work, commit the intended
+  changes directly to `main` and push `origin main`.
+- Do not create a feature branch or pull request unless the user explicitly
+  requests one.
+- Fetch `origin main` before publishing and never force-push. If local and
+  remote `main` have diverged, stop and resolve the divergence safely before
+  pushing.
+- Publishing source changes is separate from deployment. Do not deploy to
+  production unless the user explicitly requests a production release.
+
 ## Production releases
 
 Production topology can change, so inspect the active processes and nginx config
