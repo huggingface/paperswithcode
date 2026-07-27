@@ -15,6 +15,7 @@ import LatexTitle from "@/components/LatexTitle";
 import { Icon } from "@/components";
 import ClosedSourceEvalBadge from "@/components/ClosedSourceEvalBadge";
 import ExternalSourceEvalBadge from "@/components/ExternalSourceEvalBadge";
+import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
 import { useToast } from "@/hooks/use-toast";
 
 /** Cap how many metric columns we render in the leaderboard at once. The
@@ -707,6 +708,30 @@ const BenchmarkDetailView: React.FC = () => {
     return tasks[0].id;
   }, [datasetTasksQ.data, evalsQ.data, taskSlugFromQuery, highlightEval]);
 
+  const benchmarkTrendsQ = useQuery({
+    queryKey: [
+      "task-benchmark-trends",
+      currentTaskId,
+      preferences.hide_closed_source_evals ? true : undefined,
+    ],
+    queryFn: () =>
+      apiClient.getTrendingBenchmarks(currentTaskId!, {
+        limit: 100,
+        min_recent_papers: 0,
+        is_open: preferences.hide_closed_source_evals ? true : undefined,
+      }),
+    enabled: !!currentTaskId && !!datasetQ.data?.id,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const benchmarkTrend = useMemo(
+    () =>
+      (benchmarkTrendsQ.data?.results || []).find(
+        (benchmark) => benchmark.id === datasetQ.data?.id,
+      ) || null,
+    [benchmarkTrendsQ.data, datasetQ.data?.id],
+  );
+
   // Configured metrics for the current leaderboard — the canonical column
   // set rendered in the table. Missing for legacy/unconfigured (task,
   // dataset) pairs, in which case we fall back to a data-union below.
@@ -901,40 +926,77 @@ const BenchmarkDetailView: React.FC = () => {
           <span style={{ color: "var(--accent-text)" }}>{dataset.name}</span>
         </div>
 
-        <h1 className="bm-title">{dataset.name}</h1>
-        <div
-          className="bm-subtitle"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 16,
-            flexWrap: "wrap",
-          }}
-        >
-          <span>
-            {activeMetric && (
-              <>
-                <span className="metric-tag">{activeMetric}</span>
-                <span style={{ color: "var(--hairline-strong)", margin: "0 8px" }}>·</span>
-              </>
-            )}
-            {sotaModel ? (
+        <div className="bm-hero-row">
+          <div className="bm-hero-copy">
+            <h1 className="bm-title">{dataset.name}</h1>
+            <div className="bm-subtitle">
               <span>
-                Best: <span className="best-name">{formatMetricValue(sota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{sotaModel}</span>
+                {activeMetric && (
+                  <>
+                    <span className="metric-tag">{activeMetric}</span>
+                    <span style={{ color: "var(--hairline-strong)", margin: "0 8px" }}>·</span>
+                  </>
+                )}
+                {sotaModel ? (
+                  <span>
+                    Best: <span className="best-name">{formatMetricValue(sota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{sotaModel}</span>
+                  </span>
+                ) : (
+                  <span>{sortedRows.length} evaluations</span>
+                )}
               </span>
-            ) : (
-              <span>{sortedRows.length} evaluations</span>
-            )}
-          </span>
-          {dataset.hf_url && (
-            <a
-              className="bm-action-btn"
-              href={dataset.hf_url}
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              <span aria-hidden="true">🤗</span> View on Hugging Face
-            </a>
+              {dataset.hf_url && (
+                <a
+                  className="bm-action-btn"
+                  href={dataset.hf_url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <span aria-hidden="true">🤗</span> View on Hugging Face
+                </a>
+              )}
+            </div>
+          </div>
+
+          {benchmarkTrend && (
+            <aside className="bm-benchmark-trend" aria-label={`${dataset.name} reporting trend`}>
+              <div className="bm-benchmark-trend-head">
+                <span>Reporting activity</span>
+                <span>{benchmarkTrendsQ.data?.recent_days || 90} days</span>
+              </div>
+              <BenchmarkTrendSparkline
+                history={benchmarkTrend.history}
+                benchmarkName={benchmarkTrend.name}
+              />
+              <div className="bm-benchmark-trend-summary">
+                <span>
+                  <strong>{benchmarkTrend.recent_paper_count}</strong>{" "}
+                  {benchmarkTrend.recent_paper_count === 1 ? "paper" : "papers"} reporting
+                </span>
+                {benchmarkTrend.rate_change == null ? (
+                  benchmarkTrend.recent_paper_count > 0 && (
+                    <span className="benchmark-trend-change is-new">new</span>
+                  )
+                ) : (
+                  <span
+                    className={`benchmark-trend-change ${
+                      benchmarkTrend.rate_change >= 1 ? "is-up" : "is-down"
+                    }`}
+                  >
+                    {benchmarkTrend.rate_change >= 1 ? "↑" : "↓"}{" "}
+                    {benchmarkTrend.rate_change.toFixed(1)}×
+                  </span>
+                )}
+              </div>
+              {primaryTask && (
+                <Link
+                  className="bm-benchmark-trend-link"
+                  to={`/tasks/${primaryTask.slug || primaryTask.id}`}
+                >
+                  View {primaryTask.name} benchmarks →
+                </Link>
+              )}
+            </aside>
           )}
         </div>
 
