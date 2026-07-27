@@ -16,9 +16,11 @@ from backend.models.api import (
     Papers,
     KeywordUpdate,
     TaskCreateRequest,
+    TrendingBenchmarks,
     TrendingTasks,
 )
 from backend.models.database import Task as DBTask
+from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.task_service import TaskService
 from backend.database.connection import get_database_session
 from backend.utils.entity_images import (
@@ -195,6 +197,58 @@ def get_top_tasks(
     try:
         service = TaskService(db)
         return service.get_top_tasks(limit=limit)
+    except DatabaseError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/{task_id}/trending-benchmarks", response_model=TrendingBenchmarks)
+def get_trending_benchmarks(
+    task_id: str,
+    limit: int = Query(
+        20, ge=1, le=100, description="Maximum number of benchmarks to return"
+    ),
+    recent_days: int = Query(
+        90, ge=1, le=365, description="Length of the recent reporting window"
+    ),
+    baseline_days: int = Query(
+        180,
+        ge=1,
+        le=730,
+        description="Length of the window immediately preceding the recent one",
+    ),
+    min_recent_papers: int = Query(
+        1, ge=0, description="Minimum distinct recent reporting papers"
+    ),
+    include_descendants: bool = Query(
+        False, description="Roll up benchmark reports from descendant tasks"
+    ),
+    bucket_days: int = Query(
+        30, ge=7, le=90, description="Length of each sparkline bucket"
+    ),
+    history_buckets: int = Query(
+        6, ge=2, le=24, description="Number of sparkline buckets"
+    ),
+    db: Session = Depends(get_database_session),
+):
+    """Rank a task's benchmarks by distinct recent evaluation-reporting papers.
+
+    The default 90-day ranking provides enough evidence for sparse task pages
+    without falling back to all-time leaderboard popularity. Each paper counts
+    once per benchmark even when it contributes multiple model or metric rows.
+    """
+    try:
+        return BenchmarkTrendService(db).get_trending_benchmarks(
+            task_id,
+            limit=limit,
+            recent_days=recent_days,
+            baseline_days=baseline_days,
+            min_recent_papers=min_recent_papers,
+            include_descendants=include_descendants,
+            bucket_days=bucket_days,
+            history_buckets=history_buckets,
+        )
+    except PaperNotFoundError as e:
+        raise HTTPException(status_code=404, detail=str(e))
     except DatabaseError as e:
         raise HTTPException(status_code=500, detail=str(e))
 
