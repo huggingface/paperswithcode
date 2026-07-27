@@ -831,6 +831,14 @@ const BenchmarkDetailView: React.FC = () => {
     () => computeSeries(mergedTaskEvals, activeMetric, arrow),
     [mergedTaskEvals, activeMetric, arrow],
   );
+  // The dataset metadata arrives before the leaderboard's dependent queries.
+  // Do not present that transient empty client state as a real "0 evaluations"
+  // result in the header. Cached query data still renders immediately.
+  const isSummaryLoading =
+    evalsQ.isPending ||
+    datasetTasksQ.isPending ||
+    directionsQ.isPending ||
+    (!!currentTaskId && leaderboardMetricsQ.isPending);
 
   // Bring the highlighted leaderboard row into view once the evaluations
   // query resolves. Guarded by a ref so subsequent metric switches don't
@@ -957,21 +965,28 @@ const BenchmarkDetailView: React.FC = () => {
         </div>
 
         <div className="bm-subtitle">
-          <span>
-            {activeMetric && (
-              <>
-                <span className="metric-tag">{activeMetric}</span>
-                <span style={{ color: "var(--hairline-strong)", margin: "0 8px" }}>·</span>
-              </>
-            )}
-            {sotaModel ? (
-              <span>
-                Best: <span className="best-name">{formatMetricValue(sota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{sotaModel}</span>
-              </span>
-            ) : (
-              <span>{sortedRows.length} evaluations</span>
-            )}
-          </span>
+          {isSummaryLoading ? (
+            <Skeleton
+              className="h-5 w-64 bm-summary-skeleton"
+              aria-label="Loading benchmark summary"
+            />
+          ) : (
+            <span>
+              {activeMetric && (
+                <>
+                  <span className="metric-tag">{activeMetric}</span>
+                  <span style={{ color: "var(--hairline-strong)", margin: "0 8px" }}>·</span>
+                </>
+              )}
+              {sotaModel ? (
+                <span>
+                  Best: <span className="best-name">{formatMetricValue(sota)}</span> by <span className="best-name" style={{ fontStyle: "normal" }}>{sotaModel}</span>
+                </span>
+              ) : (
+                <span>{sortedRows.length} evaluations</span>
+              )}
+            </span>
+          )}
           {dataset.hf_url && (
             <a
               className="bm-action-btn"

@@ -10,9 +10,11 @@ Guidance for agents working in this repository.
 - During routine development, do not restart or stop services, kill processes,
   rebuild/repoint the production frontend, or reload nginx. Deploy only when the
   user explicitly requests a production release.
-- When a requested change is explicitly scoped to staging, treat approval to
-  implement it as approval to deploy the completed, validated change to staging;
-  do not wait for a separate deployment request.
+- Treat approval to implement a repository source change as approval to validate
+  it, commit the intended changes directly to `main`, push `origin main`, and
+  deploy that exact commit to staging. Do not wait for separate commit, push, or
+  staging deployment requests unless the user explicitly asks for local-only
+  work or no deployment.
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
@@ -42,15 +44,19 @@ Guidance for agents working in this repository.
 
 ## Publishing changes
 
-- When the user asks to commit or push completed work, commit the intended
-  changes directly to `main` and push `origin main`.
+- After completing and validating a repository source change, commit the
+  intended changes directly to `main`, push `origin main`, and deploy the exact
+  pushed commit to staging with `pwc-deploy`.
+- Read-only investigation and reporting, data-only curation, database operations,
+  and other work that does not change deployed source do not require a commit or
+  application deployment.
 - Do not create a feature branch or pull request unless the user explicitly
   requests one.
 - Fetch `origin main` before publishing and never force-push. If local and
   remote `main` have diverged, stop and resolve the divergence safely before
   pushing.
-- Publishing source changes is separate from deployment. Do not deploy to
-  production unless the user explicitly requests a production release.
+- Staging deployment approval never implies production approval. Do not deploy
+  to production unless the user explicitly requests a production release.
 
 ## Production releases
 
