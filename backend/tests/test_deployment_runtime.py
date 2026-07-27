@@ -513,6 +513,28 @@ def test_staging_profile_inherits_admin_catalog_actions():
     }
 
 
+def test_version_three_staging_release_remains_valid_after_profile_expansion(
+    tmp_path: Path,
+):
+    release = make_bundle(tmp_path, chat=True)
+    manifest_path = release / "release.json"
+    manifest = json.loads(manifest_path.read_text())
+    previous_features = {
+        "chat": True,
+        "codex_add_evals": False,
+        "codex_enrich_paper": False,
+    }
+    manifest["feature_contract_version"] = 3
+    manifest["backend_features"] = previous_features
+    manifest["frontend_features"] = previous_features
+    manifest_path.write_text(json.dumps(manifest))
+    (release / "frontend-dist" / "features.json").write_text(
+        json.dumps(previous_features)
+    )
+
+    assert validate_manifest(release, "staging")["feature_contract_version"] == 3
+
+
 def test_production_profile_enables_admin_catalog_actions():
     assert profile_features("production") == {
         "chat": False,
