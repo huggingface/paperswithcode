@@ -29,30 +29,16 @@ from backend.services.evaluation_service import EvaluationService
 from backend.utils.urls import get_paper_route_identifier
 
 
-def ensure_paper_redirects_table(conn) -> None:
-    conn.execute(
-        text(
-            """
-            CREATE TABLE IF NOT EXISTS paper_redirects (
-                old_paper_id BIGINT PRIMARY KEY,
-                route_identifier VARCHAR(100) NOT NULL
-            )
-            """
-        )
-    )
-
-
 def record_paper_merge_redirect(
     db: Session, old_paper_id: int, arxiv_paper: Paper
 ) -> None:
     route_identifier = get_paper_route_identifier(
         arxiv_paper.source, arxiv_paper.arxiv_id, arxiv_paper.id
     )
-    ensure_paper_redirects_table(db.connection())
     db.execute(
         text(
             """
-            INSERT INTO paper_redirects (old_paper_id, route_identifier)
+            INSERT INTO public.paper_redirects (old_paper_id, route_identifier)
             VALUES (:old_paper_id, :route_identifier)
             ON CONFLICT (old_paper_id) DO UPDATE
             SET route_identifier = EXCLUDED.route_identifier
@@ -63,12 +49,11 @@ def record_paper_merge_redirect(
 
 
 def lookup_paper_merge_redirect(db: Session, old_paper_id: int) -> str | None:
-    ensure_paper_redirects_table(db.connection())
     row = db.execute(
         text(
             """
             SELECT route_identifier
-            FROM paper_redirects
+            FROM public.paper_redirects
             WHERE old_paper_id = :old_paper_id
             """
         ),
