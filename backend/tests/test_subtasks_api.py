@@ -273,6 +273,7 @@ def test_trending_benchmarks_default_to_ninety_days(db_session):
     rising, established = response.results
     assert rising.recent_paper_count == 4
     assert rising.all_time_paper_count == 4
+    assert rising.best_model_name == "Model 500"
     assert established.recent_paper_count == 2
     assert established.baseline_paper_count == 5
     assert established.featured_rank == 1
@@ -295,6 +296,7 @@ def test_trending_benchmarks_endpoint_exposes_default_window(client):
     assert body["recent_days"] == 90
     assert body["baseline_days"] == 180
     assert body["results"][0]["name"] == "RisingBench"
+    assert body["results"][0]["best_model_name"] == "Model 500"
     assert len(body["results"][0]["history"]) == 6
 
 

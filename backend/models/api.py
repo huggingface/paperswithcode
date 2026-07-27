@@ -1219,6 +1219,10 @@ class TrendingBenchmark(BaseModel):
     latest_reported_on: Optional[date] = Field(
         None, description="Publication date of the newest reporting paper"
     )
+    best_model_name: Optional[str] = Field(
+        None,
+        description="Top-ranked model on this benchmark for the scoped task",
+    )
     history: List[BenchmarkTrendPoint] = Field(
         default_factory=list,
         description="Chronological reporting-paper counts for sparkline rendering",

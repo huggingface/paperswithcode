@@ -17,6 +17,7 @@ from backend.models.database import (
     Task as DBTask,
     TaskDataset,
 )
+from backend.services.dataset_service import DatasetService
 from backend.utils.exceptions import PaperNotFoundError
 from backend.utils.task_hierarchy import collect_descendant_task_ids
 
@@ -38,6 +39,7 @@ class BenchmarkTrendService:
         include_descendants: bool = False,
         bucket_days: int = 30,
         history_buckets: int = 6,
+        is_open: bool | None = None,
         today: date | None = None,
     ) -> TrendingBenchmarks:
         """Return recent benchmark reporting activity for one task.
@@ -114,6 +116,11 @@ class BenchmarkTrendService:
             bucket_days=bucket_days,
             history_buckets=history_buckets,
         )
+        best_models = DatasetService(self.db)._best_models_for_datasets(
+            [row[0].id for row in rows],
+            scoped_task_ids,
+            is_open=is_open,
+        )
 
         results = []
         for (
@@ -145,6 +152,7 @@ class BenchmarkTrendService:
                         else None
                     ),
                     latest_reported_on=latest_reported_on,
+                    best_model_name=best_models.get(dataset.id),
                     history=history.get(dataset.id, []),
                 )
             )

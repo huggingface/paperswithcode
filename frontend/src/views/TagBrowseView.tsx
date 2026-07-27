@@ -4,9 +4,10 @@ import { useQuery } from "@tanstack/react-query";
 import { Github, Pin, Trophy } from "lucide-react";
 
 import { MethodChip, PaperCard } from "@/components";
+import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
 import MarkdownText from "@/components/MarkdownText";
 import { apiClient } from "@/lib/api";
-import type { Dataset, Task } from "@/lib/api";
+import type { Dataset, Task, TrendingBenchmark } from "@/lib/api";
 import { assetUrl } from "@/lib/apiUrl";
 import { usePreferences } from "@/lib/preferencesContext";
 import { displayTaskName, transformPaperForCard } from "@/lib/transform";
@@ -77,6 +78,18 @@ const TagBrowseView: React.FC = () => {
   const pageQ = useQuery({
     queryKey: ["task-page", taskSlug, bestModelIsOpen],
     queryFn: () => apiClient.getTaskPage(taskSlug!, { is_open: bestModelIsOpen }),
+    enabled: !!taskSlug,
+    staleTime: 10 * 60 * 1000,
+  });
+
+  const benchmarkTrendsQ = useQuery({
+    queryKey: ["task-benchmark-trends", taskSlug, bestModelIsOpen],
+    queryFn: () =>
+      apiClient.getTrendingBenchmarks(taskSlug!, {
+        limit: 100,
+        min_recent_papers: 0,
+        is_open: bestModelIsOpen,
+      }),
     enabled: !!taskSlug,
     staleTime: 10 * 60 * 1000,
   });
@@ -160,11 +173,34 @@ const TagBrowseView: React.FC = () => {
   const sisters = (pageQ.data.sisters || []).filter((s) => s.id !== task.id);
   const recommendedFrameworks = pageQ.data.recommended_frameworks || [];
   const datasets = pageQ.data.benchmarks || [];
+  const visibleDatasetIds = new Set(datasets.map((dataset) => dataset.id));
+  const visibleTrendRows = (benchmarkTrendsQ.data?.results || []).filter((benchmark) =>
+    visibleDatasetIds.has(benchmark.id),
+  );
+  const benchmarkRows: TrendingBenchmark[] =
+    visibleTrendRows.length
+      ? visibleTrendRows
+      : datasets.map((dataset) => ({
+          id: dataset.id,
+          name: dataset.name,
+          slug: dataset.slug,
+          full_name: dataset.full_name,
+          featured_rank: dataset.featured_rank,
+          recent_paper_count: 0,
+          baseline_paper_count: 0,
+          all_time_paper_count: dataset.paper_count || 0,
+          trend_score: 0,
+          rate_change: null,
+          latest_reported_on: null,
+          best_model_name: dataset.best_model_name,
+          history: [],
+        }));
+  const trendWindowDays = benchmarkTrendsQ.data?.recent_days || 90;
   const hasVisibleSubtaskBenchmarks = visibleSubtasks.some(
     (s) => (subtaskBenchmarksById.get(s.id) || []).length > 0,
   );
   const shouldShowSubtaskList = visibleSubtasks.length > 0;
-  const shouldShowBenchmarkList = datasets.length > 0;
+  const shouldShowBenchmarkList = benchmarkRows.length > 0;
 
   // Total unique benchmarks for the BENCHMARKS quickstat: direct task
   // benchmarks plus visible subtask benchmarks, deduped by dataset id so a
@@ -299,39 +335,84 @@ const TagBrowseView: React.FC = () => {
           {shouldShowBenchmarkList && (
             <>
               <div className="task-section-head">
-                <div className="task-section-eyebrow">Leaderboards · click any</div>
+                <div className="task-section-eyebrow">
+                  {trendWindowDays}-day reporting activity · click any
+                </div>
                 <div className="task-section-title">
-                  Benchmarks <span className="meta">[{datasets.length}]</span>
+                  Benchmarks <span className="meta">[{benchmarkRows.length}]</span>
                 </div>
               </div>
-              {(benchmarksExpanded ? datasets : datasets.slice(0, 5)).map((d, i) => (
-                <div key={d.id} className="bench-row" onClick={() => navigate(benchmarkPath(d.slug || d.id, taskSlug))}>
-                  <div className="bench-row-num">{String(i + 1).padStart(2, "0")}</div>
-                  <div className="bench-row-main">
-                    <div className="bench-row-name">{d.name}</div>
-                    <div className="bench-row-sub">
-                      {d.featured_rank != null && (
-                        <span className="bench-pin">
-                          <Pin size={11} className="bench-pin-icon" /> pinned
-                        </span>
-                      )}
-                      {d.paper_count != null && (
-                        <span>
-                          <strong>{d.paper_count}</strong> ENTRIES
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                  {d.best_model_name && (
-                    <div className="bench-row-best">
-                      <Trophy size={13} className="bench-row-best-icon" />
-                      <span className="bench-row-best-name">{d.best_model_name}</span>
-                    </div>
-                  )}
-                  <div className="bench-row-arrow">→</div>
+              <div className="benchmark-trend-table" role="table" aria-label="Trending benchmarks">
+                <div className="benchmark-trend-head" role="row">
+                  <span role="columnheader">Trend</span>
+                  <span role="columnheader">Benchmark</span>
+                  <span role="columnheader">Best model</span>
+                  <span aria-hidden="true" />
                 </div>
-              ))}
-              {datasets.length > 5 && (
+                {(benchmarksExpanded ? benchmarkRows : benchmarkRows.slice(0, 5)).map((benchmark) => (
+                  <Link
+                    key={benchmark.id}
+                    className="benchmark-trend-row"
+                    to={benchmarkPath(benchmark.slug || benchmark.id, taskSlug)}
+                    role="row"
+                  >
+                    <div className="benchmark-trend-cell" role="cell">
+                      <BenchmarkTrendSparkline
+                        history={benchmark.history}
+                        benchmarkName={benchmark.name}
+                      />
+                      <div className="benchmark-trend-meta">
+                        <span>
+                          <strong>{benchmark.recent_paper_count}</strong>{" "}
+                          {benchmark.recent_paper_count === 1 ? "paper" : "papers"} /{" "}
+                          {trendWindowDays}d
+                        </span>
+                        {benchmark.rate_change == null ? (
+                          benchmark.recent_paper_count > 0 && (
+                            <span className="benchmark-trend-change is-new">new</span>
+                          )
+                        ) : (
+                          <span
+                            className={`benchmark-trend-change ${
+                              benchmark.rate_change >= 1 ? "is-up" : "is-down"
+                            }`}
+                          >
+                            {benchmark.rate_change >= 1 ? "↑" : "↓"}{" "}
+                            {benchmark.rate_change.toFixed(1)}×
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <div className="benchmark-trend-benchmark" role="cell">
+                      <div className="bench-row-name">{benchmark.name}</div>
+                      <div className="bench-row-sub">
+                        {benchmark.featured_rank != null && (
+                          <span className="bench-pin">
+                            <Pin size={11} className="bench-pin-icon" /> pinned
+                          </span>
+                        )}
+                        <span>
+                          <strong>{benchmark.all_time_paper_count}</strong> reporting papers
+                        </span>
+                      </div>
+                    </div>
+                    <div className="bench-row-best" role="cell">
+                      {benchmark.best_model_name ? (
+                        <>
+                          <Trophy size={13} className="bench-row-best-icon" />
+                          <span className="bench-row-best-name">
+                            {benchmark.best_model_name}
+                          </span>
+                        </>
+                      ) : (
+                        <span className="bench-row-best-empty">—</span>
+                      )}
+                    </div>
+                    <div className="bench-row-arrow" aria-hidden="true">→</div>
+                  </Link>
+                ))}
+              </div>
+              {benchmarkRows.length > 5 && (
                 <button
                   type="button"
                   className="bench-show-more"
@@ -339,7 +420,7 @@ const TagBrowseView: React.FC = () => {
                 >
                   {benchmarksExpanded
                     ? "− show top 5"
-                    : `+ show ${datasets.length - 5} more benchmarks`}
+                    : `+ show ${benchmarkRows.length - 5} more benchmarks`}
                 </button>
               )}
             </>

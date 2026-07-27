@@ -2741,7 +2741,122 @@ a.paper-resource.is-link:focus-visible {
   overflow-wrap: break-word;
 }
 
-/* Benchmark list rows on task page (compact, no charts) */
+/* Trending benchmark table on task pages. The compact sparkline echoes the
+ * legacy PwC trend column while matching the current site's blue accent. */
+.benchmark-trend-table {
+  border-top: 1px solid var(--hairline);
+}
+.benchmark-trend-head,
+.benchmark-trend-row {
+  display: grid;
+  grid-template-columns: 124px minmax(180px, 1fr) minmax(150px, 220px) 24px;
+  gap: 20px;
+  align-items: center;
+}
+.benchmark-trend-head {
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--mono);
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.benchmark-trend-row {
+  min-height: 92px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hairline);
+  background: transparent;
+  transition: background 0.15s, border-color 0.15s;
+}
+.benchmark-trend-row:hover {
+  background: var(--bg-elevated);
+  border-color: var(--hairline-strong);
+}
+.benchmark-trend-row:hover .bench-row-name { color: var(--accent-text); }
+.benchmark-trend-row:hover .bench-row-arrow {
+  color: var(--accent-text);
+  transform: translateX(3px);
+}
+.benchmark-trend-cell {
+  min-width: 0;
+}
+.benchmark-trend-sparkline {
+  display: block;
+  width: 112px;
+  height: 42px;
+  overflow: visible;
+}
+.benchmark-trend-axis {
+  stroke: var(--hairline-strong);
+  stroke-width: 0.8;
+  stroke-dasharray: 1.5 2.5;
+  vector-effect: non-scaling-stroke;
+}
+.benchmark-trend-area {
+  fill: var(--accent-soft);
+  opacity: 0.68;
+}
+.benchmark-trend-line {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.benchmark-trend-dot {
+  fill: var(--bg-elevated);
+  stroke: var(--accent);
+  stroke-width: 1.8;
+  vector-effect: non-scaling-stroke;
+}
+.benchmark-trend-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  letter-spacing: 0.035em;
+  color: var(--ink-faint);
+  white-space: nowrap;
+}
+.benchmark-trend-meta strong {
+  color: var(--ink-soft);
+  font-weight: 600;
+}
+.benchmark-trend-change {
+  padding: 1px 4px;
+  border-radius: 999px;
+  font-size: 8px;
+  font-weight: 600;
+}
+.benchmark-trend-change.is-up,
+.benchmark-trend-change.is-new {
+  color: var(--positive-text);
+  background: var(--positive-bg);
+}
+.benchmark-trend-change.is-down {
+  color: var(--negative-text);
+  background: var(--negative-bg);
+}
+.benchmark-trend-benchmark {
+  min-width: 0;
+}
+.benchmark-trend-row .bench-row-name {
+  margin-bottom: 5px;
+}
+.benchmark-trend-row .bench-row-best {
+  width: 100%;
+}
+.bench-row-best-empty {
+  color: var(--ink-faint);
+  font-family: var(--mono);
+}
+
+/* Compact benchmark rows used inside subtask cards. */
 .bench-row {
   display: grid;
   grid-template-columns: 36px 1fr auto 28px;
@@ -3889,6 +4004,12 @@ html { scroll-behavior: smooth; }
   .bench-row > .bench-row-arrow { display: none; }
   .bench-row-best { max-width: 130px; }
   .bench-row-best-name { font-size: 12.5px; }
+  .benchmark-trend-head,
+  .benchmark-trend-row {
+    grid-template-columns: 112px minmax(160px, 1fr) minmax(130px, 180px) 18px;
+    gap: 14px;
+  }
+  .benchmark-trend-sparkline { width: 104px; }
 }
 
 /* Tablet-only thumbnail sizing.
@@ -3953,6 +4074,32 @@ html { scroll-behavior: smooth; }
   .framework-grid { grid-template-columns: 1fr; }
 
   .subtask-grid { grid-template-columns: 1fr; }
+
+  .benchmark-trend-head { display: none; }
+  .benchmark-trend-row {
+    grid-template-columns: 100px minmax(0, 1fr) 16px;
+    grid-template-areas:
+      "trend benchmark arrow"
+      "trend best arrow";
+    gap: 4px 12px;
+    min-height: 98px;
+    padding: 12px 4px;
+  }
+  .benchmark-trend-cell { grid-area: trend; }
+  .benchmark-trend-benchmark { grid-area: benchmark; }
+  .benchmark-trend-row .bench-row-best {
+    grid-area: best;
+    justify-content: flex-start;
+    max-width: none;
+    text-align: left;
+  }
+  .benchmark-trend-row .bench-row-arrow { grid-area: arrow; }
+  .benchmark-trend-sparkline { width: 96px; }
+  .benchmark-trend-meta {
+    flex-wrap: wrap;
+    gap: 3px;
+    white-space: normal;
+  }
 
   .paper-card {
     grid-template-columns: 1fr;

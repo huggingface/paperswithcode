@@ -228,6 +228,13 @@ def get_trending_benchmarks(
     history_buckets: int = Query(
         6, ge=2, le=24, description="Number of sparkline buckets"
     ),
+    is_open: Optional[bool] = Query(
+        None,
+        description=(
+            "When set, choose best models from only open-source or only "
+            "closed-source evaluation rows"
+        ),
+    ),
     db: Session = Depends(get_database_session),
 ):
     """Rank a task's benchmarks by distinct recent evaluation-reporting papers.
@@ -246,6 +253,7 @@ def get_trending_benchmarks(
             include_descendants=include_descendants,
             bucket_days=bucket_days,
             history_buckets=history_buckets,
+            is_open=is_open,
         )
     except PaperNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))

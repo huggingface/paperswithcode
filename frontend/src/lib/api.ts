@@ -350,6 +350,39 @@ export interface TrendingTasksResponse {
   baseline_days: number;
 }
 
+export interface BenchmarkTrendPoint {
+  start_date: string;
+  end_date: string;
+  paper_count: number;
+}
+
+export interface TrendingBenchmark {
+  id: string;
+  name: string;
+  slug?: string | null;
+  full_name?: string | null;
+  featured_rank?: number | null;
+  recent_paper_count: number;
+  baseline_paper_count: number;
+  all_time_paper_count: number;
+  trend_score: number;
+  rate_change?: number | null;
+  latest_reported_on?: string | null;
+  best_model_name?: string | null;
+  history: BenchmarkTrendPoint[];
+}
+
+export interface TrendingBenchmarksResponse {
+  task_id: string;
+  task_slug: string;
+  signal: "evaluation_reports";
+  recent_days: number;
+  baseline_days: number;
+  bucket_days: number;
+  generated_on: string;
+  results: TrendingBenchmark[];
+}
+
 export interface Method {
   id: string;
   name: string;
@@ -1191,6 +1224,31 @@ class ApiClient {
     if (params?.is_open !== undefined) searchParams.append('is_open', params.is_open.toString());
     const endpoint = `/tasks/${taskId}/page${searchParams.toString() ? `?${searchParams.toString()}` : ''}`;
     return this.request<TaskPage>(endpoint);
+  }
+
+  async getTrendingBenchmarks(taskId: string, params?: {
+    limit?: number;
+    recent_days?: number;
+    baseline_days?: number;
+    min_recent_papers?: number;
+    include_descendants?: boolean;
+    bucket_days?: number;
+    history_buckets?: number;
+    is_open?: boolean;
+  }): Promise<TrendingBenchmarksResponse> {
+    const searchParams = new URLSearchParams();
+    if (params?.limit !== undefined) searchParams.append('limit', params.limit.toString());
+    if (params?.recent_days !== undefined) searchParams.append('recent_days', params.recent_days.toString());
+    if (params?.baseline_days !== undefined) searchParams.append('baseline_days', params.baseline_days.toString());
+    if (params?.min_recent_papers !== undefined) searchParams.append('min_recent_papers', params.min_recent_papers.toString());
+    if (params?.include_descendants !== undefined) searchParams.append('include_descendants', params.include_descendants.toString());
+    if (params?.bucket_days !== undefined) searchParams.append('bucket_days', params.bucket_days.toString());
+    if (params?.history_buckets !== undefined) searchParams.append('history_buckets', params.history_buckets.toString());
+    if (params?.is_open !== undefined) searchParams.append('is_open', params.is_open.toString());
+
+    const queryString = searchParams.toString();
+    const endpoint = `/tasks/${encodeURIComponent(taskId)}/trending-benchmarks${queryString ? `?${queryString}` : ''}`;
+    return this.request<TrendingBenchmarksResponse>(endpoint);
   }
 
   async getTaskPapers(taskId: string, params?: {
