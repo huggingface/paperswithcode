@@ -2845,6 +2845,39 @@ a.paper-resource.is-link:focus-visible {
   stroke-width: 1.8;
   vector-effect: non-scaling-stroke;
 }
+.benchmark-trend-point {
+  cursor: crosshair;
+  outline: none;
+}
+.benchmark-trend-point-hit {
+  fill: transparent;
+}
+.benchmark-trend-point-mark {
+  fill: var(--bg-elevated);
+  stroke: var(--accent);
+  stroke-width: 1.25;
+  opacity: 0;
+  transition: opacity 0.12s, r 0.12s;
+  vector-effect: non-scaling-stroke;
+}
+.benchmark-trend-point:hover .benchmark-trend-point-mark,
+.benchmark-trend-point:focus .benchmark-trend-point-mark {
+  opacity: 1;
+  r: 2.3px;
+}
+.benchmark-trend-tooltip rect {
+  fill: var(--ink);
+  opacity: 0.94;
+}
+.benchmark-trend-tooltip text {
+  fill: var(--bg);
+  font-family: var(--mono);
+  font-size: 3.2px;
+  letter-spacing: 0.01em;
+}
+.benchmark-trend-tooltip .benchmark-trend-tooltip-value {
+  font-weight: 700;
+}
 .benchmark-trend-meta {
   display: flex;
   align-items: center;
@@ -3009,12 +3042,18 @@ a.paper-resource.is-link:focus-visible {
 .bm-page { max-width: calc(50vw + 600px); margin: 0 auto; }
 .bm-hero-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 230px;
-  gap: 36px;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 42px;
   align-items: start;
   margin-bottom: 18px;
 }
 .bm-hero-copy { min-width: 0; }
+.bm-hero-aside {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+}
 .bm-title {
   font-family: var(--serif);
   font-size: 44px;
@@ -3046,6 +3085,12 @@ a.paper-resource.is-link:focus-visible {
   font-weight: 600;
   font-style: italic;
 }
+.bm-description {
+  max-width: 760px;
+  margin: 28px 0 0;
+  font-family: var(--serif);
+  color: var(--ink-soft);
+}
 .bm-actions {
   display: flex;
   gap: 10px;
@@ -3068,6 +3113,9 @@ a.paper-resource.is-link:focus-visible {
 }
 .bm-action-btn:hover { border-color: var(--ink); }
 .bm-action-btn svg { display: block; }
+.bm-hf-action {
+  align-self: flex-end;
+}
 .bm-benchmark-trend {
   padding: 12px 14px 11px;
   border: 1px solid var(--hairline);
@@ -3089,7 +3137,7 @@ a.paper-resource.is-link:focus-visible {
 }
 .bm-benchmark-trend .benchmark-trend-sparkline {
   width: 100%;
-  height: 58px;
+  height: 112px;
 }
 .bm-benchmark-trend-summary {
   display: flex;
@@ -4228,8 +4276,10 @@ html { scroll-behavior: smooth; }
     gap: 12px;
   }
   .bm-benchmark-trend {
-    width: min(100%, 300px);
+    width: min(100%, 360px);
   }
+  .bm-hf-action { align-self: flex-start; }
+  .bm-description { margin-top: 20px; }
   .bm-title { font-size: 30px; }
   .bm-card { padding: 18px 14px 20px; }
   .bm-card-head {
