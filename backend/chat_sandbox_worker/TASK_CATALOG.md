@@ -59,6 +59,7 @@ The public catalog currently uses the areas below. Up to 12 visible top-level ta
 - `video-understanding` — Video Understanding
 - `video-segmentation` — Video segmentation
 - `object-tracking` — Object Tracking
+- `video-compression` — Video Compression
 - `video-super-resolution` — Video super-resolution
 - `video-frame-interpolation` — Video frame interpolation
 - `video-restoration` — Video Restoration
