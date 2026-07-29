@@ -1,6 +1,6 @@
 ## Available research areas and representative tasks
 
-The public catalog currently uses the areas below. Up to 12 visible top-level tasks are shown per area, ordered by paper coverage. Task slugs are included for precise CLI queries; use `pwc --help` to inspect the live command surface.
+The public catalog currently uses the areas below. Up to 12 top-level tasks are shown per area, ordered by paper coverage. Task slugs are included for precise CLI queries; use `pwc --help` to inspect the live command surface.
 
 ### Audio
 
@@ -59,6 +59,7 @@ The public catalog currently uses the areas below. Up to 12 visible top-level ta
 - `video-understanding` — Video Understanding
 - `video-segmentation` — Video segmentation
 - `object-tracking` — Object Tracking
+- `video-compression` — Video Compression
 - `video-super-resolution` — Video super-resolution
 - `video-frame-interpolation` — Video frame interpolation
 - `video-restoration` — Video Restoration
