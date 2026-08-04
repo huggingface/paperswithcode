@@ -15,6 +15,10 @@ The `pwc` CLI is anonymous and read-only. It queries the public
 Run `pwc --help` or a nested `--help` command when the live parser and this skill
 disagree; the parser is authoritative.
 
+Install or refresh this Skill from the locally installed CLI with
+`pwc skills add --force`. Use `--global` for `~/.agents/skills`, `--claude` to
+also link it for Claude Code, or `--dest PATH` for another harness.
+
 Use compact output for reading and discovery. Add `--json` when programmatic
 filtering, joining, or schema-dependent processing is useful.
 Use only flags documented for the exact subcommand; do not infer that sibling
@@ -99,6 +103,8 @@ than silently selecting a paper.
   --sort METRIC[:asc|desc]
   --pareto METRIC:higher,METRIC:lower --json]`
 - `pwc version` — Show the CLI and API contract versions.
+- `pwc skills add` — Install the version-matched CLI Skill.
+  `[--global --claude --dest SKILLS_DIRECTORY --force]`
 
 ## Research workflow
 
