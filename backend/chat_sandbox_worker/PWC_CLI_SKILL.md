@@ -15,6 +15,10 @@ The `pwc` CLI is anonymous and read-only. It queries the public
 Run `pwc --help` or a nested `--help` command when the live parser and this skill
 disagree; the parser is authoritative.
 
+Install or refresh this Skill from the locally installed CLI with
+`pwc skills add --force`. Use `--global` for `~/.agents/skills`, `--claude` to
+also link it for Claude Code, or `--dest PATH` for another harness.
+
 Use compact output for reading and discovery. Add `--json` when programmatic
 filtering, joining, or schema-dependent processing is useful.
 Use only flags documented for the exact subcommand; do not infer that sibling
@@ -53,8 +57,13 @@ than silently selecting a paper.
   `[--limit 1-20 --json]`
 - `pwc paper lineage list PAPER` — Render linked Markdown sections for a paper,
   its predecessors, and its successors. `[--json]`
+- `pwc task --name NAME` — Show a task page in CLI form, including its area,
+  description, hierarchy, research trends, recommended frameworks, sister
+  tasks, subtasks, common methods, benchmarks, and trending papers. `NAME`
+  must exactly match a task name, slug, or ID. `[--json]`
 - `pwc task list` — List research tasks, optionally filtering by a
   case-insensitive exact area name such as Vision, Audio, or General.
+  Rows include direct paper, benchmark, and evaluation counts for each task.
   Interactive output groups visible top-level tasks into Markdown area sections;
   `--group-by-area` forces that view when output is captured, while `--flat`
   forces the paginated table.
@@ -99,6 +108,8 @@ than silently selecting a paper.
   --sort METRIC[:asc|desc]
   --pareto METRIC:higher,METRIC:lower --json]`
 - `pwc version` — Show the CLI and API contract versions.
+- `pwc skills add` — Install the version-matched CLI Skill.
+  `[--global --claude --dest SKILLS_DIRECTORY --force]`
 
 ## Research workflow
 
@@ -109,6 +120,7 @@ than silently selecting a paper.
    a leaderboard sorted by one metric.
 2. Use `pwc paper info` to inspect promising results. Add `--include-resources`
    when linked GitHub repositories, project pages, or Hugging Face artifacts matter.
+   When the paper includes successors, always consider them more state-of-the-art.
 3. Use `pwc search` to search more broadly for a topic or a known paper.
    Use the default hybrid mode first; use keyword mode for exact terminology
    and semantic mode for conceptual matches.
@@ -116,8 +128,9 @@ than silently selecting a paper.
    titles as sufficient support for detailed claims.
 5. Expand the literature with `pwc paper related` and use
    `pwc paper lineage list` when model or method ancestry matters.
-6. Explore the catalog taxonomy with `pwc task list --group-by-area`,
-   `pwc method list`, and `pwc conference list`; use `--area` or `--year` to
+6. Explore the catalog taxonomy with `pwc task list --group-by-area`, inspect a
+   specific task with `pwc task --name NAME`, then use
+   `pwc method list` and `pwc conference list`; use `--area` or `--year` to
    narrow broad lists.
 7. Synthesize only after gathering enough primary evidence. Preserve paper
    titles, identifiers, and URLs in the answer so claims remain traceable.
@@ -125,7 +138,8 @@ than silently selecting a paper.
 ## Command selection
 
 - Use `pwc benchmark list --task TASK` for finding state-of-the-art (SOTA) for a given task.
-- Use `pwc search` for relevance-ranked discovery.
+- If the task is not supported by PwC, use `pwc search` for relevance-ranked discovery.
+- Use `pwc paper info` to gather more info about a specific paper.
 - Use `pwc paper list` for structured filters, date windows, conferences, and
   deterministic sorting.
 - Use `pwc paper recent` for recency and `pwc paper trending` for current
@@ -145,8 +159,8 @@ than silently selecting a paper.
 
 - Interactive list and search output uses aligned text columns. When stdout is
   piped or captured, the same rows use lossless TSV for agent and script
-  processing. Paper info uses labeled metadata and Markdown sections; benchmark
-  details use Markdown.
+  processing. Paper info uses labeled metadata and Markdown sections. Benchmark
+  details use an aligned table interactively and Markdown when piped or captured.
 - `--json` wraps responses as
   `{"schema_version":"v1","data":...}` for stable agent consumption.
 - Stable exit codes are `0` success, `2` invalid usage, `3` network/server
