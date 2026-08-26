@@ -98,21 +98,10 @@ def configure_release(manifest: dict, release: Path) -> None:
                 ),
             }
         )
-        posterly_release = runtime.get("posterly_enabled") is True
-        values.update(
-            {
-                "PWC_CHAT_ARTIFACTS_ENABLED": str(posterly_release).lower(),
-                "PWC_CHAT_POSTERLY_ENABLED": str(posterly_release).lower(),
-                "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": str(
-                    posterly_release
-                ).lower(),
-            }
-        )
-        if posterly_release:
-            values["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] = "hf_bucket"
-            values["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] = str(
-                runtime["posterly_artifact_bucket_id"]
-            )
+        # Keep the protected artifact-store settings intact for private papers
+        # and historical safe reads. Posterly generation itself is retired and
+        # must remain disabled regardless of an older release descriptor.
+        values["PWC_CHAT_POSTERLY_ENABLED"] = "false"
     os.environ.update(values)
 
 

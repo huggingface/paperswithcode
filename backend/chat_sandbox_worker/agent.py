@@ -7,6 +7,7 @@ import contextlib
 import http.client
 import json
 import os
+import shlex
 import sys
 import time
 from datetime import UTC, date, datetime
@@ -52,6 +53,40 @@ from backend.chat_sandbox_worker.tool_policy import (
 )
 
 PUBLIC_TOOL_RESULT_MAX_BYTES = 24 * 1024
+_PAPER_RECEIPT_TRUSTED = "_pwc_paper_receipt_trusted"
+_PAPER_RECEIPT_OPERATION = "_pwc_paper_receipt_operation"
+_PAPER_RECEIPT_OPERATIONS = frozenset({"create", "begin-edit", "draft", "repair"})
+_PAPER_COMMAND_ARGUMENTS = {
+    "create": ("--title",),
+    "begin-edit": (),
+    "draft": ("--directory", "--artifact-id", "--expected-parent-version-id"),
+    "repair": ("--directory", "--artifact-id", "--expected-parent-version-id"),
+    "repair-context": ("--directory",),
+}
+_PAPER_UNSAFE_SHELL_CHARACTERS = frozenset("\\\r\n;&|<>()`$*?[]{}!~")
+
+
+def _pwc_paper_command(command: str) -> str | None:
+    """Recognize one direct, documented pwc-paper invocation only."""
+    if any(character in _PAPER_UNSAFE_SHELL_CHARACTERS for character in command):
+        return None
+    try:
+        arguments = shlex.split(command, posix=True, comments=False)
+    except ValueError:
+        return None
+    if len(arguments) < 2 or arguments[0] != "pwc-paper":
+        return None
+    operation = arguments[1]
+    flags = _PAPER_COMMAND_ARGUMENTS.get(operation)
+    if flags is None or len(arguments) != 2 + len(flags) * 2:
+        return None
+    seen: set[str] = set()
+    for index in range(2, len(arguments), 2):
+        flag, value = arguments[index : index + 2]
+        if flag not in flags or flag in seen or not value or value.startswith("--"):
+            return None
+        seen.add(flag)
+    return operation if len(seen) == len(flags) else None
 
 
 async def _current_task_catalog() -> str | None:
@@ -88,10 +123,21 @@ def _sdk_event_policy(hooks: "WorkerToolHooks") -> SDKEventPolicy:
         if block.is_error and event.get("status") == "success":
             event = {
                 **event,
+                _PAPER_RECEIPT_TRUSTED: False,
+                _PAPER_RECEIPT_OPERATION: None,
                 "status": "error",
                 "metadata": {**(event.get("metadata") or {}), "exit_code": 1},
             }
             hooks.budget.web_search_failed = True
+        receipt_operation = _trusted_paper_receipt_operation(event)
+        if receipt_operation is not None and not block.is_error:
+            output = _response_text(event.get("content"))
+            if any(
+                paper_event.get("operation") == receipt_operation
+                and paper_event.get("activated") is True
+                for paper_event in paper_events_from_output(output)
+            ):
+                hooks.activate_paper(hooks.settings)
         return event
 
     return SDKEventPolicy(
@@ -183,6 +229,18 @@ def _response_text(value: Any) -> str:
             if isinstance(value.get(key), str):
                 return value[key]
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+
+
+def _trusted_paper_receipt_operation(event: dict[str, Any]) -> str | None:
+    operation = event.get(_PAPER_RECEIPT_OPERATION)
+    if (
+        event.get(_PAPER_RECEIPT_TRUSTED) is True
+        and event.get("status") == "success"
+        and isinstance(operation, str)
+        and operation in _PAPER_RECEIPT_OPERATIONS
+    ):
+        return operation
+    return None
 
 
 def _web_search_request(query: str) -> dict[str, Any]:
@@ -299,7 +357,7 @@ class WorkerToolHooks:
         )
         self.results: dict[str, dict[str, Any]] = {}
         self.paper_activated = False
-        self.paper_command_ids: set[str] = set()
+        self.paper_command_ids: dict[str, str] = {}
 
     def reset(
         self,
@@ -410,9 +468,13 @@ class WorkerToolHooks:
                 ),
                 self.bash_timeout_ms,
             )
-            if isinstance(command, str) and command.lstrip().startswith("pwc-paper "):
+            paper_command = (
+                _pwc_paper_command(command) if isinstance(command, str) else None
+            )
+            if paper_command is not None:
                 updated["timeout"] = max(updated["timeout"], 130_000)
-                self.paper_command_ids.add(tool_id)
+                if paper_command in _PAPER_RECEIPT_OPERATIONS:
+                    self.paper_command_ids[tool_id] = paper_command
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PreToolUse",
@@ -435,17 +497,15 @@ class WorkerToolHooks:
             status="error" if is_error else "success",
             exit_code=1 if is_error else 0,
         )
+        receipt_operation = self.paper_command_ids.get(tool_id)
+        trusted_paper_receipt = (
+            name == "Bash" and receipt_operation is not None and not is_error
+        )
+        if trusted_paper_receipt:
+            event[_PAPER_RECEIPT_TRUSTED] = True
+            event[_PAPER_RECEIPT_OPERATION] = receipt_operation
         self.results[tool_id] = event
-        if (
-            name == "Bash"
-            and tool_id in self.paper_command_ids
-            and any(
-                event.get("activated") is True
-                for event in paper_events_from_output(text)
-            )
-        ):
-            self.activate_paper(self.settings)
-        self.paper_command_ids.discard(tool_id)
+        self.paper_command_ids.pop(tool_id, None)
         bounded = event["content"][0]["text"]
         if name == "Bash" and isinstance(original, dict):
             updated: Any = dict(original)
@@ -483,6 +543,7 @@ class WorkerToolHooks:
         self.results[tool_id] = self.budget.result(
             tool_id, error, status="error", exit_code=1
         )
+        self.paper_command_ids.pop(tool_id, None)
         return {
             "hookSpecificOutput": {
                 "hookEventName": "PostToolUseFailure",
@@ -721,7 +782,14 @@ async def _adapt_messages(
             if event["type"] != "tool_result":
                 yield event
                 continue
-            raw_event = _public_tool_result_event(event)
+            receipt_operation = _trusted_paper_receipt_operation(event)
+            trusted_paper_receipt = receipt_operation is not None
+            public_event = {
+                key: value
+                for key, value in event.items()
+                if key not in {_PAPER_RECEIPT_TRUSTED, _PAPER_RECEIPT_OPERATION}
+            }
+            raw_event = _public_tool_result_event(public_event)
             yield raw_event
             output = "".join(
                 str(part.get("text") or "")
@@ -730,8 +798,10 @@ async def _adapt_messages(
             )
             for artifact_event in artifact_events_from_output(output):
                 yield {"v": 1, "request_id": request_id, **artifact_event}
-            for paper_event in paper_events_from_output(output):
-                yield {"v": 1, "request_id": request_id, **paper_event}
+            if trusted_paper_receipt:
+                for paper_event in paper_events_from_output(output):
+                    if paper_event.get("operation") == receipt_operation:
+                        yield {"v": 1, "request_id": request_id, **paper_event}
     for event in terminal_events:
         yield event
 

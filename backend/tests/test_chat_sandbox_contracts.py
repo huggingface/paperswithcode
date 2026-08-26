@@ -42,9 +42,11 @@ from backend.chat_gateway_app import (
     MAX_PROVIDER_OUTPUT_TOKENS,
     MAX_PROVIDER_TURN_TOKENS,
     CatalogRequest,
+    PaperCommandRequest,
     _output_tokens_allowed,
     _provider_turn_limits,
     catalog,
+    paper_command,
 )
 from backend.chat_sandbox_worker import (
     agent,
@@ -84,7 +86,7 @@ from backend.chat_sandbox_worker.sdk_adapter import SDKEventAdapter as WorkerSDK
 from backend.chat_sandbox_worker.tool_policy import ToolBudget, bound_tool_output
 from backend.config import Settings
 from backend.models.chat import DISPLAY_BLOCKS_ADAPTER, sse_event
-from backend.models.database import ChatTurnCapability
+from backend.models.database import ChatSession, ChatTurnCapability
 from backend.scripts import qualify_chat_sandbox, qualify_chat_soak
 from backend.scripts.qualify_chat_sandbox import (
     QualificationRunner,
@@ -1663,6 +1665,17 @@ def test_paper_receipt_is_bounded_and_emits_a_typed_event():
     validator.accept(event[0])
 
 
+def test_paper_draft_receipt_is_a_typed_event():
+    event = paper_events_from_output(
+        '@@PWC_PAPER@@{"operation":"draft","activated":false,"paper":{"artifact_id":"paper-1","title":"Draft"}}'
+    )
+
+    assert event is not None
+    validator = WorkerEventValidator()
+    validator.accept(event[0])
+    assert event[0]["operation"] == "draft"
+
+
 def test_worker_keeps_large_tool_evidence_out_of_public_events():
     event = agent._public_tool_result_event(
         {
@@ -1716,6 +1729,98 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
     assert exc_info.value.detail == (
         "Task with ID, slug, or name 'speech recognition' not found"
     )
+
+
+@pytest.mark.parametrize("operation", ["draft", "repair"])
+def test_gateway_paper_mutation_rejects_same_owner_artifact_from_another_chat(
+    monkeypatch, operation: str
+):
+    session_id = uuid.uuid4()
+    other_artifact_id = uuid.uuid4()
+    current_artifact_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    calls: list[dict] = []
+
+    class Descriptor:
+        def __init__(self, artifact_id: uuid.UUID):
+            self.artifact_id = artifact_id
+
+        def model_dump(self, **_kwargs):
+            return {"artifact_id": str(self.artifact_id)}
+
+    class DB:
+        def get(self, model, identifier):
+            assert model is ChatSession
+            assert identifier == session_id
+            return SimpleNamespace(
+                active_turn_id=turn_id,
+                primary_paper_id=None,
+                selected_model="gpt-5.6-luna@openai",
+            )
+
+        def rollback(self):
+            pass
+
+        def commit(self):
+            pass
+
+    def unexpected_mutation(**kwargs):
+        calls.append(kwargs)
+        if operation == "draft":
+            return Descriptor(other_artifact_id)
+        return SimpleNamespace(
+            descriptor=Descriptor(other_artifact_id), repaired=False, exhausted=False
+        )
+
+    paper_service = SimpleNamespace(
+        get_descriptor=lambda owner_id, requested_session_id: (
+            Descriptor(current_artifact_id)
+            if owner_id == "same-owner" and requested_session_id == session_id
+            else None
+        ),
+        save_ai_version=unexpected_mutation,
+        repair_failed_version=unexpected_mutation,
+    )
+    capability = SimpleNamespace(
+        chat_session_id=session_id,
+        turn_id=turn_id,
+        scopes=["paper"],
+        expires_at=datetime.now(UTC),
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: capability
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._capability_owner",
+        lambda *_args, **_kwargs: "same-owner",
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app.LatexPaperService", lambda *_args: paper_service
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        paper_command(
+            PaperCommandRequest(
+                operation=operation,
+                artifact_id=other_artifact_id,
+                expected_parent_version_id=parent_id,
+            ),
+            authorization="Bearer capability",
+            x_pwc_session=str(session_id),
+            x_pwc_turn=str(turn_id),
+            db=DB(),
+            settings=SimpleNamespace(
+                chat_artifacts_enabled=True,
+                chat_latex_paper_enabled=True,
+                chat_latex_compiler_jobs_enabled=True,
+                chat_latex_paper_timeout_seconds=600,
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "paper_missing"
+    assert calls == []
 
 
 def test_gateway_paper_read_uses_bounded_diskless_reader(monkeypatch):

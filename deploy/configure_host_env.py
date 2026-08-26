@@ -12,6 +12,7 @@ import json
 import os
 import pwd
 import secrets
+import stat
 import subprocess
 import tomllib
 from pathlib import Path
@@ -134,7 +135,50 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "PWC_CHAT_WEB_SEARCH_MONTHLY_HARD_CALLS",
     "PWC_CHAT_WEB_SEARCH_TRANSIENT_COOLDOWN_SECONDS",
     "PWC_CHAT_WEB_SEARCH_DOMAIN_DENYLIST",
+    # Private paper compiler. These values are provisioned only through the
+    # staging-only modes below and survive ordinary environment refreshes.
+    "PWC_CHAT_ARTIFACTS_ENABLED",
+    "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED",
+    "PWC_CHAT_ARTIFACT_STORAGE_BACKEND",
+    "PWC_CHAT_ARTIFACT_HF_BUCKET_ID",
+    "PWC_CHAT_POSTERLY_ENABLED",
+    "PWC_CHAT_LATEX_PAPER_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
+    "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
 }
+
+STAGING_LATEX_COMPILER_NAMESPACE = "nielsr"
+STAGING_LATEX_COMPILER_ARTIFACT_BUCKET = "nielsr/pwc-chat-artifacts-staging"
+STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
+_LATEX_SIGNING_KEY = "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"
+_LATEX_REQUIRED_SETTINGS = {
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
+    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
+    _LATEX_SIGNING_KEY,
+}
+STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
+    "/var/lib/paperswithcode/staging/latex-compiler-qualification.json"
+)
+_LATEX_QUALIFICATION_CHECKS = frozenset(
+    {
+        "hostile_input",
+        "cancellation",
+        "health",
+        "metrics",
+        "image_isolation",
+        "reconciliation",
+        "restart",
+    }
+)
 
 STAGING_LANGFUSE_KEYS = {
     "LANGFUSE_BASE_URL",
@@ -245,6 +289,216 @@ def staging_runtime_passthrough(lines: dict[str, str]) -> dict[str, str]:
         for key, line in lines.items()
         if key in STAGING_RUNTIME_PASSTHROUGH_KEYS
     }
+
+
+def _staging_latex_token(lines: dict[str, str]) -> str:
+    """Reuse the existing protected staging Hub identity without printing it."""
+
+    for key in ("PWC_HF_TOKEN", "HF_TOKEN"):
+        line = lines.get(key)
+        if line and (value := decoded_value(line).strip()):
+            return value
+    raise ValueError("staging Hub credential is missing")
+
+
+def _staging_latex_signing_key(lines: dict[str, str]) -> str:
+    """Preserve a valid backend-only key or create one in the protected env."""
+
+    existing = lines.get(_LATEX_SIGNING_KEY)
+    if existing and (value := decoded_value(existing).strip()):
+        try:
+            raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+            Ed25519PrivateKey.from_private_bytes(raw)
+        except ValueError as error:
+            raise ValueError("staging LaTeX signing key is invalid") from error
+        return value
+    private_key = Ed25519PrivateKey.generate()
+    raw = private_key.private_bytes(
+        serialization.Encoding.Raw,
+        serialization.PrivateFormat.Raw,
+        serialization.NoEncryption(),
+    )
+    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
+
+
+def _validate_staging_latex_image(image: str, namespace: str) -> str:
+    """Accept only the approved immutable, staging-scoped Sandbox image."""
+
+    normalized = image.strip()
+    prefix = f"registry.hf.space/{STAGING_LATEX_COMPILER_NAMESPACE}-"
+    digest_prefix, marker, digest = normalized.partition("@sha256:")
+    if namespace != STAGING_LATEX_COMPILER_NAMESPACE:
+        raise ValueError(
+            "LaTeX Sandbox namespace must be the approved staging identity"
+        )
+    if (
+        not marker
+        or not digest_prefix.startswith(prefix)
+        or not digest_prefix.endswith("-staging")
+        or "production" in normalized.lower()
+        or len(digest) != 64
+        or any(character not in "0123456789abcdef" for character in digest)
+    ):
+        raise ValueError("LaTeX Sandbox image must be an immutable staging digest")
+    return normalized
+
+
+def staging_latex_compiler_provision_values(
+    current: dict[str, str], *, image: str, namespace: str
+) -> dict[str, str]:
+    """Install a disabled, protected per-job compiler configuration for staging.
+
+    This prepares the only supported compiler path while keeping every user
+    feature kill-switched. The Hub token never enters a Sandbox; it is used only
+    by the backend when creating a dedicated job VM.
+    """
+
+    validated_image = _validate_staging_latex_image(image, namespace)
+    return {
+        "PWC_CHAT_ARTIFACTS_ENABLED": "false",
+        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
+        "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_LATEX_COMPILER_ARTIFACT_BUCKET,
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        "PWC_CHAT_LATEX_PAPER_ENABLED": "false",
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "false",
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE": validated_image,
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE": namespace,
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN": _staging_latex_token(current),
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR": "cpu-upgrade",
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS": "180",
+        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION": (
+            STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
+        ),
+        _LATEX_SIGNING_KEY: _staging_latex_signing_key(current),
+    }
+
+
+def _staging_latex_compiler_ready(current: dict[str, str]) -> None:
+    """Validate the non-secret shape of a provisioned staging compiler path."""
+
+    missing = sorted(key for key in _LATEX_REQUIRED_SETTINGS if key not in current)
+    if missing:
+        raise ValueError("staging LaTeX compiler configuration is missing")
+    values = {
+        key: decoded_value(current[key]).strip() for key in _LATEX_REQUIRED_SETTINGS
+    }
+    if any(not value for value in values.values()):
+        raise ValueError("staging LaTeX compiler configuration is incomplete")
+    _validate_staging_latex_image(
+        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"],
+        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE"],
+    )
+    bucket_line = current.get("PWC_CHAT_ARTIFACT_HF_BUCKET_ID")
+    bucket_id = decoded_value(bucket_line).strip() if bucket_line else ""
+    if (
+        _decoded_flag(current, "PWC_CHAT_ARTIFACT_STORAGE_BACKEND") != "hf_bucket"
+        or bucket_id != STAGING_LATEX_COMPILER_ARTIFACT_BUCKET
+    ):
+        raise ValueError("staging LaTeX compiler requires the private staging bucket")
+    if (
+        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION"]
+        != STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
+    ):
+        raise ValueError("staging LaTeX compiler egress attestation is invalid")
+    try:
+        encoded = values[_LATEX_SIGNING_KEY]
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        Ed25519PrivateKey.from_private_bytes(raw)
+    except ValueError as error:
+        raise ValueError("staging LaTeX signing key is invalid") from error
+
+
+def _qualified_staging_latex_compiler(
+    evidence_path: Path, *, expected_image: str
+) -> None:
+    """Require a complete, content-free result from the staging-only qualifier."""
+
+    try:
+        evidence_stat = evidence_path.lstat()
+        if (
+            not stat.S_ISREG(evidence_stat.st_mode)
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o600
+            or evidence_stat.st_uid != 0
+            or evidence_stat.st_nlink != 1
+            or evidence_stat.st_size > 16_384
+        ):
+            raise ValueError
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        raise ValueError(
+            "staging LaTeX qualification evidence is unavailable"
+        ) from error
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or set(payload)
+        != {
+            "schema_version",
+            "environment",
+            "compiler_image",
+            "passed",
+            "total",
+            "checks",
+        }
+        or not isinstance(checks, dict)
+        or set(checks) != _LATEX_QUALIFICATION_CHECKS
+        or payload.get("schema_version") != 1
+        or payload.get("environment") != "staging"
+        or payload.get("compiler_image") != expected_image
+        or type(payload.get("passed")) is not int
+        or type(payload.get("total")) is not int
+        or payload["passed"] != payload["total"]
+        or payload["total"] < len(_LATEX_QUALIFICATION_CHECKS)
+        or any(checks[name] is not True for name in _LATEX_QUALIFICATION_CHECKS)
+    ):
+        raise ValueError("staging LaTeX qualification evidence is incomplete")
+
+
+def staging_latex_compiler_qualification_values(
+    current: dict[str, str], *, enabled: bool
+) -> dict[str, str]:
+    """Allow only an isolated staging compiler qualification, never user turns."""
+
+    if enabled:
+        _staging_latex_compiler_ready(current)
+    return {
+        "PWC_CHAT_ARTIFACTS_ENABLED": "false",
+        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        "PWC_CHAT_LATEX_PAPER_ENABLED": "false",
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "false",
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": str(enabled).lower(),
+    }
+
+
+def staging_latex_paper_activation_values(
+    current: dict[str, str], *, evidence_path: Path
+) -> dict[str, str]:
+    """Enable user paper turns only after the private Sandbox proof is complete."""
+
+    _staging_latex_compiler_ready(current)
+    _qualified_staging_latex_compiler(
+        evidence_path,
+        expected_image=decoded_value(
+            current["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"]
+        ).strip(),
+    )
+    return {
+        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
+        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        "PWC_CHAT_LATEX_PAPER_ENABLED": "true",
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "true",
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
+    }
+
+
+def staging_latex_paper_disable_values() -> dict[str, str]:
+    """Immediately stop new paper/compiler work while preserving owner reads."""
+
+    return staging_latex_compiler_qualification_values({}, enabled=False)
 
 
 def staging_langfuse_values(legacy: dict[str, str]) -> dict[str, str]:
@@ -1117,6 +1371,16 @@ def main() -> int:
     parser.add_argument("--staging-openrouter-only", action="store_true")
     parser.add_argument("--staging-openai-direct-only", action="store_true")
     parser.add_argument("--staging-openai-direct-disable-only", action="store_true")
+    parser.add_argument("--staging-latex-compiler-provision-only", action="store_true")
+    parser.add_argument("--staging-latex-compiler-image")
+    parser.add_argument(
+        "--staging-latex-compiler-qualification-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-latex-compiler-qualification-disable-only", action="store_true"
+    )
+    parser.add_argument("--staging-latex-paper-enable-only", action="store_true")
+    parser.add_argument("--staging-latex-paper-disable-only", action="store_true")
     parser.add_argument("--staging-openrouter-disable-only", action="store_true")
     parser.add_argument("--staging-openrouter-secrets-rotate-only", action="store_true")
     parser.add_argument("--staging-chat-capacity-only", action="store_true")
@@ -1193,6 +1457,85 @@ def main() -> int:
     if os.geteuid() != 0:
         parser.error("run through sudo")
     legacy = read_lines(args.legacy_env)
+    latex_modes = (
+        args.staging_latex_compiler_provision_only,
+        args.staging_latex_compiler_qualification_enable_only,
+        args.staging_latex_compiler_qualification_disable_only,
+        args.staging_latex_paper_enable_only,
+        args.staging_latex_paper_disable_only,
+    )
+    if any(latex_modes):
+        if sum(latex_modes) != 1:
+            parser.error("staging LaTeX modes are mutually exclusive")
+        latex_mode_names = {
+            "staging_latex_compiler_provision_only",
+            "staging_latex_compiler_qualification_enable_only",
+            "staging_latex_compiler_qualification_disable_only",
+            "staging_latex_paper_enable_only",
+            "staging_latex_paper_disable_only",
+        }
+        other_modes = [
+            key
+            for key, value in vars(args).items()
+            if isinstance(value, bool) and value and key not in latex_mode_names
+        ]
+        if other_modes or args.codex_jobs_namespace or args.modal_profile:
+            parser.error("staging LaTeX modes must run alone")
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            if args.staging_latex_compiler_provision_only:
+                if args.confirm != "PROVISION_PRIVATE_STAGING_LATEX_COMPILER":
+                    parser.error(
+                        "--confirm must be PROVISION_PRIVATE_STAGING_LATEX_COMPILER"
+                    )
+                if not args.staging_latex_compiler_image:
+                    parser.error("--staging-latex-compiler-image is required")
+                values = staging_latex_compiler_provision_values(
+                    current,
+                    image=args.staging_latex_compiler_image,
+                    namespace=STAGING_LATEX_COMPILER_NAMESPACE,
+                )
+                label = "provisioned disabled private staging LaTeX compiler"
+            elif args.staging_latex_compiler_qualification_enable_only:
+                if args.confirm != "QUALIFY_PRIVATE_STAGING_LATEX_COMPILER":
+                    parser.error(
+                        "--confirm must be QUALIFY_PRIVATE_STAGING_LATEX_COMPILER"
+                    )
+                values = staging_latex_compiler_qualification_values(
+                    current, enabled=True
+                )
+                label = "enabled isolated staging LaTeX compiler qualification"
+            elif args.staging_latex_compiler_qualification_disable_only:
+                if args.confirm != "STOP_PRIVATE_STAGING_LATEX_COMPILER_QUALIFICATION":
+                    parser.error(
+                        "--confirm must be STOP_PRIVATE_STAGING_LATEX_COMPILER_QUALIFICATION"
+                    )
+                values = staging_latex_compiler_qualification_values(
+                    current, enabled=False
+                )
+                label = "disabled staging LaTeX compiler qualification"
+            elif args.staging_latex_paper_enable_only:
+                if args.confirm != "ENABLE_STAGING_LATEX_PAPER_AFTER_QUALIFICATION":
+                    parser.error(
+                        "--confirm must be ENABLE_STAGING_LATEX_PAPER_AFTER_QUALIFICATION"
+                    )
+                values = staging_latex_paper_activation_values(
+                    current,
+                    evidence_path=STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE,
+                )
+                label = "enabled qualified private staging LaTeX paper turns"
+            else:
+                if args.confirm != "DISABLE_STAGING_LATEX_PAPER":
+                    parser.error("--confirm must be DISABLE_STAGING_LATEX_PAPER")
+                values = staging_latex_paper_disable_values()
+                label = "disabled staging LaTeX paper and compiler turns"
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(CONFIG_ROOT / "staging.env", assign(current, values), "pwc-staging")
+        print(label)
+        return 0
+    if args.staging_latex_compiler_image:
+        parser.error("--staging-latex-compiler-image requires provision mode")
     if args.production_codex_image_only:
         selected_modes = [
             value

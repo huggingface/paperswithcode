@@ -25,6 +25,7 @@ from latex_compiler_contract import (
     EnvelopeError,
     sign_envelope,
     validate_result,
+    validate_staging_sandbox_compiler_identity,
 )
 
 logger = logging.getLogger(__name__)
@@ -175,7 +176,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
 
             sandbox_create = sandbox_create or Sandbox.create
             sandbox_connect = sandbox_connect or Sandbox.connect
-        self.image = image
+        self.image = validate_staging_sandbox_compiler_identity(image, namespace)
         self.namespace = namespace
         self.token = token
         self.private_key = private_key
@@ -273,6 +274,10 @@ class HuggingFaceSandboxLatexCompilerTransport:
             response.raise_for_status()
             result = CompilerResult.model_validate_json(response.content)
             validate_result(result, expected=session.envelope)
+            if result.compiler_image != self.image:
+                raise EnvelopeError(
+                    "Compiler result does not match the qualified Sandbox image"
+                )
             return result
         finally:
             self._release(job_id, session)
@@ -301,7 +306,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
             session.sandbox.proxy_url_for(_SANDBOX_PORT, "/health")
         )
         response.raise_for_status()
-        return response.json()
+        return self._qualified_health_snapshot(response.json())
 
     def metrics(self, job_id: str) -> dict[str, object]:
         session = self._session(job_id)
@@ -310,6 +315,39 @@ class HuggingFaceSandboxLatexCompilerTransport:
         )
         response.raise_for_status()
         return response.json()
+
+    def isolation(self, job_id: str) -> dict[str, object]:
+        """Return the non-secret Sandbox isolation contract for qualification."""
+        snapshot = self.health(job_id)
+        return {
+            "image": snapshot["qualified_image"],
+            "forward_hf_token": False,
+            "secrets": False,
+            "volumes": False,
+            "network_isolation": snapshot["network_isolation"],
+        }
+
+    def reconnect_after_restart(
+        self,
+        *,
+        job_id: str,
+        provider_job_id: str,
+        bundle: bytes,
+        entrypoint: str,
+        limits: CompileLimits | None = None,
+    ) -> CompilerStatus:
+        """Detach local state and exercise the normal durable-job reattachment path."""
+        session = self._sessions.pop(job_id, None)
+        if session is None:
+            raise RuntimeError("LaTeX Sandbox job is not attached")
+        session.client.close()
+        return self.resume(
+            job_id=job_id,
+            provider_job_id=provider_job_id,
+            bundle=bundle,
+            entrypoint=entrypoint,
+            limits=limits,
+        )
 
     def _create_session(self, envelope: CompilerEnvelope) -> _SandboxSession:
         public_key = base64.urlsafe_b64encode(
@@ -321,9 +359,11 @@ class HuggingFaceSandboxLatexCompilerTransport:
             idle_timeout=self.idle_timeout_seconds,
             env={
                 "PWC_LATEX_COMPILER_PUBLIC_KEY": public_key,
+                "PWC_LATEX_COMPILER_QUALIFIED_IMAGE": self.image,
                 "PWC_LATEX_COMPILER_NETWORK_ISOLATION_REQUIRED": "true",
             },
             secrets=None,
+            volumes=None,
             namespace=self.namespace,
             forward_hf_token=False,
             token=self.token,
@@ -347,7 +387,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
                 background=True,
             )
             return self._session_after_health(sandbox, envelope)
-        except (httpx.HTTPError, OSError, RuntimeError):
+        except (SandboxError, httpx.HTTPError, OSError, RuntimeError):
             self._release(
                 envelope.job_id, _SandboxSession(sandbox, httpx.Client(), envelope)
             )
@@ -361,10 +401,10 @@ class HuggingFaceSandboxLatexCompilerTransport:
         for _ in range(30):
             try:
                 response = client.get(sandbox.proxy_url_for(_SANDBOX_PORT, "/health"))
-                if (
-                    response.status_code == 200
-                    and response.json().get("status") == "ready"
-                ):
+                if response.status_code == 200:
+                    snapshot = self._qualified_health_snapshot(response.json())
+                    if snapshot.get("status") != "ready":
+                        raise RuntimeError("LaTeX Sandbox compiler is not ready")
                     logger.info("latex_compiler_event event=sandbox_ready")
                     return session
             except httpx.HTTPError:
@@ -372,6 +412,17 @@ class HuggingFaceSandboxLatexCompilerTransport:
             self.sleep(0.5)
         client.close()
         raise RuntimeError("LaTeX Sandbox compiler did not become ready")
+
+    def _qualified_health_snapshot(self, snapshot: object) -> dict[str, object]:
+        if not isinstance(snapshot, dict):
+            raise RuntimeError("LaTeX Sandbox compiler health response is invalid")
+        if snapshot.get("qualified_image") != self.image:
+            raise RuntimeError(
+                "LaTeX Sandbox compiler image does not match the requested digest"
+            )
+        if snapshot.get("network_isolation") != _SANDBOX_EGRESS_ATTESTATION:
+            raise RuntimeError("LaTeX Sandbox compiler network isolation is unattested")
+        return snapshot
 
     def _session(self, job_id: str) -> _SandboxSession:
         session = self._sessions.get(job_id)
@@ -390,13 +441,20 @@ class HuggingFaceSandboxLatexCompilerTransport:
 
 def compiler_transport_from_settings(settings: Settings) -> LatexCompilerTransport:
     """Build the only application transport: an attested, per-job Sandbox."""
-    private_key = _private_key_from_settings(settings)
+    if settings.environment != "staging":
+        raise RuntimeError("LaTeX Sandbox transport is staging-only")
     if not settings.chat_latex_compiler_hf_sandbox_image:
         raise RuntimeError("LaTeX Sandbox image is not configured")
-    if "@sha256:" not in settings.chat_latex_compiler_hf_sandbox_image:
-        raise RuntimeError("LaTeX Sandbox image must use an immutable digest")
-    if not settings.chat_latex_compiler_hf_sandbox_namespace:
-        raise RuntimeError("LaTeX Sandbox namespace is not configured")
+    try:
+        image = validate_staging_sandbox_compiler_identity(
+            settings.chat_latex_compiler_hf_sandbox_image,
+            settings.chat_latex_compiler_hf_sandbox_namespace,
+        )
+    except EnvelopeError as error:
+        raise RuntimeError(
+            "LaTeX Sandbox image must use a private immutable HF digest"
+        ) from error
+    private_key = _private_key_from_settings(settings)
     if not settings.chat_latex_compiler_hf_sandbox_token:
         raise RuntimeError("LaTeX Sandbox credential is not configured")
     if (
@@ -405,7 +463,7 @@ def compiler_transport_from_settings(settings: Settings) -> LatexCompilerTranspo
     ):
         raise RuntimeError("LaTeX Sandbox egress policy is not attested")
     return HuggingFaceSandboxLatexCompilerTransport(
-        image=settings.chat_latex_compiler_hf_sandbox_image,
+        image=image,
         namespace=settings.chat_latex_compiler_hf_sandbox_namespace,
         token=settings.chat_latex_compiler_hf_sandbox_token,
         private_key=private_key,

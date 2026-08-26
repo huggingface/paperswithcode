@@ -60,6 +60,17 @@ def _write_context(directory: Path) -> int:
 
 
 def _repair(directory: Path, parent_version_id: str, artifact_id: str) -> int:
+    return _publish("repair", directory, parent_version_id, artifact_id)
+
+
+def _draft(directory: Path, parent_version_id: str, artifact_id: str) -> int:
+    """Publish the worker-authored first complete draft for this turn only."""
+    return _publish("draft", directory, parent_version_id, artifact_id)
+
+
+def _publish(
+    operation: str, directory: Path, parent_version_id: str, artifact_id: str
+) -> int:
     files = [
         {
             "path": path.relative_to(directory).as_posix(),
@@ -69,12 +80,16 @@ def _repair(directory: Path, parent_version_id: str, artifact_id: str) -> int:
         if path.is_file() and path.suffix.lower() in {".tex", ".bib"}
     ]
     result = _command(
-        "repair",
+        operation,
         artifact_id=artifact_id,
         expected_parent_version_id=parent_version_id,
         files=files,
     )
-    print(EVENT_PREFIX + json.dumps(result, ensure_ascii=False, separators=(",", ":")))
+    activated = result.get("activated")
+    if not isinstance(activated, bool):
+        raise RuntimeError("Invalid paper publication response")
+    receipt = {**result, "operation": operation, "activated": activated}
+    print(EVENT_PREFIX + json.dumps(receipt, ensure_ascii=False, separators=(",", ":")))
     return 0
 
 
@@ -90,12 +105,20 @@ def main() -> int:
     repair.add_argument("--directory", required=True)
     repair.add_argument("--artifact-id", required=True)
     repair.add_argument("--expected-parent-version-id", required=True)
+    draft = commands.add_parser("draft")
+    draft.add_argument("--directory", required=True)
+    draft.add_argument("--artifact-id", required=True)
+    draft.add_argument("--expected-parent-version-id", required=True)
     args = parser.parse_args()
     try:
         if args.command == "repair-context":
             return _write_context(Path(args.directory))
         if args.command == "repair":
             return _repair(
+                Path(args.directory), args.expected_parent_version_id, args.artifact_id
+            )
+        if args.command == "draft":
+            return _draft(
                 Path(args.directory), args.expected_parent_version_id, args.artifact_id
             )
         result = _command(args.command, title=getattr(args, "title", None))

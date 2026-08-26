@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-WORKER_CONTRACT_VERSION = "101"
+WORKER_CONTRACT_VERSION = "102"
 # Web search extends the catalog operation set without changing its request or
 # response framing, so it remains on the rollback-compatible gateway protocol.
 GATEWAY_CONTRACT_VERSION = 30
@@ -54,7 +54,9 @@ POSTERLY_LICENSE = "AGPL-3.0-only"
 POSTERLY_PLAYWRIGHT_VERSION = "1.62.0"
 POSTERLY_CHROMIUM_REVISION = "1234"
 POSTERLY_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
-POSTERLY_ENABLED = True
+# Posterly generation is retired. Existing immutable artifacts stay readable
+# through the private artifact store, but no worker turn may create another.
+POSTERLY_ENABLED = False
 
 
 def restricted_hf_cli_digest(package_root: Path, wrapper: Path) -> str:

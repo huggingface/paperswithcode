@@ -83,17 +83,11 @@ def configure_release_environment(release: Path) -> dict:
         os.environ["PWC_CHAT_RESTRICTED_HF_CLI_VERSION"] = runtime.get(
             "restricted_hf_cli_version", ""
         )
-        posterly_release = runtime.get("posterly_enabled") is True
-        os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] = str(posterly_release).lower()
-        os.environ["PWC_CHAT_POSTERLY_ENABLED"] = str(posterly_release).lower()
-        os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] = str(
-            posterly_release
-        ).lower()
-        if posterly_release:
-            os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] = "hf_bucket"
-            os.environ["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] = runtime[
-                "posterly_artifact_bucket_id"
-            ]
+        # Posterly generation is permanently disabled. Artifact storage is an
+        # independently provisioned private-paper dependency, so preserve its
+        # protected host configuration for historical safe reads and the paper
+        # flow rather than coupling it to the retired worker feature.
+        os.environ["PWC_CHAT_POSTERLY_ENABLED"] = "false"
     expected_dist = (release / manifest["frontend_entrypoint"]).parent
     configured_dist = Path(os.environ["PWC_FRONTEND_DIST_DIR"]).resolve()
     if configured_dist != expected_dist.resolve():

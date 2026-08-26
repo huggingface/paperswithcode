@@ -7,41 +7,38 @@ credentials.
 
 ## Current qualification decision
 
-**Do not enable paper compilation.** The private Docker Space remains
-unqualified, so `PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED=false` is the required
-staging state.
+**Do not enable paper compilation.** The required steady state until every
+gate passes is `PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED=false` and
+`PWC_CHAT_LATEX_PAPER_ENABLED=false`.
 
-Evidence captured on 2026-08-25:
+A long-lived Docker Space is not adequate evidence for the privacy boundary.
+The only application transport is the per-job Hugging Face Sandbox client in
+`backend/services/latex_compiler_service.py`. It creates one dedicated VM per
+immutable source version, does not forward the backend HF token, mounts no
+volumes or secrets, injects only a public signing key and the requested
+immutable image reference, and starts the compiler only after a fresh,
+unprivileged user/network/PID namespace has no default route. If any preflight,
+image identity, or network-isolation check fails, no manuscript bytes are sent.
 
-- The authenticated Hub identity is `nielsr`, but `hf spaces list --author
-  nielsr --search pwc` returned only public curator Spaces; no existing private
-  compiler Space was available to inspect.
-- The staging example deliberately leaves the compiler URL, private-Space
-  token, and signing key empty. No configured endpoint or public-key secret is
-  available for a live request.
-- The pinned Space image runs as an unprivileged user with a minimal
-  environment and no application credentials, but its Docker Space deployment
-  does not establish a per-job network boundary. A compiler compromise could
-  make outbound requests with the manuscript it received. Serialized execution
-  does not solve this confidentiality risk.
+`scripts/deploy_latex_compiler_space.py` may create a private,
+clearly-staging-named Docker **image builder**. It waits only to resolve its
+authenticated OCI `Docker-Content-Digest`, outputs the non-secret
+`registry.hf.space/...@sha256:...` identity, then pauses the Space. The builder
+is never a compiler endpoint and must have no secret, variable, volume, or
+always-on hardware. Qualification must prove that a fresh Sandbox can pull the
+pinned image while that builder remains paused.
 
-Consequently, a long-lived Docker Space is not adequate evidence for the
-privacy boundary. The application factory now selects only the per-job Hugging
-Face Sandbox transport in `backend/services/latex_compiler_service.py`. It
-creates one dedicated HF Job VM for each immutable source version, does not
-forward the backend HF token, mounts no volumes or secrets, injects only the
-compiler's public signing key, and starts the compiler only after a fresh,
-unprivileged user/network/PID namespace has no default route. If that preflight
-cannot run, the submission fails before any manuscript bytes are sent.
+The protected staging environment needs an approved private namespace, that
+immutable registry image, a Sandbox-only credential, the backend signing
+private key, private HF artifact storage, and the exact
+`sandbox-netns-v1` egress-policy attestation. Do not reuse a Space endpoint
+credential or put any signing key in the builder. The legacy HTTP Space client
+remains compatibility-only; `compiler_transport_from_settings` never selects
+it. `qualify_latex_compiler_space` intentionally refuses to run.
 
-The required external staging inputs remain intentionally blank in the release
-example: an operator-approved private namespace, an immutable compiler image
-digest, a protected Sandbox-only credential, and the exact
-`sandbox-netns-v1` egress-policy attestation. Do not derive these from the
-authenticated developer identity, reuse a Space credential, or invent a
-target. The legacy `LatexCompilerClient` and Space settings remain only for
-rollback-era direct compatibility; `compiler_transport_from_settings` never
-selects them. `qualify_latex_compiler_space` now refuses to run.
+The only approved compiler owner is `nielsr`. Both the builder and runtime
+reject any other owner or an image outside
+`registry.hf.space/nielsr-pwc-latex-compiler-*-staging@sha256:<digest>`.
 
 ## Kill switch
 
@@ -56,14 +53,36 @@ PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED=false
 `PWC_CHAT_LATEX_PAPER_ENABLED=false` is the stricter paper-creation switch.
 Neither control deletes artifacts or invalidates safe historical previews.
 
+## Isolated qualification mode
+
+Qualification runs with all user-facing artifact, paper, and compiler-job
+admission disabled. The protected host configuration may set only the
+staging-only qualifier switch alongside the private bucket and immutable
+Sandbox contract:
+
+```text
+PWC_CHAT_ARTIFACTS_ENABLED=false
+PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED=false
+PWC_CHAT_POSTERLY_ENABLED=false
+PWC_CHAT_LATEX_PAPER_ENABLED=false
+PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED=false
+PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE=true
+```
+
+The qualifier rejects a non-staging environment, a local/non-private artifact
+store, missing immutable image identity, or any enabled user-facing artifact,
+shared-preview, Posterly, paper, or compiler-job admission. It may send only
+its fixed synthetic bundles.
+
 ## Health and metrics
 
 Each disposable Sandbox exposes only content-free operational endpoints through
 its short-lived, authenticated Sandbox proxy:
 
 - `GET /health` reports readiness, serialized capacity, queue depth, active
-  work, retained-job count, outcome totals, failure-category totals, and a
-  bounded latency sample.
+  work, retained-job count, outcome totals, failure-category totals, a bounded
+  latency sample, the requested immutable image identity, and the
+  `sandbox-netns-v1` isolation attestation.
 - `GET /metrics` returns the same bounded counters for collection.
 
 No endpoint, application log, or metric contains a job ID, source digest,
@@ -106,25 +125,40 @@ this mode never submits or resumes compiler work.
 
 ## Qualification procedure
 
-Only after the exact external inputs above are supplied and the kill switch is
-intentionally enabled for this isolated staging exercise:
+Only after the exact external inputs above are supplied and isolated
+qualification mode is explicitly enabled (while both user-facing kill switches
+remain off):
 
 ```bash
-uv run --env-file /etc/paperswithcode/staging.env \
-  python -m backend.scripts.qualify_latex_compiler_sandbox \
+sudo systemd-run --quiet --wait --pipe --collect \
+  --working-directory=/srv/paperswithcode/environments/staging/current \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  --property=UMask=0077 \
+  /srv/paperswithcode/.venv/bin/python \
+  -m backend.scripts.qualify_latex_compiler_sandbox \
   --confirm QUALIFY_PRIVATE_LATEX_COMPILER_SANDBOX
 ```
 
-The suite uses fixed synthetic bundles for shell escape, host file reads,
-network pipe input, recursive expansion, process pressure, oversized output,
-path traversal, malformed archives, and malformed PDF figures. It prints only
-case names, terminal outcomes, and elapsed milliseconds. Also perform one
-manual cancellation while compiling and one controlled Sandbox/backend restart
-followed by the reconciliation command; record `/health` and `/metrics` before
-and after. Confirm that the Sandbox preflight completed before submitting the
-first fixture, that the provider Job has no forwarded HF token, mounts, or
-secrets, and that each terminal fixture releases its dedicated Job. Keep all
-manuscript content out of tickets, terminal capture, and provider logs.
+This is intentionally a root unit: do **not** add `--uid=pwc-staging`. The
+writer refuses non-root callers, creates the fixed evidence directory as mode
+`0700` when absent, and otherwise refuses a linked, non-root-owned, or
+group/other-accessible directory. It emits a root-owned regular single-link
+mode-`0600` evidence file only.
+
+The full suite uses fixed synthetic bundles for shell escape, host file reads,
+network pipe input, recursive expansion, process pressure, CPU, memory, disk,
+and output ceilings, path traversal, malformed archives, and malformed PDF
+figures. It also checks cancellation, content-free `/health` and `/metrics`,
+the exact image/isolation snapshot, and Sandbox reconnect/reconciliation. It
+prints only case names, terminal outcomes, and elapsed milliseconds. A complete
+passing run atomically writes root-owned, single-link mode-`0600` content-free evidence to
+`/var/lib/paperswithcode/staging/latex-compiler-qualification.json`; a full
+rerun clears older evidence before it starts, while individual `--case`
+fixtures never replace that gate. Confirm independently
+that the builder remains paused, provider Jobs have no forwarded HF token,
+mounts, or secrets, and every terminal fixture releases its dedicated job.
+Keep all manuscript content out of tickets, terminal capture, and provider
+logs.
 
 Passing local contract tests does **not** qualify the remote isolation. Do not
 claim this procedure passed until the exact private namespace/image/credential

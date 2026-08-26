@@ -32,6 +32,7 @@ from latex_compiler_contract import (
     CompilerStatus,
     CompileSubmission,
     EnvelopeError,
+    validate_qualified_compiler_image,
     validate_public_key,
     validate_result,
     verify_envelope,
@@ -43,8 +44,11 @@ _ALLOWED_SUFFIXES = {".tex", ".bib", ".png", ".jpg", ".jpeg", ".pdf"}
 _ERROR = re.compile(r"^! (?P<message>.+)$", re.MULTILINE)
 _LINE = re.compile(r"^l\.(?P<line>\d+)\s*(?P<message>.*)$", re.MULTILINE)
 _WARNING = re.compile(r"^LaTeX Warning: (?P<message>.+)$", re.MULTILINE)
-COMPILER_IMAGE = os.environ.get("PWC_LATEX_COMPILER_IMAGE", "unqualified-image")
+_TEX_SOURCE = re.compile(
+    r"\((?P<file>(?:\./)?[A-Za-z0-9][A-Za-z0-9._/-]{0,299}\.(?:tex|bib))(?=[\s)])"
+)
 ENGINE_VERSION = os.environ.get("PWC_LATEX_COMPILER_ENGINE", "pdfLaTeX")
+NETWORK_ISOLATION_ATTESTATION = "sandbox-netns-v1"
 
 
 class BundleError(ValueError):
@@ -77,8 +81,9 @@ class _Job:
 class JobManager:
     """In-memory queue intentionally keeps a single compiler active at a time."""
 
-    def __init__(self, compiler: Compiler) -> None:
+    def __init__(self, compiler: Compiler, *, compiler_image: str) -> None:
         self.compiler = compiler
+        self.compiler_image = compiler_image
         self.jobs: dict[str, _Job] = {}
         self.queue: asyncio.Queue[str] = asyncio.Queue()
         self.worker: asyncio.Task[None] | None = None
@@ -136,7 +141,7 @@ class JobManager:
             job.state = CompilerJobState.CANCELED
             job.result = CompilerResult.canceled(
                 job.envelope,
-                compiler_image=COMPILER_IMAGE,
+                compiler_image=self.compiler_image,
                 engine_version=ENGINE_VERSION,
             )
             cancel = getattr(self.compiler, "cancel", None)
@@ -165,7 +170,7 @@ class JobManager:
                         )
                     ],
                     log_tail="",
-                    compiler_image=COMPILER_IMAGE,
+                    compiler_image=self.compiler_image,
                     engine_version=ENGINE_VERSION,
                     elapsed_ms=0,
                     failure_category="service_error",
@@ -213,10 +218,16 @@ class JobManager:
 class LatexCompilerRunner:
     """Runs a single constrained latexmk process in a freshly extracted root."""
 
-    def __init__(self, *, network_isolation_required: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        compiler_image: str,
+        network_isolation_required: bool = False,
+    ) -> None:
         self.processes: dict[str, subprocess.Popen[bytes]] = {}
         self._canceled: set[str] = set()
         self._lock = threading.Lock()
+        self.compiler_image = compiler_image
         self.network_isolation_required = network_isolation_required
 
     async def __call__(
@@ -249,7 +260,7 @@ class LatexCompilerRunner:
                     self._canceled.discard(envelope.job_id)
                 return CompilerResult.canceled(
                     envelope,
-                    compiler_image=COMPILER_IMAGE,
+                    compiler_image=self.compiler_image,
                     engine_version=ENGINE_VERSION,
                 )
             with tempfile.TemporaryDirectory(prefix="pwc-latex-") as temporary:
@@ -281,6 +292,7 @@ class LatexCompilerRunner:
                             _read_tail(log_path, envelope.limits.max_log_bytes),
                             started_at,
                             "Compilation exceeded its time limit",
+                            compiler_image=self.compiler_image,
                             failure_category="timeout",
                         )
                     finally:
@@ -291,12 +303,18 @@ class LatexCompilerRunner:
                     if canceled:
                         return CompilerResult.canceled(
                             envelope,
-                            compiler_image=COMPILER_IMAGE,
+                            compiler_image=self.compiler_image,
                             engine_version=ENGINE_VERSION,
                         )
                 output = _read_tail(log_path, envelope.limits.max_log_bytes)
                 if process.returncode != 0:
-                    return _failed_result(envelope, output, started_at, None)
+                    return _failed_result(
+                        envelope,
+                        output,
+                        started_at,
+                        None,
+                        compiler_image=self.compiler_image,
+                    )
                 pdf_path = root / PurePosixPath(envelope.entrypoint).with_suffix(".pdf")
                 if pdf_path.stat().st_size > envelope.limits.max_pdf_bytes:
                     return _failed_result(
@@ -304,6 +322,7 @@ class LatexCompilerRunner:
                         output,
                         started_at,
                         "Compiled PDF exceeds its limit",
+                        compiler_image=self.compiler_image,
                         failure_category="resource_limit",
                     )
                 pdf = pdf_path.read_bytes()
@@ -311,14 +330,19 @@ class LatexCompilerRunner:
                     envelope,
                     pdf=pdf,
                     log_tail=_log_tail(output, envelope.limits.max_log_bytes),
-                    compiler_image=COMPILER_IMAGE,
+                    compiler_image=self.compiler_image,
                     engine_version=ENGINE_VERSION,
                     elapsed_ms=_elapsed_ms(started_at),
                     diagnostics=_diagnostics(output),
                 )
         except BundleError as error:
             return _failed_result(
-                envelope, b"", started_at, str(error), failure_category="invalid_bundle"
+                envelope,
+                b"",
+                started_at,
+                str(error),
+                compiler_image=self.compiler_image,
+                failure_category="invalid_bundle",
             )
         except (OSError, subprocess.SubprocessError):
             return _failed_result(
@@ -326,6 +350,7 @@ class LatexCompilerRunner:
                 b"",
                 started_at,
                 "Compiler execution failed",
+                compiler_image=self.compiler_image,
                 failure_category="execution_error",
             )
 
@@ -385,14 +410,26 @@ def verify_network_isolation() -> None:
     )
 
 
-def create_app(*, public_key: str, compiler: Compiler | None = None) -> FastAPI:
+def create_app(
+    *,
+    public_key: str,
+    compiler: Compiler | None = None,
+    qualified_image: str | None = None,
+) -> FastAPI:
+    qualified_image = qualified_image or os.environ.get(
+        "PWC_LATEX_COMPILER_QUALIFIED_IMAGE", ""
+    )
     network_isolation_required = (
         os.environ.get("PWC_LATEX_COMPILER_NETWORK_ISOLATION_REQUIRED", "").lower()
         == "true"
     )
     manager = JobManager(
         compiler
-        or LatexCompilerRunner(network_isolation_required=network_isolation_required)
+        or LatexCompilerRunner(
+            compiler_image=qualified_image,
+            network_isolation_required=network_isolation_required,
+        ),
+        compiler_image=qualified_image,
     )
 
     @asynccontextmanager
@@ -401,6 +438,10 @@ def create_app(*, public_key: str, compiler: Compiler | None = None) -> FastAPI:
             validate_public_key(public_key)
         except EnvelopeError as error:
             raise RuntimeError("PWC_LATEX_COMPILER_PUBLIC_KEY is required") from error
+        try:
+            validate_qualified_compiler_image(qualified_image)
+        except EnvelopeError as error:
+            raise RuntimeError("PWC qualified compiler image is required") from error
         if network_isolation_required:
             try:
                 verify_network_isolation()
@@ -489,7 +530,12 @@ def create_app(*, public_key: str, compiler: Compiler | None = None) -> FastAPI:
                 status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
                 detail="Compiler worker is unavailable",
             )
-        return {"status": "ready", **manager.metrics()}
+        return {
+            "status": "ready",
+            "qualified_image": qualified_image,
+            "network_isolation": NETWORK_ISOLATION_ATTESTATION,
+            **manager.metrics(),
+        }
 
     @app.get("/metrics")
     async def metrics() -> dict[str, object]:
@@ -573,6 +619,7 @@ def _failed_result(
     started_at: float,
     message: str | None,
     *,
+    compiler_image: str,
     failure_category: str = "compiler_error",
 ) -> CompilerResult:
     diagnostics = _diagnostics(output)
@@ -586,7 +633,7 @@ def _failed_result(
         envelope,
         diagnostics=diagnostics,
         log_tail=_log_tail(output, envelope.limits.max_log_bytes),
-        compiler_image=COMPILER_IMAGE,
+        compiler_image=compiler_image,
         engine_version=ENGINE_VERSION,
         elapsed_ms=_elapsed_ms(started_at),
         failure_category=failure_category,
@@ -603,6 +650,9 @@ def _diagnostics(output: bytes) -> list[CompilerDiagnostic]:
         CompilerDiagnostic(severity="warning", message=match.group("message")[:1000])
         for match in _WARNING.finditer(text)
     ]
+    source_file = _diagnostic_source_file(text)
+    if errors and source_file is not None:
+        errors[0] = errors[0].model_copy(update={"file": source_file})
     line = _LINE.search(text)
     if errors and line:
         errors[0] = errors[0].model_copy(
@@ -612,6 +662,21 @@ def _diagnostics(output: bytes) -> list[CompilerDiagnostic]:
             }
         )
     return (errors + warnings)[:100]
+
+
+def _diagnostic_source_file(text: str) -> str | None:
+    """Return only a normalized bundle-relative TeX/Bib path from compiler logs."""
+    for match in _TEX_SOURCE.finditer(text):
+        candidate = match.group("file").removeprefix("./")
+        path = PurePosixPath(candidate)
+        if (
+            _SAFE_PATH.fullmatch(candidate)
+            and path.suffix.lower() in {".tex", ".bib"}
+            and not path.is_absolute()
+            and not any(part in {"", ".", ".."} for part in path.parts)
+        ):
+            return path.as_posix()
+    return None
 
 
 def _log_tail(output: bytes, maximum: int) -> str:

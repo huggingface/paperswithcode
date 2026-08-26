@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
+import re
 import time
 from enum import StrEnum
 from pathlib import PurePosixPath
@@ -22,6 +23,13 @@ MAX_SOURCE_BYTES = 32 * 1024 * 1024
 MAX_PDF_BYTES = 20 * 1024 * 1024
 MAX_LOG_BYTES = 64 * 1024
 MAX_ENVELOPE_LIFETIME_SECONDS = 10 * 60
+_QUALIFIED_COMPILER_IMAGE = re.compile(
+    r"^registry\.hf\.space/[a-z0-9][a-z0-9._-]{0,254}@sha256:[0-9a-f]{64}$"
+)
+STAGING_SANDBOX_COMPILER_NAMESPACE = "nielsr"
+_STAGING_SANDBOX_COMPILER_IMAGE = re.compile(
+    r"^registry\.hf\.space/nielsr-pwc-latex-compiler-[a-z0-9-]+-staging@sha256:[0-9a-f]{64}$"
+)
 
 
 class EnvelopeError(ValueError):
@@ -244,6 +252,30 @@ def validate_public_key(public_key_base64: str) -> None:
         )
     except ValueError as error:
         raise EnvelopeError("Compiler public key is invalid") from error
+
+
+def validate_qualified_compiler_image(image: str) -> str:
+    """Require the exact private HF registry image identity used by a Sandbox."""
+    if not _QUALIFIED_COMPILER_IMAGE.fullmatch(image):
+        raise EnvelopeError("Compiler qualified image must be a pinned HF digest")
+    return image
+
+
+def validate_staging_sandbox_compiler_identity(image: str, namespace: str) -> str:
+    """Bind user-facing compiler work to the one approved private staging owner."""
+    if namespace != STAGING_SANDBOX_COMPILER_NAMESPACE:
+        raise EnvelopeError(
+            "Compiler Sandbox must use the approved staging compiler identity"
+        )
+    image = validate_qualified_compiler_image(image)
+    if (
+        not _STAGING_SANDBOX_COMPILER_IMAGE.fullmatch(image)
+        or "production" in image.lower()
+    ):
+        raise EnvelopeError(
+            "Compiler Sandbox must use the approved staging compiler identity"
+        )
+    return image
 
 
 def validate_result(result: CompilerResult, *, expected: CompilerEnvelope) -> None:

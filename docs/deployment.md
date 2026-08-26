@@ -185,7 +185,10 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    `add_chat_sandbox_spend_cap.sql`, `add_chat_web_search.sql`, and
    `add_chat_hf_catalog.sql`, `add_chat_reasoning_effort.sql`, and
    `add_chat_ttft_profiles.sql`, `add_chat_sandbox_egress_policy.sql`,
-   `add_chat_artifacts.sql`, `expand_chat_artifact_foundation.sql`, and
+   `add_chat_artifacts.sql`, `expand_chat_artifact_foundation.sql`,
+   `allow_chat_latex_paper_restore_digests.sql`,
+   `add_chat_latex_paper_figure_storage.sql`,
+   `add_chat_latex_repair_provenance.sql`, and
    `add_chat_warm_assignment_race.sql` as
    PostgreSQL superuser with
    `search_path=staging,public`. The guarded migrations refuse any other schema,
@@ -335,6 +338,91 @@ project. It emits timings and no environment values, commands, prompts,
 credentials, or tool output. Full model,
 SDK compaction, resume, edit/retry, and citation qualification still runs
 through authenticated staging chats before increasing the rollout percentage.
+
+### Private LaTeX paper staging gate
+
+After the private artifact and compiler switches have been enabled in staging,
+run the paper gate through the active staging Unix socket. It requires Luna to
+be both the discovered staging API default and the explicitly selected model;
+the runner never falls back to whichever model happens to be first in a local
+configuration.
+
+```bash
+sudo systemd-run --quiet --wait --pipe --collect \
+  --uid=pwc-staging --gid=pwc-staging \
+  --working-directory=/srv/paperswithcode/environments/staging/current \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  /srv/paperswithcode/.venv/bin/python \
+  -m backend.scripts.qualify_latex_paper_staging \
+  --admin-subject <allowlisted-staging-admin-subject> \
+  --admin-username <operator-name> \
+  --qualification-owner operator:pi-qualification:paper-<run-id> \
+  --model gpt-5.6-luna@openai \
+  --expect enabled \
+  --confirm QUALIFY_STAGING_LATEX_PAPER
+```
+
+The normal enabled run uses an operator-only disposable chat and deletes every
+created session in `finally`. Its report contains only check names, booleans,
+and elapsed milliseconds—never prompts, answers, sources, diagnostics,
+artifact IDs, share IDs, URLs, credentials, or trace payloads. It exercises the
+deterministic `/write-paper` and natural-prompt activation paths, ordinary-turn
+non-activation, structural citations, first compile, Preview/Files, editing,
+figure upload, optimistic conflicts, failed-source/stale-PDF behavior, history
+restore, private exports, public-share omission, actual
+`/sessions/archive-oldest` plus owner re-read, responsive Preview/Files UI, and
+deletion. The controlled failed source is also repaired through exactly three
+Luna repair receipts; it only passes when the failed source and last good
+preview remain unchanged and the descriptor reports an exhausted repair budget.
+
+For the telemetry-content gate, add
+`--telemetry-canary <opaque-random-marker>` to the normal enabled command (and
+to the preserve run when using the two-phase sequence). The runner places that
+marker in the private authoring input and an owner-only LaTeX comment, then
+checks the current owner source ZIP contains it without echoing the marker or
+any source bytes. The report contains only the structural
+`telemetry_canary_owner_source_present` result. It does not query Langfuse or
+claim the telemetry gate passed: use the same protected marker in the separate
+Langfuse scan and retain its content-free absence evidence before accepting the
+gate.
+
+The kill-switch evidence is an intentionally separate, two-phase sequence.
+First run the normal enabled command above so archive behavior is qualified.
+Then use the same dedicated owner value for a second enabled preparation run,
+adding `--preserve-for-kill-switch`. That variant never calls
+`archive-oldest`: archiving would hide the sole active historical session that
+the disabled phase must list. It deletes all secondary sessions and preserves
+the one primary Luna paper only if every executed deterministic preparation
+check passed; otherwise `finally` deletes everything.
+
+After an operator has independently disabled all three paper/compiler switches
+through the documented staging host-configuration procedure, run the disabled
+historical phase with that exact same owner:
+
+```bash
+sudo systemd-run --quiet --wait --pipe --collect \
+  --uid=pwc-staging --gid=pwc-staging \
+  --working-directory=/srv/paperswithcode/environments/staging/current \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  /srv/paperswithcode/.venv/bin/python \
+  -m backend.scripts.qualify_latex_paper_staging \
+  --admin-subject <allowlisted-staging-admin-subject> \
+  --admin-username <operator-name> \
+  --qualification-owner operator:pi-qualification:paper-<run-id> \
+  --model gpt-5.6-luna@openai \
+  --expect disabled \
+  --verify-historical \
+  --confirm QUALIFY_STAGING_LATEX_PAPER
+```
+
+This phase refuses anything other than exactly one active session for that
+owner. It reads the private session descriptor and source ZIP, verifies a
+disabled `/write-paper` turn creates no artifact, then deletes that session.
+Neither phase changes feature flags. The runner intentionally reports (and
+exits nonzero for) any unexercised external telemetry-content gate; an enabled
+report also keeps rollback unmet until the disabled historical phase succeeds.
+Do not turn those false values into a pass by supplying a synthetic report.
+Keep the switches off if either phase fails.
 
 The release-scoped reliability gate uses explicit qualification metadata rather
 than synthetic usernames. Run the naturally paced SLO cohort and the broader

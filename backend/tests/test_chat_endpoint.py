@@ -55,6 +55,7 @@ from backend.services.chat_session_service import (
 from backend.services.chat_stream_service import (
     ChatStreamOrchestrator,
     ChatTurnProjection,
+    _private_paper_tool_event,
     _public_poster_tool_event,
     sequential_reasoning_events,
 )
@@ -959,6 +960,45 @@ def test_poster_tool_events_show_safe_arguments_and_hide_private_evidence():
     ]
 
 
+def test_private_paper_tool_events_never_persist_manuscript_content():
+    manuscript = "MANUSCRIPT-CANARY: unpublished theorem proof"
+    events = [
+        _private_paper_tool_event(
+            "tool_call",
+            {
+                "type": "tool_call",
+                "id": "paper-1",
+                "name": "Bash",
+                "args": {"command": f"printf '%s' '{manuscript}' > main.tex"},
+            },
+        ),
+        _private_paper_tool_event(
+            "tool_call_arguments_delta",
+            {
+                "type": "tool_call_arguments_delta",
+                "id": "paper-1",
+                "name": "Bash",
+                "delta": manuscript,
+                "partial_args": {"command": manuscript},
+            },
+        ),
+        _private_paper_tool_event(
+            "tool_result",
+            {
+                "type": "tool_result",
+                "id": "paper-1",
+                "status": "success",
+                "content": [{"type": "text", "text": manuscript}],
+                "results": [{"text": manuscript}],
+            },
+        ),
+    ]
+
+    serialized = json.dumps(events)
+    assert manuscript not in serialized
+    assert all(event["redacted"] is True for event in events)
+
+
 def test_poster_tool_argument_stream_sanitizes_before_public_projection():
     bash = _public_poster_tool_event(
         "tool_call_arguments_delta",
@@ -1504,11 +1544,12 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
 
     direct = Settings(environment="staging", chat_openai_direct_enabled=True)
     assert [choice["id"] for choice in direct.chat_model_choices] == [
+        "gpt-5.6-luna@openai",
         "deepseek-ai/DeepSeek-V4-Flash-0731",
         "moonshotai/Kimi-K3",
         "gpt-5.6-luna@openrouter",
-        "gpt-5.6-luna@openai",
     ]
+    assert direct.chat_model_choices[0]["label"] == "GPT-5.6 Luna (Direct)"
     assert direct.chat_model_routes["gpt-5.6-luna@openai"] == ("gpt-5.6-luna@openai")
     assert direct.chat_model_providers["gpt-5.6-luna@openai"] == "openai"
     assert direct.chat_route_providers["gpt-5.6-luna@openai"] == "openai"

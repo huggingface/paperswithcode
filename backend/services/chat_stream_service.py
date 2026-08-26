@@ -703,9 +703,12 @@ def _trusted_paper_artifact(
     admission: TurnAdmission,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    if event.get("operation") not in {"create", "begin-edit"} or not isinstance(
-        event.get("activated"), bool
-    ):
+    if event.get("operation") not in {
+        "create",
+        "begin-edit",
+        "draft",
+        "repair",
+    } or not isinstance(event.get("activated"), bool):
         return None
     try:
         artifact_id = uuid.UUID(str((event.get("descriptor") or {})["artifact_id"]))
@@ -780,6 +783,77 @@ def _public_poster_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any
             ],
         }
     return event
+
+
+_PRIVATE_PAPER_TOOL_NAMES = frozenset(
+    {
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob",
+        "Ls",
+        "Write",
+        "Edit",
+        "WebFetch",
+        "search_web",
+    }
+)
+
+
+def _private_paper_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any]:
+    """Project paper-authoring tool activity without retaining source text.
+
+    Paper source belongs only in the owner-scoped artifact store.  Tool events are
+    copied into chat display blocks and tracing, so they must not retain command
+    arguments, streamed fragments, or compiler/editor output.
+    """
+
+    tool_id = str(event.get("id") or "")
+    tool_name = str(event.get("name") or "private-paper-tool")
+    if tool_name not in _PRIVATE_PAPER_TOOL_NAMES:
+        tool_name = "private-paper-tool"
+    base = {
+        "type": kind,
+        "id": tool_id,
+        "name": tool_name,
+        "redacted": True,
+    }
+    if kind == "tool_call":
+        return {**base, "args": {}}
+    if kind == "tool_call_start":
+        raw_content_index = event.get("content_index")
+        content_index = raw_content_index if isinstance(raw_content_index, int) else 0
+        return {**base, "content_index": max(0, content_index)}
+    if kind == "tool_call_arguments_delta":
+        return {
+            **base,
+            "delta": "{}",
+            "partial_args": {},
+            "snapshot": True,
+        }
+    if kind == "tool_call_arguments_done":
+        return {**base, "args": {}}
+    if kind == "tool_result":
+        status = str(event.get("status") or "success")
+        if status not in {"success", "error"}:
+            status = "error"
+        raw_took_ms = event.get("took_ms")
+        took_ms = raw_took_ms if isinstance(raw_took_ms, int) else 0
+        return {
+            **base,
+            "status": status,
+            "took_ms": max(0, took_ms),
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Private paper tool output omitted.",
+                    "truncated": True,
+                }
+            ],
+            "metadata": {"exit_code": None, "output_truncated": True},
+            "results": [],
+        }
+    return base
 
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -1286,6 +1360,7 @@ class ChatStreamOrchestrator:
         self.first_application_delta_recorded = False
         self.interruption_reason: str | None = None
         self.trace: ChatTurnTrace | NullChatTurnTrace = NullChatTurnTrace()
+        self.private_paper_tool_ids: set[str] = set()
         self.tool_timing = _ToolTimingFallback(
             enabled=getattr(admission, "agent_harness", "claude") == "pi"
         )
@@ -1306,6 +1381,7 @@ class ChatStreamOrchestrator:
             execution_backend=self.admission.execution_backend,
             is_replacement=self.admission.is_replacement,
             reasoning_effort=getattr(self.admission, "reasoning_effort", "high"),
+            content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
             _persist_trace_id(
@@ -1681,6 +1757,25 @@ class ChatStreamOrchestrator:
                     )
                     continue
                 event = trusted_paper
+            paper_tool_event = kind in {
+                "tool_call",
+                "tool_call_start",
+                "tool_call_arguments_delta",
+                "tool_call_arguments_done",
+                "tool_result",
+            }
+            tool_id = str(event.get("id") or "")
+            if (
+                getattr(self.admission, "paper_artifacts_enabled", False)
+                and paper_tool_event
+                and (
+                    str(event.get("name") or "") in _PRIVATE_PAPER_TOOL_NAMES
+                    or tool_id in self.private_paper_tool_ids
+                )
+            ):
+                if kind != "tool_result":
+                    self.private_paper_tool_ids.add(tool_id)
+                event = _private_paper_tool_event(kind, event)
             if getattr(self.admission, "poster_mode", False) and kind in {
                 "tool_call",
                 "tool_call_start",
@@ -1719,6 +1814,7 @@ class ChatStreamOrchestrator:
                 self.trace.start_tool(event)
             elif kind == "tool_result":
                 self.trace.finish_tool(event)
+                self.private_paper_tool_ids.discard(tool_id)
             if kind == "error":
                 budget_interrupted = event.get("code") in {
                     "chat_temporarily_disabled",

@@ -9,10 +9,13 @@ import uuid
 import httpx
 import pytest
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
+from huggingface_hub.errors import SandboxError
 
+from backend.config import Settings
 from backend.services.latex_compiler_service import (
     HuggingFaceSandboxLatexCompilerTransport,
     LatexCompilerClient,
+    compiler_transport_from_settings,
 )
 from latex_compiler_contract import (
     CompileLimits,
@@ -96,6 +99,9 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
     private_key = Ed25519PrivateKey.generate()
     source = b"zip bytes"
     job_id = str(uuid.uuid4())
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
 
     class FakeSandbox:
         id = "sandbox-job-id"
@@ -131,7 +137,14 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
-            return httpx.Response(200, json={"status": "ready"})
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ready",
+                    "qualified_image": image,
+                    "network_isolation": "sandbox-netns-v1",
+                },
+            )
         if request.method == "POST":
             return httpx.Response(202, json={"job_id": job_id, "state": "queued"})
         if request.method == "DELETE":
@@ -139,8 +152,8 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
         return httpx.Response(200, json={"job_id": job_id, "state": "compiling"})
 
     transport = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=image,
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=create,
@@ -154,15 +167,17 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
     assert status.provider_job_id == "sandbox-job-id"
     assert created[0][1]["forward_hf_token"] is False
     assert created[0][1]["secrets"] is None
-    assert created[0][1]["namespace"] == "approved-staging"
+    assert created[0][1]["volumes"] is None
+    assert created[0][1]["env"]["PWC_LATEX_COMPILER_QUALIFIED_IMAGE"] == image
+    assert created[0][1]["namespace"] == "nielsr"
     assert created[0][1]["token"] == "sandbox-token"
     assert any(command[0][0] == "python3" for command in sandbox.commands)
     assert transport.cancel(job_id).state.value == "canceled"
     assert sandbox.killed
 
     restarted = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=image,
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=create,
@@ -182,6 +197,84 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
     assert len(created) == 1
 
 
+def test_sandbox_transport_fails_closed_when_result_image_is_not_the_pinned_image() -> (
+    None
+):
+    private_key = Ed25519PrivateKey.generate()
+    source = b"zip bytes"
+    job_id = str(uuid.uuid4())
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    mismatched_image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "b" * 64
+    )
+    submitted: CompilerEnvelope | None = None
+
+    class FakeSandbox:
+        id = "sandbox-job-id"
+
+        def __init__(self) -> None:
+            self.proxy_headers = {"X-Sandbox-Token": "ephemeral"}
+            self.killed = False
+
+        def run(self, *_: object, **__: object) -> None:
+            return None
+
+        def proxy_url_for(self, _port: int, path: str = "/") -> str:
+            return f"https://sandbox.example.invalid{path}"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    sandbox = FakeSandbox()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal submitted
+        if request.url.path == "/health":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ready",
+                    "qualified_image": image,
+                    "network_isolation": "sandbox-netns-v1",
+                },
+            )
+        if request.method == "POST":
+            submitted = CompilerEnvelope.model_validate(
+                json.loads(request.content)["envelope"]
+            )
+            return httpx.Response(202, json={"job_id": job_id, "state": "queued"})
+        assert submitted is not None
+        result = CompilerResult.succeeded(
+            submitted,
+            pdf=b"%PDF-test",
+            log_tail="",
+            compiler_image=mismatched_image,
+            engine_version="pdfTeX test",
+        )
+        return httpx.Response(200, json=result.model_dump(mode="json"))
+
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=image,
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=private_key,
+        sandbox_create=lambda **_: sandbox,
+        sandbox_connect=lambda *_args, **_kwargs: sandbox,
+        http_client_factory=lambda headers: httpx.Client(
+            headers=headers, transport=httpx.MockTransport(handler)
+        ),
+    )
+
+    transport.submit(job_id=job_id, bundle=source, entrypoint="main.tex")
+
+    with pytest.raises(EnvelopeError, match="qualified Sandbox image"):
+        transport.result(job_id)
+
+    assert sandbox.killed
+
+
 def test_sandbox_transport_cleans_up_an_unhealthy_reconnected_job() -> None:
     class FakeSandbox:
         id = "stale-sandbox-job"
@@ -199,8 +292,11 @@ def test_sandbox_transport_cleans_up_an_unhealthy_reconnected_job() -> None:
     private_key = Ed25519PrivateKey.generate()
     sandbox = FakeSandbox()
     transport = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=(
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64
+        ),
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=lambda **_: sandbox,
@@ -221,3 +317,87 @@ def test_sandbox_transport_cleans_up_an_unhealthy_reconnected_job() -> None:
         )
 
     assert sandbox.killed
+
+
+@pytest.mark.parametrize(
+    ("image", "namespace"),
+    [
+        (
+            "registry.hf.space/other-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64,
+            "other",
+        ),
+        (
+            "registry.hf.space/nielsr-pwc-chat-artifacts-staging@sha256:" + "a" * 64,
+            "nielsr",
+        ),
+        (
+            "registry.hf.space/nielsr-pwc-latex-compiler-production-staging@sha256:"
+            + "a" * 64,
+            "nielsr",
+        ),
+    ],
+)
+def test_sandbox_transport_refuses_a_nonapproved_staging_compiler_identity(
+    image: str, namespace: str
+) -> None:
+    """Runtime settings cannot redirect manuscripts to another HF image or owner."""
+
+    with pytest.raises(EnvelopeError, match="approved staging"):
+        HuggingFaceSandboxLatexCompilerTransport(
+            image=image,
+            namespace=namespace,
+            token="sandbox-token",
+            private_key=Ed25519PrivateKey.generate(),
+            sandbox_create=lambda **_: None,
+            sandbox_connect=lambda *_args, **_kwargs: None,
+        )
+
+
+def test_sandbox_transport_kills_a_job_when_preflight_raises_sandbox_error() -> None:
+    """A provider-side preflight failure cannot leave a live compiler VM behind."""
+
+    class FakeSandbox:
+        id = "failed-sandbox-job"
+
+        def __init__(self) -> None:
+            self.killed = False
+
+        def run(self, *_: object, **__: object) -> None:
+            raise SandboxError("preflight unavailable")
+
+        def kill(self) -> None:
+            self.killed = True
+
+    sandbox = FakeSandbox()
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=(
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64
+        ),
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_: sandbox,
+        sandbox_connect=lambda *_args, **_kwargs: sandbox,
+    )
+
+    with pytest.raises(RuntimeError, match="isolation preflight failed"):
+        transport.submit(
+            job_id=str(uuid.uuid4()), bundle=b"zip bytes", entrypoint="main.tex"
+        )
+
+    assert sandbox.killed
+
+
+def test_compiler_transport_refuses_non_staging_configuration() -> None:
+    with pytest.raises(RuntimeError, match="staging-only"):
+        compiler_transport_from_settings(
+            Settings(
+                environment="production",
+                chat_latex_compiler_hf_sandbox_image=(
+                    "registry.hf.space/pwc-test-latex-compiler-staging@sha256:"
+                    + "a" * 64
+                ),
+            )
+        )

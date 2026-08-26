@@ -61,6 +61,7 @@ def _path_traversal_archive() -> bytes:
 
 def qualification_cases() -> tuple[QualificationCase, ...]:
     """Fixed synthetic cases spanning the compiler trust-boundary threats."""
+    disk_line = "x" * 1024
     return (
         QualificationCase(
             "valid-document", _zip({"main.tex": _document("safe")}), "succeeded"
@@ -88,6 +89,50 @@ def qualification_cases() -> tuple[QualificationCase, ...]:
         QualificationCase(
             "process-pressure",
             _zip({"main.tex": _document("\\immediate\\write18{yes > pressure}")}),
+            "failed",
+        ),
+        QualificationCase(
+            "cpu-limit",
+            _zip(
+                {
+                    "main.tex": _document(
+                        "\\newcount\\pwcCounter \\pwcCounter=0 "
+                        "\\loop \\advance\\pwcCounter by 1 "
+                        "\\ifnum\\pwcCounter<1000000000 \\repeat"
+                    )
+                }
+            ),
+            "failed",
+        ),
+        QualificationCase(
+            "memory-limit",
+            _zip(
+                {
+                    "main.tex": _document(
+                        "\\newcount\\pwcCounter \\pwcCounter=0 "
+                        "\\loop \\expandafter\\gdef\\csname pwcMemory"
+                        "\\the\\pwcCounter\\endcsname{xxxxxxxxxxxxxxxx} "
+                        "\\advance\\pwcCounter by 1 "
+                        "\\ifnum\\pwcCounter<10000000 \\repeat"
+                    )
+                }
+            ),
+            "failed",
+        ),
+        QualificationCase(
+            "disk-limit",
+            _zip(
+                {
+                    "main.tex": _document(
+                        "\\newwrite\\pwcOutput "
+                        "\\immediate\\openout\\pwcOutput=pwc-fill.tmp "
+                        "\\newcount\\pwcCounter \\pwcCounter=0 "
+                        "\\loop \\immediate\\write\\pwcOutput{" + disk_line + "} "
+                        "\\advance\\pwcCounter by 1 "
+                        "\\ifnum\\pwcCounter<27000 \\repeat"
+                    )
+                }
+            ),
             "failed",
         ),
         QualificationCase(

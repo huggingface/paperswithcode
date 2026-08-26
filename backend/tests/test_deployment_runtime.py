@@ -423,6 +423,7 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
 def test_run_backend_derives_features_from_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
+    monkeypatch.setattr(os, "environ", os.environ.copy())
     release = make_bundle(tmp_path, chat=False)
     monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
     monkeypatch.setenv("PWC_RUNTIME_DATA_DIR", str(tmp_path / "runtime-data"))
@@ -441,6 +442,7 @@ def test_run_backend_derives_features_from_release(
 def test_slot_launcher_enables_chat_catalog_features(
     monkeypatch: pytest.MonkeyPatch,
 ):
+    monkeypatch.setattr(os, "environ", os.environ.copy())
     monkeypatch.delenv("PWC_CHAT_PAPER_MENTIONS_ENABLED", raising=False)
     monkeypatch.delenv("PWC_CHAT_HF_CATALOG_ENABLED", raising=False)
     manifest = build_manifest(
@@ -453,6 +455,279 @@ def test_slot_launcher_enables_chat_catalog_features(
 
     assert os.environ["PWC_CHAT_PAPER_MENTIONS_ENABLED"] == "true"
     assert os.environ["PWC_CHAT_HF_CATALOG_ENABLED"] == "true"
+
+
+def test_slot_launcher_preserves_paper_storage_but_forces_posterly_off(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(os, "environ", os.environ.copy())
+    manifest = build_manifest("a" * 40, "staging")
+    monkeypatch.setenv("PWC_CHAT_ARTIFACTS_ENABLED", "true")
+    monkeypatch.setenv("PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED", "true")
+    monkeypatch.setenv("PWC_CHAT_ARTIFACT_STORAGE_BACKEND", "hf_bucket")
+    monkeypatch.setenv(
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID", "nielsr/pwc-chat-artifacts-staging"
+    )
+
+    slot_launcher.configure_release(manifest, Path("/release"))
+
+    assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
+    assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
+    assert os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] == "hf_bucket"
+    assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
+
+
+def test_run_backend_preserves_paper_storage_but_forces_posterly_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(os, "environ", os.environ.copy())
+    release = make_bundle(tmp_path, chat=True)
+    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
+    monkeypatch.setenv("PWC_RUNTIME_DATA_DIR", str(tmp_path / "runtime-data"))
+    monkeypatch.setenv("PWC_CHAT_ARTIFACTS_ENABLED", "true")
+    monkeypatch.setenv("PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED", "true")
+    monkeypatch.setenv("PWC_CHAT_ARTIFACT_STORAGE_BACKEND", "hf_bucket")
+    monkeypatch.setenv(
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID", "nielsr/pwc-chat-artifacts-staging"
+    )
+
+    run_backend.configure_release_environment(release)
+
+    assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
+    assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
+    assert os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] == "hf_bucket"
+    assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
+
+
+def test_staging_latex_compiler_provision_uses_the_existing_staging_identity():
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    values = configure_host_env.staging_latex_compiler_provision_values(
+        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+        image=image,
+        namespace="nielsr",
+    )
+
+    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"] == image
+    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE"] == "nielsr"
+    assert (
+        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN"] == "existing-staging-token"
+    )
+    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION"] == (
+        "sandbox-netns-v1"
+    )
+    assert values["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] == (
+        "nielsr/pwc-chat-artifacts-staging"
+    )
+    assert values["PWC_CHAT_POSTERLY_ENABLED"] == "false"
+    assert values["PWC_CHAT_ARTIFACTS_ENABLED"] == "false"
+    assert values["PWC_CHAT_LATEX_PAPER_ENABLED"] == "false"
+    assert values["PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED"] == "false"
+    assert values["PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE"] == "false"
+    assert (
+        len(
+            base64.urlsafe_b64decode(
+                values["PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"] + "=="
+            )
+        )
+        == 32
+    )
+
+
+def test_staging_latex_compiler_provision_rejects_any_non_staging_identity():
+    with pytest.raises(ValueError, match="staging"):
+        configure_host_env.staging_latex_compiler_provision_values(
+            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+            image="registry.hf.space/nielsr-pwc-latex-compiler@sha256:" + "a" * 64,
+            namespace="nielsr",
+        )
+
+
+def test_staging_latex_paper_activation_requires_complete_private_qualification(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    current = configure_host_env.assign(
+        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+        configure_host_env.staging_latex_compiler_provision_values(
+            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+            image=image,
+            namespace="nielsr",
+        ),
+    )
+    evidence = tmp_path / "latex-qualification.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "staging",
+                "compiler_image": image,
+                "passed": 7,
+                "total": 7,
+                "checks": {
+                    "hostile_input": True,
+                    "cancellation": True,
+                    "health": True,
+                    "metrics": True,
+                    "image_isolation": True,
+                    "reconciliation": True,
+                    "restart": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(evidence, 0o600)
+    original_lstat = type(evidence).lstat
+
+    def root_owned_lstat(path: Path):
+        observed = original_lstat(path)
+        if path == evidence:
+            return SimpleNamespace(
+                st_mode=observed.st_mode,
+                st_uid=0,
+                st_nlink=1,
+                st_size=observed.st_size,
+            )
+        return observed
+
+    monkeypatch.setattr(type(evidence), "lstat", root_owned_lstat)
+
+    values = configure_host_env.staging_latex_paper_activation_values(
+        current, evidence_path=evidence
+    )
+
+    assert values == {
+        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
+        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        "PWC_CHAT_LATEX_PAPER_ENABLED": "true",
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "true",
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
+    }
+
+    evidence.write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="qualification evidence"):
+        configure_host_env.staging_latex_paper_activation_values(
+            current, evidence_path=evidence
+        )
+
+
+@pytest.mark.parametrize(
+    ("compiler_image", "mode"),
+    [
+        (
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "b" * 64,
+            0o600,
+        ),
+        (
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64,
+            0o640,
+        ),
+    ],
+)
+def test_staging_latex_paper_activation_rejects_stale_or_nonprivate_evidence(
+    tmp_path: Path, compiler_image: str, mode: int
+):
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    current = configure_host_env.assign(
+        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+        configure_host_env.staging_latex_compiler_provision_values(
+            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+            image=image,
+            namespace="nielsr",
+        ),
+    )
+    evidence = tmp_path / "latex-qualification.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "staging",
+                "compiler_image": compiler_image,
+                "passed": 7,
+                "total": 7,
+                "checks": {
+                    "hostile_input": True,
+                    "cancellation": True,
+                    "health": True,
+                    "metrics": True,
+                    "image_isolation": True,
+                    "reconciliation": True,
+                    "restart": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(evidence, mode)
+
+    with pytest.raises(ValueError, match="qualification evidence"):
+        configure_host_env.staging_latex_paper_activation_values(
+            current, evidence_path=evidence
+        )
+
+
+def test_staging_latex_compiler_provision_mode_keeps_every_feature_off(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "staging.env").write_text(
+        "PWC_HF_TOKEN=existing-staging-token\nUNRELATED=preserved\n",
+        encoding="utf-8",
+    )
+    written = {}
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_env",
+        lambda path, lines, group: written.update(
+            {"path": path, "lines": lines, "group": group}
+        ),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-latex-compiler-provision-only",
+            "--staging-latex-compiler-image",
+            image,
+            "--confirm",
+            "PROVISION_PRIVATE_STAGING_LATEX_COMPILER",
+        ],
+    )
+
+    assert configure_host_env.main() == 0
+    assert written["path"] == config_root / "staging.env"
+    assert written["group"] == "pwc-staging"
+    assert configure_host_env.decoded_value(written["lines"]["UNRELATED"]) == (
+        "preserved"
+    )
+    for key in (
+        "PWC_CHAT_ARTIFACTS_ENABLED",
+        "PWC_CHAT_LATEX_PAPER_ENABLED",
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
+        "PWC_CHAT_POSTERLY_ENABLED",
+    ):
+        assert configure_host_env.decoded_value(written["lines"][key]) == "false"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):

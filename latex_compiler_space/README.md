@@ -8,43 +8,44 @@ app_port: 7860
 pinned: false
 ---
 
-# PwC private LaTeX compiler
+# PwC private LaTeX compiler image builder
 
-This is a private, staging-only service endpoint; it is not a user-facing
-Space. It accepts only signed compiler envelopes from the PwC backend. It has
-no bucket, database, model-provider, user, session, or signing-private-key
-credential.
+This private, staging-only Docker Space is an **image builder**, not a
+compiler endpoint. PwC never sends a manuscript to its Space URL. It has no
+bucket, database, model-provider, user, session, or signing-private-key
+credential, and the provisioning command pauses it after building.
 
-## Private Space setup
+## Private builder setup
 
-Create a **private Docker Space** on CPU Upgrade and configure it as always-on
-through the Hugging Face Space settings. From the PwC checkout, deploy the
-assembled service with the explicit staging-only command:
+Create a **private Docker Space** whose name is
+`pwc-latex-compiler-<source>-staging`. From the PwC checkout, assemble the
+image and resolve its authenticated OCI manifest digest:
 
 ```bash
-HF_TOKEN=<private-space-write-token> uv run python scripts/deploy_latex_compiler_space.py \
-  --space <namespace>/pwc-latex-compiler-staging \
+HF_TOKEN=<private-builder-write-token> uv run python scripts/deploy_latex_compiler_space.py \
+  --space <namespace>/pwc-latex-compiler-<source>-staging \
   --confirm DEPLOY_PRIVATE_LATEX_COMPILER_SPACE
 ```
 
-Before it can accept a request, set only this Space secret:
+The command verifies that the Space remains private, waits only long enough to
+obtain `Docker-Content-Digest`, prints the non-secret source revision and
+immutable `registry.hf.space/...@sha256:...` reference, and pauses the Space in
+all post-upload outcomes. Do not request always-on hardware, attach a volume,
+or configure any Space secret or variable.
 
-```text
-PWC_LATEX_COMPILER_PUBLIC_KEY=<base64url Ed25519 public key>
-```
+Install the emitted image reference, a protected Sandbox credential, and the
+matching backend signing private key only through the staging host’s protected
+configuration flow. The backend injects the corresponding public key and the
+exact image identity into each fresh Sandbox as non-secret per-job environment
+values; neither belongs in the builder Space, image layers, or build logs.
 
-Set the matching private key, private-Space access token, and Space URL only in
-the staging backend environment as `PWC_CHAT_LATEX_COMPILER_*` values. Do not
-put any of those values in this repository, Space variables, image layers, or
-build logs. The Space deliberately ignores request authorization headers; the
-Hugging Face private-Space gateway validates the backend's access token before
-requests reach this process.
-
-The Dockerfile pins the TeX image by digest. Replacing it requires a reviewed
-staging qualification covering the image digest, TeX engine versions, hostile
-bundle handling, timeout/cancellation, and the no-network/no-shell-escape
-controls. The in-memory queue is intentionally ephemeral: PwC owns durable job
-intent and may safely resubmit the same signed job after a Space restart.
+The Dockerfile pins the TeX base image by digest. Replacing it requires a
+reviewed staging qualification covering the builder digest, TeX engine
+versions, hostile bundles, cancellation, restart/reconciliation, health,
+metrics, and the no-network/no-shell-escape controls. Qualification must also
+prove that a fresh Sandbox can pull the pinned image while the builder remains
+paused. The in-memory queue is intentionally ephemeral: PwC owns durable job
+intent and may safely resubmit the same signed job after a backend restart.
 
 See `docs/latex-compiler-runbook.md` in the PwC source checkout for the
 mandatory staging qualification, health/metrics, kill-switch, and restart
