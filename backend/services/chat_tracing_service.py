@@ -5,17 +5,147 @@ from __future__ import annotations
 import hashlib
 import logging
 import os
+import re
+import uuid
 from collections.abc import Iterator
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any
+from typing import Any, Callable
 
 from langfuse import Langfuse, propagate_attributes
 
 from backend.config import Settings
+from backend.services.autonomous_cron_probe import FindingState, HealthFinding
 
 logger = logging.getLogger(__name__)
+
+SAFE_OBSERVATION_FIELDS = "core,basic,time,metrics"
+MAX_OBSERVATION_PAGES = 10
+PROVIDER_OUTCOMES = frozenset(
+    {
+        "provider_error",
+        "provider_invalid_request",
+        "provider_rate_limit",
+        "provider_timeout",
+        "provider_unavailable",
+        "auth_error",
+        "billing_error",
+    }
+)
+AUTH_OUTCOMES = frozenset(
+    {
+        "openrouter_byok_credential_invalid",
+        "provider_auth",
+        "provider_authentication_error",
+        "provider_unauthorized",
+    }
+)
+BILLING_OUTCOMES = frozenset(
+    {
+        "hf_inference_billing_exhausted",
+        "openrouter_byok_billing_error",
+        "openrouter_monthly_budget_exhausted",
+        "provider_billing",
+        "provider_payment_required",
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class SafeProviderObservation:
+    """Content-free projection of one Langfuse provider request."""
+
+    outcome: str
+    ttft_ms: int | None
+    duration_ms: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SafeProviderObservationPage:
+    observations: tuple[SafeProviderObservation, ...]
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class SafeChatTurnObservation:
+    """Content-free projection of one end-to-end chat turn."""
+
+    outcome: str
+    ttft_ms: int | None
+    duration_ms: int | None
+
+
+@dataclass(frozen=True, slots=True)
+class SafeChatTurnObservationPage:
+    observations: tuple[SafeChatTurnObservation, ...]
+    complete: bool
+
+
+@dataclass(frozen=True, slots=True)
+class IncidentTraceContentQuery:
+    trace_id: str
+    window_start: datetime
+    window_end: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class IncidentTraceContentPermit:
+    incident_signature: str
+    query: IncidentTraceContentQuery
+    audited_at: datetime
+
+
+def authorize_incident_trace_content_access(
+    *,
+    finding: HealthFinding,
+    actor: str,
+    run_id: uuid.UUID,
+    query: IncidentTraceContentQuery,
+    telemetry_retention_disabled: bool,
+    durable_audit: Callable[[dict[str, object]], bool],
+    now: datetime | None = None,
+) -> IncidentTraceContentPermit:
+    """Authorize exceptional trace I/O access only after a durable redacted audit."""
+
+    if finding.state != FindingState.DEGRADED:
+        raise PermissionError("a degraded aggregate finding is required")
+    if not telemetry_retention_disabled:
+        raise PermissionError("telemetry retention must be disabled")
+    if re.fullmatch(r"operator:[A-Za-z0-9._-]{1,200}", actor) is None:
+        raise PermissionError("a named operator actor is required")
+    if re.fullmatch(r"[0-9a-f]{32}", query.trace_id) is None:
+        raise PermissionError("a bounded trace query is required")
+    if (
+        query.window_start.tzinfo is None
+        or query.window_end.tzinfo is None
+        or query.window_end <= query.window_start
+        or query.window_end - query.window_start > timedelta(hours=1)
+    ):
+        raise PermissionError("a bounded trace query is required")
+    signature = finding.evidence.get("incident_signature")
+    if not isinstance(signature, str) or not signature.startswith("chat:"):
+        raise PermissionError("a stable incident signature is required")
+    finding_start = datetime.fromisoformat(str(finding.evidence["window_start"]))
+    finding_end = datetime.fromisoformat(str(finding.evidence["window_end"]))
+    if query.window_start < finding_start or query.window_end > finding_end:
+        raise PermissionError("trace query exceeds the incident window")
+    accessed_at = (now or datetime.now(UTC)).astimezone(UTC)
+    record: dict[str, object] = {
+        "actor": actor,
+        "accessed_at": accessed_at.isoformat(),
+        "incident_signature": signature,
+        "query": {
+            "trace_id": query.trace_id,
+            "window_start": query.window_start.isoformat(),
+            "window_end": query.window_end.isoformat(),
+        },
+        "run_id": str(run_id),
+    }
+    if durable_audit(record) is not True:
+        raise PermissionError("durable audit acknowledgement is required")
+    return IncidentTraceContentPermit(signature, query, accessed_at)
 
 
 @lru_cache(maxsize=4)
@@ -59,6 +189,122 @@ def configured_chat_client(settings: Settings) -> Langfuse | None:
     """Return the server-owned Langfuse client used by chat integrations."""
 
     return _configured_client(settings)
+
+
+def _safe_provider_outcome(level: object, status_message: object) -> str:
+    value = status_message if isinstance(status_message, str) else ""
+    if value in AUTH_OUTCOMES:
+        return "auth_error"
+    if value in BILLING_OUTCOMES:
+        return "billing_error"
+    if value in PROVIDER_OUTCOMES:
+        if "auth" in value:
+            return "auth_error"
+        if "billing" in value:
+            return "billing_error"
+        return "provider_error"
+    normalized_level = str(getattr(level, "value", level)).upper()
+    return "provider_error" if normalized_level == "ERROR" else "success"
+
+
+def _milliseconds(value: object) -> int | None:
+    if not isinstance(value, (int, float)) or value < 0:
+        return None
+    return round(float(value) * 1000)
+
+
+def fetch_provider_request_observations(
+    settings: Settings,
+    window_start: datetime,
+    window_end: datetime,
+) -> SafeProviderObservationPage | None:
+    """Fetch only content-free Langfuse fields for one bounded probe window."""
+
+    client = configured_chat_client(settings)
+    if client is None:
+        return None
+    cursor: str | None = None
+    observations: list[SafeProviderObservation] = []
+    try:
+        for _page_number in range(MAX_OBSERVATION_PAGES):
+            page = client.api.observations.get_many(
+                fields=SAFE_OBSERVATION_FIELDS,
+                limit=1000,
+                cursor=cursor,
+                name="provider-request",
+                environment=settings.environment,
+                from_start_time=window_start,
+                to_start_time=window_end,
+            )
+            observations.extend(
+                SafeProviderObservation(
+                    outcome=_safe_provider_outcome(row.level, row.status_message),
+                    ttft_ms=_milliseconds(row.time_to_first_token),
+                    duration_ms=_milliseconds(row.latency),
+                )
+                for row in page.data
+                if row.end_time is not None
+            )
+            cursor = page.meta.cursor
+            if cursor is None:
+                return SafeProviderObservationPage(tuple(observations), complete=True)
+    except Exception:
+        logger.exception("content-free chat aggregate query failed")
+        return None
+    return SafeProviderObservationPage(tuple(observations), complete=False)
+
+
+def fetch_chat_turn_observations(
+    settings: Settings,
+    window_start: datetime,
+    window_end: datetime,
+) -> SafeChatTurnObservationPage | None:
+    """Fetch sanitized end-to-end turn outcomes without Langfuse I/O fields."""
+
+    client = configured_chat_client(settings)
+    if client is None:
+        return None
+    cursor: str | None = None
+    observations: list[SafeChatTurnObservation] = []
+    try:
+        for _page_number in range(MAX_OBSERVATION_PAGES):
+            page = client.api.observations.get_many(
+                fields=SAFE_OBSERVATION_FIELDS,
+                limit=1000,
+                cursor=cursor,
+                name="generate-research-response",
+                environment=settings.environment,
+                from_start_time=window_start,
+                to_start_time=window_end,
+            )
+            for row in page.data:
+                if row.end_time is None:
+                    continue
+                level = str(getattr(row.level, "value", row.level)).upper()
+                status = (
+                    row.status_message if isinstance(row.status_message, str) else ""
+                )
+                outcome = (
+                    "error"
+                    if level == "ERROR"
+                    else "interrupted"
+                    if level == "WARNING" or status in {"interrupted", "stopped"}
+                    else "success"
+                )
+                observations.append(
+                    SafeChatTurnObservation(
+                        outcome=outcome,
+                        ttft_ms=_milliseconds(row.time_to_first_token),
+                        duration_ms=_milliseconds(row.latency),
+                    )
+                )
+            cursor = page.meta.cursor
+            if cursor is None:
+                return SafeChatTurnObservationPage(tuple(observations), complete=True)
+    except Exception:
+        logger.exception("content-free chat turn aggregate query failed")
+        return None
+    return SafeChatTurnObservationPage(tuple(observations), complete=False)
 
 
 def _usage_details(value: Any) -> dict[str, int]:

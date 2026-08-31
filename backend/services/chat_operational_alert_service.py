@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.models.database import ChatMessageRecord
+from backend.services.autonomous_cron_probe import FindingState, HealthFinding
 
 PROVIDER_ERROR_CODES = frozenset(
     {
@@ -82,6 +83,22 @@ LIFECYCLE_ALERT_NAMES = frozenset(
     }
 )
 MAX_LIFECYCLE_VALUE = 16 * 1024 * 1024
+
+
+def reliability_alert_classifications(
+    findings: tuple[HealthFinding, ...] | list[HealthFinding],
+) -> dict[str, int]:
+    """Project degraded findings to bounded, content-free alert keys."""
+
+    classifications: dict[str, int] = {}
+    for finding in findings:
+        if finding.state != FindingState.DEGRADED:
+            continue
+        signature = finding.evidence.get("incident_signature")
+        if not isinstance(signature, str) or not signature.startswith("chat:"):
+            continue
+        classifications[f"{finding.contract}|{signature}"] = 1
+    return classifications
 
 
 @dataclass(frozen=True)
