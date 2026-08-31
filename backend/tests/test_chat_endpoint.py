@@ -1735,6 +1735,68 @@ def test_private_paper_tool_events_never_persist_manuscript_content():
     assert all(event["redacted"] is True for event in events)
 
 
+@pytest.mark.parametrize("operation", ["draft", "repair"])
+def test_private_paper_trust_gate_accepts_published_draft_operations(
+    monkeypatch, operation
+):
+    artifact_id = uuid.uuid4()
+    descriptor = {
+        "artifact_id": str(artifact_id),
+        "title": "Private paper",
+        "source_head": None,
+        "preview_head": None,
+        "editing_enabled": True,
+        "repair_attempts_remaining": 3,
+        "repair_exhausted": False,
+        "generation_provenance": None,
+        "display_metadata": {"title": "Private paper"},
+    }
+
+    class DB:
+        def scalar(self, _statement):
+            return SimpleNamespace(id=artifact_id)
+
+    @contextmanager
+    def session_local():
+        yield DB()
+
+    class PaperService:
+        def __init__(self, _db, _settings):
+            pass
+
+        def get_descriptor(self, _owner_id, _session_id):
+            return SimpleNamespace(
+                artifact_id=artifact_id,
+                model_dump=lambda **_kwargs: descriptor,
+            )
+
+    monkeypatch.setattr(
+        chat_stream_service, "db_manager", SimpleNamespace(session_local=session_local)
+    )
+    monkeypatch.setattr(chat_stream_service, "LatexPaperService", PaperService)
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        user_message_id=uuid.uuid4(),
+        selected_model="test-model",
+        model_route="test-route",
+        sdk_session_id=None,
+        sdk_project_key=None,
+    )
+
+    assert chat_stream_service._trusted_paper_artifact(
+        {"operation": operation, "activated": True, "descriptor": descriptor},
+        ChatOwner(hf_user_id="test-user", hf_username="tester"),
+        admission,
+        Settings(environment="staging"),
+    ) == {
+        "type": "paper_artifact",
+        "operation": operation,
+        "activated": True,
+        "descriptor": descriptor,
+    }
+
+
 def test_poster_tool_argument_stream_sanitizes_before_public_projection():
     bash = _public_poster_tool_event(
         "tool_call_arguments_delta",
@@ -3533,6 +3595,52 @@ def test_closing_stream_persists_interrupted_turn(monkeypatch):
         {"interruption_reason": "stream_closed"},
     )
     assert released == [True]
+
+
+def test_paper_turn_enables_content_free_tracing(monkeypatch):
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        user_message_id=uuid.uuid4(),
+        selected_model="test-model",
+        model_route="test-route",
+        sdk_session_id=None,
+        sdk_project_key=None,
+        paper_artifacts_enabled=True,
+    )
+    trace_arguments = {}
+
+    @contextmanager
+    def trace_turn(**kwargs):
+        trace_arguments.update(kwargs)
+        yield chat_stream_service.NullChatTurnTrace()
+
+    monkeypatch.setattr(chat_stream_service, "trace_chat_turn", trace_turn)
+    monkeypatch.setattr(chat_stream_service, "_persist_trace_id", lambda *_args: None)
+    orchestrator = ChatStreamOrchestrator(
+        settings=get_settings().model_copy(update={"environment": "development"}),
+        owner=ChatOwner(hf_user_id="test-user", hf_username="tester"),
+        admission=admission,
+        prompt="MANUSCRIPT-CANARY",
+        request_id=str(uuid.uuid4()),
+        title_token=None,
+        is_disconnected=lambda: asyncio.sleep(0, result=False),
+        release_admission=lambda: asyncio.sleep(0),
+    )
+
+    async def no_events():
+        if False:
+            yield None
+
+    monkeypatch.setattr(orchestrator, "_events", no_events)
+
+    async def consume():
+        async for _frame in orchestrator.events():
+            pass
+
+    asyncio.run(consume())
+
+    assert trace_arguments["content_free"] is True
 
 
 def test_chat_endpoint_rejects_when_capacity_is_occupied(monkeypatch, caplog):

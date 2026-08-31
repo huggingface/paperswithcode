@@ -789,9 +789,12 @@ def _trusted_paper_artifact(
     admission: TurnAdmission,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    if event.get("operation") not in {"create", "begin-edit"} or not isinstance(
-        event.get("activated"), bool
-    ):
+    if event.get("operation") not in {
+        "create",
+        "begin-edit",
+        "draft",
+        "repair",
+    } or not isinstance(event.get("activated"), bool):
         return None
     try:
         artifact_id = uuid.UUID(str((event.get("descriptor") or {})["artifact_id"]))
@@ -1623,6 +1626,7 @@ class ChatStreamOrchestrator:
             execution_backend=self.admission.execution_backend,
             is_replacement=self.admission.is_replacement,
             reasoning_effort=getattr(self.admission, "reasoning_effort", "high"),
+            content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
             _persist_trace_id(
