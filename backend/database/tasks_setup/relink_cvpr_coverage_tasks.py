@@ -28,7 +28,7 @@ TASK_KEYWORDS: dict[str, str] = {
     "remote-sensing": (
         "remote sensing, satellite imagery, aerial imagery, drone imagery"
     ),
-    "deepfake-and-forensics": (
+    "deepfake-detection": (
         "deepfake detection, media forensics, face forensics, anti-spoofing, "
         "spoofing detection, synthetic media detection, face anti-spoof, "
         "face forgery detection, video forgery detection"

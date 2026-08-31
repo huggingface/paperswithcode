@@ -2,6 +2,7 @@
 
 TASK_SLUG_ALIASES = {
     "3d-tracking": "3D-tracking",
+    "deepfake-and-forensics": "deepfake-detection",
 }
 
 

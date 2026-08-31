@@ -247,7 +247,11 @@ class DiscoveryPageService:
             .filter(Evaluation.dataset_id == entity.id, eligible_paper_filter())
         )
         if task_slug:
-            task = self.db.query(Task).filter(Task.slug == task_slug).one_or_none()
+            task = None
+            for candidate in task_slug_candidates(task_slug):
+                task = self.db.query(Task).filter(Task.slug == candidate).one_or_none()
+                if task is not None:
+                    break
             if task is None:
                 return None
             evaluation_query = evaluation_query.filter(Evaluation.task_id == task.id)

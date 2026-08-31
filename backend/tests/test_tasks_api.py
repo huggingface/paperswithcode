@@ -32,6 +32,8 @@ from backend.models.database import (
 from backend.database.connection import get_database_session
 from backend.config import get_settings
 from backend.services.task_service import TaskService
+from backend.services.discovery_page_service import DiscoveryPageService
+from backend.database.tasks_setup.add_cvpr_coverage_tasks import ensure_task
 
 
 # Trending scores older than 24h are treated as missing, so test repos/papers
@@ -118,6 +120,171 @@ def test_legacy_lowercase_3d_tracking_slug_resolves_canonical_task(client):
     assert image_response.status_code == 200
     assert image_response.headers["content-type"] == "image/gif"
     assert image_response.content == b"gif89a"
+
+
+@pytest.fixture
+def canonical_deepfake_task(client):
+    db = TestingSessionLocal()
+    db.add(
+        DBTask(
+            id=451,
+            name="Deepfake Detection",
+            slug="deepfake-detection",
+            level=0,
+        )
+    )
+    db.add(
+        DBDataset(
+            id=451,
+            name="DeepSpeak v2.0",
+            slug="deepspeak-v2-0",
+        )
+    )
+    db.add(
+        DBTask(
+            id=452,
+            name="Unrelated Task",
+            slug="unrelated-task",
+            level=0,
+        )
+    )
+    db.add(
+        DBDataset(
+            id=452,
+            name="Unrelated Benchmark",
+            slug="unrelated-benchmark",
+        )
+    )
+    db.add(TaskDataset(task_id=451, dataset_id=451))
+    db.add(TaskDataset(task_id=452, dataset_id=452))
+    db.add(
+        DBPaper(
+            id=451,
+            title="DeepSpeak Result",
+            abstract="Reports a DeepSpeak evaluation.",
+            arxiv_id="2026.00451",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    db.add(
+        DBEvaluation(
+            id=451,
+            paper_id=451,
+            task_id=451,
+            dataset_id=451,
+            model_name="Detector",
+            metrics={"F1": 0.9},
+            best_metric="F1",
+        )
+    )
+    db.commit()
+    db.close()
+
+
+def test_legacy_deepfake_slug_resolves_canonical_task(client, canonical_deepfake_task):
+    response = client.get("/api/v1/tasks/deepfake-and-forensics")
+
+    assert response.status_code == 200
+    assert response.json()["slug"] == "deepfake-detection"
+
+
+def test_legacy_deepfake_slug_filters_canonical_task_benchmarks(
+    client, canonical_deepfake_task
+):
+    legacy = client.get("/api/v1/datasets/?task=deepfake-and-forensics&page_size=10")
+    canonical = client.get("/api/v1/datasets/?task=deepfake-detection&page_size=10")
+
+    assert legacy.status_code == canonical.status_code == 200
+    assert [row["slug"] for row in legacy.json()["results"]] == ["deepspeak-v2-0"]
+    assert legacy.json()["results"] == canonical.json()["results"]
+
+    detail = client.get("/api/v1/datasets/deepspeak-v2-0?task=deepfake-and-forensics")
+    assert detail.status_code == 200
+    assert detail.json()["leaderboard_summary"]["task_slug"] == "deepfake-detection"
+
+
+def test_legacy_deepfake_slug_resolves_trending_benchmarks(
+    client, canonical_deepfake_task
+):
+    legacy = client.get(
+        "/api/v1/tasks/deepfake-and-forensics/trending-benchmarks?min_recent_papers=0"
+    )
+    canonical = client.get(
+        "/api/v1/tasks/deepfake-detection/trending-benchmarks?min_recent_papers=0"
+    )
+
+    assert legacy.status_code == canonical.status_code == 200
+    assert legacy.json()["task_slug"] == "deepfake-detection"
+    assert legacy.json() == canonical.json()
+
+
+def test_legacy_deepfake_public_url_emits_canonical_link(
+    client, canonical_deepfake_task
+):
+    legacy = client.get("/tasks/deepfake-and-forensics")
+    canonical = client.get("/tasks/deepfake-detection")
+
+    assert legacy.status_code == canonical.status_code == 200
+    expected = (
+        '<link rel="canonical" '
+        'href="https://paperswithcode.co/tasks/deepfake-detection">'
+    )
+    assert expected in legacy.text
+    assert expected in canonical.text
+
+
+def test_legacy_deepfake_slug_filters_benchmark_discovery_page(
+    client, canonical_deepfake_task
+):
+    db = TestingSessionLocal()
+    try:
+        page = DiscoveryPageService(db).benchmark(
+            "deepspeak-v2-0", "deepfake-and-forensics"
+        )
+    finally:
+        db.close()
+
+    assert page is not None
+    assert page.canonical_path == "/benchmark/deepspeak-v2-0"
+
+
+def test_cvpr_task_setup_renames_legacy_deepfake_task_in_place(client):
+    db = TestingSessionLocal()
+    db.add(DBArea(id=451, name="General"))
+    db.add(
+        DBTask(
+            id=460,
+            name="Deepfake and Forensics",
+            slug="deepfake-and-forensics",
+            description="Existing description",
+            keywords="deepfake detection",
+            area_id=451,
+            level=0,
+        )
+    )
+    db.add(DBDataset(id=460, name="Existing Benchmark", slug="existing-benchmark"))
+    db.add(TaskDataset(task_id=460, dataset_id=460))
+    db.commit()
+
+    task_id = ensure_task(
+        db,
+        {
+            "slug": "deepfake-detection",
+            "legacy_slugs": ("deepfake-and-forensics",),
+            "name": "Deepfake and Forensics",
+            "description": "Existing description",
+            "keywords": "deepfake detection",
+            "area_id": 451,
+        },
+    )
+    db.commit()
+
+    assert task_id == 460
+    assert db.query(DBTask).filter(DBTask.slug == "deepfake-detection").one().id == 460
+    assert db.query(DBTask).count() == 1
+    assert db.get(TaskDataset, (460, 460)) is not None
+    db.close()
 
 
 @pytest.fixture
