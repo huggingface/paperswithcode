@@ -557,6 +557,22 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --disable-dispatch \
 sudo pwc-cron enqueue_hf_daily_paper_curation --enable-dispatch
 ```
 
+Scheduled curation has a separate `curation` autonomous operator. Enabling or
+disabling the submission reviewer does not grant or revoke curation writes.
+Before enabling scheduled dispatch, the curation operator must be enabled from
+the admin autonomous-operations control plane; the dispatcher performs the same
+policy check before allocating a remote job and pauses with
+`autonomous_policy_denied` if it would be rejected. Pausing scheduled dispatch
+does not disable the curation operator, so callbacks from jobs already in flight
+can finish. Use the global manual-mode control or disable the curation operator
+only when already-running callbacks must also fail closed.
+
+Existing installations must apply
+`backend/database/migrations/add_curation_autonomous_operator.sql` before
+deploying source that uses this operator. The migration adds the disabled
+control row and expands only the autonomous operator constraints; it does not
+enable curation or release scheduled dispatch.
+
 Retry a terminal scheduled stage by its durable job UUID through the same
 allowlisted queue. Operator retries use priority 50 (ahead of ordinary daily
 work but behind priority-0 admin jobs), and repeating the command for an already

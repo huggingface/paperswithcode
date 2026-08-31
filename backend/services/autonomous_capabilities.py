@@ -17,6 +17,7 @@ class Capability(StrEnum):
     APPLY_EXISTING_LEADERBOARD_EVAL = "apply_existing_leaderboard_eval"
     APPLY_PAPER_METADATA_EDIT = "apply_paper_metadata_edit"
     CREATE_EXTERNAL_PAPER = "create_external_paper"
+    RESOLVE_MODEL_PAPER = "resolve_model_paper"
     RETRY_DECLARED_CRON = "retry_declared_cron"
     REPAIR_DECLARED_CRON_SOURCE = "repair_declared_cron_source"
     SWITCH_CHAT_PROVIDER = "switch_chat_provider"
@@ -32,6 +33,7 @@ class ResourceKind(StrEnum):
     PAPER = "paper"
     EVALUATION = "evaluation"
     EXTERNAL_PAPER = "external_paper"
+    TRENDING_MODEL_CANDIDATE = "trending_model_candidate"
     DECLARED_CRON = "declared_cron"
     SOURCE_REPAIR = "source_repair"
     CHAT_PROVIDER = "chat_provider"
@@ -79,6 +81,14 @@ CAPABILITY_MANIFESTS: Mapping[Operator, frozenset[Capability]] = MappingProxyTyp
                 Capability.CREATE_EXTERNAL_PAPER,
             }
         ),
+        Operator.CURATION: frozenset(
+            {
+                Capability.APPLY_EXISTING_TAXONOMY_EDIT,
+                Capability.APPLY_EXISTING_LEADERBOARD_EVAL,
+                Capability.APPLY_PAPER_METADATA_EDIT,
+                Capability.RESOLVE_MODEL_PAPER,
+            }
+        ),
         Operator.CRON_HEALTH: frozenset(
             {
                 Capability.RETRY_DECLARED_CRON,
@@ -116,6 +126,9 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
             ),
             Capability.APPLY_PAPER_METADATA_EDIT: frozenset({ResourceKind.PAPER}),
             Capability.CREATE_EXTERNAL_PAPER: frozenset({ResourceKind.EXTERNAL_PAPER}),
+            Capability.RESOLVE_MODEL_PAPER: frozenset(
+                {ResourceKind.TRENDING_MODEL_CANDIDATE}
+            ),
             Capability.RETRY_DECLARED_CRON: frozenset({ResourceKind.DECLARED_CRON}),
             Capability.REPAIR_DECLARED_CRON_SOURCE: frozenset(
                 {ResourceKind.SOURCE_REPAIR}

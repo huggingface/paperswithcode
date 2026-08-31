@@ -13,6 +13,7 @@ import { formatCronDate } from "@/lib/cronStatus";
 
 const labels: Record<string, string> = {
   submissions: "Submission review",
+  curation: "Scheduled curation",
   cron_health: "CRON health",
   chat_reliability: "Chat reliability",
 };
@@ -92,7 +93,7 @@ const AutonomousOperations = () => {
           <Card><CardHeader><CardTitle className="text-sm">Global control</CardTitle></CardHeader><CardContent className="space-y-2"><Input aria-label="Manual mode confirmation" value={manualConfirmation} onChange={(event) => setManualConfirmation(event.target.value)} placeholder="Type SET_MANUAL_MODE" /><Button disabled={update.isPending || manualConfirmation !== "SET_MANUAL_MODE"} onClick={setManualMode}>{data.manual_mode ? "Leave manual mode" : "Enable manual mode"}</Button></CardContent></Card>
         </div>
 
-        <div className="grid md:grid-cols-3 gap-4">
+        <div className="grid md:grid-cols-4 gap-4">
           {data.operators.map((operator) => (
             <Card key={operator.operator} className={statusClass[operator.status]}>
               <CardHeader><CardTitle className="flex justify-between gap-2"><span>{labels[operator.operator]}</span><Badge>{operator.status}</Badge></CardTitle></CardHeader>

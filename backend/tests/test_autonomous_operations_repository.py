@@ -131,6 +131,7 @@ def test_operator_switches_are_independent_and_default_disabled(db):
     assert state.manual_mode is True
     assert state.enabled == {
         Operator.SUBMISSIONS: True,
+        Operator.CURATION: False,
         Operator.CRON_HEALTH: False,
         Operator.CHAT_RELIABILITY: False,
     }

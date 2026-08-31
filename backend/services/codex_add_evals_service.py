@@ -37,6 +37,8 @@ from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
     serialize_thumbnail,
 )
+from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
+from backend.services.curation_autonomy import authorize_curation_launch
 from backend.utils.urls import get_paper_route_identifier
 from jobs.curation_failure_codes import AWAITING_MARKDOWN, parse_failure_code
 
@@ -704,6 +706,29 @@ class CodexPaperJobService:
     def _dispatch_row(
         self, db: Session, settings: Settings, row: PaperCurationJob
     ) -> None:
+        if getattr(row, "trigger", "admin") in {
+            "hf-daily-cron",
+            "hf-trending-cron",
+        }:
+            try:
+                authorize_curation_launch(db, row)
+            except AutonomousCapabilityDenied as error:
+                state = db.get(PaperCurationSchedulerState, 1)
+                if state is not None:
+                    state.paused_at = _now()
+                    state.pause_condition = "autonomous_policy_denied"
+                    reason = str(error)
+                    state.pause_reason = (
+                        "Scheduled curation operator is disabled"
+                        if reason == "operator_disabled"
+                        else f"Scheduled curation authorization denied: {reason}"
+                    )
+                db.commit()
+                logger.error(
+                    "paper curation dispatch paused condition=autonomous_policy_denied reason=%s",
+                    error,
+                )
+                return
         if (
             not settings.codex_jobs_namespace
             or not settings.codex_jobs_token

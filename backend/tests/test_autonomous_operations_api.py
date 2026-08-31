@@ -29,7 +29,7 @@ from backend.services.autonomous_operations_repository import (
 from backend.utils.auth import require_admin
 
 
-NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
+NOW = datetime.now(UTC).replace(microsecond=0)
 RUN_ID = uuid.UUID("aaaaaaaa-0000-0000-0000-000000000501")
 
 
@@ -86,7 +86,12 @@ def _seed_snapshot(db: Session) -> None:
                     updated_by="admin:owner",
                     updated_at=NOW,
                 )
-                for operator in ("submissions", "cron_health", "chat_reliability")
+                for operator in (
+                    "submissions",
+                    "curation",
+                    "cron_health",
+                    "chat_reliability",
+                )
             ),
             AutonomousRun(
                 id=RUN_ID,
@@ -158,11 +163,10 @@ def test_admin_read_model_is_content_free_and_keeps_monitoring_visible(api):
     assert payload["monitoring_active"] is True
     assert payload["display_state"] == "manual"
     assert payload["monitoring_active"] is True
-    assert (
-        next(row for row in payload["operators"] if row["operator"] == "cron_health")[
-            "next_scheduled_run"
-        ]
-        == "2026-08-28T12:15:00Z"
+    assert next(
+        row for row in payload["operators"] if row["operator"] == "cron_health"
+    )["next_scheduled_run"] == (NOW + timedelta(minutes=15)).isoformat().replace(
+        "+00:00", "Z"
     )
     assert payload["active_lease"]["owner_operator"] == "cron_health"
     assert payload["costs"] == {
@@ -340,6 +344,17 @@ def test_snapshot_uses_each_operator_history_and_newer_success_clears_rollback(a
                 evidence_digests=[],
                 created_at=NOW - timedelta(minutes=2),
             ),
+            AutonomousRun(
+                id=uuid.uuid4(),
+                operator="curation",
+                dry_run=False,
+                manifest_revision="curation-v1",
+                status="completed",
+                exit_classification="completed",
+                capability_requests=[],
+                evidence_digests=[],
+                created_at=NOW - timedelta(minutes=2),
+            ),
             *[
                 AutonomousRun(
                     id=uuid.uuid4(),
@@ -364,6 +379,7 @@ def test_snapshot_uses_each_operator_history_and_newer_success_clears_rollback(a
     assert snapshot["display_state"] == "healthy"
     assert {row["operator"]: row["status"] for row in snapshot["operators"]} == {
         "submissions": "healthy",
+        "curation": "healthy",
         "cron_health": "healthy",
         "chat_reliability": "healthy",
     }

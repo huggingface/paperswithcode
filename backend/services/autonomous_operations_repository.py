@@ -28,7 +28,13 @@ from backend.models.database import (
     ChatReliabilityBaseline,
 )
 
-_CONTROL_ROWS = ("global", "submissions", "cron_health", "chat_reliability")
+_CONTROL_ROWS = (
+    "global",
+    "submissions",
+    "curation",
+    "cron_health",
+    "chat_reliability",
+)
 _CODE = re.compile(r"^[a-z0-9][a-z0-9_.:-]{0,199}$")
 _RESOURCE_IDENTIFIER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,254}$")
 _ACTOR = re.compile(r"^(?:admin|system):[A-Za-z0-9][A-Za-z0-9._@-]{0,199}$")
@@ -37,6 +43,7 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SECRET_PREFIXES = ("sk-", "hf_", "bearer", "eyj")
 _MONITORING_INTERVALS = {
     "submissions": timedelta(hours=1),
+    "curation": timedelta(hours=1),
     "cron_health": timedelta(minutes=15),
     "chat_reliability": timedelta(minutes=15),
 }
@@ -44,6 +51,7 @@ _MONITORING_INTERVALS = {
 
 class Operator(StrEnum):
     SUBMISSIONS = "submissions"
+    CURATION = "curation"
     CRON_HEALTH = "cron_health"
     CHAT_RELIABILITY = "chat_reliability"
 

@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from backend.models.database import Paper, Task
+from backend.models.database import Paper, Task, TrendingModelCandidate
 from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
 from backend.services.autonomous_operations_repository import (
     Operator,
@@ -12,6 +12,7 @@ from backend.services.autonomous_operations_repository import (
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
 )
+from backend.services.curation_autonomy import curation_run_context
 from backend.services.pending_edit_mutations import PendingEditMutationService
 
 
@@ -40,6 +41,22 @@ class DenyPolicy:
 
 def context() -> RunContext:
     return RunContext(uuid.uuid4(), Operator.SUBMISSIONS, False, "manifest-v1")
+
+
+def curation_context() -> RunContext:
+    return RunContext(uuid.uuid4(), Operator.CURATION, False, "curation-v1")
+
+
+def test_curation_run_identity_does_not_reinterpret_legacy_job_run_ids():
+    job_id = uuid.uuid4()
+    row = SimpleNamespace(id=job_id, policy_version="scheduled-v1")
+
+    first = curation_run_context(row)
+    second = curation_run_context(row)
+
+    assert first.run_id == second.run_id
+    assert first.run_id != job_id
+    assert first.operator is Operator.CURATION
 
 
 def mutation_service(db, called):
@@ -118,16 +135,19 @@ def test_scheduled_curation_callback_requires_runtime_policy_authorization():
         service.authorize_autonomous_callback(row, body, context=context())
 
 
-def test_scheduled_resolver_has_no_undeclared_mutation_capability():
+def test_scheduled_resolver_uses_the_declared_curation_capability():
+    candidate_id = uuid.uuid4()
     service = object.__new__(CodexCurationCallbackService)
-    service.db = FakeDB(set())
+    service.db = FakeDB({(TrendingModelCandidate, candidate_id)})
     service.autonomous_policy = AllowPolicy()
     row = SimpleNamespace(
-        kind="resolve-model-paper", paper_id=None, trigger="hf-trending-cron"
+        kind="resolve-model-paper",
+        paper_id=None,
+        candidate_id=candidate_id,
+        trigger="hf-trending-cron",
     )
-    with pytest.raises(AutonomousCapabilityDenied, match="capability_not_in_manifest"):
-        service.authorize_autonomous_callback(
-            row,
-            SimpleNamespace(enrich=None, evaluations=[]),
-            context=context(),
-        )
+    service.authorize_autonomous_callback(
+        row,
+        SimpleNamespace(enrich=None, evaluations=[]),
+        context=curation_context(),
+    )

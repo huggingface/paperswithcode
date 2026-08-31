@@ -14,19 +14,28 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 from jsonschema import Draft202012Validator
+from sqlalchemy import create_engine
+from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.models.database import (
+    AutonomousOperatorState,
+    AutonomousRun,
     BenchmarkCurationCandidate,
     BenchmarkCurationEvidence,
     Dataset,
     Metric,
     Paper,
+    PaperCurationSchedulerState,
     PaperCurationWorkflow,
     Task,
     TaskDataset,
 )
 from backend.services.benchmark_gap_service import BenchmarkGapService
+from backend.services.autonomous_operations_repository import (
+    AutonomousOperationsRepository,
+    Operator,
+)
 from backend.services.codex_add_evals_service import (
     CodexPaperJobService,
     _is_callback_validation_rejection,
@@ -1390,7 +1399,7 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
         id=uuid.uuid4(),
         kind="enrich-paper",
         paper_id=42,
-        trigger="hf-daily-cron",
+        trigger="admin",
         retry_of_id=None,
         repository_sha="b" * 40,
         model="gpt-5.6-sol",
@@ -1415,6 +1424,76 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
     assert launched["image"] == "hf.co/spaces/example/curator-0123456789ab"
     assert row.status == "running"
     assert row.hf_job_id == "hf-job"
+
+
+def test_scheduled_dispatch_fails_closed_before_remote_launch_when_curation_is_disabled(
+    monkeypatch,
+):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    for model in (
+        AutonomousOperatorState,
+        AutonomousRun,
+        PaperCurationSchedulerState,
+    ):
+        model.__table__.create(engine)
+    with Session(engine, expire_on_commit=False) as session:
+
+        class Database:
+            def get(self, model, key):
+                if model is Paper:
+                    return SimpleNamespace(id=key)
+                return session.get(model, key)
+
+            def __getattr__(self, name):
+                return getattr(session, name)
+
+        db = Database()
+        operations = AutonomousOperationsRepository()
+        control = operations.get_control_state(db)
+        assert control.manual_mode is True
+        session.get(AutonomousOperatorState, "global").manual_mode = False
+        state = PaperCurationSchedulerState(
+            id=1,
+            dispatch_enabled=True,
+            first_enabled_at=datetime.now(UTC),
+        )
+        db.add(state)
+        db.commit()
+        row = SimpleNamespace(
+            id=uuid.uuid4(),
+            kind="enrich-paper",
+            paper_id=42,
+            candidate_id=None,
+            trigger="hf-daily-cron",
+            policy_version="scheduled-v1",
+            status="queued",
+        )
+        service = CodexPaperJobService()
+        launched = False
+
+        def launch(**_values):
+            nonlocal launched
+            launched = True
+            return SimpleNamespace(id="hf-job")
+
+        monkeypatch.setattr(service, "_run_job_with_retry", launch)
+        settings = get_settings().model_copy(
+            update={
+                "codex_jobs_namespace": "example",
+                "codex_jobs_token": "hf-token",
+                "codex_jobs_openai_api_key": "openai-token",
+            }
+        )
+
+        service._dispatch_row(db, settings, row)
+
+        assert launched is False
+        assert row.status == "queued"
+        assert state.pause_condition == "autonomous_policy_denied"
+        assert "curation operator is disabled" in state.pause_reason
+        control = operations.get_control_state(db)
+        assert control.enabled[Operator.CURATION] is False
+    engine.dispose()
 
 
 def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
