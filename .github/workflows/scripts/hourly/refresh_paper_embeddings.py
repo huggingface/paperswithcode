@@ -45,6 +45,8 @@ class RefreshPaperEmbeddingsJob(CronJobBase):
         self.logger.info("Candidates: %d", result.candidates)
         self.logger.info("Embeddings updated: %d", result.embedded)
         self.logger.info("Stale during inference: %d", result.stale)
+        self.logger.info("Missing remaining: %d", result.missing_remaining)
+        self.logger.info("Content hash mismatches: %d", result.content_hash_mismatches)
         self.logger.info("Run ID: %s", result.run_id)
         self.logger.info(
             "PAPER_EMBEDDINGS_SUMMARY %s",
@@ -54,6 +56,8 @@ class RefreshPaperEmbeddingsJob(CronJobBase):
                     "candidates": result.candidates,
                     "embeddings_updated": result.embedded,
                     "stale_during_inference": result.stale,
+                    "missing_remaining": result.missing_remaining,
+                    "content_hash_mismatches": result.content_hash_mismatches,
                     "run_id": str(result.run_id),
                 }
             ),

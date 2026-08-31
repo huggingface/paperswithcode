@@ -1,8 +1,25 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { PanelIcon, PlusIcon, TrashIcon } from "./icons";
 import { canNavigateAwayFromArtifact } from "./useArtifactPanel";
 import { type ChatSession, groupSessions } from "@/lib/chatSessions";
+
+const SIDEBAR_WIDTH_KEY = "pwc:chat:sidebar-width";
+const DEFAULT_SIDEBAR_WIDTH = 280;
+const MIN_SIDEBAR_WIDTH = 200;
+const MAX_SIDEBAR_WIDTH = 480;
+
+const clampSidebarWidth = (width: number) => (
+  Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width))
+);
+
+const savedSidebarWidth = () => {
+  if (typeof window === "undefined") return DEFAULT_SIDEBAR_WIDTH;
+  const stored = Number(localStorage.getItem(SIDEBAR_WIDTH_KEY));
+  return Number.isFinite(stored) && stored > 0
+    ? clampSidebarWidth(stored)
+    : DEFAULT_SIDEBAR_WIDTH;
+};
 
 interface ChatSessionNavigationProps {
   sessions: ChatSession[];
@@ -29,6 +46,9 @@ export function ChatSessionNavigation({
   onRename,
   onDelete,
 }: ChatSessionNavigationProps) {
+  const [sidebarWidth, setSidebarWidth] = useState(savedSidebarWidth);
+  const dragStart = useRef<{ x: number; width: number } | null>(null);
+  const pendingWidth = useRef(sidebarWidth);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
@@ -56,9 +76,31 @@ export function ChatSessionNavigation({
     if (title && await onRename(sessionId, title)) setEditingId(null);
   };
   const openMenu = (id: string, x: number, y: number) => setMenu({ id, x, y });
+  const resizeFromPointer = (clientX: number) => {
+    if (!dragStart.current) return;
+    const next = clampSidebarWidth(
+      dragStart.current.width + clientX - dragStart.current.x,
+    );
+    pendingWidth.current = next;
+    setSidebarWidth(next);
+  };
+  const finishResize = () => {
+    if (!dragStart.current) return;
+    dragStart.current = null;
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(pendingWidth.current));
+  };
+  const saveSidebarWidth = (next: number) => {
+    const width = clampSidebarWidth(next);
+    pendingWidth.current = width;
+    setSidebarWidth(width);
+    localStorage.setItem(SIDEBAR_WIDTH_KEY, String(width));
+  };
 
   return (
-    <aside className={`chat-sidebar${open ? "" : " chat-sidebar-closed"}`}>
+    <aside
+      className={`chat-sidebar${open ? "" : " chat-sidebar-closed"}`}
+      style={{ "--chat-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
+    >
       <div className="chat-sidebar-top">
         <button type="button" className="chat-new-chat" onClick={() => { if (canNavigateAwayFromArtifact()) onNew(); }}><PlusIcon /> New chat</button>
         <button type="button" className="icon-btn" onClick={onClose} title="Collapse sidebar"><PanelIcon /></button>
@@ -129,6 +171,38 @@ export function ChatSessionNavigation({
           </div>)}
         </div>)}
       </nav>
+      <div
+        className="chat-sidebar-resize-handle"
+        role="separator"
+        aria-label="Resize chat history"
+        aria-orientation="vertical"
+        aria-valuemin={MIN_SIDEBAR_WIDTH}
+        aria-valuemax={MAX_SIDEBAR_WIDTH}
+        aria-valuenow={sidebarWidth}
+        title="Drag to resize; double-click to reset"
+        tabIndex={0}
+        onPointerDown={(event) => {
+          if (event.button !== 0) return;
+          dragStart.current = { x: event.clientX, width: sidebarWidth };
+          pendingWidth.current = sidebarWidth;
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => resizeFromPointer(event.clientX)}
+        onPointerUp={finishResize}
+        onPointerCancel={finishResize}
+        onLostPointerCapture={finishResize}
+        onDoubleClick={() => saveSidebarWidth(DEFAULT_SIDEBAR_WIDTH)}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+            event.preventDefault();
+            saveSidebarWidth(sidebarWidth + (event.key === "ArrowRight" ? 10 : -10));
+          }
+          if (event.key === "Home" || event.key === "End") {
+            event.preventDefault();
+            saveSidebarWidth(event.key === "Home" ? MIN_SIDEBAR_WIDTH : MAX_SIDEBAR_WIDTH);
+          }
+        }}
+      />
       {menu && <div
         className="chat-session-context-menu"
         role="menu"

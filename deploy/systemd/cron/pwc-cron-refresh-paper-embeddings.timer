@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Refresh paper embeddings hourly
+
+[Timer]
+OnCalendar=*-*-* *:15:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-refresh-paper-embeddings.service
+
+[Install]
+WantedBy=timers.target

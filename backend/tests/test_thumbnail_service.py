@@ -21,6 +21,10 @@ from backend.services.thumbnail_service import (
     is_thumbnail_valid,
 )
 from backend.services.arxiv_service import ArxivPdfUnavailableError
+from backend.services.safe_outbound_http_service import (
+    SafeFetchResult,
+    SafeOutboundHttpError,
+)
 from backend.utils.exceptions import ThumbnailGenerationError, ThumbnailUnavailableError
 
 
@@ -248,6 +252,121 @@ def test_external_html_source_skips_pdf_download():
     )
 
     assert result is None
+
+
+def _external_pdf_service() -> ThumbnailService:
+    service = ThumbnailService.__new__(ThumbnailService)
+    service.max_pdf_size = 1_000_000
+    service.pdf_timeout = 10
+    return service
+
+
+@pytest.mark.parametrize(
+    "host",
+    [
+        "aixiv.science",
+        "ecmlpkdd-storage.s3.eu-central-1.amazonaws.com",
+        "microsoft.ai",
+        "www.cv-foundation.org",
+    ],
+)
+def test_approved_external_pdf_host_can_be_rendered(monkeypatch, host: str):
+    service = _external_pdf_service()
+
+    async def fetch(url, **kwargs):
+        if host not in kwargs["allowed_hosts"]:
+            raise SafeOutboundHttpError(403, "The outbound hostname is not approved")
+        return SafeFetchResult(url, 200, "application/pdf", b"%PDF-example")
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    result = asyncio.run(service._download_external_pdf(f"https://{host}/report.pdf"))
+
+    assert result == b"%PDF-example"
+
+
+@pytest.mark.parametrize("origin_status_code", [403, 404, 410])
+def test_permanent_external_pdf_error_generates_metadata_fallback(
+    tmp_path: Path, monkeypatch, origin_status_code: int
+):
+    service = _external_pdf_service()
+    service.thumbnail_width = EXPECTED_THUMBNAIL_WIDTH
+    service.thumbnail_quality = 85
+    service.get_external_filename = lambda _paper_id: "external_42.jpg"
+    service.get_existing_custom_thumbnail_path = MagicMock(return_value=None)
+    service._get_active_cache_path = MagicMock(
+        return_value=tmp_path / "external_42.jpg"
+    )
+    service._upload_to_bucket = MagicMock()
+
+    async def missing(*_args, **_kwargs):
+        raise SafeOutboundHttpError(
+            502,
+            "The outbound origin returned an error",
+            origin_status_code=origin_status_code,
+        )
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", missing
+    )
+
+    path = asyncio.run(
+        service.generate_external_thumbnail(
+            42,
+            "https://openaccess.thecvf.com/missing.pdf",
+            title="Missing report",
+        )
+    )
+
+    assert is_thumbnail_valid(path)
+    service._upload_to_bucket.assert_called_once_with(path, "external_42.jpg")
+
+
+@pytest.mark.parametrize("safe_status_code", [403, 409, 413, 415, 422])
+def test_permanent_safe_fetch_error_uses_metadata_fallback(
+    monkeypatch, safe_status_code: int
+):
+    service = _external_pdf_service()
+
+    async def rejected(*_args, **_kwargs):
+        raise SafeOutboundHttpError(safe_status_code, "permanent")
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", rejected
+    )
+
+    result = asyncio.run(
+        service._download_external_pdf("https://example.com/report.pdf")
+    )
+
+    assert result is None
+
+
+@pytest.mark.parametrize("origin_status_code", [None, 503])
+def test_transient_external_pdf_error_remains_retryable(
+    monkeypatch, origin_status_code: int | None
+):
+    service = _external_pdf_service()
+
+    async def unavailable(*_args, **_kwargs):
+        raise SafeOutboundHttpError(
+            502,
+            "The outbound origin returned an error",
+            origin_status_code=origin_status_code,
+        )
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", unavailable
+    )
+
+    with pytest.raises(ThumbnailGenerationError, match="temporarily unavailable"):
+        asyncio.run(
+            service._download_external_pdf(
+                "https://openaccess.thecvf.com/temporarily-unavailable.pdf"
+            )
+        )
 
 
 def test_external_metadata_thumbnail_matches_card_dimensions():

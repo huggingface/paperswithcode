@@ -9,7 +9,7 @@ from datetime import UTC, datetime, timedelta
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from backend.models.database import PaperCurationJob
+from backend.models.database import Paper, PaperCurationJob
 from backend.services.paper_thumbnail_service import regenerate_paper_thumbnail
 
 TERMINAL_THUMBNAIL_STATUSES = {"succeeded", "failed"}
@@ -19,6 +19,43 @@ DEFAULT_STALE_AFTER = timedelta(minutes=15)
 
 def _now() -> datetime:
     return datetime.now(UTC)
+
+
+def queue_thumbnail(row: PaperCurationJob) -> None:
+    """Reset one curation row to a fresh durable thumbnail request."""
+    row.thumbnail_status = "queued"
+    row.thumbnail_requested_at = _now()
+    row.thumbnail_claimed_at = None
+    row.thumbnail_finished_at = None
+    row.thumbnail_attempt_count = 0
+    row.thumbnail_url = None
+    row.thumbnail_previous_width = None
+    row.thumbnail_previous_height = None
+    row.thumbnail_generated_width = None
+    row.thumbnail_generated_height = None
+    row.thumbnail_warnings = None
+    row.thumbnail_error = None
+
+
+def queue_missing_paper_thumbnail(
+    db: Session, row: PaperCurationJob, paper: Paper | None
+) -> bool:
+    """Queue one missing paper thumbnail without duplicating active work."""
+    if paper is None or paper.thumbnail_url:
+        return False
+    active = (
+        db.query(PaperCurationJob.id)
+        .filter(
+            PaperCurationJob.paper_id == paper.id,
+            PaperCurationJob.id != row.id,
+            PaperCurationJob.thumbnail_status.in_({"queued", "processing"}),
+        )
+        .first()
+    )
+    if active is not None:
+        return False
+    queue_thumbnail(row)
+    return True
 
 
 def serialize_thumbnail(row: PaperCurationJob) -> dict:
@@ -93,13 +130,18 @@ class CurationThumbnailQueueService:
         )
         if row is None:
             return None
+        paper_id = row.paper_id
+        if paper_id is None:
+            paper_id = (row.mutation_result or {}).get("paper_id")
+        if paper_id is None:
+            raise RuntimeError("Thumbnail request has no target paper")
         row.thumbnail_status = "processing"
         row.thumbnail_claimed_at = _now()
         row.thumbnail_finished_at = None
         row.thumbnail_attempt_count += 1
         row.thumbnail_error = None
         db.commit()
-        return ThumbnailClaim(job_id=row.id, paper_id=int(row.paper_id))
+        return ThumbnailClaim(job_id=row.id, paper_id=int(paper_id))
 
     def succeed(self, db: Session, claim: ThumbnailClaim, result) -> None:
         row = db.get(PaperCurationJob, claim.job_id)

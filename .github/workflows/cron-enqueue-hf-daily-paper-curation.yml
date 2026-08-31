@@ -1,8 +1,6 @@
 name: Cron - Enqueue HF Daily Paper Curation
 
 on:
-  schedule:
-    - cron: "27 * * * *"
   workflow_dispatch:
     inputs:
       date:

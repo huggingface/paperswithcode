@@ -11,8 +11,8 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import secrets
-import stat
 import subprocess
 import tomllib
 from pathlib import Path
@@ -22,7 +22,9 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CONFIG_ROOT = Path("/etc/paperswithcode")
+APP_ROOT = Path("/srv/paperswithcode")
 PRODUCTION_CHAT_SEALED_CONFIG = CONFIG_ROOT / "production-chat-prepared.env"
+STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
 
 STAGING_EXCLUDED_PREFIXES = (
     "PWC_POSTGRES_BACKUP_",
@@ -40,6 +42,15 @@ STAGING_EXCLUDED_KEYS = {
     "PWC_OPENROUTER_API_KEY",
 }
 CRON_ONLY_KEYS = {
+    "PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_CODEX_API_KEY",
+    "PWC_AUTONOMOUS_CODEX_BROKER_TOKEN",
+    "PWC_AUTONOMOUS_DIGEST_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_CODEX_RESERVATION_VERIFY_KEY",
+    "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
+    "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
+    "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
 }
@@ -86,6 +97,10 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "PWC_CHAT_SANDBOX_MEMORY_MIB",
     "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP",
     "PWC_CHAT_SANDBOX_WARNING_MICROUSD",
+    "PWC_CHAT_SCOPE_GUARDRAIL_ENABLED",
+    "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN",
+    "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO",
+    "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY",
     "PWC_CHAT_SANDBOX_SPEND_ENFORCEMENT_ENABLED",
     "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD",
     "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD",
@@ -135,51 +150,7 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "PWC_CHAT_WEB_SEARCH_MONTHLY_HARD_CALLS",
     "PWC_CHAT_WEB_SEARCH_TRANSIENT_COOLDOWN_SECONDS",
     "PWC_CHAT_WEB_SEARCH_DOMAIN_DENYLIST",
-    # Private paper compiler. These values are provisioned only through the
-    # staging-only modes below and survive ordinary environment refreshes.
-    "PWC_CHAT_ARTIFACTS_ENABLED",
-    "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED",
-    "PWC_CHAT_ARTIFACT_STORAGE_BACKEND",
-    "PWC_CHAT_ARTIFACT_HF_BUCKET_ID",
-    "PWC_CHAT_POSTERLY_ENABLED",
-    "PWC_CHAT_LATEX_PAPER_ENABLED",
-    "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
-    "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
-    "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
 }
-
-STAGING_LATEX_COMPILER_NAMESPACE = "nielsr"
-STAGING_LATEX_COMPILER_ARTIFACT_BUCKET = "nielsr/pwc-chat-artifacts-staging"
-STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
-_LATEX_SIGNING_KEY = "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"
-_LATEX_REQUIRED_SETTINGS = {
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
-    _LATEX_SIGNING_KEY,
-}
-STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
-    "/var/lib/paperswithcode/staging-compiler-qualification/"
-    "latex-compiler-qualification.json"
-)
-_LATEX_QUALIFICATION_CHECKS = frozenset(
-    {
-        "hostile_input",
-        "cancellation",
-        "health",
-        "metrics",
-        "image_isolation",
-        "reconciliation",
-        "restart",
-    }
-)
 
 STAGING_LANGFUSE_KEYS = {
     "LANGFUSE_BASE_URL",
@@ -213,6 +184,26 @@ def decoded_value(line: str) -> str:
 def existing_or_random(lines: dict[str, str], key: str) -> str:
     line = lines.get(key)
     return decoded_value(line) if line else secrets.token_urlsafe(48)
+
+
+def trending_cron_values(
+    legacy: dict[str, str],
+    current: dict[str, str],
+    *,
+    password: str,
+) -> dict[str, str]:
+    """Build the persistent minimal environment for isolated scoring jobs."""
+    return {
+        "PWC_DB_HOST": decoded_value(legacy["PWC_DB_HOST"]),
+        "PWC_DB_NAME": decoded_value(legacy["PWC_DB_NAME"]),
+        "PWC_DB_PORT": decoded_value(legacy["PWC_DB_PORT"]),
+        "PWC_TRENDING_DB_PASSWORD": password,
+        **{
+            key: decoded_value(line)
+            for key, line in current.items()
+            if key.startswith("PWC_TRENDING_PIN_")
+        },
+    }
 
 
 def shared_role_values(*sources: dict[str, str]) -> dict[str, str]:
@@ -290,261 +281,6 @@ def staging_runtime_passthrough(lines: dict[str, str]) -> dict[str, str]:
         for key, line in lines.items()
         if key in STAGING_RUNTIME_PASSTHROUGH_KEYS
     }
-
-
-def _staging_latex_token(lines: dict[str, str]) -> str:
-    """Reuse the existing protected staging Hub identity without printing it."""
-
-    for key in ("PWC_HF_TOKEN", "HF_TOKEN"):
-        line = lines.get(key)
-        if line and (value := decoded_value(line).strip()):
-            return value
-    raise ValueError("staging Hub credential is missing")
-
-
-def _staging_latex_signing_key(lines: dict[str, str]) -> str:
-    """Preserve a valid backend-only key or create one in the protected env."""
-
-    existing = lines.get(_LATEX_SIGNING_KEY)
-    if existing and (value := decoded_value(existing).strip()):
-        try:
-            raw = base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
-            Ed25519PrivateKey.from_private_bytes(raw)
-        except ValueError as error:
-            raise ValueError("staging LaTeX signing key is invalid") from error
-        return value
-    private_key = Ed25519PrivateKey.generate()
-    raw = private_key.private_bytes(
-        serialization.Encoding.Raw,
-        serialization.PrivateFormat.Raw,
-        serialization.NoEncryption(),
-    )
-    return base64.urlsafe_b64encode(raw).rstrip(b"=").decode("ascii")
-
-
-def _validate_staging_latex_image(image: str, namespace: str) -> str:
-    """Accept only the approved immutable, staging-scoped Sandbox image."""
-
-    normalized = image.strip()
-    prefix = f"registry.hf.space/{STAGING_LATEX_COMPILER_NAMESPACE}-"
-    digest_prefix, marker, digest = normalized.partition("@sha256:")
-    if namespace != STAGING_LATEX_COMPILER_NAMESPACE:
-        raise ValueError(
-            "LaTeX Sandbox namespace must be the approved staging identity"
-        )
-    if (
-        not marker
-        or not digest_prefix.startswith(prefix)
-        or not digest_prefix.endswith("-staging")
-        or "production" in normalized.lower()
-        or len(digest) != 64
-        or any(character not in "0123456789abcdef" for character in digest)
-    ):
-        raise ValueError("LaTeX Sandbox image must be an immutable staging digest")
-    return normalized
-
-
-def staging_latex_compiler_provision_values(
-    current: dict[str, str], *, image: str, namespace: str
-) -> dict[str, str]:
-    """Install a disabled, protected per-job compiler configuration for staging.
-
-    This prepares the only supported compiler path while keeping every user
-    feature kill-switched. The Hub token never enters a Sandbox; it is used only
-    by the backend when creating a dedicated job VM.
-    """
-
-    validated_image = _validate_staging_latex_image(image, namespace)
-    return {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "false",
-        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
-        "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
-        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_LATEX_COMPILER_ARTIFACT_BUCKET,
-        "PWC_CHAT_POSTERLY_ENABLED": "false",
-        "PWC_CHAT_LATEX_PAPER_ENABLED": "false",
-        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "false",
-        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE": validated_image,
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE": namespace,
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN": _staging_latex_token(current),
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR": "cpu-upgrade",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS": "180",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION": (
-            STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
-        ),
-        # The retired direct-Space client must never become an alternate
-        # manuscript path when this immutable Sandbox configuration is armed.
-        "PWC_CHAT_LATEX_COMPILER_URL": "",
-        "PWC_CHAT_LATEX_COMPILER_HF_TOKEN": "",
-        _LATEX_SIGNING_KEY: _staging_latex_signing_key(current),
-    }
-
-
-def _staging_latex_compiler_ready(current: dict[str, str]) -> None:
-    """Validate the non-secret shape of a provisioned staging compiler path."""
-
-    missing = sorted(key for key in _LATEX_REQUIRED_SETTINGS if key not in current)
-    if missing:
-        raise ValueError("staging LaTeX compiler configuration is missing")
-    values = {
-        key: decoded_value(current[key]).strip() for key in _LATEX_REQUIRED_SETTINGS
-    }
-    if any(not value for value in values.values()):
-        raise ValueError("staging LaTeX compiler configuration is incomplete")
-    _validate_staging_latex_image(
-        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"],
-        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE"],
-    )
-    bucket_line = current.get("PWC_CHAT_ARTIFACT_HF_BUCKET_ID")
-    bucket_id = decoded_value(bucket_line).strip() if bucket_line else ""
-    if (
-        _decoded_flag(current, "PWC_CHAT_ARTIFACT_STORAGE_BACKEND") != "hf_bucket"
-        or bucket_id != STAGING_LATEX_COMPILER_ARTIFACT_BUCKET
-    ):
-        raise ValueError("staging LaTeX compiler requires the private staging bucket")
-    if (
-        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION"]
-        != STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
-    ):
-        raise ValueError("staging LaTeX compiler egress attestation is invalid")
-    try:
-        encoded = values[_LATEX_SIGNING_KEY]
-        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
-        Ed25519PrivateKey.from_private_bytes(raw)
-    except ValueError as error:
-        raise ValueError("staging LaTeX signing key is invalid") from error
-
-
-def _qualified_staging_latex_compiler(
-    evidence_path: Path, *, expected_image: str
-) -> None:
-    """Require a complete, content-free result from the staging-only qualifier."""
-
-    try:
-        evidence_gid = grp.getgrnam("pwc-staging").gr_gid
-        directory_stat = evidence_path.parent.lstat()
-        evidence_stat = evidence_path.lstat()
-        if (
-            not stat.S_ISDIR(directory_stat.st_mode)
-            or stat.S_IMODE(directory_stat.st_mode) != 0o750
-            or directory_stat.st_uid != 0
-            or directory_stat.st_gid != evidence_gid
-            or not stat.S_ISREG(evidence_stat.st_mode)
-            or stat.S_IMODE(evidence_stat.st_mode) != 0o640
-            or evidence_stat.st_uid != 0
-            or evidence_stat.st_gid != evidence_gid
-            or evidence_stat.st_nlink != 1
-            or evidence_stat.st_size > 16_384
-        ):
-            raise ValueError
-        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
-    except (KeyError, OSError, ValueError, json.JSONDecodeError) as error:
-        raise ValueError(
-            "staging LaTeX qualification evidence is unavailable"
-        ) from error
-    checks = payload.get("checks") if isinstance(payload, dict) else None
-    if (
-        not isinstance(payload, dict)
-        or set(payload)
-        != {
-            "schema_version",
-            "environment",
-            "compiler_image",
-            "passed",
-            "total",
-            "checks",
-        }
-        or not isinstance(checks, dict)
-        or set(checks) != _LATEX_QUALIFICATION_CHECKS
-        or payload.get("schema_version") != 1
-        or payload.get("environment") != "staging"
-        or payload.get("compiler_image") != expected_image
-        or type(payload.get("passed")) is not int
-        or type(payload.get("total")) is not int
-        or payload["passed"] != payload["total"]
-        or payload["total"] < len(_LATEX_QUALIFICATION_CHECKS)
-        or any(checks[name] is not True for name in _LATEX_QUALIFICATION_CHECKS)
-    ):
-        raise ValueError("staging LaTeX qualification evidence is incomplete")
-
-
-def ensure_staging_latex_compiler_evidence_layout() -> None:
-    """Create only the root-controlled evidence handoff directory.
-
-    This is deliberately narrower than the host-layout installer: operators can
-    prepare the read-only staging handoff without touching units, releases, or
-    any other runtime path.
-    """
-
-    path = STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE.parent
-    try:
-        existing = path.lstat()
-    except FileNotFoundError:
-        path.mkdir(mode=0o750)
-    else:
-        if not stat.S_ISDIR(existing.st_mode):
-            raise ValueError("staging LaTeX qualification directory is invalid")
-    try:
-        gid = grp.getgrnam("pwc-staging").gr_gid
-        os.chown(path, 0, gid)
-        os.chmod(path, 0o750)
-        trusted = path.lstat()
-    except (KeyError, OSError) as error:
-        raise ValueError(
-            "staging LaTeX qualification directory is unavailable"
-        ) from error
-    if (
-        not stat.S_ISDIR(trusted.st_mode)
-        or trusted.st_uid != 0
-        or trusted.st_gid != gid
-        or stat.S_IMODE(trusted.st_mode) != 0o750
-    ):
-        raise ValueError("staging LaTeX qualification directory is not trusted")
-
-
-def staging_latex_compiler_qualification_values(
-    current: dict[str, str], *, enabled: bool
-) -> dict[str, str]:
-    """Allow only an isolated staging compiler qualification, never user turns."""
-
-    if enabled:
-        _staging_latex_compiler_ready(current)
-    return {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "false",
-        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
-        "PWC_CHAT_POSTERLY_ENABLED": "false",
-        "PWC_CHAT_LATEX_PAPER_ENABLED": "false",
-        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "false",
-        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": str(enabled).lower(),
-    }
-
-
-def staging_latex_paper_activation_values(
-    current: dict[str, str], *, evidence_path: Path
-) -> dict[str, str]:
-    """Enable user paper turns only after the private Sandbox proof is complete."""
-
-    _staging_latex_compiler_ready(current)
-    _qualified_staging_latex_compiler(
-        evidence_path,
-        expected_image=decoded_value(
-            current["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"]
-        ).strip(),
-    )
-    return {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
-        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
-        "PWC_CHAT_POSTERLY_ENABLED": "false",
-        "PWC_CHAT_LATEX_PAPER_ENABLED": "true",
-        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "true",
-        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
-    }
-
-
-def staging_latex_paper_disable_values() -> dict[str, str]:
-    """Immediately stop new paper/compiler work while preserving owner reads."""
-
-    return staging_latex_compiler_qualification_values({}, enabled=False)
 
 
 def staging_langfuse_values(legacy: dict[str, str]) -> dict[str, str]:
@@ -683,6 +419,132 @@ def staging_openai_direct_disable_values() -> dict[str, str]:
         "PWC_CHAT_PI_PREWARM_MODEL": "openai/gpt-5.6-luna",
         "PWC_CHAT_PI_PREWARM_REASONING_EFFORT": "low",
     }
+
+
+def staging_scope_guardrail_values(current: dict[str, str]) -> dict[str, str]:
+    """Install server-owned scope credentials without exposing user tokens."""
+
+    required = (
+        "PWC_CHAT_TITLE_HF_TOKEN",
+        "PWC_CHAT_HF_BILL_TO",
+        "PWC_CODEX_JOBS_OPENAI_API_KEY",
+    )
+    values = {
+        key: decoded_value(current[key]).strip()
+        for key in required
+        if key in current and decoded_value(current[key]).strip()
+    }
+    missing = [key for key in required if key not in values]
+    if missing:
+        raise ValueError(
+            "staging scope guardrail source is missing: " + ", ".join(missing)
+        )
+    for dedicated, general in (
+        ("PWC_CHAT_TITLE_HF_TOKEN", "PWC_HF_TOKEN"),
+        ("PWC_CODEX_JOBS_OPENAI_API_KEY", "PWC_OPENAI_API_KEY"),
+    ):
+        if (
+            general in current
+            and decoded_value(current[general]).strip() == values[dedicated]
+        ):
+            raise ValueError(
+                f"staging scope guardrail credential must not reuse {general}"
+            )
+    return {
+        "PWC_CHAT_SCOPE_GUARDRAIL_ENABLED": "true",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN": values["PWC_CHAT_TITLE_HF_TOKEN"],
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": values["PWC_CHAT_HF_BILL_TO"],
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": values[
+            "PWC_CODEX_JOBS_OPENAI_API_KEY"
+        ],
+        "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_CHAT_ARTIFACT_BUCKET_ID,
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+    }
+
+
+def scope_title_hf_values(
+    source: dict[str, str],
+    current: dict[str, str],
+    other_environment: dict[str, str],
+    *,
+    environment: str,
+) -> dict[str, str]:
+    """Build one environment-isolated HF title and scope policy."""
+
+    if environment not in {"staging", "production"}:
+        raise ValueError("scope/title environment must be staging or production")
+    required_source = (
+        "PWC_CHAT_TITLE_GENERATION_ENABLED",
+        "PWC_CHAT_TITLE_HF_TOKEN",
+        "PWC_CHAT_TITLE_BILL_TO",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER",
+        "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT",
+    )
+    source_values = {
+        key: decoded_value(source[key]).strip()
+        for key in required_source
+        if key in source and decoded_value(source[key]).strip()
+    }
+    missing = [key for key in required_source if key not in source_values]
+    if missing:
+        raise ValueError("scope/title source is missing: " + ", ".join(missing))
+    expected = {
+        "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
+        "PWC_CHAT_TITLE_BILL_TO": "huggingface",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
+        "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": environment,
+    }
+    for key, value in expected.items():
+        if source_values[key] != value:
+            raise ValueError(f"{key} must be {value}")
+
+    token = source_values["PWC_CHAT_TITLE_HF_TOKEN"]
+    forbidden_hf_tokens = {
+        decoded_value(lines[key]).strip()
+        for lines, key in (
+            (source, "PWC_HF_TOKEN"),
+            (current, "PWC_HF_TOKEN"),
+            (other_environment, "PWC_HF_TOKEN"),
+            (other_environment, "PWC_CHAT_TITLE_HF_TOKEN"),
+            (other_environment, "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN"),
+        )
+        if key in lines and decoded_value(lines[key]).strip()
+    }
+    if token in forbidden_hf_tokens:
+        raise ValueError(
+            "the title token must remain distinct from general and other-environment tokens"
+        )
+
+    fallback_line = current.get("PWC_CODEX_JOBS_OPENAI_API_KEY")
+    fallback = decoded_value(fallback_line).strip() if fallback_line else ""
+    if not fallback:
+        raise ValueError("PWC_CODEX_JOBS_OPENAI_API_KEY must be configured")
+    bill_to = source_values["PWC_CHAT_TITLE_BILL_TO"]
+    values = {
+        **source_values,
+        "PWC_CHAT_TITLE_MODEL": "zai-org/GLM-5.3-Flash:baseten",
+        "PWC_CHAT_TITLE_PROVIDER": "huggingface",
+        "PWC_CHAT_TITLE_MAX_TOKENS": "64",
+        "PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD": "25000000",
+        "PWC_CHAT_TITLE_WARNING_MICROUSD": "20000000",
+        "PWC_CHAT_TITLE_MAX_CALL_MICROUSD": "10000",
+        "PWC_CHAT_SCOPE_GUARDRAIL_ENABLED": "true",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN": token,
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": bill_to,
+        "PWC_CHAT_SCOPE_GUARDRAIL_GLM_MODEL": ("zai-org/GLM-5.3-Flash:baseten"),
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": fallback,
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-5.6-luna",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+    }
+    if environment == "staging":
+        values.update(
+            {
+                "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+                "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_CHAT_ARTIFACT_BUCKET_ID,
+            }
+        )
+    return values
 
 
 def production_openai_direct_values(current: dict[str, str]) -> dict[str, str]:
@@ -831,8 +693,8 @@ def staging_title_values(
         )
     return {
         **values,
-        "PWC_CHAT_TITLE_MODEL": "deepseek/deepseek-v4-flash-0731",
-        "PWC_CHAT_TITLE_PROVIDER": "openrouter",
+        "PWC_CHAT_TITLE_MODEL": "zai-org/GLM-5.3-Flash:baseten",
+        "PWC_CHAT_TITLE_PROVIDER": "huggingface",
         "PWC_CHAT_TITLE_MAX_TOKENS": "64",
         "PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD": "25000000",
         "PWC_CHAT_TITLE_WARNING_MICROUSD": "20000000",
@@ -845,10 +707,12 @@ def production_title_values(
     current_production: dict[str, str],
     current_staging: dict[str, str],
 ) -> dict[str, str]:
-    """Validate the production OpenRouter title policy."""
+    """Validate the isolated production HF title policy."""
 
     required = {
         "PWC_CHAT_TITLE_GENERATION_ENABLED",
+        "PWC_CHAT_TITLE_HF_TOKEN",
+        "PWC_CHAT_TITLE_BILL_TO",
         "PWC_CHAT_TITLE_CREDENTIAL_OWNER",
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT",
     }
@@ -858,18 +722,33 @@ def production_title_values(
     values = {key: decoded_value(source[key]).strip() for key in required}
     expected = {
         "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
+        "PWC_CHAT_TITLE_BILL_TO": "huggingface",
         "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": "production",
     }
     for key, value in expected.items():
         if values[key] != value:
             raise ValueError(f"{key} must be {value}")
+    token = values["PWC_CHAT_TITLE_HF_TOKEN"]
+    forbidden_tokens = {
+        decoded_value(lines[key]).strip()
+        for lines, key in (
+            (source, "PWC_HF_TOKEN"),
+            (current_production, "PWC_HF_TOKEN"),
+            (current_staging, "PWC_HF_TOKEN"),
+            (current_staging, "PWC_CHAT_TITLE_HF_TOKEN"),
+            (current_staging, "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN"),
+        )
+        if key in lines and decoded_value(lines[key]).strip()
+    }
+    if token in forbidden_tokens:
+        raise ValueError(
+            "the production title token must be distinct from general and staging tokens"
+        )
     return {
         **values,
-        "PWC_CHAT_TITLE_HF_TOKEN": "",
-        "PWC_CHAT_TITLE_BILL_TO": "",
-        "PWC_CHAT_TITLE_MODEL": "deepseek/deepseek-v4-flash-0731",
-        "PWC_CHAT_TITLE_PROVIDER": "openrouter",
+        "PWC_CHAT_TITLE_MODEL": "zai-org/GLM-5.3-Flash:baseten",
+        "PWC_CHAT_TITLE_PROVIDER": "huggingface",
         "PWC_CHAT_TITLE_MAX_TOKENS": "64",
         "PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD": "25000000",
         "PWC_CHAT_TITLE_WARNING_MICROUSD": "20000000",
@@ -941,6 +820,11 @@ def cron_passthrough_credentials(
             "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
         }
     }
+    for key in CRON_ONLY_KEYS:
+        if key in legacy:
+            result[key] = legacy[key]
+        elif key in current_cron:
+            result[key] = current_cron[key]
     secondary_key = "PWC_SEMANTIC_SCHOLAR_API_KEY_2"
     if secondary_key not in result and secondary_key in current_cron:
         result[secondary_key] = current_cron[secondary_key]
@@ -960,6 +844,125 @@ def write_env(path: Path, lines: dict[str, str], group: str) -> None:
     os.chown(temporary, 0, grp.getgrnam(group).gr_gid)
     temporary.chmod(0o640)
     os.replace(temporary, path)
+
+
+def validate_active_staging_release(app_root: Path, release_id: str) -> None:
+    """Require one exact active immutable staging release and manifest identity."""
+
+    if re.fullmatch(r"[0-9a-f]{12}-staging", release_id) is None:
+        raise ValueError("active immutable staging release is invalid")
+    current = app_root / "environments" / "staging" / "current"
+    if not current.is_symlink():
+        raise ValueError("active immutable staging release is required")
+    try:
+        release = current.resolve(strict=True)
+        manifest_path = release / "release.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("active immutable staging release is required") from None
+    sha = manifest.get("git_sha") if isinstance(manifest, dict) else None
+    if (
+        release.parent != app_root / "releases"
+        or release.name != release_id
+        or not isinstance(manifest, dict)
+        or manifest.get("release_id") != release_id
+        or not isinstance(sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", sha) is None
+        or release_id != f"{sha[:12]}-staging"
+    ):
+        raise ValueError("active immutable staging release is required")
+
+
+def staging_modal_rate_evidence(
+    *, app_root: Path, release_id: str, microusd_per_second: int
+) -> dict[str, str]:
+    """Build explicit release-bound Modal rate evidence with no fallback."""
+
+    validate_active_staging_release(app_root, release_id)
+    if (
+        type(microusd_per_second) is not int
+        or not 1 <= microusd_per_second <= 1_000_000
+    ):
+        raise ValueError("staging Modal rate must be an explicit bounded integer")
+    return {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": str(microusd_per_second),
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": release_id,
+    }
+
+
+def write_staging_modal_rate_evidence(path: Path, values: dict[str, str]) -> None:
+    """Atomically install the fixed root-only Modal rate evidence contract."""
+
+    expected_keys = {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID",
+        "PWC_RELEASE_ID",
+    }
+    if set(values) != expected_keys:
+        raise ValueError("staging Modal rate evidence keys are invalid")
+    payload = json.dumps(values, sort_keys=True, separators=(",", ":")) + "\n"
+    if len(payload.encode("utf-8")) > 4_096:
+        raise ValueError("staging Modal rate evidence is too large")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o711)
+    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
+    descriptor = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chown(temporary, 0, 0)
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def remove_staging_modal_rate_evidence(path: Path, expected_release_id: str) -> None:
+    """Remove only the exact protected evidence for the active staging release."""
+
+    try:
+        metadata = path.lstat()
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError(
+            "protected staging Modal rate evidence is unavailable"
+        ) from None
+    try:
+        rate = int(values.get("PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND", ""))
+    except (AttributeError, TypeError, ValueError):
+        rate = 0
+    if (
+        not path.is_file()
+        or metadata.st_uid != 0
+        or metadata.st_gid != 0
+        or metadata.st_mode & 0o777 != 0o600
+        or metadata.st_size > 4_096
+        or not isinstance(values, dict)
+        or set(values)
+        != {
+            "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND",
+            "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID",
+            "PWC_RELEASE_ID",
+        }
+        or values.get("PWC_RELEASE_ID") != expected_release_id
+        or values.get("PWC_MODAL_EXECUTOR_RATE_SOURCE_ID") != "modal-staging-price-v1"
+        or not 1 <= rate <= 1_000_000
+        or values.get("PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND") != str(rate)
+    ):
+        raise ValueError("protected staging Modal rate evidence does not match")
+    path.unlink()
 
 
 def staging_chat_capacity_values() -> dict[str, str]:
@@ -992,6 +995,89 @@ def staging_chat_pool_values(*, enabled: bool) -> dict[str, str]:
     values = {"PWC_CHAT_BLANK_POOL_ENABLED": "true" if enabled else "false"}
     if enabled:
         values.update(staging_chat_capacity_values())
+    return values
+
+
+def staging_chat_durable_dispatch_values(*, enabled: bool) -> dict[str, str]:
+    """Toggle only the staging durable-turn compatibility bridge."""
+
+    return {"PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true" if enabled else "false"}
+
+
+_STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+}
+_STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "false",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "false",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "false",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "false",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "false",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+}
+
+
+def staging_durable_external_qualification_values(
+    current: dict[str, str], *, enabled: bool
+) -> dict[str, str]:
+    """Enter or leave the exact staging-only 32-turn qualification profile."""
+
+    required = {
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "false",
+        "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": "true",
+        "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": "true",
+        "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true",
+        "PWC_CHAT_MAX_CONCURRENCY": "2",
+        "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+        **(
+            _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED
+            if enabled
+            else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
+        ),
+    }
+    drifted = sorted(
+        key
+        for key, expected in required.items()
+        if (
+            _decoded_flag(current, key)
+            if expected in {"true", "false"}
+            else (decoded_value(current[key]).strip() if key in current else "")
+        )
+        != expected
+    )
+    if drifted:
+        raise ValueError(
+            "staging durable external qualification baseline has drifted: "
+            + ", ".join(drifted)
+        )
+    values = dict(
+        _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
+        if enabled
+        else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED
+    )
+    if not enabled:
+        values["PWC_ADMIN_API_TOKEN"] = ""
+        return values
+    existing_line = current.get("PWC_ADMIN_API_TOKEN")
+    existing = decoded_value(existing_line).strip() if existing_line else ""
+    values["PWC_ADMIN_API_TOKEN"] = (
+        existing if 32 <= len(existing) <= 8192 else secrets.token_urlsafe(48)
+    )
     return values
 
 
@@ -1399,8 +1485,8 @@ def production_codex_values(
 
 def production_codex_image_values() -> dict[str, str]:
     return {
-        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-d5db656657e6",
-        "PWC_CODEX_JOBS_IMAGE_REVISION": "1d85149040996dbb4ea0805f4c034a80ad214bdf",
+        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86",
+        "PWC_CODEX_JOBS_IMAGE_REVISION": "7067f309c98f9ea002b812773c9a256400c740ef",
     }
 
 
@@ -1417,25 +1503,35 @@ def main() -> int:
     parser.add_argument("--staging-openrouter-only", action="store_true")
     parser.add_argument("--staging-openai-direct-only", action="store_true")
     parser.add_argument("--staging-openai-direct-disable-only", action="store_true")
-    parser.add_argument("--staging-latex-compiler-provision-only", action="store_true")
-    parser.add_argument(
-        "--staging-latex-compiler-evidence-layout-only", action="store_true"
-    )
-    parser.add_argument("--staging-latex-compiler-image")
-    parser.add_argument(
-        "--staging-latex-compiler-qualification-enable-only", action="store_true"
-    )
-    parser.add_argument(
-        "--staging-latex-compiler-qualification-disable-only", action="store_true"
-    )
-    parser.add_argument("--staging-latex-paper-enable-only", action="store_true")
-    parser.add_argument("--staging-latex-paper-disable-only", action="store_true")
+    parser.add_argument("--staging-scope-guardrail-only", action="store_true")
+    parser.add_argument("--staging-scope-title-hf-only", action="store_true")
+    parser.add_argument("--production-scope-title-hf-only", action="store_true")
     parser.add_argument("--staging-openrouter-disable-only", action="store_true")
     parser.add_argument("--staging-openrouter-secrets-rotate-only", action="store_true")
     parser.add_argument("--staging-chat-capacity-only", action="store_true")
     parser.add_argument("--staging-chat-alerts-only", action="store_true")
     parser.add_argument("--staging-chat-pool-enable-only", action="store_true")
     parser.add_argument("--staging-chat-pool-disable-only", action="store_true")
+    parser.add_argument(
+        "--staging-chat-durable-dispatch-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-chat-durable-dispatch-disable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-durable-external-qualification-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-durable-external-qualification-disable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-modal-rate-evidence-install-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-modal-rate-evidence-remove-only", action="store_true"
+    )
+    parser.add_argument("--staging-modal-rate-release-id")
+    parser.add_argument("--staging-modal-rate-microusd-per-second", type=int)
     parser.add_argument("--staging-chat-pi-prewarm-enable-only", action="store_true")
     parser.add_argument("--staging-chat-pi-prewarm-disable-only", action="store_true")
     parser.add_argument("--staging-chat-routing-enable-only", action="store_true")
@@ -1506,95 +1602,244 @@ def main() -> int:
     if os.geteuid() != 0:
         parser.error("run through sudo")
     legacy = read_lines(args.legacy_env)
-    latex_modes = (
-        args.staging_latex_compiler_provision_only,
-        args.staging_latex_compiler_evidence_layout_only,
-        args.staging_latex_compiler_qualification_enable_only,
-        args.staging_latex_compiler_qualification_disable_only,
-        args.staging_latex_paper_enable_only,
-        args.staging_latex_paper_disable_only,
+    modal_rate_modes = (
+        args.staging_modal_rate_evidence_install_only,
+        args.staging_modal_rate_evidence_remove_only,
     )
-    if any(latex_modes):
-        if sum(latex_modes) != 1:
-            parser.error("staging LaTeX modes are mutually exclusive")
-        latex_mode_names = {
-            "staging_latex_compiler_provision_only",
-            "staging_latex_compiler_evidence_layout_only",
-            "staging_latex_compiler_qualification_enable_only",
-            "staging_latex_compiler_qualification_disable_only",
-            "staging_latex_paper_enable_only",
-            "staging_latex_paper_disable_only",
-        }
+    if any(modal_rate_modes):
         other_modes = [
-            key
+            value
             for key, value in vars(args).items()
-            if isinstance(value, bool) and value and key not in latex_mode_names
+            if key
+            not in {
+                "staging_modal_rate_evidence_install_only",
+                "staging_modal_rate_evidence_remove_only",
+            }
+            and isinstance(value, bool)
+            and value
         ]
-        if other_modes or args.codex_jobs_namespace or args.modal_profile:
-            parser.error("staging LaTeX modes must run alone")
-        current = read_lines(CONFIG_ROOT / "staging.env")
+        if (
+            sum(modal_rate_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+            or not args.staging_modal_rate_release_id
+        ):
+            parser.error("staging Modal rate evidence mode must run alone")
+        install = args.staging_modal_rate_evidence_install_only
+        confirmation = (
+            "INSTALL_STAGING_MODAL_RATE_EVIDENCE"
+            if install
+            else "REMOVE_STAGING_MODAL_RATE_EVIDENCE"
+        )
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        if install != (args.staging_modal_rate_microusd_per_second is not None):
+            parser.error("install requires one explicit staging Modal rate")
         try:
-            if args.staging_latex_compiler_evidence_layout_only:
-                if args.confirm != "LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE":
-                    parser.error(
-                        "--confirm must be LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE"
-                    )
-                ensure_staging_latex_compiler_evidence_layout()
-                print("prepared private staging LaTeX qualification evidence layout")
-                return 0
-            if args.staging_latex_compiler_provision_only:
-                if args.confirm != "PROVISION_PRIVATE_STAGING_LATEX_COMPILER":
-                    parser.error(
-                        "--confirm must be PROVISION_PRIVATE_STAGING_LATEX_COMPILER"
-                    )
-                if not args.staging_latex_compiler_image:
-                    parser.error("--staging-latex-compiler-image is required")
-                values = staging_latex_compiler_provision_values(
-                    current,
-                    image=args.staging_latex_compiler_image,
-                    namespace=STAGING_LATEX_COMPILER_NAMESPACE,
+            validate_active_staging_release(
+                APP_ROOT, args.staging_modal_rate_release_id
+            )
+            path = CONFIG_ROOT / "staging-modal-rate-evidence.json"
+            if install:
+                values = staging_modal_rate_evidence(
+                    app_root=APP_ROOT,
+                    release_id=args.staging_modal_rate_release_id,
+                    microusd_per_second=args.staging_modal_rate_microusd_per_second,
                 )
-                label = "provisioned disabled private staging LaTeX compiler"
-            elif args.staging_latex_compiler_qualification_enable_only:
-                if args.confirm != "QUALIFY_PRIVATE_STAGING_LATEX_COMPILER":
-                    parser.error(
-                        "--confirm must be QUALIFY_PRIVATE_STAGING_LATEX_COMPILER"
-                    )
-                values = staging_latex_compiler_qualification_values(
-                    current, enabled=True
-                )
-                label = "enabled isolated staging LaTeX compiler qualification"
-            elif args.staging_latex_compiler_qualification_disable_only:
-                if args.confirm != "STOP_PRIVATE_STAGING_LATEX_COMPILER_QUALIFICATION":
-                    parser.error(
-                        "--confirm must be STOP_PRIVATE_STAGING_LATEX_COMPILER_QUALIFICATION"
-                    )
-                values = staging_latex_compiler_qualification_values(
-                    current, enabled=False
-                )
-                label = "disabled staging LaTeX compiler qualification"
-            elif args.staging_latex_paper_enable_only:
-                if args.confirm != "ENABLE_STAGING_LATEX_PAPER_AFTER_QUALIFICATION":
-                    parser.error(
-                        "--confirm must be ENABLE_STAGING_LATEX_PAPER_AFTER_QUALIFICATION"
-                    )
-                values = staging_latex_paper_activation_values(
-                    current,
-                    evidence_path=STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE,
-                )
-                label = "enabled qualified private staging LaTeX paper turns"
+                write_staging_modal_rate_evidence(path, values)
             else:
-                if args.confirm != "DISABLE_STAGING_LATEX_PAPER":
-                    parser.error("--confirm must be DISABLE_STAGING_LATEX_PAPER")
-                values = staging_latex_paper_disable_values()
-                label = "disabled staging LaTeX paper and compiler turns"
+                remove_staging_modal_rate_evidence(
+                    path, args.staging_modal_rate_release_id
+                )
         except ValueError as error:
             parser.error(str(error))
-        write_env(CONFIG_ROOT / "staging.env", assign(current, values), "pwc-staging")
-        print(label)
+        print(
+            f"{'installed' if install else 'removed'} protected staging Modal rate "
+            "evidence; no service was restarted"
+        )
         return 0
-    if args.staging_latex_compiler_image:
-        parser.error("--staging-latex-compiler-image requires provision mode")
+    scope_title_modes = (
+        args.staging_scope_title_hf_only,
+        args.production_scope_title_hf_only,
+    )
+    if any(scope_title_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "staging_scope_title_hf_only",
+                "production_scope_title_hf_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(scope_title_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("HF scope/title mode must run alone")
+        environment = "staging" if args.staging_scope_title_hf_only else "production"
+        expected_confirmation = (
+            None
+            if environment == "staging"
+            else "ENABLE_PRODUCTION_HF_SCOPE_AND_TITLES"
+        )
+        if args.confirm != expected_confirmation:
+            if expected_confirmation is None:
+                parser.error("staging HF scope/title mode does not accept --confirm")
+            parser.error(f"--confirm must be {expected_confirmation}")
+        if (
+            not args.legacy_env.is_file()
+            or args.legacy_env.stat().st_uid != 0
+            or args.legacy_env.stat().st_mode & 0o077
+        ):
+            parser.error("HF scope/title source must be a protected root-only file")
+        target = CONFIG_ROOT / f"{environment}.env"
+        other = CONFIG_ROOT / (
+            "production.env" if environment == "staging" else "staging.env"
+        )
+        current = read_lines(target)
+        try:
+            values = scope_title_hf_values(
+                legacy,
+                current,
+                read_lines(other),
+                environment=environment,
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            target,
+            assign(current, values),
+            f"pwc-{environment}",
+        )
+        print(
+            f"enabled {environment} HF GLM titles and research-scope guardrail; "
+            "no service was restarted"
+        )
+        return 0
+    if args.staging_scope_guardrail_only:
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key != "staging_scope_guardrail_only"
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            other_modes
+            or args.confirm is not None
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("staging scope guardrail mode must run alone")
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            values = staging_scope_guardrail_values(current)
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "staging.env",
+            assign(current, values),
+            "pwc-staging",
+        )
+        print("enabled staging research-scope guardrail; no service was restarted")
+        return 0
+    qualification_modes = (
+        args.staging_durable_external_qualification_enable_only,
+        args.staging_durable_external_qualification_disable_only,
+    )
+    if any(qualification_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "staging_durable_external_qualification_enable_only",
+                "staging_durable_external_qualification_disable_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(qualification_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error(
+                "staging durable external qualification enable/disable must run alone"
+            )
+        enabled = args.staging_durable_external_qualification_enable_only
+        confirmation = (
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+            if enabled
+            else "DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+        )
+        if args.confirm != confirmation:
+            parser.error(
+                "staging durable external qualification --confirm must be "
+                f"{confirmation}"
+            )
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            values = staging_durable_external_qualification_values(
+                current, enabled=enabled
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "staging.env",
+            assign(current, values),
+            "pwc-staging",
+        )
+        print(
+            f"{'enabled' if enabled else 'disabled'} staging durable external "
+            "qualification profile; no service was restarted"
+        )
+        return 0
+    durable_dispatch_modes = (
+        args.staging_chat_durable_dispatch_enable_only,
+        args.staging_chat_durable_dispatch_disable_only,
+    )
+    if any(durable_dispatch_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "staging_chat_durable_dispatch_enable_only",
+                "staging_chat_durable_dispatch_disable_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(durable_dispatch_modes) != 1
+            or other_modes
+            or args.confirm is not None
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error(
+                "staging durable dispatch enable/disable must run alone "
+                "without --confirm"
+            )
+        enabled = args.staging_chat_durable_dispatch_enable_only
+        staging = assign(
+            read_lines(CONFIG_ROOT / "staging.env"),
+            staging_chat_durable_dispatch_values(enabled=enabled),
+        )
+        write_env(CONFIG_ROOT / "staging.env", staging, "pwc-staging")
+        print(
+            f"{'enabled' if enabled else 'disabled'} staging chat durable dispatch; "
+            "no service was restarted"
+        )
+        return 0
     if args.production_codex_image_only:
         selected_modes = [
             value
@@ -2443,10 +2688,14 @@ def main() -> int:
     current_production = read_lines(CONFIG_ROOT / "production.env")
     current_staging = read_lines(CONFIG_ROOT / "staging.env")
     current_cron = read_lines(CONFIG_ROOT / "production-cron.env")
+    current_trending_cron = read_lines(CONFIG_ROOT / "trending-cron.env")
     staging_db_password = existing_or_random(current_staging, "PWC_DB_PASSWORD")
     staging_jwt = existing_or_random(current_staging, "PWC_JWT_SECRET")
     backup_db_password = existing_or_random(
         current_cron, "PWC_POSTGRES_BACKUP_DB_PASSWORD"
+    )
+    trending_db_password = existing_or_random(
+        current_trending_cron, "PWC_TRENDING_DB_PASSWORD"
     )
     production_jwt = decoded_value(legacy["PWC_JWT_SECRET"])
     session_private_key, session_public_key = shared_session_keys(
@@ -2605,9 +2854,27 @@ def main() -> int:
         },
     )
 
+    trending_cron = trending_cron_values(
+        legacy,
+        {
+            **{
+                key: line
+                for key, line in current_cron.items()
+                if key.startswith("PWC_TRENDING_PIN_")
+            },
+            **current_trending_cron,
+        },
+        password=trending_db_password,
+    )
+
     write_env(CONFIG_ROOT / "production.env", production, "pwc-production")
     write_env(CONFIG_ROOT / "staging.env", staging, "pwc-staging")
     write_env(CONFIG_ROOT / "production-cron.env", cron, "pwc-cron")
+    write_env(
+        CONFIG_ROOT / "trending-cron.env",
+        trending_cron,
+        "pwc-cron-trending",
+    )
     production_group = grp.getgrnam("pwc-production").gr_name
     cron_user = pwd.getpwnam("pwc-cron").pw_name
     subprocess.run(

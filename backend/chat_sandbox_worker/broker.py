@@ -632,13 +632,23 @@ class Handler(BaseHTTPRequestHandler):
                 "is_open": query.get("is_open"),
             }
         elif _EVALUATIONS.match(parsed.path):
-            operation = "paper_evaluations"
-            arguments = {
-                "paper": query.get("paper_id"),
-                "page": query.get("page", 1),
-                "page_size": query.get("page_size", 100),
-                "ordering": query.get("ordering", "-benchmark_popularity"),
-            }
+            if query.get("dataset_id") is not None:
+                operation = "benchmark_evaluations"
+                arguments = {
+                    "dataset": query["dataset_id"],
+                    "page": query.get("page", 1),
+                    "page_size": query.get("page_size", 100),
+                    "is_open": query.get("is_open"),
+                    "max_parameters_exclusive": query.get("max_parameters_exclusive"),
+                }
+            else:
+                operation = "paper_evaluations"
+                arguments = {
+                    "paper": query.get("paper_id"),
+                    "page": query.get("page", 1),
+                    "page_size": query.get("page_size", 100),
+                    "ordering": query.get("ordering", "-benchmark_popularity"),
+                }
         elif match := _TASK_PAGE.match(parsed.path):
             operation = "task_page"
             arguments = {

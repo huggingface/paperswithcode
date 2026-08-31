@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Update hot GitHub trending snapshots every 15 minutes
+
+[Timer]
+OnCalendar=*-*-* *:00/15:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-update-hot-github-trending.service
+
+[Install]
+WantedBy=timers.target

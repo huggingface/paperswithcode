@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Enqueue Hugging Face trending model curation hourly
+
+[Timer]
+OnCalendar=*-*-* *:42:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-enqueue-hf-trending-model-curation.service
+
+[Install]
+WantedBy=timers.target

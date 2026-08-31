@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import deploy.cli as deploy_cli
 import deploy.configure_host_env as configure_host_env
+import deploy.configure_db_roles as configure_db_roles
 import deploy.configure_production_chat_application_cap as configure_production_chat_application_cap
 import deploy.configure_production_chat_budget as configure_production_chat_budget
 import deploy.configure_role_allowlists as configure_role_allowlists
@@ -34,6 +35,7 @@ from backend.services.runtime_validation import (
     validate_chat_capacity_and_spend_policy,
     validate_chat_provider_policy,
     validate_chat_schema,
+    validate_qualification_evidence_schema,
     validate_runtime,
 )
 from deploy.cli import (
@@ -47,6 +49,8 @@ from deploy.install_deploy_tools import (
     bundle_runtime_contract,
     cron_wrapper,
     deployment_wrapper,
+    reconcile_submission_review_timer,
+    submission_review_timer_action,
 )
 from deploy.nginx_validate import (
     CURATION_CALLBACK_LOCATION,
@@ -71,9 +75,13 @@ from deploy.smoke_test import validate_local_bundle
 
 @pytest.fixture(autouse=True)
 def _avoid_live_openrouter_guardrail(monkeypatch: pytest.MonkeyPatch):
+    environment = os.environ.copy()
     monkeypatch.setattr(
         deploy_openrouter, "validate_openrouter_guardrail", lambda _settings: None
     )
+    yield
+    os.environ.clear()
+    os.environ.update(environment)
 
 
 def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
@@ -135,12 +143,196 @@ def test_installed_wrapper_preserves_command_parser(
     assert expected in output
 
 
+def test_rollback_parser_accepts_failed_sha_fencing():
+    sha = "a" * 40
+
+    args = deploy_cli.parser_for("pwc-rollback").parse_args(
+        ["staging", "--failed-sha", sha]
+    )
+
+    assert args.failed_sha == sha
+
+
 def test_cron_wrapper_grants_journal_access_only_to_chat_monitor():
     wrapper = cron_wrapper()
 
     assert 'if [ "$1" = "monitor_chat_operational_alerts" ]' in wrapper
     assert wrapper.count("SupplementaryGroups=systemd-journal") == 1
-    assert wrapper.count("cron_launcher.py") == 2
+    assert wrapper.count("cron_launcher.py") == 3
+
+
+def test_cron_wrapper_isolates_source_repairable_trending_jobs():
+    wrapper = cron_wrapper()
+    restricted_branch = wrapper.split('case "$1" in', 1)[1].split("esac", 1)[0]
+
+    assert "calculate_trending_scores|calculate_paper_trending_scores)" in wrapper
+    assert "--uid=pwc-cron-trending --gid=pwc-cron-trending" in wrapper
+    assert "EnvironmentFile=/etc/paperswithcode/trending-cron.env" in restricted_branch
+    assert "production.env" not in restricted_branch
+    assert "production-cron.env" not in restricted_branch
+    assert "SupplementaryGroups" not in restricted_branch
+
+
+def test_restricted_trending_environment_drops_broad_credentials():
+    source = {
+        "PATH": "/usr/bin",
+        "LANG": "C.UTF-8",
+        "PWC_DB_HOST": "db",
+        "PWC_DB_PORT": "5432",
+        "PWC_DB_NAME": "paperswithcode",
+        "PWC_DB_USER": "paperswithcode_user",
+        "PWC_DB_PASSWORD": "broad-secret",
+        "PWC_TRENDING_DB_PASSWORD": "restricted-secret",
+        "PWC_TRENDING_PIN_ARXIV_IDS": "2601.00001:72",
+        "PWC_GITHUB_TOKEN": "must-not-leak",
+        "OPENAI_API_KEY": "must-not-leak",
+        "PWC_CHAT_LANGFUSE_SECRET_KEY": "must-not-leak",
+    }
+
+    environment = cron_launcher.restricted_trending_environment(
+        source,
+        release_id="a" * 12 + "-production",
+    )
+
+    assert environment["PWC_DB_USER"] == "pwc_cron_trending"
+    assert environment["PWC_DB_PASSWORD"] == "restricted-secret"
+    assert environment["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.00001:72"
+    assert "PWC_TRENDING_DB_PASSWORD" not in environment
+    assert "PWC_GITHUB_TOKEN" not in environment
+    assert "OPENAI_API_KEY" not in environment
+    assert "PWC_CHAT_LANGFUSE_SECRET_KEY" not in environment
+    assert set(environment) <= cron_launcher.RESTRICTED_TRENDING_ENV_KEYS
+    assert environment["PWC_CRON_LOG_DIR"] == str(
+        cron_launcher.RESTRICTED_TRENDING_LOG_DIR
+    )
+    assert environment["PWC_CRON_LOCK_DIR"] == str(
+        cron_launcher.RESTRICTED_TRENDING_LOCK_DIR
+    )
+
+
+def test_restricted_trending_environment_fails_closed_without_role_password():
+    with pytest.raises(RuntimeError, match="PWC_TRENDING_DB_PASSWORD"):
+        cron_launcher.restricted_trending_environment(
+            {
+                "PWC_DB_HOST": "db",
+                "PWC_DB_PORT": "5432",
+                "PWC_DB_NAME": "paperswithcode",
+            },
+            release_id="a" * 12 + "-production",
+        )
+
+
+def test_trending_database_role_has_only_scoring_capabilities():
+    sql = configure_db_roles.trending_role_sql(
+        database="paperswithcode",
+        password="restricted-secret",
+    )
+
+    assert "NOINHERIT" in sql
+    assert "pg_auth_members" in sql
+    assert "EXECUTE 'REVOKE ' || granted_role" in sql
+    assert "trending role retains a role membership" in sql
+    assert "REVOKE ALL ON ALL TABLES IN SCHEMA public" in sql
+    assert "REVOKE CREATE ON SCHEMA public" in sql
+    assert (
+        "GRANT SELECT ON papers, paper_repositories, repositories, "
+        "repository_star_history, paper_hf_artifacts, hf_artifacts"
+    ) in sql
+    assert (
+        "GRANT UPDATE (trending_score, trending_score_updated_at, updated_at) "
+        "ON repositories"
+    ) in sql
+    assert (
+        "GRANT UPDATE (trending_score, github_trending_component, "
+        "hf_trending_component, trending_score_updated_at, updated_at) ON papers"
+    ) in sql
+    for taxonomy_table in ("tasks", "methods", "datasets", "metrics", "conferences"):
+        assert f"'{taxonomy_table}'" in sql
+    assert "has_table_privilege(" in sql
+    assert "taxonomy_table" in sql
+
+
+def test_trending_environment_rotation_preserves_existing_role_password():
+    current = {
+        "PWC_TRENDING_DB_PASSWORD": "PWC_TRENDING_DB_PASSWORD=stable-secret",
+        "PWC_TRENDING_PIN_ARXIV_IDS": "PWC_TRENDING_PIN_ARXIV_IDS=2601.1:72",
+    }
+    password = configure_host_env.existing_or_random(
+        current, "PWC_TRENDING_DB_PASSWORD"
+    )
+
+    values = configure_host_env.trending_cron_values(
+        {
+            "PWC_DB_HOST": "PWC_DB_HOST=localhost",
+            "PWC_DB_NAME": "PWC_DB_NAME=paperswithcode_hf",
+            "PWC_DB_PORT": "PWC_DB_PORT=5432",
+        },
+        current,
+        password=password,
+    )
+
+    assert values["PWC_TRENDING_DB_PASSWORD"] == "stable-secret"
+    assert values["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.1:72"
+
+
+@pytest.mark.parametrize(
+    ("review_enabled", "jobs_enabled", "primary_alert_url", "fallback_alert_url"),
+    [
+        (False, False, "https://primary", "https://fallback"),
+        (True, False, "https://primary", "https://fallback"),
+        (False, True, "https://primary", "https://fallback"),
+        (True, True, "", "https://fallback"),
+        (True, True, "https://primary", ""),
+        (True, True, "https://same", "https://same"),
+    ],
+)
+def test_submission_review_timer_stays_disabled_without_complete_configuration(
+    review_enabled: bool,
+    jobs_enabled: bool,
+    primary_alert_url: str,
+    fallback_alert_url: str,
+):
+    assert submission_review_timer_action(
+        review_enabled=review_enabled,
+        jobs_enabled=jobs_enabled,
+        primary_alert_url=primary_alert_url,
+        fallback_alert_url=fallback_alert_url,
+    ) == ["systemctl", "disable", "--now", "submission-review.timer"]
+
+
+def test_submission_review_timer_can_run_only_with_alert_delivery():
+    assert submission_review_timer_action(
+        review_enabled=True,
+        jobs_enabled=True,
+        primary_alert_url="https://primary",
+        fallback_alert_url="https://fallback",
+    ) == ["systemctl", "enable", "--now", "submission-review.timer"]
+
+
+def test_submission_timer_reconciliation_merges_cron_env_and_writes_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    environment = tmp_path / "production.env"
+    cron_environment = tmp_path / "production-cron.env"
+    state = tmp_path / "submission-review-schedule.json"
+    environment.write_text(
+        "PWC_AUTONOMOUS_SUBMISSION_ENABLED=true\n"
+        "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED=false\n"
+        "PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL=https://primary\n"
+    )
+    cron_environment.write_text(
+        "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED=true\n"
+        "PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL=https://fallback\n"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+
+    reconcile_submission_review_timer(environment, cron_environment, state)
+
+    assert json.loads(state.read_text()) == {
+        "enabled": True,
+        "reason": "complete configuration",
+    }
+    assert state.stat().st_mode & 0o777 == 0o644
 
 
 def test_chat_alert_timer_uses_only_the_allowlisted_cron_interface():
@@ -392,6 +584,24 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
         chat_title_credential_environment=(
             "staging" if environment == "staging" else ""
         ),
+        chat_scope_guardrail_enabled=environment == "staging",
+        chat_scope_guardrail_hf_token=(
+            "test-only-isolated-title-token" if environment == "staging" else ""
+        ),
+        chat_scope_guardrail_hf_bill_to=(
+            "huggingface" if environment == "staging" else ""
+        ),
+        chat_scope_guardrail_openai_api_key=(
+            "test-only-guardrail-fallback" if environment == "staging" else ""
+        ),
+        chat_artifacts_enabled=environment == "staging",
+        chat_artifact_shared_preview_enabled=environment == "staging",
+        chat_artifact_storage_backend=(
+            "hf_bucket" if environment == "staging" else "local"
+        ),
+        chat_artifact_hf_bucket_id=(
+            "nielsr/pwc-chat-artifacts-staging" if environment == "staging" else ""
+        ),
         codex_jobs_enabled=True,
         codex_add_evals_enabled=True,
         codex_enrich_paper_enabled=True,
@@ -420,10 +630,25 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
     )
 
 
+def configure_hf_scope_and_title(settings: Settings, environment: str) -> None:
+    settings.chat_title_generation_enabled = True
+    settings.chat_title_provider = "huggingface"
+    settings.chat_title_model = "zai-org/GLM-5.3-Flash:baseten"
+    settings.chat_title_hf_token = f"test-only-title-{environment}"
+    settings.chat_title_bill_to = "huggingface"
+    settings.chat_title_credential_owner = "nielsr"
+    settings.chat_title_credential_environment = environment
+    settings.chat_scope_guardrail_enabled = True
+    settings.chat_scope_guardrail_hf_token = settings.chat_title_hf_token
+    settings.chat_scope_guardrail_hf_bill_to = "huggingface"
+    settings.chat_scope_guardrail_openai_api_key = (
+        f"test-only-guardrail-fallback-{environment}"
+    )
+
+
 def test_run_backend_derives_features_from_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    monkeypatch.setattr(os, "environ", os.environ.copy())
     release = make_bundle(tmp_path, chat=False)
     monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
     monkeypatch.setenv("PWC_RUNTIME_DATA_DIR", str(tmp_path / "runtime-data"))
@@ -442,7 +667,6 @@ def test_run_backend_derives_features_from_release(
 def test_slot_launcher_enables_chat_catalog_features(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(os, "environ", os.environ.copy())
     monkeypatch.delenv("PWC_CHAT_PAPER_MENTIONS_ENABLED", raising=False)
     monkeypatch.delenv("PWC_CHAT_HF_CATALOG_ENABLED", raising=False)
     manifest = build_manifest(
@@ -451,368 +675,76 @@ def test_slot_launcher_enables_chat_catalog_features(
         production_chat_enabled=True,
     )
 
-    slot_launcher.configure_release(manifest, Path("/release"))
+    slot_launcher.configure_release(manifest, Path("/release"), "production")
 
     assert os.environ["PWC_CHAT_PAPER_MENTIONS_ENABLED"] == "true"
     assert os.environ["PWC_CHAT_HF_CATALOG_ENABLED"] == "true"
 
 
-def test_slot_launcher_preserves_paper_storage_but_forces_posterly_off(
+def test_staging_launcher_disables_only_posterly_artifact_generation(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    monkeypatch.setattr(os, "environ", os.environ.copy())
     manifest = build_manifest("a" * 40, "staging")
-    monkeypatch.setenv("PWC_CHAT_ARTIFACTS_ENABLED", "true")
-    monkeypatch.setenv("PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED", "true")
-    monkeypatch.setenv("PWC_CHAT_ARTIFACT_STORAGE_BACKEND", "hf_bucket")
-    monkeypatch.setenv(
-        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID", "nielsr/pwc-chat-artifacts-staging"
-    )
 
-    slot_launcher.configure_release(manifest, Path("/release"))
+    with monkeypatch.context() as scoped:
+        for key in (
+            "PWC_CHAT_ARTIFACTS_ENABLED",
+            "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED",
+            "PWC_CHAT_POSTERLY_ENABLED",
+            "PWC_CHAT_ARTIFACT_STORAGE_BACKEND",
+            "PWC_CHAT_ARTIFACT_HF_BUCKET_ID",
+        ):
+            scoped.delenv(key, raising=False)
+        slot_launcher.configure_release(manifest, Path("/release"), "staging")
 
-    assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
-    assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
-    assert os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] == "hf_bucket"
-    assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
-
-
-def test_run_backend_preserves_paper_storage_but_forces_posterly_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    monkeypatch.setattr(os, "environ", os.environ.copy())
-    release = make_bundle(tmp_path, chat=True)
-    monkeypatch.setenv("PWC_FRONTEND_DIST_DIR", str(release / "frontend-dist"))
-    monkeypatch.setenv("PWC_RUNTIME_DATA_DIR", str(tmp_path / "runtime-data"))
-    monkeypatch.setenv("PWC_CHAT_ARTIFACTS_ENABLED", "true")
-    monkeypatch.setenv("PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED", "true")
-    monkeypatch.setenv("PWC_CHAT_ARTIFACT_STORAGE_BACKEND", "hf_bucket")
-    monkeypatch.setenv(
-        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID", "nielsr/pwc-chat-artifacts-staging"
-    )
-
-    run_backend.configure_release_environment(release)
-
-    assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
-    assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
-    assert os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] == "hf_bucket"
-    assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
-
-
-def test_staging_latex_compiler_provision_uses_the_existing_staging_identity():
-    image = (
-        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
-    )
-    values = configure_host_env.staging_latex_compiler_provision_values(
-        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-        image=image,
-        namespace="nielsr",
-    )
-
-    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"] == image
-    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE"] == "nielsr"
-    assert (
-        values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN"] == "existing-staging-token"
-    )
-    assert values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION"] == (
-        "sandbox-netns-v1"
-    )
-    assert values["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] == (
-        "nielsr/pwc-chat-artifacts-staging"
-    )
-    assert values["PWC_CHAT_POSTERLY_ENABLED"] == "false"
-    assert values["PWC_CHAT_ARTIFACTS_ENABLED"] == "false"
-    assert values["PWC_CHAT_LATEX_PAPER_ENABLED"] == "false"
-    assert values["PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED"] == "false"
-    assert values["PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE"] == "false"
-    assert (
-        len(
-            base64.urlsafe_b64decode(
-                values["PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"] + "=="
-            )
-        )
-        == 32
-    )
-
-
-def test_staging_latex_compiler_provision_rejects_any_non_staging_identity():
-    with pytest.raises(ValueError, match="staging"):
-        configure_host_env.staging_latex_compiler_provision_values(
-            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-            image="registry.hf.space/nielsr-pwc-latex-compiler@sha256:" + "a" * 64,
-            namespace="nielsr",
-        )
-
-
-def test_staging_latex_paper_activation_requires_complete_private_qualification(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    image = (
-        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
-    )
-    current = configure_host_env.assign(
-        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-        configure_host_env.staging_latex_compiler_provision_values(
-            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-            image=image,
-            namespace="nielsr",
-        ),
-    )
-    evidence_directory = tmp_path / "staging-compiler-qualification"
-    evidence_directory.mkdir()
-    os.chmod(evidence_directory, 0o750)
-    evidence = evidence_directory / "latex-qualification.json"
-    evidence.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "environment": "staging",
-                "compiler_image": image,
-                "passed": 7,
-                "total": 7,
-                "checks": {
-                    "hostile_input": True,
-                    "cancellation": True,
-                    "health": True,
-                    "metrics": True,
-                    "image_isolation": True,
-                    "reconciliation": True,
-                    "restart": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    os.chmod(evidence, 0o640)
-    monkeypatch.setattr(
-        configure_host_env.grp,
-        "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
-    )
-
-    values = configure_host_env.staging_latex_paper_activation_values(
-        current, evidence_path=evidence
-    )
-
-    assert values == {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
-        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
-        "PWC_CHAT_POSTERLY_ENABLED": "false",
-        "PWC_CHAT_LATEX_PAPER_ENABLED": "true",
-        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "true",
-        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": "false",
-    }
-
-    evidence.write_text("{}", encoding="utf-8")
-    with pytest.raises(ValueError, match="qualification evidence"):
-        configure_host_env.staging_latex_paper_activation_values(
-            current, evidence_path=evidence
-        )
+        assert os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] == "true"
+        assert os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] == "true"
+        assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
 
 
 @pytest.mark.parametrize(
-    ("compiler_image", "mode"),
-    [
-        (
-            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
-            + "b" * 64,
-            0o600,
-        ),
-        (
-            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
-            + "a" * 64,
-            0o640,
-        ),
-    ],
+    ("slot", "worker_id", "url"),
+    (
+        ("blue", "staging-blue", "http://127.0.0.1:8766"),
+        ("green", "staging-green", "http://127.0.0.1:8767"),
+    ),
 )
-def test_staging_latex_paper_activation_rejects_stale_or_nonprivate_evidence(
-    tmp_path: Path, compiler_image: str, mode: int
+def test_staging_slot_launcher_binds_external_pi_loopback_identity(
+    monkeypatch: pytest.MonkeyPatch, slot: str, worker_id: str, url: str
 ):
-    image = (
-        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
-    )
-    current = configure_host_env.assign(
-        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-        configure_host_env.staging_latex_compiler_provision_values(
-            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-            image=image,
-            namespace="nielsr",
-        ),
-    )
-    evidence = tmp_path / "latex-qualification.json"
-    evidence.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "environment": "staging",
-                "compiler_image": compiler_image,
-                "passed": 7,
-                "total": 7,
-                "checks": {
-                    "hostile_input": True,
-                    "cancellation": True,
-                    "health": True,
-                    "metrics": True,
-                    "image_isolation": True,
-                    "reconciliation": True,
-                    "restart": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    os.chmod(evidence, mode)
-
-    with pytest.raises(ValueError, match="qualification evidence"):
-        configure_host_env.staging_latex_paper_activation_values(
-            current, evidence_path=evidence
-        )
-
-
-def test_staging_latex_paper_activation_rejects_legacy_service_owned_evidence(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    image = (
-        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
-    )
-    current = configure_host_env.assign(
-        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-        configure_host_env.staging_latex_compiler_provision_values(
-            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
-            image=image,
-            namespace="nielsr",
-        ),
-    )
-    legacy_directory = tmp_path / "staging"
-    legacy_directory.mkdir()
-    os.chmod(legacy_directory, 0o700)
-    evidence = legacy_directory / "latex-compiler-qualification.json"
-    evidence.write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "environment": "staging",
-                "compiler_image": image,
-                "passed": 7,
-                "total": 7,
-                "checks": {
-                    "hostile_input": True,
-                    "cancellation": True,
-                    "health": True,
-                    "metrics": True,
-                    "image_isolation": True,
-                    "reconciliation": True,
-                    "restart": True,
-                },
-            }
-        ),
-        encoding="utf-8",
-    )
-    os.chmod(evidence, 0o600)
-    monkeypatch.setattr(
-        configure_host_env.grp,
-        "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
-    )
-
-    with pytest.raises(ValueError, match="qualification evidence"):
-        configure_host_env.staging_latex_paper_activation_values(
-            current, evidence_path=evidence
-        )
-
-
-def test_staging_latex_compiler_provision_mode_keeps_every_feature_off(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    source = tmp_path / "source.env"
-    source.write_text("SOURCE=unused\n", encoding="utf-8")
-    config_root = tmp_path / "config"
-    config_root.mkdir()
-    (config_root / "staging.env").write_text(
-        "PWC_HF_TOKEN=existing-staging-token\nUNRELATED=preserved\n",
-        encoding="utf-8",
-    )
-    written = {}
-    image = (
-        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
-    )
-    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
-    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(
-        configure_host_env,
-        "write_env",
-        lambda path, lines, group: written.update(
-            {"path": path, "lines": lines, "group": group}
-        ),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "configure_host_env.py",
-            "--legacy-env",
-            str(source),
-            "--staging-latex-compiler-provision-only",
-            "--staging-latex-compiler-image",
-            image,
-            "--confirm",
-            "PROVISION_PRIVATE_STAGING_LATEX_COMPILER",
-        ],
-    )
-
-    assert configure_host_env.main() == 0
-    assert written["path"] == config_root / "staging.env"
-    assert written["group"] == "pwc-staging"
-    assert configure_host_env.decoded_value(written["lines"]["UNRELATED"]) == (
-        "preserved"
-    )
     for key in (
-        "PWC_CHAT_ARTIFACTS_ENABLED",
-        "PWC_CHAT_LATEX_PAPER_ENABLED",
-        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
-        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
-        "PWC_CHAT_POSTERLY_ENABLED",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ID",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
     ):
-        assert configure_host_env.decoded_value(written["lines"][key]) == "false"
+        monkeypatch.delenv(key, raising=False)
+
+    slot_launcher.configure_external_pi_slot("staging", slot)
+
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == worker_id
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == url
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
+        "external-pi-v1"
+    )
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
 
 
-def test_staging_latex_compiler_evidence_layout_mode_touches_only_root_handoff(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+def test_production_slot_launcher_does_not_bind_external_pi_worker(
+    monkeypatch: pytest.MonkeyPatch,
 ):
-    source = tmp_path / "source.env"
-    source.write_text("SOURCE=unused\n", encoding="utf-8")
-    evidence = tmp_path / "staging-compiler-qualification" / "evidence.json"
-    monkeypatch.setattr(
-        configure_host_env,
-        "STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE",
-        evidence,
-    )
-    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
-    monkeypatch.setattr(
-        configure_host_env.grp,
-        "getgrnam",
-        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
-    )
-    monkeypatch.setattr(
-        sys,
-        "argv",
-        [
-            "configure_host_env.py",
-            "--legacy-env",
-            str(source),
-            "--staging-latex-compiler-evidence-layout-only",
-            "--confirm",
-            "LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE",
-        ],
-    )
+    preserved = {
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ID": "preserved-id",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_URL": "preserved-url",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "preserved-contract",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "preserved-capacity",
+    }
+    for key, value in preserved.items():
+        monkeypatch.setenv(key, value)
 
-    assert configure_host_env.main() == 0
-    layout = evidence.parent
-    assert layout.is_dir()
-    assert layout.stat().st_mode & 0o777 == 0o750
-    assert layout.stat().st_uid == 0
-    assert layout.stat().st_gid == os.getegid()
-    assert not evidence.exists()
+    slot_launcher.configure_external_pi_slot("production", "blue")
+
+    assert {key: os.environ[key] for key in preserved} == preserved
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):
@@ -871,11 +803,7 @@ def test_production_runtime_accepts_reviewed_team_environment_policy(tmp_path: P
     settings.chat_sandbox_runbook_url = "https://example.test/production-runbook"
     settings.chat_sandbox_operator_usernames = "nielsr"
     settings.chat_operational_alerts_enabled = True
-    settings.chat_title_generation_enabled = True
-    settings.chat_title_provider = "openrouter"
-    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
-    settings.chat_title_credential_owner = "nielsr"
-    settings.chat_title_credential_environment = "production"
+    configure_hf_scope_and_title(settings, "production")
 
     validate_chat_capacity_and_spend_policy(settings)
 
@@ -897,12 +825,40 @@ def test_enabled_chat_does_not_require_general_server_hf_token(tmp_path: Path):
     assert validate_runtime(settings) == profile_features("staging")
 
 
-def test_enabled_chat_requires_openrouter_title_credential(tmp_path: Path):
+def test_enabled_chat_requires_hf_glm_title_credential(tmp_path: Path):
     release = make_bundle(tmp_path, chat=True)
     settings = deployed_settings(tmp_path, release, "staging")
-    settings.chat_openrouter_api_key = ""
+    settings.chat_title_hf_token = ""
 
-    with pytest.raises(RuntimeError, match="OpenRouter title credential"):
+    with pytest.raises(RuntimeError, match="HF GLM title credential"):
+        validate_runtime(settings)
+
+
+def test_enforced_runtime_rejects_legacy_openrouter_title_policy(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    settings.chat_title_provider = "openrouter"
+    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
+
+    with pytest.raises(RuntimeError, match="HF GLM title credential"):
+        validate_runtime(settings)
+
+
+def test_enabled_chat_requires_scope_guardrail(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    settings.chat_scope_guardrail_enabled = False
+
+    with pytest.raises(RuntimeError, match="research-scope guardrail"):
+        validate_runtime(settings)
+
+
+def test_bridge_runtime_rejects_unapproved_hf_title_model(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    settings.chat_title_model = "deepseek-ai/DeepSeek-V4-Flash-0731:fastest"
+
+    with pytest.raises(RuntimeError, match="HF GLM title credential"):
         validate_runtime(settings)
 
 
@@ -1087,11 +1043,7 @@ def test_production_runtime_accepts_reviewed_250_environment_policy(tmp_path: Pa
     settings.chat_sandbox_runbook_url = "https://example.test/production-runbook"
     settings.chat_sandbox_operator_usernames = "nielsr"
     settings.chat_operational_alerts_enabled = True
-    settings.chat_title_generation_enabled = True
-    settings.chat_title_provider = "openrouter"
-    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
-    settings.chat_title_credential_owner = "nielsr"
-    settings.chat_title_credential_environment = "production"
+    configure_hf_scope_and_title(settings, "production")
     validate_chat_capacity_and_spend_policy(settings)
 
 
@@ -1118,11 +1070,7 @@ def test_production_runtime_accepts_reviewed_225_application_policy(tmp_path: Pa
     settings.chat_sandbox_runbook_url = "https://example.test/production-runbook"
     settings.chat_sandbox_operator_usernames = "nielsr"
     settings.chat_operational_alerts_enabled = True
-    settings.chat_title_generation_enabled = True
-    settings.chat_title_provider = "openrouter"
-    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
-    settings.chat_title_credential_owner = "nielsr"
-    settings.chat_title_credential_environment = "production"
+    configure_hf_scope_and_title(settings, "production")
 
     validate_chat_capacity_and_spend_policy(settings)
 
@@ -1277,11 +1225,7 @@ def test_disabled_production_accepts_armed_configuration_for_atomic_rollback(
     settings.chat_gateway_url = (
         "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
     )
-    settings.chat_title_generation_enabled = True
-    settings.chat_title_provider = "openrouter"
-    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
-    settings.chat_title_credential_owner = "nielsr"
-    settings.chat_title_credential_environment = "production"
+    configure_hf_scope_and_title(settings, "production")
 
     assert settings.chat_enabled is False
     assert settings.chat_new_chat_modal_percentage == 0
@@ -1467,6 +1411,9 @@ class _ChatSchemaResult:
     def first(self):
         return self._first
 
+    def scalars(self):
+        return (row[0] for row in self._rows)
+
 
 class _ChatSchemaDB:
     def __init__(
@@ -1479,11 +1426,11 @@ class _ChatSchemaDB:
         include_pool_columns: bool = True,
         include_latency_columns: bool = True,
         include_qualification_columns: bool = True,
+        include_mapped_qualification_columns: bool = True,
         include_reader_context_columns: bool = True,
         include_artifact_foundation: bool = True,
-        include_paper_figure_tables: bool = True,
-        include_paper_provenance: bool = True,
-        include_restore_digest_constraint: bool = False,
+        include_durable_schema: bool = True,
+        include_reservation_schema: bool = True,
     ):
         self.transaction_read_only = transaction_read_only
         self.include_edit_columns = include_edit_columns
@@ -1492,29 +1439,16 @@ class _ChatSchemaDB:
         self.include_pool_columns = include_pool_columns
         self.include_latency_columns = include_latency_columns
         self.include_qualification_columns = include_qualification_columns
+        self.include_mapped_qualification_columns = include_mapped_qualification_columns
         self.include_reader_context_columns = include_reader_context_columns
         self.include_artifact_foundation = include_artifact_foundation
-        self.include_paper_figure_tables = include_paper_figure_tables
-        self.include_paper_provenance = include_paper_provenance
-        self.include_restore_digest_constraint = include_restore_digest_constraint
+        self.include_durable_schema = include_durable_schema
+        self.include_reservation_schema = include_reservation_schema
 
     def execute(self, statement):
         sql = str(statement)
         if "SHOW transaction_read_only" in sql:
             return _ChatSchemaResult(scalar=self.transaction_read_only)
-        if "chat_latex_paper_figure_blobs" in sql and "to_regclass" in sql:
-            names = (
-                "chat_latex_paper_figure_blobs",
-                "chat_latex_paper_figure_references",
-                "chat_latex_paper_storage_cleanup",
-            )
-            if not self.include_paper_figure_tables:
-                names = names[1:]
-            return _ChatSchemaResult(rows=[(name, name) for name in names])
-        if "uq_chat_latex_paper_versions_digest" in sql:
-            return _ChatSchemaResult(
-                first=(1,) if self.include_restore_digest_constraint else None
-            )
         if "to_regclass" in sql:
             names = (
                 "chat_sessions",
@@ -1537,22 +1471,236 @@ class _ChatSchemaDB:
             )
             if self.include_artifact_foundation:
                 names += ("chat_artifacts", "chat_latex_paper_versions")
+            if self.include_durable_schema:
+                names += (
+                    "chat_turn_jobs",
+                    "chat_turn_event_chunks",
+                    "chat_external_workers",
+                )
+            if self.include_reservation_schema:
+                names += (
+                    "chat_external_worker_reservations",
+                    "chat_qualification_scopes",
+                    "chat_qualification_evidence_events",
+                )
             return _ChatSchemaResult(rows=[(name, name) for name in names])
-        if "information_schema.columns" in sql:
-            if "generation_provenance" in sql:
-                rows = [
-                    ("chat_latex_paper_figure_blobs", "digest"),
-                    ("chat_latex_paper_figure_blobs", "byte_count"),
-                    ("chat_latex_paper_figure_blobs", "media_type"),
-                    ("chat_latex_paper_figure_blobs", "storage_key"),
-                    ("chat_latex_paper_figure_references", "version_id"),
-                    ("chat_latex_paper_figure_references", "path"),
-                    ("chat_latex_paper_figure_references", "blob_digest"),
-                    ("chat_latex_paper_storage_cleanup", "storage_prefix"),
+        if (
+            "character_maximum_length" in sql
+            and "chat_external_worker_reservations" in sql
+        ):
+            rows = [
+                ("request_id", "character varying", "NO", 200),
+                ("turn_id", "uuid", "YES", None),
+                ("endpoint_id", "character varying", "NO", 128),
+                ("worker_id", "character varying", "NO", 128),
+                ("instance_id", "uuid", "NO", None),
+                ("worker_generation", "bigint", "NO", None),
+                ("release_id", "character varying", "NO", 255),
+                ("contract_version", "character varying", "NO", 128),
+                ("maximum_sessions", "integer", "NO", None),
+                ("reserved_at", "timestamp with time zone", "NO", None),
+                ("expires_at", "timestamp with time zone", "NO", None),
+            ]
+            return _ChatSchemaResult(
+                rows=rows if self.include_reservation_schema else []
+            )
+        if "qualification_evidence_exact_columns" in sql:
+            rows = [
+                ("chat_qualification_scopes", "id", "uuid", "NO", None),
+                ("chat_qualification_scopes", "run_id", "character varying", "NO", 64),
+                ("chat_qualification_scopes", "profile", "character varying", "NO", 32),
+                (
+                    "chat_qualification_scopes",
+                    "app_release_id",
+                    "character varying",
+                    "NO",
+                    255,
+                ),
+                (
+                    "chat_qualification_scopes",
+                    "window_started_at",
+                    "timestamp with time zone",
+                    "NO",
+                    None,
+                ),
+                (
+                    "chat_qualification_scopes",
+                    "window_ended_at",
+                    "timestamp with time zone",
+                    "YES",
+                    None,
+                ),
+                (
+                    "chat_qualification_scopes",
+                    "expires_at",
+                    "timestamp with time zone",
+                    "NO",
+                    None,
+                ),
+                (
+                    "chat_qualification_scopes",
+                    "created_at",
+                    "timestamp with time zone",
+                    "NO",
+                    None,
+                ),
+                ("chat_qualification_evidence_events", "id", "uuid", "NO", None),
+                (
+                    "chat_qualification_evidence_events",
+                    "qualification_scope_id",
+                    "uuid",
+                    "NO",
+                    None,
+                ),
+                ("chat_qualification_evidence_events", "turn_id", "uuid", "NO", None),
+                (
+                    "chat_qualification_evidence_events",
+                    "chat_session_id",
+                    "uuid",
+                    "NO",
+                    None,
+                ),
+                (
+                    "chat_qualification_evidence_events",
+                    "event_type",
+                    "character varying",
+                    "NO",
+                    32,
+                ),
+                (
+                    "chat_qualification_evidence_events",
+                    "operation_digest",
+                    "character varying",
+                    "YES",
+                    64,
+                ),
+                (
+                    "chat_qualification_evidence_events",
+                    "operation_kind",
+                    "character varying",
+                    "YES",
+                    8,
+                ),
+                (
+                    "chat_qualification_evidence_events",
+                    "occurred_at",
+                    "timestamp with time zone",
+                    "NO",
+                    None,
+                ),
+                ("chat_turn_latency", "qualification_scope_id", "uuid", "YES", None),
+                (
+                    "chat_turn_latency",
+                    "qualification_run_id",
+                    "character varying",
+                    "YES",
+                    64,
+                ),
+                (
+                    "chat_turn_latency",
+                    "qualification_profile",
+                    "character varying",
+                    "YES",
+                    32,
+                ),
+                (
+                    "chat_turn_latency",
+                    "qualification_workload",
+                    "character varying",
+                    "YES",
+                    16,
+                ),
+                (
+                    "chat_turn_latency",
+                    "qualification_scenario",
+                    "character varying",
+                    "YES",
+                    32,
+                ),
+            ]
+            rows = [
+                (
+                    *row,
+                    "now()"
+                    if row[:2] == ("chat_qualification_scopes", "created_at")
+                    else None,
+                )
+                for row in rows
+            ]
+            return _ChatSchemaResult(
+                rows=rows if self.include_reservation_schema else []
+            )
+        if "qualification_evidence_exact_constraints" in sql:
+            fragments = {
+                "chat_qualification_scopes_pkey": "PRIMARY KEY (id)",
+                "chat_qualification_scopes_run_id_key": "UNIQUE (run_id)",
+                "chat_qualification_scopes_profile_check": "CHECK (((profile)::text = ANY ((ARRAY['32-functional-turns'::character varying, '100-immediate-admission'::character varying])::text[])))",
+                "chat_qualification_scopes_window_check": "CHECK (((window_ended_at IS NULL) OR (window_ended_at >= window_started_at)))",
+                "chat_qualification_scopes_expiry_check": "CHECK ((expires_at > window_started_at))",
+                "chat_qualification_evidence_events_pkey": "PRIMARY KEY (id)",
+                "chat_qualification_evidence_scope_fkey": "FOREIGN KEY (qualification_scope_id) REFERENCES chat_qualification_scopes(id) ON DELETE CASCADE",
+                "chat_qualification_evidence_turn_fkey": "FOREIGN KEY (turn_id) REFERENCES chat_turn_jobs(turn_id) ON DELETE CASCADE",
+                "chat_qualification_evidence_session_fkey": "FOREIGN KEY (chat_session_id) REFERENCES chat_sessions(id) ON DELETE CASCADE",
+                "chat_qualification_evidence_event_type_check": "CHECK (((event_type)::text = ANY ((ARRAY['admitted_no_queue'::character varying, 'executor_started'::character varying, 'stale_fence'::character varying, 'queued'::character varying, 'workspace_created'::character varying, 'workspace_reused'::character varying, 'workspace_evicted'::character varying])::text[])))",
+                "chat_qualification_evidence_operation_shape_check": "CHECK ((((event_type)::text = 'executor_started'::text) = ((operation_digest IS NOT NULL) AND (operation_kind IS NOT NULL) AND ((operation_kind)::text = ANY ((ARRAY['read'::character varying, 'bash'::character varying])::text[])))))",
+                "chat_turn_latency_qualification_scope_fkey": "FOREIGN KEY (qualification_scope_id) REFERENCES chat_qualification_scopes(id) ON DELETE SET NULL",
+                "chat_turn_latency_qualification_profile_check": "CHECK (((qualification_profile IS NULL) OR ((qualification_profile)::text = ANY ((ARRAY['32-functional-turns'::character varying, '100-immediate-admission'::character varying])::text[]))))",
+                "chat_turn_latency_qualification_workload_check": "CHECK (((qualification_workload IS NULL) OR ((qualification_workload)::text = ANY ((ARRAY['no_tool'::character varying, 'read'::character varying, 'bash'::character varying])::text[]))))",
+                "chat_turn_latency_qualification_scenario_check": "CHECK (((qualification_scenario IS NULL) OR ((qualification_scenario)::text = ANY ((ARRAY['focused_latency'::character varying, 'reliability'::character varying, 'clean_cancel'::character varying, 'forced_failure'::character varying])::text[]))))",
+            }
+            return _ChatSchemaResult(
+                rows=list(fragments.items()) if self.include_reservation_schema else []
+            )
+        if "qualification_evidence_exact_indexes" in sql:
+            columns = {
+                "idx_chat_qualification_scopes_expiry": ["expires_at"],
+                "idx_chat_qualification_scopes_release_profile": [
+                    "app_release_id",
+                    "profile",
+                ],
+                "idx_chat_qualification_evidence_scope_event_time": [
+                    "qualification_scope_id",
+                    "event_type",
+                    "occurred_at",
+                ],
+                "idx_chat_qualification_evidence_session_time": [
+                    "chat_session_id",
+                    "occurred_at",
+                ],
+                "idx_chat_qualification_evidence_turn_event": ["turn_id", "event_type"],
+                "uq_chat_qualification_evidence_stale_turn": [
+                    "qualification_scope_id",
+                    "turn_id",
+                ],
+                "uq_chat_qualification_evidence_eviction_turn": [
+                    "qualification_scope_id",
+                    "turn_id",
+                ],
+                "idx_chat_turn_latency_qualification_scope": [
+                    "qualification_scope_id",
+                    "admitted_at",
+                ],
+            }
+            return _ChatSchemaResult(
+                rows=[
+                    (
+                        name,
+                        name.startswith("uq_"),
+                        value,
+                        (
+                            "((event_type)::text = 'stale_fence'::text)"
+                            if name.endswith("stale_turn")
+                            else "((event_type)::text = 'workspace_evicted'::text)"
+                            if name.endswith("eviction_turn")
+                            else None
+                        ),
+                    )
+                    for name, value in columns.items()
                 ]
-                if self.include_paper_provenance:
-                    rows.append(("chat_latex_paper_versions", "generation_provenance"))
-                return _ChatSchemaResult(rows=rows)
+                if self.include_reservation_schema
+                else []
+            )
+        if "information_schema.columns" in sql:
             rows = [
                 ("chat_sessions", "execution_backend"),
                 ("chat_sessions", "reasoning_effort"),
@@ -1598,6 +1746,90 @@ class _ChatSchemaDB:
                         ("chat_messages", "viewer_context"),
                         ("chat_messages", "paper_selection"),
                     ]
+                )
+            if self.include_durable_schema:
+                rows.extend(
+                    [
+                        ("chat_turn_jobs", name)
+                        for name in (
+                            "state",
+                            "worker_id",
+                            "worker_generation",
+                            "lease_generation",
+                            "lease_expires_at",
+                            "terminal_at",
+                            "failure_code",
+                            "event_sequence",
+                            "event_bytes",
+                        )
+                    ]
+                    + [
+                        ("chat_turn_event_chunks", name)
+                        for name in (
+                            "turn_id",
+                            "first_sequence",
+                            "last_sequence",
+                            "events",
+                            "payload_bytes",
+                        )
+                    ]
+                    + [
+                        ("chat_external_workers", name)
+                        for name in (
+                            "worker_id",
+                            "instance_id",
+                            "environment",
+                            "release_id",
+                            "contract_version",
+                            "generation",
+                            "state",
+                            "maximum_sessions",
+                            "active_sessions",
+                            "lease_expires_at",
+                        )
+                    ]
+                )
+            if self.include_reservation_schema:
+                rows.extend(
+                    ("chat_external_worker_reservations", name)
+                    for name in (
+                        "request_id",
+                        "turn_id",
+                        "endpoint_id",
+                        "worker_id",
+                        "instance_id",
+                        "worker_generation",
+                        "release_id",
+                        "contract_version",
+                        "maximum_sessions",
+                        "reserved_at",
+                        "expires_at",
+                    )
+                )
+                rows.extend(
+                    ("chat_qualification_scopes", name)
+                    for name in (
+                        "id",
+                        "run_id",
+                        "profile",
+                        "app_release_id",
+                        "window_started_at",
+                        "window_ended_at",
+                        "expires_at",
+                    )
+                )
+                rows.extend(
+                    ("chat_qualification_evidence_events", name)
+                    for name in (
+                        "id",
+                        "qualification_scope_id",
+                        "turn_id",
+                        "chat_session_id",
+                        "event_type",
+                        "operation_digest",
+                        "operation_kind",
+                        "occurred_at",
+                    )
                 )
             if self.include_artifact_foundation:
                 rows.extend(
@@ -1663,6 +1895,14 @@ class _ChatSchemaDB:
                         ("chat_turn_latency", "retry_overhead_ms"),
                     ]
                 )
+            if self.include_mapped_qualification_columns:
+                rows.extend(
+                    [
+                        ("chat_turn_latency", "qualification_scope_id"),
+                        ("chat_turn_latency", "qualification_profile"),
+                        ("chat_turn_latency", "qualification_workload"),
+                    ]
+                )
             if self.include_qualification_columns:
                 rows.extend(
                     [
@@ -1671,6 +1911,104 @@ class _ChatSchemaDB:
                     ]
                 )
             return _ChatSchemaResult(rows=rows)
+        if "FROM pg_indexes" in sql:
+            if "idx_chat_external_worker_reservations_capacity" in sql:
+                return _ChatSchemaResult(
+                    rows=[
+                        ("chat_external_worker_reservations_pkey",),
+                        ("chat_external_worker_reservations_turn_id_key",),
+                        ("idx_chat_external_worker_reservations_capacity",),
+                        ("idx_chat_external_worker_reservations_unbound_expiry",),
+                    ]
+                    if self.include_reservation_schema
+                    else []
+                )
+            if "tablename = 'chat_external_worker_reservations'" in sql:
+                rows = [
+                    (
+                        "chat_external_worker_reservations_pkey",
+                        "CREATE UNIQUE INDEX chat_external_worker_reservations_pkey "
+                        "ON staging.chat_external_worker_reservations USING btree "
+                        "(request_id)",
+                    ),
+                    (
+                        "chat_external_worker_reservations_turn_id_key",
+                        "CREATE UNIQUE INDEX chat_external_worker_reservations_turn_id_key "
+                        "ON staging.chat_external_worker_reservations USING btree "
+                        "(turn_id)",
+                    ),
+                    (
+                        "idx_chat_external_worker_reservations_capacity",
+                        "CREATE INDEX idx_chat_external_worker_reservations_capacity "
+                        "ON staging.chat_external_worker_reservations USING btree "
+                        "(worker_id, instance_id, worker_generation)",
+                    ),
+                    (
+                        "idx_chat_external_worker_reservations_unbound_expiry",
+                        "CREATE INDEX idx_chat_external_worker_reservations_unbound_expiry "
+                        "ON staging.chat_external_worker_reservations USING btree "
+                        "(expires_at) WHERE (turn_id IS NULL)",
+                    ),
+                ]
+                return _ChatSchemaResult(
+                    rows=rows if self.include_reservation_schema else []
+                )
+            if "idx_chat_external_workers_dispatch" in sql:
+                return _ChatSchemaResult(
+                    rows=[("idx_chat_external_workers_dispatch",)]
+                    if self.include_durable_schema
+                    else []
+                )
+            return _ChatSchemaResult(
+                rows=[
+                    (name,)
+                    for name in (
+                        "idx_chat_turn_jobs_expiry",
+                        "idx_chat_turn_jobs_terminal_cleanup",
+                        "idx_chat_turn_event_chunks_after",
+                        "uq_chat_turn_event_chunk_start",
+                    )
+                ]
+                if self.include_durable_schema
+                else []
+            )
+        if "chat_turn_jobs_state_check" in sql:
+            return _ChatSchemaResult(
+                rows=[
+                    (name,)
+                    for name in (
+                        "chat_turn_jobs_state_check",
+                        "chat_turn_jobs_lease_fields_check",
+                        "chat_turn_jobs_terminal_timestamp_check",
+                        "ck_chat_turn_event_chunk_range",
+                    )
+                ]
+                if self.include_durable_schema
+                else []
+            )
+        if "chat_external_worker_reservations_worker_generation_check" in sql:
+            return _ChatSchemaResult(
+                rows=[
+                    (
+                        "chat_external_worker_reservations_pkey",
+                        "PRIMARY KEY (request_id)",
+                    ),
+                    (
+                        "chat_external_worker_reservations_turn_id_key",
+                        "UNIQUE (turn_id)",
+                    ),
+                    (
+                        "chat_external_worker_reservations_worker_generation_check",
+                        "CHECK ((worker_generation > 0))",
+                    ),
+                    (
+                        "chat_external_worker_reservations_maximum_sessions_check",
+                        "CHECK ((maximum_sessions BETWEEN 1 AND 32))",
+                    ),
+                ]
+                if self.include_reservation_schema
+                else []
+            )
         if "chat_shares_messages_array_check" in sql:
             return _ChatSchemaResult(
                 first=(1,) if self.include_share_constraint else None
@@ -1700,6 +2038,174 @@ def test_chat_schema_accepts_writable_staging_connection():
         _ChatSchemaDB("off"),
         Settings(environment="staging", chat_openrouter_server_funded_enabled=True),
     )
+
+
+def test_chat_schema_requires_real_durable_tables_when_dispatch_is_armed():
+    settings = Settings(
+        environment="staging",
+        chat_durable_turn_dispatch_enabled=True,
+    )
+    with pytest.raises(RuntimeError, match="required chat sandbox schema is missing"):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_durable_schema=False), settings
+        )
+    validate_chat_schema(_ChatSchemaDB("off"), settings)
+
+
+def test_chat_schema_requires_complete_reservation_contract_for_external_admission():
+    settings = Settings(
+        environment="staging",
+        chat_external_pi_admission_enabled=True,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="required external worker schema is missing"
+    ):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_reservation_schema=False), settings
+        )
+
+    validate_chat_schema(_ChatSchemaDB("off"), settings)
+
+
+@pytest.mark.parametrize(
+    ("kind", "name"),
+    [
+        ("table", "chat_external_worker_reservations"),
+        *(
+            ("column", name)
+            for name in (
+                "request_id",
+                "turn_id",
+                "endpoint_id",
+                "worker_id",
+                "instance_id",
+                "worker_generation",
+                "release_id",
+                "contract_version",
+                "maximum_sessions",
+                "reserved_at",
+                "expires_at",
+            )
+        ),
+        *(
+            ("index", name)
+            for name in (
+                "chat_external_worker_reservations_pkey",
+                "chat_external_worker_reservations_turn_id_key",
+                "idx_chat_external_worker_reservations_capacity",
+                "idx_chat_external_worker_reservations_unbound_expiry",
+            )
+        ),
+        *(
+            ("constraint", name)
+            for name in (
+                "chat_external_worker_reservations_pkey",
+                "chat_external_worker_reservations_turn_id_key",
+                "chat_external_worker_reservations_worker_generation_check",
+                "chat_external_worker_reservations_maximum_sessions_check",
+            )
+        ),
+    ],
+)
+def test_chat_schema_rejects_each_missing_reservation_contract_item(kind, name):
+    db = _ChatSchemaDB("off")
+    original_execute = db.execute
+
+    def without_contract_item(statement):
+        sql = str(statement)
+        result = original_execute(statement)
+        if kind == "table" and "to_regclass" in sql:
+            result._rows = [row for row in result._rows if row[0] != name]
+        elif kind == "column" and "information_schema.columns" in sql:
+            result._rows = [
+                row
+                for row in result._rows
+                if not (
+                    row[0] == name or row == ("chat_external_worker_reservations", name)
+                )
+            ]
+        elif kind == "index" and "FROM pg_indexes" in sql:
+            result._rows = [row for row in result._rows if row[0] != name]
+        elif kind == "constraint" and "pg_constraint AS constraint_row" in sql:
+            result._rows = [row for row in result._rows if row[0] != name]
+        return result
+
+    db.execute = without_contract_item
+    with pytest.raises(
+        RuntimeError, match="required external worker schema is missing"
+    ):
+        validate_chat_schema(
+            db,
+            Settings(environment="staging", chat_external_pi_admission_enabled=True),
+        )
+
+
+@pytest.mark.parametrize(
+    ("query_marker", "object_name", "replacement"),
+    (
+        (
+            "character_maximum_length",
+            "endpoint_id",
+            ("endpoint_id", "text", "YES", None),
+        ),
+        (
+            "tablename = 'chat_external_worker_reservations'",
+            "chat_external_worker_reservations_turn_id_key",
+            "CREATE INDEX chat_external_worker_reservations_turn_id_key "
+            "ON staging.chat_external_worker_reservations USING btree (turn_id)",
+        ),
+        (
+            "tablename = 'chat_external_worker_reservations'",
+            "idx_chat_external_worker_reservations_capacity",
+            "CREATE INDEX idx_chat_external_worker_reservations_capacity "
+            "ON staging.chat_external_worker_reservations USING btree (worker_id)",
+        ),
+        (
+            "tablename = 'chat_external_worker_reservations'",
+            "idx_chat_external_worker_reservations_unbound_expiry",
+            "CREATE INDEX idx_chat_external_worker_reservations_unbound_expiry "
+            "ON staging.chat_external_worker_reservations USING btree (expires_at)",
+        ),
+        (
+            "pg_get_constraintdef",
+            "chat_external_worker_reservations_worker_generation_check",
+            "CHECK ((worker_generation >= 0))",
+        ),
+        (
+            "pg_get_constraintdef",
+            "chat_external_worker_reservations_maximum_sessions_check",
+            "CHECK ((maximum_sessions BETWEEN 1 AND 64))",
+        ),
+    ),
+)
+def test_chat_schema_rejects_malformed_same_name_reservation_objects(
+    query_marker, object_name, replacement
+):
+    db = _ChatSchemaDB("off")
+    original_execute = db.execute
+
+    def malformed(statement):
+        result = original_execute(statement)
+        if query_marker in str(statement):
+            result._rows = [
+                (
+                    replacement
+                    if row[0] == object_name and isinstance(replacement, tuple)
+                    else ((row[0], replacement) if row[0] == object_name else row)
+                )
+                for row in result._rows
+            ]
+        return result
+
+    db.execute = malformed
+    with pytest.raises(
+        RuntimeError, match="required external worker schema is missing"
+    ):
+        validate_chat_schema(
+            db,
+            Settings(environment="staging", chat_external_pi_admission_enabled=True),
+        )
 
 
 def test_chat_schema_production_profile_does_not_require_openrouter_tables():
@@ -1762,6 +2268,14 @@ def test_chat_schema_requires_qualification_metadata_columns():
         )
 
 
+def test_chat_schema_production_requires_mapped_qualification_metadata_columns():
+    with pytest.raises(RuntimeError, match="required chat sandbox schema is missing"):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_mapped_qualification_columns=False),
+            Settings(environment="production"),
+        )
+
+
 def test_chat_schema_requires_reader_context_columns():
     with pytest.raises(RuntimeError, match="required chat sandbox schema is missing"):
         validate_chat_schema(
@@ -1815,39 +2329,6 @@ def test_chat_schema_requires_latency_telemetry_columns():
         validate_chat_schema(
             _ChatSchemaDB("off", include_latency_columns=False),
             Settings(environment="staging", chat_openrouter_server_funded_enabled=True),
-        )
-
-
-def _armed_private_paper_schema_settings() -> Settings:
-    return Settings(
-        environment="staging",
-        chat_artifacts_enabled=True,
-        chat_latex_paper_enabled=True,
-        chat_latex_compiler_jobs_enabled=True,
-    )
-
-
-def test_chat_schema_requires_figure_storage_migration_when_paper_jobs_are_armed():
-    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
-        validate_chat_schema(
-            _ChatSchemaDB("off", include_paper_figure_tables=False),
-            _armed_private_paper_schema_settings(),
-        )
-
-
-def test_chat_schema_requires_repair_provenance_when_paper_jobs_are_armed():
-    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
-        validate_chat_schema(
-            _ChatSchemaDB("off", include_paper_provenance=False),
-            _armed_private_paper_schema_settings(),
-        )
-
-
-def test_chat_schema_requires_restore_digest_migration_when_paper_jobs_are_armed():
-    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
-        validate_chat_schema(
-            _ChatSchemaDB("off", include_restore_digest_constraint=True),
-            _armed_private_paper_schema_settings(),
         )
 
 
@@ -1937,7 +2418,7 @@ def test_chat_descriptor_is_extracted_from_selected_source():
     assert dormant["system_prompt_sha256"] == descriptor["system_prompt_sha256"]
     production = _chat_descriptor_from_source(source, "production", chat_enabled=True)
     assert production["modal_image_version"] == PRODUCTION_MODAL_IMAGE_ID
-    assert production["worker_contract_version"] == "99"
+    assert production["worker_contract_version"] == "102"
     assert production["enabled"] is True
     assert production["database_contract_version"] == 2
     assert production["default_agent_harness"] == "pi"
@@ -2124,12 +2605,8 @@ def test_fully_configured_production_chat_runtime_can_start(tmp_path: Path):
     settings.chat_gateway_url = (
         "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
     )
-    settings.chat_title_generation_enabled = True
-    settings.chat_title_provider = "openrouter"
-    settings.chat_title_model = "deepseek/deepseek-v4-flash-0731"
+    configure_hf_scope_and_title(settings, "production")
     settings.chat_openrouter_server_funded_enabled = True
-    settings.chat_title_credential_owner = "nielsr"
-    settings.chat_title_credential_environment = "production"
 
     assert validate_runtime(settings) == features
     settings.chat_operational_alerts_enabled = False
@@ -3028,6 +3505,7 @@ def test_common_chat_migrations_support_isolated_production_schema():
         "add_chat_active_cost.sql",
         "add_chat_user_billing.sql",
         "add_chat_qualification_metadata.sql",
+        "repair_chat_qualification_evidence_contract.sql",
         "add_chat_sandbox_spend_cap.sql",
         "add_chat_shares.sql",
         "add_chat_edit_preparation_state.sql",
@@ -3297,6 +3775,35 @@ def test_manual_rollback_syncs_target_runtime_before_restart(
     ]
 
 
+def test_manual_rollback_failed_sha_fence_rejects_changed_current(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    environment_root = tmp_path / "environments"
+    root = environment_root / "staging"
+    current = tmp_path / "current"
+    previous = tmp_path / "previous"
+    current.mkdir()
+    previous.mkdir()
+    root.mkdir(parents=True)
+    atomic_symlink(current, root / "current")
+    atomic_symlink(previous, root / "previous")
+    monkeypatch.setattr(deploy_cli, "ENVIRONMENTS_ROOT", environment_root)
+    monkeypatch.setattr(deploy_cli, "require_root", lambda: None)
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda release, *_args: {
+            "release_id": release.name,
+            "git_sha": "c" * 40,
+        },
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="target changed"):
+        deploy_cli.rollback(
+            Namespace(environment="staging", confirm="", failed_sha="b" * 40)
+        )
+
+
 def test_runtime_sync_failure_restores_previous_lock(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -3369,6 +3876,29 @@ def test_qualified_staging_capacity_keeps_one_warm_sandbox():
     }
 
 
+@pytest.mark.parametrize(
+    ("environment", "active_turn_limit", "external_worker_limit"),
+    [("staging", "2", "32"), ("production", "1", "8")],
+)
+def test_environment_examples_keep_durable_dispatch_disabled_and_current_safe(
+    environment, active_turn_limit, external_worker_limit
+):
+    values = {
+        key: value
+        for line in Path(f"deploy/env/{environment}.env.example")
+        .read_text()
+        .splitlines()
+        if line and not line.startswith("#")
+        for key, value in [line.split("=", 1)]
+    }
+
+    assert values["PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED"] == "false"
+    assert values["PWC_CHAT_MAX_CONCURRENCY"] == active_turn_limit
+    assert values["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == external_worker_limit
+    assert values["PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS"] == "10"
+    assert values["PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS"] == "30"
+
+
 def test_staging_capacity_configuration_preserves_explicit_pool_toggle():
     enabled = {"PWC_CHAT_BLANK_POOL_ENABLED": "PWC_CHAT_BLANK_POOL_ENABLED=true"}
     values = configure_host_env.staging_chat_capacity_configuration(enabled)
@@ -3397,6 +3927,442 @@ def test_staging_chat_pool_toggle_is_narrow_and_bounded():
     assert configure_host_env.staging_chat_pool_values(enabled=False) == {
         "PWC_CHAT_BLANK_POOL_ENABLED": "false"
     }
+
+
+# Production break caught: the durable bridge toggle mutates capacity, worker,
+# executor, workspace, or provider controls along with its single feature flag.
+@pytest.mark.parametrize("enabled", [True, False])
+def test_staging_chat_durable_dispatch_toggle_is_single_key(enabled: bool):
+    assert configure_host_env.staging_chat_durable_dispatch_values(enabled=enabled) == {
+        "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true" if enabled else "false"
+    }
+
+
+def _staging_durable_external_qualification_baseline() -> dict[str, str]:
+    return {
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false"
+        ),
+        "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED=true"
+        ),
+        "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED=true"
+        ),
+        "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": (
+            "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED=true"
+        ),
+        "PWC_CHAT_MAX_CONCURRENCY": "PWC_CHAT_MAX_CONCURRENCY=2",
+        "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": ("PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3"),
+        "PWC_CHAT_BLANK_POOL_ENABLED": "PWC_CHAT_BLANK_POOL_ENABLED=true",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "PWC_CHAT_PI_PREWARM_ENABLED=true",
+    }
+
+
+def test_staging_durable_external_qualification_profile_is_exact_and_reversible():
+    baseline = _staging_durable_external_qualification_baseline()
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+    qualification_admin_token = enabled.pop("PWC_ADMIN_API_TOKEN")
+    assert len(qualification_admin_token) >= 32
+    assert enabled == {
+        "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+        "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+        "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+        "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+        "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+        "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+        "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+        "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+    }
+
+    active = configure_host_env.assign(baseline, enabled)
+    disabled = configure_host_env.staging_durable_external_qualification_values(
+        active, enabled=False
+    )
+    assert disabled == {
+        "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
+        "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+        "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "false",
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "false",
+        "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "false",
+        "PWC_CHAT_REMOTE_BASH_ENABLED": "false",
+        "PWC_CHAT_REMOTE_READ_ENABLED": "false",
+        "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
+        "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+        "PWC_ADMIN_API_TOKEN": "",
+    }
+
+
+def test_staging_durable_external_qualification_installs_scoped_admin_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = _staging_durable_external_qualification_baseline()
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+
+    assert enabled["PWC_ADMIN_API_TOKEN"] == "q" * 64
+    active = configure_host_env.assign(baseline, enabled)
+    disabled = configure_host_env.staging_durable_external_qualification_values(
+        active, enabled=False
+    )
+    assert disabled["PWC_ADMIN_API_TOKEN"] == ""
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED", "true"),
+        ("PWC_CHAT_MAX_CONCURRENCY", "32"),
+        ("PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP", "16"),
+        ("PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED", "false"),
+        ("PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED", "false"),
+        ("PWC_CHAT_REMOTE_BASH_ENABLED", "true"),
+    ),
+)
+def test_staging_durable_external_qualification_refuses_baseline_drift(key, value):
+    baseline = _staging_durable_external_qualification_baseline()
+    baseline[key] = f"{key}={value}"
+
+    with pytest.raises(ValueError, match="qualification baseline"):
+        configure_host_env.staging_durable_external_qualification_values(
+            baseline, enabled=True
+        )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_staging_durable_external_qualification_mode_is_atomic_and_staging_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    enabled: bool,
+):
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    baseline = _staging_durable_external_qualification_baseline()
+    current = (
+        baseline
+        if enabled
+        else configure_host_env.assign(
+            baseline,
+            configure_host_env.staging_durable_external_qualification_values(
+                baseline, enabled=True
+            ),
+        )
+    )
+    staging_path = config_root / "staging.env"
+    staging_path.write_text(
+        "".join(f"{current[key]}\n" for key in sorted(current)), encoding="utf-8"
+    )
+    production_path = config_root / "production.env"
+    production_bytes = b"PRODUCTION=untouched\n"
+    production_path.write_bytes(production_bytes)
+    written = {}
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_env",
+        lambda path, lines, group: written.update(
+            {"path": path, "lines": lines, "group": group}
+        ),
+    )
+    action = "enable" if enabled else "disable"
+    confirmation = (
+        "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+        if enabled
+        else "DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            f"--staging-durable-external-qualification-{action}-only",
+            "--confirm",
+            confirmation,
+        ],
+    )
+
+    assert configure_host_env.main() == 0
+    assert written["path"] == staging_path
+    assert written["group"] == "pwc-staging"
+    assert production_path.read_bytes() == production_bytes
+    expected = configure_host_env.staging_durable_external_qualification_values(
+        current, enabled=enabled
+    )
+    assert {
+        key: configure_host_env.decoded_value(written["lines"][key]) for key in expected
+    } == expected
+    assert capsys.readouterr().out == (
+        f"{'enabled' if enabled else 'disabled'} staging durable external "
+        "qualification profile; no service was restarted\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    (
+        (),
+        ("--confirm", "DEPLOY_PRODUCTION"),
+        (
+            "--staging-chat-capacity-only",
+            "--confirm",
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION",
+        ),
+        (
+            "--staging-durable-external-qualification-disable-only",
+            "--confirm",
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION",
+        ),
+    ),
+)
+def test_staging_durable_external_qualification_requires_exact_confirmation_and_runs_alone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra_args: tuple[str, ...],
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    staging_path = config_root / "staging.env"
+    staging_path.write_text("KEEP=value\n", encoding="utf-8")
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-durable-external-qualification-enable-only",
+            *extra_args,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        configure_host_env.main()
+    assert staging_path.read_text(encoding="utf-8") == "KEEP=value\n"
+    assert "staging durable external qualification" in capsys.readouterr().err
+
+
+def _active_staging_release(tmp_path: Path, release_id: str) -> Path:
+    app_root = tmp_path / "app"
+    release = app_root / "releases" / release_id
+    release.mkdir(parents=True)
+    sha = release_id.removesuffix("-staging") + "a" * 28
+    (release / "release.json").write_text(
+        json.dumps({"git_sha": sha, "release_id": release_id}), encoding="utf-8"
+    )
+    environment = app_root / "environments" / "staging"
+    environment.mkdir(parents=True)
+    (environment / "current").symlink_to(release)
+    return app_root
+
+
+def test_staging_modal_rate_evidence_is_exact_release_bound_and_has_no_default(
+    tmp_path: Path,
+):
+    release_id = "a" * 12 + "-staging"
+    app_root = _active_staging_release(tmp_path, release_id)
+
+    assert configure_host_env.staging_modal_rate_evidence(
+        app_root=app_root,
+        release_id=release_id,
+        microusd_per_second=53,
+    ) == {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": "53",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": release_id,
+    }
+    with pytest.raises(TypeError):
+        configure_host_env.staging_modal_rate_evidence(
+            app_root=app_root,
+            release_id=release_id,
+        )
+    with pytest.raises(ValueError, match="active immutable staging release"):
+        configure_host_env.staging_modal_rate_evidence(
+            app_root=app_root,
+            release_id="b" * 12 + "-staging",
+            microusd_per_second=53,
+        )
+
+
+def test_write_staging_modal_rate_evidence_is_atomic_root_only_and_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = tmp_path / "staging-modal-rate-evidence.json"
+    ownership = []
+    monkeypatch.setattr(
+        configure_host_env.os,
+        "chown",
+        lambda path, uid, gid: ownership.append((path, uid, gid)),
+    )
+    values = {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": "53",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": "a" * 12 + "-staging",
+    }
+
+    configure_host_env.write_staging_modal_rate_evidence(target, values)
+
+    assert json.loads(target.read_text(encoding="utf-8")) == values
+    assert target.stat().st_mode & 0o777 == 0o600
+    temporary = target.with_name(f".{target.name}.new-{os.getpid()}")
+    assert ownership == [(temporary, 0, 0)]
+    assert not temporary.exists()
+    assert target.stat().st_size <= 4096
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_staging_modal_rate_mode_is_confirmed_staging_only_and_content_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    remove: bool,
+):
+    release_id = "a" * 12 + "-staging"
+    app_root = _active_staging_release(tmp_path, release_id)
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    production = config_root / "production.env"
+    production.write_bytes(b"PRODUCTION=untouched\n")
+    target = config_root / "staging-modal-rate-evidence.json"
+    if remove:
+        target.write_text(
+            json.dumps(
+                configure_host_env.staging_modal_rate_evidence(
+                    app_root=app_root,
+                    release_id=release_id,
+                    microusd_per_second=53,
+                )
+            ),
+            encoding="utf-8",
+        )
+        target.chmod(0o600)
+    written = {}
+    monkeypatch.setattr(configure_host_env, "APP_ROOT", app_root)
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_staging_modal_rate_evidence",
+        lambda path, values: written.update({"path": path, "values": values}),
+    )
+    monkeypatch.setattr(
+        configure_host_env,
+        "remove_staging_modal_rate_evidence",
+        lambda path, expected_release_id: written.update(
+            {"removed": path, "release_id": expected_release_id}
+        ),
+    )
+    mode = "remove" if remove else "install"
+    confirmation = (
+        "REMOVE_STAGING_MODAL_RATE_EVIDENCE"
+        if remove
+        else "INSTALL_STAGING_MODAL_RATE_EVIDENCE"
+    )
+    arguments = [
+        "configure_host_env.py",
+        "--legacy-env",
+        str(source),
+        f"--staging-modal-rate-evidence-{mode}-only",
+        "--staging-modal-rate-release-id",
+        release_id,
+        "--confirm",
+        confirmation,
+    ]
+    if not remove:
+        arguments.extend(["--staging-modal-rate-microusd-per-second", "53"])
+    monkeypatch.setattr(sys, "argv", arguments)
+
+    assert configure_host_env.main() == 0
+    output = capsys.readouterr().out
+    assert "53" not in output
+    assert release_id not in output
+    assert production.read_bytes() == b"PRODUCTION=untouched\n"
+    if remove:
+        assert written == {"removed": target, "release_id": release_id}
+    else:
+        assert written["path"] == target
+        assert written["values"]["PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND"] == "53"
+
+
+def test_staging_modal_rate_mode_rejects_missing_confirmation_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-modal-rate-evidence-install-only",
+            "--staging-modal-rate-release-id",
+            "a" * 12 + "-staging",
+            "--staging-modal-rate-microusd-per-second",
+            "53",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        configure_host_env.main()
+    assert not (config_root / "staging-modal-rate-evidence.json").exists()
+
+
+def test_deployment_runbook_has_reversible_staging_external_qualification_gate():
+    runbook = Path("docs/deployment.md").read_text(encoding="utf-8")
+
+    assert "--staging-durable-external-qualification-enable-only" in runbook
+    assert "--confirm ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION" in runbook
+    assert "--staging-durable-external-qualification-disable-only" in runbook
+    assert "--confirm DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION" in runbook
+    assert 'pwc-deploy staging "$qualification_sha" --refresh-environment' in runbook
+    assert "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false" in runbook
+    assert "PWC_CHAT_MAX_CONCURRENCY=2" in runbook
+    assert "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3" in runbook
+    assert "maximum_sessions=32" in runbook
+    assert "chat_sandbox_pool" in runbook
+    assert "must return `0`" in runbook
+    assert "`pwc-rollback staging` does not restore" in runbook
+    assert "Production remains unchanged" in runbook
+    assert "--staging-modal-rate-evidence-install-only" in runbook
+    assert "--staging-modal-rate-microusd-per-second 53" in runbook
+    assert "--confirm INSTALL_STAGING_MODAL_RATE_EVIDENCE" in runbook
+    assert "--staging-modal-rate-evidence-remove-only" in runbook
+    assert "--confirm REMOVE_STAGING_MODAL_RATE_EVIDENCE" in runbook
 
 
 def test_staging_chat_pi_prewarm_toggle_is_narrow_and_profiled():
@@ -3459,6 +4425,225 @@ def test_production_chat_pi_prewarm_rejects_unadmitted_or_alternative_pool():
             },
             enabled=True,
         )
+
+
+def test_staging_scope_guardrail_uses_server_credentials_and_disables_posterly():
+    current = {
+        "PWC_CHAT_TITLE_HF_TOKEN": "PWC_CHAT_TITLE_HF_TOKEN=hf-guardrail",
+        "PWC_CHAT_HF_BILL_TO": "PWC_CHAT_HF_BILL_TO=pwc-org",
+        "PWC_CODEX_JOBS_OPENAI_API_KEY": ("PWC_CODEX_JOBS_OPENAI_API_KEY=sk-guardrail"),
+        "PWC_HF_TOKEN": "PWC_HF_TOKEN=hf-main",
+        "PWC_OPENAI_API_KEY": "PWC_OPENAI_API_KEY=sk-main",
+    }
+    assert configure_host_env.staging_scope_guardrail_values(current) == {
+        "PWC_CHAT_SCOPE_GUARDRAIL_ENABLED": "true",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN": "hf-guardrail",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": "pwc-org",
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": "sk-guardrail",
+        "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": "nielsr/pwc-chat-artifacts-staging",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+    }
+    with pytest.raises(ValueError, match="source is missing"):
+        configure_host_env.staging_scope_guardrail_values(
+            {
+                key: value
+                for key, value in current.items()
+                if key != "PWC_CHAT_TITLE_HF_TOKEN"
+            }
+        )
+    with pytest.raises(ValueError, match="must not reuse PWC_HF_TOKEN"):
+        configure_host_env.staging_scope_guardrail_values(
+            {
+                **current,
+                "PWC_CHAT_TITLE_HF_TOKEN": "PWC_CHAT_TITLE_HF_TOKEN=hf-main",
+            }
+        )
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_scope_title_hf_values_are_exact_and_environment_isolated(environment):
+    other = "production" if environment == "staging" else "staging"
+    source = {
+        "PWC_CHAT_TITLE_GENERATION_ENABLED": ("PWC_CHAT_TITLE_GENERATION_ENABLED=true"),
+        "PWC_CHAT_TITLE_HF_TOKEN": (f"PWC_CHAT_TITLE_HF_TOKEN=hf-title-{environment}"),
+        "PWC_CHAT_TITLE_BILL_TO": "PWC_CHAT_TITLE_BILL_TO=huggingface",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": ("PWC_CHAT_TITLE_CREDENTIAL_OWNER=nielsr"),
+        "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": (
+            f"PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT={environment}"
+        ),
+    }
+    current = {
+        "PWC_HF_TOKEN": f"PWC_HF_TOKEN=hf-general-{environment}",
+        "PWC_OPENAI_API_KEY": f"PWC_OPENAI_API_KEY=sk-main-{environment}",
+        "PWC_CODEX_JOBS_OPENAI_API_KEY": (
+            f"PWC_CODEX_JOBS_OPENAI_API_KEY=sk-guardrail-{environment}"
+        ),
+    }
+    other_current = {
+        "PWC_CHAT_TITLE_HF_TOKEN": f"PWC_CHAT_TITLE_HF_TOKEN=hf-title-{other}"
+    }
+
+    values = configure_host_env.scope_title_hf_values(
+        source,
+        current,
+        other_current,
+        environment=environment,
+    )
+
+    assert values == {
+        "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
+        "PWC_CHAT_TITLE_HF_TOKEN": f"hf-title-{environment}",
+        "PWC_CHAT_TITLE_BILL_TO": "huggingface",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
+        "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": environment,
+        "PWC_CHAT_TITLE_MODEL": "zai-org/GLM-5.3-Flash:baseten",
+        "PWC_CHAT_TITLE_PROVIDER": "huggingface",
+        "PWC_CHAT_TITLE_MAX_TOKENS": "64",
+        "PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD": "25000000",
+        "PWC_CHAT_TITLE_WARNING_MICROUSD": "20000000",
+        "PWC_CHAT_TITLE_MAX_CALL_MICROUSD": "10000",
+        "PWC_CHAT_SCOPE_GUARDRAIL_ENABLED": "true",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN": f"hf-title-{environment}",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_BILL_TO": "huggingface",
+        "PWC_CHAT_SCOPE_GUARDRAIL_GLM_MODEL": ("zai-org/GLM-5.3-Flash:baseten"),
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY": (f"sk-guardrail-{environment}"),
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_MODEL": "gpt-5.6-luna",
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        **(
+            {
+                "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+                "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": ("nielsr/pwc-chat-artifacts-staging"),
+            }
+            if environment == "staging"
+            else {}
+        ),
+    }
+
+    for reused in (
+        f"hf-general-{environment}",
+        f"hf-title-{other}",
+    ):
+        with pytest.raises(ValueError, match="distinct"):
+            configure_host_env.scope_title_hf_values(
+                {
+                    **source,
+                    "PWC_CHAT_TITLE_HF_TOKEN": (f"PWC_CHAT_TITLE_HF_TOKEN={reused}"),
+                },
+                current,
+                other_current,
+                environment=environment,
+            )
+
+
+def test_scope_title_hf_values_require_luna_fallback():
+    source = {
+        "PWC_CHAT_TITLE_GENERATION_ENABLED": ("PWC_CHAT_TITLE_GENERATION_ENABLED=true"),
+        "PWC_CHAT_TITLE_HF_TOKEN": "PWC_CHAT_TITLE_HF_TOKEN=hf-title",
+        "PWC_CHAT_TITLE_BILL_TO": "PWC_CHAT_TITLE_BILL_TO=huggingface",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": ("PWC_CHAT_TITLE_CREDENTIAL_OWNER=nielsr"),
+        "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": (
+            "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT=production"
+        ),
+    }
+
+    with pytest.raises(ValueError, match="PWC_CODEX_JOBS_OPENAI_API_KEY"):
+        configure_host_env.scope_title_hf_values(
+            source,
+            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=hf-general"},
+            {},
+            environment="production",
+        )
+    values = configure_host_env.scope_title_hf_values(
+        source,
+        {
+            "PWC_HF_TOKEN": "PWC_HF_TOKEN=hf-general",
+            "PWC_OPENAI_API_KEY": "PWC_OPENAI_API_KEY=shared-fallback",
+            "PWC_CODEX_JOBS_OPENAI_API_KEY": (
+                "PWC_CODEX_JOBS_OPENAI_API_KEY=shared-fallback"
+            ),
+        },
+        {
+            "PWC_CODEX_JOBS_OPENAI_API_KEY": (
+                "PWC_CODEX_JOBS_OPENAI_API_KEY=shared-fallback"
+            )
+        },
+        environment="production",
+    )
+    assert values["PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY"] == "shared-fallback"
+
+
+def test_production_scope_title_hf_mode_updates_only_production(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "production-title.env"
+    source.write_text(
+        "\n".join(
+            (
+                "PWC_CHAT_TITLE_GENERATION_ENABLED=true",
+                "PWC_CHAT_TITLE_HF_TOKEN=hf-title-production",
+                "PWC_CHAT_TITLE_BILL_TO=huggingface",
+                "PWC_CHAT_TITLE_CREDENTIAL_OWNER=nielsr",
+                "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT=production",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    source.chmod(0o600)
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "production.env").write_text(
+        "\n".join(
+            (
+                "KEEP=production",
+                "PWC_HF_TOKEN=hf-general-production",
+                "PWC_OPENAI_API_KEY=sk-main-production",
+                "PWC_CODEX_JOBS_OPENAI_API_KEY=sk-guardrail-production",
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    (config_root / "staging.env").write_text(
+        "PWC_CHAT_TITLE_HF_TOKEN=hf-title-staging\n",
+        encoding="utf-8",
+    )
+    writes = []
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_env",
+        lambda path, lines, group: writes.append((path, lines, group)),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--production-scope-title-hf-only",
+            "--confirm",
+            "ENABLE_PRODUCTION_HF_SCOPE_AND_TITLES",
+        ],
+    )
+
+    assert configure_host_env.main() == 0
+    assert [(path.name, group) for path, _, group in writes] == [
+        ("production.env", "pwc-production")
+    ]
+    written = writes[0][1]
+    assert configure_host_env.decoded_value(written["KEEP"]) == "production"
+    assert (
+        configure_host_env.decoded_value(written["PWC_CHAT_TITLE_PROVIDER"])
+        == "huggingface"
+    )
+    assert (
+        configure_host_env.decoded_value(written["PWC_CHAT_SCOPE_GUARDRAIL_ENABLED"])
+        == "true"
+    )
 
 
 def test_production_openai_direct_configuration_reuses_protected_key_exactly():
@@ -3692,6 +4877,132 @@ def test_staging_chat_pi_prewarm_mode_preserves_other_configuration(
     ) == ("true" if enabled else "false")
 
 
+# Production break caught: a staging durable toggle targets production, changes
+# unrelated feature/capacity lines, uses the wrong ownership, or prints a broad claim.
+@pytest.mark.parametrize("enabled", [True, False])
+def test_staging_chat_durable_dispatch_mode_is_narrow_and_staging_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    enabled: bool,
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    staging_lines = (
+        "UNRELATED=preserved\n"
+        "PWC_CHAT_MAX_CONCURRENCY=2\n"
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true\n"
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=true\n"
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED=false\n"
+        "PWC_CHAT_DEEPSEEK_V4_FLASH_PROVIDER=huggingface\n"
+    )
+    staging_path = config_root / "staging.env"
+    staging_path.write_text(staging_lines, encoding="utf-8")
+    staging_path.chmod(0o600)
+    production_path = config_root / "production.env"
+    production_bytes = b"# production bytes must remain exact\nPRODUCTION=untouched\n"
+    production_path.write_bytes(production_bytes)
+    real_chown = os.chown
+    chown_requests = []
+    group_requests = []
+
+    def apply_test_identity(path: Path, uid: int, gid: int) -> None:
+        chown_requests.append((path, uid, gid))
+        real_chown(path, os.getuid(), os.getgid())
+
+    def test_group(group: str) -> SimpleNamespace:
+        group_requests.append(group)
+        return SimpleNamespace(gr_name=group, gr_gid=os.getgid())
+
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(configure_host_env.grp, "getgrnam", test_group)
+    monkeypatch.setattr(configure_host_env.os, "chown", apply_test_identity)
+    mode = (
+        "--staging-chat-durable-dispatch-enable-only"
+        if enabled
+        else "--staging-chat-durable-dispatch-disable-only"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["configure_host_env.py", "--legacy-env", str(source), mode],
+    )
+
+    assert configure_host_env.main() == 0
+    assert capsys.readouterr().out == (
+        f"{'enabled' if enabled else 'disabled'} staging chat durable dispatch; "
+        "no service was restarted\n"
+    )
+    assert staging_path.read_text(encoding="utf-8") == (
+        "PWC_CHAT_DEEPSEEK_V4_FLASH_PROVIDER=huggingface\n"
+        f"PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED={'true' if enabled else 'false'}\n"
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true\n"
+        "PWC_CHAT_MAX_CONCURRENCY=2\n"
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED=false\n"
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=true\n"
+        "UNRELATED=preserved\n"
+    )
+    assert chown_requests == [
+        (
+            staging_path.with_name(f".staging.env.new-{os.getpid()}"),
+            0,
+            os.getgid(),
+        )
+    ]
+    assert group_requests == ["pwc-staging"]
+    assert staging_path.stat().st_uid == os.getuid()
+    assert staging_path.stat().st_gid == os.getgid()
+    assert staging_path.stat().st_mode & 0o777 == 0o640
+    assert config_root.stat().st_mode & 0o777 == 0o711
+    assert production_path.read_bytes() == production_bytes
+
+
+# Production break caught: the protected bridge can be mixed with another mode
+# or can accept a production confirmation, widening its staging-only authority.
+@pytest.mark.parametrize(
+    "extra_args",
+    [
+        ["--staging-chat-capacity-only"],
+        ["--staging-chat-durable-dispatch-disable-only"],
+        ["--confirm", "DEPLOY_PRODUCTION"],
+    ],
+)
+def test_staging_chat_durable_dispatch_mode_must_run_alone_without_confirmation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra_args: list[str],
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    (config_root / "staging.env").write_text("KEEP=value\n", encoding="utf-8")
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-chat-durable-dispatch-enable-only",
+            *extra_args,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        configure_host_env.main()
+    assert (config_root / "staging.env").read_text(encoding="utf-8") == "KEEP=value\n"
+    assert "staging durable dispatch enable/disable must run alone" in (
+        capsys.readouterr().err
+    )
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_production_chat_pi_prewarm_mode_preserves_other_configuration(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, enabled: bool
@@ -3856,8 +5167,8 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_JOBS_NAMESPACE": "nielsr",
         "PWC_CODEX_JOBS_OPENAI_API_KEY": "openai-secret",
         "PWC_CODEX_JOBS_TOKEN": "hf-secret",
-        "PWC_CODEX_JOBS_IMAGE": ("hf.co/spaces/nielsr/pwc-codex-curator-d5db656657e6"),
-        "PWC_CODEX_JOBS_IMAGE_REVISION": ("1d85149040996dbb4ea0805f4c034a80ad214bdf"),
+        "PWC_CODEX_JOBS_IMAGE": ("hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86"),
+        "PWC_CODEX_JOBS_IMAGE_REVISION": ("7067f309c98f9ea002b812773c9a256400c740ef"),
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
         "PWC_CODEX_JOBS_MODEL": "gpt-5.6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
@@ -3942,7 +5253,7 @@ def test_production_codex_only_updates_app_and_cron_environments(
         )
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
-            == "1d85149040996dbb4ea0805f4c034a80ad214bdf"
+            == "7067f309c98f9ea002b812773c9a256400c740ef"
         )
 
 
@@ -3993,11 +5304,11 @@ def test_production_codex_image_only_updates_no_other_values(
     assert configure_host_env.decoded_value(cron_lines["CRON_ONLY"]) == "keep"
     for lines in (app_lines, cron_lines):
         assert configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE"]) == (
-            "hf.co/spaces/nielsr/pwc-codex-curator-d5db656657e6"
+            "hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86"
         )
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
-            == "1d85149040996dbb4ea0805f4c034a80ad214bdf"
+            == "7067f309c98f9ea002b812773c9a256400c740ef"
         )
 
 
@@ -4017,6 +5328,28 @@ def test_historical_semantic_scholar_key_is_cron_only_and_preserved():
         {"PWC_GITHUB_TOKEN": "PWC_GITHUB_TOKEN=github"}, current
     )
     assert preserved[secondary] == f"{secondary}=old-secondary"
+
+
+def test_autonomous_credentials_are_preserved_only_in_cron_overlay():
+    keys = {
+        "PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_CODEX_API_KEY",
+        "PWC_AUTONOMOUS_CODEX_BROKER_TOKEN",
+        "PWC_AUTONOMOUS_DIGEST_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_CODEX_RESERVATION_VERIFY_KEY",
+        "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
+        "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
+        "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
+    }
+    current = {key: f"{key}=existing-{index}" for index, key in enumerate(keys)}
+    legacy = {"PWC_GITHUB_TOKEN": "PWC_GITHUB_TOKEN=github"}
+
+    cron = configure_host_env.cron_passthrough_credentials(legacy, current)
+    application = configure_host_env.without_cron_only_credentials(current)
+
+    assert keys <= cron.keys()
+    assert keys.isdisjoint(application)
 
 
 def test_staging_chat_runtime_credentials_are_preserved():
@@ -4064,8 +5397,8 @@ def test_staging_title_values_are_exact_and_isolated():
         "PWC_CHAT_TITLE_BILL_TO": "huggingface",
         "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": "staging",
-        "PWC_CHAT_TITLE_MODEL": "deepseek/deepseek-v4-flash-0731",
-        "PWC_CHAT_TITLE_PROVIDER": "openrouter",
+        "PWC_CHAT_TITLE_MODEL": "zai-org/GLM-5.3-Flash:baseten",
+        "PWC_CHAT_TITLE_PROVIDER": "huggingface",
         "PWC_CHAT_TITLE_MAX_TOKENS": "64",
         "PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD": "25000000",
         "PWC_CHAT_TITLE_WARNING_MICROUSD": "20000000",
@@ -4099,6 +5432,8 @@ def _production_chat_preparation_source() -> dict[str, str]:
             "https://alerts-fallback.test/production"
         ),
         "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
+        "PWC_CHAT_TITLE_HF_TOKEN": "production-title-secret",
+        "PWC_CHAT_TITLE_BILL_TO": "huggingface",
         "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": "production",
         "PWC_CHAT_OPENROUTER_API_KEY": "production-openrouter-secret",
@@ -4171,8 +5506,9 @@ def test_production_chat_preparation_is_sealed_and_fail_closed():
     assert values["PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD"] == "250000000"
     assert values["PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD"] == "250000000"
     assert values["PWC_CHAT_TITLE_MONTHLY_CAP_MICROUSD"] == "25000000"
-    assert values["PWC_CHAT_TITLE_HF_TOKEN"] == ""
-    assert values["PWC_CHAT_TITLE_PROVIDER"] == "openrouter"
+    assert values["PWC_CHAT_TITLE_HF_TOKEN"] == "production-title-secret"
+    assert values["PWC_CHAT_TITLE_MODEL"] == "zai-org/GLM-5.3-Flash:baseten"
+    assert values["PWC_CHAT_TITLE_PROVIDER"] == "huggingface"
     assert values["PWC_CHAT_OPENROUTER_API_KEY"] == "production-openrouter-secret"
     assert values["PWC_CHAT_OPENROUTER_MONTHLY_USER_BUDGET_USD"] == "5.00"
     assert values["PWC_CHAT_OPENROUTER_WORKSPACE_MONTHLY_BUDGET_USD"] == "200.00"
@@ -4731,10 +6067,15 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
 def test_cron_jobs_declare_bounded_execution_contracts():
     assert cron_launcher.COMMANDS
+    read_only_jobs = {
+        "alert_submission_review_failure",
+        "export_enrichment_dashboard",
+        "monitor_chat_operational_alerts",
+    }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command
         assert spec.timeout in {"1m", "30m", "45m", "50m", "2h", "6h"}
-        assert spec.mutates_shared_data is (name != "monitor_chat_operational_alerts")
+        assert spec.mutates_shared_data is (name not in read_only_jobs)
         assert spec.idempotency
         assert spec.health_job
 
@@ -4766,15 +6107,23 @@ def test_cron_codex_flags_follow_active_release(features, expected):
 
 
 def test_hot_workflow_runs_on_the_activated_production_schedule():
+    root = Path(__file__).resolve().parents[2]
     workflow = (
-        Path(__file__).resolve().parents[2]
-        / ".github"
-        / "workflows"
-        / "cron-update-hot-github-trending.yml"
+        root / ".github" / "workflows" / "cron-update-hot-github-trending.yml"
     ).read_text()
+    # Scheduled execution moved to the host timer; the workflow remains
+    # dispatch-only for manual recovery.
     assert "workflow_dispatch:" in workflow
-    assert "schedule:" in workflow
-    assert 'cron: "*/15 * * * *"' in workflow
+    assert "schedule:" not in workflow
+    timer = (
+        root
+        / "deploy"
+        / "systemd"
+        / "cron"
+        / "pwc-cron-update-hot-github-trending.timer"
+    ).read_text()
+    assert "OnCalendar=*-*-* *:00/15:00" in timer
+    assert "Persistent=true" in timer
 
     cron_env_example = (
         Path(__file__).resolve().parents[2]
@@ -4817,6 +6166,9 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_mmeb_v2"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmeb_v3"]["timeout"] == "30m"
     assert status["jobs"]["sync_artificial_analysis"]["timeout"] == "30m"
+    assert (
+        "TTS Quality Elo" in status["jobs"]["sync_artificial_analysis"]["idempotency"]
+    )
     assert status["jobs"]["sync_programbench"]["timeout"] == "30m"
     assert status["jobs"]["sync_frontiercode"]["timeout"] == "30m"
     assert status["jobs"]["sync_coarena"]["timeout"] == "30m"
@@ -4906,3 +6258,79 @@ def test_role_allowlist_installer_normalizes_and_rejects_usernames():
     )
     with pytest.raises(ValueError, match="Malformed"):
         configure_role_allowlists.normalized_subjects(["not a subject"])
+
+
+_QUALIFICATION_SCHEMA_OBJECTS = (
+    *(
+        ("columns", name)
+        for name in (
+            "id",
+            "run_id",
+            "profile",
+            "app_release_id",
+            "window_started_at",
+            "window_ended_at",
+            "expires_at",
+            "created_at",
+            "qualification_scope_id",
+            "turn_id",
+            "chat_session_id",
+            "event_type",
+            "operation_digest",
+            "operation_kind",
+            "occurred_at",
+            "qualification_profile",
+        )
+    ),
+    *(
+        ("constraints", name)
+        for name in (
+            "chat_qualification_scopes_run_id_key",
+            "chat_qualification_scopes_profile_check",
+            "chat_qualification_scopes_window_check",
+            "chat_qualification_scopes_expiry_check",
+            "chat_qualification_evidence_scope_fkey",
+            "chat_qualification_evidence_turn_fkey",
+            "chat_qualification_evidence_session_fkey",
+            "chat_qualification_evidence_event_type_check",
+            "chat_qualification_evidence_operation_shape_check",
+            "chat_turn_latency_qualification_scope_fkey",
+            "chat_turn_latency_qualification_profile_check",
+        )
+    ),
+    *(
+        ("indexes", name)
+        for name in (
+            "idx_chat_qualification_scopes_expiry",
+            "idx_chat_qualification_scopes_release_profile",
+            "idx_chat_qualification_evidence_scope_event_time",
+            "idx_chat_qualification_evidence_session_time",
+            "idx_chat_qualification_evidence_turn_event",
+            "uq_chat_qualification_evidence_stale_turn",
+            "uq_chat_qualification_evidence_eviction_turn",
+            "idx_chat_turn_latency_qualification_scope",
+        )
+    ),
+)
+
+
+@pytest.mark.parametrize(("kind", "missing_name"), _QUALIFICATION_SCHEMA_OBJECTS)
+def test_qualification_schema_readiness_refuses_each_missing_contract_object(
+    kind, missing_name
+):
+    class BrokenQualificationSchemaDB(_ChatSchemaDB):
+        def execute(self, statement):
+            result = super().execute(statement)
+            if f"qualification_evidence_exact_{kind}" not in str(statement):
+                return result
+            identifier_index = 1 if kind == "columns" else 0
+            return _ChatSchemaResult(
+                rows=[
+                    row for row in result.all() if row[identifier_index] != missing_name
+                ]
+            )
+
+    with pytest.raises(
+        RuntimeError, match="required qualification evidence schema is missing"
+    ):
+        validate_qualification_evidence_schema(BrokenQualificationSchemaDB("off"))

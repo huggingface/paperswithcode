@@ -492,6 +492,101 @@ def test_late_evaluation_failure_rolls_back_the_whole_apply():
     assert row.applied_at is None
 
 
+def test_scheduled_validation_failure_keeps_job_open_for_one_corrected_apply():
+    row = SimpleNamespace(
+        id=42,
+        kind="add-evals",
+        status="running",
+        trigger="hf-trending-cron",
+        submitted_at=None,
+        applied_at=None,
+        paper_id=42,
+    )
+
+    class Database(_MutationDatabase):
+        def get(self, model, _key):
+            return row if model is type(row) else None
+
+    database = Database()
+    service = _service(database, SimpleNamespace())
+    service._validate_scheduled_policy = lambda *_args: (_ for _ in ()).throw(
+        ValueError("Evaluation metric value 91.9 is outside configured scale 0-1")
+    )
+
+    with pytest.raises(ValueError, match="outside configured scale"):
+        service._apply_authorized(row, ApplyMutationRequest(evaluations=[]))
+
+    assert row.submitted_at is None
+    assert row.applied_at is None
+    assert row.validation_summary["status"] == "rejected"
+    assert "outside configured scale" in row.validation_summary["error"]
+    assert database.rollbacks == 1
+    assert database.commits == 1
+
+    with pytest.raises(ValueError, match="outside configured scale"):
+        service._apply_authorized(row, ApplyMutationRequest(evaluations=[]))
+
+    assert row.submitted_at is not None
+    assert row.validation_summary["retryable"] is False
+    assert database.rollbacks == 2
+    assert database.commits == 2
+
+    with pytest.raises(
+        CodexCurationMutationClosedError, match="may no longer apply mutations"
+    ):
+        service._apply_authorized(row, ApplyMutationRequest(evaluations=[]))
+
+    assert database.rollbacks == 3
+    assert database.commits == 2
+
+
+def test_rejected_scheduled_benchmark_gap_keeps_job_open_for_correction(
+    monkeypatch,
+):
+    row = SimpleNamespace(
+        id=42,
+        kind="add-evals",
+        status="running",
+        trigger="hf-trending-cron",
+        submitted_at=None,
+        applied_at=None,
+        paper_id=42,
+        url_candidates={"source_documents": []},
+    )
+
+    class Database(_MutationDatabase):
+        def get(self, model, _key):
+            return row if model is type(row) else SimpleNamespace(id=42)
+
+    class Gaps:
+        def __init__(self, _db):
+            pass
+
+        def validate(self, _gaps, **_kwargs):
+            return [], [{"index": 0, "error": "evidence source URL is not scoped"}]
+
+    monkeypatch.setattr(
+        "backend.services.codex_curation_callback_service.BenchmarkGapService", Gaps
+    )
+    database = Database()
+    service = _service(database, SimpleNamespace())
+
+    with pytest.raises(ValueError, match="benchmark gap"):
+        service._apply_authorized(
+            row,
+            ApplyMutationRequest(
+                evaluations=[],
+                benchmark_gaps=[{"reasoning": "A proposed gap"}],
+            ),
+        )
+
+    assert row.submitted_at is None
+    assert row.validation_summary["retryable"] is True
+    assert row.validation_summary["benchmark_gaps_rejected"] == [
+        {"index": 0, "error": "evidence source URL is not scoped"}
+    ]
+
+
 def test_all_evaluation_paper_ids_are_checked_before_the_first_write():
     database = _MutationDatabase()
 
@@ -547,7 +642,7 @@ def test_late_scheduled_callback_does_not_pause_dispatch_or_overwrite_audit():
         CodexCurationMutationClosedError,
         match="This job may no longer apply mutations",
     ):
-        _service(database, SimpleNamespace()).apply(
+        _service(database, SimpleNamespace())._apply_authorized(
             row, ApplyMutationRequest(evaluations=[])
         )
 

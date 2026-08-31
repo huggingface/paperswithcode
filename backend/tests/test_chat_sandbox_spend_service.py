@@ -341,6 +341,36 @@ def test_terminal_pool_owner_releases_abandoned_pre_provider_reservation():
     assert active.reserved_microusd > 0
 
 
+def test_creation_failed_interval_without_provider_has_no_compute_cost():
+    sessions = factory()
+    configured = settings()
+    started_at = datetime(2026, 8, 4, tzinfo=UTC)
+    failed_at = started_at + timedelta(days=3)
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, configured)
+        interval_id = service.reserve_interval(
+            origin="direct",
+            worker_generation="never-created",
+            now=started_at,
+        )
+        service.abort_reservation(
+            interval_id,
+            "lease_owner_terminated",
+            failed_at,
+        )
+
+    with sessions() as db, db.begin():
+        status = ChatSandboxSpendService(db, configured).status(
+            failed_at + timedelta(hours=1)
+        )
+        interval = db.get(ChatSandboxComputeInterval, interval_id)
+
+    assert interval.provider_created_at is None
+    assert interval.reconciliation_state == "creation_failed"
+    assert status["estimated_microusd"] == 0
+    assert status["daily_spend"] == []
+
+
 def test_late_provider_reopens_creation_failed_reservation_until_confirmed():
     sessions = factory()
     configured = settings()

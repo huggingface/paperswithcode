@@ -15,6 +15,12 @@ from pathlib import Path
 INSTALL_ROOT = Path("/usr/local/lib/paperswithcode-deploy")
 BIN_ROOT = Path("/usr/local/sbin")
 SYSTEMD_ROOT = Path("/etc/systemd/system")
+SUDOERS_PATH = Path("/etc/sudoers.d/paperswithcode-autonomous-operations")
+PRODUCTION_ENV_PATH = Path("/etc/paperswithcode/production.env")
+PRODUCTION_CRON_ENV_PATH = Path("/etc/paperswithcode/production-cron.env")
+SUBMISSION_REVIEW_SCHEDULE_STATE_PATH = Path(
+    "/var/lib/paperswithcode/production/cron-logs/submission-review-schedule.json"
+)
 COMMANDS = (
     "pwc-deploy",
     "pwc-rollback",
@@ -30,6 +36,7 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/HF_CLI_SKILL.md",
     "backend/chat_sandbox_worker/S2_CLI_SKILL.md",
     "backend/chat_sandbox_worker/METHOD_CATALOG.md",
+    "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
@@ -53,13 +60,25 @@ def deployment_wrapper(command: str) -> str:
     )
 
 
+def cron_throttle_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/python3 "
+        '/usr/local/lib/paperswithcode-deploy/cron_throttle.py "$@"\n'
+    )
+
+
 def cron_wrapper() -> str:
     common = (
         "systemd-run --quiet --wait --pipe --collect "
-        "--uid=pwc-cron --gid=pwc-cron "
         "--working-directory=/srv/paperswithcode/environments/production/current "
+    )
+    production_environment = (
         "--property=EnvironmentFile=/etc/paperswithcode/production.env "
         "--property=EnvironmentFile=/etc/paperswithcode/production-cron.env "
+    )
+    trending_environment = (
+        "--property=EnvironmentFile=/etc/paperswithcode/trending-cron.env "
     )
     launcher = (
         '/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cron_launcher.py "$@"\n'
@@ -67,10 +86,203 @@ def cron_wrapper() -> str:
     return (
         "#!/bin/sh\n"
         'if [ "$1" = "monitor_chat_operational_alerts" ]; then\n'
-        f"  exec {common}--property=SupplementaryGroups=systemd-journal {launcher}"
+        f"  exec {common}--uid=pwc-cron --gid=pwc-cron "
+        f"{production_environment}"
+        f"--property=SupplementaryGroups=systemd-journal {launcher}"
         "fi\n"
-        f"exec {common}{launcher}"
+        'case "$1" in\n'
+        "  calculate_trending_scores|calculate_paper_trending_scores)\n"
+        f"    exec {common}--uid=pwc-cron-trending --gid=pwc-cron-trending "
+        f"{trending_environment}"
+        f"{launcher}"
+        "    ;;\n"
+        "esac\n"
+        f"exec {common}--uid=pwc-cron --gid=pwc-cron "
+        f"{production_environment}{launcher}"
     )
+
+
+def submission_review_timer_action(
+    *,
+    review_enabled: bool,
+    jobs_enabled: bool,
+    primary_alert_url: str,
+    fallback_alert_url: str,
+) -> list[str]:
+    alert_configured = bool(
+        primary_alert_url
+        and fallback_alert_url
+        and primary_alert_url != fallback_alert_url
+    )
+    action = (
+        "enable" if review_enabled and jobs_enabled and alert_configured else "disable"
+    )
+    return ["systemctl", action, "--now", "submission-review.timer"]
+
+
+def _environment_values(path: Path) -> dict[str, str]:
+    values: dict[str, str] = {}
+    try:
+        source = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return values
+    for raw_line in source.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        values[key.strip()] = value.strip().strip('"').strip("'")
+    return values
+
+
+def reconcile_submission_review_timer(
+    environment_path: Path = PRODUCTION_ENV_PATH,
+    cron_environment_path: Path = PRODUCTION_CRON_ENV_PATH,
+    state_path: Path = SUBMISSION_REVIEW_SCHEDULE_STATE_PATH,
+) -> None:
+    values = _environment_values(environment_path)
+    values.update(_environment_values(cron_environment_path))
+
+    def enabled(name: str) -> bool:
+        return values.get(name, "").casefold() in {"1", "true", "yes", "on"}
+
+    action = submission_review_timer_action(
+        review_enabled=enabled("PWC_AUTONOMOUS_SUBMISSION_ENABLED"),
+        jobs_enabled=enabled("PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED"),
+        primary_alert_url=values.get("PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL", ""),
+        fallback_alert_url=values.get("PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL", ""),
+    )
+    subprocess.run(action, check=True)
+    schedule_enabled = action[1] == "enable"
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_path.with_name(f".{state_path.name}.new-{os.getpid()}")
+    temporary.write_text(
+        json.dumps(
+            {
+                "enabled": schedule_enabled,
+                "reason": (
+                    "complete configuration"
+                    if schedule_enabled
+                    else "incomplete or unsafe configuration"
+                ),
+            },
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    temporary.chmod(0o644)
+    os.replace(temporary, state_path)
+
+
+def autonomous_check_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        '/usr/local/lib/paperswithcode-deploy/autonomous_check_runner.py "$@"\n'
+    )
+
+
+def autonomous_release_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        '/usr/local/lib/paperswithcode-deploy/autonomous_release_bridge.py "$@"\n'
+    )
+
+
+def autonomous_source_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        '/usr/local/lib/paperswithcode-deploy/autonomous_source_bridge.py "$@"\n'
+    )
+
+
+def autonomous_cron_retry_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        "/usr/local/lib/paperswithcode-deploy/autonomous_cron_retry_bridge.py "
+        '"$@"\n'
+    )
+
+
+def autonomous_sudoers() -> str:
+    root = "/usr/local/lib/paperswithcode-deploy"
+    return (
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_check_runner.py *\n"
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_release_bridge.py *\n"
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_source_bridge.py *\n"
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_cron_retry_bridge.py *\n"
+    )
+
+
+def autonomous_release_broker_check() -> str:
+    return """
+DO $$
+BEGIN
+    IF to_regclass('public.autonomous_release_consumption') IS NULL THEN
+        RAISE EXCEPTION 'autonomous release broker migration is not applied';
+    END IF;
+    IF (
+        SELECT tableowner <> 'postgres'
+          FROM pg_tables
+         WHERE schemaname = 'public'
+           AND tablename = 'autonomous_release_consumption'
+    ) THEN
+        RAISE EXCEPTION 'autonomous release broker table is not root-owned';
+    END IF;
+    IF has_table_privilege(
+        'paperswithcode_user',
+        'public.autonomous_release_consumption',
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    ) OR has_table_privilege(
+        'pwc_staging',
+        'public.autonomous_release_consumption',
+        'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER'
+    ) THEN
+        RAISE EXCEPTION 'application roles can access release broker state';
+    END IF;
+END $$;
+""".strip()
+
+
+def verify_autonomous_release_broker_schema() -> None:
+    subprocess.run(
+        [
+            "/usr/sbin/runuser",
+            "-u",
+            "postgres",
+            "--",
+            "/usr/bin/psql",
+            "--dbname",
+            "paperswithcode_hf",
+            "--no-psqlrc",
+            "--set",
+            "ON_ERROR_STOP=1",
+            "--command",
+            autonomous_release_broker_check(),
+        ],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+    )
+
+
+def install_autonomous_sudoers() -> None:
+    temporary = SUDOERS_PATH.with_name(f".{SUDOERS_PATH.name}.new-{os.getpid()}")
+    temporary.write_text(autonomous_sudoers())
+    temporary.chmod(0o440)
+    try:
+        subprocess.run(["/usr/sbin/visudo", "-cf", str(temporary)], check=True)
+        os.replace(temporary, SUDOERS_PATH)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def main() -> int:
@@ -79,6 +291,7 @@ def main() -> int:
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo")
+    SUDOERS_PATH.unlink(missing_ok=True)
     repo = Path(__file__).resolve().parents[1]
     sha = subprocess.run(
         ["git", "rev-parse", f"{args.source}^{{commit}}"],
@@ -135,21 +348,66 @@ def main() -> int:
                 f'exec /usr/bin/python3 /usr/local/lib/paperswithcode-deploy/{module} "$@"\n'
             )
             wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-check"
+        wrapper.write_text(autonomous_check_wrapper())
+        wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-release"
+        wrapper.write_text(autonomous_release_wrapper())
+        wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-source"
+        wrapper.write_text(autonomous_source_wrapper())
+        wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-cron-retry"
+        wrapper.write_text(autonomous_cron_retry_wrapper())
+        wrapper.chmod(0o755)
+        verify_autonomous_release_broker_schema()
+        install_autonomous_sudoers()
         wrapper = BIN_ROOT / "pwc-cron"
         wrapper.write_text(cron_wrapper())
+        wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-cron-throttled"
+        wrapper.write_text(cron_throttle_wrapper())
         wrapper.chmod(0o755)
         for unit in (
             "paperswithcode-staging-backend@.service",
             "paperswithcode-staging-backend@.socket",
+            "paperswithcode-staging-external-pi@.service",
+            "paperswithcode-staging-external-pi-worker@.service",
             "paperswithcode-production-backend@.service",
             "paperswithcode-production-backend@.socket",
             "pwc-curation-thumbnails.service",
             "pwc-curation-thumbnails.timer",
             "pwc-chat-alert-monitor.service",
             "pwc-chat-alert-monitor.timer",
+            "autonomous/submission-review.service",
+            "autonomous/submission-review.timer",
+            "autonomous/submission-review-alert.service",
+            "autonomous/cron-health.service",
+            "autonomous/cron-health.timer",
+            "autonomous/cron-audit.service",
+            "autonomous/cron-audit.timer",
         ):
-            shutil.copy2(INSTALL_ROOT / "systemd" / unit, SYSTEMD_ROOT / unit)
+            source = (
+                INSTALL_ROOT / unit
+                if unit.startswith("autonomous/")
+                else INSTALL_ROOT / "systemd" / unit
+            )
+            shutil.copy2(
+                source,
+                SYSTEMD_ROOT / Path(unit).name,
+            )
+        for unit_file in sorted((INSTALL_ROOT / "systemd" / "cron").glob("pwc-cron-*")):
+            shutil.copy2(unit_file, SYSTEMD_ROOT / unit_file.name)
+        shutil.copy2(
+            INSTALL_ROOT / "systemd" / "paperswithcode-tmpfiles.conf",
+            "/etc/tmpfiles.d/paperswithcode.conf",
+        )
+        subprocess.run(
+            ["systemd-tmpfiles", "--create", "/etc/tmpfiles.d/paperswithcode.conf"],
+            check=True,
+        )
         subprocess.run(["systemctl", "daemon-reload"], check=True)
+        reconcile_submission_review_timer()
         if backup.exists():
             shutil.rmtree(backup)
     finally:

@@ -99,6 +99,30 @@ def test_get_cron_job_status_ignores_untimestamped_failure_before_current_run():
     assert status["last_run"] == afternoon
 
 
+def test_get_cron_job_status_reads_only_a_bounded_log_tail(monkeypatch, tmp_path):
+    cron_helpers = _load_cron_helpers()
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    test_date = "20990103"
+    log_file = tmp_path / f"bounded_{test_date}.log"
+    log_file.write_bytes(
+        b"x" * (cron_helpers.MAX_CRON_LOG_READ_BYTES + 128)
+        + b"\n2099-01-03 17:00:00 - Starting cron job: bounded\n"
+        + b"2099-01-03 17:00:01 - Cron job completed successfully: bounded\n"
+    )
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *args, **kwargs: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="", stderr=""
+        ),
+    )
+
+    status = cron_helpers.get_cron_job_status("bounded", test_date)
+
+    assert status["status"] == "success_no_work"
+    assert status["last_run"] == "2099-01-03 17:00:01"
+
+
 def test_evaluate_job_health_does_not_mark_recent_run_as_stuck():
     job = get_cron_job("extract_urls")
     assert job is not None
@@ -152,6 +176,76 @@ def test_get_cron_job_status_parses_queue_specific_github_metrics():
     assert status["status"] == "failed"
     assert status["work_metrics"]["fresh_credential"] == "PWC_GITHUB_TOKEN"
     assert status["work_metrics"]["fresh_credential_failures"] == 2
+
+
+def test_get_cron_job_status_parses_daily_curation_summary():
+    cron_helpers = _load_cron_helpers()
+    logs_dir = WORKFLOW_SCRIPTS / "scripts" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    test_date = "20990105"
+    log_file = logs_dir / f"enqueue_hf_daily_paper_curation_{test_date}.log"
+    log_file.write_text(
+        "2099-01-05 08:00:00 - Starting cron job: enqueue_hf_daily_paper_curation\n"
+        '2099-01-05 08:00:01 - HF_DAILY_CURATION_SUMMARY {"created": 2, '
+        '"dispatch_enabled": true, "queued": 4}\n'
+        "2099-01-05 08:00:02 - Cron job completed successfully: "
+        "enqueue_hf_daily_paper_curation\n",
+        encoding="utf-8",
+    )
+    try:
+        with patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            ),
+        ):
+            status = cron_helpers.get_cron_job_status(
+                "enqueue_hf_daily_paper_curation", test_date
+            )
+    finally:
+        log_file.unlink(missing_ok=True)
+
+    assert status["work_metrics"] == {
+        "created": 2,
+        "dispatch_enabled": True,
+        "queued": 4,
+    }
+
+
+def test_get_cron_job_status_counts_named_paper_groups_as_work():
+    cron_helpers = _load_cron_helpers()
+    logs_dir = WORKFLOW_SCRIPTS / "scripts" / "logs"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    test_date = "20990106"
+    log_file = logs_dir / f"sync_artificial_analysis_{test_date}.log"
+    log_file.write_text(
+        "2099-01-06 08:00:00 - Starting cron job: sync_artificial_analysis\n"
+        "2099-01-06 08:00:01 - Papers processed: language=60 tts=14\n"
+        "2099-01-06 08:00:02 - Cron job completed successfully: "
+        "sync_artificial_analysis\n",
+        encoding="utf-8",
+    )
+
+    try:
+        with patch(
+            "subprocess.run",
+            return_value=subprocess.CompletedProcess(
+                args=[], returncode=0, stdout="", stderr=""
+            ),
+        ):
+            status = cron_helpers.get_cron_job_status(
+                "sync_artificial_analysis", test_date
+            )
+    finally:
+        log_file.unlink(missing_ok=True)
+
+    assert status["status"] == "success"
+    assert status["work_summary"] == "Processed 74 items"
+    assert status["work_metrics"] == {
+        "papers_processed": 74,
+        "language_processed": 60,
+        "tts_processed": 14,
+    }
 
 
 def test_timeout_log_is_a_failure_not_a_success():

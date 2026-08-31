@@ -1,9 +1,6 @@
 name: Cron - Import HF Daily Papers
 
 on:
-  schedule:
-    # Hourly: check the current day's HF daily papers and import any not yet in the DB
-    - cron: "0 * * * *"
   workflow_dispatch:
     inputs:
       date:

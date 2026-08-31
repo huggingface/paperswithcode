@@ -2,6 +2,18 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
+## Papers With Code evaluation outreach
+
+For `Verify evals on Papers with Code` outreach, do not create an issue when:
+
+- the target repository is owned by `huggingface`;
+- the repository name is `vllm`, `sglang`, or `llama.cpp`;
+- the repository already has an open issue authored by `nielsrogge`.
+
+The publisher checks these exclusions before creating an issue. It also reuses
+an existing issue containing the paper URL, including closed issues, to avoid
+duplicate outreach.
+
 ## Conventions
 
 - **Create an issue**: `gh issue create --title "..." --body "..."`. Use a heredoc for multi-line bodies.

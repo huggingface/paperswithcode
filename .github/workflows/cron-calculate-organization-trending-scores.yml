@@ -1,8 +1,6 @@
 name: Cron - Calculate Organization Trending Scores
 
 on:
-  schedule:
-    - cron: "40 3 * * *"
   workflow_dispatch: {}
 
 concurrency:

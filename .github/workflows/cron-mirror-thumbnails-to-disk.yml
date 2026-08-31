@@ -1,10 +1,6 @@
 name: Cron - Mirror Thumbnails To VPS Disk
 
 on:
-  schedule:
-    # Daily at 05:00 UTC, after preload_thumbnails (04:30 UTC) so any
-    # newly-uploaded bucket objects from that run land on the VPS disk too.
-    - cron: "0 5 * * *"
   workflow_dispatch:
     inputs:
       dry_run:

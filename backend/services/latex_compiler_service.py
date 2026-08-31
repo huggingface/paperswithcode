@@ -96,78 +96,6 @@ def _submission(
     )
 
 
-class LatexCompilerClient:
-    """Legacy signed HTTP adapter retained for direct contract compatibility."""
-
-    def __init__(
-        self,
-        base_url: str,
-        *,
-        private_key: Ed25519PrivateKey,
-        hf_token: str = "",
-        http_client: httpx.Client | None = None,
-        clock: Callable[[], float] = time.time,
-    ) -> None:
-        self.base_url = base_url.rstrip("/")
-        self.private_key = private_key
-        self.clock = clock
-        self.http_client = http_client or httpx.Client(timeout=15.0)
-        self.headers = {"Authorization": f"Bearer {hf_token}"} if hf_token else {}
-        self._submitted: dict[str, CompilerEnvelope] = {}
-
-    def submit(
-        self,
-        *,
-        job_id: str,
-        bundle: bytes,
-        entrypoint: str,
-        limits: CompileLimits | None = None,
-    ) -> CompilerStatus:
-        envelope, submission = _submission(
-            job_id=job_id,
-            bundle=bundle,
-            entrypoint=entrypoint,
-            limits=limits,
-            private_key=self.private_key,
-            clock=self.clock,
-        )
-        response = self.http_client.post(
-            f"{self.base_url}/v1/jobs",
-            headers=self.headers,
-            json=submission.model_dump(mode="json"),
-        )
-        response.raise_for_status()
-        status = _status(response, job_id)
-        self._submitted[job_id] = envelope
-        return status
-
-    def status(self, job_id: str) -> CompilerStatus:
-        response = self.http_client.get(
-            f"{self.base_url}/v1/jobs/{job_id}", headers=self.headers
-        )
-        response.raise_for_status()
-        return _status(response, job_id)
-
-    def result(self, job_id: str) -> CompilerResult:
-        response = self.http_client.get(
-            f"{self.base_url}/v1/jobs/{job_id}/result", headers=self.headers
-        )
-        response.raise_for_status()
-        result = CompilerResult.model_validate_json(response.content)
-        expected = self._submitted.get(job_id)
-        if expected is None:
-            raise EnvelopeError("Compiler result has no locally submitted envelope")
-        validate_result(result, expected=expected)
-        return result
-
-    def cancel(self, job_id: str) -> CompilerStatus:
-        response = self.http_client.delete(
-            f"{self.base_url}/v1/jobs/{job_id}", headers=self.headers
-        )
-        response.raise_for_status()
-        return _status(response, job_id)
-
-
 @dataclass
 class _SandboxSession:
     sandbox: Any
@@ -533,18 +461,6 @@ def compiler_transport_from_settings(settings: Settings) -> LatexCompilerTranspo
         private_key=private_key,
         flavor=settings.chat_latex_compiler_hf_sandbox_flavor,
         idle_timeout_seconds=settings.chat_latex_compiler_hf_sandbox_idle_timeout_seconds,
-    )
-
-
-def compiler_client_from_settings(settings: Settings) -> LatexCompilerClient:
-    """Build the legacy Space adapter for direct compatibility-only callers."""
-    url = settings.chat_latex_compiler_url
-    if not url:
-        raise RuntimeError("LaTeX compiler URL is not configured")
-    return LatexCompilerClient(
-        url,
-        private_key=_private_key_from_settings(settings),
-        hf_token=settings.chat_latex_compiler_hf_token,
     )
 
 

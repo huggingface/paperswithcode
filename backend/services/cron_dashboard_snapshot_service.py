@@ -14,6 +14,7 @@ from typing import Any
 
 from backend.config import get_settings
 from backend.services.cron_health import build_cron_dashboard, to_iso8601
+from backend.services.cron_registry import CronJobDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +39,7 @@ class CronDashboardSnapshotService:
         self.snapshot_dir = root / "cron-dashboard"
         self.snapshot_path = self.snapshot_dir / "status-v1.json"
         self.lock_path = self.snapshot_dir / "status-v1.lock"
+        self.autonomous_snapshot_path = self.snapshot_dir / "autonomous-health-v1.json"
         self.builder = builder or (
             lambda previous: build_cron_dashboard(previous_dashboard=previous)
         )
@@ -146,6 +148,29 @@ class CronDashboardSnapshotService:
                 type(exc).__name__,
             )
 
+    def build_autonomous_snapshot(
+        self,
+        *,
+        daily: bool,
+        definitions: tuple[CronJobDefinition, ...] | None = None,
+    ) -> dict[str, Any]:
+        """Persist one strict, content-free deterministic operator snapshot."""
+
+        from backend.services.autonomous_cron_probe import AutonomousCronProbe
+
+        dashboard = self.refresh(force=True, blocking=True)
+        if dashboard is None:
+            raise CronDashboardSnapshotError("strict CRON snapshot is unavailable")
+        observed_at = self.now()
+        audit = AutonomousCronProbe(
+            dashboard_provider=lambda: dashboard,
+            definitions=definitions,
+        ).audit_all_jobs(observed_at)
+        payload = audit.as_dict()
+        payload["mode"] = "daily" if daily else "strict_15m"
+        self._write_json(self.autonomous_snapshot_path, payload)
+        return payload
+
     def _read_snapshot(self) -> dict[str, Any] | None:
         try:
             value = json.loads(self.snapshot_path.read_text(encoding="utf-8"))
@@ -199,17 +224,20 @@ class CronDashboardSnapshotService:
         return handle
 
     def _write_snapshot(self, envelope: dict[str, Any]) -> None:
+        self._write_json(self.snapshot_path, envelope)
+
+    def _write_json(self, destination: Path, payload: dict[str, Any]) -> None:
         self.snapshot_dir.mkdir(parents=True, exist_ok=True)
         descriptor, temporary_name = tempfile.mkstemp(
-            prefix="status-v1-", suffix=".tmp", dir=self.snapshot_dir
+            prefix=f"{destination.stem}-", suffix=".tmp", dir=self.snapshot_dir
         )
         temporary = Path(temporary_name)
         try:
             with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                json.dump(envelope, handle, separators=(",", ":"), sort_keys=True)
+                json.dump(payload, handle, separators=(",", ":"), sort_keys=True)
                 handle.flush()
                 os.fsync(handle.fileno())
             os.chmod(temporary, 0o600)
-            os.replace(temporary, self.snapshot_path)
+            os.replace(temporary, destination)
         finally:
             temporary.unlink(missing_ok=True)

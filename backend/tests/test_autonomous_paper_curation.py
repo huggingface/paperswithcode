@@ -4,30 +4,49 @@ import base64
 import gzip
 import hashlib
 import json
+import os
+import sys
 import urllib.error
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
+from io import BytesIO
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from jsonschema import Draft202012Validator
+from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
+from sqlalchemy.orm import Session
 
 from backend.config import get_settings
+from backend.scripts import enqueue_hf_daily_paper_curation as curation_cli
 from backend.models.database import (
+    AutonomousOperatorState,
+    AutonomousRun,
     BenchmarkCurationCandidate,
     BenchmarkCurationEvidence,
     Dataset,
     Metric,
     Paper,
+    PaperCurationJob,
+    PaperCurationSchedulerState,
     PaperCurationWorkflow,
     Task,
     TaskDataset,
 )
 from backend.services.benchmark_gap_service import BenchmarkGapService
+from backend.services.autonomous_operations_repository import (
+    AutonomousOperationsRepository,
+    Operator,
+)
 from backend.services.codex_add_evals_service import (
+    CanaryDispatchFailed,
     CodexPaperJobService,
+    curation_dispatch_lock,
     _is_callback_validation_rejection,
 )
 from backend.services.codex_curation_callback_service import (
@@ -42,6 +61,7 @@ from backend.services.hf_daily_curation_service import (
     HFDailyCurationService,
     _dispatched_canary_workflows,
     _MAX_AUTOMATIC_RETRIES,
+    paper_markdown_available,
 )
 from jobs import url_preflight
 
@@ -126,7 +146,37 @@ def test_preflight_reuses_complete_importer_links_but_verifies_markdown(
     assert all("hf_api" in item["source_layers"][0] for item in result["candidates"])
 
 
-def test_preflight_still_requires_markdown_when_hf_detail_completes_links(
+def test_eval_preflight_manifests_model_card_blog_project_and_readme(monkeypatch):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    context = _context()
+    context["paper"]["source_url"] = "https://example.com/official-blog"
+    context["source_candidate"] = {
+        "repo_id": "org/model",
+        "model_card_url": "https://huggingface.co/org/model/raw/revision/README.md",
+    }
+
+    result = url_preflight.extract_candidates(
+        context,
+        fetch=lambda url, _limit: (b"# Paper\n", url),
+    )
+
+    assert {(item["kind"], item["url"]) for item in result["source_documents"]} == {
+        ("paper_source", "https://example.com/official-blog"),
+        (
+            "model_card",
+            "https://huggingface.co/org/model/raw/revision/README.md",
+        ),
+        ("github_readme", "https://github.com/example/project"),
+        ("project_page", "https://example.github.io/project"),
+        ("paper_markdown", "https://huggingface.co/papers/2608.00042.md"),
+    }
+
+
+def test_preflight_accepts_official_links_when_markdown_is_not_ready(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -150,7 +200,8 @@ def test_preflight_still_requires_markdown_when_hf_detail_completes_links(
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
 
-    assert result["awaiting_markdown"] is True
+    assert result["awaiting_markdown"] is False
+    assert result["complete"] is True
     assert fetched == [
         "https://huggingface.co/api/papers/2608.00042",
         "https://huggingface.co/papers/2608.00042.md",
@@ -235,6 +286,53 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
     assert not any("/pdf/" in url for url in fetched)
 
 
+def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+    fetched = []
+
+    def fetch(url: str, _limit: int):
+        fetched.append(url)
+        if "/api/papers/" in url:
+            return b"{}", url
+        if url.endswith(".md"):
+            return b"# Complete paper\n", url
+        raise AssertionError("PDF is a last-resort source")
+
+    result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
+
+    assert result["complete"] is True
+    assert not any("/pdf/" in url for url in fetched)
+
+
+def test_preflight_skips_pdf_when_official_repository_is_available(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    fetched = []
+
+    def fetch(url: str, _limit: int):
+        fetched.append(url)
+        if "/api/papers/" in url:
+            return b"{}", url
+        raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+
+    result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
+
+    assert result["complete"] is True
+    assert result["awaiting_markdown"] is False
+    assert {error["source"] for error in result["errors"]} == {"hf_markdown"}
+    assert not any("/pdf/" in url for url in fetched)
+
+
 def test_preflight_marks_missing_public_and_ocr_markdown_as_awaiting(monkeypatch):
     monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
     monkeypatch.setattr(
@@ -249,10 +347,10 @@ def test_preflight_marks_missing_public_and_ocr_markdown_as_awaiting(monkeypatch
     def unavailable_ocr(*_args, **_kwargs):
         raise urllib.error.HTTPError("bucket", 404, "not found", {}, None)
 
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
     result = url_preflight.extract_candidates(
-        _context(project_page=False),
-        fetch=unavailable,
-        fetch_ocr_markdown=unavailable_ocr,
+        context, fetch=unavailable, fetch_ocr_markdown=unavailable_ocr
     )
 
     assert result["awaiting_markdown"] is True
@@ -662,6 +760,57 @@ def test_markdown_reconciliation_rotates_unavailable_workflows():
     assert unavailable.updated_at >= checked_at
 
 
+@pytest.mark.parametrize(
+    ("canonical", "expected"),
+    [
+        (
+            "Title: Ready Paper\n\nURL Source: https://example.com\n\n"
+            "Markdown Content:\n\nReady paper experiments establish the result. "
+            "The ready paper analysis includes reproducible ablations.\n",
+            True,
+        ),
+        (
+            "Title: Ready Paper\n\nURL Source: https://example.com\n\n"
+            "Markdown Content:\n\npage_001_image_01.png\n",
+            False,
+        ),
+    ],
+)
+def test_curation_markdown_availability_requires_semantic_body(
+    monkeypatch, canonical, expected
+):
+    observed = {}
+
+    class Handle(BytesIO):
+        def read(self, size=-1):
+            observed["read_size"] = size
+            return super().read(size)
+
+    class Filesystem:
+        def __init__(self, *, token):
+            assert token == "token"
+
+        def open(self, path, mode, *, block_size):
+            observed.update(path=path, mode=mode, block_size=block_size)
+            return Handle(canonical.encode())
+
+    monkeypatch.setattr(
+        "backend.services.hf_daily_curation_service.HfFileSystem", Filesystem
+    )
+    paper = SimpleNamespace(arxiv_id="2608.00042v2", title="Ready Paper")
+    settings = SimpleNamespace(
+        hf_token="token", paper_markdown_hf_bucket_id="test/paper-markdown"
+    )
+
+    assert paper_markdown_available(paper, settings) is expected
+    assert observed == {
+        "path": "hf://buckets/test/paper-markdown/2608/2608.00042.md",
+        "mode": "rb",
+        "block_size": 0,
+        "read_size": 64 * 1024 * 1024 + 1,
+    }
+
+
 def test_callback_validation_rejection_is_not_classified_as_transient():
     rejected = SimpleNamespace(
         error="Remote job completed without an accepted apply.",
@@ -796,6 +945,168 @@ def test_queued_operator_retry_is_prioritized_without_duplication():
     assert result == {"id": str(job_id), "priority": 50}
     assert database.committed is True
     assert jobs.dispatched is True
+
+
+def test_canary_dispatch_launches_only_selected_job_while_normal_dispatch_is_paused():
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    other = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-trending-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Database:
+        def get(self, model, key):
+            if model is PaperCurationSchedulerState:
+                return scheduler
+            if key == selected.id:
+                return selected
+            return None
+
+    class Jobs:
+        launched = []
+
+        def dispatch_canary(self, _db, _settings, row):
+            self.launched.append(row)
+            row.status = "running"
+            return row
+
+        def serialize(self, row, _settings):
+            return SimpleNamespace(
+                model_dump=lambda **_kwargs: {
+                    "id": str(row.id),
+                    "status": row.status,
+                }
+            )
+
+    jobs = Jobs()
+    result = HFDailyCurationService(
+        Database(), SimpleNamespace(), job_service=jobs
+    ).dispatch_canary_job(selected.id)
+
+    assert result == {"id": str(selected.id), "status": "running"}
+    assert jobs.launched == [selected]
+    assert other.status == "queued"
+    assert scheduler.dispatch_enabled is False
+    assert scheduler.paused_at is not None
+
+
+def test_daily_curation_cli_dispatches_one_explicit_canary_job(monkeypatch, capsys):
+    job_id = uuid.uuid4()
+    calls = []
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, db, settings):
+            calls.append((db, settings))
+
+        def dispatch_canary_job(self, selected_job_id):
+            calls.append(selected_job_id)
+            return {"id": str(selected_job_id), "status": "running"}
+
+    settings = object()
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["enqueue_hf_daily_paper_curation", "--canary-job", str(job_id)],
+    )
+
+    assert curation_cli.main() == 0
+    assert calls[1] == job_id
+    assert json.loads(capsys.readouterr().out) == {
+        "id": str(job_id),
+        "status": "running",
+    }
+
+
+def test_daily_curation_cli_exits_nonzero_when_canary_does_not_launch(
+    monkeypatch, capsys
+):
+    job_id = uuid.uuid4()
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, _db, _settings):
+            pass
+
+        def dispatch_canary_job(self, _selected_job_id):
+            raise CanaryDispatchFailed("Canary job did not launch")
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", object)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["enqueue_hf_daily_paper_curation", "--canary-job", str(job_id)],
+    )
+
+    assert curation_cli.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "error": "Canary job did not launch",
+        "job_id": str(job_id),
+        "launched": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("trigger", "status", "dispatch_enabled", "paused_at", "message"),
+    (
+        ("admin", "queued", False, datetime.now(UTC), "Only scheduled"),
+        (
+            "hf-daily-cron",
+            "running",
+            False,
+            datetime.now(UTC),
+            "requires a queued",
+        ),
+        (
+            "hf-trending-cron",
+            "queued",
+            True,
+            None,
+            "normal dispatch to be paused",
+        ),
+    ),
+)
+def test_canary_dispatch_rejects_unsafe_selection_or_scheduler_state(
+    trigger, status, dispatch_enabled, paused_at, message
+):
+    row = SimpleNamespace(id=uuid.uuid4(), trigger=trigger, status=status)
+    scheduler = SimpleNamespace(
+        dispatch_enabled=dispatch_enabled,
+        paused_at=paused_at,
+    )
+
+    class Database:
+        def get(self, model, _key):
+            return scheduler if model is PaperCurationSchedulerState else row
+
+    class Jobs:
+        def dispatch_canary(self, *_args):
+            raise AssertionError("unsafe canary must not reach the dispatcher")
+
+    with pytest.raises(ValueError, match=message):
+        HFDailyCurationService(
+            Database(), SimpleNamespace(), job_service=Jobs()
+        ).dispatch_canary_job(row.id)
 
 
 def test_repeating_operator_retry_returns_active_child_attempt():
@@ -955,7 +1266,82 @@ def test_scheduled_usage_snapshot_exposes_enforced_threshold(monkeypatch):
         "mode": "enforced",
         "current_day_tokens": 600,
         "trailing_seven_day_median_tokens": 100,
+        "positive_baseline_days": 7,
         "pause_threshold_tokens": 200,
+    }
+
+
+def test_scheduled_usage_filters_for_completed_jobs(monkeypatch):
+    from backend.services import codex_add_evals_service
+
+    now = datetime(2026, 8, 18, 12, tzinfo=UTC)
+    monkeypatch.setattr(codex_add_evals_service, "_now", lambda: now)
+    filters = []
+
+    class Query:
+        def filter(self, *predicates):
+            filters.extend(str(predicate) for predicate in predicates)
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def query(self, *_args):
+            return Query()
+
+    CodexPaperJobService._scheduled_usage_snapshot(Database(), None)
+
+    assert any("paper_curation_jobs.status" in predicate for predicate in filters)
+
+
+@pytest.mark.parametrize(
+    ("daily_tokens", "mode", "median_tokens", "threshold"),
+    [
+        ([100, 300], "baseline_alert_only", 200, None),
+        ([100, 300, 500], "enforced", 300, 600),
+    ],
+)
+def test_scheduled_usage_excludes_zero_days_and_requires_three_positive_days(
+    monkeypatch, daily_tokens, mode, median_tokens, threshold
+):
+    from backend.services import codex_add_evals_service
+
+    now = datetime(2026, 8, 18, 12, tzinfo=UTC)
+    monkeypatch.setattr(codex_add_evals_service, "_now", lambda: now)
+    rows = [
+        SimpleNamespace(
+            finished_at=now - codex_add_evals_service.timedelta(days=offset),
+            input_tokens=tokens,
+            output_tokens=0,
+        )
+        for offset, tokens in enumerate(daily_tokens, start=1)
+    ]
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return rows
+
+    class Database:
+        def query(self, *_args):
+            return Query()
+
+    snapshot = CodexPaperJobService._scheduled_usage_snapshot(
+        Database(),
+        SimpleNamespace(
+            first_enabled_at=now - codex_add_evals_service.timedelta(days=30)
+        ),
+    )
+
+    assert snapshot == {
+        "mode": mode,
+        "current_day_tokens": 0,
+        "trailing_seven_day_median_tokens": median_tokens,
+        "positive_baseline_days": len(daily_tokens),
+        "pause_threshold_tokens": threshold,
     }
 
 
@@ -1035,7 +1421,7 @@ def test_overdue_dispatch_reserves_only_one_slot_before_newest_first():
     oldest_overdue = object()
     newest = object()
     first_slot = _DispatchDatabase(None, oldest_overdue)
-    remaining_slot = _DispatchDatabase(object(), newest)
+    remaining_slot = _DispatchDatabase(object(), None, newest)
 
     assert CodexPaperJobService._next_scheduled_row(first_slot) is oldest_overdue
     assert CodexPaperJobService._next_scheduled_row(remaining_slot) is newest
@@ -1044,6 +1430,13 @@ def test_overdue_dispatch_reserves_only_one_slot_before_newest_first():
         for ordering in remaining_slot.orderings
         for value in ordering
     )
+
+
+def test_trending_resolution_precedes_non_overdue_daily_work():
+    trending = object()
+    database = _DispatchDatabase(object(), trending)
+
+    assert CodexPaperJobService._next_scheduled_row(database) is trending
 
 
 def test_newest_first_fallback_when_no_overdue_workflow_exists():
@@ -1177,7 +1570,7 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
         id=uuid.uuid4(),
         kind="enrich-paper",
         paper_id=42,
-        trigger="hf-daily-cron",
+        trigger="admin",
         retry_of_id=None,
         repository_sha="b" * 40,
         model="gpt-5.6-sol",
@@ -1202,6 +1595,295 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
     assert launched["image"] == "hf.co/spaces/example/curator-0123456789ab"
     assert row.status == "running"
     assert row.hf_job_id == "hf-job"
+
+
+def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    other = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-trending-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def query(self, model):
+            assert model is PaperCurationJob
+            return Query()
+
+        def get(self, model, key):
+            assert (model, key) == (PaperCurationSchedulerState, 1)
+            return scheduler
+
+    launched = []
+    service = CodexPaperJobService()
+
+    def launch(_db, _settings, row):
+        launched.append(row)
+        row.status = "running"
+        row.hf_job_id = "hf-canary-job"
+
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        launch,
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    service.dispatch_canary(Database(), settings, selected)
+
+    assert launched == [selected]
+    assert other.status == "queued"
+    assert scheduler.dispatch_enabled is False
+    assert scheduler.paused_at is not None
+
+
+def test_one_shot_dispatch_refuses_to_exceed_scheduled_capacity(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    active = SimpleNamespace(trigger="hf-trending-cron", status="running")
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return [active]
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def get(self, _model, _key):
+            return scheduler
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        lambda *_args: pytest.fail("capacity denial must not launch a job"),
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=1,
+    )
+
+    with pytest.raises(RuntimeError, match="scheduled curation capacity"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_one_shot_dispatch_reports_a_non_launched_row_as_failure(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+        hf_job_id=None,
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def get(self, model, _key):
+            return scheduler if model is PaperCurationSchedulerState else selected
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(service, "_dispatch_row", lambda *_args: None)
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    with pytest.raises(RuntimeError, match="did not launch"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_one_shot_dispatch_cannot_bypass_an_automatic_safety_pause(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="daily_token_guardrail",
+        first_enabled_at=datetime.now(UTC),
+    )
+
+    class Database:
+        def get(self, _model, _key):
+            return scheduler
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        lambda *_args: pytest.fail("automatic safety pauses must not be bypassed"),
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    with pytest.raises(RuntimeError, match="operator pause"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_postgres_curation_dispatch_lock_serializes_concurrent_sessions():
+    database_url = os.getenv("PWC_AUTONOMOUS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("PWC_AUTONOMOUS_TEST_DATABASE_URL is not configured")
+    if not (make_url(database_url).database or "").startswith("autonomous_ops_test_"):
+        pytest.fail("Curation concurrency test requires a disposable database")
+    engine = create_engine(database_url, pool_size=2)
+    first_acquired = Event()
+    release_first = Event()
+    second_acquired = Event()
+
+    def hold_first_lock():
+        with Session(engine) as db:
+            with curation_dispatch_lock(db):
+                first_acquired.set()
+                assert release_first.wait(timeout=5)
+
+    def acquire_second_lock():
+        assert first_acquired.wait(timeout=5)
+        with Session(engine) as db:
+            with curation_dispatch_lock(db):
+                second_acquired.set()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(hold_first_lock)
+            second = pool.submit(acquire_second_lock)
+            assert first_acquired.wait(timeout=5)
+            assert second_acquired.wait(timeout=0.2) is False
+            release_first.set()
+            first.result(timeout=5)
+            second.result(timeout=5)
+        assert second_acquired.is_set()
+    finally:
+        engine.dispose()
+
+
+def test_scheduled_dispatch_fails_closed_before_remote_launch_when_curation_is_disabled(
+    monkeypatch,
+):
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    for model in (
+        AutonomousOperatorState,
+        AutonomousRun,
+        PaperCurationSchedulerState,
+    ):
+        model.__table__.create(engine)
+    with Session(engine, expire_on_commit=False) as session:
+
+        class Database:
+            def get(self, model, key):
+                if model is Paper:
+                    return SimpleNamespace(id=key)
+                return session.get(model, key)
+
+            def __getattr__(self, name):
+                return getattr(session, name)
+
+        db = Database()
+        operations = AutonomousOperationsRepository()
+        control = operations.get_control_state(db)
+        assert control.manual_mode is True
+        session.get(AutonomousOperatorState, "global").manual_mode = False
+        state = PaperCurationSchedulerState(
+            id=1,
+            dispatch_enabled=True,
+            first_enabled_at=datetime.now(UTC),
+        )
+        db.add(state)
+        db.commit()
+        row = SimpleNamespace(
+            id=uuid.uuid4(),
+            kind="enrich-paper",
+            paper_id=42,
+            candidate_id=None,
+            trigger="hf-daily-cron",
+            policy_version="scheduled-v1",
+            status="queued",
+        )
+        service = CodexPaperJobService()
+        launched = False
+
+        def launch(**_values):
+            nonlocal launched
+            launched = True
+            return SimpleNamespace(id="hf-job")
+
+        monkeypatch.setattr(service, "_run_job_with_retry", launch)
+        settings = get_settings().model_copy(
+            update={
+                "codex_jobs_namespace": "example",
+                "codex_jobs_token": "hf-token",
+                "codex_jobs_openai_api_key": "openai-token",
+            }
+        )
+
+        service._dispatch_row(db, settings, row)
+
+        assert launched is False
+        assert row.status == "queued"
+        assert state.pause_condition == "autonomous_policy_denied"
+        assert "curation operator is disabled" in state.pause_reason
+        control = operations.get_control_state(db)
+        assert control.enabled[Operator.CURATION] is False
+    engine.dispose()
 
 
 def test_bootstrap_bundle_is_allowlisted_hashed_and_release_bound(monkeypatch):
@@ -1353,6 +2035,27 @@ def test_benchmark_gap_validation_isolates_malformed_entries():
     assert len(accepted) == 1
     assert rejected == []
 
+    queried_source = {
+        **valid,
+        "evidence": [
+            {
+                **valid["evidence"][0],
+                "source_kind": "paper_source",
+                "source_url": "https://example.com/report?id=1",
+            }
+        ],
+    }
+    accepted, rejected = BenchmarkGapService(Database()).validate(
+        [queried_source],
+        paper=SimpleNamespace(
+            source_url="https://example.com/report?id=1",
+            arxiv_id=None,
+        ),
+    )
+
+    assert len(accepted) == 1
+    assert rejected == []
+
     eprint_evidence = {
         **valid,
         "evidence": [
@@ -1375,6 +2078,55 @@ def test_benchmark_gap_validation_isolates_malformed_entries():
     assert accepted[0]["evidence"][0]["source_url"] == (
         "https://arxiv.org/html/2608.00042"
     )
+
+    repository_evidence = {
+        **valid,
+        "evidence": [
+            {
+                **valid["evidence"][0],
+                "source_kind": "github_readme",
+                "source_url": (
+                    "https://raw.githubusercontent.com/example/model/main/README.md"
+                ),
+                "supports": ["ExampleBench results in Table 3"],
+            }
+        ],
+    }
+    accepted, rejected = BenchmarkGapService(Database()).validate(
+        [repository_evidence],
+        paper=SimpleNamespace(
+            source_url="https://example.com/release",
+            arxiv_id=None,
+        ),
+        source_documents=[
+            {"kind": "github_readme", "url": "https://github.com/example/model"}
+        ],
+    )
+
+    assert len(accepted) == 1
+    assert rejected == []
+
+    mismatched_kind = {
+        **repository_evidence,
+        "evidence": [
+            {**repository_evidence["evidence"][0], "source_kind": "paper_pdf"}
+        ],
+    }
+    accepted, rejected = BenchmarkGapService(Database()).validate(
+        [mismatched_kind],
+        paper=SimpleNamespace(
+            source_url="https://example.com/release",
+            arxiv_id=None,
+        ),
+        source_documents=[
+            {"kind": "github_readme", "url": "https://github.com/example/model"}
+        ],
+    )
+
+    assert accepted == []
+    assert rejected == [
+        {"index": 0, "error": "evidence source kind does not match scoped source"}
+    ]
 
 
 def test_benchmark_gap_rejects_server_owned_fields():

@@ -1,9 +1,6 @@
 name: Cron - Refresh Paper Embeddings
 
 on:
-  schedule:
-    # Run after the hourly HF daily-paper import at minute 0.
-    - cron: "15 * * * *"
   workflow_dispatch: {}
 
 concurrency:

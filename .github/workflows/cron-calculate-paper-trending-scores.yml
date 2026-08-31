@@ -1,8 +1,6 @@
 name: Cron - Calculate Paper Trending Scores
 
 on:
-  schedule:
-    - cron: "45 * * * *"
   workflow_dispatch: {}
 
 concurrency:

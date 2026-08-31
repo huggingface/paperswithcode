@@ -33,7 +33,9 @@ class PaperIngestionService:
         self.db = db
         self.arxiv_service = arxiv_service or ArxivService()
 
-    async def get_or_import_arxiv_paper(self, arxiv_id: str) -> tuple[Paper, bool]:
+    async def get_or_import_arxiv_paper(
+        self, arxiv_id: str, *, commit: bool = True
+    ) -> tuple[Paper, bool]:
         arxiv_id = canonical_arxiv_id(arxiv_id)
         existing = (
             self.db.query(Paper)
@@ -59,7 +61,8 @@ class PaperIngestionService:
                 "primary_category": metadata.primary_category,
                 "all_categories": metadata.categories,
                 "is_latest_version": True,
-            }
+            },
+            commit=commit,
         )
         if not paper_id:
             raise PaperIngestionError(arxiv_id, "db_error")
@@ -87,8 +90,11 @@ class PaperIngestionService:
                         author_order=order,
                     )
                 )
-        self.db.commit()
-        self.db.refresh(paper)
+        if commit:
+            self.db.commit()
+            self.db.refresh(paper)
+        else:
+            self.db.flush()
         return paper, True
 
     async def get_or_import_api_paper(

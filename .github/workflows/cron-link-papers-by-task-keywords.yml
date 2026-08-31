@@ -1,9 +1,6 @@
 name: Cron - Link Papers by Task Keywords
 
 on:
-  schedule:
-    # Sundays 05:00 UTC (after the weekly method-reference linker at 04:00).
-    - cron: "0 5 * * 0"
   workflow_dispatch:
     inputs:
       rebuild:

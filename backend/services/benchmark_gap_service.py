@@ -27,6 +27,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.utils.public_urls import normalize_public_url
+from backend.utils.source_urls import source_url_identity
 from backend.utils.urls import get_paper_route_identifier
 
 GAP_TYPES = {
@@ -36,7 +37,14 @@ GAP_TYPES = {
     "task_missing",
 }
 CONFIDENCE_VALUES = {"low", "medium", "high"}
-PRIMARY_EVIDENCE_KINDS = {"paper_markdown", "paper_pdf", "paper_source"}
+AUTHORITATIVE_EVIDENCE_KINDS = {
+    "github_readme",
+    "model_card",
+    "paper_markdown",
+    "paper_pdf",
+    "paper_source",
+    "project_page",
+}
 RESERVED_AGENT_FIELDS = {
     "candidate_id",
     "recurrence_count",
@@ -87,7 +95,7 @@ def _paper_evidence_urls(paper: Paper | None) -> set[str] | None:
         return None
     values = set()
     if paper.source_url:
-        values.add(_without_query_or_fragment(normalize_public_url(paper.source_url)))
+        values.add(normalize_public_url(paper.source_url))
     if paper.arxiv_id:
         values.update(
             {
@@ -118,16 +126,47 @@ def _paper_evidence_url_aliases(paper: Paper | None) -> dict[str, str]:
     }
 
 
+def _paper_evidence_kinds(paper: Paper | None) -> dict[str, set[str]] | None:
+    if paper is None:
+        return None
+    kinds: dict[str, set[str]] = {}
+    if paper.source_url:
+        kinds.setdefault(source_url_identity(paper.source_url), set()).add(
+            "paper_source"
+        )
+    if paper.arxiv_id:
+        identity = source_url_identity(f"https://arxiv.org/abs/{paper.arxiv_id}")
+        kinds.setdefault(identity, set()).update(
+            {"paper_markdown", "paper_pdf", "paper_source"}
+        )
+    return kinds
+
+
 class BenchmarkGapService:
     def __init__(self, db: Session):
         self.db = db
 
     def validate(
-        self, gaps: list[dict], *, paper: Paper | None = None
+        self,
+        gaps: list[dict],
+        *,
+        paper: Paper | None = None,
+        source_documents: list[dict] | None = None,
     ) -> tuple[list[dict], list[dict]]:
         accepted: list[dict] = []
         rejected: list[dict] = []
         evidence_urls = _paper_evidence_urls(paper)
+        evidence_kinds = _paper_evidence_kinds(paper)
+        if evidence_urls is not None:
+            evidence_urls = {source_url_identity(url) for url in evidence_urls}
+            for item in source_documents or []:
+                if not isinstance(item, dict) or not item.get("url"):
+                    continue
+                identity = source_url_identity(item["url"])
+                evidence_urls.add(identity)
+                if item.get("kind") in AUTHORITATIVE_EVIDENCE_KINDS:
+                    assert evidence_kinds is not None
+                    evidence_kinds.setdefault(identity, set()).add(item["kind"])
         evidence_url_aliases = _paper_evidence_url_aliases(paper)
         for index, gap in enumerate(gaps):
             try:
@@ -136,6 +175,7 @@ class BenchmarkGapService:
                         gap,
                         evidence_urls=evidence_urls,
                         evidence_url_aliases=evidence_url_aliases,
+                        evidence_kinds=evidence_kinds,
                     )
                 )
             except (KeyError, TypeError, ValueError) as exc:
@@ -148,6 +188,7 @@ class BenchmarkGapService:
         *,
         evidence_urls: set[str] | None = None,
         evidence_url_aliases: dict[str, str] | None = None,
+        evidence_kinds: dict[str, set[str]] | None = None,
     ) -> dict:
         if not isinstance(gap, dict):
             raise TypeError("gap must be an object")
@@ -307,19 +348,21 @@ class BenchmarkGapService:
                 raise ValueError("evidence_id values must be unique")
             evidence_ids.add(evidence_id)
             source_kind = evidence.get("source_kind")
-            if source_kind not in PRIMARY_EVIDENCE_KINDS:
-                raise ValueError("benchmark gaps require primary-paper evidence")
+            if source_kind not in AUTHORITATIVE_EVIDENCE_KINDS:
+                raise ValueError("benchmark gaps require authoritative source evidence")
             source_url = normalize_public_url(
                 _bounded_text(evidence.get("source_url"), "evidence source URL", 2_000)
             )
             source_url = (evidence_url_aliases or {}).get(
                 _without_query_or_fragment(source_url), source_url
             )
-            if (
-                evidence_urls is not None
-                and _without_query_or_fragment(source_url) not in evidence_urls
-            ):
+            source_identity = source_url_identity(source_url)
+            if evidence_urls is not None and source_identity not in evidence_urls:
                 raise ValueError("evidence source URL is not the scoped paper")
+            if evidence_kinds is not None and source_kind not in evidence_kinds.get(
+                source_identity, set()
+            ):
+                raise ValueError("evidence source kind does not match scoped source")
             normalized = {
                 **evidence,
                 "evidence_id": evidence_id,
@@ -454,12 +497,6 @@ class BenchmarkGapService:
                     evidence_aliases.get(value, value) for value in linked_evidence
                 )
             )
-        supported_refs = {
-            value for evidence in normalized_evidence for value in evidence["supports"]
-        }
-        if not blocked_refs <= supported_refs:
-            raise ValueError("every blocked evaluation must be supported by evidence")
-
         assessment = result.get("assessment")
         if not isinstance(assessment, dict):
             raise ValueError("assessment is required")

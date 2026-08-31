@@ -1,0 +1,52 @@
+name: Cron - Enqueue HF Trending Model Curation
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Discover and classify without persisting"
+        required: false
+        type: boolean
+        default: false
+      max_queued:
+        description: "Maximum releases to queue in this cycle"
+        required: false
+        type: number
+        default: 10
+
+concurrency:
+  group: cron-enqueue-hf-trending-model-curation
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      - name: Add VPS host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          if [ -z "$VPS_HOST" ] || [[ "$VPS_HOST" == *"://"* || "$VPS_HOST" == *"@"* || "$VPS_HOST" == *"/"* || "$VPS_HOST" =~ [[:space:]] ]]; then
+            echo "VPS_HOST must be a bare hostname or IP address"
+            exit 1
+          fi
+          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Reconcile trending models through installed launcher
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          MAX_QUEUED: ${{ inputs.max_queued || 10 }}
+        run: |
+          [[ "$MAX_QUEUED" =~ ^[0-9]+$ ]] || exit 2
+          [ "$MAX_QUEUED" -le 50 ] || exit 2
+          ARGS="--max-queued $MAX_QUEUED"
+          if [ "$DRY_RUN" = "true" ]; then ARGS="$ARGS --dry-run"; fi
+          ssh -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" \
+            "sudo /usr/local/sbin/pwc-cron enqueue_hf_trending_model_curation $ARGS"

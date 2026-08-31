@@ -3,7 +3,7 @@
 import math
 from datetime import UTC, date, datetime, timedelta
 
-from sqlalchemy import and_, case, func, or_
+from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
 from backend.models.api import (
@@ -21,6 +21,7 @@ from backend.models.database import (
 from backend.services.dataset_service import DatasetService
 from backend.services.catalog_errors import CatalogNotFoundError
 from backend.utils.task_hierarchy import collect_descendant_task_ids
+from backend.utils.task_slugs import task_slug_candidates
 
 _SUPPORT_PRIOR_PAPERS = 2.0
 
@@ -221,17 +222,23 @@ class BenchmarkTrendService:
         if str(task_id).isdigit():
             task = self.db.query(DBTask).filter(DBTask.id == int(task_id)).first()
         else:
-            task = (
-                self.db.query(DBTask)
-                .filter(
-                    or_(
-                        func.lower(DBTask.slug) == str(task_id).lower(),
-                        func.lower(DBTask.name) == str(task_id).lower(),
-                    )
+            task = None
+            for candidate in task_slug_candidates(str(task_id)):
+                task = (
+                    self.db.query(DBTask)
+                    .filter(func.lower(DBTask.slug) == candidate.lower())
+                    .order_by(DBTask.id)
+                    .first()
                 )
-                .order_by(DBTask.id)
-                .first()
-            )
+                if task is not None:
+                    break
+            if task is None:
+                task = (
+                    self.db.query(DBTask)
+                    .filter(func.lower(DBTask.name) == str(task_id).lower())
+                    .order_by(DBTask.id)
+                    .first()
+                )
         if task is None:
             raise CatalogNotFoundError(
                 f"Task with ID, slug, or name '{task_id}' not found"

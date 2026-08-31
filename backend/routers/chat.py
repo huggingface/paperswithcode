@@ -43,6 +43,11 @@ from backend.models.chat import (
     LatexPaperRestoreRequest,
     LatexPaperSaveCompileRequest,
     ChatSandboxSpendResponse,
+    ChatQualificationEvidenceRequest,
+    ChatQualificationEvidenceResponse,
+    ChatQualificationScopeRequest,
+    ChatQualificationScopeResponse,
+    ChatQualificationTeardownResponse,
     ChatSessionDetail,
     ChatSessionList,
     ChatSessionSummary,
@@ -66,7 +71,13 @@ from backend.services.chat_feedback_service import (
 )
 from backend.services.chat_latency_service import ChatLatencyService
 from backend.services.latex_paper_service import LatexPaperService
-from backend.services.chat_live_stream_service import live_chat_stream_registry
+from backend.services.chat_detached_runtime import (
+    detached_chat_runtime,
+    replay_detached_frames,
+)
+from backend.services.chat_live_stream_service import (
+    live_chat_stream_registry,
+)
 from backend.services.chat_mcp_app_proxy import (
     APP_HTML_MIME,
     fetch_excalidraw_app_html,
@@ -97,9 +108,26 @@ from backend.services.chat_session_service import (
     ChatSessionService,
     owner_from_user,
 )
+from backend.services.chat_scope_guardrail_service import (
+    ScopeMessage,
+    build_scope_context,
+)
 from backend.services.chat_share_service import ChatShareService
-from backend.services.chat_stream_service import ChatStreamOrchestrator
+from backend.services.chat_stream_service import (
+    ChatStreamOrchestrator,
+    encode_journal_frame,
+)
 from backend.services.chat_turn_runner import shared_sandbox_manager
+from backend.services.chat_turn_cancellation_coordinator import (
+    ChatTurnCancellationCoordinator,
+)
+from backend.services.chat_turn_event_repository import JournalFrame
+from backend.services.chat_durable_lifecycle_observer import durable_lifecycle_observer
+from backend.services.chat_durable_qualification_evidence import (
+    ChatDurableQualificationEvidenceService,
+    QualificationEvidenceUnavailable,
+    record_qualification_event_safely,
+)
 from backend.services.chat_web_search_service import (
     ChatWebSearchBudgetService,
     web_search_available,
@@ -116,6 +144,7 @@ from backend.services.openrouter_byok_service import (
     OpenRouterCredentialError,
     OpenRouterCredentialUnavailable,
 )
+from backend.utils.csrf import has_valid_non_cookie_admin_credential
 from backend.services.openrouter_user_budget_service import (
     PUBLIC_SUPPORT_URL,
     OpenRouterUserBudgetService,
@@ -125,6 +154,37 @@ from backend.utils.client_ip import get_client_ip
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
+
+
+def detached_turn_coordinator():
+    return detached_chat_runtime().coordinator
+
+
+async def _durable_replay_frames(admission, *, request_id: str, after_sequence: int):
+    async for frame in replay_detached_frames(
+        detached_turn_coordinator(),
+        admission,
+        request_id=request_id,
+        after_sequence=after_sequence,
+    ):
+        yield frame
+
+
+def _last_event_sequence(request: Request) -> int:
+    raw = request.headers.get("last-event-id", "0")
+    try:
+        sequence = int(raw)
+    except ValueError:
+        sequence = -1
+    if sequence < 0 or str(sequence) != raw:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "chat_stream_cursor_invalid",
+                "message": "Last-Event-ID must be a non-negative integer.",
+            },
+        )
+    return sequence
 
 
 CHAT_CAPACITY_RETRY_SECONDS = 5
@@ -236,6 +296,30 @@ class AdminCreateHarnessSession(BaseModel):
     agent_harness: Literal["claude", "pi"]
     selected_model: str | None = None
     reasoning_effort: Literal["low", "high", "max"] = "low"
+
+
+def _durable_qualification_scope(
+    request: Request, settings: Settings
+) -> tuple[uuid.UUID, Literal["no_tool", "read", "bash"]] | None:
+    raw_scope_id = request.headers.get("X-PWC-Qualification-Scope-ID")
+    if raw_scope_id is None:
+        return None
+    try:
+        scope_id = uuid.UUID(raw_scope_id)
+    except ValueError:
+        scope_id = None
+    workload = request.headers.get("X-PWC-Qualification-Workload")
+    if (
+        settings.environment != "staging"
+        or scope_id is None
+        or workload not in {"no_tool", "read", "bash"}
+        or not (has_valid_non_cookie_admin_credential(request, settings))
+    ):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "qualification_scope_rejected"},
+        )
+    return scope_id, workload
 
 
 OPENROUTER_UNAVAILABLE_MESSAGE = (
@@ -636,6 +720,109 @@ def chat_sandbox_spend(environment: str | None = None):
     )
 
 
+@router.post(
+    "/admin/qualification-scopes",
+    dependencies=[Depends(require_admin)],
+    response_model=ChatQualificationScopeResponse,
+    status_code=201,
+)
+def create_chat_qualification_scope(
+    body: ChatQualificationScopeRequest,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Issue one release-bound, server-timed protected staging cohort."""
+    if settings.environment != "staging":
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        scope = ChatDurableQualificationEvidenceService(db).create_scope(
+            run_id=body.run_id,
+            profile=body.profile,
+            settings=settings,
+        )
+        db.commit()
+        return scope
+    except QualificationEvidenceUnavailable:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "qualification_scope_unavailable"},
+        ) from None
+
+
+@router.post(
+    "/admin/qualification-evidence",
+    dependencies=[Depends(require_admin)],
+    response_model=ChatQualificationEvidenceResponse,
+)
+def chat_qualification_evidence(
+    body: ChatQualificationEvidenceRequest,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Return the exact protected run cohort without identities or content."""
+    if settings.environment != "staging":
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        evidence = ChatDurableQualificationEvidenceService(db).collect(
+            scope_id=body.scope_id, settings=settings
+        )
+        db.commit()
+        return evidence
+    except QualificationEvidenceUnavailable:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "qualification_evidence_unavailable"},
+        ) from None
+
+
+@router.post(
+    "/admin/qualification-scopes/{scope_id}/teardown",
+    dependencies=[Depends(require_admin)],
+    response_model=ChatQualificationTeardownResponse,
+)
+async def teardown_chat_qualification_scope(
+    scope_id: uuid.UUID,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Evict only the exact server-scoped qualification cohort."""
+    if settings.environment != "staging":
+        raise HTTPException(status_code=404, detail="Not found")
+    try:
+        proof = await ChatDurableQualificationEvidenceService(db).teardown_scope(
+            scope_id=scope_id,
+            settings=settings,
+            sandbox_manager=shared_sandbox_manager(settings),
+        )
+        db.commit()
+        return proof
+    except QualificationEvidenceUnavailable:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "qualification_teardown_incomplete"},
+        ) from None
+
+
+@router.delete(
+    "/admin/qualification-scopes/{scope_id}",
+    dependencies=[Depends(require_admin)],
+    status_code=204,
+)
+def delete_chat_qualification_scope(
+    scope_id: uuid.UUID,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if settings.environment != "staging":
+        raise HTTPException(status_code=404, detail="Not found")
+    ChatDurableQualificationEvidenceService(db).cleanup_scope(scope_id)
+    db.commit()
+    return Response(status_code=204)
+
+
 @router.get("/usage")
 async def get_openrouter_usage(
     user: dict = Depends(require_user),
@@ -929,10 +1116,16 @@ def get_session(
 )
 def reconnect_active_stream(
     session_id: uuid.UUID,
+    request: Request,
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
+    after_sequence = (
+        _last_event_sequence(request)
+        if settings.chat_durable_turn_dispatch_enabled
+        else 0
+    )
     owner = owner_from_user(user)
     try:
         session, _messages = ChatSessionService(db, settings).get_session(
@@ -948,25 +1141,34 @@ def reconnect_active_stream(
                 "message": "This chat is not generating.",
             },
         )
-    stream = live_chat_stream_registry().get(
-        session_id, session.active_turn_id, owner.hf_user_id
-    )
-    if stream is None:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "chat_stream_unavailable",
-                "message": "The active response cannot be reconnected.",
-            },
+    stream = None
+    if not settings.chat_durable_turn_dispatch_enabled:
+        stream = live_chat_stream_registry().get(
+            session_id, session.active_turn_id, owner.hf_user_id
         )
+        if stream is None:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "chat_stream_unavailable",
+                    "message": "The active response cannot be reconnected.",
+                },
+            )
 
     async def event_stream():
         yield b": " + (b" " * SSE_PROXY_FLUSH_PADDING_BYTES) + b"\n\n"
-        async for frame in stream.subscribe():
-            if frame.event is None:
-                yield b": ping\n\n"
-            else:
-                yield sse_event(frame.event, **frame.payload)
+        if settings.chat_durable_turn_dispatch_enabled:
+            async for frame in detached_turn_coordinator().subscribe(
+                turn_id=session.active_turn_id, after_sequence=after_sequence
+            ):
+                yield encode_journal_frame(frame)
+        else:
+            assert stream is not None
+            async for frame in stream.subscribe():
+                if frame.event is None:
+                    yield b": ping\n\n"
+                else:
+                    yield sse_event(frame.event, **frame.payload)
 
     return StreamingResponse(
         event_stream(),
@@ -1581,16 +1783,36 @@ async def cancel_active_turn(
     settings: Settings = Depends(get_settings),
 ):
     owner = owner_from_user(user)
+    if getattr(settings, "chat_durable_turn_dispatch_enabled", False):
+        try:
+            coordinator_kwargs = (
+                {"external_cancel": detached_chat_runtime(settings).cancel}
+                if settings.chat_external_pi_admission_enabled
+                else {}
+            )
+            await ChatTurnCancellationCoordinator(
+                db,
+                settings,
+                shared_sandbox_manager(settings),
+                observe=durable_lifecycle_observer(settings),
+                **coordinator_kwargs,
+            ).cancel(owner, session_id)
+        except ChatServiceError as exc:
+            db.rollback()
+            _raise(exc)
+        return Response(status_code=204)
     try:
-        session, _messages = ChatSessionService(db, settings).get_session(
+        turn_id = ChatSessionService(db, settings).request_legacy_cancel(
             owner, session_id
         )
+        db.commit()
     except ChatServiceError as exc:
+        db.rollback()
         _raise(exc)
-    if session.active_turn_id is None:
+    if turn_id is None:
         return Response(status_code=204)
     manager = shared_sandbox_manager(settings)
-    cancelled = await manager.cancel(session_id, session.active_turn_id)
+    cancelled = await manager.cancel(session_id, turn_id)
     if not cancelled:
         await manager.terminate(session_id, failure_code="cancel_control_missing")
     return Response(status_code=204)
@@ -1722,6 +1944,12 @@ async def stream_chat(
     body: ChatRequest, request: Request, user: dict = Depends(require_user)
 ):
     settings = get_settings()
+    qualification_scope = _durable_qualification_scope(request, settings)
+    after_sequence = (
+        _last_event_sequence(request)
+        if settings.chat_durable_turn_dispatch_enabled
+        else 0
+    )
     if not settings.chat_enabled:
         raise HTTPException(status_code=503, detail="Chat is not configured")
     if body.paper_selection is not None and not settings.paper_reader_selection_enabled:
@@ -1799,6 +2027,7 @@ async def stream_chat(
     )
     request_id = str(uuid.uuid4())
     prepared = PreparedPaperTurn(body.message, body.message, [], 0, 0, 0)
+    scope_messages = [ScopeMessage(role="user", content=body.message)]
     existing_prompt: str | None = None
     if body.session_id is not None:
         with db_manager.session_local() as replay_db:
@@ -1848,6 +2077,23 @@ async def stream_chat(
     try:
         with db_manager.session_local() as db:
             try:
+                try:
+                    qualification_context = (
+                        ChatDurableQualificationEvidenceService(
+                            db
+                        ).require_active_context(
+                            qualification_scope[0],
+                            workload=qualification_scope[1],
+                            settings=settings,
+                        )
+                        if qualification_scope is not None
+                        else None
+                    )
+                except QualificationEvidenceUnavailable:
+                    raise HTTPException(
+                        status_code=409,
+                        detail={"code": "qualification_scope_unavailable"},
+                    ) from None
                 service = ChatSessionService(db, settings)
                 admission = service.begin_turn(
                     owner,
@@ -1866,9 +2112,14 @@ async def stream_chat(
                     web_search_enabled=body.web_search_enabled,
                     reasoning_effort=body.reasoning_effort,
                     update_web_search_preference=search_is_available,
+                    qualification=qualification_context,
                 )
                 transport = settings.chat_route_providers[admission.model_route]
-                if transport == "huggingface" and not inference_credential:
+                if (
+                    not getattr(admission, "attach_only", False)
+                    and transport == "huggingface"
+                    and not inference_credential
+                ):
                     raise ChatServiceError(
                         "hf_inference_billing_required",
                         402,
@@ -1885,8 +2136,11 @@ async def stream_chat(
                     and not admission.replay_assistant
                     else None
                 )
-                if not admission.replay_assistant:
-                    ChatLatencyService(db).admit(
+                if not admission.replay_assistant and not getattr(
+                    admission, "attach_only", False
+                ):
+                    latency = ChatLatencyService(db)
+                    latency.admit(
                         turn_id=admission.turn_id,
                         session_id=admission.session_id,
                         request_id=request_id,
@@ -1896,6 +2150,60 @@ async def stream_chat(
                         is_new_chat=body.session_id is None,
                         agent_harness=admission.agent_harness,
                     )
+                    if (
+                        qualification_context is not None
+                        and not latency.mark_qualification(
+                            request_id,
+                            scope_id=qualification_context.scope_id,
+                            run_id=qualification_context.run_id,
+                            profile=qualification_context.profile,
+                            workload=qualification_scope[1],
+                            scenario="reliability",
+                        )
+                    ):
+                        raise RuntimeError("qualification scope persistence failed")
+                    if settings.chat_scope_guardrail_enabled:
+                        current_user = db.get(
+                            ChatMessageRecord, admission.user_message_id
+                        )
+                        cutoff = (
+                            admission.replacement_target_sequence
+                            if admission.replacement_target_sequence is not None
+                            else getattr(current_user, "sequence", 0)
+                        )
+                        prior_rows = list(
+                            db.execute(
+                                select(ChatMessageRecord)
+                                .where(
+                                    ChatMessageRecord.session_id
+                                    == admission.session_id,
+                                    ChatMessageRecord.sequence < cutoff,
+                                    ChatMessageRecord.role.in_(("user", "assistant")),
+                                    ChatMessageRecord.status == "complete",
+                                )
+                                .order_by(ChatMessageRecord.sequence.desc())
+                                .limit(settings.chat_scope_guardrail_max_prior_messages)
+                            ).scalars()
+                        )
+                        selected_paper = None
+                        primary = prepared.primary_paper_context
+                        if isinstance(primary, dict):
+                            selected_paper = {
+                                "title": primary.get("title"),
+                                "route_id": primary.get("route_id"),
+                            }
+                        scope_messages = build_scope_context(
+                            [
+                                ScopeMessage(role=row.role, content=row.content)
+                                for row in reversed(prior_rows)
+                            ],
+                            prepared.display_message,
+                            max_prior_messages=(
+                                settings.chat_scope_guardrail_max_prior_messages
+                            ),
+                            max_chars=settings.chat_scope_guardrail_max_context_chars,
+                            selected_paper=selected_paper,
+                        )
                 db.commit()
             except ChatServiceError as exc:
                 if exc.commit_changes:
@@ -1903,7 +2211,21 @@ async def stream_chat(
                 else:
                     db.rollback()
                 raise
-        if transport == "openrouter" and not admission.replay_assistant:
+        if (
+            qualification_context is not None
+            and not admission.replay_assistant
+            and not getattr(admission, "attach_only", False)
+        ):
+            record_qualification_event_safely(
+                turn_id=admission.turn_id,
+                chat_session_id=admission.session_id,
+                event_type="admitted_no_queue",
+            )
+        if (
+            transport == "openrouter"
+            and not admission.replay_assistant
+            and not getattr(admission, "attach_only", False)
+        ):
             try:
                 with db_manager.session_local() as db:
                     openrouter = await _authorize_openrouter(
@@ -1937,23 +2259,46 @@ async def stream_chat(
             )
         _raise(exc)
 
-    orchestrator = ChatStreamOrchestrator(
-        settings=settings,
-        owner=owner,
-        admission=admission,
-        prompt=prepared.effective_prompt,
-        display_message=prepared.title_prompt or prepared.display_message,
-        request_id=request_id,
-        title_token=title_token,
-        is_disconnected=_never_disconnected,
-        release_admission=_release_durable_admission,
-    )
-    live_stream = live_chat_stream_registry().start(
-        session_id=admission.session_id,
-        turn_id=admission.turn_id,
-        owner_id=owner.hf_user_id,
-        source=orchestrator.events(),
-    )
+    live_stream = None
+    journal_stream = None
+    if getattr(admission, "attach_only", False):
+        journal_stream = _durable_replay_frames(
+            admission,
+            request_id=request_id,
+            after_sequence=after_sequence,
+        )
+    else:
+        orchestrator = ChatStreamOrchestrator(
+            settings=settings,
+            owner=owner,
+            admission=admission,
+            prompt=prepared.effective_prompt,
+            display_message=prepared.title_prompt or prepared.display_message,
+            request_id=request_id,
+            title_token=title_token,
+            is_disconnected=_never_disconnected,
+            release_admission=_release_durable_admission,
+            scope_messages=scope_messages,
+        )
+        if (
+            settings.chat_durable_turn_dispatch_enabled
+            and admission.replay_assistant is None
+        ):
+            claim = await orchestrator.claim_durable_turn()
+            live_stream = await detached_chat_runtime(settings).start(
+                admission=admission,
+                owner_id=owner.hf_user_id,
+                claim=claim,
+                orchestrator=orchestrator,
+            )
+            journal_stream = live_stream.subscribe(after_sequence)
+        else:
+            live_stream = live_chat_stream_registry().start(
+                session_id=admission.session_id,
+                turn_id=admission.turn_id,
+                owner_id=owner.hf_user_id,
+                source=orchestrator.events(),
+            )
 
     async def event_stream():
         # Some edge POPs buffer small initial HTTP/2 DATA frames even when the
@@ -1961,11 +2306,22 @@ async def stream_chat(
         # comment above the common 2 KiB threshold forces those intermediaries
         # to flush the response before the first model delta arrives.
         yield b": " + (b" " * SSE_PROXY_FLUSH_PADDING_BYTES) + b"\n\n"
-        async for frame in live_stream.subscribe():
-            if frame.event is None:
-                yield b": ping\n\n"
-            else:
-                yield sse_event(frame.event, **frame.payload)
+        if journal_stream is not None:
+            async for frame in journal_stream:
+                yield encode_journal_frame(frame)
+        else:
+            assert live_stream is not None
+            sequence = 0
+            async for frame in live_stream.subscribe():
+                if frame.event is None:
+                    yield b": ping\n\n"
+                elif settings.chat_durable_turn_dispatch_enabled:
+                    sequence += 1
+                    yield encode_journal_frame(
+                        JournalFrame(sequence, frame.event, frame.payload)
+                    )
+                else:
+                    yield sse_event(frame.event, **frame.payload)
 
     return StreamingResponse(
         event_stream(),

@@ -355,7 +355,15 @@ export const isChatSmoothStreamingEnabled = (): boolean => {
 
 export interface StreamChatOptions {
   signal?: AbortSignal;
+  afterSequence?: number;
+  onSequence?: (sequence: number) => void;
 }
+
+type ParsedSSEFrame = {
+  sequence: number | null;
+  event: string;
+  data: string;
+};
 
 export class ChatStreamError extends Error {
   constructor(
@@ -366,6 +374,13 @@ export class ChatStreamError extends Error {
   ) {
     super(message);
     this.name = "ChatStreamError";
+  }
+}
+
+export class ChatTransportError extends Error {
+  constructor(message = "The assistant stream was interrupted.") {
+    super(message);
+    this.name = "ChatTransportError";
   }
 }
 
@@ -410,7 +425,7 @@ export function streamChat(
   if (!isChatLive()) {
     return mockChatStream(request.message, opts.signal);
   }
-  return streamChatOverSSE(request, opts.signal);
+  return streamChatOverSSE(request, opts);
 }
 
 /** Reattach to a durable turn after navigation or a full page reload. */
@@ -418,7 +433,7 @@ export function resumeChat(
   sessionId: string,
   opts: StreamChatOptions = {},
 ): AsyncGenerator<ChatEvent> {
-  return resumeChatOverSSE(sessionId, opts.signal);
+  return resumeChatOverSSE(sessionId, opts);
 }
 
 /**
@@ -427,21 +442,62 @@ export function resumeChat(
  */
 async function* streamChatOverSSE(
   request: ChatStreamRequest,
-  signal?: AbortSignal,
+  opts: StreamChatOptions,
 ): AsyncGenerator<ChatEvent> {
-  const res = await chatApi.stream(request, signal);
-  yield* readChatSSE(res);
+  try {
+    const res = await chatApi.stream(request, opts.signal);
+    yield* readChatSSE(res, opts);
+  } catch (error) {
+    throw classifyStreamFailure(error);
+  }
 }
 
 async function* resumeChatOverSSE(
   sessionId: string,
-  signal?: AbortSignal,
+  opts: StreamChatOptions,
 ): AsyncGenerator<ChatEvent> {
-  const res = await chatApi.resumeStream(sessionId, signal);
-  yield* readChatSSE(res);
+  try {
+    const res = await chatApi.resumeStream(sessionId, opts.signal, opts.afterSequence);
+    yield* readChatSSE(res, opts);
+  } catch (error) {
+    throw classifyStreamFailure(error);
+  }
 }
 
-async function* readChatSSE(res: Response): AsyncGenerator<ChatEvent> {
+function classifyStreamFailure(error: unknown): Error {
+  if (error instanceof ChatStreamError || error instanceof ChatTransportError) return error;
+  if (error instanceof SyntaxError) {
+    return new ChatStreamError(
+      "The assistant returned an invalid stream event.",
+      "invalid_stream_event",
+    );
+  }
+  return new ChatTransportError(
+    error instanceof Error ? error.message : "The assistant stream was interrupted.",
+  );
+}
+
+function parseSSEFrame(raw: string): ParsedSSEFrame {
+  let sequence: number | null = null;
+  let event = "message";
+  const data: string[] = [];
+  for (const line of raw.split("\n")) {
+    if (line.startsWith("id:")) {
+      const rawSequence = line.slice(3).trim();
+      if (/^[1-9]\d*$/.test(rawSequence)) sequence = Number(rawSequence);
+    } else if (line.startsWith("event:")) {
+      event = line.slice(6).trimStart();
+    } else if (line.startsWith("data:")) {
+      data.push(line.slice(5).trimStart());
+    }
+  }
+  return { sequence, event, data: data.join("\n") };
+}
+
+async function* readChatSSE(
+  res: Response,
+  opts: StreamChatOptions,
+): AsyncGenerator<ChatEvent> {
   if (!res.ok || !res.body) {
     const apiError = !res.ok ? new ApiError(res, await res.text()) : null;
     if (apiError) notifyStaleAuth(apiError);
@@ -467,6 +523,9 @@ async function* readChatSSE(res: Response): AsyncGenerator<ChatEvent> {
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let latestSequence = opts.afterSequence && opts.afterSequence > 0
+    ? opts.afterSequence
+    : 0;
 
   try {
     for (;;) {
@@ -480,13 +539,15 @@ async function* readChatSSE(res: Response): AsyncGenerator<ChatEvent> {
       while ((sep = buffer.indexOf("\n\n")) !== -1) {
         const raw = buffer.slice(0, sep);
         buffer = buffer.slice(sep + 2);
-        const data = raw
-          .split("\n")
-          .filter((line) => line.startsWith("data:"))
-          .map((line) => line.slice(5).trimStart())
-          .join("\n");
-        if (!data || data === "[DONE]") continue;
-        yield JSON.parse(data) as ChatEvent;
+        const frame = parseSSEFrame(raw);
+        if (!frame.data || frame.data === "[DONE]") continue;
+        if (frame.sequence !== null && frame.sequence <= latestSequence) continue;
+        const event = JSON.parse(frame.data) as ChatEvent;
+        if (frame.sequence !== null) {
+          latestSequence = frame.sequence;
+          opts.onSequence?.(frame.sequence);
+        }
+        yield event;
       }
     }
   } finally {

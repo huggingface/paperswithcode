@@ -176,6 +176,15 @@ class ChatSandboxTurnCoordinator:
     async def run(self, request: ChatSandboxTurnRequest) -> AsyncIterator[dict]:
         """Stream one turn, retrying one failed reusable assignment at most once."""
 
+        try:
+            async for event in self._run(request):
+                yield event
+        finally:
+            self.transport.clear_deferred_cancel(request.turn_id)
+
+    async def _run(self, request: ChatSandboxTurnRequest) -> AsyncIterator[dict]:
+        """Run one turn behind its pre-registration cancellation fence."""
+
         if self.spend_enforced:
             try:
                 assert_chat_sandbox_spend_available(
@@ -608,6 +617,9 @@ class ChatSandboxTurnCoordinator:
             turn_id,
             grace_seconds=self.settings.chat_cancel_grace_seconds,
         )
+        if outcome.status is WorkerCancelStatus.NOT_FOUND:
+            self.transport.defer_cancel(turn_id)
+            return WorkerCancelStatus.PENDING
         if outcome.status is WorkerCancelStatus.CONTROL_LOST:
             assert outcome.claim is not None
             await self.lifecycle.terminate_worker(

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Enqueue Hugging Face daily paper curation hourly
+
+[Timer]
+OnCalendar=*-*-* *:27:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-enqueue-hf-daily-paper-curation.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Calculate paper trending scores hourly
+
+[Timer]
+OnCalendar=*-*-* *:45:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-calculate-paper-trending-scores.service
+
+[Install]
+WantedBy=timers.target

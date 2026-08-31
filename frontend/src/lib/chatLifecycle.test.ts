@@ -64,6 +64,36 @@ describe("chatLifecycleReducer", () => {
     });
   });
 
+  it("preserves the scope-blocked terminal reason as a normal completion", () => {
+    const started = chatLifecycleReducer(initialChatLifecycle(), {
+      type: "start",
+      messages: streaming(),
+      sessionId: "session-1",
+    });
+    const refused = chatLifecycleReducer(started, {
+      type: "event",
+      event: {
+        type: "answer_delta",
+        text: "I can only help with AI and machine-learning research.",
+      },
+    });
+    const completed = chatLifecycleReducer(refused, {
+      type: "event",
+      event: {
+        type: "done",
+        citations: [],
+        followups: [],
+        finish_reason: "scope_blocked",
+      },
+    });
+
+    expect(completed.phase).toBe("complete");
+    expect(completed.messages[0]).toMatchObject({
+      streaming: false,
+      finishReason: "scope_blocked",
+    });
+  });
+
   it("buffers title, tool, reasoning, and error transitions explicitly", () => {
     const actions = [
       { type: "start", messages: streaming(), sessionId: "session-1" },

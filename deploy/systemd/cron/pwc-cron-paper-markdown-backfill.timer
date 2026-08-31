@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Reconcile paper Markdown live and full backfill lanes hourly
+
+[Timer]
+OnCalendar=*-*-* *:17:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-paper-markdown-backfill.service
+
+[Install]
+WantedBy=timers.target

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import io
 import json
+import threading
+import time
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
@@ -117,6 +119,151 @@ def test_monitor_combines_hf_stage_with_compact_shard_progress(monkeypatch):
     assert result["jobs"][0]["effective_outcome"] == "active"
     assert result["jobs"][0]["progress"]["failed_papers"] == 3
     assert result["jobs"][0]["progress"]["omitted_images"] == 2
+    monitor.clear_paper_markdown_job_monitor_cache()
+
+
+def test_monitor_reads_remote_progress_with_bounded_concurrency(monkeypatch):
+    settings = SimpleNamespace(
+        hf_token="private-token",
+        paper_markdown_hf_namespace="huggingface",
+        paper_markdown_hf_bucket_id="huggingface/pwc-papers-content",
+        paper_markdown_incremental_monthly_budget_usd=100.0,
+        paper_markdown_backfill_budget_usd=750.0,
+        paper_markdown_cost_policy="unmetered_hf",
+    )
+    jobs = [
+        SimpleNamespace(
+            id=f"job-{shard_id}",
+            url=f"https://huggingface.co/jobs/huggingface/job-{shard_id}",
+            status=SimpleNamespace(stage="COMPLETED", message=None),
+            labels={
+                "app": "pwc-paper-markdown",
+                "mode": "backfill",
+                "run_id": "backfill-20260728T151500-a1b2c3d4",
+                "shard_id": f"{shard_id:05d}",
+            },
+            flavor=SimpleNamespace(name="l40sx1"),
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+            finished_at=datetime.now(timezone.utc),
+            durations=SimpleNamespace(total_secs=240),
+        )
+        for shard_id in range(16)
+    ]
+
+    class FakeApi:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def list_jobs(self, **_kwargs):
+            return iter(jobs)
+
+    class FakeFileSystem:
+        active = 0
+        max_active = 0
+        lock = threading.Lock()
+
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def open(self, path, mode, *, block_size):
+            assert mode == "rb"
+            assert block_size == 0
+            cls = type(self)
+            with cls.lock:
+                cls.active += 1
+                cls.max_active = max(cls.max_active, cls.active)
+            time.sleep(0.02)
+            with cls.lock:
+                cls.active -= 1
+            shard_id = path.removesuffix(".json").rsplit("/", 1)[-1]
+            progress = {
+                "status": "completed",
+                "total_papers": 1,
+                "processed_papers": 1,
+                "succeeded_papers": 1,
+                "failed_papers": 0,
+                "already_existed_papers": 0,
+                "extracted_images": 0,
+                "omitted_images": 0,
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "shard_id": shard_id,
+            }
+            return io.BytesIO(json.dumps(progress).encode())
+
+    monkeypatch.setattr(monitor, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitor, "HfApi", FakeApi)
+    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monitor.clear_paper_markdown_job_monitor_cache()
+
+    result = monitor.get_paper_markdown_job_monitor()
+
+    assert result["available"] is True
+    assert result["summary"]["processed_papers"] == 16
+    assert FakeFileSystem.max_active > 1
+    assert FakeFileSystem.max_active <= 8
+    monitor.clear_paper_markdown_job_monitor_cache()
+
+
+def test_monitor_returns_unavailable_when_progress_reads_exceed_deadline(monkeypatch):
+    settings = SimpleNamespace(
+        hf_token="private-token",
+        paper_markdown_hf_namespace="huggingface",
+        paper_markdown_hf_bucket_id="huggingface/pwc-papers-content",
+        paper_markdown_incremental_monthly_budget_usd=100.0,
+        paper_markdown_backfill_budget_usd=750.0,
+        paper_markdown_cost_policy="unmetered_hf",
+    )
+    jobs = [
+        SimpleNamespace(
+            id=f"job-{shard_id}",
+            url=f"https://huggingface.co/jobs/huggingface/job-{shard_id}",
+            status=SimpleNamespace(stage="RUNNING", message=None),
+            labels={
+                "app": "pwc-paper-markdown",
+                "mode": "backfill",
+                "run_id": "backfill-20260728T151500-a1b2c3d4",
+                "shard_id": f"{shard_id:05d}",
+            },
+            flavor=SimpleNamespace(name="l40sx1"),
+            created_at=datetime.now(timezone.utc),
+            started_at=datetime.now(timezone.utc),
+            finished_at=None,
+            durations=SimpleNamespace(total_secs=240),
+        )
+        for shard_id in range(2)
+    ]
+
+    class FakeApi:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def list_jobs(self, **_kwargs):
+            return iter(jobs)
+
+    class SlowFileSystem:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def open(self, _path, _mode, *, block_size):
+            assert block_size == 0
+            time.sleep(0.2)
+            return io.BytesIO(b"{}")
+
+    monkeypatch.setattr(monitor, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitor, "HfApi", FakeApi)
+    monkeypatch.setattr(monitor, "HfFileSystem", SlowFileSystem)
+    monkeypatch.setattr(monitor, "_PROGRESS_READ_DEADLINE_SECONDS", 0.02, raising=False)
+    monitor.clear_paper_markdown_job_monitor_cache()
+
+    started = time.monotonic()
+    result = monitor.get_paper_markdown_job_monitor()
+    elapsed = time.monotonic() - started
+
+    assert elapsed < 0.15
+    assert result["available"] is False
+    assert result["summary"]["progress_evidence_timeouts"] == 2
+    assert result["error"] == "progress evidence timed out for 2 recent job(s)"
     monitor.clear_paper_markdown_job_monitor_cache()
 
 

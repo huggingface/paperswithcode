@@ -180,12 +180,34 @@ describe("domain API clients", () => {
 
     await operations.getCronStatus(true);
     await operations.getPaperMarkdownJobs();
+    await operations.getAutonomousOperations();
+    await operations.setAutonomousManualMode(true, 7, "SET_MANUAL_MODE");
+    await operations.setAutonomousOperator("submissions", false, 8, "SET_OPERATOR_STATE");
+    await operations.qualifyAutonomousChatBaseline("a".repeat(40), 2, "QUALIFY_CHAT_BASELINE");
 
     expect(request).toHaveBeenNthCalledWith(1, "/cron/status?force_refresh=true", {
       cache: "no-store",
     });
     expect(request).toHaveBeenNthCalledWith(2, "/cron/paper-markdown-jobs", {
       cache: "no-store",
+    });
+    expect(request).toHaveBeenNthCalledWith(3, "/admin/autonomous-operations", {
+      cache: "no-store",
+    });
+    expect(request).toHaveBeenNthCalledWith(4, "/admin/autonomous-operations/manual-mode", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: true, expected_revision: 7, confirmation: "SET_MANUAL_MODE" }),
+    });
+    expect(request).toHaveBeenNthCalledWith(5, "/admin/autonomous-operations/operators/submissions", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: false, expected_revision: 8, confirmation: "SET_OPERATOR_STATE" }),
+    });
+    expect(request).toHaveBeenNthCalledWith(6, "/admin/autonomous-operations/chat-baseline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sha: "a".repeat(40), expected_revision: 2, confirmation: "QUALIFY_CHAT_BASELINE" }),
     });
   });
 

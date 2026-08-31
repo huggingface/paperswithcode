@@ -251,6 +251,18 @@ describe("AssistantMessage", () => {
     />,
   );
 
+  it("renders a scope refusal as a normal completed response", () => {
+    renderAssistant({
+      id: "assistant-scope-blocked",
+      role: "assistant",
+      finishReason: "scope_blocked",
+      blocks: [{ kind: "answer", text: "Research-only refusal", done: true }],
+    });
+
+    expect(screen.getByText("Research-only refusal")).toBeVisible();
+    expect(screen.queryByText(/stopped early/i)).not.toBeInTheDocument();
+  });
+
   it("renders completed reasoning as Markdown", () => {
     renderAssistant({
       id: "assistant-1",

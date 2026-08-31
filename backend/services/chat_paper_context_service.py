@@ -26,8 +26,8 @@ from backend.models.chat import (
     ViewerContextRequest,
     normalize_paper_selection_text,
 )
-from backend.models.database import Paper as DBPaper
 from backend.models.database import ChatMessageRecord, ChatSession
+from backend.models.database import Paper as DBPaper
 from backend.services.chat_edit_service import INACTIVE_STATUSES
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.paper_markdown_service import read_paper_markdown_bounded
@@ -332,10 +332,12 @@ class ChatPaperContextService:
         markdown = ""
         truncated = False
         available = False
-        if paper.source == "arxiv" and paper.arxiv_id:
+        markdown_id = paper.arxiv_id if paper.source == "arxiv" else str(paper.id)
+        if markdown_id:
             try:
                 markdown, truncated = read_paper_markdown_bounded(
-                    paper.arxiv_id,
+                    markdown_id,
+                    source=paper.source,
                     bucket_id=self.settings.paper_markdown_hf_bucket_id,
                     token=self.settings.hf_token or None,
                     max_bytes=MARKDOWN_LIMIT_BYTES,
@@ -457,13 +459,13 @@ class ChatPaperContextService:
 
         if persisted_primary_id is not None:
             row = self.db.get(DBPaper, persisted_primary_id)
-            if row is None or row.source != "arxiv" or not row.arxiv_id:
+            if row is None:
                 raise ChatServiceError(
                     "paper_context_unavailable",
                     503,
                     "The paper bound to this chat is no longer available.",
                 )
-            primary = self.prepare_one(row.arxiv_id)
+            primary = self.prepare_one(_route_id(row))
             if primary_route_id:
                 claimed = self.prepare_one(primary_route_id)
                 if claimed.paper_id != primary.paper_id:
@@ -476,12 +478,6 @@ class ChatPaperContextService:
             primary = self.prepare_one(primary_route_id)
 
         if primary is not None:
-            if primary.source != "arxiv" or not primary.arxiv_id:
-                raise ChatServiceError(
-                    "primary_paper_unsupported",
-                    422,
-                    "Native reader chat currently supports arXiv papers only.",
-                )
             if not primary.content_available:
                 raise ChatServiceError(
                     "paper_context_unavailable",

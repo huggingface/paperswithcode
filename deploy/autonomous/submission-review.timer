@@ -1,0 +1,12 @@
+[Unit]
+Description=Review pending Papers With Code submissions hourly
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=15m
+AccuracySec=1m
+Persistent=true
+Unit=submission-review.service
+
+[Install]
+WantedBy=timers.target

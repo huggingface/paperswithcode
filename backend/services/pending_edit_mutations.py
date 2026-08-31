@@ -12,12 +12,23 @@ from backend.models.api import DatasetCreateRequest, TaskCreateRequest
 from backend.models.database import (
     Dataset,
     Evaluation,
+    Method,
+    Metric,
     Paper,
     Task,
     TaskDataset,
     TaskDatasetMetric,
 )
 from backend.services.conference_service import ConferenceService
+from backend.services.autonomous_capabilities import (
+    AUTONOMOUS_PENDING_EDIT_CAPABILITIES,
+    HUMAN_ONLY_EDIT_TYPES,
+    AutonomousCapabilityDenied,
+    ResourceKind,
+    ResourceRef,
+)
+from backend.services.autonomous_operations_repository import RunContext
+from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.dataset_service import DatasetService
 from backend.services.evaluation_service import EvaluationService
 from backend.services.external_resource_service import (
@@ -42,8 +53,11 @@ Mutation = Callable[[int | None, Payload], tuple[str, str]]
 class PendingEditMutationService:
     """Dispatch normalized payloads without mixing mutation logic into review flow."""
 
-    def __init__(self, db: Session):
+    def __init__(
+        self, db: Session, *, autonomous_policy: AutonomousPolicy | None = None
+    ):
         self.db = db
+        self.autonomous_policy = autonomous_policy or AutonomousPolicy()
         paper_service = PaperService(db)
         self.paper_associations = PaperAssociationService(
             db, paper_service.get_paper_by_id
@@ -64,7 +78,48 @@ class PendingEditMutationService:
             "evaluations": self._paper_evaluations,
         }
 
-    def apply(
+    def apply_human_review(
+        self,
+        edit_type: str,
+        paper_id: int | None,
+        payload: Payload,
+        *,
+        actor_hf_subject: str | None = None,
+        actor_username: str | None = None,
+    ) -> tuple[str, str]:
+        """Human-review entry point; autonomous callers have no public dispatcher."""
+        return self._dispatch(
+            edit_type,
+            paper_id,
+            payload,
+            actor_hf_subject=actor_hf_subject,
+            actor_username=actor_username,
+        )
+
+    def apply_autonomous(
+        self,
+        *,
+        context: RunContext,
+        edit_type: str,
+        paper_id: int | None,
+        payload: Payload,
+    ) -> tuple[str, str]:
+        """Apply only the closed, server-resolved autonomous edit surface."""
+        if edit_type in HUMAN_ONLY_EDIT_TYPES:
+            raise AutonomousCapabilityDenied("human_only_resource")
+        capability = AUTONOMOUS_PENDING_EDIT_CAPABILITIES.get(edit_type)
+        if capability is None:
+            raise AutonomousCapabilityDenied("capability_not_in_manifest")
+        resources = self._autonomous_resources(edit_type, paper_id, payload)
+        for resource in resources:
+            decision = self.autonomous_policy.authorize(
+                self.db, context, capability, resource
+            )
+            if not decision.allowed:
+                raise AutonomousCapabilityDenied(decision.reason_code)
+        return self._dispatch(edit_type, paper_id, payload)
+
+    def _dispatch(
         self,
         edit_type: str,
         paper_id: int | None,
@@ -85,6 +140,107 @@ class PendingEditMutationService:
         except KeyError:
             raise PendingEditError(f"Unsupported edit_type: {edit_type}") from None
         return handler(paper_id, payload)
+
+    def _autonomous_resources(
+        self, edit_type: str, paper_id: int | None, payload: Payload
+    ) -> list[ResourceRef]:
+        if edit_type == "new_external_paper":
+            return [
+                ResourceRef(
+                    ResourceKind.EXTERNAL_PAPER,
+                    "new",
+                    False,
+                )
+            ]
+        resources = [self._resolved_resource(Paper, ResourceKind.PAPER, paper_id)]
+        if edit_type == "tasks":
+            resources.extend(
+                self._resolved_resource(Task, ResourceKind.TASK, value)
+                for value in payload["task_ids"]
+            )
+        elif edit_type == "methods":
+            resources.extend(
+                self._resolved_resource(Method, ResourceKind.METHOD, value)
+                for value in payload["method_ids"]
+            )
+        elif edit_type == "evaluations":
+            resources.extend(self._evaluation_resources(payload))
+        return resources
+
+    def _resolved_resource(
+        self, model: type, kind: ResourceKind, identifier: int | None
+    ) -> ResourceRef:
+        value = "missing" if identifier is None else str(identifier)
+        return ResourceRef(
+            kind,
+            value,
+            identifier is not None and self.db.get(model, identifier) is not None,
+        )
+
+    def _evaluation_resources(self, payload: Payload) -> list[ResourceRef]:
+        resources: list[ResourceRef] = []
+        for operation in payload["operations"]:
+            if operation["op"] == "delete":
+                resources.append(
+                    self._resolved_resource(
+                        Evaluation,
+                        ResourceKind.EVALUATION,
+                        int(operation["evaluation_id"]),
+                    )
+                )
+                continue
+            data = operation.get("data") or {}
+            existing = None
+            if operation["op"] == "update":
+                existing = self.db.get(Evaluation, int(operation["evaluation_id"]))
+                resources.append(
+                    ResourceRef(
+                        ResourceKind.EVALUATION,
+                        str(operation["evaluation_id"]),
+                        existing is not None,
+                    )
+                )
+            task_id = data.get("task_id") or getattr(existing, "task_id", None)
+            dataset_id = data.get("dataset_id") or getattr(existing, "dataset_id", None)
+            if task_id is not None:
+                resources.append(
+                    self._resolved_resource(Task, ResourceKind.TASK, task_id)
+                )
+            if dataset_id is not None:
+                resources.append(
+                    ResourceRef(
+                        ResourceKind.BENCHMARK,
+                        str(dataset_id),
+                        self.db.get(Dataset, dataset_id) is not None
+                        and task_id is not None
+                        and self.db.get(TaskDataset, (task_id, dataset_id)) is not None,
+                    )
+                )
+            metric_names = set((data.get("metrics") or {}).keys())
+            if data.get("best_metric"):
+                metric_names.add(data["best_metric"])
+            if task_id is not None and dataset_id is not None and metric_names:
+                configured = {
+                    metric.name: metric
+                    for metric in self.db.query(Metric)
+                    .join(TaskDatasetMetric, TaskDatasetMetric.metric_id == Metric.id)
+                    .filter(
+                        TaskDatasetMetric.task_id == task_id,
+                        TaskDatasetMetric.dataset_id == dataset_id,
+                    )
+                    .all()
+                }
+                resources.extend(
+                    ResourceRef(
+                        ResourceKind.METRIC,
+                        str(configured[name].id)
+                        if name in configured
+                        else "unconfigured",
+                        name in configured,
+                    )
+                    for name in metric_names
+                )
+        return resources
 
     @staticmethod
     def _require_paper(paper_id: int | None) -> int:

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync MMTEB v2 retrieval leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:22:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-mmteb-retrieval.service
+
+[Install]
+WantedBy=timers.target

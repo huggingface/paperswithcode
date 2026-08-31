@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ChatStreamError,
+  ChatTransportError,
   isChatSmoothStreamingEnabled,
   reportChatLatency,
   resumeChat,
@@ -61,6 +62,20 @@ describe("reportChatLatency", () => {
 });
 
 describe("streamChat access failures", () => {
+  it("types a failed fetch as a retryable transport interruption", async () => {
+    vi.stubEnv("VITE_CHAT_LIVE", "1");
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("connection reset")));
+
+    const events = streamChat({
+      message: "Reconnect me",
+      session_id: "session-1",
+      client_message_id: "message-transport",
+      web_search_enabled: false,
+    });
+
+    await expect(events.next()).rejects.toBeInstanceOf(ChatTransportError);
+  });
+
   it("uses the canonical stale-auth notification for an expired session", async () => {
     vi.stubEnv("VITE_CHAT_LIVE", "1");
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
@@ -144,5 +159,36 @@ describe("resumeChat", () => {
       expect.stringContaining("/api/v1/chat/sessions/session%2Fid/stream"),
       expect.objectContaining({ method: "GET", credentials: "include" }),
     );
+  });
+
+  it("carries the latest SSE id privately and skips stale replay frames", async () => {
+    const seenSequences: number[] = [];
+    const fetchMock = vi.fn().mockResolvedValue(new Response([
+      `id: 13\nevent: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", text: "new" })}\n\n`,
+      `id: 13\nevent: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", text: "duplicate" })}\n\n`,
+      `id: 12\nevent: answer_delta\ndata: ${JSON.stringify({ type: "answer_delta", text: "older" })}\n\n`,
+      `id: 14\nevent: done\ndata: ${JSON.stringify({ type: "done", finish_reason: "success" })}\n\n`,
+    ].join(""), {
+      status: 200,
+      headers: { "Content-Type": "text/event-stream" },
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const events = resumeChat("session-1", {
+      afterSequence: 12,
+      onSequence: (sequence) => seenSequences.push(sequence),
+    });
+
+    const received = [];
+    for await (const event of events) received.push(event);
+    expect(received).toEqual([
+      { type: "answer_delta", text: "new" },
+      { type: "done", finish_reason: "success" },
+    ]);
+    expect(seenSequences).toEqual([13, 14]);
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(url).toContain("/api/v1/chat/sessions/session-1/stream");
+    expect(init.method).toBe("GET");
+    expect(new Headers(init.headers).get("Last-Event-ID")).toBe("12");
   });
 });

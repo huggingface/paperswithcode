@@ -25,6 +25,7 @@ interface PdfViewerProps {
   onPaperSelection?: (selection: PaperSelectionDraft) => void;
   onPaperSelectionError?: (message: string) => void;
   onPageChange?: (page: number) => void;
+  loadErrorMessage?: string;
   chrome?: "reader" | "canvas";
 }
 
@@ -154,6 +155,7 @@ export function PdfViewer({
   onPaperSelection,
   onPaperSelectionError,
   onPageChange,
+  loadErrorMessage,
   chrome = "reader",
 }: PdfViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
@@ -461,7 +463,7 @@ export function PdfViewer({
             }));
           }
         }}
-        onLoadError={(loadError) => setError(pdfErrorMessage(loadError))}
+        onLoadError={(loadError) => setError(loadErrorMessage || pdfErrorMessage(loadError))}
         externalLinkTarget="_blank"
       >
         <div

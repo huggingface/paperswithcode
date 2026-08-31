@@ -1,5 +1,9 @@
 # Operations & Automation
 
+The global autonomy kill switch, operator controls, alert delivery, budgets,
+acceptance gates, and incident procedures are documented in
+[autonomous operations](autonomous-operations.md).
+
 ## Cron Job Overview
 
 Job implementations live in `.github/workflows/scripts/`, but production never
@@ -10,6 +14,7 @@ executes them from a checkout. GitHub Actions invokes the installed
 | Schedule | Script | Purpose |
 | --- | --- | --- |
 | Every minute (local systemd timer) | `.github/workflows/scripts/hourly/process_curation_thumbnails.py` | Claim remote-curation thumbnail requests and record terminal results as `pwc-cron`. |
+| Hourly with randomized delay (packaged, disabled until acceptance) | `.github/workflows/scripts/review_submissions.py` | Launch one pinned, database-free HF Job for at most 25 oldest eligible submissions. |
 | Manual dispatch only | `.github/workflows/scripts/hourly/update_hot_github_trending.py` | Staging-ready hot pipeline; production schedule remains intentionally disabled. |
 | `0 * * * *` | `.github/workflows/scripts/hourly/update_github_stars.py` | Refresh fresh and weekly official repositories concurrently using separate GitHub accounts. |
 | `15 * * * *` | `.github/workflows/scripts/hourly/calculate_trending_scores.py` | Compute EMA-based trending scores using repository star history. |
@@ -21,7 +26,7 @@ executes them from a checkout. GitHub Actions invokes the installed
 | `15 * * * *` | `.github/workflows/scripts/hourly/sync_open_asr.py` | Discover unambiguous arXiv-backed models and refresh paper-linked WER and RTFx results from the living Open ASR Leaderboard. |
 | `12 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v2` | Refresh paper-linked MMEB-v2 overall scores from the official MMEB Space. |
 | `42 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` | Refresh paper-linked MMEB-v3 overall scores from the official MMEB Space. |
-| `35 * * * *` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` | Index missing reviewed model releases and refresh paper-linked Artificial Analysis Intelligence and Agentic Index scores from the official API. |
+| `35 * * * *` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` | Index missing reviewed model releases and refresh paper-linked Artificial Analysis Intelligence, Agentic, and text-to-speech Quality Elo scores. |
 | `20 2 * * *` | `.github/workflows/scripts/daily/sync_hf_organizations.py` | Reconcile the strict featured HF organization manifest and append new paper links. |
 | `40 3 * * *` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` | Snapshot organization momentum and refresh rolling 30-day ranks. |
 | `30 4 * * *` | `.github/workflows/scripts/daily/preload_thumbnails.py` | Generate and upload missing paper thumbnails to the HF bucket. |
@@ -46,6 +51,62 @@ failures once with:
 sudo pwc-cron process_curation_thumbnails --retry-failed
 ```
 
+## Autonomous submission reviewer
+
+The packaged `submission-review.timer` invokes the immutable-release
+`pwc-cron review_submissions` allowlist once per hour with a randomized delay.
+The launcher claims at most 25 oldest pending edits, writes a private signed
+manifest under `/var/lib/paperswithcode/autonomous-submissions`, and submits
+that manifest as an encrypted secret to one pinned CPU Hugging Face Job. The
+remote worker receives no database URL or HF launch credential. It receives
+only its dedicated budget-capped OpenAI key and per-claim callback tokens.
+The configured Job image must be a Docker reference ending in an exact
+`@sha256:` digest; tags and mutable Space URLs are rejected.
+
+Keep both `PWC_AUTONOMOUS_SUBMISSION_ENABLED` and
+`PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED` false until Task 15 shadow comparison
+and acceptance drills are recorded. The dedicated HF token must only launch
+Jobs in the configured namespace; the OpenAI credential must have an external
+operator-specific spending limit no higher than the configured run budget.
+Neither credential may be shared with paper curation or interactive Codex.
+Configure distinct primary and fallback autonomous alert webhooks. A failed
+launcher pass, remote startup or timeout, missing callback, or remote cost
+limit failure makes the service fail and triggers the content-free
+`submission-review-alert.service`; alert payloads contain only environment,
+release, severity, and the runbook URL.
+
+Read-only queue preview does not claim or decide anything and remains useful in
+manual mode:
+
+```bash
+sudo pwc-cron review_submissions --dry-run
+```
+
+After acceptance, enable the timer without running the script from a checkout:
+
+```bash
+sudo systemctl enable --now submission-review.timer
+systemctl status submission-review.timer
+sudo pwc-cron status
+```
+
+Disable remotely through the admin autonomy control first; for host recovery,
+disable the timer and its configuration flag:
+
+```bash
+sudo systemctl disable --now submission-review.timer
+```
+
+Only one matching remote Job may be active. Each callback is HMAC-bound to its
+claim token, immutable snapshot, and exact decision. Exact repeats are safe;
+changed, expired, unsigned, or scope-expanding callbacks fail closed. On the
+next timer pass, a terminal Job with missing signed callbacks expires only its
+claims, exits nonzero for alerting, and can be replayed by running the same
+allowlisted command again. Verify deferred taxonomy submissions remain pending
+in their existing admin tabs. Launcher, startup, callback, timeout, image-pin,
+and capacity failures are systemd failures delivered by autonomous alerting;
+the remote provider project enforces the independent cost ceiling.
+
 ## Admin Dashboard
 
 - Route: `/admin-dashboard` on the frontend (linked from the admin user menu). The old `/cron-dashboard` URL redirects here.
@@ -65,6 +126,22 @@ the immutable `production/current` release. Use `pwc cron health`, `pwc-status`,
 and journald for diagnostics; do not execute scheduled scripts from the
 developer checkout. CRON logs live in
 `/var/lib/paperswithcode/production/cron-logs` and are retained for 30 days.
+
+### Host timer scheduling
+
+Catalog CRON jobs are scheduled by host systemd timers, not GitHub Actions.
+The timer/service pairs are generated from `deploy/cron_schedules.py` into
+`deploy/systemd/cron/` (regenerate with `python deploy/generate_cron_units.py`)
+and installed by `install_deploy_tools.py`/`install_host_layout.py`. Every
+timer sets `Persistent=true`, so missed slots (downtime, reboots) are caught up
+on the next activation. Services invoke `pwc-cron-throttled`, which admits at
+most `PWC_CRON_THROTTLE_SLOTS` (default 3) concurrent launches through slot
+locks in `/run/paperswithcode/cron-slots` before delegating to the immutable
+`pwc-cron` launcher; producer chains additionally declare `After=` orderings
+for catch-up storms. The former GitHub `schedule:` triggers were removed; the
+workflows stay `workflow_dispatch`-only for manual recovery. Enable or inspect
+a job's schedule with `systemctl status pwc-cron-<job>.timer`; list all with
+`systemctl list-timers 'pwc-cron-*'`.
 
 Environment deployment, rollback, nginx, backup, and release layout are
 documented in [deployment.md](deployment.md).
@@ -372,6 +449,25 @@ uv run --env-file backend/keys.env python \
 
 ## Autonomous HF daily-paper curation
 
+### Enrichment dashboard export
+
+The private Hugging Face Space at
+`https://huggingface.co/spaces/nielsr/pwc-enrichment-dashboard` reads its
+latest snapshot from the private dataset
+`nielsr/pwc-enrichment-dashboard-data`. The daily
+`export_enrichment_dashboard` job rebuilds the complete historical snapshot
+from production curation jobs, evaluations, and benchmark-gap evidence, then
+uploads it to the dataset. A manual backfill or verification can be run with:
+
+```bash
+sudo pwc-cron export_enrichment_dashboard
+```
+
+The Space never connects directly to PostgreSQL. Keep
+`PWC_ENRICHMENT_DASHBOARD_REPO_ID` and the write-capable `PWC_HF_TOKEN` only in
+the production CRON environment; the Space uses its own read-only download
+secret.
+
 The reconciler runs hourly at minute `27` through the installed immutable-release
 launcher. Besides discovering new daily-paper cohorts, each pass requeues papers
 whose canonical Markdown has appeared since an earlier curation attempt:
@@ -381,6 +477,24 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --dry-run
 sudo pwc-cron enqueue_hf_daily_paper_curation
 sudo pwc-cron enqueue_hf_daily_paper_curation --status
 ```
+
+Trending-model discovery is a separate hourly lane. It reads the global Hub
+top 50 through the installed `hf` CLI, deterministically skips obvious model
+conversions, and queues at most ten new or changed substantive releases per
+cycle. Each accepted release runs the normal enrich-paper then add-evals
+workflow; benchmark matching remains restricted to the existing catalog.
+
+```bash
+sudo pwc-cron enqueue_hf_trending_model_curation --dry-run --max-queued 10
+sudo pwc-cron enqueue_hf_trending_model_curation --max-queued 10
+sudo pwc-cron enqueue_hf_trending_model_curation --status
+```
+
+The first command is the release canary discovery pass and makes no database
+changes. The scheduled command runs at minute 42, shares the daily curation
+health/token guardrails, and prioritizes trending work behind only overdue
+daily workflows. Model-card revisions are pinned; a changed README is curated
+again, while rejected repackaging stays durable until the card changes.
 
 It scans the exact rolling seven-day Hugging Face daily cohorts, records missing
 imports, creates one durable parent workflow per paper, and uses the shared
@@ -401,8 +515,8 @@ Configuration is fail-closed. Production direct apply requires all of:
 - pinned model `gpt-5.6-luna`, medium reasoning, and Codex CLI version.
 
 The production image is the public, content-versioned Docker Space
-`hf.co/spaces/nielsr/pwc-codex-curator-d5db656657e6`, pinned to Hub revision
-`1d85149040996dbb4ea0805f4c034a80ad214bdf`. The dispatcher reads the Space
+`hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86`, pinned to Hub revision
+`7067f309c98f9ea002b812773c9a256400c740ef`. The dispatcher reads the Space
 revision before every launch and pauses daily dispatch if it differs. Never
 update a versioned curator Space in place: publish a new Space whose suffix is
 the first 12 characters of the runner SHA-256, record its exact Hub revision,
@@ -427,7 +541,7 @@ the active release, apply the protected environment through the same qualified
 path with `--refresh-environment` instead.
 
 The current image probe is recorded at
-`https://huggingface.co/jobs/nielsr/6a8c62317c5c7dd3792375ee`; its command
+`https://huggingface.co/jobs/nielsr/6a8f184e45686a1580c0af9c`; its command
 checks the Codex version, PyPDF2 version, full runner SHA-256, exact model, and
 scoped callback-token inheritance. The public Space avoids Docker Hub and does
 not require personal GitHub Packages access.
@@ -447,6 +561,24 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --disable-dispatch \
 sudo pwc-cron enqueue_hf_daily_paper_curation --enable-dispatch
 ```
 
+Scheduled curation has a separate `curation` autonomous operator. Enabling or
+disabling the submission reviewer does not grant or revoke curation writes.
+Before enabling scheduled dispatch, the curation operator must be enabled from
+the admin autonomous-operations control plane after recording acceptance
+evidence for `dispatcher_preflight`, `capability_isolation`,
+`callback_idempotency`, and `paused_callback_apply`; the dispatcher performs the
+same policy check before allocating a remote job and pauses with
+`autonomous_policy_denied` if it would be rejected. Pausing scheduled dispatch
+does not disable the curation operator, so callbacks from jobs already in flight
+can finish. Use the global manual-mode control or disable the curation operator
+only when already-running callbacks must also fail closed.
+
+Existing installations must apply
+`backend/database/migrations/add_curation_autonomous_operator.sql` before
+deploying source that uses this operator. The migration adds the disabled
+control row and expands only the autonomous operator constraints; it does not
+enable curation or release scheduled dispatch.
+
 Retry a terminal scheduled stage by its durable job UUID through the same
 allowlisted queue. Operator retries use priority 50 (ahead of ordinary daily
 work but behind priority-0 admin jobs), and repeating the command for an already
@@ -456,6 +588,19 @@ admin-triggered jobs:
 ```bash
 sudo pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-uuid>
 ```
+
+To launch one explicit queued daily or trending canary while normal dispatch
+remains paused by an explicit operator action, use its durable job UUID. This
+command rechecks the token guardrail and shared capacity, dispatches only the
+selected row, and never resumes the scheduler:
+
+```bash
+sudo pwc-cron enqueue_hf_daily_paper_curation --canary-job <job-uuid>
+```
+
+For a terminal daily job, first use `--retry-job` and then pass the returned
+queued retry UUID to `--canary-job`. Admin jobs and non-queued rows are rejected.
+The command exits nonzero if the remote job does not reach the running state.
 
 Replay a saved proposal through the currently deployed callback validators
 without applying writes. The command reports current policy validity and

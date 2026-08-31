@@ -8,11 +8,12 @@ import hashlib
 import json
 import re
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 
 from sqlalchemy import delete, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.chat_execution_policy import bounded_url_seed
@@ -37,7 +38,24 @@ from backend.services.chat_edit_service import (
     ChatEditService,
     user_message_projection_bytes,
 )
+from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
+from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_title_service import normalize_title
+from backend.services.chat_turn_admission_coordinator import (
+    ChatTurnAdmissionCoordinator,
+    DurableAdmissionPreflight,
+)
+from backend.services.chat_turn_job_repository import (
+    AccountBusy,
+    ChatOverload,
+    ChatTurnJobRepository,
+    IdempotencyMismatch,
+    InvalidTurnTransition,
+    StaleTurnClaim,
+    TurnJobError,
+    TurnLeaseClaim,
+    TurnNotClaimable,
+)
 from backend.services.latex_paper_service import LatexPaperService
 
 
@@ -60,6 +78,13 @@ class ChatServiceError(Exception):
         self.details = details or {}
 
 
+@dataclass(frozen=True, slots=True)
+class CancelTurnRequest:
+    session_id: uuid.UUID
+    turn_id: uuid.UUID
+    claim: TurnLeaseClaim
+
+
 @dataclass(frozen=True)
 class ChatOwner:
     hf_user_id: str
@@ -75,6 +100,7 @@ class ChatOwner:
 class ReplayAssistant:
     content: str
     followups: list[str]
+    finish_reason: str = "success"
 
 
 @dataclass(frozen=True)
@@ -111,6 +137,9 @@ class TurnAdmission:
     paper_artifacts_enabled: bool = False
     paper_descriptor: dict[str, object] | None = None
     fetchable_urls: tuple[str, ...] = ()
+    durable_claim: TurnLeaseClaim | None = None
+    attach_only: bool = False
+    durable_event_sequence: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -347,6 +376,36 @@ class ChatSessionService:
         self.settings = settings
         self.edits = ChatEditService(db)
 
+    @staticmethod
+    def _durable_admission_error(error: Exception) -> ChatServiceError:
+        if isinstance(error, AccountBusy):
+            return ChatServiceError(
+                "account_busy", 429, "This account already has an active turn"
+            )
+        if isinstance(error, ChatOverload):
+            return ChatServiceError(
+                "chat_overload", 429, "Research chat is temporarily at capacity"
+            )
+        if isinstance(error, IdempotencyMismatch):
+            return ChatServiceError(
+                "idempotency_conflict",
+                409,
+                "This request ID was already used by another turn",
+            )
+        return ChatServiceError(
+            "durable_admission_failed",
+            503,
+            "Research chat admission could not be persisted",
+        )
+
+    @staticmethod
+    def _durable_dispatch_route(agent_harness: str) -> str:
+        return f"legacy-{agent_harness}"
+
+    @staticmethod
+    def _durable_worker_contract(worker_contract_version: str | None) -> str:
+        return worker_contract_version or "legacy-local-v1"
+
     def _owned(
         self, owner: ChatOwner, session_id: uuid.UUID, *, lock: bool = False
     ) -> ChatSession:
@@ -354,11 +413,202 @@ class ChatSessionService:
             ChatSession.id == session_id, ChatSession.hf_user_id == owner.hf_user_id
         )
         if lock:
-            query = query.with_for_update()
+            query = query.with_for_update().execution_options(populate_existing=True)
         session = self.db.execute(query).scalar_one_or_none()
         if session is None:
             raise ChatServiceError("session_not_found", 404, "Chat session not found")
         return session
+
+    @staticmethod
+    def _turn_job_repository() -> ChatTurnJobRepository:
+        return ChatTurnJobRepository()
+
+    @staticmethod
+    def _durable_control_error() -> ChatServiceError:
+        return ChatServiceError(
+            "durable_control_conflict",
+            503,
+            "The durable turn could not be safely reconciled",
+        )
+
+    def request_cancel(
+        self, owner: ChatOwner, session_id: uuid.UUID
+    ) -> CancelTurnRequest | None:
+        """Persist an exact cancellation request before the async signal."""
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            raise RuntimeError("Durable turn dispatch is disabled")
+        session = self._owned(owner, session_id, lock=True)
+        if session.active_turn_id is None:
+            return None
+        turn_id = session.active_turn_id
+        repository = self._turn_job_repository()
+        job = repository.load_by_turn(self.db, turn_id, lock=True)
+        if (
+            job is None
+            or job.chat_session_id != session.id
+            or job.hf_user_id != owner.hf_user_id
+        ):
+            raise self._durable_control_error()
+        if job.state in ("completed", "failed", "interrupted"):
+            return None
+        try:
+            claim = ChatLocalTurnLeaseService(
+                self.db, self.settings, repository=repository
+            ).request_cancelling(turn_id, now=_now())
+        except (StaleTurnClaim, InvalidTurnTransition, TurnNotClaimable):
+            return None
+        except (TurnJobError, ValueError, SQLAlchemyError) as error:
+            raise self._durable_control_error() from error
+        if claim is None:
+            return None
+        return CancelTurnRequest(session.id, turn_id, claim)
+
+    def request_legacy_cancel(
+        self, owner: ChatOwner, session_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        """Fence a legacy turn durably before process-local cancellation."""
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            raise RuntimeError("Legacy turn cancellation is disabled")
+        session = self._owned(owner, session_id, lock=True)
+        turn_id = session.active_turn_id
+        if turn_id is None:
+            return None
+        message = self.db.scalar(
+            select(ChatMessageRecord).where(
+                ChatMessageRecord.session_id == session.id,
+                ChatMessageRecord.turn_id == turn_id,
+                ChatMessageRecord.role == "user",
+            )
+        )
+        if message is not None and message.status in ("generating", PREPARING_STATUS):
+            if not self.edits.fail_preparation(session, message, "cancelled"):
+                message.status = "interrupted"
+                message.error_code = "cancelled"
+        session.updated_at = _now()
+        return turn_id
+
+    def turn_is_active(
+        self, owner: ChatOwner, session_id: uuid.UUID, turn_id: uuid.UUID
+    ) -> bool:
+        return (
+            self.db.scalar(
+                select(ChatSession.id)
+                .join(
+                    ChatMessageRecord,
+                    ChatMessageRecord.session_id == ChatSession.id,
+                )
+                .where(
+                    ChatSession.id == session_id,
+                    ChatSession.hf_user_id == owner.hf_user_id,
+                    ChatSession.active_turn_id == turn_id,
+                    ChatMessageRecord.turn_id == turn_id,
+                    ChatMessageRecord.role == "user",
+                    ChatMessageRecord.status.in_(("generating", PREPARING_STATUS)),
+                )
+            )
+            is not None
+        )
+
+    def interrupt_cancel_without_control(
+        self, owner: ChatOwner, request: CancelTurnRequest
+    ) -> None:
+        session = self._owned(owner, request.session_id, lock=True)
+        if session.active_turn_id != request.turn_id:
+            return
+        repository = self._turn_job_repository()
+        job = repository.load_by_turn(self.db, request.turn_id, lock=True)
+        if (
+            job is None
+            or job.chat_session_id != session.id
+            or job.hf_user_id != owner.hf_user_id
+        ):
+            raise self._durable_control_error()
+        try:
+            repository.interrupt_control_missing(
+                self.db, claim=request.claim, now=_now()
+            )
+        except InvalidTurnTransition:
+            return
+        except (TurnJobError, ValueError, SQLAlchemyError) as error:
+            raise self._durable_control_error() from error
+        message = self.db.scalar(
+            select(ChatMessageRecord).where(
+                ChatMessageRecord.session_id == session.id,
+                ChatMessageRecord.turn_id == request.turn_id,
+                ChatMessageRecord.role == "user",
+            )
+        )
+        if message is not None and message.status in ("generating", PREPARING_STATUS):
+            if message.status == PREPARING_STATUS:
+                self.edits.expire_preparation(session, message)
+            else:
+                message.status = "interrupted"
+                message.error_code = "cancel_control_missing"
+        session.active_turn_id = None
+        session.active_turn_expires_at = None
+        session.updated_at = _now()
+
+    def finalize_cancel(self, owner: ChatOwner, request: CancelTurnRequest) -> None:
+        """Persist the canonical cancelled projection for the exact live claim."""
+        session = self._owned(owner, request.session_id, lock=True)
+        if session.active_turn_id != request.turn_id:
+            return
+        repository = self._turn_job_repository()
+        job = repository.load_by_turn(self.db, request.turn_id, lock=True)
+        if (
+            job is None
+            or job.chat_session_id != session.id
+            or job.hf_user_id != owner.hf_user_id
+        ):
+            raise self._durable_control_error()
+        try:
+            repository.write_terminal(
+                self.db,
+                claim=request.claim,
+                state="interrupted",
+                failure_code="cancelled",
+                now=_now(),
+            )
+        except InvalidTurnTransition:
+            return
+        except (TurnJobError, ValueError, SQLAlchemyError) as error:
+            raise self._durable_control_error() from error
+        message = self.db.scalar(
+            select(ChatMessageRecord).where(
+                ChatMessageRecord.session_id == session.id,
+                ChatMessageRecord.turn_id == request.turn_id,
+                ChatMessageRecord.role == "user",
+            )
+        )
+        if message is not None and message.status in ("generating", PREPARING_STATUS):
+            if message.status == PREPARING_STATUS:
+                self.edits.expire_preparation(session, message)
+            else:
+                message.status = "interrupted"
+                message.error_code = "cancelled"
+        session.active_turn_id = None
+        session.active_turn_expires_at = None
+        session.updated_at = _now()
+
+    def _reconcile_durable_expiry(
+        self, session: ChatSession, turn_id: uuid.UUID, now: datetime
+    ) -> None:
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return
+        repository = self._turn_job_repository()
+        job = repository.load_by_turn(self.db, turn_id, lock=True)
+        if (
+            job is None
+            or job.chat_session_id != session.id
+            or job.hf_user_id != session.hf_user_id
+        ):
+            raise self._durable_control_error()
+        try:
+            ChatLocalTurnLeaseService(
+                self.db, self.settings, repository=repository
+            ).interrupt_expired(turn_id, now=now)
+        except (TurnJobError, ValueError, SQLAlchemyError) as error:
+            raise self._durable_control_error() from error
 
     def existing_effective_prompt(
         self,
@@ -819,6 +1069,48 @@ class ChatSessionService:
                 409,
                 "This request ID was already used with different reasoning effort",
             )
+        if (
+            self.settings.chat_durable_turn_dispatch_enabled
+            and existing.status in ("generating", PREPARING_STATUS)
+            and session.active_turn_id == existing.turn_id
+            and session.active_turn_expires_at
+            and session.active_turn_expires_at > now
+        ):
+            return _ReplayOutcome(
+                kind="admitted",
+                admission=TurnAdmission(
+                    session_id=session.id,
+                    turn_id=existing.turn_id,
+                    user_message_id=existing.id,
+                    selected_model=existing.model or session.selected_model,
+                    model_route=(
+                        existing.model_route
+                        or self._validate_model(session.selected_model)[1]
+                    ),
+                    sdk_session_id=session.sdk_session_id,
+                    sdk_project_key=session.sdk_project_key,
+                    agent_harness=getattr(session, "agent_harness", "claude"),
+                    is_first_turn=existing.sequence == 1,
+                    prompt_revision=existing.revision,
+                    execution_backend=session.execution_backend,
+                    app_release_id=(
+                        getattr(existing, "app_release_id", None)
+                        or self.settings.release_id
+                    ),
+                    worker_contract_version=self._durable_worker_contract(
+                        getattr(existing, "worker_contract_version", None)
+                    ),
+                    web_search_enabled=existing_web_search_enabled,
+                    reasoning_effort=existing_reasoning_effort,
+                    reader_mode=getattr(session, "primary_paper_id", None) is not None,
+                    poster_mode=(
+                        self.settings.chat_artifacts_enabled
+                        and self.settings.chat_posterly_enabled
+                        and detect_poster_intent(getattr(existing, "content", ""))
+                    ),
+                    attach_only=True,
+                ),
+            )
         assistant = self.db.execute(
             select(ChatMessageRecord).where(
                 ChatMessageRecord.session_id == session.id,
@@ -845,9 +1137,19 @@ class ChatSessionService:
                     replay_assistant=ReplayAssistant(
                         content=assistant.content,
                         followups=list(assistant.followups or []),
+                        finish_reason=(
+                            getattr(assistant, "finish_reason", None) or "success"
+                        ),
                     ),
                     prompt_revision=existing.revision,
                     execution_backend=session.execution_backend,
+                    app_release_id=(
+                        getattr(existing, "app_release_id", None)
+                        or self.settings.release_id
+                    ),
+                    worker_contract_version=self._durable_worker_contract(
+                        getattr(existing, "worker_contract_version", None)
+                    ),
                     web_search_enabled=existing_web_search_enabled,
                     reasoning_effort=existing_reasoning_effort,
                     reader_mode=getattr(session, "primary_paper_id", None) is not None,
@@ -856,6 +1158,7 @@ class ChatSessionService:
                         and self.settings.chat_posterly_enabled
                         and detect_poster_intent(existing.content)
                     ),
+                    attach_only=self.settings.chat_durable_turn_dispatch_enabled,
                 ),
             )
         if (
@@ -880,6 +1183,7 @@ class ChatSessionService:
     def _apply_expired_replay(
         self, session: ChatSession, existing: ChatMessageRecord
     ) -> None:
+        self._reconcile_durable_expiry(session, existing.turn_id, _now())
         if existing.status == PREPARING_STATUS:
             self.edits.expire_preparation(session, existing)
         else:
@@ -978,6 +1282,7 @@ class ChatSessionService:
     ) -> bool:
         if not session.active_turn_id:
             return False
+        self._reconcile_durable_expiry(session, session.active_turn_id, _now())
         if stale:
             if stale.status == PREPARING_STATUS:
                 self.edits.expire_preparation(session, stale)
@@ -1382,10 +1687,68 @@ class ChatSessionService:
         web_search_enabled: bool = False,
         reasoning_effort: str | None = None,
         update_web_search_preference: bool = True,
+        qualification: QualificationContext | None = None,
     ) -> TurnAdmission:
-        session = (
-            None if session_id is None else self._owned(owner, session_id, lock=True)
-        )
+        durable_coordinator: ChatTurnAdmissionCoordinator | None = None
+        durable_preflight: DurableAdmissionPreflight | None = None
+        session: ChatSession | None = None
+        recovered_durable_preflight_expiry = False
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            durable_coordinator = ChatTurnAdmissionCoordinator(self.db, self.settings)
+            try:
+                durable_preflight = durable_coordinator.preflight(
+                    hf_user_id=owner.hf_user_id,
+                    request_id=client_message_id,
+                    requested_session_id=session_id,
+                    qualification=qualification,
+                )
+                recovered_durable_preflight_expiry = (
+                    durable_preflight.reconciled_expired_count > 0
+                )
+            except AccountBusy as error:
+                if session_id is None:
+                    raise self._durable_admission_error(error) from error
+                session = self._owned(owner, session_id, lock=True)
+                now = _now()
+                stale = self._load_expired_active_message(session, now)
+                if not session.active_turn_id:
+                    raise self._durable_admission_error(error) from error
+                recovered_durable_preflight_expiry = self._apply_expired_active_turn(
+                    session, stale
+                )
+                try:
+                    durable_preflight = durable_coordinator.preflight(
+                        hf_user_id=owner.hf_user_id,
+                        request_id=client_message_id,
+                        requested_session_id=session_id,
+                        qualification=qualification,
+                    )
+                except (TurnJobError, ValueError, SQLAlchemyError) as retry_error:
+                    raise self._durable_admission_error(retry_error) from retry_error
+                recovered_durable_preflight_expiry = (
+                    recovered_durable_preflight_expiry
+                    or durable_preflight.reconciled_expired_count > 0
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
+            if durable_preflight.existing_job is not None:
+                session_id = durable_preflight.existing_job.chat_session_id
+        if session is None:
+            session = (
+                None
+                if session_id is None
+                else self._owned(owner, session_id, lock=True)
+            )
+        if (
+            qualification is not None
+            and session is not None
+            and getattr(session, "agent_harness", "claude") != "pi"
+        ):
+            raise ChatServiceError(
+                "qualification_session_harness_mismatch",
+                409,
+                "Qualification sessions must already use the Pi harness",
+            )
         effective_reasoning_effort = self._validate_reasoning_effort(
             reasoning_effort
             or (
@@ -1395,16 +1758,61 @@ class ChatSessionService:
             )
         )
         now = _now()
-        replay = self._resolve_replay(
-            session,
-            client_message_id=client_message_id,
-            web_search_enabled=web_search_enabled,
-            reasoning_effort=effective_reasoning_effort,
-            now=now,
-        )
+        try:
+            replay = self._resolve_replay(
+                session,
+                client_message_id=client_message_id,
+                web_search_enabled=web_search_enabled,
+                reasoning_effort=effective_reasoning_effort,
+                now=now,
+            )
+        except ChatServiceError as error:
+            if (
+                recovered_durable_preflight_expiry
+                and error.code == "turn_requires_retry"
+            ):
+                error.commit_changes = True
+            raise
         if replay.kind == "admitted":
             assert replay.admission is not None
-            return replay.admission
+            admission = replay.admission
+            if durable_coordinator is not None:
+                assert durable_preflight is not None
+                try:
+                    durable_coordinator.validate_replay(
+                        durable_preflight,
+                        turn_id=admission.turn_id,
+                        chat_session_id=admission.session_id,
+                        hf_user_id=owner.hf_user_id,
+                        revision=admission.prompt_revision,
+                        dispatch_route=self._durable_dispatch_route(
+                            admission.agent_harness
+                        ),
+                        app_release_id=admission.app_release_id,
+                        worker_contract_version=self._durable_worker_contract(
+                            admission.worker_contract_version
+                        ),
+                        now=now,
+                    )
+                except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                    raise self._durable_admission_error(error) from error
+                admission = replace(
+                    admission,
+                    durable_event_sequence=int(
+                        getattr(durable_preflight.existing_job, "event_sequence", 0)
+                    ),
+                )
+            return admission
+        if (
+            durable_preflight is not None
+            and durable_preflight.existing_job is not None
+            and replay.kind == "continue"
+        ):
+            raise ChatServiceError(
+                "durable_admission_failed",
+                503,
+                "The durable turn is missing its chat projection",
+            )
         if replay.kind == "expired":
             assert session is not None
             assert replay.expired_message is not None
@@ -1433,9 +1841,36 @@ class ChatSessionService:
                     "This conversation belongs to a different paper.",
                 )
 
-        self._lock_admission_keys(owner)
-        capacity = self._load_capacity_snapshot(owner, session)
-        self._validate_capacity(capacity)
+        target_harness = (
+            getattr(session, "agent_harness", "claude")
+            if session is not None
+            else (
+                "pi"
+                if qualification is not None
+                or self.settings.chat_new_session_pi_percentage == 100
+                else self.settings.chat_default_agent_harness
+            )
+        )
+        if (
+            durable_coordinator is not None
+            and durable_preflight is not None
+            and (
+                self.settings.chat_external_pi_admission_enabled
+                or qualification is not None
+            )
+            and target_harness == "pi"
+        ):
+            try:
+                durable_preflight = durable_coordinator.reserve_external_capacity(
+                    durable_preflight, now=now
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
+
+        if durable_coordinator is None:
+            self._lock_admission_keys(owner)
+            capacity = self._load_capacity_snapshot(owner, session)
+            self._validate_capacity(capacity)
 
         # Capacity admission precedes creation so a rejected new-chat request
         # cannot leave behind a session or any message state.
@@ -1449,10 +1884,14 @@ class ChatSessionService:
                     if primary_paper_id is not None
                     else {}
                 ),
+                agent_harness_override=("pi" if qualification is not None else None),
             )
 
         stale = self._load_expired_active_message(session, now)
         recovered_expired_lease = self._apply_expired_active_turn(session, stale)
+        recovered_expired_lease = (
+            recovered_expired_lease or recovered_durable_preflight_expiry
+        )
         if self._has_unresolved_turn(session) and replace_message_id is None:
             raise ChatServiceError(
                 "turn_requires_retry",
@@ -1526,6 +1965,27 @@ class ChatSessionService:
             update_web_search_preference=update_web_search_preference,
             now=now,
         )
+        if durable_coordinator is not None:
+            assert durable_preflight is not None
+            try:
+                durable_coordinator.admit(
+                    durable_preflight,
+                    turn_id=plan.replacement.turn_id,
+                    chat_session_id=session.id,
+                    hf_user_id=owner.hf_user_id,
+                    revision=plan.replacement.revision,
+                    dispatch_route=self._durable_dispatch_route(
+                        getattr(message, "agent_harness", None)
+                        or getattr(session, "agent_harness", "claude")
+                    ),
+                    app_release_id=message.app_release_id,
+                    worker_contract_version=self._durable_worker_contract(
+                        message.worker_contract_version
+                    ),
+                    now=now,
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
         fetchable_urls = tuple(
             self.fetchable_url_seed(
                 session.id,
@@ -1610,6 +2070,11 @@ class ChatSessionService:
         code: str = "edit_prepare_failed",
     ) -> None:
         session = self._owned(owner, admission.session_id, lock=True)
+        self._write_durable_terminal(
+            admission,
+            state="interrupted" if code == "interrupted" else "failed",
+            failure_code=code,
+        )
         self.edits.abort(session, admission, code)
 
     def complete_turn(
@@ -1626,7 +2091,12 @@ class ChatSessionService:
         user_message = self.db.get(ChatMessageRecord, admission.user_message_id)
         if not user_message or session.active_turn_id != admission.turn_id:
             raise ChatServiceError("stale_turn", 409, "The chat turn lease changed")
-        if finish_reason not in {"success", "max_turns", "tool_limit"}:
+        if finish_reason not in {
+            "success",
+            "max_turns",
+            "tool_limit",
+            "scope_blocked",
+        }:
             raise ChatServiceError(
                 "invalid_finish_reason", 422, "Unsupported completion state"
             )
@@ -1643,6 +2113,7 @@ class ChatSessionService:
             raise ChatServiceError(
                 "citations_too_large", 422, "The citation projection is too large"
             )
+        self._write_durable_terminal(admission, state="completed")
         followups = [
             _normalized(value, 500) for value in followups[:5] if value.strip()
         ]
@@ -1693,6 +2164,11 @@ class ChatSessionService:
         session = self._owned(owner, admission.session_id, lock=True)
         if session.active_turn_id != admission.turn_id:
             return
+        self._write_durable_terminal(
+            admission,
+            state="interrupted" if interrupted else "failed",
+            failure_code=code,
+        )
         message = self.db.get(ChatMessageRecord, admission.user_message_id)
         if message:
             if self.edits.fail_preparation(session, message, code):
@@ -1712,6 +2188,33 @@ class ChatSessionService:
         session.active_turn_id = None
         session.active_turn_expires_at = None
         session.updated_at = _now()
+
+    def _write_durable_terminal(
+        self,
+        admission: TurnAdmission,
+        *,
+        state: str,
+        failure_code: str | None = None,
+    ) -> None:
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return
+        if admission.durable_claim is None:
+            raise ChatServiceError(
+                "durable_claim_missing",
+                503,
+                "The durable chat turn claim is missing",
+            )
+        sanitized_code = failure_code
+        if sanitized_code is not None and not re.fullmatch(
+            r"[a-z0-9][a-z0-9_]{0,63}", sanitized_code
+        ):
+            sanitized_code = "turn_failed"
+        ChatLocalTurnLeaseService(self.db, self.settings).write_terminal(
+            admission.durable_claim,
+            state=state,
+            now=_now(),
+            failure_code=sanitized_code,
+        )
 
     def mark_transcript_degraded(
         self, owner: ChatOwner, session_id: uuid.UUID, turn_id: uuid.UUID
@@ -1768,6 +2271,17 @@ class ChatSessionService:
         session.title_generation_id = None
         session.updated_at = _now()
         return normalized
+
+    def cancel_title(
+        self, owner: ChatOwner, session_id: uuid.UUID, token: uuid.UUID
+    ) -> bool:
+        session = self._owned(owner, session_id, lock=True)
+        if session.title_generation_id != token or session.title_source == "user":
+            return False
+        session.title_generation_id = None
+        session.title_status = "pending"
+        session.updated_at = _now()
+        return True
 
     def delete_session(
         self, owner: ChatOwner, session_id: uuid.UUID

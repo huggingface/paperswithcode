@@ -40,6 +40,47 @@
       }
     },
     "enrich": {"type": ["object", "null"]},
+    "resolve_model_paper": {
+      "type": ["object", "null"],
+      "required": ["decision", "reason", "novelty_kind", "evidence_urls"],
+      "properties": {
+        "decision": {"enum": ["accept", "reject"]},
+        "reason": {"type": "string", "minLength": 1, "maxLength": 4000},
+        "novelty_kind": {"enum": ["new_weights", "new_method", "new_release", "repackaging", "uncertain"]},
+        "evidence_urls": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 20,
+          "items": {"type": "string", "format": "uri"}
+        },
+        "existing_paper_id": {"type": ["integer", "null"], "minimum": 1},
+        "predecessor_paper_id": {"type": ["integer", "null"], "minimum": 1},
+        "arxiv_id": {"type": ["string", "null"], "pattern": "^\\d{4}\\.\\d{4,5}(?:v\\d+)?$"},
+        "external_paper": {
+          "type": ["object", "null"],
+          "required": ["source_url", "title", "abstract", "date_published"],
+          "properties": {
+            "source_url": {"type": "string", "format": "uri"},
+            "title": {"type": "string", "minLength": 1, "maxLength": 1000},
+            "abstract": {"type": "string", "minLength": 1, "maxLength": 20000},
+            "date_published": {"type": "string", "format": "date"}
+          },
+          "additionalProperties": false
+        },
+        "model_release": {
+          "type": ["object", "null"],
+          "required": ["canonical_name", "publisher", "is_open", "aliases"],
+          "properties": {
+            "canonical_name": {"type": "string", "minLength": 1, "maxLength": 500},
+            "publisher": {"type": "string", "minLength": 1, "maxLength": 255},
+            "is_open": {"type": "boolean"},
+            "aliases": {"type": "array", "maxItems": 50, "items": {"type": "string"}}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
     "benchmark_gaps": {
       "type": "array",
       "maxItems": 30,
@@ -216,6 +257,34 @@
           "canonical_selection_reason": {"type": "string", "minLength": 1}
         },
         "additionalProperties": true
+      }
+    },
+    "source_coverage": {
+      "type": "array",
+      "maxItems": 50,
+      "items": {
+        "type": "object",
+        "required": ["url", "status", "benchmark_outcomes"],
+        "properties": {
+          "url": {"type": "string", "format": "uri", "maxLength": 2000},
+          "status": {"enum": ["inspected", "unavailable"]},
+          "benchmark_outcomes": {
+            "type": "array",
+            "maxItems": 100,
+            "items": {
+              "type": "object",
+              "required": ["benchmark", "disposition", "detail"],
+              "properties": {
+                "benchmark": {"type": "string", "minLength": 1, "maxLength": 500},
+                "disposition": {"enum": ["evaluation", "already_present", "benchmark_gap", "not_paper_native", "not_applicable"]},
+                "detail": {"type": "string", "minLength": 1, "maxLength": 2000}
+              },
+              "additionalProperties": false
+            }
+          },
+          "detail": {"type": ["string", "null"], "maxLength": 2000}
+        },
+        "additionalProperties": false
       }
     }
   },

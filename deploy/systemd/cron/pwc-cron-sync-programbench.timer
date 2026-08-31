@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync ProgramBench leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:40:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-programbench.service
+
+[Install]
+WantedBy=timers.target

@@ -69,9 +69,6 @@ product-photography-engine/
 # Thumbnails
 thumbnail_cache
 
-# Claude Design uploads
-frontend/design-paperswithcode/project/uploads/
-
 # design-sync (claude.ai/design) — staged scripts, build output, machine state
 .ds-sync/
 ds-bundle/

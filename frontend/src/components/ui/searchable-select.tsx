@@ -23,10 +23,11 @@ export interface SearchableSelectOption {
 
 interface SearchableSelectProps {
   value: string;
-  onChange: (value: string) => void;
+  onChange: (value: string, option: SearchableSelectOption) => void;
   placeholder?: string;
   searchPlaceholder?: string;
   emptyMessage?: string;
+  errorMessage?: string;
   disabled?: boolean;
   /** Shown in the trigger when `value` is set but not in current search results. */
   selectedOption?: SearchableSelectOption | null;
@@ -43,6 +44,7 @@ export function SearchableSelect({
   placeholder = "Select...",
   searchPlaceholder = "Search...",
   emptyMessage = "No results found.",
+  errorMessage,
   disabled = false,
   selectedOption,
   queryKey,
@@ -69,7 +71,7 @@ export function SearchableSelect({
     }
   }, [open]);
 
-  const { data: options = [], isFetching } = useQuery({
+  const { data: options = [], isFetching, isError } = useQuery({
     queryKey: [...queryKey, debouncedQuery],
     queryFn: () => queryFn(debouncedQuery),
     enabled: enabled && open,
@@ -130,6 +132,10 @@ export function SearchableSelect({
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                 Loading...
               </div>
+            ) : isError && errorMessage ? (
+              <div className="px-4 py-6 text-center text-sm text-destructive" role="alert">
+                {errorMessage}
+              </div>
             ) : displayedOptions.length === 0 ? (
               <CommandEmpty>{emptyMessage}</CommandEmpty>
             ) : (
@@ -139,7 +145,7 @@ export function SearchableSelect({
                     key={option.value}
                     value={option.value}
                     onSelect={() => {
-                      onChange(option.value);
+                      onChange(option.value, option);
                       setOpen(false);
                     }}
                   >

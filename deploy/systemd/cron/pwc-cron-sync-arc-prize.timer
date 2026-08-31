@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync ARC Prize leaderboards hourly
+
+[Timer]
+OnCalendar=*-*-* *:10:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-arc-prize.service
+
+[Install]
+WantedBy=timers.target

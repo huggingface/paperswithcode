@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync 3D Arena leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:05:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-3d-arena.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,31 @@
+name: Cron - Export Enrichment Dashboard
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: cron-export-enrichment-dashboard
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: webfactory/ssh-agent@v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      - name: Add VPS host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Export and publish snapshot
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" \
+            "sudo /usr/local/sbin/pwc-cron export_enrichment_dashboard"

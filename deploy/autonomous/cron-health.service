@@ -1,0 +1,16 @@
+[Unit]
+Description=Run the bounded autonomous Papers With Code CRON health operator
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron autonomous_cron_health
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/paperswithcode/production/cron-logs
+ReadWritePaths=/var/lib/paperswithcode/autonomous-candidates
+ReadWritePaths=/var/lib/paperswithcode/autonomous-source-broker
+ReadWritePaths=/srv/paperswithcode/repository.git

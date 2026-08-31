@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync featured Hugging Face organizations daily
+
+[Timer]
+OnCalendar=*-*-* 02:20:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-hf-organizations.service
+
+[Install]
+WantedBy=timers.target

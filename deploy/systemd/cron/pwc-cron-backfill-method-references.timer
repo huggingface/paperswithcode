@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Backfill method reference evidence every six hours
+
+[Timer]
+OnCalendar=*-*-* 00/6:15:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-backfill-method-references.service
+
+[Install]
+WantedBy=timers.target

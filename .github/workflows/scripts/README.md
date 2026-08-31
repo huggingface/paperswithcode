@@ -1,8 +1,12 @@
 # PapersWithCode Cron Jobs
 
-Production cron scheduling is driven by GitHub Actions. The workflows under
-`.github/workflows/cron-*.yml` SSH into the VPS and run the entrypoints in this
-directory with `uv run --env-file backend/keys.env ...`.
+Production cron scheduling is driven by host systemd timers generated from
+`deploy/cron_schedules.py` into `deploy/systemd/cron/`; each timer invokes the
+allowlisted `pwc-cron` launcher through the bounded `pwc-cron-throttled`
+wrapper. The workflows under `.github/workflows/cron-*.yml` are
+`workflow_dispatch`-only manual-recovery paths that SSH into the VPS and run
+the same `pwc-cron` jobs. The schedule columns below describe the timer
+cadence, which preserves the former GitHub Actions minute offsets.
 
 ## Production Jobs and Pending Activations
 
@@ -16,6 +20,7 @@ directory with `uv run --env-file backend/keys.env ...`.
 | `cron-extract-urls.yml` | `45 * * * *` | `.github/workflows/scripts/run_extract_urls_hourly.sh` | `.github/workflows/scripts/hourly/extract_urls.py` |
 | `cron-import-hf-daily-papers.yml` | `0 * * * *` | `pwc-cron import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
+| `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |

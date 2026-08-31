@@ -25,13 +25,18 @@ vi.mock("./PdfToolbar", () => ({
 }));
 
 vi.mock("react-pdf", () => ({
-    Document: ({ children, onLoadSuccess, options }: {
+    Document: ({ children, onLoadSuccess, onLoadError, options }: {
       children: React.ReactNode;
       onLoadSuccess: (pdf: { numPages: number }) => void;
+      onLoadError: (error: Error) => void;
       options?: unknown;
     }) => {
       reactPdf.documentOptions.push(options);
-      return <div><button onClick={() => onLoadSuccess({ numPages: 1 })}>Load PDF</button>{children}</div>;
+      return <div>
+        <button onClick={() => onLoadSuccess({ numPages: 1 })}>Load PDF</button>
+        <button onClick={() => onLoadError(new Error("network response was 404"))}>Fail PDF</button>
+        {children}
+      </div>;
     },
     Page: ({ width }: { width: number }) => <div data-testid="pdf-page" data-width={width} />,
 }));
@@ -177,6 +182,23 @@ describe("PdfViewer resize rendering", () => {
     expect(screen.getByRole("button", { name: "Close search" })).toBeVisible();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("button", { name: "Close search" })).not.toBeInTheDocument();
+  });
+
+  it("shows a preparation message for an archived PDF that is not ready yet", () => {
+    const props = {
+      url: "/paper-assets/external/109743/paper.pdf",
+      paperKey: "109743",
+      paperTitle: "External report",
+      paperHref: "/paper/109743",
+      loadErrorMessage: "Paper content is still being prepared. Please try again later.",
+    } as React.ComponentProps<typeof PdfViewer> & { loadErrorMessage: string };
+    render(<PdfViewer {...props} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Fail PDF" }));
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Paper content is still being prepared. Please try again later.",
+    );
   });
 
   it("provides application-owned canvas controls for a private paper preview", async () => {

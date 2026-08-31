@@ -29,6 +29,14 @@ class GithubIssuePublishResult:
 
 
 GithubApi = Callable[[list[str], dict[str, str]], Any]
+NIELSROGGE_LOGIN = "nielsrogge"
+EXCLUDED_REPOSITORY_OWNERS = frozenset({"huggingface"})
+EXCLUDED_REPOSITORY_NAMES = frozenset({"vllm", "sglang", "llama.cpp"})
+
+
+def _is_excluded_repository(repository: str) -> bool:
+    owner, _, name = repository.lower().partition("/")
+    return owner in EXCLUDED_REPOSITORY_OWNERS or name in EXCLUDED_REPOSITORY_NAMES
 
 
 def select_official_repository(
@@ -54,13 +62,17 @@ def select_official_repository(
             raise ValueError(
                 "Requested repository is not marked official for the paper"
             )
-        return match
-    if len(candidates) > 1:
-        joined = ", ".join(candidates)
-        raise ValueError(
-            f"Paper has multiple official repositories; use --repository: {joined}"
-        )
-    return candidates[0]
+        selected = match
+    else:
+        if len(candidates) > 1:
+            joined = ", ".join(candidates)
+            raise ValueError(
+                f"Paper has multiple official repositories; use --repository: {joined}"
+            )
+        selected = candidates[0]
+    if _is_excluded_repository(selected):
+        raise ValueError(f"Repository {selected} is excluded from outreach")
+    return selected
 
 
 def github_environment(token_environment_variable: str) -> dict[str, str]:
@@ -144,6 +156,34 @@ def _matching_issue(
     )
 
 
+def _has_open_nielsrogge_issue(
+    repository: str,
+    env: dict[str, str],
+    api: GithubApi,
+) -> bool:
+    open_issues = api(
+        [
+            f"repos/{repository}/issues",
+            "-f",
+            "state=open",
+            "-f",
+            "per_page=100",
+            "-f",
+            "sort=created",
+            "-f",
+            "direction=desc",
+            "--method",
+            "GET",
+        ],
+        env,
+    )
+    return any(
+        "pull_request" not in issue
+        and (issue.get("user", {}).get("login") or "").lower() == NIELSROGGE_LOGIN
+        for issue in open_issues
+    )
+
+
 def publish_github_issue(
     draft: GithubIssueDraft,
     *,
@@ -162,6 +202,12 @@ def publish_github_issue(
     if not metadata["has_issues"]:
         raise ValueError("Official repository has issues disabled")
     repository = metadata["full_name"]
+
+    if _has_open_nielsrogge_issue(repository, env, api):
+        raise ValueError(
+            f"Repository {repository} already has an open issue authored by "
+            f"{NIELSROGGE_LOGIN}"
+        )
 
     existing = _matching_issue(draft, repository, env, api)
     status = "existing"

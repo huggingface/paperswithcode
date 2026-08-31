@@ -1,8 +1,6 @@
 name: Cron - Sync MMTEB v2 Retrieval
 
 on:
-  schedule:
-    - cron: "22 * * * *"
   workflow_dispatch: {}
 
 concurrency:

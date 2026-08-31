@@ -1,8 +1,6 @@
 name: Cron - Sync MMEB-v2 Overall
 
 on:
-  schedule:
-    - cron: "12 * * * *"
   workflow_dispatch: {}
 
 concurrency:

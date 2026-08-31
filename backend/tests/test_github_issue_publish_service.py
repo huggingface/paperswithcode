@@ -44,6 +44,20 @@ def test_select_official_repository_rejects_third_party_override():
         select_official_repository(("owner/repository",), "third/party")
 
 
+@pytest.mark.parametrize(
+    "repository",
+    (
+        "huggingface/transformers",
+        "vllm-project/vllm",
+        "sgl-project/sglang",
+        "ggml-org/llama.cpp",
+    ),
+)
+def test_select_official_repository_rejects_excluded_repository(repository):
+    with pytest.raises(ValueError, match="excluded from outreach"):
+        select_official_repository((repository,), None)
+
+
 def test_publish_reuses_recent_matching_issue_without_post(monkeypatch):
     monkeypatch.setenv("TEST_GITHUB_TOKEN", "test-token")
     calls = []
@@ -126,3 +140,32 @@ def test_publish_creates_and_reads_back_new_issue(monkeypatch):
     assert result.title_verified
     assert result.body_verified
     assert sum("POST" in call for call in calls) == 1
+
+
+def test_publish_skips_repository_with_open_nielsrogge_issue(monkeypatch):
+    monkeypatch.setenv("TEST_GITHUB_TOKEN", "test-token")
+
+    def api(arguments, _env):
+        endpoint = arguments[0]
+        if endpoint == "repos/owner/repository":
+            return {
+                "archived": False,
+                "has_issues": True,
+                "full_name": "owner/repository",
+            }
+        if endpoint == "repos/owner/repository/issues":
+            return [
+                {
+                    "number": 12,
+                    "user": {"login": "NielsRogge"},
+                    "state": "open",
+                }
+            ]
+        raise AssertionError(arguments)
+
+    with pytest.raises(ValueError, match="open issue authored by nielsrogge"):
+        publish_github_issue(
+            draft(),
+            token_environment_variable="TEST_GITHUB_TOKEN",
+            api=api,
+        )

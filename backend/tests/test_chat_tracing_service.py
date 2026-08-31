@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 from backend.config import Settings
 from backend.services import chat_tracing_service as tracing
+from backend.services.chat_scope_guardrail_service import ScopeAttempt, ScopeDecision
 
 
 class Observation:
@@ -41,6 +42,60 @@ class Client:
     def start_observation(self, *, name: str, **fields):
         self.root = Observation(name, **fields)
         return self.root
+
+
+def test_scope_guardrail_trace_never_contains_suppressed_main_content(monkeypatch):
+    client = Client()
+
+    @contextmanager
+    def attributes(**_values):
+        yield
+
+    monkeypatch.setattr(tracing, "_configured_client", lambda _settings: client)
+    monkeypatch.setattr(tracing, "propagate_attributes", attributes)
+    with tracing.trace_chat_turn(
+        settings=Settings(
+            environment="staging", release_id="release-1", chat_langfuse_enabled=True
+        ),
+        request_id="request-1",
+        session_id="session-1",
+        user_id="private-user",
+        prompt="Build a miner",
+        model="research-model",
+        execution_backend="modal_cli",
+        is_replacement=False,
+    ) as trace:
+        trace.record_event("answer_delta", {"text": "suppressed secret answer"})
+        trace.record_guardrail(
+            ScopeDecision(
+                "unrelated application",
+                "block",
+                "huggingface-baseten",
+                1,
+                False,
+                attempt_records=(
+                    ScopeAttempt(
+                        "huggingface-baseten",
+                        "glm",
+                        50,
+                        "validated",
+                        "unrelated application",
+                        "block",
+                    ),
+                ),
+            ),
+            buffered_events=4,
+            buffered_bytes=200,
+            cancellation_result="cancelled",
+        )
+        trace.finish("fixed refusal", "scope_blocked")
+
+    serialized = str(client.root.fields) + str(
+        [(child.name, child.fields) for child in client.root.children]
+    )
+    assert "suppressed secret answer" not in serialized
+    assert "unrelated application" in serialized
+    assert "buffered_bytes" in serialized
 
 
 def test_chat_trace_captures_hierarchy_usage_and_context(monkeypatch):

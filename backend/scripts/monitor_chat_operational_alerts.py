@@ -18,6 +18,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from backend.config import Settings, get_settings
 from backend.database.connection import db_manager
 from backend.services.chat_operational_alert_service import (
+    LIFECYCLE_ALERT_NAMES,
+    lifecycle_window_alerts,
     post_operational_alert,
     provider_health,
     provider_transition,
@@ -41,6 +43,7 @@ def empty_state() -> dict[str, Any]:
         "provider_active": False,
         "journal_monitor_failed": False,
         "provider_monitor_failed": False,
+        "lifecycle_active": [],
         "events": [],
     }
 
@@ -53,6 +56,15 @@ def load_state(path: Path) -> dict[str, Any]:
         raise ValueError("chat operational alert state has an unsupported version")
     if not isinstance(state.get("events"), list):
         raise TypeError("chat operational alert state has invalid events")
+    state.setdefault("lifecycle_active", [])
+    if (
+        not isinstance(state["lifecycle_active"], list)
+        or len(state["lifecycle_active"]) > len(LIFECYCLE_ALERT_NAMES)
+        or not all(isinstance(name, str) for name in state["lifecycle_active"])
+        or len(set(state["lifecycle_active"])) != len(state["lifecycle_active"])
+        or not set(state["lifecycle_active"]).issubset(LIFECYCLE_ALERT_NAMES)
+    ):
+        raise TypeError("chat operational alert state has invalid lifecycle state")
     return state
 
 
@@ -89,7 +101,7 @@ def read_journal(
             command.extend(("--after-cursor", active_cursor))
         else:
             command.extend(("--since", (now - timedelta(minutes=2)).isoformat()))
-        command.extend(("--output=json", "--no-pager", "--quiet"))
+        command.extend(("--output=json", "--show-cursor", "--no-pager", "--quiet"))
         return command
 
     reset = False
@@ -107,6 +119,9 @@ def read_journal(
     messages: list[str] = []
     latest_cursor = cursor
     for line in result.stdout.splitlines():
+        if line.startswith("-- cursor: "):
+            latest_cursor = line.removeprefix("-- cursor: ")
+            continue
         record = json.loads(line)
         message = record.get("MESSAGE")
         record_cursor = record.get("__CURSOR")
@@ -115,6 +130,32 @@ def read_journal(
         if isinstance(record_cursor, str):
             latest_cursor = record_cursor
     return messages, latest_cursor, reset
+
+
+def read_lifecycle_window(now: datetime, window_seconds: int) -> list[str]:
+    command = ["journalctl"]
+    for unit in PRODUCTION_JOURNAL_UNITS:
+        command.extend(("--unit", unit))
+    command.extend(
+        (
+            "--since",
+            (now - timedelta(seconds=window_seconds)).isoformat(),
+            "--grep",
+            "chat durable lifecycle event=",
+            "--output=json",
+            "--no-pager",
+            "--quiet",
+        )
+    )
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+    if getattr(result, "returncode", 0) not in (0, 1):
+        raise subprocess.CalledProcessError(result.returncode, command)
+    messages: list[str] = []
+    for line in result.stdout.splitlines():
+        message = json.loads(line).get("MESSAGE")
+        if isinstance(message, str):
+            messages.append(message)
+    return messages
 
 
 def new_event(
@@ -206,6 +247,9 @@ def collect_events(
     collection_failed = False
     try:
         messages, cursor, cursor_reset = read_journal(state.get("journal_cursor"), now)
+        lifecycle_messages = read_lifecycle_window(
+            now, settings.chat_lifecycle_alert_window_seconds
+        )
     except (subprocess.CalledProcessError, json.JSONDecodeError):
         collection_failed = True
         if not state["journal_monitor_failed"]:
@@ -225,6 +269,35 @@ def collect_events(
                     classifications=failures,
                 )
             )
+        lifecycle_alerts = lifecycle_window_alerts(lifecycle_messages, settings)
+        active = set(state["lifecycle_active"])
+        current = set(lifecycle_alerts)
+        entered = current - active
+        recovered = active - current
+        if entered:
+            classifications = {name: lifecycle_alerts[name] for name in sorted(entered)}
+            events.append(
+                new_event(
+                    "chat_lifecycle_threshold",
+                    now=now,
+                    count=sum(classifications.values()),
+                    classifications=classifications,
+                    window_start=now
+                    - timedelta(seconds=settings.chat_lifecycle_alert_window_seconds),
+                )
+            )
+        if recovered:
+            events.append(
+                new_event(
+                    "chat_lifecycle_threshold_recovered",
+                    now=now,
+                    count=len(recovered),
+                    classifications={name: 1 for name in sorted(recovered)},
+                    window_start=now
+                    - timedelta(seconds=settings.chat_lifecycle_alert_window_seconds),
+                )
+            )
+        state["lifecycle_active"] = sorted(current)
         if state["journal_monitor_failed"]:
             events.append(new_event("journal_monitor_recovered", now=now))
         state["journal_monitor_failed"] = False

@@ -31,6 +31,9 @@ from deploy.release import atomic_symlink, validate_rolling_compatibility
 from deploy.runtime import prepare_runtime, runtime_id, runtime_manifest
 
 
+START_RECOVERY_SLOT = deploy_cli._start_recovery_slot
+
+
 def test_accounting_covers_complete_streaming_body(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -539,6 +542,19 @@ def _activation_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         lambda release, *_args: manifests[release],
     )
     monkeypatch.setattr(deploy_cli, "_write_journal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(deploy_cli, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        deploy_cli, "_persist_active_slot_socket", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        deploy_cli, "prepare_candidate_if_enabled", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
+        deploy_cli, "stop_slot_if_enabled", lambda *_args, **_kwargs: True
+    )
+    monkeypatch.setattr(
+        deploy_cli, "_start_recovery_slot", lambda *_args, **_kwargs: None
+    )
 
     def prepare(_environment, slot, release, _runtime):
         atomic_symlink(release, root / "slots" / slot / "release")
@@ -565,7 +581,6 @@ def test_live_smoke_failure_restores_complete_activation(
         "_unix_json",
         lambda *args, **kwargs: {"accepting_chat_turns": True},
     )
-
     with pytest.raises(deploy_cli.DeployError, match="restored"):
         deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
 
@@ -573,6 +588,72 @@ def test_live_smoke_failure_restores_complete_activation(
     assert (root / "current").resolve() == old
     assert (root / "previous").resolve() == older
     assert smokes == [candidate, old]
+
+
+def test_automatic_rollback_restores_old_slot_boot_persistence_after_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    persisted: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_persist_active_slot_socket",
+        lambda _environment, slot: persisted.append(slot),
+    )
+    monkeypatch.setattr(deploy_cli, "smoke_public", lambda *_args: None)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *args, **kwargs: {"accepting_chat_turns": True},
+    )
+
+    def stop(_environment: str, slot: str, _release_id: str) -> None:
+        if slot == "blue":
+            raise deploy_cli.ExternalPiSlotError("old slot drain failed")
+
+    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
+
+    with pytest.raises(deploy_cli.DeployError, match="prior activation was restored"):
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert persisted == ["green", "blue"]
+    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+    assert (root / "current").resolve() == old
+
+
+def test_automatic_rollback_proves_old_slot_ready_before_repointing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    readiness: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_start_recovery_slot",
+        lambda _environment, slot, release: readiness.append((slot, release.name))
+        or (
+            (root / "active").resolve() == (root / "slots" / "green").resolve()
+            and (root / "current").resolve() == candidate
+        )
+        or pytest.fail("rollback pointers moved before old-slot readiness"),
+    )
+    smokes = iter((OSError("candidate smoke failed"), None))
+
+    def smoke(*_args):
+        result = next(smokes)
+        if result:
+            raise result
+
+    monkeypatch.setattr(deploy_cli, "smoke_public", smoke)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *args, **kwargs: {"accepting_chat_turns": True},
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="prior activation was restored"):
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert readiness == [("blue", "old")]
 
 
 def test_candidate_failure_leaves_live_activation_unchanged(
@@ -588,6 +669,35 @@ def test_candidate_failure_leaves_live_activation_unchanged(
     with pytest.raises(OSError, match="candidate failed"):
         deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
 
+    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+    assert (root / "current").resolve() == old
+    assert (root / "previous").resolve() == older
+
+
+def test_shadow_cleanup_failure_is_reported_before_candidate_prepared_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, older = _activation_fixture(tmp_path, monkeypatch)
+    phases: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **_values: phases.append(phase),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "prepare_candidate_if_enabled",
+        lambda *_args: (_ for _ in ()).throw(
+            deploy_cli.ExternalPiSlotError("candidate cleanup failed")
+        ),
+    )
+
+    with pytest.raises(
+        deploy_cli.ExternalPiSlotError, match="candidate cleanup failed"
+    ):
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert phases == ["candidate-preparing"]
     assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
     assert (root / "current").resolve() == old
     assert (root / "previous").resolve() == older
@@ -617,6 +727,237 @@ def test_slot_rollback_qualifies_previous_as_one_complete_activation(
     assert (root / "active").resolve() == (root / "slots" / "green").resolve()
     assert (root / "current").resolve() == older
     assert (root / "previous").resolve() == old
+
+
+def test_shadow_candidate_is_fenced_before_cutover_and_old_worker_drains_after(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    events: list[tuple[str, str, str]] = []
+
+    def prepare(environment, slot, release_id):
+        assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+        assert (root / "current").resolve() == old
+        events.append(("prepare", slot, release_id))
+        return True
+
+    def stop(environment, slot, release_id):
+        assert (root / "active").resolve() == (root / "slots" / "green").resolve()
+        assert (root / "current").resolve() == candidate
+        events.append(("stop", slot, release_id))
+        return True
+
+    monkeypatch.setattr(deploy_cli, "prepare_candidate_if_enabled", prepare)
+    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
+    monkeypatch.setattr(deploy_cli, "smoke_public", lambda *args: None)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *args, **kwargs: {
+            "drain_started_at": "now",
+            "active_http_requests": 0,
+            "active_chat_streams": 0,
+            "active_gateway_streams": 0,
+        },
+    )
+    monkeypatch.setattr(deploy_cli, "_stop_drained_slot", lambda *_args: True)
+    monkeypatch.setattr(deploy_cli, "_drain_report_seconds", lambda _environment: 1)
+
+    assert (
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+        == "success"
+    )
+    assert events == [
+        ("prepare", "green", "candidate"),
+        ("stop", "blue", "old"),
+    ]
+
+
+def test_initial_slot_bridge_qualifies_shadow_before_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    environments = tmp_path / "environments"
+    root = environments / "staging"
+    release = tmp_path / "release"
+    release.mkdir()
+    (root / "slots/blue").mkdir(parents=True)
+    atomic_symlink(release, root / "current")
+    events: list[tuple] = []
+    monkeypatch.setattr(deploy_cli, "ENVIRONMENTS_ROOT", environments)
+    monkeypatch.setattr(
+        deploy_cli,
+        "read_pointers",
+        lambda _root: SimpleNamespace(current=release, previous=None),
+    )
+    monkeypatch.setattr(deploy_cli, "_active_slot", lambda _environment: None)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_prepare_slot",
+        lambda environment, slot, candidate, runtime: events.append(
+            ("backend", environment, slot, candidate, runtime)
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "prepare_candidate_if_enabled",
+        lambda environment, slot, release_id: events.append(
+            ("shadow", environment, slot, release_id)
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda candidate, environment: {"release_id": "release-staging"},
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda environment, phase, **values: events.append(
+            ("journal", environment, phase)
+        ),
+    )
+
+    runtime = tmp_path / "runtime"
+    deploy_cli._bridge_qualify_current(release, "staging", runtime)
+
+    assert events[:4] == [
+        ("journal", "staging", "candidate-preparing"),
+        ("backend", "staging", "blue", release, runtime),
+        ("shadow", "staging", "blue", "release-staging"),
+        ("journal", "staging", "candidate-prepared"),
+    ]
+
+
+def test_active_slot_qualify_only_prepares_external_pi_before_reporting_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    release = tmp_path / "candidate"
+    release.mkdir()
+    runtime = tmp_path / "runtime"
+    events: list[tuple] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_prepare_slot",
+        lambda environment, slot, candidate, python_runtime: events.append(
+            ("backend", environment, slot, candidate, python_runtime)
+        )
+        or {"ready": True},
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda candidate, environment: {"release_id": "candidate-staging"},
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "prepare_candidate_if_enabled",
+        lambda environment, slot, release_id: events.append(
+            ("shadow", environment, slot, release_id)
+        ),
+    )
+
+    result = deploy_cli._prepare_qualified_slot("staging", "green", release, runtime)
+
+    assert result == {"ready": True}
+    assert events == [
+        ("backend", "staging", "green", release, runtime),
+        ("shadow", "staging", "green", "candidate-staging"),
+    ]
+
+
+def test_active_slot_qualify_only_rejects_flag_mismatch_before_backend_mutation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        deploy_cli,
+        "external_pi_lifecycle_enabled",
+        lambda _environment: (_ for _ in ()).throw(
+            deploy_cli.ExternalPiSlotError("flags disagree")
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "_prepare_slot",
+        lambda *_args: pytest.fail("backend candidate mutated before flag validation"),
+    )
+
+    with pytest.raises(deploy_cli.ExternalPiSlotError, match="flags disagree"):
+        deploy_cli._prepare_qualified_slot(
+            "staging", "green", tmp_path / "release", tmp_path / "runtime"
+        )
+
+
+def test_shadow_candidate_is_drained_on_automatic_rollback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    stopped: list[tuple[str, str]] = []
+    monkeypatch.setattr(deploy_cli, "prepare_candidate_if_enabled", lambda *_args: True)
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda _environment, slot, release_id: stopped.append((slot, release_id)),
+    )
+    smokes = iter((OSError("candidate failed"), None))
+
+    def smoke(*_args):
+        result = next(smokes)
+        if result:
+            raise result
+
+    monkeypatch.setattr(deploy_cli, "smoke_public", smoke)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *args, **kwargs: {"accepting_chat_turns": True},
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="prior activation was restored"):
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert stopped == [("green", "candidate")]
+    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+    assert (root / "current").resolve() == old
+
+
+def test_automatic_rollback_reports_unproven_candidate_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    phases: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **_values: phases.append(phase),
+    )
+    monkeypatch.setattr(deploy_cli, "prepare_candidate_if_enabled", lambda *_args: True)
+
+    def unproven_cleanup(_environment, slot, release_id):
+        assert (slot, release_id) == ("green", "candidate")
+        raise deploy_cli.ExternalPiSlotError("worker did not prove graceful drain")
+
+    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", unproven_cleanup)
+    smokes = iter((OSError("candidate failed"), None))
+
+    def smoke(*_args):
+        result = next(smokes)
+        if result:
+            raise result
+
+    monkeypatch.setattr(deploy_cli, "smoke_public", smoke)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda *args, **kwargs: {"accepting_chat_turns": True},
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="candidate drain failed"):
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+    assert (root / "current").resolve() == old
+    assert phases[-1] == "automatic-rollback-candidate-drain-failed"
+    assert "automatic-rollback-complete" not in phases
 
 
 def test_draining_previous_slot_is_undrained_and_reused_for_rollback(
@@ -895,14 +1236,68 @@ def test_legacy_service_retires_only_after_nginx_slot_migration(
         deploy_cli, "_nginx_uses_active_slot", lambda _environment: True
     )
     monkeypatch.setattr(deploy_cli, "_systemctl_state", lambda _unit: next(states))
+    monkeypatch.setattr(
+        deploy_cli,
+        "_systemctl_enabled_state",
+        lambda _unit: "enabled" if not commands else "disabled",
+    )
 
     assert deploy_cli._retire_legacy_service("staging")
-    assert commands == [["systemctl", "stop", "paperswithcode-backend@staging.service"]]
+    assert commands == [
+        [
+            "systemctl",
+            "disable",
+            "--now",
+            "paperswithcode-backend@staging.service",
+        ]
+    ]
     assert events == [
         (
             ("legacy-retire", "staging", "success"),
             {"unit": "paperswithcode-backend@staging.service"},
         )
+    ]
+
+
+def test_legacy_service_is_disabled_even_when_already_inactive(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    commands: list[list[str]] = []
+    monkeypatch.setattr(deploy_cli, "_nginx_uses_active_slot", lambda _env: True)
+    monkeypatch.setattr(deploy_cli, "_systemctl_state", lambda _unit: "inactive")
+    enabled_states = iter(["enabled", "disabled"])
+    monkeypatch.setattr(
+        deploy_cli, "_systemctl_enabled_state", lambda _unit: next(enabled_states)
+    )
+    monkeypatch.setattr(
+        deploy_cli, "run", lambda command, **_kwargs: commands.append(command)
+    )
+    monkeypatch.setattr(deploy_cli, "log_event", lambda *_args, **_kwargs: None)
+
+    assert deploy_cli._retire_legacy_service("production")
+    assert commands == [
+        [
+            "systemctl",
+            "disable",
+            "--now",
+            "paperswithcode-backend@production.service",
+        ]
+    ]
+
+
+def test_persist_active_slot_enables_only_its_socket(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        deploy_cli, "run", lambda command, **_kwargs: commands.append(command)
+    )
+
+    deploy_cli._persist_active_slot_socket("production", "green")
+
+    assert commands == [
+        ["systemctl", "enable", "paperswithcode-production-backend@green.socket"],
+        ["systemctl", "disable", "paperswithcode-production-backend@blue.socket"],
     ]
 
 
@@ -941,12 +1336,68 @@ def test_interrupted_cutover_recovers_from_every_mutation_boundary(
             "original_previous": older.name,
         },
     )
+    commands: list[list[str]] = []
+    monkeypatch.setattr(
+        deploy_cli, "run", lambda command, **_kwargs: commands.append(command)
+    )
+    monkeypatch.setattr(deploy_cli, "_start_recovery_slot", START_RECOVERY_SLOT)
     monkeypatch.setattr(
         deploy_cli,
-        "_unix_json",
-        lambda *args, **kwargs: {"accepting_chat_turns": True},
+        "_persist_active_slot_socket",
+        lambda environment, slot: commands.extend(
+            [
+                [
+                    "systemctl",
+                    "enable",
+                    deploy_cli._slot_unit(environment, slot, "socket"),
+                ],
+                [
+                    "systemctl",
+                    "disable",
+                    deploy_cli._slot_unit(
+                        environment,
+                        "green" if slot == "blue" else "blue",
+                        "socket",
+                    ),
+                ],
+            ]
+        ),
     )
+    initial_current = (root / "current").resolve()
+    initial_active = (root / "active").resolve()
+    requests: list[tuple[str, str]] = []
+
+    def unix(_environment, slot, path, *, method="GET", **_kwargs):
+        requests.append((method, path))
+        if path in {"/internal/deployment-status", "/health"}:
+            assert (root / "current").resolve() == initial_current
+            assert (root / "active").resolve() == initial_active
+        if path == "/internal/deployment-status":
+            return {"release_id": "old", "slot": slot}
+        if path == "/health":
+            return {"release_id": "old"}
+        assert path == "/internal/undrain"
+        assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+        assert (root / "current").resolve() == old
+        return {"accepting_chat_turns": True}
+
+    monkeypatch.setattr(deploy_cli, "_unix_json", unix)
     smokes: list[Path] = []
+    lifecycle_events: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda environment, slot, release_id: lifecycle_events.append(
+            ("stop", slot, release_id)
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "prepare_candidate_if_enabled",
+        lambda environment, slot, release_id: lifecycle_events.append(
+            ("prepare", slot, release_id)
+        ),
+    )
     monkeypatch.setattr(
         deploy_cli,
         "smoke_public",
@@ -959,3 +1410,129 @@ def test_interrupted_cutover_recovers_from_every_mutation_boundary(
     assert (root / "current").resolve() == old
     assert (root / "previous").resolve() == older
     assert smokes == [old]
+    assert lifecycle_events == [
+        ("stop", "green", "candidate"),
+        ("prepare", "blue", "old"),
+    ]
+    assert requests[:3] == [
+        ("GET", "/internal/deployment-status"),
+        ("GET", "/health"),
+        ("POST", "/internal/undrain"),
+    ]
+    assert commands == [
+        ["systemctl", "start", "paperswithcode-staging-backend@blue.socket"],
+        ["systemctl", "start", "paperswithcode-staging-backend@blue.service"],
+        ["systemctl", "enable", "paperswithcode-staging-backend@blue.socket"],
+        ["systemctl", "disable", "paperswithcode-staging-backend@green.socket"],
+    ]
+
+
+def test_interrupted_candidate_recovery_does_not_abandon_unproven_cleanup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, older = _activation_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": "candidate-preparing",
+            "candidate_slot": "green",
+            "candidate_release": candidate.name,
+        },
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            deploy_cli.ExternalPiSlotError("worker did not prove graceful drain")
+        ),
+    )
+    phases: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **_values: phases.append(phase),
+    )
+
+    with pytest.raises(deploy_cli.ExternalPiSlotError, match="prove graceful drain"):
+        deploy_cli._recover_interrupted_activation("staging")
+
+    assert phases == []
+    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
+    assert (root / "current").resolve() == old
+    assert (root / "previous").resolve() == older
+
+
+def test_interrupted_candidate_recovery_trusts_only_validated_release_pointers(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _root, old, candidate, older = _activation_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": "candidate-preparing",
+            "candidate_slot": "green",
+            "candidate_release": candidate.name,
+        },
+    )
+    calls: list[tuple[str, str, str, frozenset[str]]] = []
+
+    def stop(
+        environment: str,
+        slot: str,
+        release_id: str,
+        *,
+        validated_orphan_release_ids: frozenset[str],
+    ) -> None:
+        calls.append((environment, slot, release_id, validated_orphan_release_ids))
+
+    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
+    phases: list[str] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **_values: phases.append(phase),
+    )
+
+    deploy_cli._recover_interrupted_activation("staging")
+
+    assert calls == [
+        ("staging", "green", "candidate", frozenset({old.name, older.name}))
+    ]
+    assert phases == ["candidate-abandoned"]
+
+
+def test_interrupted_candidate_recovery_does_not_inspect_pointers_in_production(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _root, _old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": "candidate-preparing",
+            "candidate_slot": "green",
+            "candidate_release": candidate.name,
+        },
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "read_pointers",
+        lambda _root: pytest.fail("production inspected release pointers"),
+    )
+    calls: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda environment, slot, release_id: calls.append(
+            (environment, slot, release_id)
+        ),
+    )
+
+    deploy_cli._recover_interrupted_activation("production")
+
+    assert calls == [("production", "green", "candidate")]

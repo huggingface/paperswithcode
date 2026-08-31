@@ -1,0 +1,14 @@
+[Unit]
+Description=Enqueue Hugging Face daily paper curation hourly
+After=network-online.target postgresql@16-main.service
+After=pwc-cron-import-hf-daily-papers.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled enqueue_hf_daily_paper_curation
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

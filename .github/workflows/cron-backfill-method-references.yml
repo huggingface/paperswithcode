@@ -1,10 +1,6 @@
 name: Cron - Backfill Method References
 
 on:
-  schedule:
-    # Use OpenAlex batches; the Semantic Scholar references endpoint rejects the
-    # otherwise-valid secondary key with sustained HTTP 429 responses.
-    - cron: "15 */6 * * *"
   workflow_dispatch: {}
 
 concurrency:

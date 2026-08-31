@@ -150,7 +150,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
                     "inserted": self.new_papers_count,
                     "updated": max(
                         0,
-                        self.processed_count - self.new_papers_count - self.error_count,
+                        self.processed_count - self.new_papers_count,
                     ),
                     "skipped": 0,
                     "failed": self.error_count,
@@ -164,6 +164,11 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         self.vacuum_analyze_table("project_pages")
         self.vacuum_analyze_table("paper_tasks")
         self.vacuum_analyze_table("paper_methods")
+        if self.error_count:
+            suffix = "" if self.error_count == 1 else "s"
+            raise RuntimeError(
+                f"{self.error_count} paper import failure{suffix}; see structured summary"
+            )
 
     async def fetch_daily_papers(self, date: str) -> List[Dict]:
         """Fetch one complete daily cohort from Hugging Face, or fail closed."""
@@ -184,6 +189,9 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         if existing:
             self.logger.debug(
                 f"Paper {arxiv_id} already exists; reconciling organization link"
+            )
+            self._merge_external_duplicate(
+                arxiv_id, existing["id"], (paper_info.get("title") or "").strip()
             )
             self._link_organizations(
                 existing["id"],
@@ -207,6 +215,24 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         self.tag_paper_with_tasks(paper_id, title, abstract)
         self.tag_paper_with_methods(paper_id, title, abstract)
 
+        self._merge_external_duplicate(arxiv_id, paper_id, title)
+
+        github_repo, project_page = asyncio.run(self.fetch_paper_urls_legacy(arxiv_id))
+        if github_repo:
+            self.insert_repository(paper_id, github_repo)
+        if project_page:
+            self.insert_project_page(paper_id, project_page)
+        self.refresh_urls_extracted(paper_id)
+        self._link_organizations(
+            paper_id,
+            paper_data.get("organization") or paper_info.get("organization"),
+        )
+
+    def _merge_external_duplicate(
+        self, arxiv_id: str, paper_id: int, title: str
+    ) -> None:
+        if not title:
+            return
         session = db_manager.session_local()
         try:
             external_match = find_external_paper_for_title(session, title)
@@ -216,7 +242,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
                 )
                 session.commit()
                 self.logger.info(
-                    "Merged external paper %s into new ArXiv row %s (%s): %s",
+                    "Merged external paper %s into ArXiv row %s (%s): %s",
                     external_match.id,
                     paper_id,
                     arxiv_id,
@@ -230,19 +256,9 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
                 paper_id,
                 exc,
             )
+            raise
         finally:
             session.close()
-
-        github_repo, project_page = asyncio.run(self.fetch_paper_urls_legacy(arxiv_id))
-        if github_repo:
-            self.insert_repository(paper_id, github_repo)
-        if project_page:
-            self.insert_project_page(paper_id, project_page)
-        self.refresh_urls_extracted(paper_id)
-        self._link_organizations(
-            paper_id,
-            paper_data.get("organization") or paper_info.get("organization"),
-        )
 
     def _link_organizations(self, paper_id: int, payload) -> None:
         if not payload:

@@ -13,7 +13,7 @@ import re
 import tempfile
 import time
 import uuid
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -37,8 +37,10 @@ from backend.models.chat import LatexPaperSourceEdit
 from backend.models.database import (
     ChatMessageRecord,
     ChatOpenRouterProviderCall,
+    ChatQualificationScope,
     ChatSession,
     ChatTurnCapability,
+    ChatTurnLatency,
 )
 from backend.services.chat_artifact_service import (
     ArtifactError,
@@ -57,6 +59,9 @@ from backend.services.chat_hf_hub_service import (
     validate_hf_request,
 )
 from backend.services.chat_latency_service import ChatLatencyService
+from backend.services.durable_external_qualification_contract import (
+    DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN,
+)
 from backend.services.chat_openai_budget_service import (
     MAX_REQUEST_BYTES as MAX_OPENAI_REQUEST_BYTES,
 )
@@ -89,6 +94,14 @@ from backend.services.chat_session_store_gateway import (
     SessionStoreGatewayError,
 )
 from backend.services.chat_tracing_service import start_provider_request_trace
+from backend.services.chat_turn_job_repository import (
+    ChatTurnJobRepository,
+    StaleTurnClaim,
+    TurnLeaseClaim,
+)
+from backend.services.chat_durable_lifecycle_observer import (
+    durable_lifecycle_observer,
+)
 from backend.services.chat_web_fetch_service import (
     ChatWebFetchError,
     fetch_catalog_url,
@@ -122,6 +135,10 @@ hf_telemetry_logger = logging.getLogger("uvicorn.error")
 MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
 MAX_PROVIDER_TURN_TOKENS = 512_000
 MAX_POSTER_PROVIDER_TURN_TOKENS = 2_000_000
+QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
+QUALIFICATION_PROVIDER_TURN_TOKENS = 2 * (
+    MAX_OPENAI_REQUEST_BYTES // 4 + MAX_PROVIDER_OUTPUT_TOKENS
+)
 
 
 def _hf_latency_bucket(elapsed_seconds: float) -> str:
@@ -216,10 +233,42 @@ def _output_tokens_allowed(value: int) -> bool:
     return 1 <= value <= MAX_PROVIDER_OUTPUT_TOKENS
 
 
-def _provider_turn_limits(row: ChatTurnCapability) -> tuple[int, int]:
+def _provider_turn_limits(
+    row: ChatTurnCapability,
+    db: Session | None = None,
+    settings: Settings | None = None,
+) -> tuple[int, int]:
+    qualification_scope_id = (
+        _qualification_scope_claim(row, db, settings)
+        if db is not None and settings is not None
+        else None
+    )
+    if qualification_scope_id is not None:
+        return QUALIFICATION_PROVIDER_REQUESTS, QUALIFICATION_PROVIDER_TURN_TOKENS
     if {"artifact", "paper_grant"} & set(getattr(row, "scopes", ())):
         return MAX_POSTER_PROVIDER_REQUESTS, MAX_POSTER_PROVIDER_TURN_TOKENS
     return MAX_PROVIDER_REQUESTS, MAX_PROVIDER_TURN_TOKENS
+
+
+def _qualification_scope_claim(
+    row: ChatTurnCapability, db: Session, settings: Settings
+) -> uuid.UUID | None:
+    if settings.environment != "staging":
+        return None
+    return db.scalar(
+        select(ChatQualificationScope.id)
+        .join(
+            ChatTurnLatency,
+            ChatTurnLatency.qualification_scope_id == ChatQualificationScope.id,
+        )
+        .where(
+            ChatTurnLatency.turn_id == row.turn_id,
+            ChatTurnLatency.qualification_profile == "32-functional-turns",
+            ChatQualificationScope.profile == "32-functional-turns",
+            ChatQualificationScope.window_ended_at.is_(None),
+            ChatQualificationScope.expires_at > datetime.now(UTC),
+        )
+    )
 
 
 def _user_provider_credential(row, settings: Settings) -> HfInferenceCredential:
@@ -621,6 +670,48 @@ def _settle_openai_call(
     return replace(result, cost_microusd=actual_usage_microusd(settings, result))
 
 
+@dataclass(frozen=True, slots=True)
+class ExternalTurnFenceHeaders:
+    worker_id: str | None
+    worker_generation: str | None
+    lease_generation: str | None
+
+    def claim(self, *, turn_id: str) -> TurnLeaseClaim:
+        if (
+            self.worker_id is None
+            or self.worker_generation is None
+            or self.lease_generation is None
+        ):
+            raise LookupError("External turn fence is missing")
+        worker_generation = int(self.worker_generation)
+        lease_generation = int(self.lease_generation)
+        if worker_generation < 1 or lease_generation < 1:
+            raise ValueError("External turn fence generation is invalid")
+        return TurnLeaseClaim(
+            turn_id=uuid.UUID(turn_id),
+            worker_id=self.worker_id,
+            worker_generation=worker_generation,
+            lease_generation=lease_generation,
+        )
+
+
+def _external_turn_fence_headers(
+    x_pwc_turn_worker_id: Annotated[str | None, Header()] = None,
+    x_pwc_turn_worker_generation: Annotated[str | None, Header()] = None,
+    x_pwc_turn_lease_generation: Annotated[str | None, Header()] = None,
+) -> ExternalTurnFenceHeaders:
+    return ExternalTurnFenceHeaders(
+        worker_id=x_pwc_turn_worker_id,
+        worker_generation=x_pwc_turn_worker_generation,
+        lease_generation=x_pwc_turn_lease_generation,
+    )
+
+
+TurnFenceDependency = Annotated[
+    ExternalTurnFenceHeaders, Depends(_external_turn_fence_headers)
+]
+
+
 def _scope(
     token: str,
     scope: str,
@@ -629,6 +720,7 @@ def _scope(
     db: Session,
     *,
     model: str | None = None,
+    turn_fence: ExternalTurnFenceHeaders | None = None,
 ):
     try:
         row = ChatCapabilityService(db).validate(
@@ -638,10 +730,49 @@ def _scope(
             turn_id=uuid.UUID(turn_id),
             model=model,
         )
-        return row
     except (CapabilityError, ValueError):
         db.rollback()
         raise HTTPException(status_code=403, detail="Capability rejected") from None
+    if "external_turn" not in row.scopes:
+        return row
+    fence = turn_fence or ExternalTurnFenceHeaders(None, None, None)
+    try:
+        claim = fence.claim(turn_id=turn_id)
+    except LookupError:
+        db.rollback()
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "chat_turn_fence_missing",
+                "message": "External turn fence is required",
+            },
+        )
+    try:
+        ChatTurnJobRepository().require_live_claim(
+            db,
+            claim=claim,
+            now=datetime.now(UTC),
+        )
+    except (StaleTurnClaim, ValueError):
+        db.rollback()
+        from backend.services.chat_durable_qualification_evidence import (
+            record_qualification_event_safely,
+        )
+
+        record_qualification_event_safely(
+            turn_id=uuid.UUID(turn_id),
+            chat_session_id=uuid.UUID(session_id),
+            event_type="stale_fence",
+        )
+        durable_lifecycle_observer(get_settings())("stale_fence_rejection", "stale", 1)
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "chat_turn_fence_stale",
+                "message": "External turn fence is stale",
+            },
+        ) from None
+    return row
 
 
 @app.post("/catalog")
@@ -650,12 +781,20 @@ def catalog(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     token = _bearer(authorization)
     scope = "web_search" if body.operation == "web_search" else "catalog"
-    capability = _scope(token, scope, x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        token,
+        scope,
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     try:
         if body.operation == "web_search":
             ChatCapabilityService(db).meter_web_search(
@@ -748,6 +887,7 @@ def hf_catalog(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
@@ -767,7 +907,14 @@ def hf_catalog(
             detail={"code": error.code, "message": str(error)},
         ) from None
     token = _bearer(authorization)
-    capability = _scope(token, "hf_catalog", x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        token,
+        "hf_catalog",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     recursive = body.operation.endswith("_list") and bool(
         arguments.get("repo_id") and arguments.get("recursive")
     )
@@ -824,11 +971,19 @@ def session_store(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     token = _bearer(authorization)
-    capability = _scope(token, "session_store", x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        token,
+        "session_store",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     if body.format == "pi":
         if (
             getattr(capability, "agent_harness", "claude") != "pi"
@@ -919,11 +1074,19 @@ def artifact_prepare(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     token = _bearer(authorization)
-    capability = _scope(token, "artifact", x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        token,
+        "artifact",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     if not settings.chat_artifacts_enabled or not settings.chat_posterly_enabled:
         raise HTTPException(status_code=404, detail="Poster generation is disabled")
     try:
@@ -987,11 +1150,19 @@ def paper_command(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     """Create or inspect the paper bound to this authenticated live turn."""
-    capability = _scope(_bearer(authorization), "paper", x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        _bearer(authorization),
+        "paper",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     if not (
         settings.chat_artifacts_enabled
         and settings.chat_latex_paper_enabled
@@ -1107,11 +1278,19 @@ async def artifact_publish(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
     token = _bearer(authorization)
-    capability = _scope(token, "artifact", x_pwc_session, x_pwc_turn, db)
+    capability = _scope(
+        token,
+        "artifact",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     if capability.artifact_paper_id is None:
         raise HTTPException(
             status_code=409,
@@ -1198,10 +1377,18 @@ async def web_fetch(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
 ):
     token = _bearer(authorization)
-    _scope(token, "web_fetch", x_pwc_session, x_pwc_turn, db)
+    _scope(
+        token,
+        "web_fetch",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
     db.commit()
     try:
         result = await fetch_catalog_url(db, body.url)
@@ -1224,6 +1411,7 @@ async def responses(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
@@ -1251,6 +1439,7 @@ async def responses(
         x_pwc_session,
         x_pwc_turn,
         db,
+        turn_fence=turn_fence,
     )
     if (
         row.agent_harness != "pi"
@@ -1264,8 +1453,9 @@ async def responses(
         raise HTTPException(status_code=413, detail="Model request is too large")
     owner_id = _capability_owner(row, db)
     capability_id = row.id
+    qualification_scope_id = _qualification_scope_claim(row, db, settings)
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(trusted_raw) // 4) + maximum_tokens,
@@ -1303,6 +1493,7 @@ async def responses(
                 request_bytes=len(trusted_raw),
                 maximum_output_tokens=maximum_tokens,
             ),
+            qualification_scope_id=qualification_scope_id,
         )
         db.commit()
     except OpenAIBudgetExhausted:
@@ -1513,6 +1704,7 @@ async def messages(
     authorization: Annotated[str, Header()],
     x_pwc_session: Annotated[str, Header()],
     x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
 ):
@@ -1522,6 +1714,7 @@ async def messages(
             authorization,
             x_pwc_session,
             x_pwc_turn,
+            turn_fence,
             db,
             settings,
         )
@@ -1543,7 +1736,15 @@ async def messages(
         raise HTTPException(status_code=422, detail="Invalid model request") from None
     if not _output_tokens_allowed(maximum_tokens):
         raise HTTPException(status_code=422, detail="max_tokens is out of range")
-    row = _scope(token, "model", x_pwc_session, x_pwc_turn, db, model=model)
+    row = _scope(
+        token,
+        "model",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        model=model,
+        turn_fence=turn_fence,
+    )
     provider = settings.chat_route_providers.get(row.model)
     provider_mode = row.provider_mode or (
         "openrouter_funded" if provider == "openrouter" else "huggingface"
@@ -1584,7 +1785,7 @@ async def messages(
     capability_id = row.id
     funded_call_id: uuid.UUID | None = None
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(raw) // 4) + maximum_tokens,

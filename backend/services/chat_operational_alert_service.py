@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta
+import re
 from typing import Any
 
 import httpx
@@ -41,9 +42,46 @@ RUNTIME_FAILURE_PATTERNS = {
     "langfuse_finalization_failure": "chat Langfuse trace finalization failed",
     "langfuse_client_failure": "chat Langfuse client initialization failed",
     "excalidraw_mcp_unready": "chat Excalidraw MCP registration failed",
+    "durable_lifecycle_telemetry_failure": (
+        "chat durable lifecycle Langfuse emission failed"
+    ),
+    "event_journal_bound": (
+        "chat durable lifecycle event=typed_failure code=event_journal_exhausted"
+    ),
+    "projection_mismatch": (
+        "chat durable lifecycle event=typed_failure code=projection_mismatch"
+    ),
+    "cancel_control_missing": (
+        "chat durable lifecycle event=typed_failure code=cancel_control_missing"
+    ),
+    "dispatch_failed": (
+        "chat durable lifecycle event=typed_failure code=dispatch_failed"
+    ),
+    "stale_fence_rejection": (
+        "chat durable lifecycle event=stale_fence_rejection code=stale"
+    ),
+    "expired_turn_lease": (
+        "chat durable lifecycle event=expired_turn_lease code=expired"
+    ),
     "paper_curation_dispatch_pause": "paper curation dispatch paused",
     "paper_curation_dispatch_recovery": "paper curation dispatch resumed",
 }
+LIFECYCLE_PATTERN = re.compile(
+    r"chat durable lifecycle event=(?P<event>[a-z_]+) "
+    r"code=(?P<code>[a-z_]+|none) value=(?P<value>\d+)(?:\s|$)"
+)
+LIFECYCLE_ALERT_NAMES = frozenset(
+    {
+        "worker_reattach_failure_rate",
+        "executor_lost_rate",
+        "capacity_saturation",
+        "workspace_create_ratio",
+        "ttft_regression_rate",
+        "stale_fence_rejection",
+        "expired_turn_lease",
+    }
+)
+MAX_LIFECYCLE_VALUE = 16 * 1024 * 1024
 
 
 @dataclass(frozen=True)
@@ -61,14 +99,18 @@ class ProviderHealth:
 
 
 def provider_health(db: Session, settings: Settings, now: datetime) -> ProviderHealth:
-    """Count terminal DeepSeek turns without reading transcript content."""
+    """Count terminal Hugging Face turns without reading transcript content."""
 
     start = now - timedelta(seconds=settings.chat_provider_alert_window_seconds)
+    provider_route = next(
+        choice["route"]
+        for choice in settings.chat_model_choices
+        if choice["provider"] == "huggingface"
+    )
     terminal = ChatMessageRecord.status.in_(("complete", "error", "interrupted"))
     scope = (
         ChatMessageRecord.role == "user",
-        ChatMessageRecord.model_route
-        == settings.chat_model_routes["deepseek-ai/DeepSeek-V4-Flash-0731"],
+        ChatMessageRecord.model_route == provider_route,
         ChatMessageRecord.created_at >= start,
         ChatMessageRecord.created_at <= now,
         terminal,
@@ -117,6 +159,86 @@ def runtime_failure_counts(messages: list[str]) -> dict[str, int]:
         for message in messages
     )
     return {name: count for name, count in counts.items() if count}
+
+
+def lifecycle_window_alerts(messages: list[str], settings: Settings) -> dict[str, int]:
+    """Return only configured lifecycle threshold breaches for one log window."""
+
+    observations: list[tuple[str, str, int]] = []
+    for message in messages:
+        match = LIFECYCLE_PATTERN.search(message)
+        if match is None:
+            continue
+        value = int(match.group("value"))
+        if value <= MAX_LIFECYCLE_VALUE:
+            observations.append((match.group("event"), match.group("code"), value))
+
+    def count(event: str, code: str) -> int:
+        return sum(
+            value
+            for observed_event, observed_code, value in observations
+            if observed_event == event and observed_code == code
+        )
+
+    def rate_breached(numerator: int, denominator: int, percent: int) -> bool:
+        return (
+            denominator >= settings.chat_lifecycle_alert_min_samples
+            and numerator * 100 >= denominator * percent
+        )
+
+    alerts: dict[str, int] = {}
+    stale_fences = count("stale_fence_rejection", "stale")
+    if stale_fences:
+        alerts["stale_fence_rejection"] = stale_fences
+    expired_leases = count("expired_turn_lease", "expired")
+    if expired_leases:
+        alerts["expired_turn_lease"] = expired_leases
+    worker_failures = count("typed_failure", "external_worker_lost")
+    worker_successes = count("worker_reconnect", "none")
+    if rate_breached(
+        worker_failures,
+        worker_failures + worker_successes,
+        settings.chat_lifecycle_alert_failure_percent,
+    ):
+        alerts["worker_reattach_failure_rate"] = worker_failures
+
+    executor_failures = count("typed_failure", "execution_lost")
+    executor_attempts = count("turn_state", "waiting_tool")
+    if rate_breached(
+        executor_failures,
+        executor_attempts,
+        settings.chat_lifecycle_alert_failure_percent,
+    ):
+        alerts["executor_lost_rate"] = executor_failures
+
+    saturations = count("capacity_saturation", "none")
+    if saturations >= settings.chat_lifecycle_capacity_saturation_count:
+        alerts["capacity_saturation"] = saturations
+
+    workspace_creates = count("workspace_state", "created")
+    workspace_reuses = count("workspace_state", "reused")
+    if rate_breached(
+        workspace_creates,
+        workspace_creates + workspace_reuses,
+        settings.chat_lifecycle_workspace_create_percent,
+    ):
+        alerts["workspace_create_ratio"] = workspace_creates
+
+    ttft_values = [
+        value
+        for event, code, value in observations
+        if event == "ttft_ms" and code == "none"
+    ]
+    slow_ttft = sum(
+        value >= settings.chat_lifecycle_ttft_threshold_ms for value in ttft_values
+    )
+    if rate_breached(
+        slow_ttft,
+        len(ttft_values),
+        settings.chat_lifecycle_ttft_regression_percent,
+    ):
+        alerts["ttft_regression_rate"] = slow_ttft
+    return alerts
 
 
 def operational_alert_payload(

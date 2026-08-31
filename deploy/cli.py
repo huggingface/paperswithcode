@@ -37,6 +37,21 @@ try:
         prepare_runtime,
         runtime_id,
     )
+    from deploy.external_pi_runtime import (
+        RETAIN_ALL_RUNTIMES,
+        cleanup_external_pi_runtimes,
+        external_pi_runtime_descriptor,
+        external_pi_runtime_id,
+        prepare_external_pi_runtime,
+        recorded_external_pi_runtime_id,
+    )
+    from deploy.external_pi_slot_lifecycle import (
+        ExternalPiSlotError,
+        lifecycle_enabled as external_pi_lifecycle_enabled,
+        prepare_candidate_if_enabled,
+        slot_status as external_pi_slot_status,
+        stop_slot_if_enabled,
+    )
 except ModuleNotFoundError:
     from release import (  # type: ignore[no-redef]
         ENVIRONMENTS,
@@ -54,11 +69,27 @@ except ModuleNotFoundError:
         prepare_runtime,
         runtime_id,
     )
+    from external_pi_runtime import (  # type: ignore[no-redef]
+        RETAIN_ALL_RUNTIMES,
+        cleanup_external_pi_runtimes,
+        external_pi_runtime_descriptor,
+        external_pi_runtime_id,
+        prepare_external_pi_runtime,
+        recorded_external_pi_runtime_id,
+    )
+    from external_pi_slot_lifecycle import (  # type: ignore[no-redef]
+        ExternalPiSlotError,
+        lifecycle_enabled as external_pi_lifecycle_enabled,
+        prepare_candidate_if_enabled,
+        slot_status as external_pi_slot_status,
+        stop_slot_if_enabled,
+    )
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
 REPOSITORY = Path(os.environ.get("PWC_DEPLOY_REPOSITORY", APP_ROOT / "repository.git"))
 RELEASES = APP_ROOT / "releases"
 RUNTIMES = APP_ROOT / "runtimes"
+EXTERNAL_PI_RUNTIMES = RUNTIMES / "external-pi"
 ENVIRONMENTS_ROOT = APP_ROOT / "environments"
 VENV = APP_ROOT / ".venv"
 PYTHON_RUNTIME = APP_ROOT / "python-runtime"
@@ -453,17 +484,21 @@ def prepare_release(sha: str, environment: str) -> Path:
         descriptor = _chat_descriptor_from_source(
             source, environment, chat_enabled=expected_features["chat"]
         )
-        (source / "release.json").write_text(
-            json.dumps(
-                build_manifest(
-                    sha,
-                    environment,
-                    chat_descriptor=descriptor,
-                    production_chat_enabled=production_chat_enabled,
-                ),
-                indent=2,
-            )
-            + "\n",
+        manifest = build_manifest(
+            sha,
+            environment,
+            chat_descriptor=descriptor,
+            production_chat_enabled=production_chat_enabled,
+        )
+        manifest_path = source / "release.json"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        if environment == "staging":
+            manifest["external_pi_runtime"] = external_pi_runtime_descriptor(source)
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2) + "\n",
             encoding="utf-8",
         )
         validate_manifest(source, environment)
@@ -887,11 +922,75 @@ def _journal(environment: str) -> dict | None:
     return value if isinstance(value, dict) else None
 
 
+def _start_recovery_slot(environment: str, slot: str, release: Path) -> None:
+    """Start a rollback target and wait until its control endpoint is ready."""
+
+    run(["systemctl", "start", _slot_unit(environment, slot, "socket")])
+    run(["systemctl", "start", _slot_unit(environment, slot)])
+    expected_release = validate_manifest(release, environment)["release_id"]
+    deadline = time.monotonic() + 60
+    last = None
+    while time.monotonic() < deadline:
+        last = _unix_json(
+            environment,
+            slot,
+            "/internal/deployment-status",
+            check=False,
+        )
+        if (
+            last
+            and last.get("release_id") == expected_release
+            and last.get("slot") == slot
+        ):
+            health = _unix_json(environment, slot, "/health", check=False)
+            if health and health.get("release_id") == expected_release:
+                return
+        time.sleep(0.25)
+    raise DeployError(
+        f"{environment}/{slot} rollback target failed readiness: {last!r}"
+    )
+
+
 def _recover_interrupted_activation(environment: str) -> None:
     """Conservatively restore the old slot if cutover smoke was interrupted."""
 
     journal = _journal(environment)
-    if not journal or journal.get("phase") not in {
+    if not journal:
+        return
+    if journal.get("phase") in {"candidate-preparing", "candidate-prepared"}:
+        candidate_slot = journal.get("candidate_slot")
+        candidate_release_name = journal.get("candidate_release")
+        if candidate_slot not in {"blue", "green"} or not isinstance(
+            candidate_release_name, str
+        ):
+            raise DeployError("activation journal cannot identify its candidate")
+        candidate_release = RELEASES / candidate_release_name
+        candidate_manifest = validate_manifest(candidate_release, environment)
+        if environment == "staging":
+            pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+            validated_orphan_release_ids = frozenset(
+                validate_manifest(release, environment)["release_id"]
+                for release in (pointers.current, pointers.previous)
+                if release is not None
+            )
+            stop_slot_if_enabled(
+                environment,
+                candidate_slot,
+                candidate_manifest["release_id"],
+                validated_orphan_release_ids=validated_orphan_release_ids,
+            )
+        else:
+            stop_slot_if_enabled(
+                environment, candidate_slot, candidate_manifest["release_id"]
+            )
+        _write_journal(
+            environment,
+            "candidate-abandoned",
+            candidate_slot=candidate_slot,
+            candidate_release=candidate_release_name,
+        )
+        return
+    if journal.get("phase") not in {
         "previous-update-pending",
         "current-update-pending",
         "active-switch-pending",
@@ -922,6 +1021,7 @@ def _recover_interrupted_activation(environment: str) -> None:
         ),
         interrupted_phase=journal["phase"],
     )
+    _start_recovery_slot(environment, old_slot, old_release)
     atomic_symlink(_slot_root(environment, old_slot), root / "active")
     atomic_symlink(old_release, root / "current")
     if original_previous:
@@ -929,11 +1029,24 @@ def _recover_interrupted_activation(environment: str) -> None:
     else:
         (root / "previous").unlink(missing_ok=True)
     _unix_json(environment, old_slot, "/internal/undrain", method="POST")
+    candidate_slot = "green" if old_slot == "blue" else "blue"
+    candidate_release = _slot_release(environment, candidate_slot)
+    if candidate_release is not None:
+        candidate_manifest = validate_manifest(candidate_release, environment)
+        stop_slot_if_enabled(
+            environment, candidate_slot, candidate_manifest["release_id"]
+        )
+    prepare_candidate_if_enabled(
+        environment,
+        old_slot,
+        validate_manifest(old_release, environment)["release_id"],
+    )
     smoke_public(
         old_release,
         environment,
         validate_manifest(old_release, environment)["release_id"],
     )
+    _persist_active_slot_socket(environment, old_slot)
     _write_journal(
         environment,
         "automatic-rollback-complete",
@@ -1030,6 +1143,23 @@ def _prepare_or_reuse_slot(
     return status_value
 
 
+def _prepare_qualified_slot(
+    environment: str,
+    slot: str,
+    release: Path,
+    runtime: Path,
+) -> dict:
+    """Prepare both backend and guarded external Pi candidate lifecycles."""
+    external_pi_lifecycle_enabled(environment)
+    status_value = _prepare_slot(environment, slot, release, runtime)
+    prepare_candidate_if_enabled(
+        environment,
+        slot,
+        validate_manifest(release, environment)["release_id"],
+    )
+    return status_value
+
+
 def _bridge_qualify_current(release: Path, environment: str, runtime: Path) -> None:
     pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
     if pointers.current != release:
@@ -1039,6 +1169,7 @@ def _bridge_qualify_current(release: Path, environment: str, runtime: Path) -> N
     if _active_slot(environment) is not None:
         raise DeployError("the slot bridge is already prepared")
     slot = "blue"
+    external_pi_lifecycle_enabled(environment)
     _write_journal(
         environment,
         "candidate-preparing",
@@ -1047,6 +1178,11 @@ def _bridge_qualify_current(release: Path, environment: str, runtime: Path) -> N
         legacy_current=release.name,
     )
     _prepare_slot(environment, slot, release, runtime)
+    prepare_candidate_if_enabled(
+        environment,
+        slot,
+        validate_manifest(release, environment)["release_id"],
+    )
     _write_journal(
         environment,
         "candidate-prepared",
@@ -1106,19 +1242,34 @@ def _stop_drained_slot(environment: str, slot: str) -> bool:
 
 
 def _retire_legacy_service(environment: str) -> bool:
-    """Stop the fixed-port owner only after nginx selects the active slot."""
+    """Disable the fixed-port owner only after nginx selects the active slot."""
 
     if not _nginx_uses_active_slot(environment):
         return False
     unit = _unit(environment)
-    if _systemctl_state(unit) != "active":
+    state = _systemctl_state(unit)
+    enabled_state = _systemctl_enabled_state(unit)
+    if state == "inactive" and enabled_state == "disabled":
         return False
-    run(["systemctl", "stop", unit])
+    run(["systemctl", "disable", "--now", unit])
     state = _systemctl_state(unit)
     if state != "inactive":
         raise DeployError(f"legacy service {unit} did not stop cleanly: {state}")
+    enabled_state = _systemctl_enabled_state(unit)
+    if enabled_state != "disabled":
+        raise DeployError(
+            f"legacy service {unit} remains enabled after retirement: {enabled_state}"
+        )
     log_event("legacy-retire", environment, "success", unit=unit)
     return True
+
+
+def _persist_active_slot_socket(environment: str, slot: str) -> None:
+    """Make the selected socket, and only that socket, survive a host reboot."""
+
+    inactive = "green" if slot == "blue" else "blue"
+    run(["systemctl", "enable", _slot_unit(environment, slot, "socket")])
+    run(["systemctl", "disable", _slot_unit(environment, inactive, "socket")])
 
 
 def activate_slot(
@@ -1149,6 +1300,7 @@ def activate_slot(
             runtime,
         )
         smoke_public(release, environment, validate_manifest(release)["release_id"])
+        _persist_active_slot_socket(environment, active)
         _write_journal(
             environment,
             "settled",
@@ -1165,6 +1317,7 @@ def activate_slot(
     preserved_previous = original_previous if refresh_environment else old_release
     candidate_manifest = validate_manifest(release, environment)
     active_manifest = validate_manifest(old_release, environment)
+    external_pi_lifecycle_enabled(environment)
     validate_rolling_compatibility(active_manifest, candidate_manifest)
     _write_journal(
         environment,
@@ -1178,6 +1331,9 @@ def activate_slot(
         _prepare_slot(environment, inactive, release, runtime)
     else:
         _prepare_or_reuse_slot(environment, inactive, release, runtime)
+    prepare_candidate_if_enabled(
+        environment, inactive, candidate_manifest["release_id"]
+    )
     _write_journal(
         environment,
         "candidate-prepared",
@@ -1260,7 +1416,14 @@ def activate_slot(
     )
     try:
         smoke_public(release, environment, candidate_manifest["release_id"])
-    except (DeployError, subprocess.CalledProcessError, OSError) as exc:
+        _persist_active_slot_socket(environment, inactive)
+        stop_slot_if_enabled(environment, active, active_manifest["release_id"])
+    except (
+        DeployError,
+        ExternalPiSlotError,
+        subprocess.CalledProcessError,
+        OSError,
+    ) as exc:
         _write_journal(
             environment,
             "automatic-rollback-in-progress",
@@ -1270,6 +1433,7 @@ def activate_slot(
                 original_previous.name if original_previous is not None else None
             ),
         )
+        _start_recovery_slot(environment, active, old_release)
         atomic_symlink(_slot_root(environment, active), root / "active")
         atomic_symlink(old_release, root / "current")
         if original_previous:
@@ -1277,7 +1441,27 @@ def activate_slot(
         else:
             (root / "previous").unlink(missing_ok=True)
         _unix_json(environment, active, "/internal/undrain", method="POST")
+        candidate_drain_error = None
+        try:
+            stop_slot_if_enabled(
+                environment, inactive, candidate_manifest["release_id"]
+            )
+        except ExternalPiSlotError as error:
+            candidate_drain_error = error
+        prepare_candidate_if_enabled(environment, active, active_manifest["release_id"])
         smoke_public(old_release, environment, active_manifest["release_id"])
+        _persist_active_slot_socket(environment, active)
+        if candidate_drain_error is not None:
+            _write_journal(
+                environment,
+                "automatic-rollback-candidate-drain-failed",
+                active_slot=active,
+                restored_release=old_release.name,
+                failed_release=release.name,
+            )
+            raise DeployError(
+                "prior activation was restored but candidate drain failed"
+            ) from candidate_drain_error
         _write_journal(
             environment,
             "automatic-rollback-complete",
@@ -1394,12 +1578,18 @@ def rollback_after_failed_activation(
 def protected_release_paths() -> set[Path]:
     protected = set()
     for environment in ENVIRONMENTS:
-        pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
-        protected.update(path for path in (pointers.current, pointers.previous) if path)
-        for slot in ("blue", "green"):
-            release = _slot_release(environment, slot)
-            if release:
-                protected.add(release)
+        protected.update(protected_environment_release_paths(environment))
+    return protected
+
+
+def protected_environment_release_paths(environment: str) -> set[Path]:
+    protected = set()
+    pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+    protected.update(path for path in (pointers.current, pointers.previous) if path)
+    for slot in ("blue", "green"):
+        release = _slot_release(environment, slot)
+        if release:
+            protected.add(release)
     return protected
 
 
@@ -1410,6 +1600,29 @@ def protected_runtime_ids() -> set[str]:
         if lock.is_file():
             protected.add(sha256_file(lock))
     return protected
+
+
+def protected_external_pi_runtime_ids() -> set[str]:
+    protected: set[str] = set()
+    has_legacy_release = False
+    for release in protected_environment_release_paths("staging"):
+        recorded = recorded_external_pi_runtime_id(release)
+        if recorded is not None:
+            protected.add(recorded)
+            continue
+        has_legacy_release = True
+        try:
+            protected.add(external_pi_runtime_id(release))
+        except ValueError:
+            # Older protected releases predate the external Pi package inputs.
+            continue
+    if has_legacy_release:
+        protected.add(RETAIN_ALL_RUNTIMES)
+    return protected
+
+
+def _protected_python_runtime_ids() -> set[str]:
+    return protected_runtime_ids() | {EXTERNAL_PI_RUNTIMES.name}
 
 
 def cleanup_releases() -> None:
@@ -1436,23 +1649,37 @@ def cleanup_command(args: argparse.Namespace) -> int:
                 for path in RUNTIMES.iterdir()
                 if path.is_dir()
                 and not path.name.startswith(".")
-                and path.name not in protected_runtime_ids()
+                and path.name not in _protected_python_runtime_ids()
             ]
             if RUNTIMES.is_dir()
             else []
         )
+        protected_external_runtimes = protected_external_pi_runtime_ids()
         print(
             json.dumps(
                 {
                     "remove_releases": [path.name for path in targets],
                     "remove_runtimes": runtime_targets,
+                    "remove_external_pi_runtimes": [
+                        path.name
+                        for path in EXTERNAL_PI_RUNTIMES.iterdir()
+                        if path.is_dir()
+                        and not path.name.startswith(".")
+                        and RETAIN_ALL_RUNTIMES not in protected_external_runtimes
+                        and path.name not in protected_external_runtimes
+                    ]
+                    if EXTERNAL_PI_RUNTIMES.is_dir()
+                    else [],
                 },
                 indent=2,
             )
         )
         for path in targets:
             shutil.rmtree(path)
-        cleanup_runtimes(RUNTIMES, protected_runtime_ids())
+        cleanup_runtimes(RUNTIMES, _protected_python_runtime_ids())
+        cleanup_external_pi_runtimes(
+            EXTERNAL_PI_RUNTIMES, protected_external_pi_runtime_ids()
+        )
     return 0
 
 
@@ -1513,6 +1740,12 @@ def deploy(args: argparse.Namespace) -> int:
             )
             return 0
         runtime, runtime_built = prepare_runtime(release, RUNTIMES)
+        external_pi_runtime = None
+        external_pi_runtime_built = False
+        if args.environment == "staging":
+            external_pi_runtime, external_pi_runtime_built = (
+                prepare_external_pi_runtime(release, EXTERNAL_PI_RUNTIMES)
+            )
         current = read_pointers(ENVIRONMENTS_ROOT / args.environment).current
         print(
             json.dumps(
@@ -1525,6 +1758,10 @@ def deploy(args: argparse.Namespace) -> int:
                     "candidate_sha": sha,
                     "candidate_runtime": runtime.name,
                     "runtime_built": runtime_built,
+                    "external_pi_runtime": (
+                        external_pi_runtime.name if external_pi_runtime else None
+                    ),
+                    "external_pi_runtime_built": external_pi_runtime_built,
                     "features": validate_manifest(release, args.environment)[
                         "backend_features"
                     ],
@@ -1548,7 +1785,7 @@ def deploy(args: argparse.Namespace) -> int:
                     validate_manifest(active_release, args.environment),
                     validate_manifest(release, args.environment),
                 )
-                _prepare_slot(args.environment, inactive, release, runtime)
+                _prepare_qualified_slot(args.environment, inactive, release, runtime)
                 _write_journal(
                     args.environment,
                     "candidate-prepared",
@@ -1597,7 +1834,10 @@ def deploy(args: argparse.Namespace) -> int:
             raise
         if result == "success":
             cleanup_releases()
-            cleanup_runtimes(RUNTIMES, protected_runtime_ids())
+            cleanup_runtimes(RUNTIMES, _protected_python_runtime_ids())
+            cleanup_external_pi_runtimes(
+                EXTERNAL_PI_RUNTIMES, protected_external_pi_runtime_ids()
+            )
         log_event(
             "deploy",
             args.environment,
@@ -1620,6 +1860,19 @@ def rollback(args: argparse.Namespace) -> int:
         pointers = read_pointers(root)
         if not pointers.previous or not pointers.current:
             raise DeployError("current and previous releases are required for rollback")
+        failed_sha = getattr(args, "failed_sha", None)
+        if failed_sha:
+            if len(failed_sha) != 40 or any(
+                character not in "0123456789abcdef" for character in failed_sha
+            ):
+                raise DeployError("--failed-sha requires an exact lowercase commit SHA")
+            current_sha = validate_manifest(pointers.current, args.environment)[
+                "git_sha"
+            ]
+            if current_sha != failed_sha:
+                raise DeployError(
+                    "rollback target changed since the failure was observed"
+                )
         if _active_slot(args.environment) is None:
             target = pointers.previous
             old_current = pointers.current
@@ -1642,6 +1895,8 @@ def rollback(args: argparse.Namespace) -> int:
         validate_manifest(pointers.previous, args.environment)
         target = pointers.previous
         runtime, _ = prepare_runtime(target, RUNTIMES)
+        if args.environment == "staging":
+            prepare_external_pi_runtime(target, EXTERNAL_PI_RUNTIMES)
         result = activate_slot(target, args.environment, runtime)
         log_event(
             "rollback",
@@ -1697,7 +1952,10 @@ def reap(args: argparse.Namespace) -> int:
             previous_release=pointers.previous.name if pointers.previous else None,
         )
         cleanup_releases()
-        cleanup_runtimes(RUNTIMES, protected_runtime_ids())
+        cleanup_runtimes(RUNTIMES, _protected_python_runtime_ids())
+        cleanup_external_pi_runtimes(
+            EXTERNAL_PI_RUNTIMES, protected_external_pi_runtime_ids()
+        )
     print(f"reaped drained {args.environment}/{draining} slot")
     return 0
 
@@ -1774,6 +2032,16 @@ def status(_: argparse.Namespace) -> int:
             )
             if live:
                 slot_item["deployment"] = live
+            if environment == "staging":
+                slot_item["external_pi_shadow"] = {
+                    "supervisor": _systemctl_state(
+                        f"paperswithcode-staging-external-pi@{slot}.service"
+                    ),
+                    "worker": _systemctl_state(
+                        f"paperswithcode-staging-external-pi-worker@{slot}.service"
+                    ),
+                    "lifecycle": external_pi_slot_status(environment, slot) or None,
+                }
             item["slots"][slot] = slot_item
         journal = ENVIRONMENTS_ROOT / environment / "activation-journal.json"
         item["activation_journal"] = (
@@ -1815,6 +2083,7 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.set_defaults(handler=deploy)
     elif program.endswith("pwc-rollback"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
+        parser.add_argument("--failed-sha")
         parser.add_argument("--confirm")
         parser.set_defaults(handler=rollback)
     elif program.endswith("pwc-cleanup"):

@@ -20,6 +20,15 @@ from backend.models.database import (
     PendingPaperEdit,
 )
 from backend.services.catalog_mutation_service import json_safe
+from backend.services.autonomous_capabilities import (
+    HUMAN_ONLY_EDIT_TYPES,
+    AutonomousCapabilityDenied,
+    Capability,
+    ResourceKind,
+    ResourceRef,
+)
+from backend.services.autonomous_operations_repository import RunContext
+from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.pending_edit_errors import (
     PendingEditAlreadyReviewedError,
     PendingEditConflictError,
@@ -76,10 +85,30 @@ class PendingEditService:
     this service owns only the submission lifecycle.
     """
 
-    def __init__(self, db: Session):
+    def __init__(
+        self, db: Session, *, autonomous_policy: AutonomousPolicy | None = None
+    ):
         self.db = db
+        self.autonomous_policy = autonomous_policy or AutonomousPolicy()
         self.snapshots = PendingEditSnapshotService(db)
-        self.mutations = PendingEditMutationService(db)
+        self.mutations = PendingEditMutationService(
+            db, autonomous_policy=self.autonomous_policy
+        )
+
+    def _authorize_codex_review(
+        self, row: PendingPaperEdit, context: RunContext | None
+    ) -> RunContext:
+        if context is None:
+            raise PendingEditError("Autonomous review requires a durable run context")
+        decision = self.autonomous_policy.authorize(
+            self.db,
+            context,
+            Capability.REVIEW_SUBMISSION,
+            ResourceRef(ResourceKind.PENDING_EDIT, str(row.id), True),
+        )
+        if not decision.allowed:
+            raise AutonomousCapabilityDenied(decision.reason_code)
+        return context
 
     def is_linked_author(self, paper_id: int, hf_username: str) -> bool:
         normalized = hf_username.strip().lower()
@@ -314,16 +343,24 @@ class PendingEditService:
         reviewer_username: Optional[str],
         reviewer_hf_subject: Optional[str] = None,
         reviewer_kind: str = "human",
+        autonomous_context: RunContext | None = None,
         review_run_id: Any = None,
         review_model: Optional[str] = None,
         review_evidence: Optional[dict[str, Any]] = None,
         resolved_payload: Optional[dict[str, Any]] = None,
         admin_note: Optional[str] = None,
         user_review_reason: Optional[str] = None,
+        commit: bool = True,
     ) -> PendingPaperEdit:
         if reviewer_kind not in {"human", "codex"}:
             raise PendingEditError("Unsupported reviewer kind")
         row = self._pending_for_review(edit_id)
+        if reviewer_kind == "codex" and row.edit_type in HUMAN_ONLY_EDIT_TYPES:
+            raise PendingEditError(
+                "Autonomous reviews must defer human-only taxonomy resources"
+            )
+        if reviewer_kind == "codex":
+            autonomous_context = self._authorize_codex_review(row, autonomous_context)
         spec = edit_spec(row.edit_type)
         if row.paper_id is None and spec.requires_paper:
             raise PendingEditError("This edit is missing its paper_id")
@@ -359,13 +396,22 @@ class PendingEditService:
 
         before = self.snapshots.approval_event(row.edit_type, row.paper_id)
         try:
-            result_type, result_id = self.mutations.apply(
-                row.edit_type,
-                row.paper_id,
-                applied_payload,
-                actor_hf_subject=row.hf_subject,
-                actor_username=row.hf_username,
-            )
+            if reviewer_kind == "codex":
+                assert autonomous_context is not None
+                result_type, result_id = self.mutations.apply_autonomous(
+                    context=autonomous_context,
+                    edit_type=row.edit_type,
+                    paper_id=row.paper_id,
+                    payload=applied_payload,
+                )
+            else:
+                result_type, result_id = self.mutations.apply_human_review(
+                    row.edit_type,
+                    row.paper_id,
+                    applied_payload,
+                    actor_hf_subject=row.hf_subject,
+                    actor_username=row.hf_username,
+                )
         except Exception as exc:
             self._record_apply_failure(edit_id, row.edit_type, exc)
             raise
@@ -395,8 +441,11 @@ class PendingEditService:
         row.admin_note = admin_note
         row.user_review_reason = user_review_reason
         row.reviewed_at = datetime.now(timezone.utc)
-        self.db.commit()
-        self.db.refresh(row)
+        if commit:
+            self.db.commit()
+            self.db.refresh(row)
+        else:
+            self.db.flush()
         logger.info(
             "submission_approved id=%s reviewer_subject=%s result=%s:%s",
             row.id,
@@ -482,15 +531,23 @@ class PendingEditService:
         reviewer_username: Optional[str],
         reviewer_hf_subject: Optional[str] = None,
         reviewer_kind: str = "human",
+        autonomous_context: RunContext | None = None,
         review_run_id: Any = None,
         review_model: Optional[str] = None,
         review_evidence: Optional[dict[str, Any]] = None,
         admin_note: Optional[str] = None,
         user_review_reason: Optional[str] = None,
+        commit: bool = True,
     ) -> PendingPaperEdit:
         if reviewer_kind not in {"human", "codex"}:
             raise PendingEditError("Unsupported reviewer kind")
         row = self._pending_for_review(edit_id)
+        if reviewer_kind == "codex" and row.edit_type in HUMAN_ONLY_EDIT_TYPES:
+            raise PendingEditError(
+                "Autonomous reviews must defer human-only taxonomy resources"
+            )
+        if reviewer_kind == "codex":
+            self._authorize_codex_review(row, autonomous_context)
         row.status = "rejected"
         row.reviewed_by = reviewer_username
         row.reviewed_by_kind = reviewer_kind
@@ -501,8 +558,11 @@ class PendingEditService:
         row.admin_note = admin_note
         row.user_review_reason = user_review_reason
         row.reviewed_at = datetime.now(timezone.utc)
-        self.db.commit()
-        self.db.refresh(row)
+        if commit:
+            self.db.commit()
+            self.db.refresh(row)
+        else:
+            self.db.flush()
         logger.info(
             "submission_rejected id=%s reviewer_subject=%s",
             row.id,

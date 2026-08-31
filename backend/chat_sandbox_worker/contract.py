@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-WORKER_CONTRACT_VERSION = "102"
+WORKER_CONTRACT_VERSION = "103"
 # Web search extends the catalog operation set without changing its request or
 # response framing, so it remains on the rollback-compatible gateway protocol.
 GATEWAY_CONTRACT_VERSION = 30
@@ -24,6 +24,10 @@ SUPPORTED_AGENT_HARNESSES = ("claude", "pi")
 DEFAULT_AGENT_HARNESS = "pi"
 NEW_SESSION_PI_PERCENTAGE = 100
 PWC_CLI_VERSION = "0.3.0"
+PWC_CLI_SOURCE_COMMIT = "231d196f6add49d011e1694a7e4fdcd3c12bf2d7"
+PWC_CLI_INSTALLER_SHA256 = (
+    "c8e6e9ec67eb5ac0fe4a56e9f62b86b28a9d1a15e8f7b6d1cf90761f5540cc25"
+)
 RESTRICTED_HF_CLI_VERSION = "0.1.0"
 RESTRICTED_HF_CLI_SHA256 = (
     "4151cd20e415958e6ef7b3d15a21d1837feb9867ecbea7e079a09dadef56f4bc"
@@ -39,11 +43,11 @@ BASE_IMAGE = (
     "sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b"
 )
 # Immutable image emitted by publish_image.py for the selected worker contract.
-MODAL_IMAGE_ID = "im-1w1g9MrKU3h1a6lZMmXz3e"
+MODAL_IMAGE_ID = "im-PHw8Oj8mvieZTwFUjhhv9k"
 # Production uses a distinct immutable image because Modal image IDs are scoped
 # to their environment. It must be published by the restricted production
 # service identity.
-PRODUCTION_MODAL_IMAGE_ID = "im-9KrTNjZRd2nzi6fdYajx4p"
+PRODUCTION_MODAL_IMAGE_ID = "im-gWZg59lNVcpcjCSYeE6psd"
 DEFAULT_BACKEND = "modal_cli"
 NEW_CHAT_MODAL_PERCENTAGE = 100
 POSTERLY_SOURCE_COMMIT = "b9f42e5578a49a27525a68f85376bb3bb25af86f"
@@ -54,8 +58,6 @@ POSTERLY_LICENSE = "AGPL-3.0-only"
 POSTERLY_PLAYWRIGHT_VERSION = "1.62.0"
 POSTERLY_CHROMIUM_REVISION = "1234"
 POSTERLY_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
-# Posterly generation is retired. Existing immutable artifacts stay readable
-# through the private artifact store, but no worker turn may create another.
 POSTERLY_ENABLED = False
 
 

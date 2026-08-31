@@ -1,8 +1,11 @@
 import json
 from itertools import count
+from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
+from backend.config import Settings
 from backend.services import openrouter_budget_service
 from backend.services import runtime_validation
 from backend.tests.test_deployment_runtime import deployed_settings, make_bundle
@@ -115,6 +118,29 @@ def test_scheduled_curation_accepts_versioned_space_with_pinned_revision(
     runtime_validation.validate_codex_jobs_configuration(settings)
 
 
+def test_autonomous_submission_callbacks_require_isolated_scoped_secret(
+    settings_factory,
+):
+    settings, _release = settings_factory("production")
+    settings.autonomous_submission_enabled = True
+    settings.autonomous_submission_callback_secret = "short"
+
+    with pytest.raises(RuntimeError, match="separate strong secret"):
+        runtime_validation.validate_codex_jobs_configuration(settings)
+
+    settings.autonomous_submission_callback_secret = "s" * 32
+    settings.autonomous_submission_callback_base_url = (
+        "https://staging.paperswithcode.co/api/v1"
+    )
+    with pytest.raises(RuntimeError, match="production autonomous callbacks"):
+        runtime_validation.validate_codex_jobs_configuration(settings)
+
+    settings.autonomous_submission_callback_base_url = (
+        "https://paperswithcode.co/api/v1"
+    )
+    runtime_validation.validate_codex_jobs_configuration(settings)
+
+
 def test_chat_runtime_descriptor_classifies_enabled_dormant_and_legacy(
     settings_factory,
 ):
@@ -175,6 +201,424 @@ def test_chat_provider_policy_isolated_from_capacity(settings_factory):
     assert str(exc_info.value) == (
         "enabled chat requires the Hugging Face OAuth authentication path"
     )
+
+
+def test_external_pi_migration_switches_are_independent_and_fail_closed(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    assert settings.chat_external_pi_shadow_enabled is False
+    assert settings.chat_external_pi_admission_enabled is False
+    assert settings.chat_remote_workspace_tools_enabled is False
+    assert settings.chat_sandbox_executor_enabled is False
+    assert settings.chat_sandbox_executor_contract_version == ""
+    assert settings.chat_remote_bash_enabled is False
+    assert settings.chat_remote_read_enabled is False
+    assert settings.chat_safe_cli_fast_path_enabled is False
+    assert settings.chat_lazy_workspace_enabled is False
+    assert settings.chat_durable_turn_dispatch_enabled is False
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+
+    settings.chat_external_pi_admission_enabled = True
+    with pytest.raises(RuntimeError, match="external Pi admission requires"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+    settings.chat_external_pi_admission_enabled = False
+    settings.chat_safe_cli_fast_path_enabled = True
+    with pytest.raises(
+        RuntimeError, match="safe CLI fast path requires remote workspace tools"
+    ):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+
+def test_external_pi_shadow_worker_starts_at_eight_but_remains_configurable():
+    defaults = Settings(_env_file=None)
+    assert defaults.chat_external_pi_worker_max_sessions == 8
+    assert defaults.chat_external_pi_supervisor_enabled is False
+    assert defaults.chat_external_pi_heartbeat_seconds == 10
+    assert defaults.chat_external_pi_lease_seconds == 30
+    assert defaults.chat_external_pi_startup_timeout_seconds == 60
+    assert defaults.chat_external_pi_drain_seconds == 60
+    assert defaults.chat_external_pi_drain_poll_seconds == 1
+    assert (
+        Settings(
+            _env_file=None, chat_external_pi_worker_max_sessions=32
+        ).chat_external_pi_worker_max_sessions
+        == 32
+    )
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, chat_external_pi_worker_max_sessions=33)
+
+
+def test_durable_turn_controls_keep_current_capacity_and_allow_100_qualification():
+    defaults = Settings(_env_file=None)
+
+    assert defaults.chat_durable_turn_dispatch_enabled is False
+    assert defaults.chat_max_concurrency == 1
+    assert defaults.chat_timeout_seconds == 180
+    assert (
+        Settings(_env_file=None, chat_max_concurrency=100).chat_max_concurrency == 100
+    )
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, chat_max_concurrency=101)
+
+
+def test_external_pi_shadow_can_be_armed_without_changing_chat_admission(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_shadow_enabled = True
+
+    with pytest.raises(RuntimeError, match="external Pi worker endpoint"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+    assert settings.chat_external_pi_admission_enabled is False
+
+
+def test_external_pi_endpoint_list_is_a_complete_runtime_configuration(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_worker_id = ""
+    settings.chat_external_pi_worker_url = ""
+    settings.chat_external_pi_worker_token = ""
+    settings.chat_external_pi_worker_endpoints = [
+        {
+            "endpoint_id": "blue",
+            "worker_id": "worker-blue",
+            "base_url": "http://127.0.0.1:8780",
+            "token": "b" * 32,
+        },
+        {
+            "endpoint_id": "green",
+            "worker_id": "worker-green",
+            "base_url": "http://[::1]:8781",
+            "token": "g" * 32,
+        },
+    ]
+
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_endpoint_list_rejects_unknown_configuration_keys(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_worker_endpoints = [
+        {
+            "endpoint_id": "blue",
+            "worker_id": "worker-blue",
+            "base_url": "http://127.0.0.1:8780",
+            "token": "b" * 32,
+            "unexpected": "must-fail",
+        }
+    ]
+
+    with pytest.raises(RuntimeError, match="external Pi worker"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("base_url", "https://127.0.0.1:8780"),
+        ("base_url", "http://worker.internal:8780"),
+        ("base_url", "http://127.0.0.1:8780/path"),
+        ("token", "short"),
+    ),
+)
+def test_external_pi_runtime_validates_every_list_endpoint(
+    settings_factory, field, value
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    endpoint = {
+        "endpoint_id": "blue",
+        "worker_id": "worker-blue",
+        "base_url": "http://127.0.0.1:8780",
+        "token": "b" * 32,
+    }
+    endpoint[field] = value
+    settings.chat_external_pi_worker_endpoints = [endpoint]
+
+    with pytest.raises(RuntimeError, match="external Pi worker"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+@pytest.mark.parametrize(
+    "duplicate_field", ("endpoint_id", "worker_id", "base_url", "token")
+)
+def test_external_pi_runtime_rejects_ambiguous_endpoint_list(
+    settings_factory, duplicate_field
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_shadow_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    first = {
+        "endpoint_id": "blue",
+        "worker_id": "worker-blue",
+        "base_url": "http://127.0.0.1:8780",
+        "token": "b" * 32,
+    }
+    second = {
+        "endpoint_id": "green",
+        "worker_id": "worker-green",
+        "base_url": "http://127.0.0.1:8781",
+        "token": "g" * 32,
+    }
+    second[duplicate_field] = first[duplicate_field]
+    settings.chat_external_pi_worker_endpoints = [first, second]
+
+    with pytest.raises(RuntimeError, match="topology is ambiguous"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_runtime_rejects_mixed_list_and_legacy_configuration(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_shadow_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_worker_endpoints = [
+        {
+            "endpoint_id": "blue",
+            "worker_id": "worker-blue",
+            "base_url": "http://127.0.0.1:8780",
+            "token": "b" * 32,
+        }
+    ]
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+
+    with pytest.raises(RuntimeError, match="topology is ambiguous"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_runtime_keeps_complete_legacy_singleton_compatible_and_rejects_partial(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_shadow_enabled = True
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_token = "l" * 32
+
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+    settings.chat_external_pi_worker_token = ""
+    with pytest.raises(RuntimeError, match="topology is incomplete"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_migration_controls_remain_staging_only(settings_factory):
+    settings, _release = settings_factory("production")
+    settings.chat_external_pi_shadow_enabled = True
+
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("chat_external_pi_ready_registry_enabled", True),
+        ("chat_turn_event_journal_schema_enabled", True),
+        ("chat_external_pi_runtime_contract_version", "durable-external-pi-v1"),
+    ],
+)
+def test_durable_external_contract_attestations_remain_staging_only(
+    settings_factory, field, value
+):
+    settings, _release = settings_factory("production")
+    setattr(settings, field, value)
+
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+    settings.chat_external_pi_shadow_enabled = False
+    settings.chat_external_pi_supervisor_enabled = True
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+
+def test_disabled_production_rejects_durable_turn_dispatch(settings_factory):
+    settings, _release = settings_factory("production")
+    assert settings.chat_enabled is False
+    settings.chat_durable_turn_dispatch_enabled = True
+
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_runtime(settings)
+
+
+def test_staging_can_qualify_durable_bridge_without_external_admission(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_durable_turn_dispatch_enabled = True
+
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+    assert settings.chat_external_pi_admission_enabled is False
+
+
+@pytest.mark.parametrize(
+    "switch",
+    [
+        "chat_sandbox_executor_enabled",
+        "chat_remote_bash_enabled",
+        "chat_remote_read_enabled",
+    ],
+)
+def test_executor_bridge_controls_remain_staging_only(settings_factory, switch):
+    settings, _release = settings_factory("production")
+    setattr(settings, switch, True)
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+
+@pytest.mark.parametrize(
+    "switch",
+    [
+        "chat_sandbox_executor_enabled",
+        "chat_remote_bash_enabled",
+        "chat_remote_read_enabled",
+    ],
+)
+def test_disabled_production_runtime_rejects_executor_bridge_controls(
+    settings_factory, switch
+):
+    settings, _release = settings_factory("production")
+    assert settings.chat_enabled is False
+    setattr(settings, switch, True)
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+
+    with pytest.raises(RuntimeError, match="staging-only"):
+        runtime_validation.validate_runtime(settings)
+
+
+def test_deployed_runtime_allows_disabled_executor_bridge_and_staging_qualification(
+    settings_factory,
+):
+    production, _release = settings_factory("production")
+    runtime_validation.validate_runtime(production)
+
+    staging, _release = settings_factory("staging")
+    staging.chat_sandbox_executor_enabled = True
+    staging.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    staging.chat_remote_bash_enabled = True
+    staging.chat_remote_read_enabled = True
+
+    runtime_validation.validate_runtime(staging)
+
+    assert staging.chat_external_pi_admission_enabled is False
+
+
+def test_executor_bridge_contract_does_not_admit_external_pi(settings_factory):
+    settings, _release = settings_factory("staging")
+    settings.chat_sandbox_executor_enabled = True
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    settings.chat_remote_bash_enabled = True
+    settings.chat_remote_read_enabled = True
+
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+    assert settings.chat_external_pi_admission_enabled is False
+
+
+def test_external_pi_admission_requires_the_executor_bridge(settings_factory):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_admission_enabled = True
+    settings.chat_remote_workspace_tools_enabled = True
+    settings.chat_lazy_workspace_enabled = True
+    settings.chat_durable_turn_dispatch_enabled = True
+
+    with pytest.raises(RuntimeError, match="sandbox executor with Bash and Read"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_admission_requires_durable_bridge_and_exact_contracts(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_admission_enabled = True
+    settings.chat_remote_workspace_tools_enabled = True
+    settings.chat_lazy_workspace_enabled = True
+    settings.chat_sandbox_executor_enabled = True
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    settings.chat_remote_bash_enabled = True
+    settings.chat_remote_read_enabled = True
+
+    with pytest.raises(RuntimeError, match="durable turn dispatch"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+    settings.chat_durable_turn_dispatch_enabled = True
+    with pytest.raises(RuntimeError, match="complete durable runtime contract"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+    settings.chat_turn_event_journal_schema_enabled = True
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_ready_registry_enabled = True
+    settings.chat_external_pi_runtime_contract_version = "durable-external-pi-v1"
+    runtime_validation.validate_external_pi_migration_policy(settings)
+
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v2"
+    with pytest.raises(RuntimeError, match="sandbox executor contract"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+@pytest.mark.parametrize("environment", ["staging", "production"])
+def test_executor_bridge_environment_examples_remain_disabled(environment):
+    source = Path(f"deploy/env/{environment}.env.example").read_text()
+
+    assert "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=false\n" in source
+    assert "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION=\n" in source
+    assert "PWC_CHAT_REMOTE_BASH_ENABLED=false\n" in source
+    assert "PWC_CHAT_REMOTE_READ_ENABLED=false\n" in source
+
+
+def test_external_pi_supervisor_requires_a_safe_heartbeat_lease_ratio(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_heartbeat_seconds = 30
+    settings.chat_external_pi_lease_seconds = 30
+
+    with pytest.raises(RuntimeError, match="heartbeat must be shorter than the lease"):
+        runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+    settings.chat_external_pi_heartbeat_seconds = 29
+    runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
 def test_environment_policy_isolated_from_storage(settings_factory):
@@ -248,6 +692,70 @@ def test_direct_openai_requires_exact_low_reasoning_warm_profile(settings_factor
     settings.chat_pi_prewarm_reasoning_effort = "high"
     with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
         runtime_validation.validate_chat_capacity_and_spend_policy(settings)
+
+
+def _durable_external_qualification_resource_profile(settings):
+    settings.chat_openai_direct_enabled = True
+    settings.openai_api_key = "test-only"
+    settings.chat_blank_pool_enabled = False
+    settings.chat_pi_prewarm_enabled = False
+    settings.chat_external_pi_admission_enabled = False
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_ready_registry_enabled = True
+    settings.chat_external_pi_runtime_contract_version = "durable-external-pi-v1"
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_durable_turn_dispatch_enabled = True
+    settings.chat_turn_event_journal_schema_enabled = True
+    settings.chat_sandbox_executor_enabled = True
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    settings.chat_remote_workspace_tools_enabled = True
+    settings.chat_remote_bash_enabled = True
+    settings.chat_remote_read_enabled = True
+    settings.chat_lazy_workspace_enabled = True
+    settings.chat_max_concurrency = 2
+    settings.chat_sandbox_total_live_cap = 3
+    return settings
+
+
+def test_direct_openai_accepts_only_complete_staging_durable_qualification_profile(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    _durable_external_qualification_resource_profile(settings)
+
+    runtime_validation._validate_chat_resource_policy(settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    (
+        ("environment", "production"),
+        ("chat_external_pi_admission_enabled", True),
+        ("chat_external_pi_supervisor_enabled", False),
+        ("chat_external_pi_ready_registry_enabled", False),
+        ("chat_external_pi_runtime_contract_version", ""),
+        ("chat_external_pi_worker_contract_version", ""),
+        ("chat_durable_turn_dispatch_enabled", False),
+        ("chat_turn_event_journal_schema_enabled", False),
+        ("chat_sandbox_executor_enabled", False),
+        ("chat_sandbox_executor_contract_version", ""),
+        ("chat_remote_workspace_tools_enabled", False),
+        ("chat_remote_bash_enabled", False),
+        ("chat_remote_read_enabled", False),
+        ("chat_lazy_workspace_enabled", False),
+        ("chat_max_concurrency", 3),
+        ("chat_sandbox_total_live_cap", 4),
+    ),
+)
+def test_direct_openai_rejects_partial_or_nonstaging_durable_qualification_profile(
+    settings_factory, field, invalid
+):
+    settings, _release = settings_factory("staging")
+    _durable_external_qualification_resource_profile(settings)
+    setattr(settings, field, invalid)
+
+    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+        runtime_validation._validate_chat_resource_policy(settings)
 
 
 def test_chat_provider_policy_rejects_unreviewed_kimi_route(settings_factory):
@@ -344,9 +852,9 @@ def test_chat_provider_policy_owns_gateway_and_openrouter(
     ("field", "value", "message"),
     [
         (
-            "chat_openrouter_api_key",
+            "chat_title_hf_token",
             "",
-            "an OpenRouter title credential is required",
+            "an HF GLM title credential is required",
         ),
         (
             "chat_sandbox_cpu_limit",
@@ -382,10 +890,12 @@ def test_runtime_finishes_local_chat_policy_before_openrouter_guardrail(
         calls.append("provider")
 
     monkeypatch.setattr(runtime_validation, "validate_chat_provider_policy", provider)
+
+    def capacity(_settings):
+        calls.append("capacity")
+
     monkeypatch.setattr(
-        runtime_validation,
-        "validate_chat_capacity_and_spend_policy",
-        lambda _settings: calls.append("capacity"),
+        runtime_validation, "_validate_chat_capacity_and_spend_policy", capacity
     )
     monkeypatch.setattr(
         runtime_validation,
@@ -396,6 +906,29 @@ def test_runtime_finishes_local_chat_policy_before_openrouter_guardrail(
     runtime_validation.validate_runtime(settings)
 
     assert calls == ["provider", "capacity", "openrouter"]
+
+
+def test_runtime_validates_external_migration_policy_exactly_once(
+    settings_factory, monkeypatch
+):
+    settings, _release = settings_factory("staging")
+    original = runtime_validation.validate_external_pi_migration_policy
+    calls = 0
+
+    def migration_policy(current_settings):
+        nonlocal calls
+        calls += 1
+        original(current_settings)
+
+    monkeypatch.setattr(
+        runtime_validation,
+        "validate_external_pi_migration_policy",
+        migration_policy,
+    )
+
+    runtime_validation.validate_runtime(settings)
+
+    assert calls == 1
 
 
 def test_release_manifest_isolated_from_storage_and_tolerates_extra_keys(

@@ -50,6 +50,9 @@ class CronJobStatus(BaseModel):
     lock_stale: bool = False
     diagnostics: Optional[str] = None
     diagnostic_groups: Dict[str, List[str]] = Field(default_factory=dict)
+    health_findings: List[Dict[str, Any]] = Field(default_factory=list)
+    operator_url: Optional[str] = None
+    run_url: Optional[str] = None
 
 
 class CronJobsResponse(BaseModel):

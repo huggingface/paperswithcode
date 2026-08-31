@@ -1,4 +1,8 @@
-import type { CronJobsResponse, PaperMarkdownJobsResponse } from "./operations.types";
+import type {
+  AutonomousOperationsResponse,
+  CronJobsResponse,
+  PaperMarkdownJobsResponse,
+} from "./operations.types";
 export type * from "./operations.types";
 import type { ApiRequest } from "../apiTransport";
 import { apiRequest } from "./request";
@@ -13,6 +17,59 @@ export class OperationsApi {
 
   getPaperMarkdownJobs(): Promise<PaperMarkdownJobsResponse> {
     return this.request("/cron/paper-markdown-jobs", { cache: "no-store" });
+  }
+
+  getAutonomousOperations(): Promise<AutonomousOperationsResponse> {
+    return this.request("/admin/autonomous-operations", { cache: "no-store" });
+  }
+
+  setAutonomousManualMode(
+    enabled: boolean,
+    expectedRevision: number,
+    confirmation: string,
+  ): Promise<AutonomousOperationsResponse> {
+    return this.request("/admin/autonomous-operations/manual-mode", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled,
+        expected_revision: expectedRevision,
+        confirmation,
+      }),
+    });
+  }
+
+  setAutonomousOperator(
+    operator: string,
+    enabled: boolean,
+    expectedRevision: number,
+    confirmation: string,
+  ): Promise<AutonomousOperationsResponse> {
+    return this.request(`/admin/autonomous-operations/operators/${operator}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled,
+        expected_revision: expectedRevision,
+        confirmation,
+      }),
+    });
+  }
+
+  qualifyAutonomousChatBaseline(
+    sha: string,
+    expectedRevision: number,
+    confirmation: string,
+  ): Promise<AutonomousOperationsResponse> {
+    return this.request("/admin/autonomous-operations/chat-baseline", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        sha,
+        expected_revision: expectedRevision,
+        confirmation,
+      }),
+    });
   }
 }
 

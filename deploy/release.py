@@ -305,13 +305,32 @@ def validate_manifest(release_dir: Path, environment: str | None = None) -> dict
     versioned_required = legacy_required | {"feature_contract_version"}
     bridge_required = versioned_required | {"chat_runtime"}
     profile = manifest.get("build_profile")
-    if set(manifest) == legacy_required:
+    manifest_keys = set(manifest)
+    external_pi_runtime = manifest.get("external_pi_runtime")
+    if external_pi_runtime is not None:
+        if (
+            not isinstance(external_pi_runtime, dict)
+            or set(external_pi_runtime) != {"identity_schema", "runtime_id", "contract"}
+            or not isinstance(external_pi_runtime["identity_schema"], int)
+            or external_pi_runtime["identity_schema"] < 1
+            or not isinstance(external_pi_runtime["runtime_id"], str)
+            or len(external_pi_runtime["runtime_id"]) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in external_pi_runtime["runtime_id"]
+            )
+            or not isinstance(external_pi_runtime["contract"], str)
+            or not external_pi_runtime["contract"]
+        ):
+            raise ValueError("release external Pi runtime descriptor is invalid")
+        manifest_keys.remove("external_pi_runtime")
+    if manifest_keys == legacy_required:
         expected = {"chat": profile == "staging"}
-    elif set(manifest) == versioned_required:
+    elif manifest_keys == versioned_required:
         expected = _profile_features_for_version(
             profile, manifest["feature_contract_version"]
         )
-    elif set(manifest) == bridge_required:
+    elif manifest_keys == bridge_required:
         version = manifest["feature_contract_version"]
         if version in {4, 5, 6, FEATURE_CONTRACT_VERSION} and profile == "production":
             backend_features = manifest.get("backend_features")

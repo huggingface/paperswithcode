@@ -292,8 +292,9 @@ def extract_candidates(
             check_liveness()
     if (
         arxiv_id
+        and not hf_markdown_available
         and not ocr_markdown_available
-        and not (has_live("github") and has_live("project_page"))
+        and not (has_live("github") or has_live("project_page"))
     ):
         try:
             url = f"https://arxiv.org/pdf/{arxiv_id}"
@@ -345,15 +346,54 @@ def extract_candidates(
 
     check_liveness()
 
+    source_documents: list[dict[str, str]] = []
+    seen_documents: set[str] = set()
+
+    def document(kind: str, url: str | None) -> None:
+        if not url or url in seen_documents:
+            return
+        normalized = url.strip()
+        if not normalized.startswith(("http://", "https://")):
+            return
+        seen_documents.add(normalized)
+        source_documents.append({"kind": kind, "url": normalized})
+
+    document("paper_source", paper.get("source_url"))
+    source_candidate = context.get("source_candidate") or {}
+    document("model_card", source_candidate.get("model_card_url"))
+    for repository in paper.get("repositories") or []:
+        if repository.get("is_official"):
+            document("github_readme", repository.get("url"))
+    for project_page in paper.get("project_pages") or []:
+        if project_page.get("is_official"):
+            document("project_page", project_page.get("url"))
+    for source in sources:
+        if source.get("source") in {"hf_markdown", "ocr_markdown"}:
+            document("paper_markdown", source.get("url"))
+
+    markdown_available = hf_markdown_available or ocr_markdown_available
+    official_source_available = has_live("github") or has_live("project_page")
+
+    def is_nonblocking(error: dict) -> bool:
+        source = error.get("source")
+        if source in {"hf_markdown", "ocr_markdown"}:
+            return official_source_available
+        if source == "pdf_first_two_pages":
+            return markdown_available or official_source_available
+        return False
+
+    blocking_errors = [error for error in errors if not is_nonblocking(error)]
+
     return {
         "schema_version": "url-candidates.v1",
         "paper_id": paper["id"],
-        "complete": not errors,
-        "markdown_available": hf_markdown_available or ocr_markdown_available,
+        "complete": not blocking_errors,
+        "markdown_available": markdown_available,
         "awaiting_markdown": markdown_attempted
-        and not (hf_markdown_available or ocr_markdown_available),
+        and not (markdown_available or official_source_available),
         "candidates": list(candidates.values())[:50],
         "sources": sources[:20],
+        "source_documents": source_documents[:20],
         "errors": errors[:20],
     }
 

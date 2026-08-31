@@ -15,6 +15,10 @@ from backend.models.database import (
     Dataset,
     Evaluation,
     Metric,
+    HfArtifact,
+    ModelProviderAlias,
+    ModelRelease,
+    ModelReleaseArtifact,
     Paper,
     PaperTask,
     Task,
@@ -147,6 +151,113 @@ def _session() -> Session:
     )
     session.commit()
     return session
+
+
+def test_discovery_resolves_new_model_through_shared_release_identity(monkeypatch):
+    session = _session()
+    Base.metadata.create_all(
+        session.get_bind(),
+        tables=[
+            HfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+        ],
+    )
+    paper = Paper(
+        title="Qwen3.8 Report",
+        source="external",
+        source_url="https://qwen.ai/blog/qwen3.8",
+        version="v1",
+        is_latest_version=True,
+    )
+    session.add(paper)
+    session.flush()
+    release = ModelRelease(
+        paper_id=paper.id,
+        canonical_name="Qwen3.8 27B",
+        publisher="Qwen",
+        aliases=[],
+        is_open=True,
+    )
+    session.add(release)
+    session.flush()
+    artifact = HfArtifact(
+        repo_id="Qwen/Qwen3.8-27B",
+        kind="model",
+        url="https://huggingface.co/Qwen/Qwen3.8-27B",
+    )
+    session.add(artifact)
+    session.flush()
+    session.add(
+        ModelReleaseArtifact(model_release_id=release.id, hf_artifact_id=artifact.id)
+    )
+    session.commit()
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "qwen3-8-27b",
+                "Qwen3.8 27B",
+                {"intelligence": 50.0},
+                date(2026, 8, 1),
+            )
+        ],
+    )
+
+    result = asyncio.run(
+        aa.ArtificialAnalysisPaperDiscoveryService(session).discover(
+            leaderboard=leaderboard
+        )
+    )
+
+    assert result.papers == {"qwen3-8-27b": paper.id}
+    alias = session.query(ModelProviderAlias).one()
+    assert (alias.provider, alias.alias, alias.model_release_id) == (
+        "artificial-analysis",
+        "qwen3-8-27b",
+        release.id,
+    )
+
+
+def test_shared_release_identity_fails_closed_on_ambiguous_names():
+    session = _session()
+    Base.metadata.create_all(
+        session.get_bind(),
+        tables=[
+            HfArtifact.__table__,
+            ModelRelease.__table__,
+            ModelReleaseArtifact.__table__,
+            ModelProviderAlias.__table__,
+        ],
+    )
+    for index in range(2):
+        paper = Paper(
+            title=f"Shared Model Report {index}",
+            source="external",
+            source_url=f"https://example.com/shared-{index}",
+            version="v1",
+            is_latest_version=True,
+        )
+        session.add(paper)
+        session.flush()
+        session.add(
+            ModelRelease(
+                paper_id=paper.id,
+                canonical_name="Shared Model",
+                publisher=f"org-{index}",
+                aliases=[],
+            )
+        )
+    session.commit()
+
+    release = aa.ModelReleaseIdentityService(session).resolve(
+        "artificial-analysis", "shared-model", name="Shared Model"
+    )
+
+    assert release is None
+    assert session.query(ModelProviderAlias).count() == 0
 
 
 def test_discovery_indexes_missing_arxiv_and_external_papers(monkeypatch):

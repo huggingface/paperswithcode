@@ -7,11 +7,11 @@ from backend.config import Settings
 from backend.services import chat_title_service
 
 
-def test_title_generation_defaults_to_deepseek_v4_flash_on_openrouter():
+def test_title_generation_defaults_to_glm_5_3_flash_on_hugging_face():
     settings = Settings(_env_file=None)
 
-    assert settings.chat_title_model == "deepseek/deepseek-v4-flash-0731"
-    assert settings.chat_title_provider == "openrouter"
+    assert settings.chat_title_model == "zai-org/GLM-5.3-Flash:baseten"
+    assert settings.chat_title_provider == "huggingface"
 
 
 def test_stream_title_uses_throughput_routing_without_reasoning(monkeypatch):
@@ -56,6 +56,8 @@ def test_stream_title_uses_throughput_routing_without_reasoning(monkeypatch):
     settings = Settings(
         _env_file=None,
         hf_token="shared-nielsr-token",
+        chat_title_provider="openrouter",
+        chat_title_model="deepseek/deepseek-v4-flash-0731",
     )
 
     async def collect():
@@ -107,7 +109,7 @@ def test_stream_title_uses_throughput_routing_without_reasoning(monkeypatch):
     )
 
 
-def test_stream_title_uses_hugging_face_router_for_production(monkeypatch):
+def test_stream_title_uses_hugging_face_glm_with_org_billing(monkeypatch):
     client_args = {}
     completion_args = {}
 
@@ -133,7 +135,8 @@ def test_stream_title_uses_hugging_face_router_for_production(monkeypatch):
     settings = Settings(
         _env_file=None,
         chat_title_provider="huggingface",
-        chat_title_model="deepseek-ai/DeepSeek-V4-Flash-0731:fastest",
+        chat_title_model="zai-org/GLM-5.3-Flash:baseten",
+        chat_title_bill_to="huggingface",
     )
 
     async def collect():
@@ -145,8 +148,12 @@ def test_stream_title_uses_hugging_face_router_for_production(monkeypatch):
         ]
 
     assert asyncio.run(collect()) == []
-    assert client_args["base_url"] == "https://router.huggingface.co/v1"
-    assert client_args["api_key"] == "production-title-token"
-    assert completion_args["model"] == "deepseek-ai/DeepSeek-V4-Flash-0731:fastest"
+    assert client_args == {
+        "base_url": "https://router.huggingface.co/v1",
+        "api_key": "production-title-token",
+        "timeout": 5,
+        "default_headers": {"X-HF-Bill-To": "huggingface"},
+    }
+    assert completion_args["model"] == "zai-org/GLM-5.3-Flash:baseten"
     assert completion_args["stream_options"] == {"include_usage": True}
     assert completion_args["extra_body"] == {"reasoning": {"effort": "low"}}

@@ -356,12 +356,18 @@ class ChatGatewayService:
             )
         if operation == "benchmark_evaluations":
             is_open = _optional_boolean(arguments.get("is_open"))
+            max_parameters_exclusive = arguments.get("max_parameters_exclusive")
             return _dump(
                 EvaluationService(self.db).get_evaluations(
                     page=max(1, min(int(arguments.get("page", 1)), 100)),
                     page_size=max(1, min(int(arguments.get("page_size", 100)), 100)),
                     dataset_id=int(arguments["dataset"]),
                     is_open=is_open,
+                    max_parameters_exclusive=(
+                        int(max_parameters_exclusive)
+                        if max_parameters_exclusive is not None
+                        else None
+                    ),
                     order_by="best_rank",
                     order_dir="asc",
                 )

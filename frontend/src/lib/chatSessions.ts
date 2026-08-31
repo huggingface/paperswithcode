@@ -148,6 +148,7 @@ export interface ChatModelChoice {
 
 export const DEFAULT_CHAT_MODEL = "gpt-5.6-luna@openai";
 export const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
+export const GLM_CHAT_MODEL = "zai-org/GLM-5.3-Flash";
 export const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
 
 export function providerForChatModel(
@@ -180,8 +181,8 @@ export const PRODUCTION_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
     provider: "openai",
   },
   {
-    id: DEEPSEEK_CHAT_MODEL,
-    label: "DeepSeek V4 Flash",
+    id: GLM_CHAT_MODEL,
+    label: "GLM-5.3-Flash",
     provider: "huggingface",
   },
 ];

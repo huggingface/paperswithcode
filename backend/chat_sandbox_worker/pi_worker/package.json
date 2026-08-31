@@ -8,6 +8,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "start:external-shadow": "node dist/src/external_http_main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --test --import tsx test/*.test.ts"
   },
@@ -19,11 +20,13 @@
     "pi-mcp-adapter": "2.25.0",
     "tsx": "4.20.5",
     "typebox": "1.3.7",
+    "ws": "^8.18.3",
     "zod": "4.2.0"
   },
   "devDependencies": {
-    "@types/node": "22.18.3",
     "@types/cross-spawn": "6.0.6",
+    "@types/node": "22.18.3",
+    "@types/ws": "^8.18.1",
     "typescript": "5.9.2"
   }
 }

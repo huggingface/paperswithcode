@@ -7,8 +7,11 @@ import asyncio
 import json
 import subprocess
 import sys
+import uuid
 from collections.abc import Sequence
 from datetime import datetime, timezone
+from decimal import Decimal
+from hashlib import sha256
 from pathlib import Path
 
 from sqlalchemy import text
@@ -23,6 +26,13 @@ from backend.cli_papers import (
 )
 from backend.cli_submissions import register_submission_commands
 from backend.database.connection import db_manager
+from backend.services.autonomous_capabilities import CAPABILITY_MANIFESTS
+from backend.services.autonomous_codex_runner import (
+    CodexRequest,
+    codex_result_schema,
+    run_codex,
+)
+from backend.services.autonomous_operations_repository import Operator, RunContext
 from backend.services.cron_health import build_cron_dashboard
 from backend.services.cron_registry import get_cron_job, list_cron_jobs
 from backend.services.cron_token_probe import TOKEN_PROBES, probe_cron_token
@@ -196,6 +206,18 @@ def build_parser() -> argparse.ArgumentParser:
     register_admin_commands(commands)
     register_contributor_commands(commands)
     register_submission_commands(commands)
+
+    autonomous = commands.add_parser(
+        "autonomous", help="Run bounded autonomous-operations diagnostics"
+    )
+    autonomous_commands = autonomous.add_subparsers(
+        dest="autonomous_command", required=True
+    )
+    autonomous_run = autonomous_commands.add_parser("run")
+    autonomous_run.add_argument("operator", choices=[value.value for value in Operator])
+    autonomous_run.add_argument("--dry-run", action="store_true")
+    autonomous_run.add_argument("--budget-usd", type=Decimal, default=Decimal("0.25"))
+    autonomous_run.set_defaults(handler=run_autonomous_operator)
 
     paper_commands = register_paper_commands(commands)
 
@@ -802,6 +824,65 @@ def check_cron_token(args: argparse.Namespace) -> int:
         if result.error:
             print(f"ERROR: {result.error}", file=sys.stderr)
     return 0 if result.success else 1
+
+
+def run_autonomous_operator(args: argparse.Namespace) -> int:
+    if not args.dry_run:
+        raise ValueError("autonomous run currently requires --dry-run")
+    operator = Operator(args.operator)
+    capabilities = tuple(sorted(CAPABILITY_MANIFESTS[operator], key=str))
+    schema = codex_result_schema(capabilities)
+    revision_source = json.dumps(
+        {
+            "capabilities": [value.value for value in capabilities],
+            "schema": schema,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    context = RunContext(
+        run_id=uuid.uuid4(),
+        operator=operator,
+        dry_run=True,
+        manifest_revision=f"autonomous-v1:{sha256(revision_source.encode()).hexdigest()}",
+    )
+    request = CodexRequest(
+        context=context,
+        evidence=(),
+        capabilities=capabilities,
+        output_schema=schema,
+        budget_usd=args.budget_usd,
+    )
+    with db_manager.session_local() as db:
+        result = run_codex(request, db=db)
+        db.commit()
+    print(
+        json.dumps(
+            {
+                "run_id": str(result.run_id),
+                "operator": operator.value,
+                "status": result.status,
+                "exit_classification": result.exit_classification,
+                "usage": {
+                    "input_tokens": result.usage.input_tokens,
+                    "output_tokens": result.usage.output_tokens,
+                    "cost_usd": format(result.usage.cost_usd, "f"),
+                },
+                "proposed_actions": [
+                    {
+                        "capability": action.capability.value,
+                        "resource_kind": action.resource.kind.value,
+                        "resource_identifier": action.resource.identifier,
+                        "reason_code": action.reason_code,
+                    }
+                    for action in result.proposed_actions
+                ],
+                "result_digest": result.result_digest,
+            },
+            indent=2,
+        )
+    )
+    return 0 if result.status in {"completed", "rejected"} else 1
 
 
 def main(argv: Sequence[str] | None = None) -> int:

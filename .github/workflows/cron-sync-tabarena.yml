@@ -1,8 +1,6 @@
 name: Cron - Sync TabArena
 
 on:
-  schedule:
-    - cron: "55 * * * *"
   workflow_dispatch: {}
 
 concurrency:

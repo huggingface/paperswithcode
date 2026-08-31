@@ -1,0 +1,332 @@
+#!/usr/bin/env python3
+"""Host timer schedule table for production pwc-cron jobs.
+
+This table is the single source of truth for the generated systemd units in
+deploy/systemd/cron/.  Schedules preserve the minute offsets previously used
+by the GitHub Actions ``schedule:`` triggers so that load stays staggered and
+producer chains keep their relative ordering.  Regenerate the units with
+``python deploy/generate_cron_units.py`` after editing this table.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TimerSpec:
+    """One systemd timer/service pair driving one pwc-cron invocation."""
+
+    job: str
+    on_calendar: tuple[str, ...]
+    description: str
+    # Extra pwc-cron arguments after the job name.
+    args: tuple[str, ...] = ()
+    # Multiple sequential pwc-cron invocations (overrides job+args when set);
+    # each entry is a full argument vector passed to pwc-cron-throttled.
+    commands: tuple[tuple[str, ...], ...] = ()
+    # systemd After= orderings onto other generated cron services, by unit
+    # base name.  Ordering only applies when both units are queued (for
+    # example during a persistent catch-up storm after downtime).
+    after: tuple[str, ...] = ()
+    # Unit base name override; defaults to pwc-cron-<job with - for _>.
+    unit_name: str = ""
+
+    @property
+    def unit(self) -> str:
+        return self.unit_name or "pwc-cron-" + self.job.replace("_", "-")
+
+    @property
+    def invocations(self) -> tuple[tuple[str, ...], ...]:
+        if self.commands:
+            return self.commands
+        return ((self.job, *self.args),)
+
+
+TIMERS: tuple[TimerSpec, ...] = (
+    # Trending pipeline: stars (:00) -> task trending (:15) -> paper trending
+    # (:45, also consumes HF artifacts from :30).  Hot trending runs its own
+    # 15-minute lane.
+    TimerSpec(
+        job="update_github_stars",
+        on_calendar=("*-*-* *:00:00",),
+        description="Update GitHub repository star counts hourly",
+    ),
+    TimerSpec(
+        job="update_hot_github_trending",
+        on_calendar=("*-*-* *:00/15:00",),
+        description="Update hot GitHub trending snapshots every 15 minutes",
+    ),
+    TimerSpec(
+        job="calculate_trending_scores",
+        on_calendar=("*-*-* *:15:00",),
+        description="Calculate task trending scores hourly",
+        after=("pwc-cron-update-github-stars",),
+    ),
+    TimerSpec(
+        job="update_citations",
+        on_calendar=("*-*-* *:30:00",),
+        description="Update citation counts hourly",
+    ),
+    TimerSpec(
+        job="update_hf_artifacts",
+        on_calendar=("*-*-* *:30:00",),
+        description="Update Hugging Face artifact links hourly",
+    ),
+    TimerSpec(
+        job="calculate_paper_trending_scores",
+        on_calendar=("*-*-* *:45:00",),
+        description="Calculate paper trending scores hourly",
+        after=(
+            "pwc-cron-update-github-stars",
+            "pwc-cron-update-hf-artifacts",
+            "pwc-cron-calculate-trending-scores",
+        ),
+    ),
+    # Hugging Face import and consumers.
+    TimerSpec(
+        job="import_hf_daily_papers",
+        on_calendar=("*-*-* *:00:00",),
+        description="Import Hugging Face daily papers hourly",
+    ),
+    TimerSpec(
+        job="refresh_paper_embeddings",
+        on_calendar=("*-*-* *:15:00",),
+        description="Refresh paper embeddings hourly",
+        after=("pwc-cron-import-hf-daily-papers",),
+    ),
+    TimerSpec(
+        job="paper_markdown_backfill",
+        on_calendar=("*-*-* *:17:00",),
+        description="Reconcile paper Markdown live and full backfill lanes hourly",
+        commands=(
+            ("paper_markdown_backfill", "--execute", "--confirm"),
+            ("paper_markdown_backfill", "--full", "--execute", "--confirm"),
+        ),
+        after=("pwc-cron-import-hf-daily-papers",),
+    ),
+    TimerSpec(
+        job="enqueue_hf_daily_paper_curation",
+        on_calendar=("*-*-* *:27:00",),
+        description="Enqueue Hugging Face daily paper curation hourly",
+        after=("pwc-cron-import-hf-daily-papers",),
+    ),
+    TimerSpec(
+        job="enqueue_hf_trending_model_curation",
+        on_calendar=("*-*-* *:42:00",),
+        description="Enqueue Hugging Face trending model curation hourly",
+    ),
+    # Leaderboard syncs, staggered at their previous workflow minutes.
+    TimerSpec(
+        job="sync_3d_arena",
+        on_calendar=("*-*-* *:05:00",),
+        description="Sync 3D Arena leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_mmteb_overall",
+        on_calendar=("*-*-* *:07:00",),
+        description="Sync MMTEB v2 overall leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_arc_prize",
+        on_calendar=("*-*-* *:10:00",),
+        description="Sync ARC Prize leaderboards hourly",
+    ),
+    TimerSpec(
+        job="sync_mmeb_v2",
+        on_calendar=("*-*-* *:12:00",),
+        description="Sync MMEB-v2 overall leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_open_asr",
+        on_calendar=("*-*-* *:15:00",),
+        description="Sync Open ASR leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_mmteb_retrieval",
+        on_calendar=("*-*-* *:22:00",),
+        description="Sync MMTEB v2 retrieval leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_deepswe",
+        on_calendar=("*-*-* *:25:00",),
+        description="Sync DeepSWE leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_artificial_analysis",
+        on_calendar=("*-*-* *:35:00",),
+        description="Sync Artificial Analysis leaderboards hourly",
+    ),
+    TimerSpec(
+        job="sync_mmteb_reranking",
+        on_calendar=("*-*-* *:37:00",),
+        description="Sync MMTEB v2 reranking leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_programbench",
+        on_calendar=("*-*-* *:40:00",),
+        description="Sync ProgramBench leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_mmeb_v3",
+        on_calendar=("*-*-* *:42:00",),
+        description="Sync MMEB-v3 overall leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_frontiercode",
+        on_calendar=("*-*-* *:45:00",),
+        description="Sync FrontierCode leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_coarena",
+        on_calendar=("*-*-* *:50:00",),
+        description="Sync CoArena leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_tabarena",
+        on_calendar=("*-*-* *:55:00",),
+        description="Sync TabArena leaderboard hourly",
+    ),
+    # Daily jobs.
+    TimerSpec(
+        job="backfill_method_keywords",
+        on_calendar=("*-*-* 01:10:00",),
+        description="Backfill method keyword evidence daily",
+        args=(
+            "--resume",
+            "--limit",
+            "10000",
+            "--max-runtime-seconds",
+            "3300",
+        ),
+    ),
+    TimerSpec(
+        job="sync_hf_organizations",
+        on_calendar=("*-*-* 02:20:00",),
+        description="Sync featured Hugging Face organizations daily",
+    ),
+    TimerSpec(
+        job="export_enrichment_dashboard",
+        on_calendar=("*-*-* 03:10:00",),
+        description="Export the enrichment dashboard snapshot daily",
+    ),
+    TimerSpec(
+        job="calculate_organization_trending_scores",
+        on_calendar=("*-*-* 03:40:00",),
+        description="Calculate organization trending scores daily",
+        after=(
+            "pwc-cron-sync-hf-organizations",
+            "pwc-cron-calculate-paper-trending-scores",
+        ),
+    ),
+    TimerSpec(
+        job="mirror_thumbnails_to_disk",
+        on_calendar=("*-*-* 05:00:00",),
+        description="Mirror thumbnails to VPS disk daily",
+        after=("pwc-cron-preload-thumbnails-recent",),
+    ),
+    # Six-hourly backfill.
+    TimerSpec(
+        job="backfill_method_references",
+        on_calendar=("*-*-* 00/6:15:00",),
+        description="Backfill method reference evidence every six hours",
+        args=(
+            "--provider",
+            "openalex",
+            "--resume",
+            "--retry-failures",
+            "--limit",
+            "10000",
+            "--max-runtime-seconds",
+            "19800",
+        ),
+    ),
+    # Weekly linkers (Sunday, method linker before task keywords).
+    TimerSpec(
+        job="link_methods_by_references",
+        on_calendar=("Sun *-*-* 04:00:00",),
+        description="Link methods by paper references weekly",
+    ),
+    TimerSpec(
+        job="link_papers_by_task_keywords",
+        on_calendar=("Sun *-*-* 05:00:00",),
+        description="Link papers by task keywords weekly",
+        after=("pwc-cron-link-methods-by-references",),
+    ),
+    # Thumbnail preload lanes (five schedules with distinct arguments; all
+    # share the preload_thumbnails job lock).
+    TimerSpec(
+        job="preload_thumbnails",
+        unit_name="pwc-cron-preload-thumbnails-visible",
+        on_calendar=("*-*-* 00/3:00:00",),
+        description="Preload thumbnails for visible candidate sets every three hours",
+        args=(
+            "--priority",
+            "visible",
+            "--citation-top",
+            "1000",
+            "--trending-top",
+            "500",
+            "--newest-top",
+            "300",
+            "--per-task",
+            "20",
+            "--per-method",
+            "20",
+            "--limit",
+            "10000",
+            "--missing-only",
+            "--trust-local-cache",
+        ),
+    ),
+    TimerSpec(
+        job="preload_thumbnails",
+        unit_name="pwc-cron-preload-thumbnails-task-top",
+        on_calendar=("*-*-* 04:00:00",),
+        description="Preload thumbnails for top task-page papers daily",
+        args=(
+            "--priority",
+            "task-top",
+            "--per-task",
+            "50",
+            "--missing-only",
+            "--trust-local-cache",
+        ),
+    ),
+    TimerSpec(
+        job="preload_thumbnails",
+        unit_name="pwc-cron-preload-thumbnails-method-top",
+        on_calendar=("*-*-* 04:15:00",),
+        description="Preload thumbnails for top method-page papers daily",
+        args=(
+            "--priority",
+            "method-top",
+            "--per-method",
+            "50",
+            "--missing-only",
+            "--trust-local-cache",
+        ),
+    ),
+    TimerSpec(
+        job="preload_thumbnails",
+        unit_name="pwc-cron-preload-thumbnails-recent",
+        on_calendar=("*-*-* 04:30:00",),
+        description="Preload thumbnails for recent papers daily",
+        args=("--priority", "recent", "--recent-days", "30", "--limit", "500"),
+        after=("pwc-cron-import-hf-daily-papers",),
+    ),
+    TimerSpec(
+        job="preload_thumbnails",
+        unit_name="pwc-cron-preload-thumbnails-external",
+        on_calendar=("*-*-* 04:45:00",),
+        description="Preload thumbnails for external resources daily",
+        args=(
+            "--priority",
+            "external-missing",
+            "--request-delay-seconds",
+            "2",
+            "--max-failures",
+            "-1",
+        ),
+    ),
+)

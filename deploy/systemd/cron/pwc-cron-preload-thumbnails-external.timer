@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Preload thumbnails for external resources daily
+
+[Timer]
+OnCalendar=*-*-* 04:45:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-preload-thumbnails-external.service
+
+[Install]
+WantedBy=timers.target

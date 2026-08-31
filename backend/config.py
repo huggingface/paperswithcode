@@ -8,13 +8,28 @@ from functools import lru_cache
 from pathlib import Path
 from typing import List, Literal
 
-from pydantic import Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from backend.services.paper_markdown_job_profile import (
     PAPER_MARKDOWN_BACKFILL_JOB_PROFILE,
     PAPER_MARKDOWN_LIVE_JOB_PROFILE,
 )
+
+
+class ExternalPiWorkerEndpointConfig(BaseModel):
+    """Closed configuration shape for one authenticated loopback worker."""
+
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    endpoint_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    worker_id: str = Field(
+        min_length=1, max_length=128, pattern=r"^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+    )
+    base_url: str = Field(min_length=1, max_length=1000)
+    token: str = Field(min_length=32, max_length=8192, repr=False)
 
 
 class Settings(BaseSettings):
@@ -155,6 +170,39 @@ class Settings(BaseSettings):
         default="",
         description="API token required for administrative endpoints",
     )
+    autonomous_submission_enabled: bool = Field(default=False)
+    autonomous_submission_callback_secret: str = Field(default="")
+    autonomous_submission_callback_base_url: str = Field(
+        default="https://paperswithcode.co/api/v1"
+    )
+    autonomous_submission_run_budget_usd: Decimal = Field(
+        default=Decimal("5"), gt=0, le=100
+    )
+    autonomous_submission_jobs_enabled: bool = Field(default=False)
+    autonomous_submission_hf_namespace: str = Field(default="")
+    autonomous_submission_hf_token: str = Field(default="")
+    autonomous_submission_openai_api_key: str = Field(default="")
+    autonomous_submission_job_image: str = Field(default="")
+    autonomous_alert_slack_webhook_url: str = Field(default="", max_length=2000)
+    autonomous_alert_fallback_webhook_url: str = Field(default="", max_length=2000)
+    autonomous_digest_webhook_url: str = Field(default="", max_length=2000)
+    autonomous_alert_runbook_url: str = Field(default="", max_length=2000)
+    autonomous_submission_job_timeout_seconds: int = Field(
+        default=1800, ge=300, le=3600
+    )
+    autonomous_submission_codex_timeout_seconds: int = Field(
+        default=1200, ge=60, le=1800
+    )
+    autonomous_submission_max_active_jobs: int = Field(default=1, ge=1, le=1)
+    autonomous_submission_input_usd_per_million: Decimal = Field(
+        default=Decimal("0"), ge=0
+    )
+    autonomous_submission_cached_input_usd_per_million: Decimal = Field(
+        default=Decimal("0"), ge=0
+    )
+    autonomous_submission_output_usd_per_million: Decimal = Field(
+        default=Decimal("0"), ge=0
+    )
 
     # Codex curation jobs. Immutable production releases may opt in; staging
     # remains disabled because its catalog role is read-only.
@@ -174,10 +222,10 @@ class Settings(BaseSettings):
     codex_jobs_token: str = Field(default="")
     codex_jobs_openai_api_key: str = Field(default="")
     codex_jobs_image: str = Field(
-        default="hf.co/spaces/nielsr/pwc-codex-curator-d5db656657e6"
+        default="hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86"
     )
     codex_jobs_image_revision: str = Field(
-        default="1d85149040996dbb4ea0805f4c034a80ad214bdf"
+        default="7067f309c98f9ea002b812773c9a256400c740ef"
     )
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
     codex_jobs_timeout_seconds: int = Field(default=5400, ge=300, le=14400)
@@ -285,6 +333,7 @@ class Settings(BaseSettings):
     # registry. They are never exposed in current model discovery.
     chat_glm_route: str = Field(default="zai-org/GLM-5.2:together")
     chat_gemma_route: str = Field(default="google/gemma-4-31B-it:cerebras")
+    chat_glm_5_3_flash_route: str = Field(default="zai-org/GLM-5.3-Flash:fastest")
     # Staging-only Hugging Face Inference Providers route. Pin a live provider;
     # `:fastest` hops across backends.
     chat_kimi_route: str = Field(default="moonshotai/Kimi-K3:baseten")
@@ -343,6 +392,39 @@ class Settings(BaseSettings):
     chat_openai_user_max_concurrency: int = Field(default=2, ge=1, le=16)
     chat_openai_global_max_concurrency: int = Field(default=4, ge=1, le=64)
     chat_openai_reconciliation_stale_minutes: int = Field(default=15, ge=1, le=24 * 60)
+    # Server-owned research-scope guardrail. These credentials, limits, and
+    # counters are deliberately separate from user inference credentials and
+    # the main direct-OpenAI chat allowance.
+    chat_scope_guardrail_enabled: bool = Field(default=False)
+    chat_scope_guardrail_hf_token: str = Field(default="")
+    chat_scope_guardrail_hf_bill_to: str = Field(default="", max_length=200)
+    chat_scope_guardrail_glm_model: str = Field(
+        default="zai-org/GLM-5.3-Flash:baseten",
+        pattern=r"^zai-org/GLM-5\.3-Flash:baseten$",
+    )
+    chat_scope_guardrail_openai_api_key: str = Field(default="")
+    chat_scope_guardrail_openai_model: str = Field(
+        default="gpt-5.6-luna", pattern=r"^gpt-5\.6-luna$"
+    )
+    chat_scope_guardrail_attempt_timeout_seconds: float = Field(
+        default=1.5, ge=0.1, le=1.5
+    )
+    chat_scope_guardrail_max_prior_messages: int = Field(default=6, ge=0, le=6)
+    chat_scope_guardrail_max_context_chars: int = Field(
+        default=8_000, ge=8_000, le=8_000
+    )
+    chat_scope_guardrail_buffer_max_events: int = Field(default=256, ge=8, le=4096)
+    chat_scope_guardrail_buffer_max_bytes: int = Field(
+        default=2 * 1024 * 1024, ge=64 * 1024, le=16 * 1024 * 1024
+    )
+    chat_scope_guardrail_max_concurrency: int = Field(default=16, ge=1, le=128)
+    chat_scope_guardrail_rate_limit_calls: int = Field(default=600, ge=1, le=100_000)
+    chat_scope_guardrail_rate_limit_window_seconds: int = Field(
+        default=10 * 60, ge=60, le=24 * 60 * 60
+    )
+    chat_scope_guardrail_daily_budget_usd: Decimal = Field(
+        default=Decimal("5.00"), gt=0, le=1000
+    )
     # Read-only compatibility input for rolling back releases whose staging
     # registry still exposed the Terra route.
     chat_terra_route: str = Field(default="openai/gpt-5.6-terra")
@@ -400,8 +482,8 @@ class Settings(BaseSettings):
     chat_openrouter_input_microusd_per_token: int = Field(default=2, ge=1)
     chat_openrouter_output_microusd_per_token: int = Field(default=9, ge=1)
     chat_openrouter_request_fee_microusd: int = Field(default=10_000, ge=0)
-    chat_title_model: str = Field(default="deepseek/deepseek-v4-flash-0731")
-    chat_title_provider: str = Field(default="openrouter")
+    chat_title_model: str = Field(default="zai-org/GLM-5.3-Flash:baseten")
+    chat_title_provider: str = Field(default="huggingface")
     chat_title_timeout_seconds: float = Field(default=5, gt=0, le=30)
     chat_title_max_tokens: int = Field(default=64, ge=8, le=64)
     chat_title_generation_enabled: bool = Field(default=False)
@@ -431,7 +513,9 @@ class Settings(BaseSettings):
     chat_max_turns: int = Field(default=8, ge=3, le=12)
     chat_max_search_calls: int = Field(default=2, ge=1, le=5)
     chat_timeout_seconds: float = Field(default=180, gt=0, le=300)
-    chat_max_concurrency: int = Field(default=1, ge=1, le=8)
+    # Protected emergency active-turn limit. Deployed profiles stay at their
+    # qualified 1/2-turn values until a separate load qualification raises it.
+    chat_max_concurrency: int = Field(default=1, ge=1, le=100)
     chat_user_max_concurrency: int = Field(default=2, ge=1, le=8)
     chat_public_admission_enabled: bool = Field(default=True)
     chat_sandbox_admission_enabled: bool = Field(default=True)
@@ -455,6 +539,40 @@ class Settings(BaseSettings):
     chat_pi_max_extension_files: Literal[0] = Field(default=0)
     chat_pi_max_extension_bytes: Literal[0] = Field(default=0)
     chat_pi_max_reloads_per_turn: Literal[0] = Field(default=0)
+    # External-harness migration controls remain independently fail-closed.
+    # Chat work is staging-only until a separate production authorization.
+    chat_external_pi_shadow_enabled: bool = Field(default=False)
+    chat_external_pi_admission_enabled: bool = Field(default=False)
+    chat_external_pi_supervisor_enabled: bool = Field(default=False)
+    chat_external_pi_ready_registry_enabled: bool = Field(default=False)
+    chat_external_pi_runtime_contract_version: str = Field(default="", max_length=64)
+    chat_external_pi_worker_id: str = Field(default="", max_length=128)
+    chat_external_pi_worker_url: str = Field(default="", max_length=1000)
+    chat_external_pi_worker_token: str = Field(default="", repr=False)
+    chat_external_pi_worker_endpoints: list[ExternalPiWorkerEndpointConfig] = Field(
+        default_factory=list, max_length=16, repr=False
+    )
+    chat_external_pi_worker_contract_version: str = Field(default="", max_length=64)
+    chat_qualification_evidence_retention_hours: int = Field(default=24, ge=1, le=168)
+    chat_external_pi_worker_max_sessions: int = Field(default=8, ge=1, le=32)
+    chat_external_pi_heartbeat_seconds: float = Field(default=10, ge=1, le=30)
+    chat_external_pi_lease_seconds: int = Field(default=30, ge=5, le=60)
+    chat_external_pi_startup_timeout_seconds: int = Field(default=60, ge=5, le=300)
+    chat_external_pi_drain_seconds: int = Field(default=60, ge=5, le=300)
+    chat_external_pi_drain_poll_seconds: float = Field(default=1, ge=0.1, le=5)
+    chat_remote_workspace_tools_enabled: bool = Field(default=False)
+    # Inert Phase-2 executor bridge. These controls may be qualified on staging
+    # without admitting any external Pi traffic.
+    chat_sandbox_executor_enabled: bool = Field(default=False)
+    chat_sandbox_executor_contract_version: str = Field(default="", max_length=64)
+    chat_remote_bash_enabled: bool = Field(default=False)
+    chat_remote_read_enabled: bool = Field(default=False)
+    chat_safe_cli_fast_path_enabled: bool = Field(default=False)
+    chat_lazy_workspace_enabled: bool = Field(default=False)
+    chat_durable_turn_dispatch_enabled: bool = Field(default=False)
+    chat_turn_event_journal_schema_enabled: bool = Field(default=False)
+    chat_turn_event_replay_grace_seconds: int = Field(default=300, ge=30, le=3600)
+    chat_turn_event_cleanup_batch_size: int = Field(default=100, ge=1, le=100)
     chat_modal_image_version: str = Field(default="", max_length=255)
     chat_pwc_cli_version: str = Field(default="", max_length=64)
     chat_worker_contract_version: str = Field(default="", max_length=64)
@@ -495,10 +613,6 @@ class Settings(BaseSettings):
     chat_latex_compiler_hf_sandbox_egress_policy_attestation: str = Field(
         default="", max_length=128
     )
-    # Legacy private-Space settings remain readable for rollback-era direct
-    # clients, but the application factory never selects that transport.
-    chat_latex_compiler_url: str = Field(default="", max_length=1000)
-    chat_latex_compiler_hf_token: str = Field(default="")
     chat_latex_compiler_signing_private_key: str = Field(default="")
     chat_artifact_shared_preview_enabled: bool = Field(default=False)
     chat_artifact_storage_backend: Literal["local", "hf_bucket"] = Field(
@@ -524,6 +638,7 @@ class Settings(BaseSettings):
     chat_artifact_max_version_bytes: int = Field(
         default=32 * 1024 * 1024, ge=4096, le=32 * 1024 * 1024
     )
+
     chat_artifact_owner_quota_bytes: int = Field(
         default=250 * 1024 * 1024, ge=4096, le=250 * 1024 * 1024
     )
@@ -672,6 +787,13 @@ class Settings(BaseSettings):
     chat_provider_alert_window_seconds: int = Field(default=300, ge=60, le=900)
     chat_provider_alert_min_failures: int = Field(default=5, ge=2, le=100)
     chat_provider_alert_failure_percent: int = Field(default=50, ge=1, le=100)
+    chat_lifecycle_alert_window_seconds: int = Field(default=300, ge=60, le=900)
+    chat_lifecycle_alert_min_samples: int = Field(default=5, ge=2, le=100)
+    chat_lifecycle_alert_failure_percent: int = Field(default=50, ge=1, le=100)
+    chat_lifecycle_capacity_saturation_count: int = Field(default=5, ge=1, le=100)
+    chat_lifecycle_workspace_create_percent: int = Field(default=75, ge=1, le=100)
+    chat_lifecycle_ttft_threshold_ms: int = Field(default=10_000, ge=100, le=120_000)
+    chat_lifecycle_ttft_regression_percent: int = Field(default=50, ge=1, le=100)
     chat_sandbox_total_live_cap: int = Field(default=2, ge=1, le=16)
     chat_workspace_snapshots_enabled: bool = Field(default=False)
     chat_workspace_snapshot_inactivity_days: int = Field(default=30, ge=1, le=90)
@@ -682,6 +804,15 @@ class Settings(BaseSettings):
     catalog_mutations_enabled: bool = Field(default=True)
     thumbnail_mutations_enabled: bool = Field(default=True)
     cron_enabled: bool = Field(default=True)
+
+    @model_validator(mode="after")
+    def preserve_staging_artifacts_when_scope_guarded(self) -> "Settings":
+        """Keep non-Posterly research artifacts across the legacy host launcher."""
+
+        if self.environment == "staging" and self.chat_scope_guardrail_enabled:
+            self.chat_artifacts_enabled = True
+            self.chat_artifact_shared_preview_enabled = True
+        return self
 
     @property
     def chat_model_registry(self) -> tuple[dict[str, str], ...]:
@@ -704,7 +835,16 @@ class Settings(BaseSettings):
                 else "openrouter_funded"
             ),
         }
-        choices = (deepseek,)
+        glm = {
+            "id": "zai-org/GLM-5.3-Flash",
+            "label": "GLM-5.3-Flash",
+            "route": self.chat_glm_5_3_flash_route,
+            "provider": "huggingface",
+            "provider_model": self.chat_glm_5_3_flash_route,
+            "protocol": "anthropic-messages",
+            "funding_mode": "hf_user_billed",
+        }
+        choices = (glm,) if self.environment == "production" else (deepseek,)
         if self.environment == "production" and self.chat_openai_direct_enabled:
             choices = (
                 {
@@ -716,7 +856,7 @@ class Settings(BaseSettings):
                     "protocol": "openai-responses",
                     "funding_mode": "openai_funded",
                 },
-                deepseek,
+                glm,
             )
         if self.environment == "staging":
             staging_choices = (
@@ -810,9 +950,15 @@ class Settings(BaseSettings):
     @property
     def chat_model_routes(self) -> dict[str, str]:
         routes = {choice["id"]: choice["route"] for choice in self.chat_model_choices}
-        canonical_route = routes.get("deepseek-ai/DeepSeek-V4-Flash-0731")
-        if canonical_route is None:
-            return routes
+        routes.setdefault(
+            "deepseek-ai/DeepSeek-V4-Flash-0731",
+            (
+                self.chat_deepseek_v4_flash_route
+                if self.chat_deepseek_v4_flash_provider == "huggingface"
+                else self.chat_deepseek_v4_flash_openrouter_route
+            ),
+        )
+        canonical_route = routes["deepseek-ai/DeepSeek-V4-Flash-0731"]
         # Existing sessions keep their persisted selected-model IDs but move to
         # the sole qualified route. These aliases are intentionally absent from
         # discovery and frontend defaults.
@@ -835,6 +981,10 @@ class Settings(BaseSettings):
         providers = {
             choice["id"]: choice["provider"] for choice in self.chat_model_registry
         }
+        providers.setdefault(
+            "deepseek-ai/DeepSeek-V4-Flash-0731",
+            self.chat_deepseek_v4_flash_provider,
+        )
         canonical_provider = providers["deepseek-ai/DeepSeek-V4-Flash-0731"]
         for legacy_model in (
             "google/gemma-4-31B-it",
@@ -853,6 +1003,7 @@ class Settings(BaseSettings):
     @property
     def chat_model_labels(self) -> dict[str, str]:
         labels = {choice["id"]: choice["label"] for choice in self.chat_model_registry}
+        labels.setdefault("deepseek-ai/DeepSeek-V4-Flash-0731", "DeepSeek V4 Flash")
         if self.environment == "staging":
             labels["openai/gpt-5.6-luna"] = "GPT-5.6 Luna (Legacy OpenRouter)"
         return labels
@@ -864,6 +1015,10 @@ class Settings(BaseSettings):
         }
         protocols.setdefault(self.chat_glm_route, "anthropic-messages")
         protocols.setdefault(self.chat_gemma_route, "anthropic-messages")
+        protocols.setdefault(self.chat_deepseek_v4_flash_route, "anthropic-messages")
+        protocols.setdefault(
+            self.chat_deepseek_v4_flash_openrouter_route, "anthropic-messages"
+        )
         return protocols
 
     @property
@@ -874,6 +1029,13 @@ class Settings(BaseSettings):
         }
         models.setdefault(self.chat_glm_route, self.chat_glm_route)
         models.setdefault(self.chat_gemma_route, self.chat_gemma_route)
+        models.setdefault(
+            self.chat_deepseek_v4_flash_route, self.chat_deepseek_v4_flash_route
+        )
+        models.setdefault(
+            self.chat_deepseek_v4_flash_openrouter_route,
+            self.chat_deepseek_v4_flash_openrouter_route,
+        )
         return models
 
     @property
@@ -884,6 +1046,10 @@ class Settings(BaseSettings):
         }
         modes.setdefault(self.chat_glm_route, "openrouter_funded")
         modes.setdefault(self.chat_gemma_route, "openrouter_funded")
+        modes.setdefault(self.chat_deepseek_v4_flash_route, "hf_user_billed")
+        modes.setdefault(
+            self.chat_deepseek_v4_flash_openrouter_route, "openrouter_funded"
+        )
         return modes
 
     @property
@@ -916,7 +1082,7 @@ class Settings(BaseSettings):
             return self.chat_openai_luna_route
         if self.chat_alternative_model_enabled:
             return self.chat_alternative_model
-        return self.chat_model_routes["deepseek-ai/DeepSeek-V4-Flash-0731"]
+        return self.chat_model_choices[0]["route"]
 
     # GitHub API configuration
     github_token: str = Field(

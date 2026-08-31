@@ -121,12 +121,15 @@ not be after the end date.
   --order-by trending|name|full_name|created_at|paper_count
   --order-dir asc|desc --json]`
 - `pwc benchmark --name NAME` — Show a benchmark's top models, scores, source
-  papers, publication dates, and open/closed status. `NAME` must exactly match
-  a benchmark name, full name, slug, or ID.
+  papers, publication dates, parameter counts, and open/closed status. `NAME`
+  must exactly match a benchmark name, full name, slug, or ID.
   For multi-metric tradeoffs, require numeric metrics, apply repeatable
   thresholds, sort by one metric, or select a Pareto frontier. Metric names are
   case-insensitive.
-  `[--limit 1-100 --is-open true|false
+  `--max-parameters SIZE` keeps models at or below an inclusive parameter
+  limit; SIZE accepts values such as `500M`, `1.5B`, `3B`, and raw integers.
+  Models without one consistent parameter count are excluded.
+  `[--limit 1-100 --is-open true|false --max-parameters SIZE
   --require-metrics METRIC[,METRIC]
   --min METRIC=VALUE --max METRIC=VALUE
   --sort METRIC[:asc|desc]
@@ -139,6 +142,8 @@ not be after the end date.
 
 1. Use `pwc benchmark list --task TASK` to discover active benchmarks for a given task,
    then `pwc benchmark --name NAME` to inspect a specific leaderboard.
+   Add `--max-parameters SIZE` for on-device, edge-inference, or other
+   resource-constrained device requests.
    For accuracy/latency or other multi-metric questions, use
    `--require-metrics`, thresholds, or `--pareto`; do not infer a tradeoff from
    a leaderboard sorted by one metric.

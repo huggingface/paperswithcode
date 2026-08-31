@@ -13,6 +13,7 @@ rollback target.
   .venv
   runtime-lock.sha256
   runtimes/<uv-lock-sha256>/
+  runtimes/external-pi/<content-id>/
   releases/<sha12>-<environment>/
   environments/{production,staging}/
     current
@@ -35,6 +36,35 @@ whose ID is the release's `uv.lock` SHA-256. The legacy shared `.venv` and
 fixed-port services remain a migration fallback until both environments have
 passed a slot rollback window. Public staging is static and gated to
 allowlisted project contributors and admins; it never runs Vite or HMR.
+
+The external Pi worker is packaged independently under `runtimes/external-pi`.
+It exposes the content-free shadow comparison and an authenticated active-turn
+tracer. Packaging and shadow activation do not route browser chat traffic to
+the tracer: external admission remains a separate staging-only switch, and
+runtime validation rejects every external migration switch in production until
+the durable dispatch, fencing, recovery, workspace-retention, and qualification
+gates have been approved. The runtime identity covers the package manifest,
+lockfile, TypeScript build inputs, canonical prompt inputs, and pinned Node
+22.19.0 distribution contract. Packaging does not activate worker traffic. A
+build uses a temporary directory, exact locked dependencies, a production
+TypeScript build, production-dependency pruning, and an atomic rename.
+`runtime.json` records contract `external-pi-v1`, source release, entry point,
+Node identity, and a strict file-digest inventory. Reuse rejects mutable,
+missing, extra, or digest-mismatched files. The staging `release.json` records
+the selected runtime ID, contract, and identity-schema version so cleanup and
+rollback never recalculate a historical identity with newer packaging rules.
+Only protected staging releases participate in external Pi retention. While
+any protected pre-descriptor staging release remains, cleanup conservatively
+retains the full external Pi namespace rather than guessing its identity;
+descriptor-less production releases do not disable staging cleanup.
+Dependency installation, build, pruning, and prompt rendering run under a live
+aggregate byte and inode monitor. A dedicated supervisor child becomes a Linux
+child subreaper and tracks only the launched build lineage by PID and process
+start time, so containment survives process-group changes, new sessions, double
+forks, and an early direct-parent exit without adopting unrelated deploy-process
+children. Direct-parent completion, a bound breach, or timeout stops revalidated
+descendants through PID handles and reaps them before the runner returns. The
+one-shot supervisor then exits, and failed builds discard the temporary runtime.
 
 Both environments read the live `public` catalog and shared thumbnail mirror.
 Staging connects as `pwc_staging`, can select catalog rows, and can write only
@@ -179,34 +209,35 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    routes, including the anonymous read-only HF catalog route and the bounded
    artifact preparation/publication routes.
 4. Apply `add_chat_sandbox_runtime.sql`, `add_chat_turn_latency.sql`,
+   `add_chat_turn_jobs.sql`,
    `add_chat_sandbox_pool.sql`, `add_chat_active_cost.sql`,
    `add_chat_user_billing.sql`, `add_chat_qualification_metadata.sql`,
    `add_chat_openrouter_user_budget.sql`, and
    `add_chat_sandbox_spend_cap.sql`, `add_chat_web_search.sql`, and
    `add_chat_hf_catalog.sql`, `add_chat_reasoning_effort.sql`, and
    `add_chat_ttft_profiles.sql`, `add_chat_sandbox_egress_policy.sql`,
-   `add_chat_artifacts.sql`, `expand_chat_artifact_foundation.sql`,
-   `allow_chat_latex_paper_restore_digests.sql`,
-   `add_chat_latex_paper_figure_storage.sql`,
-   `add_chat_latex_repair_provenance.sql`, and
-   `add_chat_warm_assignment_race.sql` as PostgreSQL superuser with
+   `add_chat_artifacts.sql`, `expand_chat_artifact_foundation.sql`, and
+   `add_chat_warm_assignment_race.sql` as
+   PostgreSQL superuser with
    `search_path=staging,public`. The guarded migrations refuse any other schema,
    assign the new tables to `pwc_staging_owner`, grant `pwc_staging`, and
-   revoke the production application role. The artifact foundation is required
-   for the private-paper ORM, but does not authorize Posterly or paper
-   admission. The pool migration remains required even while
-   `PWC_CHAT_BLANK_POOL_ENABLED=false`, because readiness validates the
-   rollback-safe audit schema before pool activation.
+   revoke the production application role. The pool migration remains required
+   even while `PWC_CHAT_BLANK_POOL_ENABLED=false`, because readiness validates
+   the rollback-safe audit schema before pool activation.
+   Keep `PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED=false` until this migration is
+   verified in the staging schema and the exact release passes turn-ownership
+   qualification; an application deployment does not apply the migration.
 5. Keep `PWC_CHAT_WORKSPACE_SNAPSHOTS_ENABLED=false`; snapshot activation is
    outside the latency project and requires a separate approved plan. V1 uses
    Modal's isolated, automatically reclaimed ephemeral disk; PID and memory
    ceilings remain hard qualification probes.
 
-Posterly is permanently disabled for staging paper authoring:
-`PWC_CHAT_POSTERLY_ENABLED=false` on every bridge, qualification, activation,
-and rollback release. The additive artifact schema remains only for typed
-private-paper compatibility and historical reads; no release or configuration
-refresh may set Posterly true or create a public paper artifact/share snapshot.
+Posterly's additive gateway contract uses one zero-assignment bridge release.
+Deploy the first gateway-29 release with `POSTERLY_ENABLED=false`; only after
+that release is both current and the rollback target accepts contract 29 may a
+second exact-SHA release set `POSTERLY_ENABLED=true`. The bridge contains the
+image, schema, storage provenance, and routes, but the launcher keeps artifact
+admission and publication disabled.
 
 Staging web search uses a server-owned Exa key and remains fail-closed unless
 the feature flag, protected credential, monthly circuit, database tables, and
@@ -286,6 +317,304 @@ Before any non-zero rollout, deploy two distinct zero-percent bridge commits so
 both `current` and `previous` understand `modal_cli`. Then run the operator-only
 infrastructure qualification from the selected immutable release:
 
+The durable-turn compatibility bridge is a separate, reversible staging-only
+checkpoint. The guarded `add_chat_turn_jobs.sql` migration must already be
+applied with `search_path=staging,public`, and its schema, ownership, grants,
+production-role revocation, and indexes must be audited before enabling the
+bridge. Keep staging capacity at exactly two
+(`PWC_CHAT_MAX_CONCURRENCY=2`) throughout enablement, qualification, and
+rollback; this toggle must not change capacity, external-worker, executor,
+workspace, or provider switches.
+
+Resolve and validate the active immutable staging release before any protected
+configuration write. Audit the schema while the bridge is still disabled, then
+enable only through that exact release's helper, refresh its exact SHA, and
+verify that `current` still resolves to the audited release before normal
+qualification:
+
+```bash
+release_root=/srv/paperswithcode/releases
+staging_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+case "$staging_release" in
+  "$release_root"/????????????-staging) ;;
+  *) echo "active staging release is not immutable" >&2; exit 1 ;;
+esac
+cd -- "$staging_release" || exit 1
+readarray -t staging_identity < <(/srv/paperswithcode/.venv/bin/python -c '
+import json, re, sys
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+sha = manifest.get("git_sha")
+assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+assert manifest.get("release_id") == f"{sha[:12]}-staging"
+runtime = manifest.get("chat_runtime")
+assert isinstance(runtime, dict)
+worker = runtime.get("worker_contract_version")
+assert isinstance(worker, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", worker)
+print(sha)
+print(manifest["release_id"])
+print(worker)
+' "$staging_release/release.json") || exit 1
+test "${#staging_identity[@]}" -eq 3 || exit 1
+staging_sha="${staging_identity[0]}"
+staging_release_id="${staging_identity[1]}"
+staging_worker_contract="${staging_identity[2]}"
+test "$(basename -- "$staging_release")" = "$staging_release_id" || exit 1
+runtime_id="$(sha256sum "$staging_release/uv.lock" | awk '{print $1}')" || exit 1
+case "$runtime_id" in
+  *[!0-9a-f]*|'') echo "staging runtime ID is invalid" >&2; exit 1 ;;
+esac
+test "${#runtime_id}" -eq 64 || {
+  echo "staging runtime ID is invalid" >&2
+  exit 1
+}
+runtime_python="/srv/paperswithcode/runtimes/$runtime_id/bin/python"
+test -x "$runtime_python" || {
+  echo "installed staging runtime Python is missing" >&2
+  exit 1
+}
+
+run_staging_chat_gate() {
+  case "${1-}" in
+    audit-disabled)
+      test "$#" -eq 1 || return 1
+      gate_module=backend.scripts.qualify_chat_durable_dispatch
+      gate_args=(
+        --release-dir "$staging_release"
+        --confirm QUALIFY_STAGING_DURABLE_DISPATCH
+        --audit-disabled-only
+      )
+      ;;
+    qualify-enabled)
+      test "$#" -eq 1 || return 1
+      gate_module=backend.scripts.qualify_chat_durable_dispatch
+      gate_args=(
+        --release-dir "$staging_release"
+        --confirm QUALIFY_STAGING_DURABLE_DISPATCH
+        --qualify-enabled-only
+      )
+      ;;
+    soak)
+      test "$#" -eq 1 || return 1
+      gate_module=backend.scripts.qualify_chat_soak
+      gate_args=(
+        --release-dir "$staging_release"
+        --confirm QUALIFY_STAGING_CHAT_SOAK
+      )
+      ;;
+    soak-audit)
+      test "$#" -eq 2 || return 1
+      gate_module=backend.scripts.audit_chat_soak
+      gate_args=(
+        --started-at "$2"
+        --release-dir "$staging_release"
+        --confirm AUDIT_STAGING_CHAT_SOAK
+      )
+      ;;
+    *) echo "invalid staging chat gate" >&2; return 1 ;;
+  esac
+  sudo systemd-run --quiet --wait --pipe --collect \
+    --uid=pwc-staging --gid=pwc-staging \
+    --working-directory="$staging_release" \
+    --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+    -- /usr/bin/env \
+    PWC_RELEASE_ID="$staging_release_id" \
+    PWC_CHAT_WORKER_CONTRACT_VERSION="$staging_worker_contract" \
+    "$runtime_python" -m "$gate_module" "${gate_args[@]}"
+}
+
+run_staging_chat_gate audit-disabled || exit 1
+
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$staging_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-chat-durable-dispatch-enable-only || exit 1
+sudo pwc-deploy staging "$staging_sha" --refresh-environment || exit 1
+
+refreshed_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+test "$refreshed_release" = "$staging_release" || exit 1
+refreshed_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
+' "$refreshed_release/release.json")" || exit 1
+test "$refreshed_sha" = "$staging_sha" || exit 1
+cd -- "$refreshed_release" || exit 1
+run_staging_chat_gate qualify-enabled || exit 1
+run_staging_chat_gate soak || exit 1
+run_staging_chat_gate soak-audit '<durable-bridge-activation-time>' || exit 1
+```
+
+The disabled-state audit must emit `mode=disabled_schema_audit`,
+`status.passed=true`, and all six schema audit booleans as true before the
+enable helper is run. It performs no inserts, updates, deletes, model/provider
+calls, tool calls, or sandbox work. `--audit-disabled-only` refuses an enabled
+bridge; `--qualify-enabled-only` refuses a disabled bridge. Both modes require
+the exact staging confirmation, live immutable release and worker contract,
+staging search path, and complete PostgreSQL schema/role/owner/grant/index/
+constraint contract. The catalog inspection runs in a database-enforced
+read-only transaction.
+
+Complete the authenticated staging turn-ownership matrix for new turns,
+follow-ups, cancellation, edit/retry, and resume before treating the bridge as
+qualified. The durable-dispatch command must report all seven scenarios passed,
+all six schema audit booleans true, and `cleanup.clean=true`; it never calls a
+model, provider, sandbox, or user-visible chat route. Any non-zero exit, failed
+scenario, false audit boolean, or incomplete cleanup is a rollback gate. On any
+failed gate, resolve and verify the still-active audited release, invoke its
+exact disable helper, and refresh the same exact SHA through the immutable
+deployment path:
+
+```bash
+rollback_root=/srv/paperswithcode/releases
+rollback_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+case "$rollback_release" in
+  "$rollback_root"/????????????-staging) ;;
+  *) echo "rollback release is not immutable staging" >&2; exit 1 ;;
+esac
+readarray -t rollback_identity < <(/srv/paperswithcode/.venv/bin/python -c '
+import json, re, sys
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+sha = manifest.get("git_sha")
+assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+assert manifest.get("release_id") == f"{sha[:12]}-staging"
+runtime = manifest.get("chat_runtime")
+assert isinstance(runtime, dict)
+worker = runtime.get("worker_contract_version")
+assert isinstance(worker, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", worker)
+print(sha)
+print(manifest["release_id"])
+print(worker)
+' "$rollback_release/release.json") || exit 1
+test "${#rollback_identity[@]}" -eq 3 || exit 1
+rollback_sha="${rollback_identity[0]}"
+rollback_release_id="${rollback_identity[1]}"
+rollback_worker_contract="${rollback_identity[2]}"
+test "$(basename -- "$rollback_release")" = "$rollback_release_id" || exit 1
+test -n "$rollback_worker_contract" || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$rollback_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-chat-durable-dispatch-disable-only || exit 1
+sudo pwc-deploy staging "$rollback_sha" --refresh-environment || exit 1
+rollback_refreshed="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+test "$rollback_refreshed" = "$rollback_release" || exit 1
+rollback_refreshed_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
+' "$rollback_refreshed/release.json")" || exit 1
+test "$rollback_refreshed_sha" = "$rollback_sha" || exit 1
+```
+
+### Staging durable external Pi qualification profile
+
+The 32-turn durable external Pi qualification is a staging-only, explicitly
+confirmed configuration profile. It does not enable ordinary external
+admission: public staging remains at two ordinary concurrent turns with the
+three-sandbox safety cap. Resolve the exact active immutable release, enable
+the profile with that release's helper, and refresh that same SHA:
+
+```bash
+qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+case "$qualification_release" in
+  /srv/paperswithcode/releases/????????????-staging) ;;
+  *) echo "qualification release is not immutable staging" >&2; exit 1 ;;
+esac
+qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, re, sys
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+sha = manifest.get("git_sha")
+assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+assert manifest.get("release_id") == f"{sha[:12]}-staging"
+print(sha)
+' "$qualification_release/release.json")" || exit 1
+test "$(basename -- "$qualification_release")" = "${qualification_sha:0:12}-staging" || exit 1
+
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-modal-rate-evidence-install-only \
+  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
+  --staging-modal-rate-microusd-per-second 53 \
+  --confirm INSTALL_STAGING_MODAL_RATE_EVIDENCE || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-durable-external-qualification-enable-only \
+  --confirm ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
+sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
+test "$(readlink -e /srv/paperswithcode/environments/staging/current)" = \
+  "$qualification_release" || exit 1
+```
+
+`53` is the explicitly reviewed current Modal executor rate in microusd per
+second. The helper has no rate default or fallback: re-review and supply the
+rate explicitly for each candidate. It binds the three-key evidence file to
+the exact active staging release and atomically installs it as root-owned mode
+`0600`. It does not invent an attestation timestamp or print the rate, release,
+credentials, or file contents.
+
+Before starting an explicitly authorized qualifier, run `pwc-status` and verify
+the active external worker without exposing its bearer token:
+
+```bash
+pwc-status || exit 1
+sudo grep -E '^(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED|PWC_CHAT_MAX_CONCURRENCY|PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP|PWC_CHAT_BLANK_POOL_ENABLED|PWC_CHAT_PI_PREWARM_ENABLED)=' \
+  /etc/paperswithcode/staging.env
+sudo /srv/paperswithcode/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+slot = Path("/srv/paperswithcode/environments/staging/active").resolve().name
+status = json.loads(
+    Path(f"/run/paperswithcode/external-pi/staging-{slot}.json").read_text()
+)
+assert status["state"] == "ready"
+assert status["authenticated"] is True
+assert status["registered"] is True
+assert status["maximum_sessions"] == 32
+print("external worker ready; maximum_sessions=32")
+PY
+sudo -u postgres psql -d paperswithcode_hf -Atc \
+  "SELECT count(*) FROM staging.chat_sandbox_pool WHERE state IN ('starting','blank_ready','claimed','draining');"
+```
+
+The selected environment values must include
+`PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false`,
+`PWC_CHAT_MAX_CONCURRENCY=2`, `PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3`, and both
+pool/prewarm flags set to `false`. The pool query must return `0`; any other
+value is a stop gate, not authorization to delete rows. The qualifier itself is
+a separate, explicitly authorized operation.
+
+Restore the paired baseline with the same still-active release and refresh the
+same SHA whether qualification passes or fails:
+
+```bash
+qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
+' "$qualification_release/release.json")" || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-durable-external-qualification-disable-only \
+  --confirm DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
+sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-modal-rate-evidence-remove-only \
+  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
+  --confirm REMOVE_STAGING_MODAL_RATE_EVIDENCE || exit 1
+```
+
+Verify ordinary admission is still false, concurrency/cap remain `2`/`3`, and
+pool/prewarm are restored to `true`. `pwc-rollback staging` does not restore
+protected `/etc` configuration, so release rollback alone is not this profile's
+rollback. Run the separately confirmed exact-release removal even when the
+qualifier fails; it refuses a missing, symlinked, misowned, mispermissioned,
+wrong-source, or wrong-release evidence file. Production remains unchanged and
+has no corresponding activation mode.
+
 Pi prewarming and blank-pool admission are independent protected staging
 controls. Toggle Pi prewarming without changing admission, then refresh the
 exact active release through the immutable deployment path:
@@ -338,108 +667,6 @@ project. It emits timings and no environment values, commands, prompts,
 credentials, or tool output. Full model,
 SDK compaction, resume, edit/retry, and citation qualification still runs
 through authenticated staging chats before increasing the rollout percentage.
-
-### Private LaTeX compiler and paper staging gate
-
-The private compiler is an independent, staging-only release gate. Follow the
-full [private compiler runbook](latex-compiler-runbook.md) in order: publish and
-pin the matching staging Pi/Modal worker image, deploy the exact source SHA
-with all paper controls disabled, create the private digest-pinned `nielsr`
-builder, provision the protected Sandbox contract, apply the staging-only
-migrations, qualify isolated Sandboxes, record root-owned evidence, then enable
-the paper/compiler controls and refresh that same exact SHA. Never run the
-builder, migration, host-configuration, or deployment sequence against
-production.
-
-The compiler evidence handoff is
-`/var/lib/paperswithcode/staging-compiler-qualification/latex-compiler-qualification.json`.
-Its parent must be `root:pwc-staging` mode `0750`; the content-free regular,
-single-link evidence file must be `root:pwc-staging` mode `0640` and bind to the
-configured immutable image. The activation helper refuses absent, stale,
-misowned, malformed, or non-passing evidence, and keeps shared preview and
-Posterly disabled.
-
-Only after that activation refresh succeeds, run the paper gate through the
-active staging Unix socket. It requires Luna to be both the discovered staging
-API default and the explicitly selected model; the runner never falls back to
-whichever model happens to be first in a local configuration.
-
-```bash
-sudo systemd-run --quiet --wait --pipe --collect \
-  --uid=pwc-staging --gid=pwc-staging \
-  --working-directory=/srv/paperswithcode/environments/staging/current \
-  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
-  /srv/paperswithcode/.venv/bin/python \
-  -m backend.scripts.qualify_latex_paper_staging \
-  --admin-subject <allowlisted-staging-admin-subject> \
-  --admin-username <operator-name> \
-  --qualification-owner operator:pi-qualification:paper-<run-id> \
-  --model gpt-5.6-luna@openai \
-  --expect enabled \
-  --confirm QUALIFY_STAGING_LATEX_PAPER
-```
-
-The normal enabled run uses an operator-only disposable chat and deletes every
-created session in `finally`. Its report contains only check names, booleans,
-and elapsed milliseconds—never prompts, answers, sources, diagnostics,
-artifact IDs, share IDs, URLs, credentials, or trace payloads. It exercises the
-deterministic `/write-paper` and natural-prompt activation paths, ordinary-turn
-non-activation, structural citations, first compile, Preview/Files, editing,
-figure upload, optimistic conflicts, failed-source/stale-PDF behavior, history
-restore, private exports, public-share omission, actual
-`/sessions/archive-oldest` plus owner re-read, responsive Preview/Files UI, and
-deletion. The controlled failed source is also repaired through exactly three
-Luna repair receipts; it only passes when the failed source and last good
-preview remain unchanged and the descriptor reports an exhausted repair budget.
-
-For the telemetry-content gate, add
-`--telemetry-canary <opaque-random-marker>` to the normal enabled command (and
-to the preserve run when using the two-phase sequence). The runner places that
-marker in the private authoring input and an owner-only LaTeX comment, then
-checks the current owner source ZIP contains it without echoing the marker or
-any source bytes. The report contains only the structural
-`telemetry_canary_owner_source_present` result. It does not query Langfuse or
-claim the telemetry gate passed: use the same protected marker in the separate
-Langfuse scan and retain its content-free absence evidence before accepting the
-gate.
-
-The kill-switch evidence is an intentionally separate, two-phase sequence.
-First run the normal enabled command above so archive behavior is qualified.
-Then use the same dedicated owner value for a second enabled preparation run,
-adding `--preserve-for-kill-switch`. That variant never calls
-`archive-oldest`: archiving would hide the sole active historical session that
-the disabled phase must list. It deletes all secondary sessions and preserves
-the one primary Luna paper only if every executed deterministic preparation
-check passed; otherwise `finally` deletes everything.
-
-After an operator has independently disabled the paper/compiler controls through
-the documented staging host-configuration procedure and refreshed that exact
-staging SHA, run the disabled historical phase with that exact same owner:
-
-```bash
-sudo systemd-run --quiet --wait --pipe --collect \
-  --uid=pwc-staging --gid=pwc-staging \
-  --working-directory=/srv/paperswithcode/environments/staging/current \
-  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
-  /srv/paperswithcode/.venv/bin/python \
-  -m backend.scripts.qualify_latex_paper_staging \
-  --admin-subject <allowlisted-staging-admin-subject> \
-  --admin-username <operator-name> \
-  --qualification-owner operator:pi-qualification:paper-<run-id> \
-  --model gpt-5.6-luna@openai \
-  --expect disabled \
-  --verify-historical \
-  --confirm QUALIFY_STAGING_LATEX_PAPER
-```
-
-This phase refuses anything other than exactly one active session for that
-owner. It reads the private session descriptor and source ZIP, verifies a
-disabled `/write-paper` turn creates no artifact, then deletes that session.
-Neither phase changes feature flags. The runner intentionally reports (and
-exits nonzero for) any unexercised external telemetry-content gate; an enabled
-report also keeps rollback unmet until the disabled historical phase succeeds.
-Do not turn those false values into a pass by supplying a synthetic report.
-Keep the switches off if either phase fails.
 
 The release-scoped reliability gate uses explicit qualification metadata rather
 than synthetic usernames. Run the naturally paced SLO cohort and the broader
@@ -725,6 +952,32 @@ sudo python deploy/configure_host_env.py \
 After the explicit credential-rotation batch has re-encrypted every older row,
 retire unused decryption versions in a separately reviewed environment change.
 
+Chat titles and the research-scope guardrail use the same environment-isolated
+HF Inference Providers credential with the pinned
+`zai-org/GLM-5.3-Flash:baseten` route. Install the staging policy from its
+root-owned title source without restarting services:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env deploy/env/staging.env \
+  --staging-scope-title-hf-only
+```
+
+Production uses a distinct title token and an explicit confirmation:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env deploy/env/production.env \
+  --production-scope-title-hf-only \
+  --confirm ENABLE_PRODUCTION_HF_SCOPE_AND_TITLES
+```
+
+Both installers reject the general HF credential and the other environment's
+title token. They reuse only the target environment's dedicated direct-OpenAI
+fallback for guardrail provider failure, keep Posterly disabled, and require an
+ordinary exact-SHA deploy or environment refresh before processes read the new
+values.
+
 To retire the preview, use the provisioning command with
 `--staging-openrouter-disable-only`. This leaves the ledger intact for
 reconciliation and keeps Hugging Face-backed chat available.
@@ -789,7 +1042,9 @@ sudo pwc-cleanup --confirm CLEAN_RELEASES
 ```
 
 The cleanup command takes the same host mutation lock as deploy, rollback, and
-reaping. Never remove a release or runtime directory by hand.
+reaping. External Pi cleanup is limited to its own namespace and protects
+content identities derived from active (`current`), rollback (`previous`), and
+prepared slot releases. Never remove a release or runtime directory by hand.
 
 ## Invariants
 

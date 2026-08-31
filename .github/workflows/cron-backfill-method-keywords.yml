@@ -1,9 +1,6 @@
 name: Cron - Backfill Method Keywords
 
 on:
-  schedule:
-    # Daily at 01:10 UTC. Completed catalogs no-op; changed keyword catalogs resume in batches.
-    - cron: "10 1 * * *"
   workflow_dispatch: {}
 
 concurrency:

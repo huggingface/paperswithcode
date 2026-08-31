@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend import cli_submissions
 from backend.config import Settings
+from backend.models.api import ApplyMutationRequest
 from backend.models.database import (
     Base,
     CatalogMutationEvent,
@@ -30,9 +31,12 @@ from backend.models.database import (
     PaperProjectPage,
     PaperRepository,
     PaperTask,
+    PaperCurationSchedulerState,
+    PaperCurationJob,
     PendingPaperEdit,
     TaskDataset,
     TaskDatasetMetric,
+    TrendingModelCandidate,
     UserProfile,
 )
 from backend.models.database import (
@@ -60,6 +64,16 @@ from backend.models.database import (
     Task as DBTask,
 )
 from backend.routers.pending_edits import _to_response
+from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
+from backend.services.autonomous_operations_repository import (
+    AutonomousOperationsRepository,
+    Operator,
+    RunContext,
+)
+from backend.services.codex_curation_callback_service import (
+    CodexCurationCallbackService,
+)
+from backend.services.curation_autonomy import curation_run_context
 from backend.services.pending_edit_service import (
     PendingEditAlreadyReviewedError,
     PendingEditConflictError,
@@ -642,7 +656,7 @@ def test_adjusted_task_approval_is_atomic_audited_and_idempotent(db_session):
         service.approve(edit_id=submitted.id, reviewer_username="admin")
 
 
-def test_codex_approval_preserves_review_identity_and_evidence(db_session):
+def test_codex_cannot_approve_human_only_taxonomy(db_session):
     service = PendingEditService(db_session)
     submitted = service.submit(
         paper_id=None,
@@ -654,22 +668,217 @@ def test_codex_approval_preserves_review_identity_and_evidence(db_session):
     run_id = uuid.uuid4()
     evidence = {"decision": "approve", "sources": ["https://example.com"]}
 
+    with pytest.raises(PendingEditError, match="human-only taxonomy"):
+        service.approve(
+            edit_id=submitted.id,
+            reviewer_username="Codex",
+            reviewer_hf_subject=f"codex-review:{run_id}",
+            reviewer_kind="codex",
+            review_run_id=run_id,
+            review_model="test-model",
+            review_evidence=evidence,
+        )
+    db_session.expire_all()
+    assert db_session.get(PendingPaperEdit, submitted.id).status == "pending"
+
+
+def test_codex_cannot_reject_human_only_taxonomy(db_session):
+    service = PendingEditService(db_session)
+    submitted = service.submit(
+        paper_id=None,
+        hf_username="alice",
+        edit_type="new_metric",
+        proposed_payload={
+            "name": "Human metric",
+            "description": "Human review required",
+            "direction": "higher_is_better",
+            "task_id": 1,
+            "dataset_id": 1,
+        },
+    )
+    with pytest.raises(PendingEditError, match="human-only taxonomy"):
+        service.reject(
+            edit_id=submitted.id,
+            reviewer_username="Codex",
+            reviewer_kind="codex",
+        )
+    db_session.expire_all()
+    assert db_session.get(PendingPaperEdit, submitted.id).status == "pending"
+
+
+def test_real_manual_mode_blocks_codex_pending_edit_mutation(db_session, paper_fixture):
+    submitted = PendingEditService(db_session).submit(
+        paper_id=1,
+        hf_username="alice",
+        edit_type="tasks",
+        proposed_payload={"task_ids": [1, 3]},
+    )
+    context = RunContext(uuid.uuid4(), Operator.SUBMISSIONS, False, "policy-v1")
+    AutonomousOperationsRepository().append_run(
+        db_session,
+        context=context,
+        status="completed",
+        now=datetime.now(timezone.utc),
+    )
+
+    with pytest.raises(AutonomousCapabilityDenied, match="manual_mode"):
+        PendingEditService(db_session).approve(
+            edit_id=submitted.id,
+            reviewer_username="Codex",
+            reviewer_kind="codex",
+            autonomous_context=context,
+        )
+    db_session.rollback()
+    assert db_session.get(PendingPaperEdit, submitted.id).status == "pending"
+
+
+def test_enabled_codex_review_uses_typed_existing_taxonomy_adapter(
+    db_session, paper_fixture
+):
+    service = PendingEditService(db_session)
+    submitted = service.submit(
+        paper_id=1,
+        hf_username="alice",
+        edit_type="tasks",
+        proposed_payload={"task_ids": [1, 3]},
+    )
+    context = RunContext(uuid.uuid4(), Operator.SUBMISSIONS, False, "policy-v1")
+    operations = AutonomousOperationsRepository()
+    operations.append_run(
+        db_session,
+        context=context,
+        status="completed",
+        now=datetime.now(timezone.utc),
+    )
+    state = operations.get_control_state(db_session)
+    operations.set_manual_mode(
+        db_session,
+        enabled=False,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+    state = operations.get_control_state(db_session)
+    operations.set_operator_enabled(
+        db_session,
+        operator=Operator.SUBMISSIONS,
+        enabled=True,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+
     reviewed = service.approve(
         edit_id=submitted.id,
         reviewer_username="Codex",
-        reviewer_hf_subject=f"codex-review:{run_id}",
         reviewer_kind="codex",
-        review_run_id=run_id,
-        review_model="test-model",
-        review_evidence=evidence,
+        autonomous_context=context,
+    )
+    assert reviewed.status == "approved"
+    assert {
+        row.task_id
+        for row in db_session.query(PaperTask).filter(PaperTask.paper_id == 1)
+    } == {1, 3}
+
+
+def test_real_manual_mode_blocks_scheduled_curation_callback(db_session, paper_fixture):
+    context = RunContext(uuid.uuid4(), Operator.SUBMISSIONS, False, "curation-v1")
+    AutonomousOperationsRepository().append_run(
+        db_session,
+        context=context,
+        status="completed",
+        now=datetime.now(timezone.utc),
+    )
+    row = SimpleNamespace(
+        kind="enrich-paper",
+        paper_id=1,
+        trigger="hf-daily-cron",
+    )
+    body = SimpleNamespace(
+        enrich=SimpleNamespace(task_ids=[1], method_ids=[]),
+        evaluations=[],
+    )
+    with pytest.raises(AutonomousCapabilityDenied, match="manual_mode"):
+        CodexCurationCallbackService(db_session).authorize_autonomous_callback(
+            row, body, context=context
+        )
+
+
+def test_pausing_dispatch_does_not_revoke_an_inflight_curation_callback(
+    db_session, paper_fixture
+):
+    operations = AutonomousOperationsRepository()
+    state = operations.get_control_state(db_session)
+    state = operations.set_manual_mode(
+        db_session,
+        enabled=False,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+    operations.set_operator_enabled(
+        db_session,
+        operator=Operator.CURATION,
+        enabled=True,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+    candidate = TrendingModelCandidate(
+        repo_id="org/paused-canary-model",
+        author="org",
+        readme_sha="a" * 64,
+        status="resolving",
+    )
+    db_session.add(candidate)
+    db_session.flush()
+    row = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="resolve-model-paper",
+        candidate_id=candidate.id,
+        requested_by="hf-trending-cron",
+        trigger="hf-trending-cron",
+        policy_version="hf-trending-v1",
+        priority=25,
+        status="running",
+    )
+    db_session.add(row)
+    context = curation_run_context(row)
+    operations.append_run(
+        db_session,
+        context=context,
+        status="completed",
+        now=datetime.now(timezone.utc),
+    )
+    db_session.add(
+        PaperCurationSchedulerState(
+            id=1,
+            dispatch_enabled=False,
+            paused_at=datetime.now(timezone.utc),
+            pause_condition="operator",
+            pause_reason="canary observation",
+        )
+    )
+    db_session.commit()
+
+    result = CodexCurationCallbackService(db_session).apply(
+        row,
+        ApplyMutationRequest.model_validate(
+            {
+                "resolve_model_paper": {
+                    "decision": "reject",
+                    "reason": "The repository only repackages existing weights.",
+                    "novelty_kind": "repackaging",
+                    "evidence_urls": ["https://huggingface.co/org/paused-canary-model"],
+                }
+            }
+        ),
+        autonomous_context=context,
     )
 
-    assert reviewed.reviewed_by_kind == "codex"
-    assert reviewed.review_run_id == run_id
-    assert reviewed.review_model == "test-model"
-    assert reviewed.review_evidence == evidence
-    event = db_session.get(CatalogMutationEvent, reviewed.catalog_event_id)
-    assert event.actor_hf_subject == f"codex-review:{run_id}"
+    assert result["status"] == "rejected"
+    assert row.applied_at is not None
+    assert candidate.status == "rejected"
 
 
 def test_codex_cli_applies_terminal_approval(db_session, tmp_path, monkeypatch):
@@ -707,24 +916,23 @@ def test_codex_cli_applies_terminal_approval(db_session, tmp_path, monkeypatch):
         lambda _db, selected: {"selected_environment": selected},
     )
 
-    cli_submissions.decide_submission(
-        argparse.Namespace(
-            id=submitted.id,
-            environment="production",
-            decision="approve",
-            resolved_payload_file=None,
-            review_file=review_file,
-            review_run_id=run_id,
-            confirm="APPLY_SUBMISSION_REVIEW",
-            json=True,
+    with pytest.raises(PendingEditError, match="human-only taxonomy"):
+        cli_submissions.decide_submission(
+            argparse.Namespace(
+                id=submitted.id,
+                environment="production",
+                decision="approve",
+                resolved_payload_file=None,
+                review_file=review_file,
+                review_run_id=run_id,
+                confirm="APPLY_SUBMISSION_REVIEW",
+                json=True,
+            )
         )
-    )
 
     db_session.expire_all()
     reviewed = db_session.get(PendingPaperEdit, submitted.id)
-    assert reviewed.status == "approved"
-    assert reviewed.reviewed_by_kind == "codex"
-    assert reviewed.review_run_id == run_id
+    assert reviewed.status == "pending"
 
 
 def test_failed_taxonomy_application_leaves_submission_pending(

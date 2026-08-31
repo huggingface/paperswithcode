@@ -16,6 +16,28 @@ LOG_ROOT = Path("/var/log/paperswithcode")
 CONFIG_ROOT = Path("/etc/paperswithcode")
 REPO = Path(__file__).resolve().parents[1]
 UV_DESTINATION = Path("/usr/local/bin/uv")
+SYSTEMD_UNITS = (
+    "paperswithcode-backend@.service",
+    "paperswithcode-staging-backend@.service",
+    "paperswithcode-staging-backend@.socket",
+    "paperswithcode-staging-external-pi@.service",
+    "paperswithcode-staging-external-pi-worker@.service",
+    "paperswithcode-production-backend@.service",
+    "paperswithcode-production-backend@.socket",
+    "pwc-postgres-backup.service",
+    "pwc-postgres-backup.timer",
+    "pwc-curation-thumbnails.service",
+    "pwc-curation-thumbnails.timer",
+    "pwc-chat-alert-monitor.service",
+    "pwc-chat-alert-monitor.timer",
+    "autonomous/submission-review.service",
+    "autonomous/submission-review.timer",
+    "autonomous/submission-review-alert.service",
+    "autonomous/cron-health.service",
+    "autonomous/cron-health.timer",
+    "autonomous/cron-audit.service",
+    "autonomous/cron-audit.timer",
+)
 
 
 def ensure_user(name: str) -> None:
@@ -76,8 +98,24 @@ def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("run through sudo")
     install_uv()
-    for user in ("pwc-production", "pwc-staging", "pwc-cron"):
+    for user in (
+        "pwc-production",
+        "pwc-staging",
+        "pwc-cron",
+        "pwc-cron-trending",
+        "pwc-external-pi",
+    ):
         ensure_user(user)
+    subprocess.run(
+        ["usermod", "--groups", "", "pwc-cron-trending"],
+        check=True,
+    )
+    if any(
+        "pwc-cron-trending" in group.gr_mem
+        for group in grp.getgrall()
+        if group.gr_name != "pwc-cron-trending"
+    ):
+        raise RuntimeError("pwc-cron-trending retains a supplementary group")
     for path in (
         APP_ROOT,
         APP_ROOT / "environments",
@@ -86,6 +124,15 @@ def main() -> int:
     ):
         ensure_dir(path, "root", "root", 0o755)
     ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
+    worker_environment = CONFIG_ROOT / "external-pi-worker.env"
+    if not worker_environment.exists():
+        worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
+    os.chown(
+        worker_environment,
+        0,
+        grp.getgrnam("pwc-external-pi").gr_gid,
+    )
+    worker_environment.chmod(0o640)
     for path in (
         APP_ROOT / "releases",
         APP_ROOT / "runtimes",
@@ -141,6 +188,11 @@ def main() -> int:
         STATE_ROOT / "production" / "cron-locks",
     ):
         ensure_dir(path, "pwc-cron", "pwc-production", 0o750)
+    for path in (
+        STATE_ROOT / "production" / "trending-cron-logs",
+        STATE_ROOT / "production" / "trending-cron-locks",
+    ):
+        ensure_dir(path, "pwc-cron-trending", "pwc-cron", 0o2770)
     ensure_dir(
         STATE_ROOT / "production" / "backups",
         "pwc-cron",
@@ -152,6 +204,30 @@ def main() -> int:
         "pwc-cron",
         "pwc-cron",
         0o750,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-candidates",
+        "pwc-cron",
+        "pwc-cron",
+        0o700,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-source-broker",
+        "root",
+        "root",
+        0o700,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-retry-broker",
+        "root",
+        "root",
+        0o700,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-submissions",
+        "pwc-cron",
+        "pwc-cron",
+        0o700,
     )
     for path in (
         STATE_ROOT / "staging" / "chat-agent",
@@ -195,20 +271,14 @@ def main() -> int:
         )
 
     systemd = Path(__file__).resolve().parent / "systemd"
-    for name in (
-        "paperswithcode-backend@.service",
-        "paperswithcode-staging-backend@.service",
-        "paperswithcode-staging-backend@.socket",
-        "paperswithcode-production-backend@.service",
-        "paperswithcode-production-backend@.socket",
-        "pwc-postgres-backup.service",
-        "pwc-postgres-backup.timer",
-        "pwc-curation-thumbnails.service",
-        "pwc-curation-thumbnails.timer",
-        "pwc-chat-alert-monitor.service",
-        "pwc-chat-alert-monitor.timer",
-    ):
-        shutil.copy2(systemd / name, Path("/etc/systemd/system") / name)
+    for name in SYSTEMD_UNITS:
+        destination = Path("/etc/systemd/system") / Path(name).name
+        source = (
+            systemd.parent / name if name.startswith("autonomous/") else systemd / name
+        )
+        shutil.copy2(source, destination)
+    for unit_file in sorted((systemd / "cron").glob("pwc-cron-*")):
+        shutil.copy2(unit_file, Path("/etc/systemd/system") / unit_file.name)
     Path("/etc/systemd/journald.conf.d").mkdir(parents=True, exist_ok=True)
     shutil.copy2(
         systemd / "journald-paperswithcode.conf",

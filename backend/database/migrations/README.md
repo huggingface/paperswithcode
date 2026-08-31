@@ -40,6 +40,9 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_chat_session_archiving.sql` | Non-destructive bulk archiving for old chats and the active-chat quota |
 | `add_chat_edit_preparation_state.sql` | Typed durable fork identity used to recover interrupted chat edits |
 | `add_chat_sandbox_runtime.sql` | Staging-only additive immutable chat backend selection, runtime provenance, sandbox leases, and hash-only turn capabilities; run as PostgreSQL superuser with `search_path=staging,public` before activating the bridge |
+| `add_chat_external_worker_registry.sql` | Additive durable identity, capacity, heartbeat, graceful-drain state, and fencing generations for trusted external Pi workers; apply to staging before enabling the external-worker shadow supervisor |
+| `add_chat_turn_jobs.sql` | Additive durable per-turn ownership, immediate admission, idempotency, worker lease fencing, and interruption state; apply to staging before enabling `PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED` |
+| `add_chat_turn_terminal_cleanup_index.sql` | Add the partial terminal replay-journal cleanup index before enabling durable terminal maintenance |
 | `add_chat_turn_latency.sql` | Staging-only, content-free per-turn server/browser latency telemetry with 30-day application retention; apply after `add_chat_sandbox_runtime.sql` |
 | `add_chat_sandbox_pool.sql` | Staging-only blank-worker pool lifecycle, generation binding, resource/cost accounting, and 35-day audit state; apply with `search_path=staging,public` before deploying pool-aware readiness |
 | `add_chat_warm_assignment_race.sql` | Additive health-probe ownership and content-free warm-fallback diagnostics for either environment-owned chat schema; apply before deploying the warm-assignment race fix |
@@ -56,6 +59,12 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_chat_direct_openai.sql` | Staging-only direct-OpenAI capability mode plus per-owner funded usage reservations, exact Responses usage settlement, and unknown-cost reconciliation ledger; apply with `search_path=staging,public` before enabling the direct route |
 | `add_paper_curation_jobs.sql` | durable admin-triggered Hugging Face paper-curation Jobs |
 | `add_autonomous_paper_curation.sql` | two-stage HF daily workflows, trace provenance, scheduler state, and benchmark-gap backlog |
+| `add_autonomous_operations.sql` | Fail-closed operator controls, immutable run/action evidence, global repair lease, provider state, attempt budgets, and Codex execution accounting |
+| `add_autonomous_release_broker.sql` | Root-owned single-use exact-SHA deploy/rollback authorization consumption |
+| `add_autonomous_submission_claims.sql` + `add_autonomous_submission_remote_jobs.sql` | Existing-taxonomy submission claims, scoped callbacks, and remote HF Job lifecycle state |
+| `add_autonomous_alert_delivery.sql` | Append-only, content-free, deduplicated urgent/mobile delivery receipts |
+| `add_autonomous_acceptance_evidence.sql` | Append-only rollout gate evidence and idempotency index |
+| `add_curation_autonomous_operator.sql` | Add the disabled curation operator and widen its autonomous ledger and alert-receipt constraints; apply after the autonomous operations and alert-delivery migrations |
 | `add_curation_thumbnail_queue.sql` | transactionally queued, CRON-owned thumbnail work and accepted-submission state for paper-curation Jobs |
 | `add_external_resources_schema.sql` + `run_add_external_resources_schema.py` | external resources |
 | `add_trending_score.sql` + `run_add_trending_score.py` + `update_trending_view_for_ema.sql` | repository (GitHub) trending scores |
@@ -85,6 +94,11 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_entity_search_vectors.sql` + `backfill_entity_search_vectors.py` + `add_entity_search_indexes.sql` | Name-only benchmark, method, and task search vectors, triggers, and GIN/trigram indexes |
 | `remove_tasks_is_visible.sql` | Remove retired task visibility state after the production compatibility gate |
 | `add_chat_active_cost.sql` | Add requested-resource and estimated active-turn cost fields to staging chat latency telemetry |
+| `add_chat_external_worker_reservations.sql` | Add protected pre-admission capacity reservations for exact external worker claims |
+| `add_chat_qualification_evidence_events.sql` | Create or forward-repair staging/production qualification scopes and content-free cohort events, including exact FKs/checks/indexes and cascade retention cleanup; apply before qualification metadata |
+| `add_chat_qualification_metadata.sql` | Bind latency rows to a server-issued qualification scope/profile and install the exact scope/admission-time index; apply after qualification evidence scopes |
+| `repair_chat_qualification_evidence_contract.sql` | Final additive qualification repair: exact defaults, primary/foreign/unique/check/index contracts plus per-turn workload metadata; apply after both qualification migrations and refuse lossy populated conversions |
+| `add_chat_turn_latency_qualification_compatibility_production.sql` | Production-only nullable compatibility columns mapped by shared chat latency telemetry while external-Pi qualification remains disabled; apply before deploying source that maps scope/profile/workload |
 
 Before running `remove_task_datasets_featured_rank.sql`, deploy application
 code without `featured_rank` into both the current and previous release slots

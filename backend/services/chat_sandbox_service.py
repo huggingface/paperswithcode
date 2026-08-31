@@ -345,9 +345,18 @@ class SandboxSessionManager:
                 lifecycle=lifecycle,
                 snapshots=self.snapshots,
                 capacity_locker=lifecycle.capacity_locker,
+                qualification_cleanup=self._cleanup_qualification_evidence,
             )
             self._sandbox_lease_maintenance = coordinator
         return coordinator
+
+    def _cleanup_qualification_evidence(self) -> int:
+        from backend.services.chat_durable_qualification_evidence import (
+            ChatDurableQualificationEvidenceService,
+        )
+
+        with self.session_factory() as db, db.begin():
+            return ChatDurableQualificationEvidenceService(db).cleanup_expired()
 
     def _spend_alert_dispatcher(self) -> ChatSandboxSpendAlertDispatcher:
         dispatcher = getattr(self, "_sandbox_spend_alerts", None)
@@ -609,8 +618,15 @@ class SandboxSessionManager:
             yield event
 
     async def cancel(self, chat_session_id: uuid.UUID, turn_id: uuid.UUID) -> bool:
-        outcome = await self._turn_coordinator().cancel(chat_session_id, turn_id)
+        outcome = await self.cancel_status(chat_session_id, turn_id)
         return outcome is not WorkerCancelStatus.NOT_FOUND
+
+    async def cancel_status(
+        self, chat_session_id: uuid.UUID, turn_id: uuid.UUID
+    ) -> WorkerCancelStatus:
+        """Expose exact cancel delivery while preserving the legacy bool façade."""
+        outcome = await self._turn_coordinator().cancel(chat_session_id, turn_id)
+        return outcome
 
     async def terminate(
         self, chat_session_id: uuid.UUID, *, failure_code: str | None = None

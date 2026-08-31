@@ -23,7 +23,7 @@ with an ID. Do not fall back to `s2 search` to resolve a specific paper.
 In this Papers With Code checkout, prefix every command with:
 
 ```bash
-uv run --directory s2_cli --env-file ../backend/keys.env
+uv run --directory clis/s2_cli --env-file ../../backend/keys.env
 ```
 
 Elsewhere, install with `uv tool install git+https://github.com/huggingface/s2-cli.git`

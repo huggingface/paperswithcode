@@ -23,6 +23,7 @@ class DeploymentStatus:
     active_gateway_streams: int
     drain_started_at: str | None
     environment: str
+    git_sha: str
     slot: str
     release_id: str
     runtime_id: str
@@ -101,6 +102,7 @@ class DeploymentLifecycle:
             active_gateway_streams=self._active_gateway_streams,
             drain_started_at=self._drain_started_at,
             environment=os.environ.get("PWC_ENVIRONMENT", ""),
+            git_sha=os.environ.get("PWC_GIT_SHA", ""),
             slot=os.environ.get("PWC_DEPLOYMENT_SLOT", "legacy"),
             release_id=os.environ.get("PWC_RELEASE_ID", ""),
             runtime_id=os.environ.get("PWC_RUNTIME_ID", "legacy"),

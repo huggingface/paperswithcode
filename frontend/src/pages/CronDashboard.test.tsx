@@ -1,16 +1,31 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CronJobCard } from "@/components/cron/CronJobCard";
-import type { ChatSandboxSpendStatus } from "@/lib/api/chat";
+import { chatApi, type ChatSandboxSpendStatus } from "@/lib/api/chat";
 import { operationsApi, type CronJobsResponse, type CronJobStatus, type PaperMarkdownJobsResponse } from "@/lib/api/operations";
 import {
   ChatComputePanel,
   CronSnapshotNotice,
   cronStatusRefetchInterval,
 } from "./CronDashboard";
+import CronDashboard from "./CronDashboard";
+
+vi.mock("@/lib/authContext", () => ({
+  useAuth: () => ({
+    user: { username: "nielsr", is_admin: true },
+  }),
+}));
+
+vi.mock("@/lib/apiUrl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/apiUrl")>()),
+  isStagingEnvironment: () => false,
+}));
 
 afterEach(() => {
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -94,6 +109,15 @@ describe("CronJobCard health axes", () => {
       scheduler_orchestration: ["scheduled workflow failed"],
       credential_provider: [],
     },
+    health_findings: [{
+      plane: "scheduler",
+      contract: "scheduler_execution",
+      state: "degraded",
+      summary: "scheduled workflow failed",
+      evidence: { conclusion: "failure" },
+    }],
+    operator_url: "/autonomous-operations?operator=cron",
+    run_url: "https://github.com/huggingface/paperswithcode/actions/runs/123",
   };
 
   it("renders axes independently and exposes scheduler evidence", () => {
@@ -107,6 +131,16 @@ describe("CronJobCard health axes", () => {
     rerender(<CronJobCard job={job} expanded={true} onToggle={() => undefined} />);
     expect(screen.getByText("Scheduler evidence")).toBeInTheDocument();
     expect(screen.getByText("github_actions")).toBeInTheDocument();
+    expect(screen.getByText("Deterministic contract findings")).toBeInTheDocument();
+    expect(screen.getByText("Conclusion: failure")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open operator" })).toHaveAttribute(
+      "href",
+      "/autonomous-operations?operator=cron",
+    );
+    expect(screen.getByRole("link", { name: "Open run" })).toHaveAttribute(
+      "href",
+      "https://github.com/huggingface/paperswithcode/actions/runs/123",
+    );
     rerender(<CronJobCard job={{ ...job, recent_write_count: 11 }} expanded={true} onToggle={() => undefined} />);
     expect(screen.getByText("Scheduler evidence")).toBeInTheDocument();
   });
@@ -238,6 +272,8 @@ describe("CronSnapshotNotice", () => {
     manual_operations: [],
     summary: {
       total_jobs: 0,
+      scheduled_jobs: 0,
+      manual_jobs: 0,
       healthy: 0,
       degraded: 0,
       broken: 0,
@@ -272,8 +308,8 @@ describe("CronSnapshotNotice", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("polls quickly until the replacement snapshot is fresh", () => {
-    expect(cronStatusRefetchInterval(snapshot(), false)).toBe(1000);
+  it("polls without hammering the API until the replacement snapshot is fresh", () => {
+    expect(cronStatusRefetchInterval(snapshot(), false)).toBe(5000);
     expect(
       cronStatusRefetchInterval(
         snapshot({ snapshot_stale: false, refreshing: false }),
@@ -302,5 +338,84 @@ describe("CronSnapshotNotice", () => {
     expect(String(fetchMock.mock.calls[0][0])).toContain(
       "/cron/status?force_refresh=true",
     );
+  });
+});
+
+describe("CronDashboard refresh controls", () => {
+  it("keeps the manual refresh button enabled during an automatic refetch", async () => {
+    const freshSnapshot: CronJobsResponse = {
+      timestamp: "2026-08-14T12:00:00Z",
+      jobs: [],
+      manual_operations: [],
+      summary: {
+        total_jobs: 0,
+        scheduled_jobs: 0,
+        manual_jobs: 0,
+        healthy: 0,
+        degraded: 0,
+        broken: 0,
+        running: 0,
+        stuck: 0,
+        unknown: 0,
+        health_score: 100,
+        critical_issues: [],
+        what_to_check_next: "All monitored jobs look healthy",
+        coverage: {
+          registered_scheduled_duties: 0,
+          discovered_scheduled_duties: 0,
+          monitored_duties: 0,
+          coverage_gaps: 0,
+          gap_ids: [],
+        },
+      },
+      snapshot_generated_at: "2026-08-14T12:00:00Z",
+      snapshot_age_seconds: 0,
+      snapshot_stale: false,
+      refreshing: false,
+    };
+    let finishAutomaticRefetch: ((value: CronJobsResponse) => void) | undefined;
+    const cronStatus = vi
+      .spyOn(operationsApi, "getCronStatus")
+      .mockResolvedValueOnce(freshSnapshot)
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finishAutomaticRefetch = resolve;
+          }),
+      );
+    vi.spyOn(operationsApi, "getPaperMarkdownJobs").mockResolvedValue({
+      available: true,
+      namespace: "huggingface",
+      jobs: [],
+      summary: {},
+      budgets: {},
+    });
+    vi.spyOn(chatApi, "getSandboxSpend").mockResolvedValue(status());
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter
+          future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        >
+          <CronDashboard />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const refreshButton = await screen.findByRole("button", { name: "Refresh" });
+    await waitFor(() => expect(refreshButton).toBeEnabled());
+
+    act(() => {
+      void queryClient.refetchQueries({ queryKey: ["cronStatus", "nielsr"] });
+    });
+    await waitFor(() => expect(cronStatus).toHaveBeenCalledTimes(2));
+
+    expect(refreshButton).toBeEnabled();
+
+    finishAutomaticRefetch?.(freshSnapshot);
+    await waitFor(() => expect(queryClient.isFetching()).toBe(0));
+    queryClient.clear();
   });
 });

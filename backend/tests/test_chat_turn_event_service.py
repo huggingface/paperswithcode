@@ -8,8 +8,10 @@ import json
 import pytest
 
 from backend.services.chat_turn_event_service import (
+    CancellationEvent,
     ChatTurnLifecycle,
     CompletionEvent,
+    InterruptionReason,
     MirrorFailureEvent,
     PersistedTurnStatus,
     ResearchFinishedEvent,
@@ -30,6 +32,8 @@ from backend.services.chat_turn_event_service import (
         {"type": "_sdk_session", "session_id": "sdk-session"},
         {"type": "_mirror_error", "key": {"session_id": "sdk-session"}},
         {"type": "_execution_telemetry", "execution_limit_reached": False},
+        {"type": "_latency", "phase": "runner_acquired", "elapsed_ms": 12},
+        {"type": "_mcp_readiness", "ready": True, "registered_tool_names": []},
         {"type": "usage", "usage": {"input_tokens": 2}, "model_usage": {}},
         {"type": "usage", "usage": None, "extra": {"values": []}},
         {
@@ -143,3 +147,8 @@ def test_mirror_failure_without_a_result_is_an_error():
     )
     assert persisted.status is PersistedTurnStatus.ERROR
     assert persisted.error_code == "transcript_mirror_error"
+
+
+def test_cancellation_event_is_reserved_for_worker_cancellation():
+    with pytest.raises(ValueError, match="worker cancellation"):
+        CancellationEvent(InterruptionReason.CLIENT_DISCONNECT)

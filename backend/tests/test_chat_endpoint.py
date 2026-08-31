@@ -20,6 +20,7 @@ from claude_agent_sdk import (
     UserMessage,
 )
 from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from starlette.responses import Response
 from starlette.requests import Request
@@ -50,6 +51,7 @@ from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
     ChatSessionService,
+    ReplayAssistant,
     TurnAdmission,
 )
 from backend.services.chat_stream_service import (
@@ -57,8 +59,10 @@ from backend.services.chat_stream_service import (
     ChatTurnProjection,
     _private_paper_tool_event,
     _public_poster_tool_event,
+    encode_journal_frame,
     sequential_reasoning_events,
 )
+from backend.services.chat_turn_event_repository import JournalFrame
 from backend.services.chat_title_service import fallback_title, normalize_title
 from backend.services.chat_tracing_service import ChatTurnTrace
 from backend.services.chat_transcript_recovery import reconcile_spooled_session
@@ -74,6 +78,57 @@ def _cookie_request() -> Request:
             "headers": [(b"cookie", b"pwc_session=test")],
         }
     )
+
+
+def test_admin_qualification_evidence_is_content_free_and_bounded(monkeypatch):
+    from backend.models.chat import ChatQualificationEvidenceRequest
+
+    scope_id = uuid.uuid4()
+
+    class EvidenceService:
+        def __init__(self, db):
+            assert db is not None
+
+        def collect(self, **scope):
+            assert scope["scope_id"] == scope_id
+            return {
+                "expected_users": 32,
+                "admitted_turns": 32,
+                "admission_denominator_events": 32,
+                "terminal_turns": 32,
+                "queued_states": 0,
+                "stale_fences": 0,
+                "executor_starts": 16,
+                "duplicate_executor_starts": 0,
+                "workspace_creates": 1,
+                "workspace_reuses": 15,
+                "workspace_evictions": 16,
+                "billed_duration_ms": 4,
+                "window_started_at_ms": 1,
+                "window_ended_at_ms": 2,
+                "source": "durable_qualification_records",
+            }
+
+    monkeypatch.setattr(
+        chat_router, "ChatDurableQualificationEvidenceService", EvidenceService
+    )
+
+    class DB:
+        def commit(self):
+            pass
+
+        def rollback(self):
+            pass
+
+    db = DB()
+    response = chat_router.chat_qualification_evidence(
+        ChatQualificationEvidenceRequest(scope_id=scope_id),
+        db,
+        Settings(environment="staging"),
+    )
+
+    assert response["executor_starts"] == 16
+    assert "turn_id" not in response and "chat_session_id" not in response
 
 
 def test_chat_quota_configuration_and_billing_api_fields_are_removed():
@@ -149,6 +204,353 @@ def test_chat_request_is_strict_and_requires_message_and_client_id():
     assert request.session_id is None
 
 
+def test_journal_sse_serializer_adds_sequence_without_changing_event_payload():
+    encoded = encode_journal_frame(JournalFrame(8, "answer_delta", {"text": "héllo"}))
+
+    assert encoded == (
+        'id: 8\nevent: answer_delta\ndata: {"type":"answer_delta","text":"héllo"}\n\n'.encode()
+    )
+
+
+def test_journal_sse_serializer_preserves_browser_data_type_contract():
+    encoded = encode_journal_frame(
+        JournalFrame(4, "done", {"followups": [], "finish_reason": "success"})
+    ).decode()
+    data = next(
+        json.loads(line.removeprefix("data: "))
+        for line in encoded.splitlines()
+        if line.startswith("data: ")
+    )
+
+    assert data == {
+        "type": "done",
+        "followups": [],
+        "finish_reason": "success",
+    }
+
+
+def _completed_durable_admission(*, event_sequence: int = 8) -> TurnAdmission:
+    return TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        user_message_id=uuid.uuid4(),
+        selected_model="model",
+        model_route="route",
+        sdk_session_id=None,
+        sdk_project_key=None,
+        replay_assistant=ReplayAssistant("canonical answer", ["next"]),
+        attach_only=True,
+        durable_event_sequence=event_sequence,
+    )
+
+
+def test_completed_durable_replay_uses_full_terminal_journal(monkeypatch):
+    admission = _completed_durable_admission()
+
+    class Coordinator:
+        async def subscribe(self, *, turn_id, after_sequence):
+            assert (turn_id, after_sequence) == (admission.turn_id, 4)
+            yield JournalFrame(5, "stream_start", {"request_id": "original"})
+            yield JournalFrame(6, "answer_delta", {"text": "stored"})
+            yield JournalFrame(8, "done", {"finish_reason": "success"})
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect():
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=4
+            )
+        ]
+
+    assert [(frame.sequence, frame.event) for frame in asyncio.run(collect())] == [
+        (5, "stream_start"),
+        (6, "answer_delta"),
+        (8, "done"),
+    ]
+
+
+def test_completed_durable_replay_suppresses_fallback_at_acknowledged_cursor(
+    monkeypatch,
+):
+    admission = _completed_durable_admission()
+
+    class Coordinator:
+        async def subscribe(self, *, turn_id, after_sequence):
+            assert turn_id == admission.turn_id
+            if False:
+                yield
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect(cursor):
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=cursor
+            )
+        ]
+
+    assert [frame.sequence for frame in asyncio.run(collect(7))] == [9, 10, 11]
+    assert asyncio.run(collect(8)) == []
+    assert asyncio.run(collect(9)) == []
+    assert asyncio.run(collect(11)) == []
+
+
+def test_completed_durable_replay_falls_back_after_job_sequence(monkeypatch):
+    admission = _completed_durable_admission(event_sequence=8)
+
+    class Coordinator:
+        async def subscribe(self, **_kwargs):
+            if False:
+                yield
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect(cursor):
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=cursor
+            )
+        ]
+
+    all_frames = asyncio.run(collect(7))
+    acknowledged = asyncio.run(collect(8))
+    assert [(frame.sequence, frame.event) for frame in all_frames] == [
+        (9, "stream_start"),
+        (10, "answer_delta"),
+        (11, "done"),
+    ]
+    assert acknowledged == []
+
+
+def test_completed_durable_replay_preserves_nonterminal_journal_before_fallback(
+    monkeypatch,
+):
+    admission = _completed_durable_admission(event_sequence=8)
+
+    class Coordinator:
+        async def subscribe(self, **_kwargs):
+            yield JournalFrame(8, "answer_delta", {"text": "partial"})
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect():
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=0
+            )
+        ]
+
+    frames = asyncio.run(collect())
+    assert [(frame.sequence, frame.event) for frame in frames] == [
+        (8, "answer_delta"),
+        (9, "stream_start"),
+        (10, "answer_delta"),
+        (11, "done"),
+    ]
+    assert frames[0].payload == {"text": "partial"}
+    assert frames[2].payload == {"text": "canonical answer"}
+
+
+@pytest.mark.parametrize("cursor", [8, 9])
+def test_completed_durable_replay_partial_journal_at_acknowledged_cursor_emits_nothing(
+    monkeypatch, cursor
+):
+    admission = _completed_durable_admission(event_sequence=8)
+
+    class Coordinator:
+        async def subscribe(self, **_kwargs):
+            if 8 > cursor:
+                yield JournalFrame(8, "answer_delta", {"text": "partial"})
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect():
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=cursor
+            )
+        ]
+
+    assert asyncio.run(collect()) == []
+
+
+def test_completed_durable_replay_falls_back_if_chunks_disappear_mid_replay(
+    monkeypatch,
+):
+    admission = _completed_durable_admission(event_sequence=8)
+    replay_steps = []
+
+    class Coordinator:
+        async def subscribe(self, **_kwargs):
+            yield JournalFrame(7, "answer_delta", {"text": "partial"})
+            replay_steps.append("terminal chunk deleted")
+
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+
+    async def collect():
+        return [
+            frame
+            async for frame in chat_router._durable_replay_frames(
+                admission, request_id="request-1", after_sequence=0
+            )
+        ]
+
+    frames = asyncio.run(collect())
+    assert replay_steps == ["terminal chunk deleted"]
+    assert [(frame.sequence, frame.event) for frame in frames] == [
+        (7, "answer_delta"),
+        (9, "stream_start"),
+        (10, "answer_delta"),
+        (11, "done"),
+    ]
+
+
+def test_reconnect_stream_resumes_after_last_event_id(monkeypatch):
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    cursors = []
+
+    class Service:
+        def __init__(self, *_args):
+            pass
+
+        def get_session(self, owner, requested_session_id):
+            assert owner.hf_user_id == "owner-1"
+            assert requested_session_id == session_id
+            return SimpleNamespace(active_turn_id=turn_id), []
+
+    class Coordinator:
+        async def subscribe(self, *, turn_id: uuid.UUID, after_sequence: int):
+            cursors.append(after_sequence)
+            for sequence in (7, 8):
+                if sequence > after_sequence:
+                    yield JournalFrame(
+                        sequence, "answer_delta", {"text": str(sequence)}
+                    )
+
+    settings = get_settings().model_copy(
+        update={"chat_durable_turn_dispatch_enabled": True}
+    )
+    monkeypatch.setattr(chat_router, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": f"/api/v1/chat/sessions/{session_id}/stream",
+            "headers": [(b"last-event-id", b"7")],
+        }
+    )
+    response = chat_router.reconnect_active_stream(
+        session_id,
+        request,
+        user={"hf_user_id": "owner-1", "username": "owner"},
+        db=object(),
+        settings=settings,
+    )
+
+    async def collect_body():
+        return b"".join([chunk async for chunk in response.body_iterator]).decode()
+
+    body = asyncio.run(collect_body())
+    assert "id: 7\n" not in body
+    assert "id: 8\n" in body
+    assert cursors == [7]
+
+
+def test_legacy_reconnect_ignores_malformed_last_event_id(monkeypatch):
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+
+    class Service:
+        def __init__(self, *_args):
+            pass
+
+        def get_session(self, *_args):
+            return SimpleNamespace(active_turn_id=turn_id), []
+
+    class Stream:
+        async def subscribe(self):
+            yield SimpleNamespace(
+                event="done",
+                payload={"followups": [], "finish_reason": "success"},
+            )
+
+    class Registry:
+        def get(self, *_args):
+            return Stream()
+
+    settings = get_settings().model_copy(
+        update={"chat_durable_turn_dispatch_enabled": False}
+    )
+    monkeypatch.setattr(chat_router, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_router, "live_chat_stream_registry", lambda: Registry())
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": f"/api/v1/chat/sessions/{session_id}/stream",
+            "headers": [(b"last-event-id", b"not-a-cursor")],
+        }
+    )
+
+    response = chat_router.reconnect_active_stream(
+        session_id,
+        request,
+        user={"hf_user_id": "owner-1", "username": "owner"},
+        db=object(),
+        settings=settings,
+    )
+
+    async def collect_body():
+        return b"".join([chunk async for chunk in response.body_iterator]).decode()
+
+    assert 'data: {"type":"done"' in asyncio.run(collect_body())
+
+
+@pytest.mark.parametrize("cursor", ["-1", "nope", "1.5"])
+def test_reconnect_stream_rejects_invalid_last_event_id(monkeypatch, cursor):
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+
+    class Service:
+        def __init__(self, *_args):
+            pass
+
+        def get_session(self, *_args):
+            return SimpleNamespace(active_turn_id=turn_id), []
+
+    settings = get_settings().model_copy(
+        update={"chat_durable_turn_dispatch_enabled": True}
+    )
+    monkeypatch.setattr(chat_router, "ChatSessionService", Service)
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": f"/api/v1/chat/sessions/{session_id}/stream",
+            "headers": [(b"last-event-id", cursor.encode())],
+        }
+    )
+    with pytest.raises(Exception) as exc_info:
+        chat_router.reconnect_active_stream(
+            session_id,
+            request,
+            user={"hf_user_id": "owner-1", "username": "owner"},
+            db=object(),
+            settings=settings,
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail["code"] == "chat_stream_cursor_invalid"
+
+
 def test_browser_latency_request_is_strict_bounded_and_nonempty():
     with pytest.raises(ValueError):
         ChatBrowserLatencyRequest()
@@ -166,16 +568,24 @@ def test_browser_latency_request_is_strict_bounded_and_nonempty():
 def test_cancel_endpoint_uses_owner_checked_active_turn(monkeypatch):
     session_id = uuid.uuid4()
     turn_id = uuid.uuid4()
-    calls: list[tuple[uuid.UUID, uuid.UUID]] = []
+    calls = []
+
+    class DB:
+        def commit(self):
+            calls.append("commit")
+
+        def rollback(self):
+            calls.append("rollback")
 
     class Service:
         def __init__(self, _db, _settings):
             pass
 
-        def get_session(self, owner, requested_session_id):
+        def request_legacy_cancel(self, owner, requested_session_id):
             assert owner.hf_user_id == "owner-1"
             assert requested_session_id == session_id
-            return SimpleNamespace(active_turn_id=turn_id), []
+            calls.append("fence")
+            return turn_id
 
     class Manager:
         async def cancel(self, requested_session_id, requested_turn_id):
@@ -190,13 +600,13 @@ def test_cancel_endpoint_uses_owner_checked_active_turn(monkeypatch):
         chat_router.cancel_active_turn(
             session_id,
             user={"hf_user_id": "owner-1", "username": "owner"},
-            db=object(),
+            db=DB(),
             settings=object(),
         )
     )
 
     assert response.status_code == 204
-    assert calls == [(session_id, turn_id)]
+    assert calls == ["fence", "commit", (session_id, turn_id)]
 
 
 def test_session_detail_never_caches_private_paper_metadata(monkeypatch):
@@ -401,6 +811,302 @@ def test_stream_spend_rejection_preserves_exact_503_before_admission(monkeypatch
         "code": "chat_temporarily_disabled",
         "message": "Chat is temporarily disabled",
     }
+
+
+def test_duplicate_durable_post_attaches_without_preparation_or_source(monkeypatch):
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    admission = TurnAdmission(
+        session_id=session_id,
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="zai-org/GLM-5.2",
+        model_route="zai-org/GLM-5.2:together",
+        sdk_session_id=None,
+        sdk_project_key=None,
+        attach_only=True,
+    )
+    settings = get_settings().model_copy(
+        update={
+            "chat_enabled": True,
+            "chat_public_admission_enabled": True,
+            "chat_sandbox_admission_enabled": True,
+            "chat_durable_turn_dispatch_enabled": True,
+        }
+    )
+    calls = {"begin": 0}
+
+    class DB:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def commit(self):
+            return None
+
+        def rollback(self):
+            return None
+
+    class Service:
+        def __init__(self, *_args):
+            pass
+
+        def existing_effective_prompt(self, owner, requested_session, request_id):
+            assert (owner.hf_user_id, requested_session, request_id) == (
+                "owner-1",
+                session_id,
+                "stable-request",
+            )
+            return "persisted prompt"
+
+        def begin_turn(self, *_args, **_kwargs):
+            calls["begin"] += 1
+            return admission
+
+    class Coordinator:
+        async def subscribe(self, *, turn_id, after_sequence):
+            assert (turn_id, after_sequence) == (admission.turn_id, 3)
+            yield JournalFrame(4, "answer_delta", {"text": "attached"})
+
+    monkeypatch.setattr(chat_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(chat_router, "web_search_available", lambda *_args: True)
+    monkeypatch.setattr(
+        chat_router,
+        "inference_credential_for_request",
+        lambda *_args: SimpleNamespace(token="token", bill_to=None),
+    )
+    monkeypatch.setattr(
+        chat_router.deployment_lifecycle,
+        "status",
+        lambda: SimpleNamespace(accepting_chat_turns=True),
+    )
+    monkeypatch.setattr(chat_router, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_router.db_manager, "_session_local", DB)
+    monkeypatch.setattr(
+        chat_router,
+        "_prepare_paper_turn",
+        lambda *_args: pytest.fail("duplicate prompt was prepared"),
+    )
+    monkeypatch.setattr(
+        chat_router,
+        "ChatStreamOrchestrator",
+        lambda **_kwargs: pytest.fail("duplicate model source was created"),
+    )
+    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [(b"last-event-id", b"3")],
+        }
+    )
+
+    async def exercise():
+        response = await chat_router.stream_chat(
+            ChatRequest(
+                message="retry",
+                session_id=session_id,
+                client_message_id="stable-request",
+            ),
+            request,
+            {"hf_user_id": "owner-1", "username": "owner"},
+        )
+        return b"".join([chunk async for chunk in response.body_iterator]).decode()
+
+    body = asyncio.run(exercise())
+
+    assert "id: 4\n" in body
+    assert calls == {"begin": 1}
+
+
+def test_failed_detached_terminal_callback_releases_orchestrator_registration():
+    from backend.services import chat_detached_runtime as runtime_module
+
+    turn_id = uuid.uuid4()
+    claim = SimpleNamespace(turn_id=turn_id)
+
+    class Orchestrator:
+        async def persist_detached_terminal(self, *_args):
+            raise RuntimeError("ambiguous terminal")
+
+    orchestrator = Orchestrator()
+    released = []
+    runtime = runtime_module.ChatDetachedRuntime(get_settings())
+    runtime._orchestrators[turn_id] = orchestrator
+
+    async def transaction(operation):
+        operation(SimpleNamespace())
+
+    runtime._transaction = transaction
+    original_release = runtime_module.ChatExternalWorkerCapacityRepository.release_turn
+    runtime_module.ChatExternalWorkerCapacityRepository.release_turn = (
+        lambda _db, *, turn_id: released.append(turn_id)
+    )
+    try:
+        with pytest.raises(RuntimeError, match="ambiguous terminal"):
+            asyncio.run(runtime._persist_terminal(claim, "failed", "turn_failed"))
+        assert turn_id not in runtime._orchestrators
+        assert released == [turn_id]
+    finally:
+        runtime_module.ChatExternalWorkerCapacityRepository.release_turn = (
+            original_release
+        )
+        runtime._orchestrators.pop(turn_id, None)
+
+
+def test_process_loss_terminal_cleanup_releases_persisted_reservation():
+    from backend.services import chat_detached_runtime as runtime_module
+
+    turn_id = uuid.uuid4()
+    released = []
+    runtime = runtime_module.ChatDetachedRuntime(get_settings())
+
+    async def transaction(operation):
+        operation(SimpleNamespace())
+
+    runtime._transaction = transaction
+    original_release = runtime_module.ChatExternalWorkerCapacityRepository.release_turn
+    runtime_module.ChatExternalWorkerCapacityRepository.release_turn = (
+        lambda _db, *, turn_id: released.append(turn_id)
+    )
+    try:
+        with pytest.raises(RuntimeError, match="owner is unavailable"):
+            asyncio.run(
+                runtime._persist_terminal(
+                    SimpleNamespace(turn_id=turn_id), "failed", "process_lost"
+                )
+            )
+    finally:
+        runtime_module.ChatExternalWorkerCapacityRepository.release_turn = (
+            original_release
+        )
+
+    assert released == [turn_id]
+
+
+def test_terminal_release_failure_does_not_mask_persistence_failure(
+    monkeypatch,
+):
+    from backend.services import chat_detached_runtime as runtime_module
+
+    turn_id = uuid.uuid4()
+    claim = SimpleNamespace(turn_id=turn_id)
+
+    class Orchestrator:
+        async def persist_detached_terminal(self, *_args):
+            raise RuntimeError("primary persistence failure")
+
+    orchestrator = Orchestrator()
+    runtime = runtime_module.ChatDetachedRuntime(get_settings())
+    runtime._orchestrators[turn_id] = orchestrator
+    cleanup_attempted = []
+
+    async def transaction(operation):
+        cleanup_attempted.append(True)
+        raise OSError("cleanup database unavailable")
+
+    runtime._transaction = transaction
+    monkeypatch.setattr(
+        runtime_module.ChatExternalWorkerCapacityRepository,
+        "release_turn",
+        lambda _db, *, turn_id: None,
+    )
+
+    with pytest.raises(RuntimeError, match="primary persistence failure"):
+        asyncio.run(runtime._persist_terminal(claim, "failed", "turn_failed"))
+    assert cleanup_attempted == [True]
+
+
+def test_detached_start_failure_releases_reservation_without_masking_primary_error(
+    monkeypatch,
+):
+    from backend.services import chat_detached_runtime as runtime_module
+
+    turn_id = uuid.uuid4()
+    admission = SimpleNamespace(turn_id=turn_id, session_id=uuid.uuid4())
+    released = []
+    abandoned = []
+
+    class Registry:
+        async def start_detached(self, **_kwargs):
+            raise RuntimeError("primary detached start failure")
+
+    class Orchestrator:
+        def events(self):
+            return None
+
+        async def abandon_detached_start(self):
+            abandoned.append(True)
+
+    runtime = runtime_module.ChatDetachedRuntime(get_settings())
+    runtime.registry = Registry()
+
+    async def transaction(operation):
+        operation(SimpleNamespace())
+
+    runtime._transaction = transaction
+    monkeypatch.setattr(
+        runtime_module.ChatExternalWorkerCapacityRepository,
+        "release_turn",
+        lambda _db, *, turn_id: released.append(turn_id),
+    )
+
+    with pytest.raises(RuntimeError, match="primary detached start failure"):
+        asyncio.run(
+            runtime.start(
+                admission=admission,
+                owner_id="owner",
+                claim=SimpleNamespace(turn_id=turn_id),
+                orchestrator=Orchestrator(),
+            )
+        )
+
+    assert abandoned == [True]
+    assert released == [turn_id]
+    assert turn_id not in runtime._orchestrators
+
+
+def test_detached_start_cleanup_failures_preserve_original_start_error():
+    from backend.services import chat_detached_runtime as runtime_module
+
+    turn_id = uuid.uuid4()
+    admission = SimpleNamespace(turn_id=turn_id, session_id=uuid.uuid4())
+    cleanup_attempted = []
+
+    class Registry:
+        async def start_detached(self, **_kwargs):
+            raise RuntimeError("original start error")
+
+    class Orchestrator:
+        def events(self):
+            return None
+
+        async def abandon_detached_start(self):
+            raise OSError("abandonment unavailable")
+
+    runtime = runtime_module.ChatDetachedRuntime(get_settings())
+    runtime.registry = Registry()
+
+    async def transaction(_operation):
+        cleanup_attempted.append(True)
+        raise OSError("reservation cleanup unavailable")
+
+    runtime._transaction = transaction
+
+    with pytest.raises(RuntimeError, match="original start error"):
+        asyncio.run(
+            runtime.start(
+                admission=admission,
+                owner_id="owner",
+                claim=SimpleNamespace(turn_id=turn_id),
+                orchestrator=Orchestrator(),
+            )
+        )
+
+    assert cleanup_attempted == [True]
 
 
 def test_stream_rejects_paper_selection_when_flag_is_off(monkeypatch):
@@ -1342,7 +2048,9 @@ def test_pi_tool_timing_fallback_measures_parallel_calls_and_preserves_worker_ti
     assert slow["took_ms"] == 73
 
 
-def test_pi_recovery_telemetry_is_logged_without_becoming_a_public_frame(caplog):
+def test_pi_recovery_telemetry_is_logged_without_becoming_a_public_frame(
+    caplog, monkeypatch
+):
     admission = TurnAdmission(
         session_id=uuid.uuid4(),
         turn_id=uuid.uuid4(),
@@ -1364,6 +2072,7 @@ def test_pi_recovery_telemetry_is_logged_without_becoming_a_public_frame(caplog)
         is_disconnected=lambda: asyncio.sleep(0, result=False),
         release_admission=lambda: asyncio.sleep(0),
     )
+    monkeypatch.setattr(chat_stream_service, "_legacy_turn_is_active", lambda *_: True)
 
     async def consume():
         queue: asyncio.Queue = asyncio.Queue()
@@ -1503,7 +2212,7 @@ def test_stream_boundary_normalizer_repairs_nested_and_extra_reasoning_events():
 def test_model_registry_exposes_stable_ids_not_provider_routes():
     production = Settings(environment="production")
     assert [choice["id"] for choice in production.chat_model_choices] == [
-        "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "zai-org/GLM-5.3-Flash",
     ]
     staging = Settings(
         environment="staging", chat_openrouter_server_funded_enabled=True
@@ -1513,8 +2222,8 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
         "moonshotai/Kimi-K3",
         "gpt-5.6-luna@openrouter",
     ]
-    assert production.chat_model_routes["deepseek-ai/DeepSeek-V4-Flash-0731"] == (
-        "deepseek-ai/DeepSeek-V4-Flash-0731:baseten"
+    assert production.chat_model_routes["zai-org/GLM-5.3-Flash"] == (
+        "zai-org/GLM-5.3-Flash:fastest"
     )
     for legacy_id in (
         "google/gemma-4-31B-it",
@@ -1529,19 +2238,16 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
             production.chat_model_routes[legacy_id]
             == production.chat_model_routes["deepseek-ai/DeepSeek-V4-Flash-0731"]
         )
-    assert (
-        production.chat_model_providers["deepseek-ai/DeepSeek-V4-Flash-0731"]
-        == "huggingface"
-    )
+    assert production.chat_model_providers["zai-org/GLM-5.3-Flash"] == "huggingface"
     assert production.chat_effective_pi_prewarm_model == (
-        "deepseek-ai/DeepSeek-V4-Flash-0731:baseten"
+        "zai-org/GLM-5.3-Flash:fastest"
     )
     production_direct = Settings(
         environment="production", chat_openai_direct_enabled=True
     )
     assert [choice["id"] for choice in production_direct.chat_model_choices] == [
         "gpt-5.6-luna@openai",
-        "deepseek-ai/DeepSeek-V4-Flash-0731",
+        "zai-org/GLM-5.3-Flash",
     ]
     assert production_direct.chat_model_choices[0]["label"] == "GPT-5.6 Luna"
     assert production_direct.chat_model_providers["gpt-5.6-luna@openai"] == "openai"
@@ -1600,7 +2306,7 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
         == "openrouter"
     )
     assert openrouter.chat_effective_pi_prewarm_model == (
-        "deepseek/deepseek-v4-flash-0731"
+        "zai-org/GLM-5.3-Flash:fastest"
     )
     assert "deepseek/deepseek-v4-flash-0731" in openrouter.chat_openrouter_routes
     assert openrouter.chat_route_providers[production.chat_deepseek_v4_flash_route] == (
@@ -2415,11 +3121,11 @@ def test_completed_turn_persists_finish_reason_in_authenticated_history():
         citations=[],
         followups=[],
         display_blocks=[],
-        finish_reason="tool_limit",
+        finish_reason="scope_blocked",
     )
 
-    assert assistant.finish_reason == "tool_limit"
-    assert _message(assistant).finish_reason == "tool_limit"
+    assert assistant.finish_reason == "scope_blocked"
+    assert _message(assistant).finish_reason == "scope_blocked"
 
 
 def test_agent_timeout_emits_typed_error_and_closes_sdk_stream(monkeypatch):
@@ -2660,6 +3366,9 @@ def test_chat_endpoint_stream_contract(monkeypatch):
         def citation_history(self, *_args, **_kwargs):
             return []
 
+        def turn_is_active(self, *_args, **_kwargs):
+            return True
+
     settings = get_settings()
     monkeypatch.setattr(settings, "chat_enabled", True)
     monkeypatch.setattr(settings, "hf_token", "test-token")
@@ -2736,6 +3445,7 @@ def test_chat_endpoint_stream_contract(monkeypatch):
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/chat/stream",
+            headers={"Last-Event-ID": "not-a-cursor"},
             json={"message": "hello", "client_message_id": "id"},
         )
     assert response.status_code == 200
@@ -2816,7 +3526,7 @@ def test_closing_stream_persists_interrupted_turn(monkeypatch):
     assert first.event == "stream_start"
     assert persisted[0][2] == admission
     assert persisted[0][3:] == ("interrupted", True, [])
-    assert orchestrator.terminal == "interrupted"
+    assert orchestrator.terminal_label == "interrupted"
     assert trace.finishes[-1] == (
         "",
         "interrupted",
@@ -2887,6 +3597,119 @@ def test_chat_endpoint_rejects_when_capacity_is_occupied(monkeypatch, caplog):
     assert "ceiling=" in caplog.text
     assert "denial_count=" in caplog.text
     assert "hello" not in caplog.text
+
+
+def test_stream_endpoint_rejects_forged_qualification_scope_header(monkeypatch):
+    settings = Settings(
+        _env_file=None,
+        environment="staging",
+        release_id="0123456789ab-staging",
+        chat_durable_turn_dispatch_enabled=True,
+    )
+    monkeypatch.setattr(
+        chat_router, "has_valid_non_cookie_admin_credential", lambda *_args: True
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-pwc-qualification-scope-id", b"forged-not-a-uuid"),
+                (b"x-pwc-qualification-workload", b"no_tool"),
+            ],
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        chat_router._durable_qualification_scope(request, settings)
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == {"code": "qualification_scope_rejected"}
+
+
+def test_stream_endpoint_rejects_nonexistent_active_qualification_scope(
+    monkeypatch,
+):
+    from backend.services.chat_durable_qualification_evidence import (
+        QualificationEvidenceUnavailable,
+    )
+
+    scope_id = uuid.uuid4()
+    settings = Settings(
+        _env_file=None,
+        environment="staging",
+        release_id="0123456789ab-staging",
+        chat_enabled=True,
+        chat_public_admission_enabled=True,
+        chat_sandbox_admission_enabled=True,
+        chat_durable_turn_dispatch_enabled=True,
+        hf_token="test-token",
+    )
+
+    class FakeDB:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def rollback(self):
+            return None
+
+    class MissingScope:
+        def __init__(self, _db):
+            pass
+
+        def require_active_context(self, *_args, **_kwargs):
+            raise QualificationEvidenceUnavailable("scope does not exist")
+
+    monkeypatch.setattr(chat_router, "get_settings", lambda: settings)
+    monkeypatch.setattr(
+        chat_router, "has_valid_non_cookie_admin_credential", lambda *_args: True
+    )
+    monkeypatch.setattr(
+        chat_router,
+        "inference_credential_for_request",
+        lambda *_args: SimpleNamespace(token="user-token", bill_to=None),
+    )
+    monkeypatch.setattr(
+        chat_router.deployment_lifecycle,
+        "status",
+        lambda: SimpleNamespace(accepting_chat_turns=True),
+    )
+    monkeypatch.setattr(
+        chat_router,
+        "_prepare_paper_turn",
+        lambda *_args: chat_router.PreparedPaperTurn("hello", "hello", [], 0, 0, 0),
+    )
+    monkeypatch.setattr(
+        chat_router, "ChatDurableQualificationEvidenceService", MissingScope
+    )
+    monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/chat/stream",
+            "headers": [
+                (b"x-pwc-qualification-scope-id", str(scope_id).encode()),
+                (b"x-pwc-qualification-workload", b"no_tool"),
+            ],
+        }
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            chat_router.stream_chat(
+                ChatRequest(message="hello", client_message_id="qualified-request"),
+                request,
+                {"hf_user_id": "operator", "username": "operator"},
+            )
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail == {"code": "qualification_scope_unavailable"}
 
 
 def test_paper_hydration_failure_precedes_turn_admission_and_runner(monkeypatch):

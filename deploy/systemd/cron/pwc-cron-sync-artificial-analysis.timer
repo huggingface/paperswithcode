@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Artificial Analysis leaderboards hourly
+
+[Timer]
+OnCalendar=*-*-* *:35:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-artificial-analysis.service
+
+[Install]
+WantedBy=timers.target

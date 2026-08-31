@@ -1,47 +1,15 @@
 import readline from "node:readline";
-import { PiWorker, type RunTurn } from "./agent.js";
+import { PiWorker } from "./agent.js";
+import { MAX_TURN_FRAME_BYTES, parseRunTurn } from "./turn_protocol.js";
 
 const PREFIX = "@@PWC_CHAT_V1@@";
-const MAX_FRAME_BYTES = 2 * 1024 * 1024 + 256 * 1024;
+const MAX_FRAME_BYTES = MAX_TURN_FRAME_BYTES;
 const persistent = process.env.PWC_CHAT_PERSISTENT_AGENT === "1";
 
 function emit(requestId: string, event: Record<string, unknown>): void {
   const frame = JSON.stringify({ v: 1, request_id: requestId, ...event });
   if (Buffer.byteLength(frame) > MAX_FRAME_BYTES) throw new Error("Pi worker frame is too large");
   process.stdout.write(`${PREFIX}${frame}\n`);
-}
-
-function runFrame(value: unknown): RunTurn {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Pi run frame");
-  const frame = value as Record<string, unknown>;
-  const required = new Set([
-    "v", "type", "request_id", "chat_session_id", "prompt", "model", "resume",
-    "web_search_enabled", "reasoning_effort", "fetchable_urls", "hf_username", "agent_harness",
-  ]);
-  const optional = new Set([
-    "turn_id", "assignment_token", "worker_generation", "reader_mode", "poster_mode",
-    "paper_artifacts_enabled", "paper_descriptor",
-    "provider_protocol",
-  ]);
-  if (Object.keys(frame).some((key) => !required.has(key) && !optional.has(key))) throw new Error("Invalid Pi run frame keys");
-  if ([...required].some((key) => !(key in frame))) throw new Error("Missing Pi run frame key");
-  if (
-    frame.v !== 1 || frame.type !== "run_turn" || frame.agent_harness !== "pi" ||
-    typeof frame.request_id !== "string" || typeof frame.chat_session_id !== "string" ||
-    typeof frame.prompt !== "string" || Buffer.byteLength(frame.prompt) > 2 * 1024 * 1024 ||
-    typeof frame.model !== "string" ||
-    (frame.provider_protocol !== undefined
-      && !new Set(["anthropic-messages", "openai-responses"]).has(String(frame.provider_protocol))) ||
-    (frame.resume !== null && typeof frame.resume !== "string") ||
-    typeof frame.web_search_enabled !== "boolean" ||
-    (frame.reader_mode !== undefined && typeof frame.reader_mode !== "boolean") ||
-    (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||
-    (frame.paper_artifacts_enabled !== undefined && typeof frame.paper_artifacts_enabled !== "boolean") ||
-    (frame.paper_descriptor !== undefined && (!frame.paper_descriptor || typeof frame.paper_descriptor !== "object" || Array.isArray(frame.paper_descriptor))) ||
-    !new Set(["low", "high", "max"]).has(String(frame.reasoning_effort)) ||
-    typeof frame.hf_username !== "string" || !Array.isArray(frame.fetchable_urls)
-  ) throw new Error("Invalid Pi run frame value");
-  return { ...frame, reader_mode: frame.reader_mode === true, poster_mode: frame.poster_mode === true, paper_artifacts_enabled: frame.paper_artifacts_enabled === true } as unknown as RunTurn;
 }
 
 const worker = new PiWorker(emit);
@@ -66,7 +34,7 @@ input.on("line", (line) => {
     .then(async () => {
       const requestId = typeof decoded.request_id === "string" ? decoded.request_id : "invalid";
       try {
-        await worker.run(runFrame(decoded));
+        await worker.run(parseRunTurn(decoded));
       } catch {
         emit(requestId, { type: "error", code: "invalid_request", message: "The research run failed." });
         emit(requestId, { type: "worker_done", status: "complete" });

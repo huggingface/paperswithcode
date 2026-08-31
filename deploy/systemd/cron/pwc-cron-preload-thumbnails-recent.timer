@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Preload thumbnails for recent papers daily
+
+[Timer]
+OnCalendar=*-*-* 04:30:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-preload-thumbnails-recent.service
+
+[Install]
+WantedBy=timers.target

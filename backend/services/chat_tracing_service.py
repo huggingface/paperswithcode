@@ -235,6 +235,59 @@ class ChatTurnTrace:
                 "warm_assignment_retry_overhead_ms": event.get("elapsed_ms"),
             }
 
+    def record_guardrail(
+        self,
+        decision: Any,
+        *,
+        buffered_events: int,
+        buffered_bytes: int,
+        cancellation_result: str,
+        wasted_usage: dict[str, int] | None = None,
+        wasted_cost: float | None = None,
+    ) -> None:
+        records = list(getattr(decision, "attempt_records", ()))
+        for index, attempt in enumerate(records, start=1):
+            validated = getattr(attempt, "decision", None) in {"allow", "block"}
+            output = None
+            if validated:
+                output = {
+                    "reason": getattr(attempt, "reason", None),
+                    "decision": getattr(attempt, "decision", None),
+                }
+            metadata = {
+                "attempt": index,
+                "provider": getattr(attempt, "provider", None),
+                "latency_ms": getattr(attempt, "latency_ms", None),
+                "outcome": getattr(attempt, "outcome", None),
+                "retry": index > 1,
+                "fail_open": bool(getattr(decision, "fail_open", False)),
+                "buffered_events": buffered_events,
+                "buffered_bytes": buffered_bytes,
+                "cancellation_result": cancellation_result,
+                "wasted_main_usage": wasted_usage,
+                "wasted_main_cost_usd": wasted_cost,
+            }
+            observation = self.root.start_observation(
+                name="research-scope-guardrail",
+                as_type="generation",
+                model=getattr(attempt, "model", None),
+                metadata=metadata,
+            )
+            observation.update(
+                output=output,
+                usage_details={
+                    key: value
+                    for key, value in {
+                        "input": getattr(attempt, "usage_input_tokens", None),
+                        "output": getattr(attempt, "usage_output_tokens", None),
+                    }.items()
+                    if isinstance(value, int)
+                }
+                or None,
+                level="DEFAULT" if validated else "WARNING",
+                status_message=str(getattr(attempt, "outcome", "unknown")),
+            ).end()
+
     def _finish_sandbox_acquisition(self, event: dict[str, Any]) -> None:
         if self.sandbox_acquisition is None:
             return
@@ -408,6 +461,9 @@ class NullChatTurnTrace:
         return
 
     def record_event(self, _kind: str, _event: dict[str, Any]) -> None:
+        return
+
+    def record_guardrail(self, _decision: Any, **_metadata: Any) -> None:
         return
 
     def start_tool(self, _event: dict[str, Any]) -> None:

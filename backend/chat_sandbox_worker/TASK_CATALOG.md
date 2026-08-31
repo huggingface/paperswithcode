@@ -14,11 +14,11 @@ The goal is to split up those tasks in the future.
 
 - `automatic-speech-recognition` — Automatic Speech Recognition
 - `text-to-speech` — Text-to-speech
-- `audio-generation` — Audio Generation
 - `speech-enhancement` — Speech Enhancement
+- `audio-generation` — Audio Generation
 - `audio-understanding` — Audio understanding
-- `audio-compression` — Audio Compression
 - `speaker-verification` — Speaker Verification
+- `audio-compression` — Audio Compression
 - `voice-cloning` — Voice cloning
 - `audio-classification` — Audio Classification
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
@@ -32,8 +32,8 @@ The goal is to split up those tasks in the future.
 - `math` — Mathematics
 - `agents` — Agents
 - `world-models` — World Models
-- `robotics` — Robotics
 - `embedding-models` — Embedding models
+- `robotics` — Robotics
 - `pseudo-labelling` — Pseudo Labelling
 - `remote-sensing` — Remote Sensing
 - `coding-agents` — Coding Agents
@@ -73,8 +73,8 @@ The goal is to split up those tasks in the future.
 - `video-segmentation` — Video segmentation
 - `object-tracking` — Object Tracking
 - `video-compression` — Video Compression
-- `video-super-resolution` — Video super-resolution
 - `video-frame-interpolation` — Video frame interpolation
+- `video-super-resolution` — Video super-resolution
 - `video-restoration` — Video Restoration
 - `video-matting` — Video Matting
 - `cross-view-object-correspondence` — Cross-view object correspondence
@@ -128,7 +128,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `continuous-control` — Continuous Control
 - `cross-view-object-correspondence` — Cross-view object correspondence
 - `deep-research-agents` — Deep Research Agents
-- `deepfake-and-forensics` — Deepfake Detection
+- `deepfake-detection` — Deepfake Detection
 - `depth-estimation` — Depth estimation
 - `document-layout-analysis` — Document Layout Analysis
 - `document-understanding` — Document Understanding

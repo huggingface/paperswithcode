@@ -156,7 +156,7 @@ describe("PapersListView repository scopes", () => {
     expect(screen.getByTestId("location")).toHaveTextContent("framework=lerobot");
     expect(screen.getByTestId("location")).toHaveTextContent("order_by=date_published");
 
-    fireEvent.click(screen.getByRole("button", { name: "This Month" }));
+    fireEvent.click(screen.getByRole("button", { name: "Last Month" }));
     fireEvent.click(screen.getByRole("button", { name: "Has artifacts" }));
     fireEvent.change(screen.getByPlaceholderText("Search title or abstract…"), {
       target: { value: "vision" },

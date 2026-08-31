@@ -15,6 +15,7 @@ except ModuleNotFoundError:
     from runtime import runtime_id, runtime_manifest  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
+EXTERNAL_PI_SLOT_PORTS = {"blue": 8766, "green": 8767}
 
 
 def resolve_slot(environment: str, slot: str) -> tuple[Path, Path, dict]:
@@ -31,7 +32,7 @@ def resolve_slot(environment: str, slot: str) -> tuple[Path, Path, dict]:
     return release, runtime, manifest
 
 
-def configure_release(manifest: dict, release: Path) -> None:
+def configure_release(manifest: dict, release: Path, environment: str) -> None:
     features = manifest["backend_features"]
     runtime = manifest.get("chat_runtime") or {}
     values = {
@@ -98,11 +99,43 @@ def configure_release(manifest: dict, release: Path) -> None:
                 ),
             }
         )
-        # Keep the protected artifact-store settings intact for private papers
-        # and historical safe reads. Posterly generation itself is retired and
-        # must remain disabled regardless of an older release descriptor.
-        values["PWC_CHAT_POSTERLY_ENABLED"] = "false"
+        posterly_release = runtime.get("posterly_enabled") is True
+        artifact_foundation = (
+            environment == "staging" and runtime.get("enabled") is True
+        )
+        values.update(
+            {
+                "PWC_CHAT_ARTIFACTS_ENABLED": str(artifact_foundation).lower(),
+                "PWC_CHAT_POSTERLY_ENABLED": str(posterly_release).lower(),
+                "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": str(
+                    artifact_foundation
+                ).lower(),
+            }
+        )
+        if artifact_foundation:
+            values["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] = "hf_bucket"
+            values["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] = str(
+                runtime["posterly_artifact_bucket_id"]
+            )
     os.environ.update(values)
+
+
+def configure_external_pi_slot(environment: str, slot: str) -> None:
+    """Bind a staging backend slot to its authenticated loopback worker."""
+    if environment != "staging":
+        return
+    try:
+        port = EXTERNAL_PI_SLOT_PORTS[slot]
+    except KeyError as error:
+        raise ValueError("invalid deployment slot") from error
+    os.environ.update(
+        {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_ID": f"staging-{slot}",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_URL": f"http://127.0.0.1:{port}",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "external-pi-v1",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "32",
+        }
+    )
 
 
 def main() -> None:
@@ -123,7 +156,8 @@ def main() -> None:
             "UVICORN_FD": "3",
         }
     )
-    configure_release(manifest, release)
+    configure_release(manifest, release, environment)
+    configure_external_pi_slot(environment, slot)
     python = runtime / "bin" / "python"
     os.chdir(release)
     os.execv(

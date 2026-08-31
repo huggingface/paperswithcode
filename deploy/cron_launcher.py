@@ -6,6 +6,7 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import pwd
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -15,6 +16,71 @@ from pathlib import Path
 CURRENT = Path("/srv/paperswithcode/environments/production/current")
 VENV = Path("/srv/paperswithcode/.venv")
 LOG_DIR = Path("/var/lib/paperswithcode/production/cron-logs")
+RESTRICTED_TRENDING_LOG_DIR = Path(
+    "/var/lib/paperswithcode/production/trending-cron-logs"
+)
+RESTRICTED_TRENDING_LOCK_DIR = Path(
+    "/var/lib/paperswithcode/production/trending-cron-locks"
+)
+RESTRICTED_TRENDING_JOBS = frozenset(
+    {"calculate_trending_scores", "calculate_paper_trending_scores"}
+)
+RESTRICTED_TRENDING_PASSTHROUGH_KEYS = frozenset(
+    {
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PWC_DB_HOST",
+        "PWC_DB_NAME",
+        "PWC_DB_PORT",
+        "PWC_TRENDING_PIN_ARXIV_IDS",
+        "PWC_TRENDING_PIN_PAPER_IDS",
+        "TZ",
+    }
+)
+RESTRICTED_TRENDING_ENV_KEYS = RESTRICTED_TRENDING_PASSTHROUGH_KEYS | {
+    "PWC_CRON_LOCK_DIR",
+    "PWC_CRON_LOG_DIR",
+    "PWC_DB_PASSWORD",
+    "PWC_DB_USER",
+    "PWC_ENVIRONMENT",
+    "PWC_RELEASE_ID",
+    "PYTHONPATH",
+}
+
+
+def restricted_trending_environment(
+    source: dict[str, str], *, release_id: str
+) -> dict[str, str]:
+    """Build the complete, credential-minimal environment for patched code."""
+    password = source.get("PWC_TRENDING_DB_PASSWORD", "")
+    if not password:
+        raise RuntimeError("PWC_TRENDING_DB_PASSWORD is required")
+    required = ("PWC_DB_HOST", "PWC_DB_NAME", "PWC_DB_PORT")
+    missing = [key for key in required if not source.get(key)]
+    if missing:
+        raise RuntimeError(
+            "restricted trending database configuration missing: " + ", ".join(missing)
+        )
+    env = {
+        key: value
+        for key in RESTRICTED_TRENDING_PASSTHROUGH_KEYS
+        if (value := source.get(key))
+    }
+    env.update(
+        {
+            "PWC_CRON_LOCK_DIR": source.get(
+                "PWC_CRON_LOCK_DIR", str(RESTRICTED_TRENDING_LOCK_DIR)
+            ),
+            "PWC_CRON_LOG_DIR": str(RESTRICTED_TRENDING_LOG_DIR),
+            "PWC_DB_PASSWORD": password,
+            "PWC_DB_USER": "pwc_cron_trending",
+            "PWC_ENVIRONMENT": "production",
+            "PWC_RELEASE_ID": release_id,
+            "PYTHONPATH": str(CURRENT / ".github" / "workflows"),
+        }
+    )
+    return env
 
 
 @dataclass(frozen=True)
@@ -43,6 +109,45 @@ def job(
 
 
 COMMANDS: dict[str, Job] = {
+    "autonomous_cron_health": job(
+        ".github/workflows/scripts/autonomous_cron_health.py",
+        "--mode",
+        "strict",
+        timeout="6h",
+        idempotency=(
+            "persist one deterministic snapshot and perform at most one fenced "
+            "allowlisted recovery for one declared job"
+        ),
+    ),
+    "autonomous_cron_audit": job(
+        ".github/workflows/scripts/autonomous_cron_health.py",
+        "--mode",
+        "daily",
+        timeout="6h",
+        idempotency=(
+            "persist one daily four-plane audit and perform at most one fenced "
+            "allowlisted recovery for one declared job"
+        ),
+    ),
+    "alert_submission_review_failure": job(
+        "-m",
+        "backend.scripts.alert_autonomous_submission_failure",
+        timeout="1m",
+        idempotency=(
+            "send one content-free failure signal through the configured primary "
+            "or fallback alert route"
+        ),
+        mutates_shared_data=False,
+    ),
+    "review_submissions": job(
+        ".github/workflows/scripts/review_submissions.py",
+        "--launch-remote",
+        timeout="45m",
+        idempotency=(
+            "claim at most 25 oldest submissions once and launch one pinned "
+            "database-free remote reviewer with replay-safe callbacks"
+        ),
+    ),
     "monitor_chat_operational_alerts": job(
         "-m",
         "backend.scripts.monitor_chat_operational_alerts",
@@ -197,7 +302,8 @@ COMMANDS: dict[str, Job] = {
         timeout="30m",
         idempotency=(
             "index reviewed model releases and upsert Artificial Analysis "
-            "Intelligence and Agentic Index scores from validated API data"
+            "Intelligence, Agentic Index, and TTS Quality Elo scores from "
+            "validated live data"
         ),
     ),
     "sync_programbench": job(
@@ -237,6 +343,23 @@ COMMANDS: dict[str, Job] = {
             "reconcile the rolling seven-day HF cohort into versioned per-paper "
             "workflows and the shared bounded curation queue"
         ),
+    ),
+    "enqueue_hf_trending_model_curation": job(
+        "-m",
+        "backend.scripts.enqueue_hf_trending_model_curation",
+        timeout="30m",
+        idempotency=(
+            "reconcile the global HF trending-model feed into pinned, bounded "
+            "model-resolution and paper-curation workflows"
+        ),
+    ),
+    "export_enrichment_dashboard": job(
+        "-m",
+        "backend.scripts.export_enrichment_dashboard",
+        "--upload",
+        timeout="30m",
+        idempotency="publish one daily enrichment dashboard snapshot",
+        mutates_shared_data=False,
     ),
     "sync_hf_organizations": job(
         "-m",
@@ -350,10 +473,19 @@ def main() -> int:
     job = sys.argv[1]
     spec = COMMANDS[job]
     extra = sys.argv[2:]
+    if job in {"autonomous_cron_health", "autonomous_cron_audit"} and extra:
+        print(
+            "autonomous CRON operator does not accept runtime arguments",
+            file=sys.stderr,
+        )
+        return 2
     if any("\n" in arg or "\x00" in arg for arg in extra):
         print("invalid argument", file=sys.stderr)
         return 2
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_dir = (
+        RESTRICTED_TRENDING_LOG_DIR if job in RESTRICTED_TRENDING_JOBS else LOG_DIR
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
         "job": job,
@@ -365,15 +497,27 @@ def main() -> int:
         "idempotency": spec.idempotency,
         "health_job": spec.health_job,
     }
-    with (LOG_DIR / "launcher.jsonl").open("a", encoding="utf-8") as handle:
+    with (log_dir / "launcher.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     command = spec.command
-    env = os.environ.copy()
-    env["PWC_ENVIRONMENT"] = "production"
-    env["PWC_RELEASE_ID"] = manifest["release_id"]
-    env["PWC_CRON_LOG_DIR"] = str(LOG_DIR)
-    env["PYTHONPATH"] = str(CURRENT / ".github" / "workflows")
-    apply_release_features(env, manifest)
+    if job in RESTRICTED_TRENDING_JOBS:
+        if pwd.getpwuid(os.getuid()).pw_name != "pwc-cron-trending":
+            print("restricted trending job requires pwc-cron-trending", file=sys.stderr)
+            return 2
+        try:
+            env = restricted_trending_environment(
+                os.environ.copy(), release_id=manifest["release_id"]
+            )
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    else:
+        env = os.environ.copy()
+        env["PWC_ENVIRONMENT"] = "production"
+        env["PWC_RELEASE_ID"] = manifest["release_id"]
+        env["PWC_CRON_LOG_DIR"] = str(log_dir)
+        env["PYTHONPATH"] = str(CURRENT / ".github" / "workflows")
+        apply_release_features(env, manifest)
     if job in {
         "preload_thumbnails",
         "mirror_thumbnails_to_disk",
@@ -382,9 +526,7 @@ def main() -> int:
         env["PWC_THUMBNAIL_MUTATIONS_ENABLED"] = "true"
     argv = [str(VENV / "bin" / "python"), *command, *extra]
     lock_dir = Path(
-        os.environ.get(
-            "PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks"
-        )
+        env.get("PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks")
     )
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / f"{job}.lock").open("w") as lock:

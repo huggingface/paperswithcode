@@ -1212,7 +1212,7 @@ def test_persistent_dispatch_distinguishes_control_open_and_write_failures():
     asyncio.run(write_failure())
 
 
-def test_cancel_registered_before_run_frame_returns_cancelled_without_write():
+def test_cancel_deferred_before_worker_registration_returns_cancelled_without_write():
     async def exercise():
         transport = _transport()
         request = _turn_request()
@@ -1220,13 +1220,7 @@ def test_cancel_registered_before_run_frame_returns_cancelled_without_write():
         process = _OneShotProcess()
         control = _control(claim.sandbox_id, process)
         transport.register_session_control(request.chat_session_id, control)
-        register = transport.register_running_worker
-
-        def register_cancelled(turn_id, running):
-            register(turn_id, running)
-            running.cancel_requested = True
-
-        transport.register_running_worker = register_cancelled
+        transport.defer_cancel(request.turn_id)
         execution = transport.create_execution(
             sandbox=control.sandbox,
             claim=claim,
@@ -1739,11 +1733,111 @@ def test_turn_coordinator_cancel_maps_timeout_and_not_found_to_typed_status():
             is WorkerCancelStatus.TIMED_OUT
         )
         assert terminations == [(session_id, claim, "cancel_timeout")]
+        deferred_turn_id = uuid.uuid4()
         assert (
-            await coordinator.cancel(session_id, uuid.uuid4())
-            is WorkerCancelStatus.NOT_FOUND
+            await coordinator.cancel(session_id, deferred_turn_id)
+            is WorkerCancelStatus.PENDING
         )
+        deferred = RunningWorker(
+            process=_OneShotProcess(),
+            request_id="manager-deferred",
+            claim=claim,
+            done=asyncio.Event(),
+        )
+        transport.register_running_worker(deferred_turn_id, deferred)
+        assert deferred.cancel_requested is True
+        transport.remove_running_worker(deferred_turn_id, expected=deferred)
 
         transport.remove_running_worker(turn_id, expected=running)
+
+    asyncio.run(exercise())
+
+
+def test_turn_coordinator_defers_cancel_across_inflight_sandbox_acquisition():
+    async def exercise():
+        settings = Settings(
+            _env_file=None,
+            chat_workspace_snapshots_enabled=False,
+            chat_persistent_worker_enabled=True,
+            chat_sandbox_spend_enforcement_enabled=False,
+            chat_agent_timeout_seconds=1,
+            chat_gateway_url="https://gateway.example.test",
+        )
+        transport = _transport()
+        session_id = uuid.uuid4()
+        turn_id = uuid.uuid4()
+        request = ChatSandboxTurnRequest(
+            chat_session_id=session_id,
+            turn_id=turn_id,
+            request_id="acquisition-race",
+            prompt="prompt",
+            model="model",
+            resume=None,
+            capability_token="capability",
+        )
+        sandbox = SimpleNamespace(object_id="sb-acquisition-race")
+        process = _OneShotProcess()
+        registrations = []
+        register_running_worker = transport.register_running_worker
+
+        def register(turn, running):
+            registrations.append((turn, turn in transport.deferred_cancellations))
+            register_running_worker(turn, running)
+
+        transport.register_running_worker = register
+        acquisition_started = asyncio.Event()
+        allow_acquisition = asyncio.Event()
+
+        async def acquire(*_args, **_kwargs):
+            acquisition_started.set()
+            await allow_acquisition.wait()
+            transport.register_session_control(
+                session_id, _control(sandbox.object_id, process)
+            )
+            return SandboxCreated(
+                sandbox=sandbox,
+                elapsed_ms=1,
+                after_pool_miss=False,
+                pool_lookup_ms=None,
+            )
+
+        terminations = []
+
+        async def terminate_worker(_session_id, _claim, *, failure_code):
+            terminations.append(failure_code)
+            return True
+
+        coordinator = build_turn_coordinator(
+            settings,
+            transport,
+            acquire=acquire,
+            claim_worker=lambda *_args, **_kwargs: WorkerClaim(
+                sandbox.object_id,
+                "claim-token",
+                assignment_token="assignment-token",
+                worker_generation="generation-a",
+            ),
+            terminate_worker=terminate_worker,
+        )
+        events = []
+
+        async def consume():
+            async for event in coordinator.run(request):
+                events.append(event)
+
+        turn = asyncio.create_task(consume())
+        await acquisition_started.wait()
+        assert (
+            await coordinator.cancel(session_id, turn_id) is WorkerCancelStatus.PENDING
+        )
+        assert turn_id in transport.deferred_cancellations
+        allow_acquisition.set()
+        await turn
+
+        assert events[-1] == {"type": "_cancelled"}
+        assert registrations == [(turn_id, True)]
+        assert process.stdin.writes == []
+        assert terminations == ["cancelled"]
+        assert transport.running_worker(turn_id) is None
 
     asyncio.run(exercise())

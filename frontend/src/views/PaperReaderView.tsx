@@ -8,7 +8,7 @@ import { ArtifactPanelProvider, useArtifactPanel } from "@/components/chat/useAr
 import type { PdfToolbarResources } from "@/components/pdf/PdfToolbar";
 import { usePaper } from "@/hooks/usePapers";
 import type { Paper } from "@/lib/api/papers.types";
-import { isPaperReaderChatEnabled } from "@/lib/apiUrl";
+import { assetUrl, isPaperReaderChatEnabled } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { safeExternalHref } from "@/lib/safeExternalHref";
@@ -91,7 +91,7 @@ export function readerToolbarResources(paper: Paper | undefined): PdfToolbarReso
 }
 
 function PaperReaderExperience() {
-  const { arxivId: rawRouteId } = useParams<{ arxivId: string }>();
+  const { paperId: rawRouteId } = useParams<{ paperId: string }>();
   const routeId = normalizePaperRouteId(rawRouteId ?? "").replace(/v\d+$/i, "");
   const query = usePaper(routeId, Boolean(routeId));
   const availabilityQuery = useQuery({
@@ -101,7 +101,9 @@ function PaperReaderExperience() {
     retry: false,
   });
   const paper = query.data;
-  const pdfUrl = directArxivPdfHref(paper?.url_pdf);
+  const pdfUrl = paper?.source === "external"
+    ? assetUrl(`/paper-assets/external/${paper.id}/paper.pdf`)
+    : directArxivPdfHref(paper?.url_pdf);
   const toolbarResources = readerToolbarResources(paper);
   const canonicalRoute = paper?.arxiv_id?.replace(/v\d+$/i, "") || routeId;
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() => {
@@ -311,7 +313,7 @@ function PaperReaderExperience() {
   if (query.isLoading) return <div className="reader-status" role="status">Loading paper…</div>;
   if (query.error || !paper) return <div className="reader-status" role="alert"><p>Paper not found.</p><Link to="/papers">Browse papers</Link></div>;
   if (availabilityQuery.data?.native_pdf_reader_enabled === false) return <div className="reader-status" role="alert"><p>The native reader is currently unavailable.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
-  if (paper.source !== "arxiv" || !pdfUrl) return <div className="reader-status" role="alert"><p>Native reading is unavailable for this resource.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
+  if (!pdfUrl) return <div className="reader-status" role="alert"><p>Native reading is unavailable for this resource.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
 
   return <div className="paper-reader-shell">
     {!desktopSplit && <div className="reader-tabs" role="tablist" aria-label="Reader panels">
@@ -347,6 +349,9 @@ function PaperReaderExperience() {
           resizeActive={resizeActive || chatTransitionActive}
           selectionEnabled={selectionEnabled}
           paperVersion={paper.version}
+          loadErrorMessage={paper.source === "external"
+            ? "Paper content is still being prepared. Please try again later."
+            : undefined}
           onPaperSelection={attachSelection}
           onPaperSelectionError={setSelectionStatus}
           onPageChange={(page) => {
@@ -403,8 +408,8 @@ function PaperReaderExperience() {
 }
 
 export default function PaperReaderView() {
-  const { arxivId = "" } = useParams<{ arxivId: string }>();
-  return <ArtifactPanelProvider workspaceKey={`reader:${arxivId}`}>
+  const { paperId = "" } = useParams<{ paperId: string }>();
+  return <ArtifactPanelProvider workspaceKey={`reader:${paperId}`}>
     <PaperReaderExperience />
   </ArtifactPanelProvider>;
 }

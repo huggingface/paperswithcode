@@ -20,6 +20,8 @@ from backend.chat_sandbox_worker.contract import (
     POSTERLY_CHROMIUM_REVISION,
     POSTERLY_PLAYWRIGHT_VERSION,
     POSTERLY_SOURCE_COMMIT,
+    PWC_CLI_INSTALLER_SHA256,
+    PWC_CLI_SOURCE_COMMIT,
     PWC_CLI_VERSION,
     RESTRICTED_HF_CLI_VERSION,
     SDK_VERSION,
@@ -28,9 +30,9 @@ from backend.chat_sandbox_worker.contract import (
 BACKEND = Path(__file__).resolve().parents[1]
 REPOSITORY = Path(__file__).resolve().parents[2]
 WORKER = Path(__file__).resolve().parent
-STANDALONE = REPOSITORY / "standalone_cli"
-RESTRICTED_HF = REPOSITORY / "restricted_hf_cli"
-S2_CLI = REPOSITORY / "s2_cli"
+CLIS = REPOSITORY / "clis"
+RESTRICTED_HF = CLIS / "restricted_hf_cli"
+S2_CLI = CLIS / "s2_cli"
 
 app = modal.App(MODAL_APP_NAME)
 image = (
@@ -73,6 +75,9 @@ image = (
         "test -r /opt/posterly/LICENSE && test -r /opt/posterly/NOTICE.md && test -r /opt/posterly/SKILL.md",
     )
     .run_commands(
+        "mkdir -p /opt/pwc",
+        f"curl -fsSLo /opt/pwc/install-pwc.py https://raw.githubusercontent.com/huggingface/pwc-cli/{PWC_CLI_SOURCE_COMMIT}/standalone_cli/install.py",
+        f"echo '{PWC_CLI_INSTALLER_SHA256}  /opt/pwc/install-pwc.py' | sha256sum -c -",
         "groupadd --system pwc-broker && useradd --system --gid pwc-broker --home-dir /var/empty/pwc-broker pwc-broker",
         "groupadd --system pwc-chat && useradd --system --gid pwc-chat --create-home --home-dir /home/pwc-chat pwc-chat",
         "mkdir -p /opt/pwc/backend/chat_sandbox_worker /workspace /home/pwc-chat/.claude /var/empty/pwc-broker",
@@ -120,7 +125,6 @@ image = (
         copy=True,
     )
     .add_local_file(RESTRICTED_HF / "bin" / "hf", "/opt/pwc/restricted-hf", copy=True)
-    .add_local_file(STANDALONE / "install.py", "/opt/pwc/install-pwc.py", copy=True)
     .run_commands(
         "chmod -R a+rX /opt/pwc/backend",
         "cd /opt/pwc/backend/chat_sandbox_worker/pi_worker && npm ci --ignore-scripts && npm run build && npm prune --omit=dev --ignore-scripts",
@@ -139,6 +143,7 @@ image = (
         "python -m pip install --no-deps /opt/pwc/s2_cli",
         "chmod 0755 /opt/pwc/restricted-hf && ln -s /opt/pwc/restricted-hf /usr/local/bin/hf",
         "PYTHONPATH=/opt/pwc python -c 'import backend.chat_execution_policy'",
+        "PYTHONPATH=/opt/pwc python -c \"import backend.chat_sandbox_worker.executor_daemon; import backend.chat_sandbox_worker.executor_relay; from backend.chat_sandbox_worker.executor_daemon import DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER; assert EXECUTOR_USER == 'pwc-chat' and DEFAULT_EXECUTOR_PIDS_MAX == 64\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; from backend.chat_sandbox_worker.contract import RESTRICTED_HF_CLI_SHA256, restricted_hf_cli_digest; assert restricted_hf_cli_digest(Path('/opt/pwc/restricted_hf_cli/restricted_hf_cli'), Path('/opt/pwc/restricted-hf')) == RESTRICTED_HF_CLI_SHA256\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; import hashlib; from backend.chat_sandbox_worker.contract import HF_CLI_SKILL_SHA256; assert hashlib.sha256(Path('/opt/pwc/HF_CLI_SKILL.md').read_bytes()).hexdigest() == HF_CLI_SKILL_SHA256\"",
         f"python /opt/pwc/install-pwc.py --version {PWC_CLI_VERSION} --prefix /usr/local",

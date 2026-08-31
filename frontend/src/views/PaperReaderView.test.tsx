@@ -6,11 +6,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   getAvailability: vi.fn(),
   showArtifact: false,
+  paper: {} as Record<string, unknown>,
 }));
 
 vi.mock("@/hooks/usePapers", () => ({
   usePaper: () => ({
-    data: {
+    data: mocks.paper,
+    isLoading: false,
+    error: null,
+  }),
+}));
+
+const arxivPaper = {
       id: "42",
       arxiv_id: "1706.03762",
       title: "Attention Is All You Need",
@@ -25,11 +32,7 @@ vi.mock("@/hooks/usePapers", () => ({
         { id: "3", paper_id: "42", url: "https://attention.example/project", is_official: true, source: "curated" },
       ],
       hf_artifact_summary: { model_count: 2, dataset_count: 1, space_count: 0, best_kind: "model", best_count: 2, best_url: "https://huggingface.co/models?other=arxiv:1706.03762" },
-    },
-    isLoading: false,
-    error: null,
-  }),
-}));
+};
 vi.mock("@/lib/api/chat", () => ({
   chatApi: { getAvailability: mocks.getAvailability },
 }));
@@ -91,12 +94,12 @@ vi.mock("@/views/ChatView", async () => {
 import PaperReaderView, { readerToolbarResources } from "@/views/PaperReaderView";
 import type { Paper } from "@/lib/api/papers.types";
 
-function renderReader() {
+function renderReader(route = "/pdf/1706.03762") {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
-      <MemoryRouter initialEntries={["/pdf/1706.03762"]}>
-        <Routes><Route path="/pdf/:arxivId" element={<PaperReaderView />} /></Routes>
+      <MemoryRouter initialEntries={[route]}>
+        <Routes><Route path="/pdf/:paperId" element={<PaperReaderView />} /></Routes>
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -108,6 +111,7 @@ describe("PaperReaderView", () => {
     vi.stubEnv("VITE_CHAT_ENABLED", "1");
     vi.stubEnv("VITE_PAPER_READER_CHAT_ENABLED", "1");
     mocks.showArtifact = false;
+    mocks.paper = arxivPaper;
     mocks.getAvailability.mockResolvedValue({
       status: "available",
       reason: null,
@@ -143,6 +147,27 @@ describe("PaperReaderView", () => {
     expect(screen.getByText("Paper chat")).toBeVisible();
     expect(screen.queryByText("Notes")).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.getAvailability).toHaveBeenCalled());
+  });
+
+  it("loads an archived external PDF by catalog paper ID", () => {
+    mocks.paper = {
+      id: "109743",
+      arxiv_id: null,
+      title: "External report",
+      source: "external",
+      version: "v1",
+      source_url: "https://example.com/report.pdf",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [],
+    };
+
+    renderReader("/pdf/109743");
+
+    expect(screen.getByRole("link", { name: /External report/ }))
+      .toHaveAttribute("href", "/paper/109743");
+    expect(screen.getByRole("region", { name: "Paper PDF" }))
+      .toHaveAttribute("data-url", "/paper-assets/external/109743/paper.pdf");
   });
 
   it("only accepts an official GitHub repository for the title action", () => {

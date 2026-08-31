@@ -10,6 +10,7 @@ import { assetUrl, isNativePdfReaderEnabled, isStagingEnvironment } from "@/lib/
 import { useAuth } from "@/lib/authContext";
 import { paperEditSubmitMode } from "@/lib/contributorCapabilities";
 import { leaderboardBadgeMarkdown } from "@/lib/leaderboardBadges";
+import { paperReaderRoute } from "@/lib/paperReader";
 import { usePaperDetailPageModel } from "@/hooks/usePaperDetailPageModel";
 import {
   parseFreshAuthEditSection,
@@ -331,6 +332,7 @@ const PaperDetailView: React.FC = () => {
     successorPapers,
   } = presentation;
   const authorLimit = 12;
+  const readerRoute = paperReaderRoute(paper, arxivId);
   const visibleAuthors = showAllAuthors || authorEntries.length <= authorLimit
     ? authorEntries
     : authorEntries.slice(0, authorLimit);
@@ -443,16 +445,16 @@ const PaperDetailView: React.FC = () => {
           </div>
 
           <div className="action-row">
-            {safePdfUrl && paper.source === "arxiv" && isNativePdfReaderEnabled()
+            {readerRoute && isNativePdfReaderEnabled()
               && (!isStagingEnvironment() || user?.is_admin) ? (
               <Link
                 className="action-btn"
-                to={`/pdf/${(paper.arxiv_id || arxivId).replace(/v\d+$/i, "")}`}
+                to={readerRoute}
                 onClick={() => {
-                  const readerRoute = (paper.arxiv_id || arxivId).replace(/v\d+$/i, "");
-                  sessionStorage.removeItem(`pwc:reader:session:${readerRoute}`);
-                  sessionStorage.removeItem(`pwc:reader:assistant-collapsed:${readerRoute}`);
-                  sessionStorage.removeItem(`pwc:reader:page:${readerRoute}`);
+                  const readerId = readerRoute.slice("/pdf/".length);
+                  sessionStorage.removeItem(`pwc:reader:session:${readerId}`);
+                  sessionStorage.removeItem(`pwc:reader:assistant-collapsed:${readerId}`);
+                  sessionStorage.removeItem(`pwc:reader:page:${readerId}`);
                 }}
               >
                 <Icon name="pdf" size={12} /> Read paper

@@ -65,6 +65,7 @@ class WorkerTurnDispatchOutcome(StrEnum):
 
 class WorkerCancelStatus(StrEnum):
     NOT_FOUND = "not_found"
+    PENDING = "pending"
     COMPLETED = "completed"
     CONTROL_LOST = "control_lost"
     TIMED_OUT = "timed_out"
@@ -191,6 +192,7 @@ class ChatSandboxWorkerTransport:
         self.provider = provider
         self.clock = clock
         self.processes: dict[uuid.UUID, RunningWorker] = {}
+        self.deferred_cancellations: set[uuid.UUID] = set()
         self.session_controls: dict[uuid.UUID, SessionControl] = {}
         self.blank_controls: dict[str, SessionControl] = {}
         self.blank_health_at: dict[str, float] = {}
@@ -451,7 +453,21 @@ class ChatSandboxWorkerTransport:
     def register_running_worker(
         self, turn_id: uuid.UUID, running: RunningWorker
     ) -> None:
+        if turn_id in self.deferred_cancellations:
+            self.deferred_cancellations.remove(turn_id)
+            running.cancel_requested = True
         self.processes[turn_id] = running
+
+    def defer_cancel(self, turn_id: uuid.UUID) -> None:
+        """Fence a turn that has not registered worker control yet."""
+        running = self.processes.get(turn_id)
+        if running is not None:
+            running.cancel_requested = True
+            return
+        self.deferred_cancellations.add(turn_id)
+
+    def clear_deferred_cancel(self, turn_id: uuid.UUID) -> None:
+        self.deferred_cancellations.discard(turn_id)
 
     def remove_running_worker(
         self, turn_id: uuid.UUID, *, expected: RunningWorker

@@ -18,6 +18,33 @@ test("registers direct OpenAI with the native Responses base path", async () => 
   assert.equal(rollback.model.baseUrl, "http://127.0.0.1:8765");
 });
 
+test("external provider authenticates directly to the fenced chat gateway", async () => {
+  const provider = await createProvider("gpt-5.6-luna", "openai-responses", {
+    url: "https://gateway.example.test/api/internal/chat-gateway",
+    capability: "opaque-turn-capability",
+    sessionId: "10000000-0000-4000-8000-000000000001",
+    turnId: "20000000-0000-4000-8000-000000000001",
+    turnClaim: {
+      turnId: "20000000-0000-4000-8000-000000000001",
+      workerId: "api-1",
+      workerGeneration: 4,
+      leaseGeneration: 9,
+    },
+  });
+  assert.equal(
+    provider.model.baseUrl,
+    "https://gateway.example.test/api/internal/chat-gateway/v1",
+  );
+  assert.deepEqual(provider.runtime.getRegisteredProviderConfig("pwc-gateway")?.headers, {
+    "X-PWC-Session": "10000000-0000-4000-8000-000000000001",
+    "X-PWC-Turn": "20000000-0000-4000-8000-000000000001",
+    "X-PWC-Turn-Worker-ID": "api-1",
+    "X-PWC-Turn-Worker-Generation": "4",
+    "X-PWC-Turn-Lease-Generation": "9",
+    "X-PWC-Provider-Protocol": "openai-responses",
+  });
+});
+
 test("direct SDK streams through the pinned Anthropic-compatible provider", async () => {
   let captured: Record<string, unknown> | undefined;
   let authorization = "";

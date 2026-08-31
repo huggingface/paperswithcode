@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from io import BytesIO, StringIO
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import httpx
 import pytest
@@ -199,6 +199,195 @@ def test_worker_download_pdf_does_not_fallback_on_rate_limit(monkeypatch):
     client.get.assert_called_once_with(url)
 
 
+def test_worker_resolves_external_repository_pdf_urls():
+    assert WORKER.normalize_external_pdf_url(
+        "https://github.com/QwenLM/Qwen3.8-Flash-Next/blob/main/tech_report.pdf"
+    ) == (
+        "https://raw.githubusercontent.com/"
+        "QwenLM/Qwen3.8-Flash-Next/main/tech_report.pdf"
+    )
+    assert (
+        WORKER.normalize_external_pdf_url(
+            "https://huggingface.co/acme/report/blob/main/report.pdf"
+        )
+        == "https://huggingface.co/acme/report/resolve/main/report.pdf"
+    )
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://127.0.0.1/report.pdf",
+        "http://169.254.169.254/latest/meta-data/report.pdf",
+        "https://localhost/report.pdf",
+        "https://user:password@example.com/report.pdf",
+    ],
+)
+def test_worker_rejects_unsafe_external_pdf_urls(url):
+    with pytest.raises(ValueError, match="invalid_external_pdf_url"):
+        WORKER.normalize_external_pdf_url(url)
+
+
+def test_worker_rejects_unsafe_external_pdf_redirects(monkeypatch):
+    class Client:
+        def __init__(self, **kwargs):
+            self.request_hook = kwargs["event_hooks"]["request"][0]
+
+        def __enter__(self):
+            self.request_hook(httpx.Request("GET", "http://127.0.0.1/report.pdf"))
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+    monkeypatch.setattr(WORKER.httpx, "Client", Client)
+
+    with pytest.raises(ValueError, match="invalid_external_pdf_url"):
+        WORKER.download_external_pdf("https://example.com/report.pdf")
+
+
+def test_worker_rejects_external_pdf_hostname_resolving_to_private_ip(monkeypatch):
+    monkeypatch.setattr(
+        WORKER.socket,
+        "getaddrinfo",
+        lambda *_args, **_kwargs: [
+            (WORKER.socket.AF_INET, WORKER.socket.SOCK_STREAM, 6, "", ("10.0.0.4", 443))
+        ],
+    )
+
+    with pytest.raises(ValueError, match="invalid_external_pdf_url"):
+        WORKER.validate_external_pdf_network_target("https://example.com/report.pdf")
+
+
+def test_worker_streams_external_pdf_with_a_hard_size_cap(monkeypatch):
+    read_past_limit = False
+
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            nonlocal read_past_limit
+            yield b"%PDF-"
+            yield b"1234"
+            read_past_limit = True
+            yield b"must-not-be-read"
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream(self, method, url):
+            assert method == "GET"
+            assert url == "https://example.com/report.pdf"
+            return Response()
+
+    monkeypatch.setattr(
+        WORKER, "validate_external_pdf_network_target", lambda value: value
+    )
+    monkeypatch.setattr(WORKER, "MAX_PDF_BYTES", 8, raising=False)
+    monkeypatch.setattr(WORKER.httpx, "Client", Client)
+
+    with pytest.raises(ValueError, match="invalid_pdf"):
+        WORKER.download_external_pdf("https://example.com/report.pdf")
+
+    assert read_past_limit is False
+
+
+def test_worker_archives_external_pdf_and_publishes_source_aware_markdown(
+    tmp_path, monkeypatch
+):
+    entry = {
+        "paper_key": "external/109743",
+        "paper_id": "109743",
+        "source": "external",
+        "arxiv_id": None,
+        "version": "v1",
+        "title": "External report",
+        "source_url": "https://github.com/acme/report/blob/main/report.pdf",
+        "pdf_url": "https://github.com/acme/report/blob/main/report.pdf",
+        "pdf_key": "external/109743/paper.pdf",
+        "output_key": "external/109743.md",
+    }
+    pdf = b"%PDF-external"
+
+    class Reader:
+        def __init__(self, stream, strict):
+            assert stream.read() == pdf
+            assert strict is True
+            self.pages = [object(), object()]
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=Reader))
+    monkeypatch.setattr(WORKER, "download_pdf_for_entry", lambda _entry: (pdf, "v1"))
+    monkeypatch.setattr(
+        WORKER,
+        "run_chandra",
+        lambda path, _output, pages: (
+            (
+                "External report Markdown body " * 12,
+                {},
+            )
+            if path.read_bytes() == pdf and pages == 2
+            else (_ for _ in ()).throw(AssertionError("unexpected OCR input"))
+        ),
+    )
+
+    result = WORKER.process(entry, tmp_path / "content", tmp_path / "run")
+
+    assert (tmp_path / "content/external/109743/paper.pdf").read_bytes() == pdf
+    markdown = (tmp_path / "content/external/109743.md").read_text()
+    assert "URL Source: https://github.com/acme/report/blob/main/report.pdf" in markdown
+    assert result["paper_key"] == "external/109743"
+    assert result["pdf_key"] == "external/109743/paper.pdf"
+
+
+def test_worker_does_not_archive_external_pdf_before_document_validation(
+    tmp_path, monkeypatch
+):
+    entry = {
+        "paper_key": "external/109743",
+        "paper_id": "109743",
+        "source": "external",
+        "arxiv_id": None,
+        "version": "v1",
+        "title": "Invalid external report",
+        "source_url": "https://example.com/report.pdf",
+        "pdf_url": "https://example.com/report.pdf",
+        "pdf_key": "external/109743/paper.pdf",
+        "output_key": "external/109743.md",
+    }
+
+    class InvalidReader:
+        def __init__(self, *_args, **_kwargs):
+            raise ValueError("broken PDF structure")
+
+    monkeypatch.setitem(sys.modules, "pypdf", SimpleNamespace(PdfReader=InvalidReader))
+    monkeypatch.setattr(
+        WORKER,
+        "download_pdf_for_entry",
+        lambda _entry: (b"%PDF-broken", "v1"),
+    )
+
+    with pytest.raises(ValueError, match="broken PDF structure"):
+        WORKER.process(entry, tmp_path / "content", tmp_path / "run")
+
+    assert not (tmp_path / "content/external/109743/paper.pdf").exists()
+
+
 def test_worker_collects_nested_chandra_images(tmp_path, monkeypatch):
     output = tmp_path / "ocr"
     observed_timeout = None
@@ -221,6 +410,78 @@ def test_worker_collects_nested_chandra_images(tmp_path, monkeypatch):
     assert observed_timeout == WORKER.CHANDRA_TIMEOUT_SECONDS
 
 
+@pytest.mark.parametrize(
+    ("title", "body"),
+    [
+        (
+            "Kimi K3: Agentic Intelligence",
+            "We introduce Kimi K3 and evaluate its agentic reasoning abilities.",
+        ),
+        (
+            "Mamba",
+            "MAMBA is a selective state-space architecture for sequence modeling.",
+        ),
+        (
+            "Étude—Über Vision!",
+            "This étude presents über vision models for robust recognition.",
+        ),
+        (
+            "The, And: Graph Networks",
+            "Graph networks learn relational structure from sparse observations.",
+        ),
+    ],
+)
+def test_worker_accepts_semantically_matching_chandra_body(title, body):
+    WORKER.validate_markdown_semantics(title, body)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        "page_001_image_01.png",
+        "![page](page_001_image_01.png)",
+        "Kimi_image.png\nK3_diagram.webp",
+        "A generic photograph of a chart with colored boxes and arrows.",
+    ],
+)
+def test_worker_rejects_image_description_or_title_mismatch(body):
+    with pytest.raises(ValueError, match="^semantic_markdown_mismatch$"):
+        WORKER.validate_markdown_semantics("Kimi K3 Agentic Intelligence", body)
+
+
+def test_worker_semantic_mismatch_retries_until_max_attempts():
+    mismatch = ValueError("semantic_markdown_mismatch")
+
+    assert WORKER.classify_failure(mismatch, 1) == (
+        "semantic_markdown_mismatch",
+        True,
+    )
+    assert WORKER.classify_failure(mismatch, WORKER.MAX_ATTEMPTS) == (
+        "semantic_markdown_mismatch",
+        False,
+    )
+
+
+def test_worker_semantic_rejection_writes_no_canonical_artifacts(tmp_path):
+    entry = {
+        "arxiv_id": "2607.00001",
+        "version": "v1",
+        "title": "Kimi K3 Agentic Intelligence",
+        "output_key": "2607/2607.00001.md",
+    }
+
+    with pytest.raises(ValueError, match="^semantic_markdown_mismatch$"):
+        WORKER.publish(
+            entry,
+            "page_001_image_01.png",
+            {},
+            tmp_path,
+        )
+
+    assert not (tmp_path / entry["output_key"]).exists()
+    assert not list(tmp_path.rglob("images"))
+
+
 def test_worker_rejects_missing_extracted_image_before_final_attempt(tmp_path):
     with pytest.raises(ValueError, match="missing_extracted_image:missing_figure.webp"):
         WORKER.publish(
@@ -230,7 +491,7 @@ def test_worker_rejects_missing_extracted_image_before_final_attempt(tmp_path):
                 "title": "Missing figure",
                 "output_key": "2607/2607.00001.md",
             },
-            "Paper body.\n\n![figure](missing_figure.webp)",
+            "Missing figure analysis.\n\n![figure](missing_figure.webp)",
             {},
             tmp_path,
         )
@@ -245,7 +506,7 @@ def test_worker_omits_missing_extracted_image_on_final_attempt(tmp_path):
             "output_key": "2607/2607.00001.md",
         },
         (
-            "Paper body.\n\n![figure](missing_figure.webp)\n\n"
+            "Missing figure analysis.\n\n![figure](missing_figure.webp)\n\n"
             '<img src="missing_plot.webp" alt="plot">'
         ),
         {},
@@ -254,7 +515,7 @@ def test_worker_omits_missing_extracted_image_on_final_attempt(tmp_path):
     )
 
     markdown = (tmp_path / "2607/2607.00001.md").read_text()
-    assert "Paper body." in markdown
+    assert "Missing figure analysis." in markdown
     assert "2 generated image references were omitted" in markdown
     assert "missing_figure.webp" not in markdown
     assert "missing_plot.webp" not in markdown
@@ -279,7 +540,7 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
     remote = {manifest_key: (json.dumps(entry) + "\n").encode()}
     stub = tmp_path / "stub"
     stub.mkdir()
-    (stub / "2608.00001.md").write_text("A" * 180)
+    (stub / "2608.00001.md").write_text("Bucket transport paper text. " * 12)
 
     def bucket_bridge(token, request):
         assert token == "secret"
@@ -331,6 +592,79 @@ def test_arxiv_identity_and_markdown_key():
     assert MODULE.normalize_arxiv_id("2607.24653v2") == "2607.24653"
     assert MODULE.markdown_key("2607.24653") == "2607/2607.24653.md"
     assert MODULE.normalize_arxiv_id("hep-th/9901001") is None
+
+
+def test_external_manifest_entry_prefers_pdf_source_url_then_explicit_pdf():
+    explicit = SimpleNamespace(
+        id=109743,
+        source="external",
+        arxiv_id=None,
+        version="v1",
+        title="External report",
+        source_url="https://example.com/report",
+        conference_url_pdf="https://example.com/report.pdf",
+    )
+    source_only = SimpleNamespace(
+        id=109744,
+        source="external",
+        arxiv_id=None,
+        version="v1",
+        title="Source PDF",
+        source_url="https://openreview.net/pdf?id=abc",
+        conference_url_pdf=None,
+    )
+    both = SimpleNamespace(
+        id=109746,
+        source="external",
+        arxiv_id=None,
+        version="v1",
+        title="Canonical source PDF",
+        source_url="https://example.com/canonical.pdf",
+        conference_url_pdf="https://example.com/conference-copy.pdf",
+    )
+    html_only = SimpleNamespace(
+        id=109745,
+        source="external",
+        arxiv_id=None,
+        version="v1",
+        title="Web page",
+        source_url="https://example.com/report",
+        conference_url_pdf=None,
+    )
+
+    assert MODULE.paper_manifest_entry(explicit) == {
+        "paper_key": "external/109743",
+        "paper_id": "109743",
+        "source": "external",
+        "arxiv_id": None,
+        "version": "v1",
+        "title": "External report",
+        "source_url": "https://example.com/report",
+        "pdf_url": "https://example.com/report.pdf",
+        "pdf_key": "external/109743/paper.pdf",
+        "output_key": "external/109743.md",
+    }
+    assert MODULE.paper_manifest_entry(source_only)["pdf_url"] == source_only.source_url
+    assert MODULE.paper_manifest_entry(both)["pdf_url"] == both.source_url
+    assert MODULE.paper_manifest_entry(html_only) is None
+
+
+def test_arxiv_manifest_entry_preserves_canonical_bucket_contract():
+    paper = SimpleNamespace(
+        id=42,
+        source="arxiv",
+        arxiv_id="2607.24653v2",
+        version="v2",
+        title="ArXiv paper",
+        source_url=None,
+        conference_url_pdf=None,
+    )
+
+    entry = MODULE.paper_manifest_entry(paper)
+
+    assert entry["paper_key"] == "2607.24653"
+    assert entry["output_key"] == "2607/2607.24653.md"
+    assert entry["pdf_key"] is None
 
 
 def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
@@ -484,6 +818,7 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
     job._existing_paths = Mock(return_value={papers[0]["output_key"]: object()})
     job._copy_upstream = Mock(return_value=([papers[1]], 0))
     job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(return_value={papers[0]["output_key"]: "valid"})
     job._launch = Mock(return_value=[])
 
     job.run()
@@ -503,13 +838,18 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
             "scope": "full",
             "eligible_papers": 2,
             "canonical_markdown_count": 1,
+            "usable_markdown_count": 1,
+            "semantic_invalid_existing": 0,
+            "semantic_evidence_unavailable": 0,
             "copied_from_upstream_count": 0,
+            "planned_upstream_copy_count": 0,
             "missing_count": 1,
             "coverage_percentage": 50.0,
             "retryable_due": 0,
             "retryable_deferred": 0,
             "permanent_failures": 0,
             "attempts_exhausted": 0,
+            "semantic_validation_failures": 0,
             "retryable_papers_blocked_by_budget": 0,
             "paid_authorization_required": False,
             "selected_profile": None,
@@ -517,6 +857,56 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
         for row in rows
     )
     job._launch.assert_called_with([{**papers[1], "retry": False}])
+
+
+def test_dry_run_does_not_count_unvalidated_upstream_as_usable(tmp_path, monkeypatch):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(2)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(return_value={papers[0]["output_key"]: object()})
+    job._copy_upstream = Mock(return_value=([], 1))
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(return_value={papers[0]["output_key"]: "valid"})
+    job._launch = Mock(return_value=[])
+
+    job.run()
+
+    coverage = json.loads(
+        (tmp_path / MODULE.COVERAGE_HISTORY_NAME).read_text().splitlines()[-1]
+    )
+    assert coverage["canonical_markdown_count"] == 1
+    assert coverage["usable_markdown_count"] == 1
+    assert coverage["copied_from_upstream_count"] == 0
+    assert coverage["planned_upstream_copy_count"] == 1
+
+
+def test_recent_semantic_invalid_object_is_not_usable_or_dispatched(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(2)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(return_value={papers[0]["output_key"]: object()})
+    job._copy_upstream = Mock(return_value=([papers[1]], 0))
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(return_value={papers[0]["output_key"]: "invalid"})
+    job._launch = Mock(return_value=[])
+
+    job.run()
+
+    summary_call = next(
+        call
+        for call in job.logger.info.call_args_list
+        if call.args and call.args[0] == "PAPER_MARKDOWN_SUMMARY %s"
+    )
+    summary = json.loads(summary_call.args[1])
+    assert summary["semantic_invalid_existing"] == 1
+    assert summary["semantic_evidence_unavailable"] == 0
+    assert summary["usable_markdown"] == 0
+    assert summary["coverage_percentage"] == 0.0
+    job._launch.assert_called_once_with([{**papers[1], "retry": False}])
 
 
 def test_retry_only_canary_selects_only_persisted_retryable_due(tmp_path, monkeypatch):
@@ -714,7 +1104,7 @@ def test_full_reconciliation_recovers_mount_failure_and_fills_remaining_slots():
         }
     )
     job._papers = Mock(return_value=[])
-    job._existing_paths = Mock(return_value=set())
+    job._existing_paths = Mock(return_value={})
     job._copy_upstream = Mock(return_value=([], 0))
     job._status_records = Mock(return_value={})
     job._launch = Mock(return_value=[])
@@ -722,7 +1112,7 @@ def test_full_reconciliation_recovers_mount_failure_and_fills_remaining_slots():
     job.run()
 
     job._recover_mount_failures.assert_called_once_with()
-    job._papers.assert_called_once_with()
+    assert job._papers.call_args_list == [call(), call(recent_only=True)]
     job._launch.assert_called_once_with([], additional_active_job_ids={"replacement-1"})
 
 
@@ -862,7 +1252,7 @@ def test_chandra_worker_stub_writes_canonical_markdown_and_checkpoint(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Before image.\n\n![figure](figure.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](figure.webp)\n\nAfter image. " * 20
     )
     asset_dir = stub / "2607.24653"
     asset_dir.mkdir()
@@ -930,7 +1320,7 @@ def test_chandra_worker_failure_records_duration(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Before image.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
     )
 
     subprocess.run(
@@ -975,7 +1365,7 @@ def test_chandra_worker_final_attempt_omits_missing_image(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Before image.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
     )
     status_path.write_text(json.dumps({"status": "failed", "attempt_count": 2}))
 
@@ -1024,7 +1414,7 @@ def test_chandra_worker_omits_missing_image_after_one_retry(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Before image.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
     )
     status_path.write_text(
         json.dumps(
@@ -1071,7 +1461,9 @@ def _write_stub_manifest(tmp_path: Path, count: int = 2):
     entries = _candidates(count)
     manifest.write_text("".join(json.dumps(item) + "\n" for item in entries))
     for entry in entries:
-        (stub / f"{entry['arxiv_id']}.md").write_text("Valid Markdown body. " * 20)
+        (stub / f"{entry['arxiv_id']}.md").write_text(
+            f"{entry['title']} valid Markdown body. " * 20
+        )
     return content, stub, manifest, entries
 
 

@@ -101,6 +101,7 @@ def test_manager_cancel_facade_preserves_legacy_boolean_contract():
     statuses = iter(
         [
             WorkerCancelStatus.NOT_FOUND,
+            WorkerCancelStatus.PENDING,
             WorkerCancelStatus.COMPLETED,
             WorkerCancelStatus.CONTROL_LOST,
             WorkerCancelStatus.TIMED_OUT,
@@ -117,9 +118,24 @@ def test_manager_cancel_facade_preserves_legacy_boolean_contract():
     manager._sandbox_turn = TurnCoordinator()
 
     async def run():
-        return [await manager.cancel(uuid.uuid4(), uuid.uuid4()) for _index in range(4)]
+        return [await manager.cancel(uuid.uuid4(), uuid.uuid4()) for _index in range(5)]
 
-    assert asyncio.run(run()) == [False, True, True, True]
+    assert asyncio.run(run()) == [False, True, True, True, True]
+
+
+def test_manager_exposes_typed_cancel_status_without_changing_legacy_facade():
+    class TurnCoordinator:
+        async def cancel(self, _chat_session_id, _turn_id):
+            return WorkerCancelStatus.CONTROL_LOST
+
+    manager = SandboxSessionManager(
+        Settings(_env_file=None, chat_workspace_snapshots_enabled=False)
+    )
+    manager._sandbox_turn = TurnCoordinator()
+
+    status = asyncio.run(manager.cancel_status(uuid.uuid4(), uuid.uuid4()))
+
+    assert status is WorkerCancelStatus.CONTROL_LOST
 
 
 def test_manager_composes_one_shared_turn_component_graph():

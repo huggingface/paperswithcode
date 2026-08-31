@@ -1,0 +1,12 @@
+[Unit]
+Description=Audit Papers With Code CRON outcomes daily
+
+[Timer]
+OnCalendar=*-*-* 02:20:00 UTC
+RandomizedDelaySec=20m
+AccuracySec=1m
+Persistent=true
+Unit=autonomous-cron-audit.service
+
+[Install]
+WantedBy=timers.target

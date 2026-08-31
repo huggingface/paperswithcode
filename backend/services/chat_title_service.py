@@ -89,11 +89,16 @@ async def stream_title(
         extra_body = {"reasoning": {"effort": "low"}}
     else:
         raise ValueError("unsupported title provider")
-    client = AsyncOpenAI(
-        base_url=base_url,
-        api_key=provider_token,
-        timeout=settings.chat_title_timeout_seconds,
-    )
+    client_kwargs: dict[str, object] = {
+        "base_url": base_url,
+        "api_key": provider_token,
+        "timeout": settings.chat_title_timeout_seconds,
+    }
+    if settings.chat_title_provider == "huggingface":
+        client_kwargs["default_headers"] = {
+            "X-HF-Bill-To": settings.chat_title_bill_to,
+        }
+    client = AsyncOpenAI(**client_kwargs)
     response = await client.chat.completions.create(
         model=settings.chat_title_model,
         messages=[

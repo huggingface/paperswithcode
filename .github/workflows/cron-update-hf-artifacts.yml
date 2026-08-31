@@ -1,8 +1,6 @@
 name: Cron - Update Hugging Face Artifacts
 
 on:
-  schedule:
-    - cron: "30 * * * *"
   workflow_dispatch: {}
 
 concurrency:

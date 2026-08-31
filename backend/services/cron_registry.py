@@ -60,6 +60,24 @@ class SchedulePolicy:
 
 
 @dataclass(frozen=True)
+class CronEvidenceContract:
+    """Deterministic evidence expected for one declared scheduled job."""
+
+    scheduler: Literal["github_actions", "systemd", "manual"]
+    schedule_policies: Tuple[SchedulePolicy, ...]
+    accepted_exit_states: Tuple[str, ...]
+    accepted_log_states: Tuple[str, ...]
+    log_source: Literal["file", "journal", "health_record"]
+    lock_expected: bool
+    lock_max_age_minutes: int
+    durable_data_required: bool
+    throughput_policy: Literal["work_required", "no_work_allowed"]
+    throughput_source: Literal["work_metrics", "durable_data", "health_record"]
+    semantic_source: Literal["output_evaluator", "health_record", "unavailable"]
+    semantic_evaluator: str
+
+
+@dataclass(frozen=True)
 class CronJobDefinition:
     id: str
     display_name: str
@@ -77,13 +95,82 @@ class CronJobDefinition:
     workflow_file: Optional[str] = None
     workflow_jobs: Tuple[str, ...] = ()
     workflow_freshness_required: bool = True
+    log_directory: Optional[str] = None
     dashboard_group: str = "operations"
     scheduler: Literal["github_actions", "systemd", "manual"] = "github_actions"
     schedule_policies: Tuple[SchedulePolicy, ...] = ()
     schedule_grace_minutes: int = 20
     systemd_timer: Optional[str] = None
     systemd_service: Optional[str] = None
+    # Additional timer/service pairs when one duty runs under several units
+    # (for example the five preload_thumbnails lanes).
+    systemd_extra_units: Tuple[Tuple[str, str], ...] = ()
     output_evaluator: Optional[str] = None
+    work_metrics_provider: Optional[
+        Literal[
+            "paper_markdown_monitor",
+            "chat_monitor",
+            "submission_review",
+            "autonomous_cron",
+        ]
+    ] = None
+    db_metrics_provider: Optional[Literal["thumbnail_cache"]] = None
+    dependency_job_id: Optional[str] = None
+    enablement_settings: Tuple[str, ...] = ()
+
+    @property
+    def systemd_unit_pairs(self) -> Tuple[Tuple[str, str], ...]:
+        """All (timer, service) pairs owning this duty's execution evidence."""
+
+        pairs: Tuple[Tuple[str, str], ...] = ()
+        if self.systemd_timer and self.systemd_service:
+            pairs = ((self.systemd_timer, self.systemd_service),)
+        return pairs + self.systemd_extra_units
+
+    @property
+    def evidence_contract(self) -> CronEvidenceContract:
+        """Return the seven-plane contract used by deterministic probes."""
+
+        evaluator = self.output_evaluator or "generic"
+        health_record = evaluator in {
+            "autonomous_cron_operator",
+            "chat_alert_monitor",
+            "submission_review",
+        }
+        return CronEvidenceContract(
+            scheduler=self.scheduler,
+            schedule_policies=self.schedule_policies,
+            accepted_exit_states=("success", "success_no_work"),
+            accepted_log_states=("success", "success_no_work", "running"),
+            log_source=(
+                "health_record"
+                if health_record
+                else "journal"
+                if self.scheduler == "systemd"
+                else "file"
+            ),
+            lock_expected=self.lock_file is not None,
+            lock_max_age_minutes=self.expected_runtime_minutes,
+            durable_data_required=self.db_freshness_query is not None,
+            throughput_policy=(
+                "no_work_allowed" if self.healthy_no_work_allowed else "work_required"
+            ),
+            throughput_source=(
+                "health_record"
+                if health_record
+                else "durable_data"
+                if self.db_freshness_query
+                else "work_metrics"
+            ),
+            semantic_source=(
+                "health_record"
+                if health_record
+                else "output_evaluator"
+                if evaluator != "generic"
+                else "unavailable"
+            ),
+            semantic_evaluator=evaluator,
+        )
 
 
 CRON_JOBS: Tuple[CronJobDefinition, ...] = (
@@ -104,6 +191,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         healthy_no_work_allowed=True,
         workflow_file="cron-paper-markdown.yml",
         workflow_jobs=("run",),
+        work_metrics_provider="paper_markdown_monitor",
     ),
     CronJobDefinition(
         id="update_hot_github_trending",
@@ -270,8 +358,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="15 * * * * (hourly)",
         script_path="hourly/calculate_trending_scores.py",
         log_name="calculate_trending_scores",
+        log_directory=("/var/lib/paperswithcode/production/trending-cron-logs"),
         process_patterns=("calculate_trending_scores",),
-        lock_file="/var/lib/paperswithcode/production/cron-locks/calculate_trending_scores.lock",
+        lock_file=(
+            "/var/lib/paperswithcode/production/trending-cron-locks/"
+            "calculate_trending_scores.lock"
+        ),
         expected_runtime_minutes=50,
         stale_after_minutes=120,
         critical=True,
@@ -298,8 +390,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="45 * * * * (hourly)",
         script_path="hourly/calculate_paper_trending_scores.py",
         log_name="calculate_paper_trending_scores",
+        log_directory=("/var/lib/paperswithcode/production/trending-cron-logs"),
         process_patterns=("calculate_paper_trending_scores",),
-        lock_file="/var/lib/paperswithcode/production/cron-locks/calculate_paper_trending_scores.lock",
+        lock_file=(
+            "/var/lib/paperswithcode/production/trending-cron-locks/"
+            "calculate_paper_trending_scores.lock"
+        ),
         expected_runtime_minutes=50,
         stale_after_minutes=120,
         critical=True,
@@ -321,6 +417,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         """,
         workflow_file="cron-calculate-paper-trending-scores.yml",
         workflow_jobs=("run",),
+        dependency_job_id="calculate_trending_scores",
     ),
     CronJobDefinition(
         id="update_hf_artifacts",
@@ -651,7 +748,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_artificial_analysis",
-        display_name="Sync Artificial Analysis Indexes",
+        display_name="Sync Artificial Analysis Leaderboards",
         category="hourly",
         schedule="35 * * * * (hourly)",
         script_path="hourly/sync_artificial_analysis.py",
@@ -666,22 +763,62 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         critical=False,
         healthy_no_work_allowed=False,
         db_freshness_query="""
-            SELECT max(e.updated_at) AS last_write,
-                   count(*) FILTER (
-                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
-                   ) AS recent_writes,
-                   count(*) AS matched_evaluations
-            FROM evaluations e
-            JOIN datasets d ON d.id = e.dataset_id
-            WHERE d.slug IN (
+            WITH managed_evaluations AS (
+              SELECT d.slug AS dataset_slug, e.updated_at
+              FROM evaluations e
+              JOIN datasets d ON d.id = e.dataset_id
+              WHERE d.slug IN (
                     'artificial-analysis-intelligence-index',
-                    'artificial-analysis-agentic-index'
+                    'artificial-analysis-agentic-index',
+                    'artificial-analysis-provider-voice-tts-arena'
                   )
-              AND e.best_metric = 'Score'
-              AND e.external_source_url LIKE
-                  'https://artificialanalysis.ai/models/%'
-              AND e.methodology LIKE
-                  'Managed by the Papers with Code Artificial Analysis live sync.%'
+                AND (
+                    (
+                      e.best_metric = 'Score'
+                      AND e.external_source_url LIKE
+                          'https://artificialanalysis.ai/models/%'
+                      AND e.methodology LIKE
+                          'Managed by the Papers with Code Artificial Analysis live sync.%'
+                    )
+                    OR
+                    (
+                      e.best_metric = 'Quality Elo'
+                      AND e.external_source_url LIKE
+                          'https://artificialanalysis.ai/text-to-speech/models/%'
+                      AND e.methodology LIKE
+                          'Managed by the Papers with Code Artificial Analysis TTS live sync.%'
+                    )
+                  )
+            )
+            SELECT max(updated_at) AS last_write,
+                   LEAST(
+                     count(*) FILTER (
+                       WHERE dataset_slug = 'artificial-analysis-intelligence-index'
+                         AND updated_at > now() - interval '2 hours 30 minutes'
+                     ),
+                     count(*) FILTER (
+                       WHERE dataset_slug = 'artificial-analysis-agentic-index'
+                         AND updated_at > now() - interval '2 hours 30 minutes'
+                     ),
+                     count(*) FILTER (
+                       WHERE dataset_slug =
+                         'artificial-analysis-provider-voice-tts-arena'
+                         AND updated_at > now() - interval '2 hours 30 minutes'
+                     )
+                   ) AS recent_writes,
+                   LEAST(
+                     count(*) FILTER (
+                       WHERE dataset_slug = 'artificial-analysis-intelligence-index'
+                     ),
+                     count(*) FILTER (
+                       WHERE dataset_slug = 'artificial-analysis-agentic-index'
+                     ),
+                     count(*) FILTER (
+                       WHERE dataset_slug =
+                         'artificial-analysis-provider-voice-tts-arena'
+                     )
+                   ) AS matched_evaluations
+            FROM managed_evaluations
         """,
         workflow_file="cron-sync-artificial-analysis.yml",
         workflow_jobs=("run",),
@@ -847,13 +984,87 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         critical=True,
         healthy_no_work_allowed=True,
         db_freshness_query="""
-            SELECT max(created_at) AS last_write,
-                   count(*) FILTER (WHERE status IN ('queued','running')) AS active,
-                   count(*) FILTER (WHERE status = 'deferred') AS deferred,
-                   count(*) FILTER (WHERE status IN ('failed','partial')) AS failed
-            FROM paper_curation_workflows
+            WITH daily_workflows AS (
+                SELECT workflow.*
+                FROM paper_curation_workflows AS workflow
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM paper_curation_jobs AS job
+                    WHERE job.parent_workflow_id = workflow.id
+                      AND job.trigger = 'hf-daily-cron'
+                )
+            ), workflow_metrics AS (
+                SELECT max(updated_at) AS last_write,
+                       count(*) FILTER (WHERE status = 'queued') AS queued_workflows,
+                       count(*) FILTER (WHERE status = 'running') AS running_workflows,
+                       count(*) FILTER (WHERE status = 'deferred') AS deferred_workflows,
+                       count(*) FILTER (WHERE status = 'failed') AS failed_workflows,
+                       count(*) FILTER (WHERE status = 'partial') AS partial_workflows
+                FROM daily_workflows
+            ), job_metrics AS (
+                SELECT count(*) FILTER (WHERE status = 'queued') AS queued_jobs,
+                       count(*) FILTER (WHERE status IN ('dispatching','running')) AS running_jobs,
+                       EXTRACT(EPOCH FROM (now() - min(created_at) FILTER (
+                           WHERE status = 'queued'))) / 60 AS oldest_queued_age_minutes,
+                       EXTRACT(EPOCH FROM (now() - min(
+                           COALESCE(started_at, created_at)
+                       ) FILTER (WHERE status IN ('dispatching','running')))) / 60
+                           AS oldest_running_age_minutes
+                FROM paper_curation_jobs
+                WHERE trigger = 'hf-daily-cron'
+            )
+            SELECT workflow_metrics.*,
+                   job_metrics.*,
+                   state.dispatch_enabled,
+                   state.paused_at,
+                   state.pause_condition
+            FROM workflow_metrics
+            CROSS JOIN job_metrics
+            LEFT JOIN paper_curation_scheduler_state AS state ON state.id = 1
         """,
         workflow_file="cron-enqueue-hf-daily-paper-curation.yml",
+        workflow_jobs=("run",),
+    ),
+    CronJobDefinition(
+        id="enqueue_hf_trending_model_curation",
+        display_name="HF Trending Model Curation",
+        category="hourly",
+        schedule="42 * * * * (hourly reconciliation)",
+        script_path="backend/scripts/enqueue_hf_trending_model_curation.py",
+        log_name="enqueue_hf_trending_model_curation",
+        process_patterns=("enqueue_hf_trending_model_curation",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "enqueue_hf_trending_model_curation.lock"
+        ),
+        expected_runtime_minutes=20,
+        stale_after_minutes=180,
+        critical=True,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(last_seen_at) AS last_write,
+                   count(*) FILTER (WHERE status IN ('discovered','queued','resolving')) AS active,
+                   count(*) FILTER (WHERE status = 'resolved') AS resolved,
+                   count(*) FILTER (WHERE status = 'failed') AS failed
+            FROM trending_model_candidates
+        """,
+        workflow_file="cron-enqueue-hf-trending-model-curation.yml",
+        workflow_jobs=("run",),
+    ),
+    CronJobDefinition(
+        id="export_enrichment_dashboard",
+        display_name="Export Enrichment Dashboard",
+        category="daily",
+        schedule="10 3 * * * (daily UTC)",
+        script_path="backend/scripts/export_enrichment_dashboard.py",
+        log_name="export_enrichment_dashboard",
+        process_patterns=("export_enrichment_dashboard",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/export_enrichment_dashboard.lock",
+        expected_runtime_minutes=10,
+        stale_after_minutes=30,
+        critical=False,
+        healthy_no_work_allowed=False,
+        workflow_file="cron-export-enrichment-dashboard.yml",
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
@@ -962,7 +1173,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                       AND missing.generation_id = g.id
                      WHERE p.is_latest_version
                        AND missing.paper_id IS NULL
-                   ) AS missing_embeddings
+                   ) AS missing_embeddings,
+                   COALESCE((
+                     SELECT (run.details ->> 'content_hash_mismatches')::bigint
+                     FROM embedding_pipeline_runs AS run
+                     CROSS JOIN active_generation AS latest_generation
+                     WHERE run.generation_id = latest_generation.id
+                       AND run.kind = 'import'
+                       AND run.status = 'complete'
+                     ORDER BY run.completed_at DESC NULLS LAST
+                     LIMIT 1
+                   ), 0) AS content_hash_mismatches
             FROM paper_embeddings e
             JOIN active_generation g ON g.id = e.generation_id
         """,
@@ -1002,6 +1223,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         db_freshness_query=None,
         workflow_file="cron-mirror-thumbnails-to-disk.yml",
         workflow_jobs=("run",),
+        db_metrics_provider="thumbnail_cache",
     ),
     CronJobDefinition(
         id="link_methods_by_references",
@@ -1034,7 +1256,10 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         script_path="backfill/backfill_method_keywords.py",
         log_name="backfill_method_keywords",
         process_patterns=("backfill_method_keywords",),
-        lock_file=None,
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "backfill_method_keywords.lock"
+        ),
         expected_runtime_minutes=60,
         stale_after_minutes=1560,
         critical=False,
@@ -1054,12 +1279,16 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    ) AS recent_writes,
                    count(*) FILTER (
                      WHERE status = 'running'
-                       AND updated_at < now() - interval '2 hours'
+                       AND updated_at < now() - interval '26 hours'
                    ) AS stale_running,
+                   count(*) FILTER (WHERE status = 'running') AS running_runs,
                    count(*) FILTER (WHERE status = 'failed') AS failed_runs,
                    COALESCE(EXTRACT(EPOCH FROM (
                      now() - min(started_at) FILTER (WHERE status = 'running')
                    )) / 60, 0)::bigint AS blocking_run_age_minutes,
+                   COALESCE(EXTRACT(EPOCH FROM (
+                     now() - max(updated_at) FILTER (WHERE status = 'running')
+                   )) / 60, 0)::bigint AS checkpoint_age_minutes,
                    max(cursor_paper_id) FILTER (WHERE status = 'running') AS resume_cursor
             FROM method_keyword_backfill_runs
             WHERE keyword_catalog_sha256 = (
@@ -1139,6 +1368,79 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="autonomous_cron_health",
+        display_name="Autonomous CRON Strict Snapshot",
+        category="systemd",
+        schedule="every 15 minutes with bounded jitter (systemd)",
+        script_path=".github/workflows/scripts/autonomous_cron_health.py",
+        log_name="autonomous_cron_health",
+        process_patterns=("autonomous_cron_health.py --mode strict",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/autonomous_cron_health.lock"
+        ),
+        expected_runtime_minutes=360,
+        stale_after_minutes=390,
+        critical=True,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(15),),
+        schedule_grace_minutes=10,
+        systemd_timer="autonomous-cron-health.timer",
+        systemd_service="autonomous-cron-health.service",
+        output_evaluator="autonomous_cron_operator",
+        work_metrics_provider="autonomous_cron",
+    ),
+    CronJobDefinition(
+        id="autonomous_cron_audit",
+        display_name="Autonomous CRON Daily Audit",
+        category="systemd",
+        schedule="daily at 02:20 UTC with bounded jitter (systemd)",
+        script_path=".github/workflows/scripts/autonomous_cron_health.py",
+        log_name="autonomous_cron_audit",
+        process_patterns=("autonomous_cron_health.py --mode daily",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/autonomous_cron_audit.lock"
+        ),
+        expected_runtime_minutes=360,
+        stale_after_minutes=1800,
+        critical=False,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(2, 20),),
+        schedule_grace_minutes=45,
+        systemd_timer="autonomous-cron-audit.timer",
+        systemd_service="autonomous-cron-audit.service",
+        output_evaluator="autonomous_cron_operator",
+        work_metrics_provider="autonomous_cron",
+    ),
+    CronJobDefinition(
+        id="review_submissions",
+        display_name="Autonomous Submission Review",
+        category="systemd",
+        schedule="hourly with up to 15 minutes randomized delay (systemd)",
+        script_path=".github/workflows/scripts/review_submissions.py",
+        log_name="review_submissions",
+        process_patterns=("review_submissions",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/review_submissions.lock"
+        ),
+        expected_runtime_minutes=45,
+        stale_after_minutes=135,
+        critical=True,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60),),
+        schedule_grace_minutes=20,
+        systemd_timer="submission-review.timer",
+        systemd_service="submission-review.service",
+        output_evaluator="submission_review",
+        work_metrics_provider="submission_review",
+        enablement_settings=(
+            "autonomous_submission_enabled",
+            "autonomous_submission_jobs_enabled",
+        ),
+    ),
+    CronJobDefinition(
         id="monitor_chat_operational_alerts",
         display_name="Chat Operational Alert Monitor",
         category="systemd",
@@ -1157,6 +1459,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-chat-alert-monitor.timer",
         systemd_service="pwc-chat-alert-monitor.service",
         output_evaluator="chat_alert_monitor",
+        work_metrics_provider="chat_monitor",
     ),
     CronJobDefinition(
         id="process_curation_thumbnails",
@@ -1235,6 +1538,11 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
         (SchedulePolicy.fixed(60, offset_minutes=27),),
         20,
     ),
+    "enqueue_hf_trending_model_curation": (
+        (SchedulePolicy.fixed(60, offset_minutes=42),),
+        20,
+    ),
+    "export_enrichment_dashboard": ((SchedulePolicy.daily(3, 10),), 60),
     "sync_hf_organizations": ((SchedulePolicy.daily(2, 20),), 60),
     "calculate_organization_trending_scores": ((SchedulePolicy.daily(3, 40),), 60),
     "refresh_paper_embeddings": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
@@ -1262,6 +1570,7 @@ _OUTPUT_EVALUATORS: dict[str, str] = {
     "calculate_trending_scores": "repository_trending",
     "calculate_paper_trending_scores": "paper_trending",
     "import_hf_daily_papers": "hf_paper_import",
+    "enqueue_hf_daily_paper_curation": "daily_curation",
     "update_citations": "citations",
     "update_hf_artifacts": "hf_artifacts",
     "paper_markdown_backfill": "paper_markdown",
@@ -1276,10 +1585,59 @@ _OUTPUT_EVALUATORS: dict[str, str] = {
     "link_papers_by_task_keywords": "weekly_linker",
 }
 
+
+# Host systemd timers own scheduled execution for the previously
+# GitHub-scheduled jobs.  GitHub Actions schedule: triggers proved unreliable
+# (delayed or missing scheduled events with no catch-up), so the units in
+# deploy/systemd/cron/ are now the execution authority; the workflows remain
+# workflow_dispatch-only for manual recovery.
+def _systemd_unit(job_id: str) -> str:
+    return "pwc-cron-" + job_id.replace("_", "-")
+
+
+_PRELOAD_LANES = ("visible", "task-top", "method-top", "recent", "external")
+
+_SYSTEMD_MIGRATED: dict[str, tuple[tuple[str, str], ...]] = {
+    job_id: ((f"{_systemd_unit(job_id)}.timer", f"{_systemd_unit(job_id)}.service"),)
+    for job_id, (_policies, _grace) in _SCHEDULE_CONTRACTS.items()
+    if job_id != "preload_thumbnails"
+}
+_SYSTEMD_MIGRATED["preload_thumbnails"] = tuple(
+    (
+        f"pwc-cron-preload-thumbnails-{lane}.timer",
+        f"pwc-cron-preload-thumbnails-{lane}.service",
+    )
+    for lane in _PRELOAD_LANES
+)
+
+
+def _migrated_scheduler(job: CronJobDefinition) -> str:
+    if job.id == "extract_urls":
+        return "manual"
+    if job.id in _SYSTEMD_MIGRATED:
+        return "systemd"
+    return job.scheduler
+
+
 CRON_JOBS = tuple(
     replace(
         job,
-        scheduler="manual" if job.id == "extract_urls" else job.scheduler,
+        scheduler=_migrated_scheduler(job),
+        systemd_timer=(
+            _SYSTEMD_MIGRATED[job.id][0][0]
+            if job.id in _SYSTEMD_MIGRATED
+            else job.systemd_timer
+        ),
+        systemd_service=(
+            _SYSTEMD_MIGRATED[job.id][0][1]
+            if job.id in _SYSTEMD_MIGRATED
+            else job.systemd_service
+        ),
+        systemd_extra_units=(
+            _SYSTEMD_MIGRATED[job.id][1:]
+            if job.id in _SYSTEMD_MIGRATED
+            else job.systemd_extra_units
+        ),
         schedule_policies=_SCHEDULE_CONTRACTS.get(
             job.id, (job.schedule_policies, job.schedule_grace_minutes)
         )[0],

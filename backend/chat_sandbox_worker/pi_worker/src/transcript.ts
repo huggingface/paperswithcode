@@ -1,5 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
+import { gatewayHeaders, type GatewayContext } from "./provider.js";
 
 const MAX_RESPONSE_BYTES = 30 * 1024 * 1024;
 const MAX_QUEUE_ENTRIES = 256;
@@ -16,10 +17,13 @@ interface Snapshot {
   entries?: Record<string, unknown>[];
 }
 
-async function request(payload: Record<string, unknown>): Promise<unknown> {
-  const response = await fetch("http://127.0.0.1:8765/session-store", {
+async function request(payload: Record<string, unknown>, gateway?: GatewayContext): Promise<unknown> {
+  const response = await fetch(`${gateway?.url.replace(/\/$/u, "") ?? "http://127.0.0.1:8765"}/session-store`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      ...(gateway ? gatewayHeaders(gateway) : {}),
+    },
     body: JSON.stringify({ format: "pi", ...payload }),
   });
   const bytes = Buffer.from(await response.arrayBuffer());
@@ -28,16 +32,16 @@ async function request(payload: Record<string, unknown>): Promise<unknown> {
   return (JSON.parse(bytes.toString("utf8")) as { result: unknown }).result;
 }
 
-export async function createOrBind(agentSessionId: string): Promise<Snapshot> {
-  return (await request({ action: "create_or_bind_session", agent_session_id: agentSessionId })) as Snapshot;
+export async function createOrBind(agentSessionId: string, gateway?: GatewayContext): Promise<Snapshot> {
+  return (await request({ action: "create_or_bind_session", agent_session_id: agentSessionId }, gateway)) as Snapshot;
 }
 
-export async function loadSession(agentSessionId: string): Promise<Snapshot> {
-  return (await request({ action: "load_session", agent_session_id: agentSessionId })) as Snapshot;
+export async function loadSession(agentSessionId: string, gateway?: GatewayContext): Promise<Snapshot> {
+  return (await request({ action: "load_session", agent_session_id: agentSessionId }, gateway)) as Snapshot;
 }
 
-export async function restoreFile(agentSessionId: string, directory: string): Promise<{ file: string; snapshot: Snapshot }> {
-  const snapshot = await loadSession(agentSessionId);
+export async function restoreFile(agentSessionId: string, directory: string, gateway?: GatewayContext): Promise<{ file: string; snapshot: Snapshot }> {
+  const snapshot = await loadSession(agentSessionId, gateway);
   if (snapshot.agent_session_id !== agentSessionId || snapshot.format_version !== 1 || !Array.isArray(snapshot.entries)) {
     throw new Error("Pi transcript restore contract mismatch");
   }
@@ -64,6 +68,7 @@ export class TranscriptMirror {
     readonly agentSessionId: string,
     private nextOrdinal: number,
     initialLeaf: string | null,
+    private readonly gateway?: GatewayContext,
   ) {
     this.durableLeaf = initialLeaf;
   }
@@ -102,7 +107,7 @@ export class TranscriptMirror {
       agent_session_id: this.agentSessionId,
       current_leaf_id: batchLeaf,
       entries: batch.map(({ ordinal, entry }) => ({ ordinal, entry })),
-    })
+    }, this.gateway)
       .then(() => {
         this.durableLeaf = batchLeaf;
       })

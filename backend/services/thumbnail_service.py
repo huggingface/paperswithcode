@@ -42,14 +42,17 @@ EXPECTED_THUMBNAIL_FORMAT = "JPEG"
 EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
     {
         "aclanthology.org",
+        "aixiv.science",
         "arxiv.org",
         "biorxiv.org",
         "cvf-openaccess.thecvf.com",
         "dl.acm.org",
+        "ecmlpkdd-storage.s3.eu-central-1.amazonaws.com",
         "github.com",
         "huggingface.co",
         "ieeexplore.ieee.org",
         "medrxiv.org",
+        "microsoft.ai",
         "nature.com",
         "neurips.cc",
         "openai.com",
@@ -61,6 +64,7 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "ras.papercept.net",
         "raw.githubusercontent.com",
         "www.biorxiv.org",
+        "www.cv-foundation.org",
         "www.github.com",
         "www.medrxiv.org",
         "www.nature.com",
@@ -68,6 +72,8 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "zenodo.org",
     }
 )
+PERMANENT_EXTERNAL_PDF_SAFE_STATUSES = frozenset({403, 409, 413, 415, 422})
+PERMANENT_EXTERNAL_PDF_ORIGIN_STATUSES = frozenset({403, 404, 410})
 # Paper cards render thumbnails in a 160×220 box, but PDF pages have their own
 # MediaBox/CropBox aspect ratio. Keep the page ratio in the JPEG and let the
 # frontend containment frame handle the small per-page difference.
@@ -636,10 +642,20 @@ class ThumbnailService:
                 allowed_hosts=EXTERNAL_THUMBNAIL_DIRECT_HOSTS,
             )
         except SafeOutboundHttpError as exc:
-            if exc.status_code == 415 and not self._looks_like_pdf_url(pdf_url):
+            if (
+                exc.status_code in PERMANENT_EXTERNAL_PDF_SAFE_STATUSES
+                or exc.origin_status_code in PERMANENT_EXTERNAL_PDF_ORIGIN_STATUSES
+            ):
+                logger.info(
+                    "Using metadata thumbnail fallback for external PDF host %s "
+                    "(safe_status=%s, origin_status=%s)",
+                    urlparse(pdf_url).hostname,
+                    exc.status_code,
+                    exc.origin_status_code,
+                )
                 return None
             raise ThumbnailGenerationError(
-                "Failed to download external PDF safely"
+                "External PDF is temporarily unavailable"
             ) from exc
         if not result.body.startswith(b"%PDF"):
             return None

@@ -69,6 +69,7 @@ class TerminalOutcome(StrEnum):
     SUCCESS = "success"
     MAX_TURNS = "max_turns"
     TOOL_LIMIT = "tool_limit"
+    SCOPE_BLOCKED = "scope_blocked"
     STOPPED = "stopped"
 
 
@@ -213,6 +214,24 @@ class TelemetryEvent:
 
 
 @dataclass(frozen=True)
+class LatencyEvent:
+    extras: FrozenExtras = ()
+    field_order: tuple[str, ...] = ()
+
+    def to_legacy(self) -> dict[str, Any]:
+        return _legacy("_latency", self.extras, self.field_order)
+
+
+@dataclass(frozen=True)
+class McpReadinessEvent:
+    extras: FrozenExtras = ()
+    field_order: tuple[str, ...] = ()
+
+    def to_legacy(self) -> dict[str, Any]:
+        return _legacy("_mcp_readiness", self.extras, self.field_order)
+
+
+@dataclass(frozen=True)
 class UsageEvent:
     usage: FrozenJson | _Unset = UNSET
     model_usage: FrozenJson | _Unset = UNSET
@@ -327,6 +346,10 @@ class CancellationEvent:
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
 
+    def __post_init__(self) -> None:
+        if self.reason is not InterruptionReason.WORKER_CANCELLED:
+            raise ValueError("Cancellation events represent worker cancellation")
+
     def to_legacy(self) -> dict[str, Any]:
         return _legacy("_cancelled", self.extras, self.field_order)
 
@@ -348,6 +371,8 @@ ChatTurnEvent: TypeAlias = (
     | PersistenceEvent
     | MirrorFailureEvent
     | TelemetryEvent
+    | LatencyEvent
+    | McpReadinessEvent
     | UsageEvent
     | ArtifactEvent
     | CompletionEvent
@@ -396,6 +421,10 @@ def from_legacy_event(event: dict[str, Any]) -> ChatTurnEvent:
         return TelemetryEvent(
             *(value(key) for key in known), _extras(event, *known), field_order
         )
+    if event_type == "_latency":
+        return LatencyEvent(_extras(event), field_order)
+    if event_type == "_mcp_readiness":
+        return McpReadinessEvent(_extras(event), field_order)
     if event_type == "usage":
         known = "usage", "model_usage", "total_cost_usd", "provider_requests", "phase"
         return UsageEvent(

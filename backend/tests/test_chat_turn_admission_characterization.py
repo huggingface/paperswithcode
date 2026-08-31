@@ -106,6 +106,7 @@ def test_completed_assistant_replay_returns_visible_result_without_writes():
     assistant_message = SimpleNamespace(
         content="The persisted answer",
         followups=["What changed?"],
+        finish_reason="scope_blocked",
     )
     db = _ScriptedDB(
         execute_results=(
@@ -127,6 +128,7 @@ def test_completed_assistant_replay_returns_visible_result_without_writes():
     assert admission.replay_assistant == ReplayAssistant(
         content="The persisted answer",
         followups=["What changed?"],
+        finish_reason="scope_blocked",
     )
     assert db.added == []
     assert db.flush_calls == 0

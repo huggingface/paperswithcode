@@ -1,0 +1,13 @@
+[Unit]
+Description=Preload thumbnails for top method-page papers daily
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled preload_thumbnails --priority method-top --per-method 50 --missing-only --trust-local-cache
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

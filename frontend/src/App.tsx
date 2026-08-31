@@ -78,6 +78,7 @@ const SettingsView = React.lazy(() => import("@/views/SettingsView"));
 const PrivacyView = React.lazy(() => import("@/views/PrivacyView"));
 const SubmitView = React.lazy(() => import("@/views/SubmitView"));
 const CronDashboard = React.lazy(() => import("@/pages/CronDashboard"));
+const AutonomousOperations = React.lazy(() => import("@/pages/AutonomousOperations"));
 const SubmissionsDashboard = React.lazy(() => import("@/pages/SubmissionsDashboard"));
 const UserProfileView = React.lazy(() => import("@/views/UserProfileView"));
 const RateLimitsView = React.lazy(() => import("@/views/RateLimitsView"));
@@ -244,7 +245,7 @@ const Shell: React.FC = () => {
           <React.Suspense fallback={<RouteFallback />}>
             <Routes>
               <Route
-                path="/pdf/:arxivId"
+                path="/pdf/:paperId"
                 element={isNativePdfReaderEnabled() ? <PaperReaderView /> : <NotFound />}
               />
             </Routes>
@@ -302,6 +303,7 @@ const Shell: React.FC = () => {
             <Route path="/settings" element={<SettingsView />} />
             <Route path="/privacy" element={<PrivacyView />} />
             <Route path="/admin-dashboard" element={<AdminDashboardRoute />} />
+            <Route path="/autonomous-operations" element={<AdminGatedRoute element={<AutonomousOperations />} />} />
             <Route path="/cron-dashboard" element={<Navigate to="/admin-dashboard" replace />} />
             <Route path="/submissions" element={<AuthGatedRoute element={<SubmissionsDashboard />} />} />
             <Route path="/rate-limits" element={<RateLimitsView />} />

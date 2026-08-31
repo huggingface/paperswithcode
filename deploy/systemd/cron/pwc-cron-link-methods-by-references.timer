@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link methods by paper references weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 04:00:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-link-methods-by-references.service
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Update citation counts hourly
+
+[Timer]
+OnCalendar=*-*-* *:30:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-update-citations.service
+
+[Install]
+WantedBy=timers.target

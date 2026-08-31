@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync CoArena leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:50:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-coarena.service
+
+[Install]
+WantedBy=timers.target

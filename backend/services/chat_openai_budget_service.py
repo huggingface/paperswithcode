@@ -12,7 +12,15 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.database import ChatOpenAIMonthlyUsage, ChatOpenAIProviderCall
+from backend.models.database import (
+    ChatOpenAIMonthlyUsage,
+    ChatOpenAIProviderCall,
+    ChatQualificationScope,
+    ChatTurnLatency,
+)
+from backend.services.durable_external_qualification_contract import (
+    DURABLE_QUALIFICATION_OPENAI_GLOBAL_CONCURRENCY,
+)
 from backend.services.chat_openai_usage_extractor import ExtractedOpenAIUsage
 from backend.services.openrouter_user_budget_service import usd_to_microusd, utc_month
 
@@ -152,7 +160,89 @@ class ChatOpenAIBudgetService:
             raise OpenAIAccountingInvariantError("OpenAI monthly usage row is missing")
         return row
 
-    def _enforce_limits(self, owner_id: str, reserved: int, now: datetime) -> None:
+    def _enforce_concurrency(
+        self,
+        owner_id: str,
+        turn_id: uuid.UUID,
+        qualification_scope_id: uuid.UUID | None,
+        now: datetime,
+    ) -> None:
+        active = ChatOpenAIProviderCall.state == "dispatched"
+        user_active = int(
+            self.db.scalar(
+                select(func.count())
+                .select_from(ChatOpenAIProviderCall)
+                .where(ChatOpenAIProviderCall.owner_id == owner_id, active)
+            )
+            or 0
+        )
+        if user_active >= self.settings.chat_openai_user_max_concurrency:
+            raise OpenAILimitExceeded("user_concurrency")
+        if qualification_scope_id is not None:
+            persisted_scope = self.db.scalar(
+                select(ChatQualificationScope.id)
+                .join(
+                    ChatTurnLatency,
+                    ChatTurnLatency.qualification_scope_id == ChatQualificationScope.id,
+                )
+                .where(
+                    ChatTurnLatency.turn_id == turn_id,
+                    ChatTurnLatency.qualification_profile == "32-functional-turns",
+                    ChatQualificationScope.id == qualification_scope_id,
+                    ChatQualificationScope.profile == "32-functional-turns",
+                    ChatQualificationScope.window_ended_at.is_(None),
+                    ChatQualificationScope.expires_at > now,
+                )
+            )
+            if persisted_scope != qualification_scope_id:
+                raise OpenAIAccountingInvariantError(
+                    "OpenAI qualification scope claim is invalid"
+                )
+            global_query = (
+                select(func.count())
+                .select_from(ChatOpenAIProviderCall)
+                .join(
+                    ChatTurnLatency,
+                    ChatTurnLatency.turn_id == ChatOpenAIProviderCall.turn_id,
+                )
+                .where(
+                    ChatOpenAIProviderCall.environment == self.settings.environment,
+                    active,
+                    ChatTurnLatency.qualification_scope_id == qualification_scope_id,
+                )
+            )
+            limit = DURABLE_QUALIFICATION_OPENAI_GLOBAL_CONCURRENCY
+        else:
+            qualification_turn = (
+                select(ChatTurnLatency.turn_id)
+                .where(
+                    ChatTurnLatency.turn_id == ChatOpenAIProviderCall.turn_id,
+                    ChatTurnLatency.qualification_scope_id.is_not(None),
+                )
+                .exists()
+            )
+            global_query = (
+                select(func.count())
+                .select_from(ChatOpenAIProviderCall)
+                .where(
+                    ChatOpenAIProviderCall.environment == self.settings.environment,
+                    active,
+                    ~qualification_turn,
+                )
+            )
+            limit = self.settings.chat_openai_global_max_concurrency
+        global_active = int(self.db.scalar(global_query) or 0)
+        if global_active >= limit:
+            raise OpenAILimitExceeded("global_concurrency")
+
+    def _enforce_limits(
+        self,
+        owner_id: str,
+        turn_id: uuid.UUID,
+        qualification_scope_id: uuid.UUID | None,
+        reserved: int,
+        now: datetime,
+    ) -> None:
         # One environment-wide transaction lock serializes concurrency, rate,
         # daily, and monthly admission across gateway processes.
         self.db.execute(
@@ -164,30 +254,7 @@ class ChatOpenAIBudgetService:
                 )
             )
         )
-        active = ChatOpenAIProviderCall.state == "dispatched"
-        user_active = int(
-            self.db.scalar(
-                select(func.count())
-                .select_from(ChatOpenAIProviderCall)
-                .where(ChatOpenAIProviderCall.owner_id == owner_id, active)
-            )
-            or 0
-        )
-        global_active = int(
-            self.db.scalar(
-                select(func.count())
-                .select_from(ChatOpenAIProviderCall)
-                .where(
-                    ChatOpenAIProviderCall.environment == self.settings.environment,
-                    active,
-                )
-            )
-            or 0
-        )
-        if user_active >= self.settings.chat_openai_user_max_concurrency:
-            raise OpenAILimitExceeded("user_concurrency")
-        if global_active >= self.settings.chat_openai_global_max_concurrency:
-            raise OpenAILimitExceeded("global_concurrency")
+        self._enforce_concurrency(owner_id, turn_id, qualification_scope_id, now)
         cutoff = now - timedelta(
             seconds=self.settings.chat_openai_rate_limit_window_seconds
         )
@@ -280,6 +347,7 @@ class ChatOpenAIBudgetService:
         provider_model: str,
         reasoning_effort: str,
         bounds: OpenAIRequestBounds,
+        qualification_scope_id: uuid.UUID | None = None,
         now: datetime | None = None,
     ):
         current = (now or datetime.now(UTC)).astimezone(UTC)
@@ -297,7 +365,13 @@ class ChatOpenAIBudgetService:
                 )
             return existing
         reserved = safe_maximum_microusd(self.settings, bounds, now=current)
-        self._enforce_limits(owner_id, reserved, current)
+        self._enforce_limits(
+            owner_id,
+            turn_id,
+            qualification_scope_id,
+            reserved,
+            current,
+        )
         month, _ = utc_month(current)
         usage = self._ensure_usage(owner_id, month)
         if (

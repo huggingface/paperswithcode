@@ -22,6 +22,20 @@ import os
 
 from backend.config import get_settings
 
+MAX_CRON_LOG_READ_BYTES = 2 * 1024 * 1024
+
+
+def _read_log_tail(path: Path) -> list[str]:
+    with path.open("rb") as handle:
+        handle.seek(0, os.SEEK_END)
+        size = handle.tell()
+        offset = max(0, size - MAX_CRON_LOG_READ_BYTES)
+        handle.seek(offset)
+        raw = handle.read(MAX_CRON_LOG_READ_BYTES)
+    if offset:
+        raw = raw.partition(b"\n")[2]
+    return raw.decode("utf-8", errors="replace").splitlines(keepends=True)
+
 
 class CronJobBase(ABC):
     """
@@ -246,7 +260,12 @@ class DatabaseCronJob(CronJobBase):
             # Don't raise the exception - this is optional maintenance
 
 
-def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, Any]:
+def get_cron_job_status(
+    job_name: str,
+    date: Optional[str] = None,
+    *,
+    logs_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
     """
     Get the status of a cron job from its log file.
 
@@ -263,7 +282,7 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
     if not date:
         date = datetime.now().strftime("%Y%m%d")
 
-    logs_dir = Path(
+    logs_dir = logs_dir or Path(
         os.environ.get("PWC_CRON_LOG_DIR", Path(__file__).parent.parent / "logs")
     )
     log_file = logs_dir / f"{job_name}_{date}.log"
@@ -316,8 +335,7 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
         pass  # If ps command fails, continue with log analysis
 
     try:
-        with open(log_file, "r") as f:
-            lines = f.readlines()
+        lines = _read_log_tail(log_file)
 
         # Parse log file for status information
         found_completion = False
@@ -486,6 +504,7 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
                 marker in line
                 for marker in (
                     "HF_DAILY_PAPERS_SUMMARY ",
+                    "HF_DAILY_CURATION_SUMMARY ",
                     "HF_ARTIFACTS_SUMMARY ",
                     "PAPER_EMBEDDINGS_SUMMARY ",
                     "THUMBNAIL_PRELOAD_SUMMARY ",
@@ -502,6 +521,7 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
                     item
                     for item in (
                         "HF_DAILY_PAPERS_SUMMARY ",
+                        "HF_DAILY_CURATION_SUMMARY ",
                         "HF_ARTIFACTS_SUMMARY ",
                         "PAPER_EMBEDDINGS_SUMMARY ",
                         "THUMBNAIL_PRELOAD_SUMMARY ",
@@ -523,6 +543,19 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
             elif re.search(r"Papers processed:\s*(\d+)", line):
                 match = re.search(r"Papers processed:\s*(\d+)", line)
                 work_metrics["papers_processed"] = int(match.group(1))
+            # Named paper groups, for composite jobs such as
+            # ``Papers processed: language=60 tts=14``.
+            elif "Papers processed:" in line:
+                payload = line.split("Papers processed:", 1)[1]
+                named_counts = re.findall(
+                    r"\b([a-z][a-z0-9_-]*)=(\d+)\b", payload, re.IGNORECASE
+                )
+                if named_counts:
+                    work_metrics["papers_processed"] = sum(
+                        int(value) for _name, value in named_counts
+                    )
+                    for name, value in named_counts:
+                        work_metrics[f"{name.lower()}_processed"] = int(value)
             # Repositories processed (with or without "Total")
             elif re.search(
                 r"(?:Total\s+)?repositories processed:\s*(\d+)", line, re.IGNORECASE

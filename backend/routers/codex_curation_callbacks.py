@@ -28,7 +28,12 @@ from backend.models.api import (
 from backend.models.api import (
     EvaluationCreateRequest as EvaluationCreateRequest,
 )
-from backend.models.database import PaperCurationJob, PaperCurationSchedulerState
+from backend.models.database import (
+    PaperCurationJob,
+    PaperCurationSchedulerState,
+)
+from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
+from backend.services.autonomous_operations_repository import RunContext
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_add_evals_service import (
     CodexPaperJob,
@@ -45,6 +50,7 @@ from backend.services.codex_curation_callback_service import (
     CodexCurationPaperNotFoundError,
 )
 from backend.services.curation_thumbnail_queue_service import serialize_thumbnail
+from backend.services.curation_autonomy import ensure_curation_run
 from backend.services.curation_trace_service import CurationTraceService
 from backend.services.evaluation_service import EvaluationService
 from backend.services.hf_daily_curation_service import HFDailyCurationService
@@ -102,6 +108,13 @@ def _service(db: Session) -> CodexCurationCallbackService:
         evaluation_service=EvaluationService(db),
         association_service=PaperAssociationService(db, paper_service.get_paper_by_id),
     )
+
+
+def _autonomous_callback_context(db: Session, row: PaperCurationJob) -> RunContext:
+    context = ensure_curation_run(db, row)
+    # Monitoring remains durable while a later policy check may reject writes.
+    db.commit()
+    return context
 
 
 def _leaderboard_inventory(db: Session, query: str) -> list[dict]:
@@ -330,6 +343,13 @@ def apply_mutation(
     row = _callback_job(job_id, authorization, db)
     try:
         service = _service(db)
+        context = (
+            _autonomous_callback_context(db, row)
+            if getattr(row, "trigger", "admin") != "admin"
+            else None
+        )
+        if context is not None and not settings.codex_curation_direct_apply_enabled:
+            service.authorize_autonomous_callback(row, body, context=context)
         if (
             getattr(row, "trigger", "admin") != "admin"
             and not settings.codex_curation_direct_apply_enabled
@@ -350,7 +370,7 @@ def apply_mutation(
                 "evaluations_created": 0,
                 "evaluations_updated": 0,
             }
-        return service.apply(row, body)
+        return service.apply(row, body, autonomous_context=context)
     except CodexCurationMutationClosedError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     except CodexCurationEnrichmentNotAllowedError as error:
@@ -361,6 +381,16 @@ def apply_mutation(
         raise HTTPException(status_code=422, detail=str(error)) from error
     except CodexCurationEnrichmentRequiredError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+    except AutonomousCapabilityDenied as error:
+        db.rollback()
+        raise HTTPException(status_code=423, detail=str(error)) from error
+    except (LookupError, RuntimeError, ValueError) as error:
+        if getattr(row, "kind", None) == "resolve-model-paper" or (
+            getattr(row, "trigger", "admin") != "admin"
+            and isinstance(error, ValueError)
+        ):
+            raise HTTPException(status_code=422, detail=str(error)) from error
+        raise
 
 
 @router.post("/{job_id}/trace/preapply")

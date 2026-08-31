@@ -1,8 +1,6 @@
 name: Cron - Paper Markdown Backfill
 
 on:
-  schedule:
-    - cron: "17 * * * *"
   workflow_dispatch:
     inputs:
       full:
@@ -47,7 +45,6 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
-          SCHEDULE: ${{ github.event.schedule }}
           INPUT_FULL: ${{ inputs.full }}
           INPUT_DRY_RUN: ${{ inputs.dry_run }}
           BACKFILL_PAUSED: ${{ vars.PAPER_MARKDOWN_BACKFILL_PAUSED }}
@@ -67,7 +64,7 @@ jobs:
             fi
           fi
           ssh -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" "$REMOTE_COMMAND"
-          if [ -n "$SCHEDULE" ] || [ "$INPUT_FULL" = "true" ]; then
+          if [ "$INPUT_FULL" = "true" ]; then
             if [ "$BACKFILL_PAUSED" = "true" ]; then
               echo "Scheduled full backfill dispatch is paused; running reconciliation dry."
             fi

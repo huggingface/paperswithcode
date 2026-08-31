@@ -279,21 +279,40 @@ def test_mark_qualification_is_explicit_validated_and_first_write_only(db):
     request_id = uuid.uuid4()
     row = _admit(db, session_id=session_id, request_id=request_id)
     service = ChatLatencyService(db)
+    scope_id = uuid.uuid4()
 
     assert service.mark_qualification(
-        str(request_id), run_id="run-123", scenario="forced_failure"
+        str(request_id),
+        scope_id=scope_id,
+        run_id="run-123",
+        profile="32-functional-turns",
+        scenario="forced_failure",
+        workload="read",
     )
     assert not service.mark_qualification(
-        str(request_id), run_id="run-456", scenario="reliability"
+        str(request_id),
+        scope_id=uuid.uuid4(),
+        run_id="run-456",
+        profile="100-immediate-admission",
+        scenario="reliability",
+        workload="no_tool",
     )
     with pytest.raises(ValueError, match="Unsupported qualification scenario"):
         service.mark_qualification(
-            str(uuid.uuid4()), run_id="run-123", scenario="unknown"
+            str(uuid.uuid4()),
+            scope_id=scope_id,
+            run_id="run-123",
+            profile="32-functional-turns",
+            scenario="unknown",
+            workload="read",
         )
     db.refresh(row)
 
     assert row.qualification_run_id == "run-123"
+    assert row.qualification_scope_id == scope_id
+    assert row.qualification_profile == "32-functional-turns"
     assert row.qualification_scenario == "forced_failure"
+    assert row.qualification_workload == "read"
 
 
 def test_reconcile_stale_turns_repairs_expired_projection_and_latency(db):

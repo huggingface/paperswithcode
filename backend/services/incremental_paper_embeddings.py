@@ -47,6 +47,8 @@ class IncrementalRefreshResult:
     candidates: int
     embedded: int
     stale: int
+    missing_remaining: int
+    content_hash_mismatches: int
 
 
 def active_generation(db: Session) -> ActiveEmbeddingGeneration:
@@ -75,43 +77,95 @@ def find_refresh_candidates(
     generation_id: int,
     limit: int,
 ) -> list[EmbeddingCandidate]:
-    """Find missing rows and rows whose source paper changed after embedding."""
+    """Find missing rows first, then stream stored hashes for mismatches."""
     if limit < 1:
         raise ValueError("limit must be positive")
-    rows = (
+    missing_rows = (
         db.execute(
             text(
                 """
-                SELECT p.id, p.title, p.abstract, e.content_hash
+                SELECT p.id, p.title, p.abstract
                 FROM papers p
                 LEFT JOIN paper_embeddings e
                   ON e.paper_id = p.id AND e.generation_id = :generation_id
                 WHERE p.is_latest_version
-                  AND (e.paper_id IS NULL OR p.updated_at > e.created_at)
-                ORDER BY (e.paper_id IS NULL) DESC, p.updated_at, p.id
+                  AND e.paper_id IS NULL
+                ORDER BY p.updated_at, p.id
+                LIMIT :limit
                 """
             ),
-            {"generation_id": generation_id},
+            {"generation_id": generation_id, "limit": limit},
         )
+        .mappings()
+        .all()
+    )
+    candidates = [
+        EmbeddingCandidate(
+            paper_id=int(row["id"]),
+            title=row["title"],
+            abstract=row["abstract"],
+            content_hash=content_hash(row["title"], row["abstract"]),
+        )
+        for row in missing_rows
+    ]
+    if len(candidates) >= limit:
+        return candidates
+
+    mismatch_statement = text(
+        """
+        SELECT p.id, p.title, p.abstract, e.content_hash
+        FROM papers p
+        JOIN paper_embeddings e
+          ON e.paper_id = p.id AND e.generation_id = :generation_id
+        WHERE p.is_latest_version
+        ORDER BY p.id
+        """
+    ).execution_options(stream_results=True, max_row_buffer=1_000)
+    result = db.execute(mismatch_statement, {"generation_id": generation_id})
+    try:
+        for row in result.mappings().yield_per(1_000):
+            current_hash = content_hash(row["title"], row["abstract"])
+            if row["content_hash"] == current_hash:
+                continue
+            candidates.append(
+                EmbeddingCandidate(
+                    paper_id=int(row["id"]),
+                    title=row["title"],
+                    abstract=row["abstract"],
+                    content_hash=current_hash,
+                )
+            )
+            if len(candidates) >= limit:
+                break
+    finally:
+        result.close()
+    return candidates
+
+
+def embedding_backlog_counts(db: Session, *, generation_id: int) -> tuple[int, int]:
+    """Stream durable missing-row and content-hash mismatch counts."""
+    statement = text(
+        """
+        SELECT p.title, p.abstract, e.content_hash
+        FROM papers AS p
+        LEFT JOIN paper_embeddings AS e
+          ON e.paper_id = p.id AND e.generation_id = :generation_id
+        WHERE p.is_latest_version
+        """
+    ).execution_options(stream_results=True, max_row_buffer=1_000)
+    rows = (
+        db.execute(statement, {"generation_id": generation_id})
         .mappings()
         .yield_per(1_000)
     )
-    candidates = []
+    missing = mismatches = 0
     for row in rows:
-        current_hash = content_hash(row["title"], row["abstract"])
-        if row["content_hash"] == current_hash:
-            continue
-        candidates.append(
-            EmbeddingCandidate(
-                paper_id=int(row["id"]),
-                title=row["title"],
-                abstract=row["abstract"],
-                content_hash=current_hash,
-            )
-        )
-        if len(candidates) >= limit:
-            break
-    return candidates
+        stored_hash = row["content_hash"]
+        if stored_hash is None:
+            missing += 1
+        elif stored_hash != content_hash(row["title"], row["abstract"]):
+            mismatches += 1
+    return missing, mismatches
 
 
 def _validated_vectors(
@@ -317,6 +371,7 @@ def refresh_active_embeddings(
     owns_client = client is None
     http = client or httpx.Client(timeout=timeout_seconds)
     embedded = stale = 0
+    missing_remaining = content_hash_mismatches = 0
     try:
         for start in range(0, len(candidates), batch_size):
             batch = candidates[start : start + batch_size]
@@ -335,6 +390,9 @@ def refresh_active_embeddings(
             )
             embedded += batch_embedded
             stale += batch_stale
+        missing_remaining, content_hash_mismatches = embedding_backlog_counts(
+            db, generation_id=generation.id
+        )
     except Exception as error:
         db.rollback()
         _record_run(
@@ -367,6 +425,8 @@ def refresh_active_embeddings(
             "embedded": embedded,
             "stale": stale,
             "batch_size": batch_size,
+            "missing_remaining": missing_remaining,
+            "content_hash_mismatches": content_hash_mismatches,
         },
         completed=True,
     )
@@ -376,4 +436,6 @@ def refresh_active_embeddings(
         candidates=len(candidates),
         embedded=embedded,
         stale=stale,
+        missing_remaining=missing_remaining,
+        content_hash_mismatches=content_hash_mismatches,
     )

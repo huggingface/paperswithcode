@@ -1924,7 +1924,9 @@ class PaperService:
             # Fall back to local search if Semantic Scholar fails
             return self.search_papers(query, limit)
 
-    def add_paper(self, paper_data: Dict[str, Any]) -> Optional[int]:
+    def add_paper(
+        self, paper_data: Dict[str, Any], *, commit: bool = True
+    ) -> Optional[int]:
         """
         Add a single paper to the database.
 
@@ -1979,12 +1981,17 @@ class PaperService:
             )
 
             self.db.add(db_paper)
-            self.db.commit()
-            self.db.refresh(db_paper)
+            if commit:
+                self.db.commit()
+                self.db.refresh(db_paper)
+            else:
+                self.db.flush()
 
             return db_paper.id
 
         except Exception as e:
+            if not commit:
+                raise
             self.db.rollback()
             print(f"Error adding paper {paper_data.get('arxiv_id', 'unknown')}: {e}")
             return None

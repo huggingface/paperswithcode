@@ -9,6 +9,7 @@ import gzip
 import json
 import os
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -25,19 +26,29 @@ def request_json(
     job_id = os.environ["PWC_CURATION_JOB_ID"]
     token = os.environ["PWC_CURATION_JOB_TOKEN"]
     data = json.dumps(payload).encode() if payload is not None else None
-    response = urllib.request.urlopen(
-        urllib.request.Request(
-            f"{base}/admin/codex-curation/jobs/{job_id}/{path}",
-            data=data,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Content-Type": "application/json",
-                "User-Agent": USER_AGENT,
-            },
-            method=method,
-        ),
-        timeout=timeout,
-    )
+    try:
+        response = urllib.request.urlopen(
+            urllib.request.Request(
+                f"{base}/admin/codex-curation/jobs/{job_id}/{path}",
+                data=data,
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "Content-Type": "application/json",
+                    "User-Agent": USER_AGENT,
+                },
+                method=method,
+            ),
+            timeout=timeout,
+        )
+    except urllib.error.HTTPError as error:
+        raw_error = error.read().decode("utf-8", "replace")
+        try:
+            detail = json.loads(raw_error).get("detail", raw_error)
+        except json.JSONDecodeError:
+            detail = raw_error
+        raise RuntimeError(
+            f"Curation API rejected {method} {path} (HTTP {error.code}): {detail}"
+        ) from error
     raw = response.read().decode()
     return json.loads(raw)
 
@@ -80,6 +91,15 @@ def make_scheduled_enrichment_additive(proposal: dict, context: dict) -> dict:
     """Preserve existing enrichment links for scheduled curation jobs."""
 
     if os.environ.get("PWC_CURATION_TRIGGER", "admin") == "admin":
+        return proposal
+    if proposal.get("resolve_model_paper") is not None:
+        enrich = proposal.get("enrich")
+        if isinstance(enrich, dict) and not any(
+            value not in (None, False, {}, []) for value in enrich.values()
+        ):
+            normalized = copy.deepcopy(proposal)
+            normalized["enrich"] = None
+            return normalized
         return proposal
     enrich = proposal.get("enrich")
     paper = context.get("paper") or {}

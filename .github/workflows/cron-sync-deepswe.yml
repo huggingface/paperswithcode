@@ -1,8 +1,6 @@
 name: Cron - Sync DeepSWE
 
 on:
-  schedule:
-    - cron: "25 * * * *"
   workflow_dispatch: {}
 
 concurrency:

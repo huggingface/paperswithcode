@@ -2,15 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import httpx
+import pytest
 
 from backend.config import Settings
 from backend.scripts import monitor_chat_operational_alerts as monitor
 from backend.services.chat_operational_alert_service import (
     ProviderHealth,
+    lifecycle_window_alerts,
     operational_alert_payload,
     provider_health,
     provider_transition,
@@ -35,6 +38,224 @@ def test_runtime_failure_counts_never_return_raw_journal_content():
     }
 
 
+def test_runtime_failure_counts_does_not_page_on_routine_lifecycle_success():
+    messages = [
+        "chat durable lifecycle event=worker_reconnect code=none value=1",
+        "chat durable lifecycle event=executor_recovery code=succeeded value=1",
+        "chat durable lifecycle event=workspace_state code=created value=1",
+        "chat durable lifecycle event=workspace_state code=reused value=1",
+        "chat durable lifecycle event=ttft_ms code=none value=12000",
+    ]
+
+    assert runtime_failure_counts(messages) == {}
+    assert lifecycle_window_alerts(messages, Settings()) == {}
+
+
+def test_lifecycle_window_alerts_require_configured_rate_or_ratio_breaches():
+    settings = Settings(
+        chat_lifecycle_alert_min_samples=5,
+        chat_lifecycle_alert_failure_percent=50,
+        chat_lifecycle_capacity_saturation_count=3,
+        chat_lifecycle_workspace_create_percent=75,
+        chat_lifecycle_ttft_threshold_ms=1_000,
+        chat_lifecycle_ttft_regression_percent=50,
+    )
+    messages = [
+        *[
+            "chat durable lifecycle event=worker_reconnect code=none value=1"
+            for _ in range(2)
+        ],
+        *[
+            (
+                "chat durable lifecycle event=typed_failure "
+                "code=external_worker_lost value=1"
+            )
+            for _ in range(3)
+        ],
+        *[
+            "chat durable lifecycle event=executor_recovery code=succeeded value=1"
+            for _ in range(2)
+        ],
+        *[
+            "chat durable lifecycle event=turn_state code=waiting_tool value=1"
+            for _ in range(5)
+        ],
+        *[
+            "chat durable lifecycle event=typed_failure code=execution_lost value=1"
+            for _ in range(3)
+        ],
+        *[
+            "chat durable lifecycle event=capacity_saturation code=none value=1"
+            for _ in range(3)
+        ],
+        *[
+            "chat durable lifecycle event=workspace_state code=created value=1"
+            for _ in range(4)
+        ],
+        "chat durable lifecycle event=workspace_state code=reused value=1",
+        *[
+            "chat durable lifecycle event=ttft_ms code=none value=1000"
+            for _ in range(3)
+        ],
+        *["chat durable lifecycle event=ttft_ms code=none value=999" for _ in range(2)],
+    ]
+
+    assert lifecycle_window_alerts(messages, settings) == {
+        "worker_reattach_failure_rate": 3,
+        "executor_lost_rate": 3,
+        "capacity_saturation": 3,
+        "workspace_create_ratio": 4,
+        "ttft_regression_rate": 3,
+    }
+
+
+def test_lifecycle_window_alerts_count_reconciled_execution_loss():
+    settings = Settings(
+        chat_lifecycle_alert_min_samples=5,
+        chat_lifecycle_alert_failure_percent=50,
+    )
+    messages = [
+        *[
+            "chat durable lifecycle event=turn_state code=waiting_tool value=1"
+            for _ in range(5)
+        ],
+        *[
+            "chat durable lifecycle event=typed_failure code=execution_lost value=1"
+            for _ in range(3)
+        ],
+    ]
+
+    assert lifecycle_window_alerts(messages, settings) == {"executor_lost_rate": 3}
+
+
+def test_lifecycle_window_alerts_ignore_early_executor_recovery_failure():
+    settings = Settings(
+        chat_lifecycle_alert_min_samples=5,
+        chat_lifecycle_alert_failure_percent=50,
+    )
+    messages = [
+        *[
+            "chat durable lifecycle event=turn_state code=waiting_tool value=1"
+            for _ in range(5)
+        ],
+        *[
+            "chat durable lifecycle event=executor_recovery code=failed value=1"
+            for _ in range(2)
+        ],
+        *[
+            "chat durable lifecycle event=typed_failure code=execution_lost value=1"
+            for _ in range(2)
+        ],
+    ]
+
+    assert lifecycle_window_alerts(messages, settings) == {}
+
+
+def test_lifecycle_window_alerts_canonical_loss_cannot_exceed_attempts():
+    settings = Settings(
+        chat_lifecycle_alert_min_samples=5,
+        chat_lifecycle_alert_failure_percent=50,
+    )
+    messages = [
+        "chat durable lifecycle event=turn_state code=waiting_tool value=5",
+        "chat durable lifecycle event=executor_recovery code=failed value=6",
+        "chat durable lifecycle event=typed_failure code=execution_lost value=3",
+    ]
+
+    alerts = lifecycle_window_alerts(messages, settings)
+
+    assert alerts == {"executor_lost_rate": 3}
+    assert alerts["executor_lost_rate"] <= 5
+
+
+def test_event_journal_bound_remains_an_explicit_runtime_failure():
+    assert runtime_failure_counts(
+        [
+            "chat durable lifecycle event=typed_failure "
+            "code=event_journal_exhausted value=1"
+        ]
+    ) == {"event_journal_bound": 1}
+
+
+def test_stale_fence_and_expired_lease_page_immediately_without_content():
+    messages = [
+        "chat durable lifecycle event=stale_fence_rejection code=stale value=1",
+        "chat durable lifecycle event=expired_turn_lease code=expired value=2",
+    ]
+
+    assert runtime_failure_counts(messages) == {
+        "stale_fence_rejection": 1,
+        "expired_turn_lease": 1,
+    }
+    assert lifecycle_window_alerts(messages, Settings()) == {
+        "stale_fence_rejection": 1,
+        "expired_turn_lease": 2,
+    }
+
+
+def test_monitor_pages_once_on_window_breach_and_recovers_once(monkeypatch):
+    now = datetime(2026, 8, 6, 12, tzinfo=UTC)
+    settings = Settings(
+        chat_lifecycle_alert_min_samples=2,
+        chat_lifecycle_alert_failure_percent=50,
+    )
+    failed_window = [
+        "chat durable lifecycle event=turn_state code=waiting_tool value=2",
+        "chat durable lifecycle event=typed_failure code=execution_lost value=1",
+    ]
+    current_window = [
+        "chat durable lifecycle event=worker_reconnect code=none value=1",
+        "chat durable lifecycle event=executor_recovery code=succeeded value=1",
+        "chat durable lifecycle event=workspace_state code=created value=1",
+    ]
+    monkeypatch.setattr(
+        monitor,
+        "read_journal",
+        lambda _cursor, _now: ([], "cursor-next", False),
+    )
+    monkeypatch.setattr(
+        monitor, "read_lifecycle_window", lambda _now, _seconds: current_window
+    )
+    monkeypatch.setattr(
+        monitor,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: nullcontext(None)),
+    )
+    monkeypatch.setattr(
+        monitor,
+        "provider_health",
+        lambda _db, _settings, observed_now: ProviderHealth(
+            0,
+            0,
+            observed_now - timedelta(minutes=5),
+            observed_now,
+        ),
+    )
+    state = monitor.empty_state()
+
+    events, failed = monitor.collect_events(state, settings, now)
+    assert failed is False
+    assert events == []
+
+    current_window = failed_window
+    events, failed = monitor.collect_events(state, settings, now)
+    assert failed is False
+    assert [event["signal"] for event in events] == ["chat_lifecycle_threshold"]
+    assert events[0]["classifications"] == {"executor_lost_rate": 1}
+
+    events, failed = monitor.collect_events(state, settings, now)
+    assert failed is False
+    assert events == []
+
+    current_window = []
+    events, failed = monitor.collect_events(state, settings, now)
+    assert failed is False
+    assert [event["signal"] for event in events] == [
+        "chat_lifecycle_threshold_recovered"
+    ]
+    assert events[0]["classifications"] == {"executor_lost_rate": 1}
+
+
 def test_provider_health_counts_only_content_free_aggregates():
     class FakeSession:
         values = iter((10, 5))
@@ -51,6 +272,26 @@ def test_provider_health_counts_only_content_free_aggregates():
         window_start=now - timedelta(minutes=5),
         window_end=now,
     )
+
+
+def test_production_provider_health_scopes_the_discovered_glm_route():
+    class FakeSession:
+        statements = []
+
+        def scalar(self, statement):
+            self.statements.append(
+                str(statement.compile(compile_kwargs={"literal_binds": True}))
+            )
+            return 0
+
+    db = FakeSession()
+    settings = Settings(environment="production")
+
+    provider_health(db, settings, datetime(2026, 8, 27, 12, tzinfo=UTC))
+
+    assert len(db.statements) == 2
+    assert all("zai-org/GLM-5.3-Flash:fastest" in sql for sql in db.statements)
+    assert all("DeepSeek-V4-Flash" not in sql for sql in db.statements)
 
 
 def test_provider_transition_requires_sustained_failure_and_clean_recovery():
@@ -147,6 +388,17 @@ def test_state_round_trip_is_private_and_atomic(tmp_path):
     assert not list(tmp_path.glob(".state.json.new-*"))
 
 
+@pytest.mark.parametrize("active", [["user-controlled-label"], [{"bad": "shape"}]])
+def test_state_rejects_unbounded_lifecycle_labels(tmp_path, active):
+    path = tmp_path / "state.json"
+    state = monitor.empty_state()
+    state["lifecycle_active"] = active
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(TypeError, match="invalid lifecycle state"):
+        monitor.load_state(path)
+
+
 def test_dashboard_health_record_is_content_free_and_group_readable(tmp_path):
     monitor.write_health_record(
         tmp_path,
@@ -193,6 +445,27 @@ def test_journal_reader_advances_cursor_without_returning_records(monkeypatch):
     assert "previous-cursor" in observed[0]
 
 
+def test_journal_reader_advances_to_reported_tail_when_no_unit_record_matches(
+    monkeypatch,
+):
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return SimpleNamespace(stdout="-- cursor: journal-tail-cursor\n")
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+
+    messages, cursor, reset = monitor.read_journal(
+        "previous-cursor", datetime(2026, 8, 6, 12, tzinfo=UTC)
+    )
+
+    assert messages == []
+    assert cursor == "journal-tail-cursor"
+    assert reset is False
+    assert "--show-cursor" in observed[0]
+
+
 def test_journal_reader_recovers_from_a_vacuumed_cursor(monkeypatch):
     calls = 0
 
@@ -214,6 +487,49 @@ def test_journal_reader_recovers_from_a_vacuumed_cursor(monkeypatch):
     assert messages == ["recent"]
     assert cursor == "fresh-cursor"
     assert reset is True
+
+
+def test_lifecycle_window_reader_uses_configured_window(monkeypatch):
+    now = datetime(2026, 8, 6, 12, tzinfo=UTC)
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return SimpleNamespace(
+            stdout=json.dumps(
+                {
+                    "MESSAGE": (
+                        "chat durable lifecycle event=worker_reconnect "
+                        "code=none value=1"
+                    )
+                }
+            )
+        )
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+
+    assert monitor.read_lifecycle_window(now, 300) == [
+        "chat durable lifecycle event=worker_reconnect code=none value=1"
+    ]
+    assert "--after-cursor" not in observed[0]
+    assert (now - timedelta(seconds=300)).isoformat() in observed[0]
+    assert observed[0][observed[0].index("--grep") + 1] == (
+        "chat durable lifecycle event="
+    )
+
+
+def test_lifecycle_window_reader_treats_no_grep_match_as_an_empty_window(
+    monkeypatch,
+):
+    def fake_run(_command, **kwargs):
+        assert kwargs["check"] is False
+        return SimpleNamespace(stdout="", returncode=1)
+
+    monkeypatch.setattr(monitor.subprocess, "run", fake_run)
+
+    assert (
+        monitor.read_lifecycle_window(datetime(2026, 8, 6, 12, tzinfo=UTC), 300) == []
+    )
 
 
 def test_delivery_uses_primary_then_fallback(monkeypatch):

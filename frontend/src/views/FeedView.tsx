@@ -29,7 +29,10 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useQuery } from "@tanstack/react-query";
-import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
+import {
+  readHomepagePaperDateRange,
+  withHomepagePaperDateRange,
+} from "@/lib/paperDateRange";
 
 type OrderBy = "trending" | "date_published" | "citation_count";
 
@@ -278,7 +281,7 @@ export const AskAssistant: React.FC = () => {
 const FeedView: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const orderBy = parseOrderBy(searchParams.get("order_by"));
-  const dateRange = readPaperDateRange(searchParams);
+  const dateRange = readHomepagePaperDateRange(searchParams);
   const hasCode = searchParams.get("has_code") === "true";
   const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
 
@@ -431,7 +434,7 @@ const FeedView: React.FC = () => {
               <PaperDateFilter
                 startDate={dateRange.startDate}
                 endDate={dateRange.endDate}
-                onChange={(value) => setSearchParams(withPaperDateRange(searchParams, value))}
+                onChange={(value) => setSearchParams(withHomepagePaperDateRange(searchParams, value))}
               />
             </div>
 

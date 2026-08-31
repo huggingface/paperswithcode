@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Update Hugging Face artifact links hourly
+
+[Timer]
+OnCalendar=*-*-* *:30:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-update-hf-artifacts.service
+
+[Install]
+WantedBy=timers.target

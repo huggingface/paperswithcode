@@ -16,6 +16,8 @@ from backend.models.database import (
     Dataset,
     Evaluation,
     Metric,
+    ModelProviderAlias,
+    ModelRelease,
     Paper,
     PaperTask,
     Task,
@@ -26,6 +28,7 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.model_release_identity_service import ModelReleaseIdentityService
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 API_ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models/free"
@@ -430,9 +433,16 @@ class ArtificialAnalysisPaperDiscoveryService:
         self.ingestion_service = ingestion_service or PaperIngestionService(db)
         self.external_service = external_service or ExternalResourceService(db)
 
-    async def discover(self, *, persist: bool = True) -> ArtificialAnalysisDiscovery:
+    async def discover(
+        self,
+        *,
+        persist: bool = True,
+        leaderboard: ArtificialAnalysisLeaderboard | None = None,
+        identities: dict[str, PaperIdentity] | None = None,
+    ) -> ArtificialAnalysisDiscovery:
         result = ArtificialAnalysisDiscovery()
-        for slug, identity in MODEL_PAPER_IDENTITIES.items():
+        active_identities = MODEL_PAPER_IDENTITIES if identities is None else identities
+        for slug, identity in active_identities.items():
             query = self.db.query(Paper).filter(Paper.is_latest_version)
             paper = (
                 (
@@ -472,6 +482,22 @@ class ArtificialAnalysisPaperDiscoveryService:
                 )
                 result.indexed_papers.append(identity.source_url or slug)
             result.papers[slug] = paper.id
+        if leaderboard is not None:
+            identity_service = ModelReleaseIdentityService(self.db)
+            resolved_releases = identity_service.resolve_many(
+                "artificial-analysis",
+                [
+                    (entry.slug, entry.name)
+                    for entry in leaderboard.entries
+                    if entry.slug not in result.papers
+                ],
+            )
+            for entry in leaderboard.entries:
+                if entry.slug in result.papers:
+                    continue
+                release = resolved_releases.get(entry.slug)
+                if release is not None and release.paper_id is not None:
+                    result.papers[entry.slug] = release.paper_id
         return result
 
 
@@ -520,9 +546,9 @@ class ArtificialAnalysisSyncService:
         selected = [
             entry
             for entry in leaderboard.entries
-            if entry.slug in MODEL_PAPER_IDENTITIES and index.key in entry.scores
+            if entry.slug in discovery.papers and index.key in entry.scores
         ]
-        if len(selected) != len(MODEL_PAPER_IDENTITIES):
+        if not set(MODEL_PAPER_IDENTITIES).issubset({entry.slug for entry in selected}):
             raise ValueError(
                 f"Refusing to synchronize an incomplete reviewed model set for "
                 f"{index.label}"
@@ -566,7 +592,22 @@ class ArtificialAnalysisSyncService:
                 stats.created += 1
             else:
                 stats.updated += 1
-            identity = MODEL_PAPER_IDENTITIES[entry.slug]
+            identity = MODEL_PAPER_IDENTITIES.get(entry.slug)
+            release_alias = None
+            if identity is None:
+                release_alias = (
+                    self.db.query(ModelProviderAlias)
+                    .filter(
+                        ModelProviderAlias.provider == "artificial-analysis",
+                        ModelProviderAlias.alias == entry.slug,
+                    )
+                    .one_or_none()
+                )
+            release = (
+                self.db.get(ModelRelease, release_alias.model_release_id)
+                if release_alias is not None
+                else None
+            )
             source_url = f"{SOURCE_URL_PREFIX}{entry.slug}"
             row.paper_id = paper_id
             row.model_name = entry.name
@@ -577,7 +618,11 @@ class ArtificialAnalysisSyncService:
             )
             row.metrics = {METRIC_NAME: entry.scores[index.key]}
             row.uses_additional_data = False
-            row.is_open = identity.is_open
+            row.is_open = (
+                identity.is_open
+                if identity is not None
+                else bool(release and release.is_open)
+            )
             row.best_metric = METRIC_NAME
             row.evaluated_on = now.date()
             row.external_source_url = source_url
@@ -641,10 +686,24 @@ class ArtificialAnalysisSyncService:
 
 
 async def discover_artificial_analysis_papers(
-    db: Session, *, persist: bool = True
+    db: Session,
+    *,
+    persist: bool = True,
+    leaderboard: ArtificialAnalysisLeaderboard | None = None,
 ) -> ArtificialAnalysisDiscovery:
-    return await ArtificialAnalysisPaperDiscoveryService(db).discover(persist=persist)
+    return await ArtificialAnalysisPaperDiscoveryService(db).discover(
+        persist=persist, leaderboard=leaderboard
+    )
 
 
-def run_discovery(db: Session, *, persist: bool = True):
-    return asyncio.run(discover_artificial_analysis_papers(db, persist=persist))
+def run_discovery(
+    db: Session,
+    *,
+    persist: bool = True,
+    leaderboard: ArtificialAnalysisLeaderboard | None = None,
+):
+    return asyncio.run(
+        discover_artificial_analysis_papers(
+            db, persist=persist, leaderboard=leaderboard
+        )
+    )

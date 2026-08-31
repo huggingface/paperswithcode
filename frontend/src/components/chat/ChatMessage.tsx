@@ -650,7 +650,7 @@ export const AssistantMessage: React.FC<{
           </span>
         )}
       </div>}
-      {!msg.streaming && msg.finishReason && msg.finishReason !== "success" && (
+      {!msg.streaming && msg.finishReason && !["success", "scope_blocked"].includes(msg.finishReason) && (
         <div className="chat-finish-note">
           {["tool_limit", "max_turns"].includes(msg.finishReason)
             ? "The assistant stopped at the execution limit."

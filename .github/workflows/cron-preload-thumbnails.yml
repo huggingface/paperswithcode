@@ -1,26 +1,6 @@
 name: Cron - Preload Thumbnails
 
 on:
-  schedule:
-    # Every 3h: warm thumbnails for every user-visible candidate set --
-    # homepage feed (top citation / trending / newest) plus the top
-    # --per-task and --per-method papers across the three sort tabs
-    # (trending, newest, most cited) on every task and method page. Run with
-    # missing-only + on-disk validity check so stale / wrong-aspect local
-    # files get regenerated automatically.
-    - cron: "0 */3 * * *"
-    # Daily 04:00 UTC: deeper backfill of the top --per-task papers on every
-    # task page (covers the longer tail of each task's three sort tabs).
-    - cron: "0 4 * * *"
-    # Daily 04:15 UTC: deeper backfill of the top --per-method papers on every
-    # method page (covers the longer tail of each method's three sort tabs).
-    - cron: "15 4 * * *"
-    # Daily 04:30 UTC: broad newest-first preload covering the last 30 days,
-    # after the HF daily import (03:00 UTC).
-    - cron: "30 4 * * *"
-    # Daily 04:45 UTC: capture thumbnails for non-ArXiv external resource pages
-    # that do not have an explicit thumbnail_url yet.
-    - cron: "45 4 * * *"
   workflow_dispatch:
     inputs:
       priority:
@@ -154,84 +134,60 @@ jobs:
           INPUT_DRY_RUN: ${{ github.event.inputs.dry_run }}
           INPUT_REFRESH_EXISTING: ${{ github.event.inputs.refresh_existing }}
           INPUT_REQUEST_DELAY_SECONDS: ${{ github.event.inputs.request_delay_seconds }}
-          GITHUB_EVENT_SCHEDULE: ${{ github.event.schedule }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
         run: |
           ARGS=""
-          if [ "${GITHUB_EVENT_NAME}" = "schedule" ]; then
-            case "${GITHUB_EVENT_SCHEDULE}" in
-              "0 */3 * * *")
-                ARGS=" --priority visible --citation-top 1000 --trending-top 500 --newest-top 300 --per-task 20 --per-method 20 --limit 10000 --missing-only --trust-local-cache"
-                ;;
-              "0 4 * * *")
-                ARGS=" --priority task-top --per-task 50 --missing-only --trust-local-cache"
-                ;;
-              "15 4 * * *")
-                ARGS=" --priority method-top --per-method 50 --missing-only --trust-local-cache"
-                ;;
-              "30 4 * * *")
-                ARGS=" --priority recent --recent-days 30 --limit 500"
-                ;;
-              "45 4 * * *")
-                ARGS=" --priority external-missing --request-delay-seconds 2 --max-failures -1"
-                ;;
-              *)
-                ARGS=" --priority recent --recent-days 30 --limit 500"
-                ;;
-            esac
-          else
-            if [ -n "${INPUT_PRIORITY}" ]; then
-              ARGS="${ARGS} --priority ${INPUT_PRIORITY}"
-            fi
-            if [ -n "${INPUT_LIMIT}" ]; then
-              ARGS="${ARGS} --limit ${INPUT_LIMIT}"
-            fi
-            if [ -n "${INPUT_RECENT_DAYS}" ]; then
-              ARGS="${ARGS} --recent-days ${INPUT_RECENT_DAYS}"
-            fi
-            if [ -n "${INPUT_PER_TASK}" ]; then
-              ARGS="${ARGS} --per-task ${INPUT_PER_TASK}"
-            fi
-            if [ -n "${INPUT_PER_METHOD}" ]; then
-              ARGS="${ARGS} --per-method ${INPUT_PER_METHOD}"
-            fi
-            if [ -n "${INPUT_TRENDING_MAX_AGE_DAYS}" ]; then
-              ARGS="${ARGS} --trending-max-age-days ${INPUT_TRENDING_MAX_AGE_DAYS}"
-            fi
-            if [ -n "${INPUT_CITATION_TOP}" ]; then
-              ARGS="${ARGS} --citation-top ${INPUT_CITATION_TOP}"
-            fi
-            if [ -n "${INPUT_TRENDING_TOP}" ]; then
-              ARGS="${ARGS} --trending-top ${INPUT_TRENDING_TOP}"
-            fi
-            if [ -n "${INPUT_NEWEST_TOP}" ]; then
-              ARGS="${ARGS} --newest-top ${INPUT_NEWEST_TOP}"
-            fi
-            if [ -n "${INPUT_AFTER_ID}" ]; then
-              ARGS="${ARGS} --after-id ${INPUT_AFTER_ID}"
-            fi
-            if [ -n "${INPUT_BEFORE_ID}" ]; then
-              ARGS="${ARGS} --before-id ${INPUT_BEFORE_ID}"
-            fi
-            if [ -n "${INPUT_SHARD}" ]; then
-              ARGS="${ARGS} --shard ${INPUT_SHARD}"
-            fi
-            if [ "${INPUT_MISSING_ONLY}" = "true" ]; then
-              ARGS="${ARGS} --missing-only"
-            fi
-            if [ "${INPUT_TRUST_LOCAL_CACHE}" = "true" ]; then
-              ARGS="${ARGS} --trust-local-cache"
-            fi
-            if [ "${INPUT_DRY_RUN}" = "true" ]; then
-              ARGS="${ARGS} --dry-run"
-            fi
-            if [ "${INPUT_REFRESH_EXISTING}" = "true" ]; then
-              ARGS="${ARGS} --refresh-existing"
-            fi
-            if [ -n "${INPUT_REQUEST_DELAY_SECONDS}" ]; then
-              ARGS="${ARGS} --request-delay-seconds ${INPUT_REQUEST_DELAY_SECONDS}"
-            fi
+          if [ -n "${INPUT_PRIORITY}" ]; then
+            ARGS="${ARGS} --priority ${INPUT_PRIORITY}"
+          fi
+          if [ -n "${INPUT_LIMIT}" ]; then
+            ARGS="${ARGS} --limit ${INPUT_LIMIT}"
+          fi
+          if [ -n "${INPUT_RECENT_DAYS}" ]; then
+            ARGS="${ARGS} --recent-days ${INPUT_RECENT_DAYS}"
+          fi
+          if [ -n "${INPUT_PER_TASK}" ]; then
+            ARGS="${ARGS} --per-task ${INPUT_PER_TASK}"
+          fi
+          if [ -n "${INPUT_PER_METHOD}" ]; then
+            ARGS="${ARGS} --per-method ${INPUT_PER_METHOD}"
+          fi
+          if [ -n "${INPUT_TRENDING_MAX_AGE_DAYS}" ]; then
+            ARGS="${ARGS} --trending-max-age-days ${INPUT_TRENDING_MAX_AGE_DAYS}"
+          fi
+          if [ -n "${INPUT_CITATION_TOP}" ]; then
+            ARGS="${ARGS} --citation-top ${INPUT_CITATION_TOP}"
+          fi
+          if [ -n "${INPUT_TRENDING_TOP}" ]; then
+            ARGS="${ARGS} --trending-top ${INPUT_TRENDING_TOP}"
+          fi
+          if [ -n "${INPUT_NEWEST_TOP}" ]; then
+            ARGS="${ARGS} --newest-top ${INPUT_NEWEST_TOP}"
+          fi
+          if [ -n "${INPUT_AFTER_ID}" ]; then
+            ARGS="${ARGS} --after-id ${INPUT_AFTER_ID}"
+          fi
+          if [ -n "${INPUT_BEFORE_ID}" ]; then
+            ARGS="${ARGS} --before-id ${INPUT_BEFORE_ID}"
+          fi
+          if [ -n "${INPUT_SHARD}" ]; then
+            ARGS="${ARGS} --shard ${INPUT_SHARD}"
+          fi
+          if [ "${INPUT_MISSING_ONLY}" = "true" ]; then
+            ARGS="${ARGS} --missing-only"
+          fi
+          if [ "${INPUT_TRUST_LOCAL_CACHE}" = "true" ]; then
+            ARGS="${ARGS} --trust-local-cache"
+          fi
+          if [ "${INPUT_DRY_RUN}" = "true" ]; then
+            ARGS="${ARGS} --dry-run"
+          fi
+          if [ "${INPUT_REFRESH_EXISTING}" = "true" ]; then
+            ARGS="${ARGS} --refresh-existing"
+          fi
+          if [ -n "${INPUT_REQUEST_DELAY_SECONDS}" ]; then
+            ARGS="${ARGS} --request-delay-seconds ${INPUT_REQUEST_DELAY_SECONDS}"
           fi
           ssh -o StrictHostKeyChecking=yes \
               "${VPS_USER}@${VPS_HOST}" \

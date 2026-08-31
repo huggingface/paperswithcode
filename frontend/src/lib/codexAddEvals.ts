@@ -19,11 +19,12 @@ export interface CodexThumbnailResult {
 
 export interface CodexPaperJob {
   id: string;
-  paper_id: number;
-  paper_route: string;
-  paper_title: string;
+  paper_id: number | null;
+  candidate_id: string | null;
+  paper_route: string | null;
+  paper_title: string | null;
   requested_by: string;
-  kind: "add-evals" | "enrich-paper";
+  kind: "add-evals" | "enrich-paper" | "resolve-model-paper";
   status: CodexPaperJobStatus;
   hf_job_id: string | null;
   hf_job_url: string | null;
@@ -37,7 +38,7 @@ export interface CodexPaperJob {
   attempt_count: number;
   thumbnail: CodexThumbnailResult | null;
   parent_workflow_id: string | null;
-  trigger: "admin" | "hf-daily-cron" | "benchmark-promotion";
+  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion";
   cohort_date: string | null;
   policy_version: string;
   repository_sha: string | null;

@@ -180,10 +180,19 @@ export class ChatApi {
     });
   }
 
-  resumeStream(sessionId: string, signal?: AbortSignal): Promise<Response> {
+  resumeStream(
+    sessionId: string,
+    signal?: AbortSignal,
+    afterSequence?: number,
+  ): Promise<Response> {
     return apiFetch(`/chat/sessions/${encodeURIComponent(sessionId)}/stream`, {
       method: "GET",
-      headers: { Accept: "text/event-stream" },
+      headers: {
+        Accept: "text/event-stream",
+        ...(afterSequence && afterSequence > 0
+          ? { "Last-Event-ID": String(afterSequence) }
+          : {}),
+      },
       signal,
     });
   }

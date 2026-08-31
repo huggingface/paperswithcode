@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync TabArena leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:55:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-tabarena.service
+
+[Install]
+WantedBy=timers.target

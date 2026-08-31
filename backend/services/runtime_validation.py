@@ -31,9 +31,12 @@ from backend.chat_sandbox_worker.contract import (
 )
 from backend.config import Settings
 from backend.services.chat_runtime_contract import (
+    ExternalAdmissionContract,
     dedicated_gateway_hostname,
+    require_external_admission_contract,
     require_immutable_image_id,
 )
+from backend.services.chat_external_worker_capacity import external_worker_endpoints
 from latex_compiler_contract import (
     EnvelopeError,
     validate_staging_sandbox_compiler_identity,
@@ -309,6 +312,76 @@ def validate_codex_jobs_configuration(settings: Settings) -> None:
             raise RuntimeError(
                 f"{settings.environment} Codex jobs must target {expected_api_url}"
             )
+    if settings.autonomous_submission_enabled:
+        expected_callback_url = {
+            "production": "https://paperswithcode.co/api/v1",
+            "staging": "https://staging.paperswithcode.co/api/v1",
+        }[settings.environment]
+        if (
+            len(settings.autonomous_submission_callback_secret.encode()) < 32
+            or settings.autonomous_submission_callback_secret
+            == settings.admin_api_token
+        ):
+            raise RuntimeError(
+                "autonomous submission callbacks require a separate strong secret"
+            )
+        if (
+            settings.autonomous_submission_callback_base_url.rstrip("/")
+            != expected_callback_url
+        ):
+            raise RuntimeError(
+                f"{settings.environment} autonomous callbacks must target "
+                f"{expected_callback_url}"
+            )
+    if settings.autonomous_submission_jobs_enabled:
+        if settings.environment != "production":
+            raise RuntimeError("autonomous submission Jobs are production-only")
+        if not settings.autonomous_submission_enabled:
+            raise RuntimeError(
+                "autonomous submission Jobs require submission callbacks"
+            )
+        if (
+            not settings.autonomous_submission_hf_namespace
+            or not settings.autonomous_submission_hf_token
+            or not settings.autonomous_submission_openai_api_key
+            or not settings.autonomous_submission_job_image
+            or not settings.autonomous_alert_slack_webhook_url
+            or not settings.autonomous_alert_fallback_webhook_url
+        ):
+            raise RuntimeError(
+                "autonomous submission Jobs require separate credentials, image, "
+                "and alert routes"
+            )
+        if settings.autonomous_submission_hf_token in {
+            settings.codex_jobs_token,
+            settings.hf_token,
+        } or settings.autonomous_submission_openai_api_key in {
+            settings.codex_jobs_openai_api_key,
+            settings.openai_api_key,
+        }:
+            raise RuntimeError(
+                "autonomous submission Jobs require separate credentials"
+            )
+        if (
+            settings.autonomous_submission_input_usd_per_million <= 0
+            or settings.autonomous_submission_cached_input_usd_per_million <= 0
+            or settings.autonomous_submission_output_usd_per_million <= 0
+        ):
+            raise RuntimeError(
+                "autonomous submission Jobs require positive pinned pricing"
+            )
+        image_is_digest = re.fullmatch(
+            r".+@sha256:[0-9a-f]{64}", settings.autonomous_submission_job_image
+        )
+        if not image_is_digest:
+            raise RuntimeError("autonomous submission Jobs require an immutable image")
+        if (
+            settings.autonomous_alert_slack_webhook_url
+            == settings.autonomous_alert_fallback_webhook_url
+        ):
+            raise RuntimeError(
+                "autonomous submission Jobs require separate alert routes"
+            )
     if settings.codex_curation_scheduler_enabled:
         if settings.environment != "production":
             raise RuntimeError("scheduled paper curation is production-only")
@@ -386,8 +459,6 @@ def _validate_private_paper_compiler_settings(settings: Settings) -> str:
         != _STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
     ):
         raise RuntimeError("private paper runtime Sandbox egress is unattested")
-    if settings.chat_latex_compiler_url or settings.chat_latex_compiler_hf_token:
-        raise RuntimeError("private paper runtime must not configure a compiler Space")
     try:
         encoded = settings.chat_latex_compiler_signing_private_key
         raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
@@ -451,7 +522,6 @@ def _validate_private_paper_qualification_evidence(*, image: str) -> None:
 def validate_private_paper_runtime(settings: Settings) -> None:
     """Fail closed unless the private per-job paper path has all staging gates."""
     user_paper_flags = (
-        settings.chat_artifacts_enabled,
         settings.chat_latex_paper_enabled,
         settings.chat_latex_compiler_jobs_enabled,
     )
@@ -459,19 +529,14 @@ def validate_private_paper_runtime(settings: Settings) -> None:
         settings.chat_latex_compiler_qualification_mode
     )
     if not any_private_paper_flag:
-        if settings.environment == "staging" and (
-            settings.chat_posterly_enabled
-            or settings.chat_artifact_shared_preview_enabled
-        ):
-            raise RuntimeError(
-                "staging Posterly and shared previews must remain disabled"
-            )
+        if settings.environment == "staging" and settings.chat_posterly_enabled:
+            raise RuntimeError("staging Posterly must remain disabled")
         return
     if settings.environment != "staging":
         raise RuntimeError("private paper runtime is staging-only")
     if settings.chat_posterly_enabled:
         raise RuntimeError("staging Posterly must remain disabled")
-    if settings.chat_artifact_shared_preview_enabled:
+    if any(user_paper_flags) and settings.chat_artifact_shared_preview_enabled:
         raise RuntimeError("private paper runtime shared previews must remain disabled")
     if (
         settings.chat_artifact_storage_backend != "hf_bucket"
@@ -557,12 +622,51 @@ def validate_chat_runtime_descriptor(settings: Settings) -> bool:
     return validate_chat_configuration
 
 
+def validate_chat_scope_guardrail_configuration(settings: Settings) -> None:
+    if not settings.chat_scope_guardrail_enabled:
+        return
+    if settings.chat_scope_guardrail_glm_model != "zai-org/GLM-5.3-Flash:baseten":
+        raise RuntimeError("scope guardrail GLM must pin the Baseten provider")
+    if settings.chat_scope_guardrail_openai_model != "gpt-5.6-luna":
+        raise RuntimeError("scope guardrail fallback must use direct Luna")
+    if settings.chat_scope_guardrail_max_context_chars != 8_000:
+        raise RuntimeError("scope guardrail context must preserve a full API message")
+    if not all(
+        (
+            settings.chat_scope_guardrail_hf_token,
+            settings.chat_scope_guardrail_hf_bill_to,
+            settings.chat_scope_guardrail_openai_api_key,
+        )
+    ):
+        raise RuntimeError("scope guardrail requires dedicated server credentials")
+    if settings.chat_scope_guardrail_hf_token == settings.hf_token:
+        raise RuntimeError("scope guardrail must not reuse the main HF credential")
+    private_paper_mode = (
+        settings.chat_latex_paper_enabled
+        or settings.chat_latex_compiler_jobs_enabled
+        or settings.chat_latex_compiler_qualification_mode
+    )
+    if settings.environment == "staging" and (
+        not settings.chat_artifacts_enabled
+        or (
+            not private_paper_mode and not settings.chat_artifact_shared_preview_enabled
+        )
+        or settings.chat_artifact_storage_backend != "hf_bucket"
+        or not settings.chat_artifact_hf_bucket_id
+    ):
+        raise RuntimeError("scope guardrail must preserve staging research artifacts")
+    if settings.chat_posterly_enabled:
+        raise RuntimeError("Posterly must remain disabled with scope enforcement")
+
+
 def validate_chat_provider_policy(
     settings: Settings,
     *,
     include_openrouter: bool = True,
 ) -> None:
     """Validate inference credentials, discovery, gateway, search, and OpenRouter."""
+
+    validate_chat_scope_guardrail_configuration(settings)
 
     if not all(
         (
@@ -582,18 +686,31 @@ def validate_chat_provider_policy(
     if settings.chat_deepseek_v4_flash_openrouter_route != expected_openrouter_route:
         raise RuntimeError("DeepSeek V4 Flash must use the reviewed OpenRouter route")
     expected_provider = settings.chat_deepseek_v4_flash_provider
-    expected_discovery = (
-        {
-            "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
-            "label": "DeepSeek V4 Flash",
-            "route": (
-                expected_huggingface_route
-                if expected_provider == "huggingface"
-                else expected_openrouter_route
-            ),
-            "provider": expected_provider,
-        },
-    )
+    if settings.environment == "production":
+        expected_glm_route = "zai-org/GLM-5.3-Flash:fastest"
+        if settings.chat_glm_5_3_flash_route != expected_glm_route:
+            raise RuntimeError("GLM-5.3-Flash must use Hugging Face fastest routing")
+        expected_discovery = (
+            {
+                "id": "zai-org/GLM-5.3-Flash",
+                "label": "GLM-5.3-Flash",
+                "route": expected_glm_route,
+                "provider": "huggingface",
+            },
+        )
+    else:
+        expected_discovery = (
+            {
+                "id": "deepseek-ai/DeepSeek-V4-Flash-0731",
+                "label": "DeepSeek V4 Flash",
+                "route": (
+                    expected_huggingface_route
+                    if expected_provider == "huggingface"
+                    else expected_openrouter_route
+                ),
+                "provider": expected_provider,
+            },
+        )
     if settings.chat_openai_direct_enabled:
         if not settings.openai_api_key:
             raise RuntimeError("direct OpenAI chat requires an OpenAI API key")
@@ -711,6 +828,13 @@ def validate_chat_provider_policy(
 
 
 def validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
+    """Validate migration controls and the chat capacity policy."""
+
+    validate_external_pi_migration_policy(settings)
+    _validate_chat_capacity_and_spend_policy(settings)
+
+
+def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
     """Validate sandbox spend, capacity, alerting, and provider reserve."""
 
     if not settings.chat_sandbox_spend_enforcement_enabled:
@@ -903,6 +1027,8 @@ def _validate_chat_gateway_policy(settings: Settings) -> None:
 def _validate_chat_title_policy(settings: Settings) -> None:
     """Validate the environment-specific title provider and spend circuit."""
 
+    if not settings.chat_scope_guardrail_enabled:
+        raise RuntimeError("enabled chat requires the research-scope guardrail")
     if (
         not settings.chat_title_generation_enabled
         or settings.chat_title_credential_owner != "nielsr"
@@ -911,12 +1037,14 @@ def _validate_chat_title_policy(settings: Settings) -> None:
         raise RuntimeError(
             "an environment-scoped title credential owned by nielsr is required"
         )
-    if not (
-        settings.chat_title_provider == "openrouter"
-        and settings.chat_title_model == "deepseek/deepseek-v4-flash-0731"
-        and settings.chat_openrouter_api_key
-    ):
-        raise RuntimeError("an OpenRouter title credential is required")
+    hf_glm = (
+        settings.chat_title_provider == "huggingface"
+        and settings.chat_title_model == "zai-org/GLM-5.3-Flash:baseten"
+        and settings.chat_title_hf_token
+        and settings.chat_title_bill_to
+    )
+    if not hf_glm:
+        raise RuntimeError("an HF GLM title credential is required")
     if (
         settings.chat_title_max_tokens != 64
         or settings.chat_title_monthly_cap_microusd != 25_000_000
@@ -1031,6 +1159,35 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         ) from error
 
 
+def _is_staging_durable_external_qualification_profile(settings: Settings) -> bool:
+    """Recognize only the exact pool-free staging qualification bridge."""
+
+    return all(
+        (
+            settings.environment == "staging",
+            settings.chat_openai_direct_enabled,
+            not settings.chat_external_pi_admission_enabled,
+            settings.chat_external_pi_supervisor_enabled,
+            settings.chat_external_pi_ready_registry_enabled,
+            settings.chat_external_pi_runtime_contract_version
+            == "durable-external-pi-v1",
+            settings.chat_external_pi_worker_contract_version == "external-pi-v1",
+            settings.chat_durable_turn_dispatch_enabled,
+            settings.chat_turn_event_journal_schema_enabled,
+            settings.chat_sandbox_executor_enabled,
+            settings.chat_sandbox_executor_contract_version == "sandbox-executor-v1",
+            settings.chat_remote_workspace_tools_enabled,
+            settings.chat_remote_bash_enabled,
+            settings.chat_remote_read_enabled,
+            settings.chat_lazy_workspace_enabled,
+            not settings.chat_blank_pool_enabled,
+            not settings.chat_pi_prewarm_enabled,
+            settings.chat_max_concurrency == 2,
+            settings.chat_sandbox_total_live_cap == 3,
+        )
+    )
+
+
 def _validate_chat_resource_policy(settings: Settings) -> None:
     """Validate sandbox resources and warm-pool lifetime."""
 
@@ -1060,7 +1217,10 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
         ):
             raise RuntimeError("blank pool rotation window is invalid")
     if settings.chat_openai_direct_enabled:
-        if (
+        qualification_profile = _is_staging_durable_external_qualification_profile(
+            settings
+        )
+        if not qualification_profile and (
             not settings.chat_pi_prewarm_enabled
             or not settings.chat_blank_pool_enabled
             or settings.chat_blank_pool_min != 1
@@ -1095,6 +1255,125 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
             raise RuntimeError("Pi prewarm model does not match the qualified model")
         if not settings.chat_system_prompt_sha256:
             raise RuntimeError("Pi prewarm requires an immutable prompt digest")
+
+
+def validate_external_pi_migration_policy(settings: Settings) -> None:
+    """Keep each external-harness bridge independently reversible."""
+
+    worker_switches = {
+        "shadow": settings.chat_external_pi_shadow_enabled,
+        "admission": settings.chat_external_pi_admission_enabled,
+        "supervisor": settings.chat_external_pi_supervisor_enabled,
+    }
+    migration_switches = {
+        **worker_switches,
+        "ready_registry": settings.chat_external_pi_ready_registry_enabled,
+        "event_journal_schema": settings.chat_turn_event_journal_schema_enabled,
+        "runtime_contract": bool(settings.chat_external_pi_runtime_contract_version),
+        "remote_tools": settings.chat_remote_workspace_tools_enabled,
+        "safe_cli": settings.chat_safe_cli_fast_path_enabled,
+        "lazy_workspace": settings.chat_lazy_workspace_enabled,
+        "durable_dispatch": settings.chat_durable_turn_dispatch_enabled,
+    }
+    executor_switches = {
+        "executor": settings.chat_sandbox_executor_enabled,
+        "bash": settings.chat_remote_bash_enabled,
+        "read": settings.chat_remote_read_enabled,
+    }
+    if settings.environment == "production" and any(
+        (*migration_switches.values(), *executor_switches.values())
+    ):
+        raise RuntimeError(
+            "external Pi migration controls are staging-only until production approval"
+        )
+    if any(worker_switches.values()):
+        try:
+            external_worker_endpoints(settings)
+        except ValueError as error:
+            message = str(error).lower()
+            if "ambiguous" in message:
+                raise RuntimeError("external Pi worker topology is ambiguous") from None
+            if "incomplete" in message or "not configured" in message:
+                raise RuntimeError(
+                    "external Pi worker endpoint topology is incomplete"
+                ) from None
+            raise RuntimeError(
+                "external Pi worker endpoint must be an authenticated loopback service"
+            ) from None
+        if settings.chat_external_pi_worker_contract_version != "external-pi-v1":
+            raise RuntimeError("external Pi worker identity is invalid")
+    if any(executor_switches.values()):
+        if settings.chat_sandbox_executor_contract_version != "sandbox-executor-v1":
+            raise RuntimeError("sandbox executor contract is invalid")
+        if (
+            settings.chat_remote_bash_enabled or settings.chat_remote_read_enabled
+        ) and not settings.chat_sandbox_executor_enabled:
+            raise RuntimeError("remote Bash and Read require the sandbox executor")
+    if (
+        settings.chat_external_pi_heartbeat_seconds
+        >= settings.chat_external_pi_lease_seconds
+    ):
+        raise RuntimeError("external Pi heartbeat must be shorter than the lease")
+    if settings.chat_safe_cli_fast_path_enabled and not (
+        settings.chat_remote_workspace_tools_enabled
+    ):
+        raise RuntimeError("safe CLI fast path requires remote workspace tools")
+    if settings.chat_lazy_workspace_enabled and not (
+        settings.chat_remote_workspace_tools_enabled
+    ):
+        raise RuntimeError("lazy workspaces require remote workspace tools")
+    if settings.chat_external_pi_admission_enabled and not all(
+        (
+            settings.chat_remote_workspace_tools_enabled,
+            settings.chat_lazy_workspace_enabled,
+            settings.chat_durable_turn_dispatch_enabled,
+        )
+    ):
+        raise RuntimeError(
+            "external Pi admission requires remote workspace tools, lazy workspaces, "
+            "and durable turn dispatch"
+        )
+    if settings.chat_external_pi_admission_enabled and not all(
+        (
+            settings.chat_sandbox_executor_enabled,
+            settings.chat_remote_bash_enabled,
+            settings.chat_remote_read_enabled,
+        )
+    ):
+        raise RuntimeError(
+            "external Pi admission requires the sandbox executor with Bash and Read"
+        )
+    if settings.chat_external_pi_admission_enabled:
+        try:
+            require_external_admission_contract(
+                ExternalAdmissionContract(
+                    durable_dispatch=settings.chat_durable_turn_dispatch_enabled,
+                    event_journal_schema=(
+                        settings.chat_turn_event_journal_schema_enabled
+                    ),
+                    external_supervisor=settings.chat_external_pi_supervisor_enabled,
+                    ready_worker_registry=(
+                        settings.chat_external_pi_ready_registry_enabled
+                    ),
+                    remote_workspace_tools=(
+                        settings.chat_remote_workspace_tools_enabled
+                    ),
+                    lazy_workspace=settings.chat_lazy_workspace_enabled,
+                    sandbox_executor=settings.chat_sandbox_executor_enabled,
+                    remote_bash=settings.chat_remote_bash_enabled,
+                    remote_read=settings.chat_remote_read_enabled,
+                    worker_contract_version=(
+                        settings.chat_external_pi_worker_contract_version
+                    ),
+                    runtime_contract_version=(
+                        settings.chat_external_pi_runtime_contract_version
+                    ),
+                )
+            )
+        except ValueError as error:
+            raise RuntimeError(
+                "external Pi admission requires the complete durable runtime contract"
+            ) from error
 
 
 def _validate_chat_execution_identity(settings: Settings) -> None:
@@ -1183,14 +1462,400 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
     validate_codex_jobs_configuration(settings)
     validate_environment_policy(settings)
     validate_private_paper_runtime(settings)
+    validate_external_pi_migration_policy(settings)
     validate_chat_configuration = validate_chat_runtime_descriptor(settings)
     if validate_chat_configuration:
         validate_chat_provider_policy(settings, include_openrouter=False)
-        validate_chat_capacity_and_spend_policy(settings)
+        _validate_chat_capacity_and_spend_policy(settings)
         _validate_chat_openrouter_policy(settings)
     validate_release_manifest(settings)
     validate_deployed_mutation_policy(settings)
     return validate_frontend_dist(settings)
+
+
+def validate_external_worker_reservation_schema(db) -> None:
+    """Require model/migration parity for protected external-worker admission."""
+    expected_columns = {
+        "request_id": ("character varying", "NO", 200),
+        "turn_id": ("uuid", "YES", None),
+        "endpoint_id": ("character varying", "NO", 128),
+        "worker_id": ("character varying", "NO", 128),
+        "instance_id": ("uuid", "NO", None),
+        "worker_generation": ("bigint", "NO", None),
+        "release_id": ("character varying", "NO", 255),
+        "contract_version": ("character varying", "NO", 128),
+        "maximum_sessions": ("integer", "NO", None),
+        "reserved_at": ("timestamp with time zone", "NO", None),
+        "expires_at": ("timestamp with time zone", "NO", None),
+    }
+    columns = {
+        name: (data_type, nullable, maximum_length)
+        for name, data_type, nullable, maximum_length in db.execute(
+            text("""
+                SELECT column_name, data_type, is_nullable, character_maximum_length
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name = 'chat_external_worker_reservations'
+                """)
+        ).all()
+    }
+    if columns != expected_columns:
+        raise RuntimeError("required external worker schema is missing")
+
+    index_rows = dict(
+        db.execute(
+            text("""
+                SELECT indexname, indexdef
+                FROM pg_indexes
+                WHERE schemaname = current_schema()
+                  AND tablename = 'chat_external_worker_reservations'
+                """)
+        ).all()
+    )
+    expected_index_names = {
+        "chat_external_worker_reservations_pkey",
+        "chat_external_worker_reservations_turn_id_key",
+        "idx_chat_external_worker_reservations_capacity",
+        "idx_chat_external_worker_reservations_unbound_expiry",
+    }
+    if set(index_rows) != expected_index_names:
+        raise RuntimeError("required external worker schema is missing")
+    normalized_indexes = {
+        name: " ".join(definition.lower().replace('"', "").split())
+        for name, definition in index_rows.items()
+    }
+    index_contracts = {
+        "chat_external_worker_reservations_pkey": (
+            True,
+            "(request_id)",
+            None,
+        ),
+        "chat_external_worker_reservations_turn_id_key": (
+            True,
+            "(turn_id)",
+            None,
+        ),
+        "idx_chat_external_worker_reservations_capacity": (
+            False,
+            "(worker_id, instance_id, worker_generation)",
+            None,
+        ),
+        "idx_chat_external_worker_reservations_unbound_expiry": (
+            False,
+            "(expires_at)",
+            "where (turn_id is null)",
+        ),
+    }
+    for name, (unique, columns_text, predicate) in index_contracts.items():
+        definition = normalized_indexes[name]
+        if (
+            (definition.startswith("create unique index ") != unique)
+            or f" using btree {columns_text}" not in definition
+            or (predicate is None and " where " in definition)
+            or (predicate is not None and not definition.endswith(predicate))
+        ):
+            raise RuntimeError("required external worker schema is missing")
+
+    constraint_rows = dict(
+        db.execute(
+            text("""
+                SELECT constraint_row.conname,
+                       pg_get_constraintdef(constraint_row.oid, true)
+                FROM pg_constraint AS constraint_row
+                JOIN pg_class AS relation ON relation.oid = constraint_row.conrelid
+                JOIN pg_namespace AS namespace ON namespace.oid = relation.relnamespace
+                WHERE namespace.nspname = current_schema()
+                  AND relation.relname = 'chat_external_worker_reservations'
+                  AND conname IN (
+                      'chat_external_worker_reservations_pkey',
+                      'chat_external_worker_reservations_turn_id_key',
+                      'chat_external_worker_reservations_worker_generation_check',
+                      'chat_external_worker_reservations_maximum_sessions_check'
+                  )
+                """)
+        ).all()
+    )
+    expected_constraint_names = {
+        "chat_external_worker_reservations_pkey",
+        "chat_external_worker_reservations_turn_id_key",
+        "chat_external_worker_reservations_worker_generation_check",
+        "chat_external_worker_reservations_maximum_sessions_check",
+    }
+    if set(constraint_rows) != expected_constraint_names:
+        raise RuntimeError("required external worker schema is missing")
+    definitions = {
+        name: " ".join(definition.lower().replace('"', "").split())
+        for name, definition in constraint_rows.items()
+    }
+    generation_check = definitions[
+        "chat_external_worker_reservations_worker_generation_check"
+    ]
+    maximum_check = definitions[
+        "chat_external_worker_reservations_maximum_sessions_check"
+    ]
+    if (
+        definitions["chat_external_worker_reservations_pkey"]
+        != "primary key (request_id)"
+        or definitions["chat_external_worker_reservations_turn_id_key"]
+        != "unique (turn_id)"
+        or not re.fullmatch(r"check \(\(*worker_generation > 0\)*\)", generation_check)
+        or not (
+            re.fullmatch(
+                r"check \(\(*maximum_sessions between 1 and 32\)*\)", maximum_check
+            )
+            or re.fullmatch(
+                r"check \(\(*maximum_sessions >= 1\)* and "
+                r"\(*maximum_sessions <= 32\)*\)",
+                maximum_check,
+            )
+        )
+    ):
+        raise RuntimeError("required external worker schema is missing")
+
+
+def validate_qualification_evidence_schema(db) -> None:
+    """Require the exact durable qualification storage contract."""
+    columns = {
+        (table, column): (data_type, nullable, maximum_length, default)
+        for table, column, data_type, nullable, maximum_length, default in db.execute(
+            text("""
+                /* qualification_evidence_exact_columns */
+                SELECT table_name, column_name, data_type, is_nullable,
+                       character_maximum_length, column_default
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND table_name IN (
+                    'chat_qualification_scopes',
+                    'chat_qualification_evidence_events',
+                    'chat_turn_latency'
+                  )
+            """)
+        ).all()
+    }
+    required_columns = {
+        ("chat_qualification_scopes", "id"): ("uuid", "NO", None, None),
+        ("chat_qualification_scopes", "run_id"): ("character varying", "NO", 64, None),
+        ("chat_qualification_scopes", "profile"): ("character varying", "NO", 32, None),
+        ("chat_qualification_scopes", "app_release_id"): (
+            "character varying",
+            "NO",
+            255,
+            None,
+        ),
+        ("chat_qualification_scopes", "window_started_at"): (
+            "timestamp with time zone",
+            "NO",
+            None,
+            None,
+        ),
+        ("chat_qualification_scopes", "window_ended_at"): (
+            "timestamp with time zone",
+            "YES",
+            None,
+            None,
+        ),
+        ("chat_qualification_scopes", "expires_at"): (
+            "timestamp with time zone",
+            "NO",
+            None,
+            None,
+        ),
+        ("chat_qualification_scopes", "created_at"): (
+            "timestamp with time zone",
+            "NO",
+            None,
+            "now()",
+        ),
+        ("chat_qualification_evidence_events", "id"): ("uuid", "NO", None, None),
+        ("chat_qualification_evidence_events", "qualification_scope_id"): (
+            "uuid",
+            "NO",
+            None,
+            None,
+        ),
+        ("chat_qualification_evidence_events", "turn_id"): ("uuid", "NO", None, None),
+        ("chat_qualification_evidence_events", "chat_session_id"): (
+            "uuid",
+            "NO",
+            None,
+            None,
+        ),
+        ("chat_qualification_evidence_events", "event_type"): (
+            "character varying",
+            "NO",
+            32,
+            None,
+        ),
+        ("chat_qualification_evidence_events", "operation_digest"): (
+            "character varying",
+            "YES",
+            64,
+            None,
+        ),
+        ("chat_qualification_evidence_events", "operation_kind"): (
+            "character varying",
+            "YES",
+            8,
+            None,
+        ),
+        ("chat_qualification_evidence_events", "occurred_at"): (
+            "timestamp with time zone",
+            "NO",
+            None,
+            None,
+        ),
+        ("chat_turn_latency", "qualification_run_id"): (
+            "character varying",
+            "YES",
+            64,
+            None,
+        ),
+        ("chat_turn_latency", "qualification_scope_id"): ("uuid", "YES", None, None),
+        ("chat_turn_latency", "qualification_profile"): (
+            "character varying",
+            "YES",
+            32,
+            None,
+        ),
+        ("chat_turn_latency", "qualification_workload"): (
+            "character varying",
+            "YES",
+            16,
+            None,
+        ),
+        ("chat_turn_latency", "qualification_scenario"): (
+            "character varying",
+            "YES",
+            32,
+            None,
+        ),
+    }
+    contract_columns = {
+        key: value
+        for key, value in columns.items()
+        if key[0]
+        in {
+            "chat_qualification_scopes",
+            "chat_qualification_evidence_events",
+        }
+        or key[1].startswith("qualification_")
+    }
+    if contract_columns != required_columns:
+        raise RuntimeError("required qualification evidence schema is missing")
+
+    constraints = {
+        name: " ".join(definition.lower().replace('"', "").split())
+        for name, definition in db.execute(
+            text("""
+                /* qualification_evidence_exact_constraints */
+                SELECT conname, pg_get_constraintdef(oid)
+                FROM pg_constraint
+                WHERE connamespace = current_schema()::regnamespace
+                  AND (
+                    conrelid = 'chat_qualification_scopes'::regclass
+                    OR conrelid = 'chat_qualification_evidence_events'::regclass
+                    OR (
+                      conrelid = 'chat_turn_latency'::regclass
+                      AND conname LIKE 'chat_turn_latency_qualification_%'
+                    )
+                  )
+            """)
+        ).all()
+    }
+    required_constraints = {
+        "chat_qualification_scopes_pkey": "primary key (id)",
+        "chat_qualification_scopes_run_id_key": "unique (run_id)",
+        "chat_qualification_scopes_profile_check": "check (((profile)::text = any ((array['32-functional-turns'::character varying, '100-immediate-admission'::character varying])::text[])))",
+        "chat_qualification_scopes_window_check": "check (((window_ended_at is null) or (window_ended_at >= window_started_at)))",
+        "chat_qualification_scopes_expiry_check": "check ((expires_at > window_started_at))",
+        "chat_qualification_evidence_events_pkey": "primary key (id)",
+        "chat_qualification_evidence_scope_fkey": "foreign key (qualification_scope_id) references chat_qualification_scopes(id) on delete cascade",
+        "chat_qualification_evidence_turn_fkey": "foreign key (turn_id) references chat_turn_jobs(turn_id) on delete cascade",
+        "chat_qualification_evidence_session_fkey": "foreign key (chat_session_id) references chat_sessions(id) on delete cascade",
+        "chat_qualification_evidence_event_type_check": "check (((event_type)::text = any ((array['admitted_no_queue'::character varying, 'executor_started'::character varying, 'stale_fence'::character varying, 'queued'::character varying, 'workspace_created'::character varying, 'workspace_reused'::character varying, 'workspace_evicted'::character varying])::text[])))",
+        "chat_qualification_evidence_operation_shape_check": "check ((((event_type)::text = 'executor_started'::text) = ((operation_digest is not null) and (operation_kind is not null) and ((operation_kind)::text = any ((array['read'::character varying, 'bash'::character varying])::text[])))))",
+        "chat_turn_latency_qualification_scope_fkey": "foreign key (qualification_scope_id) references chat_qualification_scopes(id) on delete set null",
+        "chat_turn_latency_qualification_profile_check": "check (((qualification_profile is null) or ((qualification_profile)::text = any ((array['32-functional-turns'::character varying, '100-immediate-admission'::character varying])::text[]))))",
+        "chat_turn_latency_qualification_workload_check": "check (((qualification_workload is null) or ((qualification_workload)::text = any ((array['no_tool'::character varying, 'read'::character varying, 'bash'::character varying])::text[]))))",
+        "chat_turn_latency_qualification_scenario_check": "check (((qualification_scenario is null) or ((qualification_scenario)::text = any ((array['focused_latency'::character varying, 'reliability'::character varying, 'clean_cancel'::character varying, 'forced_failure'::character varying])::text[]))))",
+    }
+    if constraints != required_constraints:
+        raise RuntimeError("required qualification evidence schema is missing")
+
+    indexes = {
+        name: (unique, list(index_columns), predicate)
+        for name, unique, index_columns, predicate in db.execute(
+            text("""
+                /* qualification_evidence_exact_indexes */
+                SELECT index_class.relname,
+                       index_meta.indisunique,
+                       ARRAY(
+                         SELECT attribute.attname
+                         FROM unnest(index_meta.indkey) WITH ORDINALITY AS key(attnum, position)
+                         JOIN pg_attribute attribute
+                           ON attribute.attrelid = table_class.oid
+                          AND attribute.attnum = key.attnum
+                         ORDER BY key.position
+                       ),
+                       pg_get_expr(index_meta.indpred, index_meta.indrelid)
+                FROM pg_index index_meta
+                JOIN pg_class index_class ON index_class.oid = index_meta.indexrelid
+                JOIN pg_class table_class ON table_class.oid = index_meta.indrelid
+                JOIN pg_namespace namespace ON namespace.oid = table_class.relnamespace
+                WHERE namespace.nspname = current_schema()
+                  AND index_class.relname IN (
+                    'idx_chat_qualification_scopes_expiry',
+                    'idx_chat_qualification_scopes_release_profile',
+                    'idx_chat_qualification_evidence_scope_event_time',
+                    'idx_chat_qualification_evidence_session_time',
+                    'idx_chat_qualification_evidence_turn_event',
+                    'uq_chat_qualification_evidence_stale_turn',
+                    'uq_chat_qualification_evidence_eviction_turn',
+                    'idx_chat_turn_latency_qualification_scope'
+                  )
+            """)
+        ).all()
+    }
+    required_indexes = {
+        "idx_chat_qualification_scopes_expiry": (False, ["expires_at"], None),
+        "idx_chat_qualification_scopes_release_profile": (
+            False,
+            ["app_release_id", "profile"],
+            None,
+        ),
+        "idx_chat_qualification_evidence_scope_event_time": (
+            False,
+            ["qualification_scope_id", "event_type", "occurred_at"],
+            None,
+        ),
+        "idx_chat_qualification_evidence_session_time": (
+            False,
+            ["chat_session_id", "occurred_at"],
+            None,
+        ),
+        "idx_chat_qualification_evidence_turn_event": (
+            False,
+            ["turn_id", "event_type"],
+            None,
+        ),
+        "uq_chat_qualification_evidence_stale_turn": (
+            True,
+            ["qualification_scope_id", "turn_id"],
+            "((event_type)::text = 'stale_fence'::text)",
+        ),
+        "uq_chat_qualification_evidence_eviction_turn": (
+            True,
+            ["qualification_scope_id", "turn_id"],
+            "((event_type)::text = 'workspace_evicted'::text)",
+        ),
+        "idx_chat_turn_latency_qualification_scope": (
+            False,
+            ["qualification_scope_id", "admitted_at"],
+            None,
+        ),
+    }
+    if indexes != required_indexes:
+        raise RuntimeError("required qualification evidence schema is missing")
 
 
 def validate_chat_schema(db, settings: Settings) -> None:
@@ -1232,6 +1897,13 @@ def validate_chat_schema(db, settings: Settings) -> None:
         "chat_web_search_circuit_events",
         "chat_web_search_owner_usage",
     }
+    durable_turn_tables = {"chat_turn_jobs", "chat_turn_event_chunks"}
+    external_worker_tables = {
+        "chat_external_workers",
+        "chat_external_worker_reservations",
+        "chat_qualification_scopes",
+        "chat_qualification_evidence_events",
+    }
     required_tables = (
         common_tables
         | (
@@ -1241,6 +1913,16 @@ def validate_chat_schema(db, settings: Settings) -> None:
         )
         | (web_search_tables if settings.chat_web_search_enabled else set())
         | (pi_tables if settings.chat_pi_runtime_enabled else set())
+        | (
+            durable_turn_tables
+            if settings.chat_durable_turn_dispatch_enabled
+            else set()
+        )
+        | (
+            external_worker_tables
+            if settings.chat_external_pi_admission_enabled
+            else set()
+        )
     )
     rows = dict(
         db.execute(
@@ -1273,6 +1955,12 @@ def validate_chat_schema(db, settings: Settings) -> None:
                     ,('chat_pi_transcript_entries')
                     ,('chat_pi_prepared_forks')
                     ,('chat_harness_assignment_audit')
+                    ,('chat_turn_jobs')
+                    ,('chat_turn_event_chunks')
+                    ,('chat_external_workers')
+                    ,('chat_external_worker_reservations')
+                    ,('chat_qualification_scopes')
+                    ,('chat_qualification_evidence_events')
                 ) AS required(name)
                 """)
         ).all()
@@ -1337,6 +2025,9 @@ def validate_chat_schema(db, settings: Settings) -> None:
         ("chat_turn_latency", "session_reuse_cohort"),
         ("chat_turn_latency", "estimated_active_cost_usd"),
         ("chat_turn_latency", "qualification_run_id"),
+        ("chat_turn_latency", "qualification_scope_id"),
+        ("chat_turn_latency", "qualification_profile"),
+        ("chat_turn_latency", "qualification_workload"),
         ("chat_turn_latency", "qualification_scenario"),
         ("chat_turn_latency", "failure_stage"),
         ("chat_turn_latency", "failure_class"),
@@ -1375,6 +2066,62 @@ def validate_chat_schema(db, settings: Settings) -> None:
         ("chat_turn_capabilities", "hf_catalog_calls"),
         ("chat_turn_capabilities", "hf_recursive_list_calls"),
     }
+    durable_turn_columns = {
+        ("chat_turn_jobs", "state"),
+        ("chat_turn_jobs", "worker_id"),
+        ("chat_turn_jobs", "worker_generation"),
+        ("chat_turn_jobs", "lease_generation"),
+        ("chat_turn_jobs", "lease_expires_at"),
+        ("chat_turn_jobs", "terminal_at"),
+        ("chat_turn_jobs", "failure_code"),
+        ("chat_turn_jobs", "event_sequence"),
+        ("chat_turn_jobs", "event_bytes"),
+        ("chat_turn_event_chunks", "turn_id"),
+        ("chat_turn_event_chunks", "first_sequence"),
+        ("chat_turn_event_chunks", "last_sequence"),
+        ("chat_turn_event_chunks", "events"),
+        ("chat_turn_event_chunks", "payload_bytes"),
+    }
+    external_worker_columns = {
+        ("chat_external_workers", "worker_id"),
+        ("chat_external_workers", "instance_id"),
+        ("chat_external_workers", "environment"),
+        ("chat_external_workers", "release_id"),
+        ("chat_external_workers", "contract_version"),
+        ("chat_external_workers", "generation"),
+        ("chat_external_workers", "state"),
+        ("chat_external_workers", "maximum_sessions"),
+        ("chat_external_workers", "active_sessions"),
+        ("chat_external_workers", "lease_expires_at"),
+        ("chat_external_worker_reservations", "request_id"),
+        ("chat_external_worker_reservations", "turn_id"),
+        ("chat_external_worker_reservations", "endpoint_id"),
+        ("chat_external_worker_reservations", "worker_id"),
+        ("chat_external_worker_reservations", "instance_id"),
+        ("chat_external_worker_reservations", "worker_generation"),
+        ("chat_external_worker_reservations", "release_id"),
+        ("chat_external_worker_reservations", "contract_version"),
+        ("chat_external_worker_reservations", "maximum_sessions"),
+        ("chat_external_worker_reservations", "reserved_at"),
+        ("chat_external_worker_reservations", "expires_at"),
+        ("chat_qualification_evidence_events", "id"),
+        ("chat_qualification_evidence_events", "qualification_scope_id"),
+        ("chat_qualification_evidence_events", "turn_id"),
+        ("chat_qualification_evidence_events", "chat_session_id"),
+        ("chat_qualification_evidence_events", "event_type"),
+        ("chat_qualification_evidence_events", "operation_digest"),
+        ("chat_qualification_evidence_events", "operation_kind"),
+        ("chat_qualification_evidence_events", "occurred_at"),
+        ("chat_qualification_scopes", "id"),
+        ("chat_qualification_scopes", "run_id"),
+        ("chat_qualification_scopes", "profile"),
+        ("chat_qualification_scopes", "app_release_id"),
+        ("chat_qualification_scopes", "window_started_at"),
+        ("chat_qualification_scopes", "window_ended_at"),
+        ("chat_qualification_scopes", "expires_at"),
+        ("chat_turn_latency", "qualification_scope_id"),
+        ("chat_turn_latency", "qualification_profile"),
+    }
     expected_columns = (
         common_columns
         | (
@@ -1385,6 +2132,16 @@ def validate_chat_schema(db, settings: Settings) -> None:
         | (web_search_columns if settings.chat_web_search_enabled else set())
         | (hf_catalog_columns if settings.chat_hf_catalog_enabled else set())
         | (pi_columns if settings.chat_pi_runtime_enabled else set())
+        | (
+            durable_turn_columns
+            if settings.chat_durable_turn_dispatch_enabled
+            else set()
+        )
+        | (
+            external_worker_columns
+            if settings.chat_external_pi_admission_enabled
+            else set()
+        )
     )
     present_columns = set(
         db.execute(
@@ -1479,12 +2236,133 @@ def validate_chat_schema(db, settings: Settings) -> None:
                 ,('chat_turn_capabilities', 'web_search_failed')
                 ,('chat_turn_capabilities', 'hf_catalog_calls')
                 ,('chat_turn_capabilities', 'hf_recursive_list_calls')
+                ,('chat_turn_jobs', 'state')
+                ,('chat_turn_jobs', 'worker_id')
+                ,('chat_turn_jobs', 'worker_generation')
+                ,('chat_turn_jobs', 'lease_generation')
+                ,('chat_turn_jobs', 'lease_expires_at')
+                ,('chat_turn_jobs', 'terminal_at')
+                ,('chat_turn_jobs', 'failure_code')
+                ,('chat_turn_jobs', 'event_sequence')
+                ,('chat_turn_jobs', 'event_bytes')
+                ,('chat_turn_event_chunks', 'turn_id')
+                ,('chat_turn_event_chunks', 'first_sequence')
+                ,('chat_turn_event_chunks', 'last_sequence')
+                ,('chat_turn_event_chunks', 'events')
+                ,('chat_turn_event_chunks', 'payload_bytes')
+                ,('chat_external_workers', 'worker_id')
+                ,('chat_external_workers', 'instance_id')
+                ,('chat_external_workers', 'environment')
+                ,('chat_external_workers', 'release_id')
+                ,('chat_external_workers', 'contract_version')
+                ,('chat_external_workers', 'generation')
+                ,('chat_external_workers', 'state')
+                ,('chat_external_workers', 'maximum_sessions')
+                ,('chat_external_workers', 'active_sessions')
+                ,('chat_external_workers', 'lease_expires_at')
+                ,('chat_external_worker_reservations', 'request_id')
+                ,('chat_external_worker_reservations', 'turn_id')
+                ,('chat_external_worker_reservations', 'endpoint_id')
+                ,('chat_external_worker_reservations', 'worker_id')
+                ,('chat_external_worker_reservations', 'instance_id')
+                ,('chat_external_worker_reservations', 'worker_generation')
+                ,('chat_external_worker_reservations', 'release_id')
+                ,('chat_external_worker_reservations', 'contract_version')
+                ,('chat_external_worker_reservations', 'maximum_sessions')
+                ,('chat_external_worker_reservations', 'reserved_at')
+                ,('chat_external_worker_reservations', 'expires_at')
+                ,('chat_qualification_evidence_events', 'id')
+                ,('chat_qualification_evidence_events', 'qualification_scope_id')
+                ,('chat_qualification_evidence_events', 'turn_id')
+                ,('chat_qualification_evidence_events', 'chat_session_id')
+                ,('chat_qualification_evidence_events', 'event_type')
+                ,('chat_qualification_evidence_events', 'operation_digest')
+                ,('chat_qualification_evidence_events', 'operation_kind')
+                ,('chat_qualification_evidence_events', 'occurred_at')
+                ,('chat_qualification_scopes', 'id')
+                ,('chat_qualification_scopes', 'run_id')
+                ,('chat_qualification_scopes', 'profile')
+                ,('chat_qualification_scopes', 'app_release_id')
+                ,('chat_qualification_scopes', 'window_started_at')
+                ,('chat_qualification_scopes', 'window_ended_at')
+                ,('chat_qualification_scopes', 'expires_at')
+                ,('chat_turn_latency', 'qualification_scope_id')
+                ,('chat_turn_latency', 'qualification_profile')
+                ,('chat_turn_latency', 'qualification_workload')
             )
             """)
         ).all()
     )
-    if missing or not expected_columns.issubset(present_columns):
+    missing_columns = expected_columns - present_columns
+    if settings.chat_external_pi_admission_enabled and (
+        "chat_external_worker_reservations" in missing
+        or any(
+            table == "chat_external_worker_reservations"
+            for table, _column in missing_columns
+        )
+    ):
+        raise RuntimeError("required external worker schema is missing")
+    if missing or missing_columns:
         raise RuntimeError("required chat sandbox schema is missing")
+    if settings.chat_durable_turn_dispatch_enabled:
+        durable_contract = set(
+            db.execute(
+                text("""
+                    SELECT indexname
+                    FROM pg_indexes
+                    WHERE schemaname = current_schema()
+                      AND indexname IN (
+                          'idx_chat_turn_jobs_expiry',
+                          'idx_chat_turn_jobs_terminal_cleanup',
+                          'idx_chat_turn_event_chunks_after',
+                          'uq_chat_turn_event_chunk_start'
+                      )
+                    """)
+            ).scalars()
+        )
+        if durable_contract != {
+            "idx_chat_turn_jobs_expiry",
+            "idx_chat_turn_jobs_terminal_cleanup",
+            "idx_chat_turn_event_chunks_after",
+            "uq_chat_turn_event_chunk_start",
+        }:
+            raise RuntimeError("required durable chat schema is missing")
+        durable_constraints = set(
+            db.execute(
+                text("""
+                    SELECT conname
+                    FROM pg_constraint
+                    WHERE conname IN (
+                        'chat_turn_jobs_state_check',
+                        'chat_turn_jobs_lease_fields_check',
+                        'chat_turn_jobs_terminal_timestamp_check',
+                        'ck_chat_turn_event_chunk_range'
+                    )
+                    """)
+            ).scalars()
+        )
+        if durable_constraints != {
+            "chat_turn_jobs_state_check",
+            "chat_turn_jobs_lease_fields_check",
+            "chat_turn_jobs_terminal_timestamp_check",
+            "ck_chat_turn_event_chunk_range",
+        }:
+            raise RuntimeError("required durable chat schema is missing")
+    if settings.chat_external_pi_admission_enabled:
+        worker_indexes = set(
+            db.execute(
+                text("""
+                    SELECT indexname
+                    FROM pg_indexes
+                    WHERE schemaname = current_schema()
+                      AND indexname = 'idx_chat_external_workers_dispatch'
+                    """)
+            ).scalars()
+        )
+        if worker_indexes != {"idx_chat_external_workers_dispatch"}:
+            raise RuntimeError("required external worker schema is missing")
+        validate_external_worker_reservation_schema(db)
+        validate_qualification_evidence_schema(db)
     share_snapshot_constraint = db.execute(
         text("""
             SELECT 1
@@ -1515,85 +2393,3 @@ def validate_chat_schema(db, settings: Settings) -> None:
         ("chat_artifacts_preview_head_version_fkey",),
     }:
         raise RuntimeError("required chat sandbox schema is missing")
-    if (
-        settings.chat_artifacts_enabled
-        and settings.chat_latex_paper_enabled
-        and settings.chat_latex_compiler_jobs_enabled
-    ):
-        _validate_private_paper_schema(db)
-
-
-def _validate_private_paper_schema(db) -> None:
-    """Require every private-paper migration before user job admission.
-
-    This deliberately checks the active schema rather than allowing an
-    identically named public table to satisfy a staging readiness probe.
-    """
-
-    required_tables = {
-        "chat_latex_paper_figure_blobs",
-        "chat_latex_paper_figure_references",
-        "chat_latex_paper_storage_cleanup",
-    }
-    table_rows = dict(
-        db.execute(
-            text("""
-                SELECT name,
-                       to_regclass(format('%I.%I', current_schema(), name))::text
-                FROM (VALUES
-                    ('chat_latex_paper_figure_blobs'),
-                    ('chat_latex_paper_figure_references'),
-                    ('chat_latex_paper_storage_cleanup')
-                ) AS required(name)
-                """)
-        ).all()
-    )
-    if any(table_rows.get(name) is None for name in required_tables):
-        raise RuntimeError("required private paper schema is missing")
-
-    required_columns = {
-        ("chat_latex_paper_versions", "generation_provenance"),
-        ("chat_latex_paper_figure_blobs", "digest"),
-        ("chat_latex_paper_figure_blobs", "byte_count"),
-        ("chat_latex_paper_figure_blobs", "media_type"),
-        ("chat_latex_paper_figure_blobs", "storage_key"),
-        ("chat_latex_paper_figure_references", "version_id"),
-        ("chat_latex_paper_figure_references", "path"),
-        ("chat_latex_paper_figure_references", "blob_digest"),
-        ("chat_latex_paper_storage_cleanup", "storage_prefix"),
-    }
-    present_columns = set(
-        db.execute(
-            text("""
-                SELECT table_name, column_name
-                FROM information_schema.columns
-                WHERE table_schema = current_schema()
-                  AND (table_name, column_name) IN (
-                    ('chat_latex_paper_versions', 'generation_provenance'),
-                    ('chat_latex_paper_figure_blobs', 'digest'),
-                    ('chat_latex_paper_figure_blobs', 'byte_count'),
-                    ('chat_latex_paper_figure_blobs', 'media_type'),
-                    ('chat_latex_paper_figure_blobs', 'storage_key'),
-                    ('chat_latex_paper_figure_references', 'version_id'),
-                    ('chat_latex_paper_figure_references', 'path'),
-                    ('chat_latex_paper_figure_references', 'blob_digest'),
-                    ('chat_latex_paper_storage_cleanup', 'storage_prefix')
-                )
-                """)
-        ).all()
-    )
-    if not required_columns.issubset(present_columns):
-        raise RuntimeError("required private paper schema is missing")
-
-    restore_digest_constraint = db.execute(
-        text("""
-            SELECT 1
-            FROM pg_constraint
-            WHERE conrelid = to_regclass(
-                format('%I.%I', current_schema(), 'chat_latex_paper_versions')
-            )
-              AND conname = 'uq_chat_latex_paper_versions_digest'
-            """)
-    ).first()
-    if restore_digest_constraint is not None:
-        raise RuntimeError("required private paper schema is missing")

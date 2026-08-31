@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Backfill method keyword evidence daily
+
+[Timer]
+OnCalendar=*-*-* 01:10:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-backfill-method-keywords.service
+
+[Install]
+WantedBy=timers.target

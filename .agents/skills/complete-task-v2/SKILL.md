@@ -224,10 +224,10 @@ Use the `s2` CLI (see the `s2-cli` skill). Search both the task name and task-sp
 
 ```bash
 QUERY="<task name or keywords>"
-uv run --env-file backend/keys.env --directory s2_cli s2 search "$QUERY" --limit 100 --json \
+uv run --directory clis/s2_cli --env-file ../../backend/keys.env s2 search "$QUERY" --limit 100 --json \
   > /tmp/s2-<task-slug>.json
 
-uv run --env-file backend/keys.env --directory s2_cli s2 search "$QUERY" --year 2025-2026 --limit 100 --json \
+uv run --directory clis/s2_cli --env-file ../../backend/keys.env s2 search "$QUERY" --year 2025-2026 --limit 100 --json \
   > /tmp/s2-<task-slug>-recent.json
 ```
 

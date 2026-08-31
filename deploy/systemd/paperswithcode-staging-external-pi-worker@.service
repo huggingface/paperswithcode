@@ -1,0 +1,27 @@
+[Unit]
+Description=Papers With Code staging external Pi Node worker (%i)
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pwc-external-pi
+Group=pwc-external-pi
+WorkingDirectory=/srv/paperswithcode/environments/staging/slots/%i/release
+EnvironmentFile=/etc/paperswithcode/external-pi-worker.env
+ExecStart=/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/external_pi_worker_launcher.py staging %i
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectProc=invisible
+ProcSubset=pid
+ReadOnlyPaths=/srv/paperswithcode
+CPUQuota=100%
+MemoryMax=805306368
+TasksMax=128

@@ -85,6 +85,36 @@ def test_bounded_markdown_read_never_requests_the_full_object(monkeypatch):
     assert truncated is True
 
 
+def test_external_markdown_uses_paper_id_bucket_namespace(monkeypatch):
+    assert (
+        paper_markdown_service.paper_markdown_bucket_key("109743", source="external")
+        == "external/109743.md"
+    )
+
+    class FakeFileSystem:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def open(self, path, mode, *, block_size):
+            assert path == "hf://buckets/owner/content/external/109743.md"
+            assert mode == "rb"
+            assert block_size == 0
+            return io.BytesIO(b"# External paper\n")
+
+    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+    try:
+        assert paper_markdown_service.read_paper_markdown_bounded(
+            "109743",
+            source="external",
+            bucket_id="owner/content",
+            token="private-token",
+            max_bytes=1024,
+        ) == ("# External paper\n", False)
+    finally:
+        paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+
 def test_bounded_markdown_read_caches_the_public_artifact(monkeypatch):
     opens = 0
 

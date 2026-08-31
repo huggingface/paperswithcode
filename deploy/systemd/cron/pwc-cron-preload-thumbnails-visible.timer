@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Preload thumbnails for visible candidate sets every three hours
+
+[Timer]
+OnCalendar=*-*-* 00/3:00:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-preload-thumbnails-visible.service
+
+[Install]
+WantedBy=timers.target

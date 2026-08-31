@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync MMEB-v2 overall leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:12:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-mmeb-v2.service
+
+[Install]
+WantedBy=timers.target

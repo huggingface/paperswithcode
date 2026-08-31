@@ -7,6 +7,7 @@ import os
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, wait
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -34,6 +35,12 @@ _CACHE_SECONDS = 20
 _HISTORY_DAYS = 7
 _MAX_HISTORY_JOBS = 200
 _MAX_DISPLAY_JOBS = 24
+_PROGRESS_READ_WORKERS = 8
+_PROGRESS_READ_DEADLINE_SECONDS = 15.0
+_PROGRESS_EXECUTOR = ThreadPoolExecutor(
+    max_workers=_PROGRESS_READ_WORKERS,
+    thread_name_prefix="paper-markdown-progress",
+)
 _CACHE_LOCK = threading.Lock()
 _CACHE: tuple[float, dict[str, Any]] | None = None
 
@@ -309,6 +316,34 @@ def _read_progress(
     return progress
 
 
+def _read_progress_batch(
+    filesystem: HfFileSystem,
+    settings: Settings,
+    jobs: list[Any],
+) -> tuple[list[dict[str, Any] | None], int]:
+    futures = []
+    for job in jobs:
+        labels = getattr(job, "labels", None) or {}
+        futures.append(
+            _PROGRESS_EXECUTOR.submit(
+                _read_progress,
+                filesystem,
+                settings,
+                labels.get("run_id"),
+                labels.get("shard_id"),
+            )
+        )
+    completed, incomplete = wait(
+        futures,
+        timeout=_PROGRESS_READ_DEADLINE_SECONDS,
+    )
+    for future in incomplete:
+        future.cancel()
+    return [
+        future.result() if future in completed else None for future in futures
+    ], len(incomplete)
+
+
 def _fetch(settings: Settings) -> dict[str, Any]:
     if not settings.hf_token:
         return {
@@ -351,15 +386,19 @@ def _fetch(settings: Settings) -> dict[str, Any]:
             or _stage(job) in {"SCHEDULING", "RUNNING"}
         )
     ][:_MAX_HISTORY_JOBS]
+    progress_snapshots, progress_evidence_timeouts = _read_progress_batch(
+        filesystem,
+        settings,
+        history_remote_jobs,
+    )
     history_jobs: list[dict[str, Any]] = []
-    for job in history_remote_jobs:
+    for job, progress in zip(history_remote_jobs, progress_snapshots, strict=True):
         labels = getattr(job, "labels", None) or {}
         run_id = labels.get("run_id")
         shard_id = labels.get("shard_id")
         status = getattr(job, "status", None)
         stage_message = str(getattr(status, "message", "") or "")[:1000] or None
         durations = getattr(job, "durations", None)
-        progress = _read_progress(filesystem, settings, run_id, shard_id)
         stage = _stage(job)
         # Replacement attempts share the logical progress path. A provider-confirmed
         # mount failure never reached that path, so a replacement's checkpoint must
@@ -484,6 +523,7 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         "failed_papers": sum(row["failed_papers"] for row in progress_rows),
         "extracted_images": sum(row["extracted_images"] for row in progress_rows),
         "omitted_images": sum(row["omitted_images"] for row in progress_rows),
+        "progress_evidence_timeouts": progress_evidence_timeouts,
         "latest_run_failed_jobs": sum(
             1
             for shard in latest_run_shards
@@ -666,7 +706,7 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         )
     )
     return {
-        "available": True,
+        "available": progress_evidence_timeouts == 0,
         "namespace": settings.paper_markdown_hf_namespace,
         "updated_at": _iso(datetime.now(timezone.utc)),
         "jobs": jobs,
@@ -680,7 +720,12 @@ def _fetch(settings: Settings) -> dict[str, Any]:
         },
         "blockers": blockers,
         "retry_dispositions": retry_dispositions,
-        "error": None,
+        "error": (
+            f"progress evidence timed out for {progress_evidence_timeouts} "
+            "recent job(s)"
+            if progress_evidence_timeouts
+            else None
+        ),
     }
 
 

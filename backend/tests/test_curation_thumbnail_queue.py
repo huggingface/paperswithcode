@@ -66,6 +66,32 @@ def test_scheduled_enrichment_proposals_preserve_existing_relations(monkeypatch)
     assert proposal["enrich"]["task_ids"] == [2]
 
 
+def test_resolution_proposal_discards_schema_generated_empty_enrichment(monkeypatch):
+    monkeypatch.setenv("PWC_CURATION_TRIGGER", "hf-trending-cron")
+    proposal = {
+        "resolve_model_paper": {"decision": "reject"},
+        "evaluations": [],
+        "evaluation_removals": [],
+        "benchmark_gaps": [],
+        "validation_evidence": [],
+        "enrich": {
+            "task_ids": None,
+            "method_ids": None,
+            "repositories": None,
+            "project_pages": None,
+            "urls_extracted": None,
+            "regenerate_thumbnail": False,
+            "task_removal_reasons": {},
+            "method_removal_reasons": {},
+            "project_page_removal_reasons": {},
+        },
+    }
+
+    result = curation_api.make_scheduled_enrichment_additive(proposal, {})
+
+    assert result["enrich"] is None
+
+
 def _queue_row(**overrides):
     values = {
         "id": uuid.UUID("00000000-0000-0000-0000-000000000042"),
@@ -182,6 +208,19 @@ def test_claim_is_durable_and_a_claimed_row_is_not_claimed_twice():
     assert row.thumbnail_attempt_count == 1
     assert row.thumbnail_claimed_at is not None
     assert db.commits == 1
+
+
+def test_resolution_thumbnail_claim_uses_applied_paper_id():
+    row = _queue_row(
+        kind="resolve-model-paper",
+        paper_id=None,
+        mutation_result={"status": "resolved", "paper_id": 109743},
+    )
+    db = _Database(row=row, query_rows=[row])
+
+    claim = CurationThumbnailQueueService().claim_next(db)
+
+    assert claim == ThumbnailClaim(job_id=row.id, paper_id=109743)
 
 
 def test_stale_processing_claim_can_be_recovered():
@@ -303,6 +342,27 @@ def test_completion_requires_accepted_apply_and_successful_thumbnail(monkeypatch
         settings=settings,
     )
     assert result.status == "completed"
+
+
+def test_resolution_completion_does_not_wait_for_thumbnail_worker(monkeypatch):
+    service = CodexPaperJobService()
+    monkeypatch.setattr(service, "dispatch_next", lambda *_args: None)
+    row = _queue_row(
+        kind="resolve-model-paper",
+        paper_id=None,
+        thumbnail_status="queued",
+    )
+
+    result = service.complete(
+        _Database(row=row),
+        row,
+        report="resolved",
+        error=None,
+        settings=get_settings(),
+    )
+
+    assert result.status == "completed"
+    assert row.thumbnail_status == "queued"
 
 
 def test_legitimate_no_changes_submission_can_complete(monkeypatch):

@@ -9,6 +9,7 @@ User submission (`require_user`, lives under ``/me``) and admin review
 from __future__ import annotations
 
 import base64
+import uuid
 from datetime import datetime
 from typing import Any, Dict, List, Literal, Optional
 
@@ -26,8 +27,16 @@ from fastapi import (
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
+from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
 from backend.models.database import PendingPaperEdit
+from backend.services.autonomous_submission_callbacks import (
+    apply_submission_callback,
+)
+from backend.services.autonomous_submission_service import (
+    AutonomousSubmissionCallbackError,
+    AutonomousSubmissionDecision,
+)
 from backend.services.pending_edit_service import (
     PendingEditAlreadyReviewedError,
     PendingEditConflictError,
@@ -65,6 +74,49 @@ StatusLiteral = Literal["pending", "approved", "rejected"]
 
 
 router = APIRouter()
+
+
+@router.post(
+    "/autonomous-submissions/{claim_id}/decision",
+    status_code=status.HTTP_204_NO_CONTENT,
+    tags=["pending_edits"],
+)
+def autonomous_submission_decision_callback(
+    claim_id: uuid.UUID,
+    body: AutonomousSubmissionDecision,
+    authorization: Optional[str] = Header(default=None, alias="Authorization"),
+    remote_signature: Optional[str] = Header(
+        default=None, alias="X-PWC-Remote-Decision"
+    ),
+    remote_usage: Optional[str] = Header(default=None, alias="X-PWC-Remote-Usage"),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+) -> Response:
+    if not settings.autonomous_submission_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Missing callback bearer token")
+    try:
+        apply_submission_callback(
+            db,
+            settings,
+            claim_id=claim_id,
+            bearer_token=authorization[7:],
+            decision=body,
+            remote_signature=remote_signature,
+            remote_usage=remote_usage,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except AutonomousSubmissionCallbackError as exc:
+        message = str(exc)
+        code = (
+            401
+            if "token" in message or "scope" in message or "signature" in message
+            else 409
+        )
+        raise HTTPException(status_code=code, detail=message) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 # ---------------------------------------------------------------------------

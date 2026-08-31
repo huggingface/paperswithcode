@@ -1,0 +1,13 @@
+[Unit]
+Description=Update citation counts hourly
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled update_citations
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

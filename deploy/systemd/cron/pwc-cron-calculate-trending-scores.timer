@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Calculate task trending scores hourly
+
+[Timer]
+OnCalendar=*-*-* *:15:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-calculate-trending-scores.service
+
+[Install]
+WantedBy=timers.target

@@ -17,17 +17,19 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import UTC, datetime
+from enum import StrEnum
 from typing import Any
 
 from claude_agent_sdk import fork_session_via_store
 from claude_agent_sdk._internal.session_store import project_key_for_directory
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import Settings
 from backend.database.connection import db_manager
 from backend.models.database import ChatArtifact, ChatArtifactVersion, ChatSession
-from backend.services.latex_paper_service import LatexPaperService
 from backend.services.chat_capability_service import ChatCapabilityService
 from backend.services.chat_citation_service import (
     PaperCitationCandidate,
@@ -41,8 +43,16 @@ from backend.services.chat_citation_service import (
     resolve_citation_targets,
 )
 from backend.services.chat_latency_service import ChatLatencyService
+from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
 from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
 from backend.services.chat_sandbox_service import SandboxError
+from backend.services.chat_sandbox_executor import ExecutorExecutionLost
+from backend.services.chat_scope_guardrail_service import (
+    BoundedRawEventQueue,
+    REFUSAL_TEXT,
+    ScopeGuardrailService,
+    ScopeMessage,
+)
 from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
@@ -65,13 +75,49 @@ from backend.services.chat_tracing_service import (
     trace_chat_turn,
 )
 from backend.services.chat_transcript_recovery import reconcile_spooled_session
+from backend.services.chat_turn_cancel_control import CancelControlResult
+from backend.services.chat_durable_lifecycle_observer import (
+    durable_lifecycle_observer,
+)
+from backend.services.chat_turn_job_repository import TurnJobError, TurnLeaseClaim
+from backend.services.chat_turn_event_repository import JournalFrame
+from backend.services.chat_turn_event_service import (
+    CancellationEvent,
+    ChatTurnEvent,
+    ChatTurnLifecycle,
+    CompletionEvent,
+    FailureEvent,
+    InterruptionReason,
+    LatencyEvent,
+    McpReadinessEvent,
+    MirrorFailureEvent,
+    PersistenceEvent,
+    ResearchFinishedEvent,
+    TelemetryEvent,
+    TerminalOutcome,
+    TitleEvent,
+    TitleFinishedEvent,
+    TurnTerminalState,
+    UsageEvent,
+    from_legacy_event,
+)
 from backend.services.chat_turn_runner import ChatTurnRunner, create_chat_turn_runner
+from backend.services.latex_paper_service import LatexPaperService
 from backend.services.openrouter_user_budget_service import OpenRouterUserBudgetService
 from backend.services.postgres_sdk_session_store import PostgresSDKSessionStore
 from backend.utils.urls import parse_arxiv_url
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_SECONDS = 15.0
+
+
+def encode_journal_frame(frame: JournalFrame) -> bytes:
+    data = json.dumps(
+        {"type": frame.event, **frame.payload},
+        separators=(",", ":"),
+        ensure_ascii=False,
+    )
+    return f"id: {frame.sequence}\nevent: {frame.event}\ndata: {data}\n\n".encode()
 
 
 def _external_paper_candidate(
@@ -177,6 +223,46 @@ class ChatStreamFrame:
     @classmethod
     def heartbeat(cls) -> ChatStreamFrame:
         return cls(event=None)
+
+
+class _TerminalPersistenceState(StrEnum):
+    PENDING = "pending"
+    PERSISTING = "persisting"
+    COMPLETED = "completed"
+
+
+@dataclass
+class _TerminalPersistence:
+    """One typed terminal payload and one exactly-once persistence state."""
+
+    completion: CompletionEvent | None = None
+    mirror_failure: MirrorFailureEvent | None = None
+    scope_block: tuple[str, str] | None = None
+    state: _TerminalPersistenceState = _TerminalPersistenceState.PENDING
+
+    @property
+    def completed(self) -> bool:
+        return self.state is _TerminalPersistenceState.COMPLETED
+
+    def begin(self) -> bool:
+        if self.state is not _TerminalPersistenceState.PENDING:
+            return False
+        self.state = _TerminalPersistenceState.PERSISTING
+        return True
+
+    def finish(self) -> None:
+        if self.state is not _TerminalPersistenceState.PERSISTING:
+            raise RuntimeError("Terminal persistence is not active")
+        self.state = _TerminalPersistenceState.COMPLETED
+
+    def retry(self) -> None:
+        if self.state is _TerminalPersistenceState.PERSISTING:
+            self.state = _TerminalPersistenceState.PENDING
+
+
+@dataclass(frozen=True)
+class _HandledTurnEvent:
+    frame: ChatStreamFrame | None = None
 
 
 class _ToolTimingFallback:
@@ -703,12 +789,9 @@ def _trusted_paper_artifact(
     admission: TurnAdmission,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    if event.get("operation") not in {
-        "create",
-        "begin-edit",
-        "draft",
-        "repair",
-    } or not isinstance(event.get("activated"), bool):
+    if event.get("operation") not in {"create", "begin-edit"} or not isinstance(
+        event.get("activated"), bool
+    ):
         return None
     try:
         artifact_id = uuid.UUID(str((event.get("descriptor") or {})["artifact_id"]))
@@ -801,23 +884,13 @@ _PRIVATE_PAPER_TOOL_NAMES = frozenset(
 
 
 def _private_paper_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any]:
-    """Project paper-authoring tool activity without retaining source text.
-
-    Paper source belongs only in the owner-scoped artifact store.  Tool events are
-    copied into chat display blocks and tracing, so they must not retain command
-    arguments, streamed fragments, or compiler/editor output.
-    """
+    """Project paper-authoring tool activity without retaining source text."""
 
     tool_id = str(event.get("id") or "")
     tool_name = str(event.get("name") or "private-paper-tool")
     if tool_name not in _PRIVATE_PAPER_TOOL_NAMES:
         tool_name = "private-paper-tool"
-    base = {
-        "type": kind,
-        "id": tool_id,
-        "name": tool_name,
-        "redacted": True,
-    }
+    base = {"type": kind, "id": tool_id, "name": tool_name, "redacted": True}
     if kind == "tool_call":
         return {**base, "args": {}}
     if kind == "tool_call_start":
@@ -1027,6 +1100,17 @@ def _persist_failure(
         except Exception:
             db.rollback()
             logger.exception("chat cleanup failed session_id=%s", admission.session_id)
+            if settings.chat_durable_turn_dispatch_enabled:
+                raise
+
+
+def _legacy_turn_is_active(
+    owner: ChatOwner, settings: Settings, admission: TurnAdmission
+) -> bool:
+    with db_manager.session_local() as db:
+        return ChatSessionService(db, settings).turn_is_active(
+            owner, admission.session_id, admission.turn_id
+        )
 
 
 def _persist_preparation_failure(
@@ -1045,6 +1129,49 @@ def _persist_preparation_failure(
                 "chat edit preparation cleanup failed session_id=%s",
                 admission.session_id,
             )
+            if settings.chat_durable_turn_dispatch_enabled:
+                raise
+
+
+def _claim_local_turn(settings: Settings, admission: TurnAdmission) -> TurnAdmission:
+    with db_manager.session_local() as db:
+        try:
+            claim = ChatLocalTurnLeaseService(db, settings).claim(
+                admission.turn_id, now=datetime.now(UTC)
+            )
+            db.commit()
+        except (TurnJobError, SQLAlchemyError, ValueError):
+            db.rollback()
+            raise
+    return replace(admission, durable_claim=claim)
+
+
+def _heartbeat_local_turn(settings: Settings, admission: TurnAdmission) -> None:
+    if admission.durable_claim is None:
+        raise RuntimeError("Durable turn claim is missing")
+    with db_manager.session_local() as db:
+        try:
+            ChatLocalTurnLeaseService(db, settings).heartbeat(
+                admission.durable_claim, now=datetime.now(UTC)
+            )
+            db.commit()
+        except (TurnJobError, SQLAlchemyError, ValueError):
+            db.rollback()
+            raise
+
+
+def _start_local_turn(settings: Settings, admission: TurnAdmission) -> None:
+    if admission.durable_claim is None:
+        raise RuntimeError("Durable turn claim is missing")
+    with db_manager.session_local() as db:
+        try:
+            ChatLocalTurnLeaseService(db, settings).transition_running(
+                admission.durable_claim, now=datetime.now(UTC)
+            )
+            db.commit()
+        except (TurnJobError, SQLAlchemyError, ValueError):
+            db.rollback()
+            raise
 
 
 def _persist_trace_id(
@@ -1337,23 +1464,30 @@ class ChatStreamOrchestrator:
         is_disconnected: Callable[[], Awaitable[bool]],
         release_admission: Callable[[], Awaitable[None]],
         display_message: str | None = None,
+        scope_messages: list[ScopeMessage] | None = None,
     ) -> None:
         self.settings = settings
         self.owner = owner
         self.admission = admission
         self.prompt = prompt
         self.display_message = display_message or prompt
+        self.scope_messages = scope_messages or [
+            ScopeMessage(role="user", content=prompt)
+        ]
         self.request_id = request_id
         self.title_token = title_token
         self.is_disconnected = is_disconnected
         self.release_admission = release_admission
         self.principal_hash = hashlib.sha256(owner.hf_user_id.encode()).hexdigest()[:12]
         self.started = time.perf_counter()
-        self.terminal = "disconnect"
         self.projection = ChatTurnProjection()
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
+        self.lease_heartbeat_task: asyncio.Task | None = None
+        self.lease_heartbeat_error: Exception | None = None
+        self.lifecycle = ChatTurnLifecycle()
+        self.terminal_persistence = _TerminalPersistence()
         self.runner: ChatTurnRunner | None = None
         self.mirror_recovery: tuple[str, uuid.UUID] | None = None
         self.edit_activated = False
@@ -1363,6 +1497,114 @@ class ChatStreamOrchestrator:
         self.private_paper_tool_ids: set[str] = set()
         self.tool_timing = _ToolTimingFallback(
             enabled=getattr(admission, "agent_harness", "claude") == "pi"
+        )
+        self._detached_cancel_requested = False
+        self.legacy_cancel_seen = False
+        self.legacy_cancel_polled_at = 0.0
+        self.lifecycle_observer = durable_lifecycle_observer(settings)
+
+    def _transition_interruption(self, reason: InterruptionReason) -> None:
+        if self.lifecycle.terminal is not TurnTerminalState.ACTIVE:
+            return
+        self.lifecycle = self.lifecycle.transition(
+            FailureEvent(code="interrupted", interruption=reason)
+        )
+
+    def _transition_failure(self, code: str) -> None:
+        if self.lifecycle.terminal is not TurnTerminalState.ACTIVE:
+            return
+        self.lifecycle = self.lifecycle.transition(FailureEvent(code=code))
+
+    def _transition_completion(self, outcome: TerminalOutcome) -> None:
+        if self.lifecycle.terminal is not TurnTerminalState.ACTIVE:
+            return
+        self.lifecycle = self.lifecycle.transition(CompletionEvent(outcome))
+
+    def _transition_completion_reason(self, reason: str) -> None:
+        try:
+            outcome = TerminalOutcome(reason)
+        except ValueError:
+            outcome = TerminalOutcome.SUCCESS
+        self._transition_completion(outcome)
+
+    @property
+    def terminal_label(self) -> str:
+        if self.lifecycle.terminal in {
+            TurnTerminalState.COMPLETED,
+            TurnTerminalState.COMPLETED_DEGRADED,
+        }:
+            return (self.lifecycle.outcome or TerminalOutcome.SUCCESS).value
+        if self.lifecycle.terminal is TurnTerminalState.FAILED:
+            return "error"
+        if self.lifecycle.terminal is TurnTerminalState.INTERRUPTED:
+            if (
+                self.lifecycle.outcome is TerminalOutcome.STOPPED
+                or self.lifecycle.interruption is InterruptionReason.WORKER_CANCELLED
+            ):
+                return "stopped"
+            return "interrupted"
+        return "disconnect"
+
+    async def _persist_interruption(
+        self, code: str, *, lifecycle_event: ChatTurnEvent | None = None
+    ) -> None:
+        if self.terminal_persistence.completed:
+            if (
+                lifecycle_event is not None
+                and self.lifecycle.terminal is TurnTerminalState.ACTIVE
+            ):
+                self.lifecycle = self.lifecycle.transition(lifecycle_event)
+            return
+        if self.admission.is_replacement and not self.edit_activated:
+            await self._persist_terminal_with_lease(
+                _persist_preparation_failure,
+                self.owner,
+                self.settings,
+                self.admission,
+                code,
+                lifecycle_event=lifecycle_event,
+            )
+            return
+        await self._persist_terminal_with_lease(
+            _persist_failure,
+            self.owner,
+            self.settings,
+            self.admission,
+            code,
+            True,
+            self.projection.completed_blocks(),
+            lifecycle_event=lifecycle_event,
+        )
+
+    async def _finalize_cancellation(self, *, cancel_runner: bool) -> ChatStreamFrame:
+        if cancel_runner:
+            await self._cancel_runner(force=True)
+        if self.title_task is not None and not self.title_task.done():
+            self.title_task.cancel()
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            await self._persist_interruption(
+                "cancelled", lifecycle_event=CancellationEvent()
+            )
+        else:
+            self._transition_interruption(InterruptionReason.WORKER_CANCELLED)
+        self.trace.finish("".join(self.projection.answer_parts), "stopped")
+        return ChatStreamFrame("done", {"followups": [], "finish_reason": "stopped"})
+
+    async def _finalize_disconnect(self, reason: InterruptionReason) -> None:
+        if self.lifecycle.terminal is not TurnTerminalState.ACTIVE:
+            self.trace.finish(
+                "".join(self.projection.answer_parts), self.terminal_label
+            )
+            return
+        await self._cancel_runner()
+        await self._persist_interruption(
+            "interrupted",
+            lifecycle_event=FailureEvent(code="interrupted", interruption=reason),
+        )
+        self.trace.finish(
+            "".join(self.projection.answer_parts),
+            "interrupted",
+            interruption_reason=reason.value,
         )
 
     async def events(self) -> AsyncIterator[ChatStreamFrame]:
@@ -1381,7 +1623,6 @@ class ChatStreamOrchestrator:
             execution_backend=self.admission.execution_backend,
             is_replacement=self.admission.is_replacement,
             reasoning_effort=getattr(self.admission, "reasoning_effort", "high"),
-            content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
             _persist_trace_id(
@@ -1415,7 +1656,7 @@ class ChatStreamOrchestrator:
                 "stream_start",
                 {
                     "request_id": self.request_id,
-                    "session_id": self.admission.session_id,
+                    "session_id": str(self.admission.session_id),
                     "provider_execution": self.admission.replay_assistant is None,
                 },
             )
@@ -1427,12 +1668,18 @@ class ChatStreamOrchestrator:
                     "done",
                     {
                         "followups": self.admission.replay_assistant.followups or [],
-                        "finish_reason": "success",
+                        "finish_reason": self.admission.replay_assistant.finish_reason,
                     },
                 )
-                self.terminal = "success"
+                self._transition_completion_reason(
+                    self.admission.replay_assistant.finish_reason
+                )
                 return
 
+            await self._claim_durable_turn()
+            if await self._legacy_cancel_requested(force=True):
+                yield await self._finish_legacy_cancel()
+                return
             replacement_ready, resume_id = await self._replacement_or_error()
             if not replacement_ready:
                 self.trace.finish(
@@ -1447,7 +1694,29 @@ class ChatStreamOrchestrator:
                 )
                 return
 
-            queue: asyncio.Queue = asyncio.Queue()
+            if await self._legacy_cancel_requested(force=True):
+                yield await self._finish_legacy_cancel()
+                return
+
+            if self._detached_cancel_requested:
+                yield await self._finalize_cancellation(cancel_runner=False)
+                return
+
+            await self._renew_durable_turn()
+            if self.settings.chat_durable_turn_dispatch_enabled:
+                await asyncio.to_thread(
+                    _start_local_turn, self.settings, self.admission
+                )
+            self._assert_durable_lease()
+
+            if self._detached_cancel_requested:
+                yield await self._finalize_cancellation(cancel_runner=False)
+                return
+
+            queue = BoundedRawEventQueue(
+                max_events=self.settings.chat_scope_guardrail_buffer_max_events,
+                max_bytes=self.settings.chat_scope_guardrail_buffer_max_bytes,
+            )
             self.runner = create_chat_turn_runner(
                 settings=self.settings,
                 owner=self.owner,
@@ -1458,6 +1727,90 @@ class ChatStreamOrchestrator:
                 store=self.store,
             )
             self.research_task = asyncio.create_task(self._produce_research(queue))
+            guardrail_task = asyncio.create_task(
+                ScopeGuardrailService(self.settings).classify(self.scope_messages)
+            )
+            decision = await guardrail_task
+            if await self._legacy_cancel_requested(force=True):
+                yield await self._finish_legacy_cancel()
+                return
+            if decision.decision == "block":
+                pre_block_events = queue.event_count
+                pre_block_bytes = queue.byte_count
+                main_completed = bool(self.research_task and self.research_task.done())
+                wasted_usage, wasted_cost = queue.speculative_usage()
+                buffered_events, buffered_bytes = await queue.discard()
+                if self.research_task and not self.research_task.done():
+                    self.research_task.cancel()
+                cancellation_result = await self._cancel_runner(
+                    force=True, timeout_seconds=0.25
+                )
+                if self.research_task:
+                    done, _pending = await asyncio.wait(
+                        {self.research_task}, timeout=0.25
+                    )
+                    if not done:
+                        cancellation_result = "producer_cancel_timeout"
+                        self.research_task.add_done_callback(
+                            _log_background_task_result
+                        )
+                    self.research_task = None
+                if self.runner is not None:
+                    runner = self.runner
+                    self.runner = None
+                    try:
+                        await asyncio.wait_for(
+                            asyncio.shield(runner.close()), timeout=0.25
+                        )
+                    except Exception:
+                        cancellation_result = "close_failed"
+                self.trace.record_guardrail(
+                    decision,
+                    buffered_events=pre_block_events,
+                    buffered_bytes=pre_block_bytes,
+                    cancellation_result=(
+                        "main_already_finished"
+                        if main_completed and cancellation_result != "close_failed"
+                        else cancellation_result
+                    ),
+                    wasted_usage=wasted_usage,
+                    wasted_cost=wasted_cost,
+                )
+                if self.settings.chat_durable_turn_dispatch_enabled:
+                    self.terminal_persistence.scope_block = (
+                        REFUSAL_TEXT,
+                        "scope_blocked",
+                    )
+                else:
+                    await self._persist_scope_block(REFUSAL_TEXT, "scope_blocked")
+                if self.settings.chat_durable_turn_dispatch_enabled:
+                    self._transition_completion(TerminalOutcome.SCOPE_BLOCKED)
+                self.trace.finish(REFUSAL_TEXT, "scope_blocked")
+                logger.info(
+                    "chat scope blocked request_id=%s provider=%s attempts=%s "
+                    "buffered_events=%s buffered_bytes=%s",
+                    self.request_id,
+                    decision.provider,
+                    decision.attempts,
+                    buffered_events,
+                    buffered_bytes,
+                )
+                yield ChatStreamFrame("answer_delta", {"text": REFUSAL_TEXT})
+                yield ChatStreamFrame(
+                    "done",
+                    {
+                        "followups": [],
+                        "citations": [],
+                        "finish_reason": "scope_blocked",
+                    },
+                )
+                return
+            self.trace.record_guardrail(
+                decision,
+                buffered_events=queue.event_count,
+                buffered_bytes=queue.byte_count,
+                cancellation_result="not_required",
+            )
             if self.title_token:
                 self.trace.start_title(self.settings.chat_title_model)
                 self.title_task = asyncio.create_task(
@@ -1479,35 +1832,7 @@ class ChatStreamOrchestrator:
                     await self.title_task
         except asyncio.CancelledError:
             interruption_reason = self.interruption_reason or "stream_cancelled"
-            await self._cancel_runner()
-            if self.admission.is_replacement and not self.edit_activated:
-                await asyncio.shield(
-                    asyncio.to_thread(
-                        _persist_preparation_failure,
-                        self.owner,
-                        self.settings,
-                        self.admission,
-                        "interrupted",
-                    )
-                )
-            else:
-                await asyncio.shield(
-                    asyncio.to_thread(
-                        _persist_failure,
-                        self.owner,
-                        self.settings,
-                        self.admission,
-                        "interrupted",
-                        True,
-                        self.projection.completed_blocks(),
-                    )
-                )
-            self.terminal = "interrupted"
-            self.trace.finish(
-                "".join(self.projection.answer_parts),
-                "interrupted",
-                interruption_reason=interruption_reason,
-            )
+            await self._finalize_disconnect(InterruptionReason(interruption_reason))
             raise
         except Exception as exc:
             logger.warning(
@@ -1515,14 +1840,18 @@ class ChatStreamOrchestrator:
                 self.admission.session_id,
                 type(exc).__name__,
             )
-            _persist_failure(
-                self.owner,
-                self.settings,
-                self.admission,
-                "persistence_error",
-                False,
-            )
-            self.terminal = "error"
+            if not self.settings.chat_durable_turn_dispatch_enabled:
+                await self._persist_terminal_with_lease(
+                    _persist_failure,
+                    self.owner,
+                    self.settings,
+                    self.admission,
+                    "persistence_error",
+                    False,
+                    lifecycle_event=FailureEvent(code="persistence_error"),
+                )
+            else:
+                self._transition_failure("persistence_error")
             self.trace.finish(
                 "".join(self.projection.answer_parts),
                 "error",
@@ -1542,13 +1871,8 @@ class ChatStreamOrchestrator:
 
     async def _replacement_or_error(self) -> tuple[bool, uuid.UUID | None]:
         try:
-            resume_id = await _prepare_replacement(
-                self.owner,
-                self.settings,
-                self.admission,
-                self.store,
-                lambda: setattr(self, "edit_activated", True),
-            )
+            resume_id = await self._prepare_replacement_with_lease()
+            self._assert_durable_lease()
             return True, resume_id
         except Exception as exc:
             logger.warning(
@@ -1556,19 +1880,244 @@ class ChatStreamOrchestrator:
                 self.admission.session_id,
                 type(exc).__name__,
             )
-            _persist_preparation_failure(
-                self.owner, self.settings, self.admission, "replacement_prepare_failed"
-            )
-            self.terminal = "error"
+            if not self.settings.chat_durable_turn_dispatch_enabled:
+                await self._persist_terminal_with_lease(
+                    _persist_preparation_failure,
+                    self.owner,
+                    self.settings,
+                    self.admission,
+                    "replacement_prepare_failed",
+                    lifecycle_event=FailureEvent(code="replacement_prepare_failed"),
+                )
+            else:
+                self._transition_failure("replacement_prepare_failed")
             return False, None
 
-    async def _produce_research(self, queue: asyncio.Queue) -> None:
+    async def _prepare_replacement_with_lease(self) -> uuid.UUID | None:
+        preparation = asyncio.create_task(
+            _prepare_replacement(
+                self.owner,
+                self.settings,
+                self.admission,
+                self.store,
+                lambda: setattr(self, "edit_activated", True),
+            )
+        )
+        heartbeat = self.lease_heartbeat_task
+        if heartbeat is None:
+            return await preparation
+        try:
+            done, _pending = await asyncio.wait(
+                (preparation, heartbeat), return_when=asyncio.FIRST_COMPLETED
+            )
+            if preparation in done:
+                result = await preparation
+                self._assert_durable_lease()
+                return result
+            preparation.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await preparation
+            self._assert_durable_lease()
+            raise RuntimeError("Durable turn heartbeat stopped")
+        except BaseException:
+            if not preparation.done():
+                preparation.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await preparation
+            raise
+
+    async def _claim_durable_turn(self) -> None:
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return
+        if self.admission.durable_claim is not None:
+            return
+        self.admission = await asyncio.to_thread(
+            _claim_local_turn, self.settings, self.admission
+        )
+        self.lease_heartbeat_task = asyncio.create_task(self._heartbeat_durable_turn())
+
+    async def claim_durable_turn(self) -> TurnLeaseClaim:
+        """Claim once before detached ownership starts consuming the source."""
+        await self._claim_durable_turn()
+        if self.admission.durable_claim is None:
+            raise RuntimeError("Durable turn claim is missing")
+        return self.admission.durable_claim
+
+    async def abandon_detached_start(self) -> None:
+        """Release process-local lease maintenance when ownership setup fails."""
+        await self._stop_lease_heartbeat()
+
+    async def cancel_detached_turn(self, claim: TurnLeaseClaim) -> CancelControlResult:
+        """Cancel only the runner already bound to this exact durable claim."""
+        if claim != self.admission.durable_claim:
+            return CancelControlResult.MISSING
+        self._detached_cancel_requested = True
+        if self.runner is None:
+            return CancelControlResult.REQUESTED
+        return await self.runner.cancel()
+
+    async def persist_detached_terminal(
+        self,
+        claim: TurnLeaseClaim,
+        state: str,
+        failure_code: str | None,
+    ) -> None:
+        """Persist canonical terminal state after the coordinator journals it."""
+        if claim != self.admission.durable_claim:
+            raise RuntimeError("Detached terminal claim does not match the turn")
+        if self.terminal_persistence.completed:
+            return
+        if self.terminal_persistence.mirror_failure is not None:
+            mirror_failure = self.terminal_persistence.mirror_failure
+            event = mirror_failure.to_legacy()
+            event.pop("type")
+            await self._persist_terminal_with_lease(
+                self._fail_mirror,
+                event,
+                True,
+                lifecycle_event=mirror_failure,
+            )
+            return
+        if self.terminal_persistence.scope_block is not None:
+            await self._persist_scope_block(*self.terminal_persistence.scope_block)
+            return
+        if state == "completed":
+            completion = self.terminal_persistence.completion
+            if completion is None:
+                raise RuntimeError("Detached completion payload is missing")
+            event = completion.to_legacy()
+            event.pop("type")
+            await self._persist_terminal_with_lease(
+                self._complete_turn,
+                event,
+                lifecycle_event=completion,
+            )
+            return
+        code = failure_code or "turn_failed"
+        lifecycle_event = FailureEvent(
+            code=code,
+            interruption=(
+                InterruptionReason.WORKER_CANCELLED
+                if code == "cancelled"
+                else InterruptionReason.STREAM_CANCELLED
+                if state == "interrupted"
+                else None
+            ),
+        )
+        if self.admission.is_replacement and not self.edit_activated:
+            await self._persist_terminal_with_lease(
+                _persist_preparation_failure,
+                self.owner,
+                self.settings,
+                self.admission,
+                code,
+                lifecycle_event=lifecycle_event,
+            )
+            return
+        await self._persist_terminal_with_lease(
+            _persist_failure,
+            self.owner,
+            self.settings,
+            self.admission,
+            code,
+            state == "interrupted",
+            self.projection.completed_blocks(),
+            lifecycle_event=lifecycle_event,
+        )
+
+    async def _heartbeat_durable_turn(self) -> None:
+        try:
+            while True:
+                await asyncio.sleep(self.settings.chat_external_pi_heartbeat_seconds)
+                await asyncio.to_thread(
+                    _heartbeat_local_turn, self.settings, self.admission
+                )
+        except asyncio.CancelledError:
+            raise
+        except (TurnJobError, SQLAlchemyError, ValueError) as exc:
+            self.lease_heartbeat_error = exc
+
+    async def _renew_durable_turn(self) -> None:
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return
+        self._assert_durable_lease()
+        await asyncio.to_thread(_heartbeat_local_turn, self.settings, self.admission)
+        self._assert_durable_lease()
+
+    def _assert_durable_lease(self) -> None:
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return
+        if self.admission.durable_claim is None:
+            raise RuntimeError("Durable turn claim is missing")
+        if self.lease_heartbeat_error is not None:
+            raise RuntimeError(
+                "Durable turn lease was lost"
+            ) from self.lease_heartbeat_error
+        if self.lease_heartbeat_task is not None and self.lease_heartbeat_task.done():
+            self.lease_heartbeat_task.result()
+
+    async def _stop_lease_heartbeat(self) -> None:
+        task = self.lease_heartbeat_task
+        self.lease_heartbeat_task = None
+        if task is None:
+            return
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    async def _persist_terminal_with_lease(
+        self,
+        function: Callable[..., Any],
+        *args: object,
+        lifecycle_event: ChatTurnEvent | None = None,
+    ) -> Any:
+        if not self.terminal_persistence.begin():
+            return
+        persistence = asyncio.create_task(asyncio.to_thread(function, *args))
+        cancellation: asyncio.CancelledError | None = None
+        result: Any = None
+        try:
+            while True:
+                try:
+                    result = await asyncio.shield(persistence)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancellation = cancellation or exc
+            self.terminal_persistence.finish()
+            if (
+                lifecycle_event is not None
+                and self.lifecycle.terminal is TurnTerminalState.ACTIVE
+            ):
+                self.lifecycle = self.lifecycle.transition(lifecycle_event)
+            if cancellation is not None:
+                raise cancellation
+            return result
+        except BaseException:
+            if not self.terminal_persistence.completed:
+                self.terminal_persistence.retry()
+            raise
+        finally:
+            await self._stop_lease_heartbeat()
+
+    async def _produce_research(self, queue: BoundedRawEventQueue) -> None:
         try:
             assert self.runner is not None
             async for event in sequential_reasoning_events(self.runner.events()):
                 await queue.put(event)
         except asyncio.CancelledError:
             raise
+        except ExecutorExecutionLost:
+            assert self.runner is not None
+            if not getattr(self.runner, "execution_loss_cancelled", False):
+                with contextlib.suppress(Exception):
+                    await self.runner.cancel()
+            await queue.put(
+                {
+                    "type": "error",
+                    "message": "The sandbox execution could not be recovered.",
+                    "code": "execution_lost",
+                }
+            )
         except SandboxError as exc:
             await queue.put({"type": "error", "message": str(exc), "code": exc.code})
         except Exception as exc:
@@ -1587,13 +2136,385 @@ class ChatStreamOrchestrator:
         finally:
             await queue.put({"type": "_research_finished"})
 
-    async def _consume(self, queue: asyncio.Queue) -> AsyncIterator[ChatStreamFrame]:
-        research_finished = False
-        title_finished = self.title_task is None
+    @staticmethod
+    def _legacy_payload(event: ChatTurnEvent) -> tuple[str, dict[str, Any]]:
+        legacy = event.to_legacy()
+        return legacy.pop("type"), legacy
+
+    async def _dispatch_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
+        handlers = {
+            ResearchFinishedEvent: self._handle_research_finished,
+            TitleEvent: self._handle_title_event,
+            TitleFinishedEvent: self._handle_title_finished,
+            PersistenceEvent: self._handle_persistence_event,
+            MirrorFailureEvent: self._handle_mirror_failure,
+            CancellationEvent: self._handle_cancellation,
+            LatencyEvent: self._handle_latency_event,
+            TelemetryEvent: self._handle_telemetry_event,
+            McpReadinessEvent: self._handle_mcp_readiness_event,
+            UsageEvent: self._handle_usage_event,
+            FailureEvent: self._handle_failure_event,
+            CompletionEvent: self._handle_completion_event,
+        }
+        handler = handlers.get(type(event), self._handle_projection_event)
+        return await handler(event)
+
+    async def _handle_research_finished(
+        self, event: ResearchFinishedEvent
+    ) -> _HandledTurnEvent:
+        self.lifecycle = self.lifecycle.transition(event)
+        return _HandledTurnEvent()
+
+    async def _handle_title_finished(
+        self, event: TitleFinishedEvent
+    ) -> _HandledTurnEvent:
+        self.lifecycle = self.lifecycle.transition(event)
+        return _HandledTurnEvent()
+
+    async def _handle_title_event(self, event: TitleEvent) -> _HandledTurnEvent:
+        kind, payload = self._legacy_payload(event)
+        return _HandledTurnEvent(frame=ChatStreamFrame(kind, payload))
+
+    async def _handle_persistence_event(
+        self, event: PersistenceEvent
+    ) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        self._bind_sdk_session(payload)
+        return _HandledTurnEvent()
+
+    async def _handle_mirror_failure(
+        self, event: MirrorFailureEvent
+    ) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            self.lifecycle = self.lifecycle.transition(event)
+            self.terminal_persistence.mirror_failure = event
+            frame = await asyncio.to_thread(self._fail_mirror, payload)
+        else:
+            frame = await self._persist_terminal_with_lease(
+                self._fail_mirror,
+                payload,
+                lifecycle_event=event,
+            )
+        self.trace.finish(
+            "".join(self.projection.answer_parts),
+            self.terminal_label,
+            terminal_code="transcript_mirror_error",
+        )
+        if self.research_task:
+            self.research_task.cancel()
+        return _HandledTurnEvent(frame=frame)
+
+    async def _handle_cancellation(self, event: CancellationEvent) -> _HandledTurnEvent:
+        return _HandledTurnEvent(
+            frame=await self._finalize_cancellation(cancel_runner=False)
+        )
+
+    async def _handle_latency_event(self, event: LatencyEvent) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        self._record_latency_phase(
+            str(payload["phase"]),
+            int(payload["elapsed_ms"]),
+            acquisition_outcome=payload.get("acquisition_outcome"),
+            first_semantic_event_class=payload.get("first_semantic_event_class"),
+            pool_miss_reason=payload.get("pool_miss_reason"),
+            session_reuse_cohort=payload.get("session_reuse_cohort"),
+            failure_stage=payload.get("failure_stage"),
+            failure_class=payload.get("failure_class"),
+            attempt_kind=payload.get("attempt_kind"),
+        )
+        return _HandledTurnEvent()
+
+    async def _handle_telemetry_event(self, event: TelemetryEvent) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        logger.info(
+            "chat execution recovery request_id=%s turn_id=%s "
+            "rounds=%s/%s denied_rounds=%s calls=%s/%s denied_calls=%s "
+            "tooling_closed=%s limit_reached=%s finalizer_attempted=%s "
+            "finalizer_outcome=%s finalization_latency_ms=%s "
+            "recovery_reason=%s recovery_attempts=%s recovery_outcome=%s",
+            self.request_id,
+            self.admission.turn_id,
+            payload.get("tool_rounds_executed"),
+            payload.get("maximum_tool_rounds"),
+            payload.get("tool_rounds_denied"),
+            payload.get("tool_calls_allowed"),
+            payload.get("maximum_tool_calls"),
+            payload.get("tool_calls_denied"),
+            payload.get("tooling_close_reason"),
+            payload.get("execution_limit_reached"),
+            payload.get("finalizer_attempted"),
+            payload.get("finalizer_outcome"),
+            payload.get("finalization_latency_ms"),
+            payload.get("recovery_reason"),
+            payload.get("recovery_attempts"),
+            payload.get("recovery_outcome"),
+        )
+        return _HandledTurnEvent()
+
+    async def _handle_mcp_readiness_event(
+        self, event: McpReadinessEvent
+    ) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        ready = payload.get("ready") is True
+        failure_class = payload.get("failure_class")
+        logger.info(
+            "chat MCP readiness request_id=%s enabled=%s ready=%s "
+            "failure_class=%s latency_ms=%s tool_count=%s egress_digest=%s",
+            self.request_id,
+            ",".join(payload.get("enabled_provider_ids") or []),
+            ready,
+            failure_class or "none",
+            payload.get("registration_latency_ms"),
+            len(payload.get("registered_tool_names") or []),
+            payload.get("egress_policy_digest"),
+        )
+        if self.settings.chat_excalidraw_enabled and not ready:
+            logger.warning(
+                "chat Excalidraw MCP registration failed request_id=%s failure_class=%s",
+                self.request_id,
+                failure_class or "configured_not_connected",
+            )
+        return _HandledTurnEvent()
+
+    async def _handle_usage_event(self, event: UsageEvent) -> _HandledTurnEvent:
+        _kind, payload = self._legacy_payload(event)
+        usage = payload.get("usage") or {}
+        token_count = (
+            sum(
+                int(value)
+                for key, value in usage.items()
+                if isinstance(value, (int, float)) and "token" in str(key)
+            )
+            if isinstance(usage, dict)
+            else 0
+        )
+        logger.info(
+            "chat provider usage request_id=%s turn_id=%s phase=%s "
+            "provider_requests=%s tokens=%s",
+            self.request_id,
+            self.admission.turn_id,
+            payload.get("phase") or "research",
+            payload.get("provider_requests") or 0,
+            token_count,
+        )
+        self.trace.record_usage(payload)
+        return _HandledTurnEvent()
+
+    def _project_event(self, event: ChatTurnEvent) -> tuple[str, dict[str, Any]] | None:
+        kind, payload = self._legacy_payload(event)
+        if kind == "artifact_ready":
+            trusted = _trusted_artifact_ready(payload, self.admission)
+            if trusted is None:
+                logger.warning(
+                    "chat artifact receipt rejected request_id=%s turn_id=%s",
+                    self.request_id,
+                    self.admission.turn_id,
+                )
+                kind = "artifact_error"
+                payload = {
+                    "type": kind,
+                    "publication_id": str(payload.get("publication_id") or ""),
+                    "code": "artifact_receipt_invalid",
+                    "message": "Poster publication could not be verified.",
+                }
+            else:
+                payload = trusted
+        if kind == "paper_artifact":
+            trusted_paper = _trusted_paper_artifact(
+                payload, self.owner, self.admission, self.settings
+            )
+            if trusted_paper is None:
+                logger.warning(
+                    "chat paper receipt rejected request_id=%s turn_id=%s",
+                    self.request_id,
+                    self.admission.turn_id,
+                )
+                return None
+            payload = trusted_paper
+        paper_tool_event = kind in {
+            "tool_call",
+            "tool_call_start",
+            "tool_call_arguments_delta",
+            "tool_call_arguments_done",
+            "tool_result",
+        }
+        tool_id = str(payload.get("id") or "")
+        if (
+            getattr(self.admission, "paper_artifacts_enabled", False)
+            and paper_tool_event
+            and (
+                str(payload.get("name") or "") in _PRIVATE_PAPER_TOOL_NAMES
+                or tool_id in self.private_paper_tool_ids
+            )
+        ):
+            if kind != "tool_result":
+                self.private_paper_tool_ids.add(tool_id)
+            payload = _private_paper_tool_event(kind, payload)
+        if getattr(self.admission, "poster_mode", False) and kind in {
+            "tool_call",
+            "tool_call_start",
+            "tool_call_arguments_delta",
+            "tool_call_arguments_done",
+            "tool_result",
+        }:
+            payload = _public_poster_tool_event(kind, payload)
+
+        elapsed_ms = round((time.perf_counter() - self.started) * 1000)
+        if kind == "workspace_ready":
+            self._record_latency_phase("sdk_query_dispatched", elapsed_ms)
+        if not self.first_application_delta_recorded and kind in {
+            "reasoning_delta",
+            "tool_call",
+            "tool_call_start",
+            "answer_delta",
+        }:
+            self.first_application_delta_recorded = True
+            self.lifecycle_observer("ttft_ms", None, elapsed_ms)
+            self._record_latency_phase(
+                "first_semantic_event",
+                elapsed_ms,
+                first_semantic_event_class={
+                    "reasoning_delta": "reasoning",
+                    "tool_call": "tool",
+                    "tool_call_start": "tool",
+                    "answer_delta": "answer",
+                }[kind],
+            )
+            self._record_latency_phase("first_application_sse_delta", elapsed_ms)
+
+        self.projection.apply(kind, payload)
+        if kind in {"tool_call", "tool_call_arguments_done"}:
+            self.trace.start_tool(payload)
+        elif kind == "tool_result":
+            self.trace.finish_tool(payload)
+            self.private_paper_tool_ids.discard(tool_id)
+        return kind, payload
+
+    async def _handle_projection_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
+        projected = self._project_event(event)
+        if projected is None:
+            return _HandledTurnEvent()
+        kind, payload = projected
+        return _HandledTurnEvent(frame=ChatStreamFrame(kind, payload))
+
+    async def _handle_failure_event(self, event: FailureEvent) -> _HandledTurnEvent:
+        projected = self._project_event(event)
+        assert projected is not None
+        _kind, payload = projected
+        budget_interrupted = payload.get("code") in {
+            "chat_temporarily_disabled",
+            "chat_disabled_interrupted",
+        }
+        if budget_interrupted:
+            payload["code"] = "chat_disabled_interrupted"
+            payload["message"] = (
+                "Chat was disabled while this response was running. "
+                "The partial response is saved. Please try again later."
+            )
+        with db_manager.session_local() as error_db:
+            provider_code = ChatCapabilityService(error_db).provider_error_for_turn(
+                self.admission.session_id, self.admission.turn_id
+            )
+            if provider_code:
+                payload["code"] = provider_code
+                if provider_code == "hf_inference_billing_exhausted":
+                    payload["message"] = (
+                        "Hugging Face could not bill this request. Your included "
+                        "credits may be exhausted; enable or review pay-as-you-go "
+                        "billing in Settings."
+                    )
+                elif provider_code == "openrouter_monthly_budget_exhausted":
+                    usage = OpenRouterUserBudgetService(
+                        error_db, self.settings
+                    ).status_percentage(self.owner.hf_user_id)
+                    reset = usage.resets_at.isoformat().replace("+00:00", "Z")
+                    payload["message"] = (
+                        f"{usage.remaining_percent}% of your monthly shared "
+                        "OpenRouter allowance remains, but that is not enough "
+                        "to reserve another model call for this response. "
+                        f"It resets at {reset}."
+                    )
+                elif provider_code == "openrouter_unavailable":
+                    payload["message"] = (
+                        "OpenRouter is currently unavailable. However, "
+                        "you can still bring your own key in Settings."
+                    )
+                elif provider_code == "openrouter_byok_credential_invalid":
+                    payload["message"] = (
+                        "Your OpenRouter API key is no longer valid. "
+                        "Reconnect it in Settings, then try again."
+                    )
+                elif provider_code == "openrouter_byok_billing_error":
+                    payload["message"] = (
+                        "Your OpenRouter key is connected, but OpenRouter "
+                        "rejected billing for the account behind it. A key "
+                        "spending limit is not an account credit balance. "
+                        "Add credits or enable pay-as-you-go in OpenRouter, "
+                        "then try again."
+                    )
+                elif provider_code == "openrouter_byok_rate_limit":
+                    payload["message"] = (
+                        "Your OpenRouter API key is temporarily rate-limited."
+                    )
+        typed_failure = from_legacy_event({"type": "error", **payload})
+        assert isinstance(typed_failure, FailureEvent)
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            self.lifecycle = self.lifecycle.transition(typed_failure)
+        else:
+            await self._persist_terminal_with_lease(
+                _persist_failure,
+                self.owner,
+                self.settings,
+                self.admission,
+                payload.get("code") or "provider_error",
+                budget_interrupted,
+                self.projection.completed_blocks(),
+                lifecycle_event=typed_failure,
+            )
+        self.trace.finish(
+            "".join(self.projection.answer_parts),
+            "error",
+            terminal_code=payload.get("code") or "provider_error",
+        )
+        return _HandledTurnEvent(frame=ChatStreamFrame("error", payload))
+
+    async def _handle_completion_event(
+        self, event: CompletionEvent
+    ) -> _HandledTurnEvent:
+        projected = self._project_event(event)
+        assert projected is not None
+        _kind, payload = projected
+        payload["citations"] = self.projection.citations
+        completion = from_legacy_event({"type": "done", **payload})
+        assert isinstance(completion, CompletionEvent)
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            self.lifecycle = self.lifecycle.transition(completion)
+            self.terminal_persistence.completion = completion
+        else:
+            await self._persist_terminal_with_lease(
+                self._complete_turn,
+                payload,
+                lifecycle_event=completion,
+            )
+        self.trace.finish("".join(self.projection.answer_parts), self.terminal_label)
+        return _HandledTurnEvent(frame=ChatStreamFrame("done", payload))
+
+    async def _consume(self, queue) -> AsyncIterator[ChatStreamFrame]:
+        self.lifecycle = replace(
+            self.lifecycle, title_requested=self.title_task is not None
+        )
         last_write = time.monotonic()
-        while not (research_finished and title_finished):
+        while not (
+            self.lifecycle.research_finished
+            and (not self.lifecycle.title_requested or self.lifecycle.title_finished)
+        ):
+            self._assert_durable_lease()
+            if await self._legacy_cancel_requested():
+                yield await self._finish_legacy_cancel()
+                return
             try:
-                event = await asyncio.wait_for(queue.get(), timeout=1)
+                raw_event = await asyncio.wait_for(queue.get(), timeout=1)
             except TimeoutError:
                 if await self.is_disconnected():
                     self.interruption_reason = "client_disconnect"
@@ -1605,295 +2526,26 @@ class ChatStreamOrchestrator:
             if await self.is_disconnected():
                 self.interruption_reason = "client_disconnect"
                 raise asyncio.CancelledError
-            event = dict(event)
-            kind = event.pop("type")
-            self.tool_timing.apply(kind, event)
-            self.trace.record_event(kind, event)
-            if kind == "_research_finished":
-                research_finished = True
-                continue
-            if kind == "_title_finished":
-                title_finished = True
-                continue
-            if kind == "_sdk_session":
-                self._bind_sdk_session(event)
-                continue
-            if kind == "_mirror_error":
-                frame = self._fail_mirror(event)
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    self.terminal,
-                    terminal_code="transcript_mirror_error",
-                )
-                yield frame
-                if self.research_task:
-                    self.research_task.cancel()
-                continue
-            if kind == "_cancelled":
-                _persist_failure(
-                    self.owner,
-                    self.settings,
-                    self.admission,
-                    "interrupted",
-                    True,
-                    self.projection.completed_blocks(),
-                )
-                self.terminal = "stopped"
-                self.trace.finish("".join(self.projection.answer_parts), "stopped")
-                yield ChatStreamFrame(
-                    "done", {"followups": [], "finish_reason": "stopped"}
-                )
-                continue
-            if kind == "_latency":
-                self._record_latency_phase(
-                    str(event["phase"]),
-                    int(event["elapsed_ms"]),
-                    acquisition_outcome=event.get("acquisition_outcome"),
-                    first_semantic_event_class=event.get("first_semantic_event_class"),
-                    pool_miss_reason=event.get("pool_miss_reason"),
-                    session_reuse_cohort=event.get("session_reuse_cohort"),
-                    failure_stage=event.get("failure_stage"),
-                    failure_class=event.get("failure_class"),
-                    attempt_kind=event.get("attempt_kind"),
-                )
-                continue
-            if kind == "_execution_telemetry":
-                logger.info(
-                    "chat execution recovery request_id=%s turn_id=%s "
-                    "rounds=%s/%s denied_rounds=%s calls=%s/%s denied_calls=%s "
-                    "tooling_closed=%s limit_reached=%s finalizer_attempted=%s "
-                    "finalizer_outcome=%s finalization_latency_ms=%s "
-                    "recovery_reason=%s recovery_attempts=%s recovery_outcome=%s",
-                    self.request_id,
-                    self.admission.turn_id,
-                    event.get("tool_rounds_executed"),
-                    event.get("maximum_tool_rounds"),
-                    event.get("tool_rounds_denied"),
-                    event.get("tool_calls_allowed"),
-                    event.get("maximum_tool_calls"),
-                    event.get("tool_calls_denied"),
-                    event.get("tooling_close_reason"),
-                    event.get("execution_limit_reached"),
-                    event.get("finalizer_attempted"),
-                    event.get("finalizer_outcome"),
-                    event.get("finalization_latency_ms"),
-                    event.get("recovery_reason"),
-                    event.get("recovery_attempts"),
-                    event.get("recovery_outcome"),
-                )
-                continue
-            if kind == "_mcp_readiness":
-                ready = event.get("ready") is True
-                failure_class = event.get("failure_class")
-                logger.info(
-                    "chat MCP readiness request_id=%s enabled=%s ready=%s "
-                    "failure_class=%s latency_ms=%s tool_count=%s "
-                    "egress_digest=%s",
-                    self.request_id,
-                    ",".join(event.get("enabled_provider_ids") or []),
-                    ready,
-                    failure_class or "none",
-                    event.get("registration_latency_ms"),
-                    len(event.get("registered_tool_names") or []),
-                    event.get("egress_policy_digest"),
-                )
-                if self.settings.chat_excalidraw_enabled and not ready:
-                    logger.warning(
-                        "chat Excalidraw MCP registration failed "
-                        "request_id=%s failure_class=%s",
-                        self.request_id,
-                        failure_class or "configured_not_connected",
-                    )
-                continue
-            if kind == "usage":
-                usage = event.get("usage") or {}
-                token_count = (
-                    sum(
-                        int(value)
-                        for key, value in usage.items()
-                        if isinstance(value, (int, float)) and "token" in str(key)
-                    )
-                    if isinstance(usage, dict)
-                    else 0
-                )
-                logger.info(
-                    "chat provider usage request_id=%s turn_id=%s phase=%s "
-                    "provider_requests=%s tokens=%s",
-                    self.request_id,
-                    self.admission.turn_id,
-                    event.get("phase") or "research",
-                    event.get("provider_requests") or 0,
-                    token_count,
-                )
-                self.trace.record_usage(event)
-                continue
 
-            if kind == "artifact_ready":
-                trusted = _trusted_artifact_ready(event, self.admission)
-                if trusted is None:
-                    logger.warning(
-                        "chat artifact receipt rejected request_id=%s turn_id=%s",
-                        self.request_id,
-                        self.admission.turn_id,
-                    )
-                    kind = "artifact_error"
-                    event = {
-                        "type": kind,
-                        "publication_id": str(event.get("publication_id") or ""),
-                        "code": "artifact_receipt_invalid",
-                        "message": "Poster publication could not be verified.",
-                    }
-                else:
-                    event = trusted
-            if kind == "paper_artifact":
-                trusted_paper = _trusted_paper_artifact(
-                    event, self.owner, self.admission, self.settings
-                )
-                if trusted_paper is None:
-                    logger.warning(
-                        "chat paper receipt rejected request_id=%s turn_id=%s",
-                        self.request_id,
-                        self.admission.turn_id,
-                    )
-                    continue
-                event = trusted_paper
-            paper_tool_event = kind in {
-                "tool_call",
-                "tool_call_start",
-                "tool_call_arguments_delta",
-                "tool_call_arguments_done",
-                "tool_result",
-            }
-            tool_id = str(event.get("id") or "")
-            if (
-                getattr(self.admission, "paper_artifacts_enabled", False)
-                and paper_tool_event
-                and (
-                    str(event.get("name") or "") in _PRIVATE_PAPER_TOOL_NAMES
-                    or tool_id in self.private_paper_tool_ids
-                )
-            ):
-                if kind != "tool_result":
-                    self.private_paper_tool_ids.add(tool_id)
-                event = _private_paper_tool_event(kind, event)
-            if getattr(self.admission, "poster_mode", False) and kind in {
-                "tool_call",
-                "tool_call_start",
-                "tool_call_arguments_delta",
-                "tool_call_arguments_done",
-                "tool_result",
-            }:
-                event = _public_poster_tool_event(kind, event)
+            if isinstance(raw_event, dict):
+                serialized = dict(raw_event)
+                legacy = dict(serialized)
+                kind = legacy.pop("type")
+                self.tool_timing.apply(kind, legacy)
+                serialized.update(legacy)
+                typed_event = from_legacy_event(serialized)
+            else:
+                typed_event = raw_event
+                kind, legacy = self._legacy_payload(typed_event)
+                self.tool_timing.apply(kind, legacy)
+                typed_event = from_legacy_event({"type": kind, **legacy})
+            self.trace.record_event(kind, legacy)
 
-            elapsed_ms = round((time.perf_counter() - self.started) * 1000)
-            if kind == "workspace_ready":
-                self._record_latency_phase("sdk_query_dispatched", elapsed_ms)
-            if not self.first_application_delta_recorded and kind in {
-                "reasoning_delta",
-                "tool_call",
-                "tool_call_start",
-                "answer_delta",
-            }:
-                self.first_application_delta_recorded = True
-                self._record_latency_phase(
-                    "first_semantic_event",
-                    elapsed_ms,
-                    first_semantic_event_class={
-                        "reasoning_delta": "reasoning",
-                        "tool_call": "tool",
-                        "tool_call_start": "tool",
-                        "answer_delta": "answer",
-                    }[kind],
-                )
-                self._record_latency_phase("first_application_sse_delta", elapsed_ms)
+            handled = await self._dispatch_event(typed_event)
+            if handled.frame is not None:
+                yield handled.frame
+                last_write = time.monotonic()
 
-            self.projection.apply(kind, event)
-            if kind == "tool_call":
-                self.trace.start_tool(event)
-            elif kind == "tool_call_arguments_done":
-                self.trace.start_tool(event)
-            elif kind == "tool_result":
-                self.trace.finish_tool(event)
-                self.private_paper_tool_ids.discard(tool_id)
-            if kind == "error":
-                budget_interrupted = event.get("code") in {
-                    "chat_temporarily_disabled",
-                    "chat_disabled_interrupted",
-                }
-                if budget_interrupted:
-                    event["code"] = "chat_disabled_interrupted"
-                    event["message"] = (
-                        "Chat was disabled while this response was running. "
-                        "The partial response is saved. Please try again later."
-                    )
-                with db_manager.session_local() as error_db:
-                    provider_code = ChatCapabilityService(
-                        error_db
-                    ).provider_error_for_turn(
-                        self.admission.session_id, self.admission.turn_id
-                    )
-                    if provider_code:
-                        event["code"] = provider_code
-                        if provider_code == "hf_inference_billing_exhausted":
-                            event["message"] = (
-                                "Hugging Face could not bill this request. Your included "
-                                "credits may be exhausted; enable or review pay-as-you-go "
-                                "billing in Settings."
-                            )
-                        elif provider_code == "openrouter_monthly_budget_exhausted":
-                            usage = OpenRouterUserBudgetService(
-                                error_db, self.settings
-                            ).status_percentage(self.owner.hf_user_id)
-                            reset = usage.resets_at.isoformat().replace("+00:00", "Z")
-                            event["message"] = (
-                                f"{usage.remaining_percent}% of your monthly shared "
-                                "OpenRouter allowance remains, but that is not enough "
-                                "to reserve another model call for this response. "
-                                f"It resets at {reset}."
-                            )
-                        elif provider_code == "openrouter_unavailable":
-                            event["message"] = (
-                                "OpenRouter is currently unavailable. However, "
-                                "you can still bring your own key in Settings."
-                            )
-                        elif provider_code == "openrouter_byok_credential_invalid":
-                            event["message"] = (
-                                "Your OpenRouter API key is no longer valid. "
-                                "Reconnect it in Settings, then try again."
-                            )
-                        elif provider_code == "openrouter_byok_billing_error":
-                            event["message"] = (
-                                "Your OpenRouter key is connected, but OpenRouter "
-                                "rejected billing for the account behind it. A key "
-                                "spending limit is not an account credit balance. "
-                                "Add credits or enable pay-as-you-go in OpenRouter, "
-                                "then try again."
-                            )
-                        elif provider_code == "openrouter_byok_rate_limit":
-                            event["message"] = (
-                                "Your OpenRouter API key is temporarily rate-limited."
-                            )
-                _persist_failure(
-                    self.owner,
-                    self.settings,
-                    self.admission,
-                    event.get("code") or "provider_error",
-                    budget_interrupted,
-                    self.projection.completed_blocks(),
-                )
-                self.terminal = "error"
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    "error",
-                    terminal_code=event.get("code") or "provider_error",
-                )
-            elif kind == "done":
-                self._complete_turn(event)
-                event["citations"] = self.projection.citations
-                self.terminal = event.get("finish_reason", "success")
-                self.trace.finish("".join(self.projection.answer_parts), self.terminal)
-            yield ChatStreamFrame(kind, event)
-            last_write = time.monotonic()
         if self.research_task:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.research_task
@@ -1911,7 +2563,9 @@ class ChatStreamOrchestrator:
             )
             db.commit()
 
-    def _fail_mirror(self, event: dict[str, Any]) -> ChatStreamFrame:
+    def _fail_mirror(
+        self, event: dict[str, Any], persist: bool = False
+    ) -> ChatStreamFrame:
         mirror_key = event.get("key") or {}
         mirror_session_id = mirror_key.get("session_id")
         mirror_project_key = mirror_key.get("project_key")
@@ -1939,6 +2593,32 @@ class ChatStreamOrchestrator:
             and isinstance(terminal, dict)
             and terminal.get("type") == "done"
         )
+        if self.settings.chat_durable_turn_dispatch_enabled and not persist:
+            if completed_result:
+                terminal_payload = {
+                    key: value
+                    for key, value in terminal.items()
+                    if key not in {"v", "type", "request_id"}
+                }
+                return ChatStreamFrame(
+                    "done",
+                    {
+                        **terminal_payload,
+                        "citations": self.projection.citations,
+                        "transcript_status": "degraded",
+                        "warning": (
+                            "The answer was saved, but its research transcript is "
+                            "temporarily unavailable. Follow-up actions are disabled."
+                        ),
+                    },
+                )
+            return ChatStreamFrame(
+                "error",
+                {
+                    "message": "The conversation could not be saved.",
+                    "code": "transcript_mirror_error",
+                },
+            )
         with db_manager.session_local() as db:
             service = ChatSessionService(db, self.settings)
             service.mark_transcript_degraded(
@@ -1970,7 +2650,6 @@ class ChatStreamOrchestrator:
                 )
             db.commit()
         if completed_result:
-            self.terminal = terminal_payload.get("finish_reason", "success")
             logger.warning(
                 "chat transcript mirror failed after model result session_id=%s",
                 self.admission.session_id,
@@ -1987,7 +2666,6 @@ class ChatStreamOrchestrator:
                     ),
                 },
             )
-        self.terminal = "error"
         logger.warning(
             "chat transcript mirror failed before model result session_id=%s",
             self.admission.session_id,
@@ -2014,6 +2692,31 @@ class ChatStreamOrchestrator:
                 event.get("finish_reason", "success"),
             )
             db.commit()
+
+    async def _persist_scope_block(self, answer: str, finish_reason: str) -> None:
+        def persist() -> None:
+            with db_manager.session_local() as db:
+                service = ChatSessionService(db, self.settings)
+                service.complete_turn(
+                    self.owner,
+                    self.admission,
+                    answer,
+                    [],
+                    [],
+                    [],
+                    finish_reason,
+                )
+                if self.title_token:
+                    service.cancel_title(
+                        self.owner, self.admission.session_id, self.title_token
+                    )
+                db.commit()
+
+        await self._persist_terminal_with_lease(
+            persist,
+            lifecycle_event=CompletionEvent(TerminalOutcome.SCOPE_BLOCKED),
+        )
+        self.title_token = None
 
     def _finalize_projection(
         self, db, service: ChatSessionService
@@ -2068,47 +2771,63 @@ class ChatStreamOrchestrator:
                 )
                 db.commit()
 
-    async def _cancel_runner(self) -> None:
-        if self.runner and self.research_task and not self.research_task.done():
-            with contextlib.suppress(Exception):
-                await asyncio.shield(self.runner.cancel())
+    async def _cancel_runner(
+        self, *, force: bool = False, timeout_seconds: float | None = None
+    ) -> str:
+        if self.runner is None:
+            return "runner_unavailable"
+        if not force and self.research_task and self.research_task.done():
+            return "main_already_finished"
+        try:
+            cancellation = asyncio.shield(self.runner.cancel())
+            if timeout_seconds is not None:
+                await asyncio.wait_for(cancellation, timeout=timeout_seconds)
+            else:
+                await cancellation
+            return "cancelled"
+        except TimeoutError:
+            return "cancel_timeout"
+        except Exception:
+            return "cancel_failed"
+
+    async def _legacy_cancel_requested(self, *, force: bool = False) -> bool:
+        if self.settings.chat_durable_turn_dispatch_enabled:
+            return False
+        if self.legacy_cancel_seen:
+            return True
+        now = time.monotonic()
+        if not force and now - self.legacy_cancel_polled_at < 1.0:
+            return False
+        self.legacy_cancel_polled_at = now
+        try:
+            active = await asyncio.to_thread(
+                _legacy_turn_is_active, self.owner, self.settings, self.admission
+            )
+        except (OSError, SQLAlchemyError) as error:
+            logger.warning(
+                "chat legacy cancel fence unavailable session_id=%s error=%s",
+                self.admission.session_id,
+                type(error).__name__,
+            )
+            return False
+        self.legacy_cancel_seen = not active
+        return self.legacy_cancel_seen
+
+    async def _finish_legacy_cancel(self) -> ChatStreamFrame:
+        return await self._finalize_cancellation(cancel_runner=True)
 
     async def _close(self) -> None:
         # Starlette may close an async response generator with GeneratorExit
         # instead of delivering CancelledError. Persist the interruption here
         # as a last resort so a disconnected browser cannot leave the turn
         # generating until its lease expires.
-        if self.terminal == "disconnect":
+        if self.lifecycle.terminal is TurnTerminalState.ACTIVE:
             self.interruption_reason = self.interruption_reason or "stream_closed"
-            if self.admission.is_replacement and not self.edit_activated:
-                await asyncio.shield(
-                    asyncio.to_thread(
-                        _persist_preparation_failure,
-                        self.owner,
-                        self.settings,
-                        self.admission,
-                        "interrupted",
-                    )
-                )
-            else:
-                await asyncio.shield(
-                    asyncio.to_thread(
-                        _persist_failure,
-                        self.owner,
-                        self.settings,
-                        self.admission,
-                        "interrupted",
-                        True,
-                        self.projection.completed_blocks(),
-                    )
-                )
-            self.terminal = "interrupted"
-            self.trace.finish(
-                "".join(self.projection.answer_parts),
-                "interrupted",
-                interruption_reason=self.interruption_reason,
+            await self._finalize_disconnect(
+                InterruptionReason(self.interruption_reason)
             )
         await self._cancel_runner()
+        await self._stop_lease_heartbeat()
         if self.runner:
             with contextlib.suppress(Exception):
                 await asyncio.shield(self.runner.close())
@@ -2124,21 +2843,24 @@ class ChatStreamOrchestrator:
             self.request_id,
             self.principal_hash,
             (time.perf_counter() - self.started) * 1000,
-            self.terminal,
+            self.terminal_label,
         )
         status = {
             "success": "complete",
             "max_turns": "complete",
             "tool_limit": "complete",
+            "scope_blocked": "complete",
             "stopped": "stopped",
             "error": "error",
-        }.get(self.terminal, "interrupted")
+        }.get(self.terminal_label, "interrupted")
+        total_ms = round((time.perf_counter() - self.started) * 1000)
+        self.lifecycle_observer("terminal_latency_ms", None, total_ms)
         try:
             with db_manager.session_local() as db:
                 ChatLatencyService(db).finalize(
                     self.request_id,
                     status,
-                    round((time.perf_counter() - self.started) * 1000),
+                    total_ms,
                 )
                 db.commit()
         except Exception as exc:

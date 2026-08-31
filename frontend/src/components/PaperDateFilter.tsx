@@ -1,11 +1,12 @@
 import React, { useMemo, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  paperDatePresetRange,
+  type PaperDateRangeValue,
+} from "@/lib/paperDateRange";
 
-export interface PaperDateRangeValue {
-  startDate?: string;
-  endDate?: string;
-}
+export type { PaperDateRangeValue } from "@/lib/paperDateRange";
 
 interface CalendarDay {
   iso: string;
@@ -35,21 +36,6 @@ const monthStart = (value: Date) =>
   new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1));
 const setYear = (value: Date, year: number) =>
   new Date(Date.UTC(year, value.getUTCMonth(), 1));
-
-const presetRange = (
-  preset: "week" | "month",
-  currentDate: Date,
-): Required<PaperDateRangeValue> => {
-  const today = new Date(currentDate);
-  const start = new Date(today);
-  if (preset === "week") {
-    const mondayOffset = (today.getUTCDay() + 6) % 7;
-    start.setUTCDate(today.getUTCDate() - mondayOffset);
-  } else {
-    start.setUTCDate(1);
-  }
-  return { startDate: isoDate(start), endDate: isoDate(today) };
-};
 
 const sameRange = (
   value: PaperDateRangeValue,
@@ -198,8 +184,8 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
   const [startYear, setStartYear] = useState(() => String(currentDay.getUTCFullYear()));
   const [endYear, setEndYear] = useState(() => String(currentDay.getUTCFullYear()));
   const current = { startDate, endDate };
-  const week = presetRange("week", currentDay);
-  const month = presetRange("month", currentDay);
+  const week = paperDatePresetRange("week", currentDay);
+  const month = paperDatePresetRange("month", currentDay);
   const today = isoDate(currentDay);
   const custom = Boolean(startDate && endDate && !sameRange(current, week) && !sameRange(current, month));
 
@@ -263,14 +249,14 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
         className={`sort-btn sort-btn-time${sameRange(current, week) ? " active" : ""}`}
         onClick={() => onChange(week)}
       >
-        This Week
+        Last Week
       </button>
       <button
         type="button"
         className={`sort-btn sort-btn-time${sameRange(current, month) ? " active" : ""}`}
         onClick={() => onChange(month)}
       >
-        This Month
+        Last Month
       </button>
       <button
         type="button"

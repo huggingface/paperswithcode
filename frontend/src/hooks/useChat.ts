@@ -7,6 +7,7 @@ import {
   type ChatPaperHit,
   type ChatStreamRequest,
   ChatStreamError,
+  ChatTransportError,
   isChatLive,
   isChatSmoothStreamingEnabled,
   resumeChat,
@@ -29,6 +30,63 @@ import {
 import { cancelSession, getSession, toUiMessages } from "@/lib/chatSessions";
 
 const WORKSPACE_STATUS_DELAY_MS = 750;
+const STREAM_RECONNECT_DELAYS_MS = [250, 500, 1_000] as const;
+
+const waitForReconnect = (delayMs: number, signal: AbortSignal): Promise<void> => (
+  new Promise((resolve) => {
+    const finish = () => {
+      window.clearTimeout(timer);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = window.setTimeout(finish, delayMs);
+    signal.addEventListener("abort", finish, { once: true });
+  })
+);
+
+async function* reconnectChatStream(
+  initialSource: AsyncGenerator<ChatEvent>,
+  options: {
+    signal: AbortSignal;
+    getSessionId: () => string | null;
+    getAfterSequence: () => number;
+    onSequence: (sequence: number) => void;
+  },
+): AsyncGenerator<ChatEvent> {
+  let source = initialSource;
+  let reconnectAttempts = 0;
+  for (;;) {
+    let sawTerminalEvent = false;
+    try {
+      for await (const event of source) {
+        if (event.type === "done" || event.type === "error") sawTerminalEvent = true;
+        yield event;
+      }
+      if (sawTerminalEvent || options.signal.aborted) return;
+      throw new ChatTransportError();
+    } catch (error) {
+      const sessionId = options.getSessionId();
+      if (
+        options.signal.aborted
+        || sawTerminalEvent
+        || !(error instanceof ChatTransportError)
+        || !sessionId
+        || reconnectAttempts >= STREAM_RECONNECT_DELAYS_MS.length
+      ) throw error;
+      await waitForReconnect(
+        STREAM_RECONNECT_DELAYS_MS[reconnectAttempts],
+        options.signal,
+      );
+      if (options.signal.aborted) return;
+      reconnectAttempts += 1;
+      source = resumeChat(sessionId, {
+        signal: options.signal,
+        afterSequence: options.getAfterSequence(),
+        onSequence: options.onSequence,
+      });
+    }
+  }
+}
 
 function findLastMatchingIndex<T>(items: T[], predicate: (item: T) => boolean): number {
   for (let index = items.length - 1; index >= 0; index -= 1) {
@@ -390,10 +448,26 @@ export function useChat(options: UseChatOptions) {
       let sawTerminalEvent = false;
       let streamFailed = false;
       let admissionRejected = false;
+      let latestSequence = 0;
+      const trackSequence = (sequence: number) => {
+        if (sequence > latestSequence) latestSequence = sequence;
+      };
       try {
-        const source = resumeSessionId
-          ? resumeChat(resumeSessionId, { signal: controller.signal })
-          : streamChat(request, { signal: controller.signal });
+        const initialSource = resumeSessionId
+          ? resumeChat(resumeSessionId, {
+              signal: controller.signal,
+              onSequence: trackSequence,
+            })
+          : streamChat(request, {
+              signal: controller.signal,
+              onSequence: trackSequence,
+            });
+        const source = reconnectChatStream(initialSource, {
+          signal: controller.signal,
+          getSessionId: () => activeSessionIdRef.current,
+          getAfterSequence: () => latestSequence,
+          onSequence: trackSequence,
+        });
         // Replayed deltas should catch the UI up immediately. Newly arriving
         // deltas continue to render as they reach the reconnecting browser.
         const smooth = !resumeSessionId && isChatLive() && isChatSmoothStreamingEnabled();

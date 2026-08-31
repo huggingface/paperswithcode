@@ -1,7 +1,13 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { ChatStreamError, type ChatEvent, type ChatMessage, type ChatStreamRequest } from "@/lib/chat";
+import {
+  type ChatEvent,
+  type ChatMessage,
+  type ChatStreamRequest,
+  ChatStreamError,
+  ChatTransportError,
+} from "@/lib/chat";
 import type { ChatSessionDetail } from "@/lib/chatSessions";
 import { useChat } from "@/hooks/useChat";
 
@@ -101,6 +107,12 @@ const deferred = <T,>() => {
   return { promise, resolve };
 };
 
+const flushMicrotasks = async () => {
+  await act(async () => {
+    for (let index = 0; index < 12; index += 1) await Promise.resolve();
+  });
+};
+
 const renderChat = (
   sessionId: string | null = "session-1",
   webSearchEnabled = false,
@@ -160,6 +172,113 @@ describe("useChat reload recovery", () => {
       role: "assistant",
       blocks: [{ kind: "answer", text: "Recovered answer", done: true }],
     });
+  });
+});
+
+describe("useChat transport recovery", () => {
+  it("resumes the same turn from the latest cursor without posting again", async () => {
+    vi.useFakeTimers();
+    const postedClientMessageIds: string[] = [];
+    streamChatMock.mockImplementation((request: ChatStreamRequest, opts: {
+      onSequence?: (sequence: number) => void;
+    }) => {
+      postedClientMessageIds.push(request.client_message_id);
+      return (async function* () {
+        opts.onSequence?.(11);
+        yield { type: "stream_start", request_id: "r1", session_id: "session-1" } as ChatEvent;
+        opts.onSequence?.(12);
+        yield { type: "answer_delta", text: "Part one. " } as ChatEvent;
+        throw new ChatTransportError("connection reset");
+      })();
+    });
+    resumeChatMock.mockImplementation(() => stream(
+      { type: "answer_delta", text: "Part two." },
+      { type: "done", finish_reason: "success" },
+    )());
+    getSessionMock.mockRejectedValue(new Error("not persisted yet"));
+    const { result } = renderChat();
+
+    act(() => expect(result.current.send("Continue this turn")).toBe(true));
+    await flushMicrotasks();
+    expect(resumeChatMock).not.toHaveBeenCalled();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    await flushMicrotasks();
+    expect(result.current.busy).toBe(false);
+
+    expect(resumeChatMock).toHaveBeenCalledWith("session-1", expect.objectContaining({
+      afterSequence: 12,
+      signal: expect.any(Object),
+    }));
+    expect(postedClientMessageIds).toHaveLength(1);
+    expect(streamChatMock).toHaveBeenCalledTimes(1);
+    expect(result.current.messages.at(-1)?.blocks).toEqual([
+      { kind: "answer", text: "Part one. Part two.", done: true, citations: undefined },
+    ]);
+  });
+
+  it("uses bounded reconnect delays and exposes the failed turn after exhaustion", async () => {
+    vi.useFakeTimers();
+    streamChatMock.mockImplementation((_request: ChatStreamRequest, opts: {
+      onSequence?: (sequence: number) => void;
+    }) => (async function* () {
+      opts.onSequence?.(7);
+      yield { type: "stream_start", request_id: "r1", session_id: "session-1" } as ChatEvent;
+      throw new ChatTransportError("connection reset");
+    })());
+    resumeChatMock.mockImplementation(() => (async function* () {
+      yield* stream()();
+      throw new ChatTransportError("still offline");
+    })());
+    getSessionMock.mockRejectedValue(new Error("not persisted yet"));
+    const { result } = renderChat();
+
+    act(() => expect(result.current.send("Keep trying")).toBe(true));
+    await flushMicrotasks();
+    await act(async () => { await vi.advanceTimersByTimeAsync(249); });
+    expect(resumeChatMock).toHaveBeenCalledTimes(0);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(resumeChatMock).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(499); });
+    expect(resumeChatMock).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(resumeChatMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(999); });
+    expect(resumeChatMock).toHaveBeenCalledTimes(2);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    await flushMicrotasks();
+    expect(result.current.busy).toBe(false);
+
+    expect(resumeChatMock).toHaveBeenCalledTimes(3);
+    expect(streamChatMock).toHaveBeenCalledTimes(1);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      error: "still offline",
+    });
+  });
+
+  it.each([
+    ["terminal event", async function* () {
+      yield { type: "stream_start", request_id: "r1", session_id: "session-1" } as ChatEvent;
+      yield { type: "error", code: "provider_error", message: "Provider rejected the turn" } as ChatEvent;
+    }],
+    ["typed stream error", async function* () {
+      yield { type: "stream_start", request_id: "r1", session_id: "session-1" } as ChatEvent;
+      throw new ChatStreamError("Request rejected", "request_rejected", 400);
+    }],
+  ])("does not reconnect after a %s", async (_label, source) => {
+    vi.useFakeTimers();
+    streamChatMock.mockImplementation(source);
+    getSessionMock.mockRejectedValue(new Error("not persisted yet"));
+    const { result } = renderChat();
+
+    act(() => expect(result.current.send("Do not retry")).toBe(true));
+    await flushMicrotasks();
+    expect(result.current.busy).toBe(false);
+
+    expect(resumeChatMock).not.toHaveBeenCalled();
   });
 });
 

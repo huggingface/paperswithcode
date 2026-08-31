@@ -30,6 +30,7 @@ export function createWebMcpExtension(
     excalidraw?: ExcalidrawTransport | false;
     excalidrawView?: ExcalidrawViewTransport;
     onStatus?: (snapshot: McpStatusSnapshot) => void;
+    exaEnv?: Record<string, string>;
   },
 ): ExtensionFactory {
   const excalidraw = options?.excalidraw === false ? false : (options?.excalidraw ?? (excalidrawEnabled() ? { url: EXCALIDRAW_ENDPOINT } : false));
@@ -44,6 +45,7 @@ export function createWebMcpExtension(
         exa: {
           command,
           args,
+          ...(options?.exaEnv ? { env: options.exaEnv } : {}),
           lifecycle: "lazy",
           directTools: ["search_web"],
           toolPrefix: "none",

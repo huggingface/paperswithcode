@@ -24,6 +24,7 @@ from backend.services.chat_sandbox_lease_maintenance_coordinator import (
 )
 from backend.services.chat_sandbox_pool_coordinator import ChatSandboxPoolCoordinator
 from backend.services.chat_sandbox_pool_repository import ChatSandboxPoolRepository
+from backend.services.chat_sandbox_provider import SandboxLaunchMode
 from backend.services.chat_sandbox_state_repository import ChatSandboxStateRepository
 from backend.services.chat_sandbox_worker_transport import ChatSandboxWorkerTransport
 from backend.tests.test_chat_sandbox_capacity_acquisition import (
@@ -141,6 +142,26 @@ def test_direct_coordinator_creation_returns_a_typed_outcome_without_db_io_overl
     assert outcome.public_label == "created"
     assert outcome.created is True
     assert provider.calls[0][0] == "create"
+
+
+def test_direct_coordinator_forwards_executor_launch_mode_to_provider():
+    settings = _settings()
+    sessions = _database()
+    session_id = uuid.uuid4()
+    with sessions() as db, db.begin():
+        db.add(_session(session_id))
+
+    class RecordingProvider(_Provider):
+        async def create(self, **options):
+            self.launch_mode = options["launch_mode"]
+            return await super().create(**options)
+
+    provider = RecordingProvider(transactions=[])
+    coordinator = _coordinator(settings, sessions, provider)
+
+    asyncio.run(coordinator.acquire(session_id, launch_mode=SandboxLaunchMode.EXECUTOR))
+
+    assert provider.launch_mode is SandboxLaunchMode.EXECUTOR
 
 
 @pytest.mark.parametrize(

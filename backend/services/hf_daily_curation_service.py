@@ -10,7 +10,7 @@ from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
 from types import SimpleNamespace
 
-from huggingface_hub import HfApi
+from huggingface_hub import HfFileSystem
 from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import func
 from sqlalchemy.orm import Session
@@ -31,6 +31,9 @@ from backend.services.codex_add_evals_service import (
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
+)
+from backend.scripts.generate_missing_paper_markdown import (
+    validate_canonical_markdown,
 )
 from backend.utils.hf_daily_papers import fetch_hf_daily_papers
 from backend.utils.urls import get_paper_route_identifier
@@ -63,20 +66,22 @@ def fetch_hf_daily_cohort(cohort_date: date) -> list[str]:
 
 
 def paper_markdown_available(paper: Paper, settings: Settings) -> bool:
-    """Check the canonical bucket key without downloading paper content."""
+    """Require bounded canonical Markdown that satisfies the OCR semantic contract."""
     arxiv_id = re.sub(r"v\d+$", "", paper.arxiv_id or "")
     if not arxiv_id or not settings.hf_token:
         return False
     key = f"{arxiv_id[:4]}/{arxiv_id}.md"
+    path = f"hf://buckets/{settings.paper_markdown_hf_bucket_id}/{key}"
     try:
-        return bool(
-            HfApi(token=settings.hf_token).get_bucket_paths_info(
-                settings.paper_markdown_hf_bucket_id,
-                [key],
-                token=settings.hf_token,
-            )
-        )
-    except HfHubHTTPError:
+        filesystem = HfFileSystem(token=settings.hf_token)
+        with filesystem.open(path, "rb", block_size=0) as handle:
+            raw = handle.read(64 * 1024 * 1024 + 1)
+        if len(raw) > 64 * 1024 * 1024:
+            return False
+        markdown = raw.decode("utf-8")
+        validate_canonical_markdown(paper.title or "", markdown)
+        return True
+    except (HfHubHTTPError, OSError, UnicodeDecodeError, ValueError):
         return False
 
 
@@ -255,6 +260,21 @@ class HFDailyCurationService:
                 priority=50,
             )
         return retried.model_dump(mode="json")
+
+    def dispatch_canary_job(self, job_id: uuid.UUID) -> dict:
+        """Dispatch exactly one queued scheduled job while normal dispatch is paused."""
+        row = self.db.get(PaperCurationJob, job_id)
+        if row is None:
+            raise LookupError("Curation job not found")
+        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+            raise ValueError("Only scheduled curation jobs may be canary-dispatched")
+        if row.status != "queued":
+            raise ValueError("Canary dispatch requires a queued curation job")
+        state = self.db.get(PaperCurationSchedulerState, 1)
+        if state is None or state.dispatch_enabled or state.paused_at is None:
+            raise ValueError("Canary dispatch requires normal dispatch to be paused")
+        row = self.job_service.dispatch_canary(self.db, self.settings, row)
+        return self.job_service.serialize(row, self.settings).model_dump(mode="json")
 
     def validator_replay(self, job_id: uuid.UUID) -> dict:
         """Run a saved proposal through current read-only policy validators."""

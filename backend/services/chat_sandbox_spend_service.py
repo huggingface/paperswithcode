@@ -365,6 +365,16 @@ class ChatSandboxSpendService:
         )
         return self._aware(interval.terminal_at) <= provider_coverage_end
 
+    @staticmethod
+    def _is_uncreated_failure(interval: ChatSandboxComputeInterval) -> bool:
+        """Return whether Modal never created compute for a closed reservation."""
+
+        return (
+            interval.reconciliation_state == "creation_failed"
+            and interval.provider_created_at is None
+            and interval.modal_sandbox_id is None
+        )
+
     def _terminal_summary(
         self,
         *,
@@ -390,6 +400,8 @@ class ChatSandboxSpendService:
             accrued = 0
             invalid = False
             for interval in rows:
+                if self._is_uncreated_failure(interval):
+                    continue
                 interval_start = self._aware(interval.reserved_at)
                 provider_created_at = (
                     None
@@ -452,6 +464,11 @@ class ChatSandboxSpendService:
                                 AND origin = 'reconciled_orphan'
                                 AND reconciliation_state = 'confirmed'
                                 AND terminal_at <= :coverage_end
+                            )
+                            AND NOT (
+                                reconciliation_state = 'creation_failed'
+                                AND provider_created_at IS NULL
+                                AND modal_sandbox_id IS NULL
                             )
                         ),
                         0
@@ -1273,6 +1290,8 @@ class ChatSandboxSpendService:
         )
         daily: dict[str, dict[str, int]] = {}
         for row in cycle_rows:
+            if self._is_uncreated_failure(row):
+                continue
             row_start = max(self._aware(row.reserved_at), cycle_start)
             row_end = min(self._metered_end(row, now), now, cycle_finish)
             cursor = row_start
@@ -1346,7 +1365,8 @@ class ChatSandboxSpendService:
         recent_rows = [
             row
             for row in cycle_rows
-            if self._metered_end(row, now) > recent_start
+            if not self._is_uncreated_failure(row)
+            and self._metered_end(row, now) > recent_start
             and self._aware(row.reserved_at) < now
         ]
         observed_start = min(

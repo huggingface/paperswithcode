@@ -17,6 +17,8 @@ from backend.models.database import ChatOpenAIMonthlyUsage, ChatOpenAIProviderCa
 from backend.services.chat_capability_service import ChatCapabilityService
 from backend.services.chat_openai_budget_service import (
     ChatOpenAIBudgetService,
+    OpenAIAccountingInvariantError,
+    OpenAILimitExceeded,
     OpenAIPricingUnavailable,
     OpenAIRequestBounds,
     actual_usage_microusd,
@@ -68,6 +70,7 @@ def test_existing_gateway_path_dispatches_explicit_responses_protocol(monkeypatc
             "Bearer capability",
             "session-id",
             "turn-id",
+            None,
             db,
             settings,
         )
@@ -79,6 +82,7 @@ def test_existing_gateway_path_dispatches_explicit_responses_protocol(monkeypatc
         "Bearer capability",
         "session-id",
         "turn-id",
+        None,
         db,
         settings,
     )
@@ -342,3 +346,75 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement():
         assert service.mark_stale_dispatched_unknown(now=later) == 0
         aggregate = db.get(ChatOpenAIMonthlyUsage, ("owner", now.date().replace(day=1)))
         assert aggregate.unknown_cost_calls == 1
+
+
+def test_qualification_turns_have_a_fixed_provider_request_ceiling():
+    from backend.chat_gateway_app import (
+        QUALIFICATION_PROVIDER_REQUESTS,
+        QUALIFICATION_PROVIDER_TURN_TOKENS,
+        _provider_turn_limits,
+    )
+
+    database = SimpleNamespace(scalar=lambda _query: "32-functional-turns")
+    limits = _provider_turn_limits(
+        SimpleNamespace(turn_id=object(), scopes=[]),
+        database,
+        SimpleNamespace(environment="staging"),
+    )
+
+    assert limits == (
+        QUALIFICATION_PROVIDER_REQUESTS,
+        QUALIFICATION_PROVIDER_TURN_TOKENS,
+    )
+    assert limits[0] == 2
+
+
+def test_production_provider_limits_never_query_staging_qualification_tables():
+    from backend.chat_gateway_app import MAX_PROVIDER_REQUESTS, _provider_turn_limits
+
+    def unexpected_query(_query):
+        raise AssertionError("production queried staging qualification state")
+
+    limits = _provider_turn_limits(
+        SimpleNamespace(turn_id=object(), scopes=[]),
+        SimpleNamespace(scalar=unexpected_query),
+        SimpleNamespace(environment="production"),
+    )
+
+    assert limits[0] == MAX_PROVIDER_REQUESTS
+
+
+class _ConcurrencyDB:
+    def __init__(self, values):
+        self.values = iter(values)
+
+    def scalar(self, _query):
+        return next(self.values)
+
+
+def test_qualification_openai_concurrency_allows_32_only_for_exact_scope_claim():
+    scope_id = uuid.uuid4()
+    now = datetime(2026, 8, 31, tzinfo=UTC)
+    service = ChatOpenAIBudgetService(_ConcurrencyDB((0, scope_id, 31)), _settings())
+    service._enforce_concurrency("owner", uuid.uuid4(), scope_id, now)
+
+    blocked = ChatOpenAIBudgetService(_ConcurrencyDB((0, scope_id, 32)), _settings())
+    with pytest.raises(OpenAILimitExceeded, match="global_concurrency"):
+        blocked._enforce_concurrency("owner", uuid.uuid4(), scope_id, now)
+
+    forged = ChatOpenAIBudgetService(_ConcurrencyDB((0, uuid.uuid4())), _settings())
+    with pytest.raises(OpenAIAccountingInvariantError, match="scope claim"):
+        forged._enforce_concurrency("owner", uuid.uuid4(), scope_id, now)
+
+
+def test_ordinary_openai_global_concurrency_remains_configured_four():
+    now = datetime(2026, 8, 31, tzinfo=UTC)
+    ChatOpenAIBudgetService(
+        _ConcurrencyDB((0, 3)), _settings(chat_openai_global_max_concurrency=4)
+    )._enforce_concurrency("owner", uuid.uuid4(), None, now)
+
+    blocked = ChatOpenAIBudgetService(
+        _ConcurrencyDB((0, 4)), _settings(chat_openai_global_max_concurrency=4)
+    )
+    with pytest.raises(OpenAILimitExceeded, match="global_concurrency"):
+        blocked._enforce_concurrency("owner", uuid.uuid4(), None, now)

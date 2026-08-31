@@ -117,9 +117,15 @@ describe("PaperDateFilter", () => {
     expect(screen.getByRole("button", { name: "Change date range" })).toHaveTextContent(
       "Aug 3–10, 2026",
     );
-    await user.click(screen.getByRole("button", { name: "This Week" }));
+    await user.click(screen.getByRole("button", { name: "Last Week" }));
     expect(onChange).toHaveBeenLastCalledWith({
-      startDate: "2026-08-17",
+      startDate: "2026-08-15",
+      endDate: "2026-08-21",
+    });
+
+    await user.click(screen.getByRole("button", { name: "Last Month" }));
+    expect(onChange).toHaveBeenLastCalledWith({
+      startDate: "2026-07-23",
       endDate: "2026-08-21",
     });
 

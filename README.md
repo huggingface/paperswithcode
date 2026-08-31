@@ -43,13 +43,13 @@ We use [uv](https://docs.astral.sh/uv/) to handle Python package management. It 
 pip install uv
 ```
 
-Install the standalone, read-only `pwc` CLI directly from the repository with
+Install the standalone, read-only `pwc` CLI from its canonical repository with
 either uv or pipx:
 
 ```bash
-uv tool install 'git+https://github.com/huggingface/paperswithcode.git#subdirectory=standalone_cli'
+uv tool install 'git+https://github.com/huggingface/pwc-cli.git#subdirectory=standalone_cli'
 # or
-pipx install 'git+https://github.com/huggingface/paperswithcode.git#subdirectory=standalone_cli'
+pipx install 'git+https://github.com/huggingface/pwc-cli.git#subdirectory=standalone_cli'
 ```
 
 For repository development, clone the full project and let uv install its
@@ -252,7 +252,6 @@ uv run
 - **[.github/workflows/scripts/README.md](.github/workflows/scripts/README.md)** – Cron job guide
 
 ### Key Scripts
-- **[setup_ssl.sh](setup_ssl.sh)** - Automated SSL certificate setup
 - **[check_services.sh](check_services.sh)** - Delegate to read-only `pwc-status`
 - **[deploy/](deploy/)** - Immutable release, rollback, nginx, and smoke tooling
 

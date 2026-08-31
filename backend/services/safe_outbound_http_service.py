@@ -17,9 +17,16 @@ SUPPORTED_PORTS = frozenset({80, 443})
 
 
 class SafeOutboundHttpError(RuntimeError):
-    def __init__(self, status_code: int, message: str):
+    def __init__(
+        self,
+        status_code: int,
+        message: str,
+        *,
+        origin_status_code: int | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.origin_status_code = origin_status_code
 
 
 @dataclass(frozen=True)
@@ -139,7 +146,9 @@ async def _fetch_one_hop(
                 return response.status, "", b"", location
             if not 200 <= response.status < 300:
                 raise SafeOutboundHttpError(
-                    502, "The outbound origin returned an error"
+                    502,
+                    "The outbound origin returned an error",
+                    origin_status_code=response.status,
                 )
             content_type = (
                 response.headers.get("Content-Type", "").split(";", 1)[0].lower()
@@ -148,10 +157,18 @@ async def _fetch_one_hop(
                 raise SafeOutboundHttpError(
                     415, "The outbound content type is not allowed"
                 )
-            body = await response.content.read(max_bytes + 1)
-            if len(body) > max_bytes:
-                raise SafeOutboundHttpError(413, "The outbound response is too large")
-            return response.status, content_type, body, None
+            body = bytearray()
+            while True:
+                remaining = max_bytes + 1 - len(body)
+                chunk = await response.content.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                body.extend(chunk)
+                if len(body) > max_bytes:
+                    raise SafeOutboundHttpError(
+                        413, "The outbound response is too large"
+                    )
+            return response.status, content_type, bytes(body), None
     except SafeOutboundHttpError:
         raise
     except (TimeoutError, aiohttp.ClientError):

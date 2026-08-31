@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Update GitHub repository star counts hourly
+
+[Timer]
+OnCalendar=*-*-* *:00:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-update-github-stars.service
+
+[Install]
+WantedBy=timers.target

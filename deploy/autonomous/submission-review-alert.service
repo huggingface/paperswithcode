@@ -1,0 +1,12 @@
+[Unit]
+Description=Alert when autonomous Papers With Code submission review fails
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron alert_submission_review_failure
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict

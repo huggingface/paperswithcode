@@ -39,6 +39,7 @@ const statusStyles: Record<CodexPaperJobStatus, string> = {
 const kindLabels: Record<CodexPaperJob["kind"], string> = {
   "add-evals": "Add evals",
   "enrich-paper": "Enrich paper",
+  "resolve-model-paper": "Resolve model release",
 };
 
 const statusIcons: Record<CodexPaperJobStatus, typeof Clock3> = {
@@ -177,7 +178,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
             </div>
             <div className="mb-5 grid gap-3 sm:grid-cols-5">
               <select aria-label="Trigger" className="rounded border px-2 py-1 text-sm" value={trigger} onChange={(event) => setTrigger(event.target.value)}>
-                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option>
+                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option>
               </select>
               <select aria-label="Status" className="rounded border px-2 py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="">All statuses</option>{Object.keys(statusStyles).map((value) => <option key={value}>{value}</option>)}
@@ -209,13 +210,22 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                       <TableRow key={job.id}>
                         <TableCell className="align-top"><JobStatus status={job.status} /></TableCell>
                         <TableCell className="min-w-[260px] align-top">
-                          <Link
-                            to={`/paper/${encodeURIComponent(job.paper_route)}`}
-                            className="font-medium hover:underline"
-                          >
-                            {job.paper_title}
-                          </Link>
-                          <div className="mt-1 text-xs cron-muted">Paper #{job.paper_id}</div>
+                          {job.paper_route ? (
+                            <>
+                              <Link
+                                to={`/paper/${encodeURIComponent(job.paper_route)}`}
+                                className="font-medium hover:underline"
+                              >
+                                {job.paper_title}
+                              </Link>
+                              <div className="mt-1 text-xs cron-muted">Paper #{job.paper_id}</div>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-medium">Trending model discovery</span>
+                              <div className="mt-1 text-xs cron-muted">Candidate {job.candidate_id}</div>
+                            </>
+                          )}
                         </TableCell>
                         <TableCell className="whitespace-nowrap align-top">
                           {kindLabels[job.kind]}

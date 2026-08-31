@@ -167,6 +167,7 @@ class ChatSandboxCapacityRepository:
         now: datetime,
         ready_timeout_seconds: float,
         reserve_interval: ReserveInterval | None = None,
+        total_live_cap: int | None = None,
     ) -> AcquisitionOutcome:
         """Select and claim a start while retaining every database lock."""
 
@@ -177,6 +178,7 @@ class ChatSandboxCapacityRepository:
             lease=lease,
             now=now,
             ready_timeout_seconds=ready_timeout_seconds,
+            total_live_cap=total_live_cap,
         )
         if not isinstance(decision, StartEligible):
             return decision
@@ -216,6 +218,7 @@ class ChatSandboxCapacityRepository:
         lease: ChatSandboxLease | None,
         now: datetime,
         ready_timeout_seconds: float,
+        total_live_cap: int | None = None,
     ) -> AcquisitionDecision:
         compatible = bool(
             lease
@@ -301,7 +304,12 @@ class ChatSandboxCapacityRepository:
                 )
                 or 0
             )
-            if live_assigned + live_pool >= self.settings.chat_sandbox_total_live_cap:
+            capacity = (
+                total_live_cap
+                if total_live_cap is not None
+                else self.settings.chat_sandbox_total_live_cap
+            )
+            if live_assigned + live_pool >= capacity:
                 evict_session_id = db.execute(
                     select(ChatSandboxLease.chat_session_id)
                     .where(

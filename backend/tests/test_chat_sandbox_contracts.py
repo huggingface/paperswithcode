@@ -1530,6 +1530,70 @@ def test_broker_routes_paper_evaluations_to_catalog(monkeypatch):
     }
 
 
+def test_broker_routes_parameter_filtered_benchmark_evaluations_to_catalog(
+    monkeypatch,
+):
+    broker = _import_broker(monkeypatch)
+
+    class Response:
+        status = 200
+
+        def read(self, _size):
+            return b'{"result":{"count":0,"results":[]}}'
+
+    class Connection:
+        requests: list[tuple[str, str, bytes]] = []
+
+        def request(self, method, request_path, body, headers):
+            del headers
+            self.requests.append((method, request_path, body))
+
+        def getresponse(self):
+            return Response()
+
+        def close(self):
+            return
+
+    class Request:
+        path = (
+            "/api/v1/evaluations/?page=1&page_size=100&dataset_id=124"
+            "&ordering=best_rank&max_parameters_exclusive=1000000001"
+        )
+        wfile = BytesIO()
+        status = None
+
+        def _connection(self):
+            return Connection()
+
+        def send_response(self, status):
+            self.status = status
+
+        def send_header(self, _name, _value):
+            return
+
+        def end_headers(self):
+            return
+
+        def send_error(self, status):
+            self.status = status
+
+    request = Request()
+    broker.Handler.do_GET(request)
+
+    assert request.status == 200
+    payload = json.loads(Connection.requests[-1][2])
+    assert payload == {
+        "operation": "benchmark_evaluations",
+        "arguments": {
+            "dataset": "124",
+            "page": "1",
+            "page_size": "100",
+            "is_open": None,
+            "max_parameters_exclusive": "1000000001",
+        },
+    }
+
+
 def test_proxy_routes_only_claude_model_posts_to_gateway(monkeypatch):
     broker = _import_broker(monkeypatch)
 
@@ -2158,6 +2222,45 @@ def test_gateway_paper_evaluations_uses_bounded_service_arguments(monkeypatch):
             "paper_id": 42,
             "order_by": "benchmark_popularity",
             "order_dir": "desc",
+        }
+    ]
+
+
+def test_gateway_benchmark_evaluations_forwards_parameter_bound(monkeypatch):
+    calls = []
+
+    class Service:
+        def __init__(self, db):
+            assert db == "db"
+
+        def get_evaluations(self, **options):
+            calls.append(options)
+            return {"count": 0, "results": []}
+
+    monkeypatch.setattr(
+        "backend.services.chat_gateway_service.EvaluationService", Service
+    )
+
+    result = ChatGatewayService("db", SimpleNamespace()).catalog(
+        "benchmark_evaluations",
+        {
+            "dataset": "124",
+            "page": "1",
+            "page_size": "100",
+            "max_parameters_exclusive": "1000000001",
+        },
+    )
+
+    assert result == {"count": 0, "results": []}
+    assert calls == [
+        {
+            "page": 1,
+            "page_size": 100,
+            "dataset_id": 124,
+            "is_open": None,
+            "max_parameters_exclusive": 1_000_000_001,
+            "order_by": "best_rank",
+            "order_dir": "asc",
         }
     ]
 
@@ -3246,7 +3349,7 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert MODAL_APP_NAME == "pwc-chat-sandbox-v1"
     assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID.startswith("im-")
-    assert PRODUCTION_MODAL_IMAGE_ID == "im-9KrTNjZRd2nzi6fdYajx4p"
+    assert PRODUCTION_MODAL_IMAGE_ID == "im-gWZg59lNVcpcjCSYeE6psd"
     assert int(WORKER_CONTRACT_VERSION) >= 97
     assert CHAT_SANDBOX_REGION == "eu-west"
     assert CONTROL_PORT == 8080
@@ -3383,6 +3486,13 @@ def test_image_makes_copied_worker_readable_and_installs_skill():
     assert '"chmod -R a+rX /opt/pwc/backend"' in source
     assert '"chmod -R a+rX /opt/pwc/restricted_hf_cli"' in source
     assert '"chmod 0644 /opt/pwc/PWC_CLI_SKILL.md /opt/pwc/install-pwc.py"' in source
+    assert "PWC_CLI_SOURCE_COMMIT" in source
+    assert "PWC_CLI_INSTALLER_SHA256" in source
+    assert "raw.githubusercontent.com/huggingface/pwc-cli/" in source
+    assert "sha256sum -c -" in source
+    assert source.index('"mkdir -p /opt/pwc"') < source.index(
+        "raw.githubusercontent.com/huggingface/pwc-cli/"
+    )
     assert '"runuser -u pwc-chat -- hf --help >/dev/null"' in source
     assert '"python -m pip install --no-deps /opt/pwc/s2_cli"' in source
     assert "runuser -u pwc-chat -- hf version" in source
@@ -3391,6 +3501,10 @@ def test_image_makes_copied_worker_readable_and_installs_skill():
     ) in source
     assert '"chown pwc-broker:pwc-broker /var/empty/pwc-broker"' in source
     assert '"websockets==16.0"' in source
+    assert "import backend.chat_sandbox_worker.executor_daemon" in source
+    assert "import backend.chat_sandbox_worker.executor_relay" in source
+    assert "EXECUTOR_USER == 'pwc-chat'" in source
+    assert "DEFAULT_EXECUTOR_PIDS_MAX == 64" in source
 
 
 def test_chat_worker_exposes_parameter_filtered_benchmarks():
@@ -3403,6 +3517,7 @@ def test_chat_worker_exposes_parameter_filtered_benchmarks():
     assert "--author AUTHOR" in skill
     assert "--max-parameters SIZE" in skill
     assert "at or below an inclusive parameter" in skill
+    assert "resource-constrained device requests" in skill
     assert "pwc benchmark --help | grep -F -- '--max-parameters'" in image_source
     assert "pwc paper list --help" in image_source
 

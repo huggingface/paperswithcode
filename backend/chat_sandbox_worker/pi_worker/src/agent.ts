@@ -19,6 +19,8 @@ import {
 } from "./mcp_app_registry.js";
 import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
+import { type GatewayContext } from "./provider.js";
+import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
 import { fetchLiveTaskCatalog, loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
@@ -79,7 +81,11 @@ export class PiWorker {
     paperTimeoutSeconds: Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600),
   });
 
-  constructor(private readonly emit: (requestId: string, event: PwCEvent) => void) {}
+  constructor(
+    private readonly emit: (requestId: string, event: PwCEvent) => void,
+    private readonly gateway?: GatewayContext,
+    private readonly remoteTools?: RemoteToolBridge,
+  ) {}
 
   initialize(): Promise<void> {
     this.initialization ??= this.initializeImmutableProfile();
@@ -99,6 +105,19 @@ export class PiWorker {
         onStatus: (snapshot) => {
           this.mcpStatus = snapshot;
         },
+        ...(this.gateway ? { exaEnv: {
+          PWC_EXTERNAL_GATEWAY_URL: this.gateway.url,
+          PWC_EXTERNAL_GATEWAY_CAPABILITY: this.gateway.capability,
+          PWC_EXTERNAL_GATEWAY_SESSION: this.gateway.sessionId,
+          PWC_EXTERNAL_GATEWAY_TURN: this.gateway.turnId,
+          PWC_EXTERNAL_GATEWAY_TURN_WORKER_ID: this.gateway.turnClaim.workerId,
+          PWC_EXTERNAL_GATEWAY_TURN_WORKER_GENERATION: String(
+            this.gateway.turnClaim.workerGeneration,
+          ),
+          PWC_EXTERNAL_GATEWAY_TURN_LEASE_GENERATION: String(
+            this.gateway.turnClaim.leaseGeneration,
+          ),
+        } } : {}),
       },
     );
     if (process.env.PWC_CHAT_PI_PREWARM_ENABLED !== "true") return;
@@ -107,7 +126,7 @@ export class PiWorker {
     const protocol = process.env.PWC_CHAT_PI_PREWARM_PROTOCOL === "openai-responses"
       ? "openai-responses"
       : "anthropic-messages";
-    this.prewarmedProvider = await createProvider(model, protocol);
+    this.prewarmedProvider = await createProvider(model, protocol, this.gateway);
     this.prewarmedModel = model;
     this.prewarmedProtocol = protocol;
   }
@@ -145,7 +164,7 @@ export class PiWorker {
       return { manager: this.manager, initialCount: this.manager.getEntries().length + 1, created: false };
     }
     if (run.resume) {
-      const restored = await restoreFile(run.resume, "/home/pwc-chat/.pi-sessions");
+      const restored = await restoreFile(run.resume, "/home/pwc-chat/.pi-sessions", this.gateway);
       const manager = SessionManager.open(restored.file, "/home/pwc-chat/.pi-sessions", "/workspace");
       if (manager.getSessionId() !== run.resume || manager.getLeafId() !== restored.snapshot.current_leaf_id) {
         throw new Error("Pi restored session identity mismatch");
@@ -156,7 +175,7 @@ export class PiWorker {
     }
     const id = randomUUID();
     const manager = SessionManager.create("/workspace", "/home/pwc-chat/.pi-sessions", { id });
-    const bound = await createOrBind(id);
+    const bound = await createOrBind(id, this.gateway);
     if (bound.agent_session_id !== id) {
       if (bound.entry_count === 0) {
         const reboundManager = SessionManager.create(
@@ -168,7 +187,7 @@ export class PiWorker {
         this.boundAgentSession = bound.agent_session_id;
         return { manager: reboundManager, initialCount: 0, created: true };
       }
-      const restored = await restoreFile(bound.agent_session_id, "/home/pwc-chat/.pi-sessions");
+      const restored = await restoreFile(bound.agent_session_id, "/home/pwc-chat/.pi-sessions", this.gateway);
       const restoredManager = SessionManager.open(
         restored.file,
         "/home/pwc-chat/.pi-sessions",
@@ -240,6 +259,7 @@ export class PiWorker {
         state.manager.getSessionId(),
         state.initialCount,
         state.manager.getLeafId(),
+        this.gateway,
       );
       if (state.created) {
         const header = state.manager.getHeader();
@@ -258,7 +278,7 @@ export class PiWorker {
       && this.prewarmedProtocol === protocol
       && this.prewarmedProvider
       ? this.prewarmedProvider
-      : await createProvider(run.model, protocol);
+      : await createProvider(run.model, protocol, this.gateway);
     const settings = SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: false },
@@ -276,6 +296,11 @@ export class PiWorker {
       extensionFactories: [
         { name: "pwc-policy", factory: this.policyExtension!, hidden: true },
         { name: "pwc-exa-mcp", factory: this.webMcpExtension!, hidden: true },
+        ...(this.remoteTools ? [{
+          name: "pwc-remote-tools",
+          factory: createRemoteToolsExtension(this.remoteTools),
+          hidden: true,
+        }] : []),
       ],
     });
     await loader.reload();

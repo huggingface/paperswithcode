@@ -1,8 +1,6 @@
 name: Cron - Update Citations
 
 on:
-  schedule:
-    - cron: "30 * * * *"
   workflow_dispatch: {}
 
 concurrency:

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import secrets
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import Settings
 from backend.services.chat_sandbox_capacity_repository import lock_capacity
@@ -24,6 +26,8 @@ SessionFactory = Callable[[], Session]
 CapacityLocker = Callable[[Session], bool]
 UtcClock = Callable[[], datetime]
 TokenFactory = Callable[[], str]
+QualificationCleanup = Callable[[], int]
+logger = logging.getLogger(__name__)
 
 
 class MaintenanceSnapshotStore(Protocol):
@@ -45,6 +49,7 @@ class ChatSandboxLeaseMaintenanceCoordinator:
         capacity_locker: CapacityLocker = lock_capacity,
         utcnow: UtcClock | None = None,
         token_factory: TokenFactory | None = None,
+        qualification_cleanup: QualificationCleanup | None = None,
     ) -> None:
         idle_eviction = lifecycle.idle_eviction
         if lifecycle.settings is not settings or idle_eviction.settings is not settings:
@@ -88,6 +93,7 @@ class ChatSandboxLeaseMaintenanceCoordinator:
         self.capacity_locker = capacity_locker
         self.utcnow = utcnow or (lambda: datetime.now(UTC))
         self.token_factory = token_factory or (lambda: secrets.token_urlsafe(24))
+        self.qualification_cleanup = qualification_cleanup or (lambda: 0)
 
     @property
     def ready_timeout_seconds(self) -> float:
@@ -134,6 +140,26 @@ class ChatSandboxLeaseMaintenanceCoordinator:
         return await self.lifecycle.terminate_idle_candidates(plan.candidates)
 
     async def reconcile(self) -> int:
+        primary_error: BaseException | None = None
+        try:
+            return await self._reconcile_sandboxes()
+        except BaseException as error:
+            primary_error = error
+            raise
+        finally:
+            if self.settings.environment == "staging":
+                try:
+                    self.qualification_cleanup()
+                except (OSError, SQLAlchemyError) as error:
+                    logger.warning(
+                        "chat qualification evidence_missing operation=retention error=%s",
+                        type(error).__name__,
+                    )
+                except BaseException:
+                    if primary_error is None:
+                        raise
+
+    async def _reconcile_sandboxes(self) -> int:
         stale_cutoff = self.utcnow()
         with self.session_factory() as db:
             stale_operations = self.repository.list_stale_operations(

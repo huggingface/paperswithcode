@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-import re
 from unittest.mock import patch
 
 import pytest
@@ -13,8 +13,11 @@ from fastapi.testclient import TestClient
 
 from backend.config import get_settings
 from backend.main import create_app
+from backend.services import cron_health
 from backend.services.cron_health import (
+    _dashboard_job_summary,
     _gh_json,
+    _normalize_db_metric,
     _paper_markdown_monitor_snapshot,
     evaluate_job_health,
     fetch_systemd_status,
@@ -40,10 +43,43 @@ def _job(job_id: str):
     return job
 
 
+def test_dashboard_summary_reports_all_records_and_scheduled_denominator():
+    jobs = [
+        {"category": "daily", "status": "healthy"},
+        {"category": "hourly", "status": "broken"},
+        {"category": "manual", "status": "healthy"},
+    ]
+
+    summary = _dashboard_job_summary(jobs)
+
+    assert summary["total_jobs"] == 3
+    assert summary["scheduled_jobs"] == 2
+    assert summary["manual_jobs"] == 1
+    assert summary["healthy"] == 1
+    assert summary["broken"] == 1
+    assert summary["health_score"] == 50
+
+
+def test_database_freshness_metrics_preserve_bounded_scheduler_state():
+    paused_at = datetime(2026, 8, 28, 10, 0, tzinfo=timezone.utc)
+
+    assert _normalize_db_metric("pause_condition", "daily_token_guardrail") == (
+        "daily_token_guardrail"
+    )
+    assert _normalize_db_metric("paused_at", paused_at) == "2026-08-28T10:00:00Z"
+    assert _normalize_db_metric("queued_jobs", 4) == 4
+
+
 def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     root = Path(__file__).resolve().parents[2]
     jobs = list(list_cron_jobs())
     by_id = {job.id: job for job in jobs}
+    summary = _dashboard_job_summary(
+        [{"category": job.category, "status": "healthy"} for job in jobs]
+    )
+    assert summary["total_jobs"] == 38
+    assert summary["scheduled_jobs"] == 37
+    assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
     scheduled_commands = set()
@@ -72,19 +108,33 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
             workflow_owners[path.name] = command
 
     systemd_commands = set()
-    for service in sorted((root / "deploy" / "systemd").glob("pwc-*.service")):
-        match = re.search(r"ExecStart=.*/pwc-cron\s+([a-z0-9_]+)", service.read_text())
+    services = [
+        *(root / "deploy" / "systemd").glob("pwc-*.service"),
+        *(root / "deploy" / "systemd" / "cron").glob("pwc-*.service"),
+        *(root / "deploy" / "autonomous").glob("*.service"),
+    ]
+    for service in sorted(services):
+        timer = service.with_suffix(".timer")
+        if not timer.exists():
+            continue
+        match = re.search(
+            r"ExecStart=.*/pwc-cron(?:-throttled)?\s+([a-z0-9_]+)",
+            service.read_text(),
+        )
         if not match:
             continue
         command = match.group(1)
         systemd_commands.add(command)
         assert command in by_id, f"systemd command missing from registry: {command}"
-        assert by_id[command].systemd_service == service.name
-        timer = service.with_suffix(".timer")
-        assert timer.exists(), f"systemd timer missing for {command}"
-        assert by_id[command].systemd_timer == timer.name
+        assert (timer.name, service.name) in by_id[command].systemd_unit_pairs, (
+            f"unit pair not registered for {command}: {service.name}"
+        )
 
-    helpers = {"extract_urls_select", "extract_urls_persist"}
+    helpers = {
+        "alert_submission_review_failure",
+        "extract_urls_select",
+        "extract_urls_persist",
+    }
     manual = {"extract_urls"}
     registered = set(by_id)
     assert set(COMMANDS) == registered | helpers
@@ -215,8 +265,20 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "monitor_chat_operational_alerts" in job_ids
     assert "process_curation_thumbnails" in job_ids
 
+    artificial_analysis_job = _job("sync_artificial_analysis")
+    assert artificial_analysis_job.display_name == (
+        "Sync Artificial Analysis Leaderboards"
+    )
+    assert "artificial-analysis-provider-voice-tts-arena" in (
+        artificial_analysis_job.db_freshness_query
+    )
+    assert "LEAST(" in artificial_analysis_job.db_freshness_query
+
     keyword_job = _job("backfill_method_keywords")
     assert "method_keyword_backfill_runs" in keyword_job.db_freshness_query
+    assert keyword_job.lock_file == (
+        "/var/lib/paperswithcode/production/cron-locks/backfill_method_keywords.lock"
+    )
     assert "WITH current_run AS" in keyword_job.db_freshness_query
     assert "WHERE keyword_catalog_sha256 =" in keyword_job.db_freshness_query
     assert keyword_job.schedule.startswith("10 1")
@@ -293,19 +355,32 @@ def test_schedule_grace_transitions_are_deterministic():
         "stale_paper_scores": 0,
         "one_snapshot_over_30m": 0,
     }
+    stale_systemd = {
+        "available": True,
+        "enabled": True,
+        "timer_active": True,
+        "service_result": "success",
+        "exec_main_status": 0,
+        "last_started_at": "2026-08-14T11:59:50Z",
+        "last_completed_at": "2026-08-14T12:00:00Z",
+        "next_trigger_at": "2026-08-14T12:30:00Z",
+        "service_active": False,
+    }
     with patch("backend.services.cron_health.is_process_running", return_value=False):
         during_grace = evaluate_job_health(
             job,
             log,
             db_metrics=db,
-            workflow_status={"available": True},
+            lock_state={"exists": False, "held": False, "stale": False},
+            systemd_status=stale_systemd,
             now=datetime(2026, 8, 14, 12, 24, tzinfo=timezone.utc),
         )
         after_grace = evaluate_job_health(
             job,
             log,
             db_metrics=db,
-            workflow_status={"available": True},
+            lock_state={"exists": False, "held": False, "stale": False},
+            systemd_status=stale_systemd,
             now=datetime(2026, 8, 14, 12, 26, tzinfo=timezone.utc),
         )
     assert during_grace["execution_health"]["status"] == "degraded"
@@ -315,20 +390,16 @@ def test_schedule_grace_transitions_are_deterministic():
 def test_failed_scheduled_run_wins_over_fresh_manual_recovery_output():
     job = _job("update_hot_github_trending")
     now = datetime(2026, 8, 14, 12, 20, tzinfo=timezone.utc)
-    workflow = {
+    failed_systemd = {
         "available": True,
-        "scheduled_run": {
-            "status": "completed",
-            "conclusion": "failure",
-            "createdAt": "2026-08-14T12:15:00Z",
-            "updatedAt": "2026-08-14T12:17:00Z",
-        },
-        "manual_run": {
-            "status": "completed",
-            "conclusion": "success",
-            "createdAt": "2026-08-14T12:18:00Z",
-            "updatedAt": "2026-08-14T12:19:00Z",
-        },
+        "enabled": True,
+        "timer_active": True,
+        "service_result": "exit-code",
+        "exec_main_status": 1,
+        "last_started_at": "2026-08-14T12:15:10Z",
+        "last_completed_at": "2026-08-14T12:17:00Z",
+        "next_trigger_at": "2026-08-14T12:30:00Z",
+        "service_active": False,
     }
     with patch("backend.services.cron_health.is_process_running", return_value=False):
         evaluated = evaluate_job_health(
@@ -342,7 +413,8 @@ def test_failed_scheduled_run_wins_over_fresh_manual_recovery_output():
                 "stale_paper_scores": 0,
                 "one_snapshot_over_30m": 0,
             },
-            workflow_status=workflow,
+            lock_state={"exists": False, "held": False, "stale": False},
+            systemd_status=failed_systemd,
             now=now,
         )
     assert evaluated["execution_health"]["status"] == "broken"
@@ -363,6 +435,7 @@ def test_unavailable_scheduler_evidence_fails_closed_to_unknown():
                 "work_metrics": {"papers_processed": 10},
             },
             db_metrics={"last_write": now, "recent_writes": 10},
+            lock_state={"exists": False, "held": False, "stale": False},
             workflow_status={"available": False, "error": "permission denied"},
             now=now,
         )
@@ -437,22 +510,149 @@ def test_systemd_adapter_reads_only_registry_units():
             (),
             {
                 "returncode": 0,
-                "stdout": "Result=success\nExecMainStatus=0\nActiveState=inactive\nExecMainStartTimestamp=Fri 2026-08-14 12:19:00 UTC\nExecMainExitTimestamp=Fri 2026-08-14 12:19:05 UTC\n",
+                "stdout": "Result=success\nExecMainStatus=0\nActiveState=inactive\nJob=101665\nExecMainStartTimestamp=Fri 2026-08-14 12:19:00 UTC\nExecMainExitTimestamp=Fri 2026-08-14 12:19:05 UTC\n",
             },
+        )(),
+        type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": "Type=start\nState=waiting\n"},
         )(),
     ]
     job = _job("monitor_chat_operational_alerts")
-    with patch(
-        "backend.services.cron_health.subprocess.run", side_effect=responses
-    ) as run:
+    with (
+        patch(
+            "backend.services.cron_health.subprocess.run", side_effect=responses
+        ) as run,
+        patch(
+            "backend.services.cron_health._system_boot_started_at",
+            return_value="2026-08-14T08:00:00Z",
+        ),
+    ):
         status = fetch_systemd_status(job)
     assert status["available"] is True
     assert status["enabled"] is True
     assert status["service_result"] == "success"
+    assert status["service_start_queued"] is True
+    assert status["boot_started_at"] == "2026-08-14T08:00:00Z"
     assert [call.args[0][2] for call in run.call_args_list] == [
         job.systemd_timer,
         job.systemd_service,
+        "101665",
     ]
+
+
+def test_systemd_adapter_does_not_treat_a_stop_job_as_a_queued_start():
+    responses = [
+        type(
+            "Result",
+            (),
+            {
+                "returncode": 0,
+                "stdout": "UnitFileState=enabled\nActiveState=active\nSubState=waiting\n",
+            },
+        )(),
+        type(
+            "Result",
+            (),
+            {
+                "returncode": 0,
+                "stdout": "Result=success\nExecMainStatus=0\nActiveState=inactive\nJob=42\n",
+            },
+        )(),
+        type(
+            "Result",
+            (),
+            {"returncode": 0, "stdout": "Type=stop\nState=waiting\n"},
+        )(),
+    ]
+    job = _job("monitor_chat_operational_alerts")
+    with (
+        patch("backend.services.cron_health.subprocess.run", side_effect=responses),
+        patch(
+            "backend.services.cron_health._system_boot_started_at",
+            return_value="2026-08-14T08:00:00Z",
+        ),
+    ):
+        status = fetch_systemd_status(job)
+
+    assert status["service_start_queued"] is False
+
+
+def test_multi_unit_adapter_preserves_the_oldest_queued_lane_trigger():
+    job = _job("preload_thumbnails")
+    common = {
+        "available": True,
+        "enabled": True,
+        "timer_active": True,
+        "service_active": False,
+        "service_result": "success",
+        "exec_main_status": 0,
+        "next_trigger_at": None,
+        "boot_started_at": "2026-08-14T08:00:00Z",
+    }
+    statuses = [
+        {
+            **common,
+            "timer": job.systemd_unit_pairs[0][0],
+            "service": job.systemd_unit_pairs[0][1],
+            "service_start_queued": True,
+            "last_trigger_at": "2026-08-14T08:30:00Z",
+            "last_started_at": "2026-08-14T07:30:00Z",
+            "last_completed_at": "2026-08-14T07:31:00Z",
+        },
+        *[
+            {
+                **common,
+                "timer": timer,
+                "service": service,
+                "service_start_queued": False,
+                "last_trigger_at": "2026-08-14T12:00:00Z",
+                "last_started_at": "2026-08-14T12:00:00Z",
+                "last_completed_at": "2026-08-14T12:01:00Z",
+            }
+            for timer, service in job.systemd_unit_pairs[1:]
+        ],
+    ]
+
+    with patch("backend.services.cron_health._read_systemd_pair", side_effect=statuses):
+        status = fetch_systemd_status(job)
+
+    assert status["service_start_queued"] is True
+    assert status["queued_since_at"] == "2026-08-14T08:30:00Z"
+
+
+def test_systemd_adapter_attaches_persistent_execution_when_boot_lost_timestamps():
+    job = _job("mirror_thumbnails_to_disk")
+    pair = {
+        "available": True,
+        "timer": job.systemd_timer,
+        "service": job.systemd_service,
+        "enabled": True,
+        "timer_active": True,
+        "service_active": False,
+        "last_started_at": None,
+        "last_completed_at": None,
+        "next_trigger_at": None,
+    }
+    persistent = {
+        "status": "success",
+        "started_at": "2026-08-14T05:00:00Z",
+        "completed_at": "2026-08-14T05:04:00Z",
+        "release_sha": "a" * 40,
+        "source": "launcher_and_file_log",
+    }
+    with (
+        patch("backend.services.cron_health._read_systemd_pair", return_value=pair),
+        patch(
+            "backend.services.cron_health.fetch_persistent_execution",
+            return_value=persistent,
+        ) as fetch_persistent,
+    ):
+        status = fetch_systemd_status(job, {"status": "success"})
+
+    assert status["persistent_execution"] == persistent
+    fetch_persistent.assert_called_once_with(job, {"status": "success"})
 
 
 def test_chat_monitor_surfaces_dormant_and_undelivered_states():
@@ -550,6 +750,17 @@ def test_successful_workflow_is_health_evidence_without_logs_or_database():
                 "available": True,
                 "status": "completed",
                 "conclusion": "success",
+            },
+            systemd_status={
+                "available": True,
+                "enabled": True,
+                "timer_active": True,
+                "service_result": "success",
+                "exec_main_status": 0,
+                "last_started_at": "2026-08-14T09:59:50Z",
+                "last_completed_at": "2026-08-14T10:00:00Z",
+                "next_trigger_at": "2026-08-14T15:00:00Z",
+                "service_active": False,
             },
             lock_state={"exists": False, "stale": False},
             now=now,
@@ -962,18 +1173,23 @@ def test_extract_urls_actions_unavailable_degrades_fresh_db():
 def test_stale_successful_workflow_cannot_mask_fresh_database_writes():
     job = _job("update_citations")
     fresh_time = datetime.now(timezone.utc) - timedelta(minutes=5)
-    stale_workflow = datetime.now(timezone.utc) - timedelta(hours=3)
+    stale_completion = datetime.now(timezone.utc) - timedelta(hours=3)
     with patch("backend.services.cron_health.is_process_running", return_value=False):
         evaluated = evaluate_job_health(
             job,
             {"status": "success", "last_run": fresh_time, "is_running": False},
             db_metrics={"last_write": fresh_time, "recent_writes": 10},
             lock_state={"exists": False, "stale": False},
-            workflow_status={
+            systemd_status={
                 "available": True,
-                "status": "completed",
-                "conclusion": "success",
-                "updated_at": stale_workflow.isoformat(),
+                "enabled": True,
+                "timer_active": True,
+                "service_result": "success",
+                "exec_main_status": 0,
+                "last_started_at": stale_completion.isoformat(),
+                "last_completed_at": stale_completion.isoformat(),
+                "next_trigger_at": None,
+                "service_active": False,
             },
         )
 
@@ -1005,6 +1221,31 @@ def test_import_hf_daily_papers_recent_log_is_healthy_without_false_db_provenanc
     assert evaluated["output_health"]["status"] == "healthy"
     assert evaluated["status"] == "unknown"
     assert job.db_freshness_query is None
+
+
+def test_import_hf_daily_papers_failed_counter_is_broken_even_after_success():
+    job = _job("import_hf_daily_papers")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {
+                "status": "success",
+                "last_run": now,
+                "is_running": False,
+                "work_metrics": {
+                    "upstream_fetch_succeeded": True,
+                    "fetched": 12,
+                    "inserted": 4,
+                    "updated": 7,
+                    "failed": 1,
+                },
+            },
+        )
+
+    assert evaluated["output_health"]["status"] == "broken"
+
+    assert "1 imported paper" in evaluated["output_health"]["reason"]
 
 
 def test_recent_weekly_task_keyword_log_is_healthy_without_db_timestamp():
@@ -1092,6 +1333,21 @@ def test_hf_artifacts_fresh_db_metrics_are_healthy():
             "degraded",
             "awaits explicit paid execution authorization",
         ),
+        (
+            {"semantic_invalid_existing": 3},
+            "broken",
+            "semantic-invalid existing",
+        ),
+        (
+            {"semantic_validation_failures": 2},
+            "broken",
+            "semantic validation",
+        ),
+        (
+            {"semantic_evidence_unavailable": 4},
+            "unknown",
+            "semantic evidence is unavailable",
+        ),
     ],
 )
 def test_paper_markdown_semantic_contract(metrics, expected, reason):
@@ -1143,6 +1399,58 @@ def test_paper_markdown_monitor_snapshot_refreshes_only_a_cold_cache():
         refresh.assert_not_called()
 
 
+def test_partial_remote_monitor_evidence_preserves_confirmed_shard_failures():
+    merge_remote_metrics = getattr(
+        cron_health,
+        "_merge_paper_markdown_monitor_metrics",
+        None,
+    )
+    assert merge_remote_metrics is not None
+
+    metrics = merge_remote_metrics(
+        {"mode": "live"},
+        {
+            "available": False,
+            "summary": {
+                "progress_evidence_timeouts": 1,
+                "latest_run_failed_jobs": 1,
+                "latest_run_interrupted_jobs": 0,
+                "oldest_active_checkpoint_age_minutes": 0,
+                "unresolved_mount_failures": 1,
+                "recovered_mount_failures": 0,
+            },
+            "budgets": {},
+            "blockers": {},
+        },
+    )
+
+    assert metrics["remote_monitor_available"] is False
+    assert metrics["remote_progress_evidence_timeouts"] == 1
+    assert metrics["terminal_shard_failures"] == 1
+    assert metrics["unresolved_mount_failures"] == 1
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            _job("paper_markdown_backfill"),
+            {
+                "status": "success",
+                "last_run": datetime.now(timezone.utc),
+                "is_running": False,
+                "work_metrics": metrics,
+            },
+        )
+    assert evaluated["output_health"]["status"] == "broken"
+
+    preserved = merge_remote_metrics(
+        {
+            "terminal_shard_failures": 2,
+            "unresolved_mount_failures": 1,
+        },
+        {"available": False, "summary": {}, "budgets": {}, "blockers": {}},
+    )
+    assert preserved["terminal_shard_failures"] == 2
+    assert preserved["unresolved_mount_failures"] == 1
+
+
 def test_embedding_no_work_is_broken_when_eligible_rows_are_missing():
     job = _job("refresh_paper_embeddings")
     now = datetime.now(timezone.utc)
@@ -1159,6 +1467,29 @@ def test_embedding_no_work_is_broken_when_eligible_rows_are_missing():
         )
     assert evaluated["output_health"]["status"] == "broken"
     assert "8 eligible embeddings" in evaluated["output_health"]["reason"]
+
+
+def test_embedding_no_work_is_broken_when_content_hashes_are_stale():
+    job = _job("refresh_paper_embeddings")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {
+                "status": "success_no_work",
+                "last_run": now,
+                "is_running": False,
+                "work_metrics": {"candidates": 0, "embeddings_updated": 0},
+            },
+            db_metrics={
+                "last_write": now,
+                "recent_writes": 0,
+                "missing_embeddings": 0,
+                "content_hash_mismatches": 3,
+            },
+        )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert "3 active-generation content hashes" in evaluated["output_health"]["reason"]
 
 
 def test_backfill_contract_separates_stale_run_and_provider_throttling():
@@ -1178,6 +1509,73 @@ def test_backfill_contract_separates_stale_run_and_provider_throttling():
     assert evaluated["output_health"]["status"] == "broken"
     assert "stale database run" in evaluated["output_health"]["reason"]
     assert "provider throttled" in evaluated["output_health"]["reason"]
+
+
+def test_method_keyword_backfill_fresh_checkpoint_is_resumable_not_stale():
+    job = _job("backfill_method_keywords")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {"status": "success", "last_run": now, "is_running": False},
+            db_metrics={
+                "last_write": now,
+                "recent_writes": 1,
+                "running_runs": 1,
+                "stale_running": 0,
+                "checkpoint_age_minutes": 90,
+                "resume_cursor": 1234,
+            },
+        )
+    assert evaluated["output_health"]["status"] == "healthy"
+    assert "resumable checkpoint" in evaluated["output_health"]["reason"]
+
+
+def test_daily_curation_pause_condition_is_broken():
+    job = _job("enqueue_hf_daily_paper_curation")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {"status": "success", "last_run": now, "is_running": False},
+            db_metrics={
+                "last_write": now,
+                "dispatch_enabled": False,
+                "pause_condition": "daily_token_guardrail",
+            },
+        )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert "daily_token_guardrail" in evaluated["output_health"]["reason"]
+
+
+def test_daily_curation_old_queue_age_is_unhealthy():
+    job = _job("enqueue_hf_daily_paper_curation")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {"status": "success", "last_run": now, "is_running": False},
+            db_metrics={
+                "last_write": now,
+                "queued_jobs": 2,
+                "oldest_queued_age_minutes": 360,
+            },
+        )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert "queued curation job" in evaluated["output_health"]["reason"]
+
+
+def test_daily_curation_partial_workflow_is_broken():
+    job = _job("enqueue_hf_daily_paper_curation")
+    now = datetime.now(timezone.utc)
+    with patch("backend.services.cron_health.is_process_running", return_value=False):
+        evaluated = evaluate_job_health(
+            job,
+            {"status": "success", "last_run": now, "is_running": False},
+            db_metrics={"last_write": now, "partial_workflows": 1},
+        )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert "partial workflow" in evaluated["output_health"]["reason"]
 
 
 def test_managed_organization_snapshot_gap_degrades_output():

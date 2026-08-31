@@ -7,12 +7,88 @@ import json
 import httpx
 import pytest
 
+from backend.services.embedding_contracts import content_hash
 from backend.services.incremental_paper_embeddings import (
     ActiveEmbeddingGeneration,
     EmbeddingCandidate,
+    embedding_backlog_counts,
     encode_documents,
+    find_refresh_candidates,
     upsert_current_embeddings,
 )
+
+
+def test_refresh_candidates_compare_hash_even_without_timestamp_hint():
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def mappings(self):
+            return self
+
+        def all(self):
+            return list(self.rows)
+
+        def yield_per(self, _size):
+            return iter(self.rows)
+
+        def close(self):
+            pass
+
+    class FakeDatabase:
+        execution_options = []
+
+        def execute(self, statement, _params=None):
+            if "e.paper_id IS NULL" in str(statement):
+                return Result([])
+            self.execution_options.append(statement.get_execution_options())
+            return Result(
+                [
+                    {
+                        "id": 7,
+                        "title": "Stale",
+                        "abstract": "Body",
+                        "content_hash": "bad",
+                    },
+                    {
+                        "id": 8,
+                        "title": "Current",
+                        "abstract": "Body",
+                        "content_hash": content_hash("Current", "Body"),
+                    },
+                ]
+            )
+
+    database = FakeDatabase()
+    candidates = find_refresh_candidates(database, generation_id=1, limit=10)
+
+    assert [candidate.paper_id for candidate in candidates] == [7]
+    assert database.execution_options[0]["stream_results"] is True
+
+
+def test_embedding_backlog_counts_missing_and_hash_mismatches():
+    class Result:
+        def mappings(self):
+            return self
+
+        def yield_per(self, _size):
+            return iter(
+                [
+                    {"title": "Missing", "abstract": None, "content_hash": None},
+                    {"title": "Stale", "abstract": "Body", "content_hash": "bad"},
+                    {
+                        "title": "Current",
+                        "abstract": "Body",
+                        "content_hash": content_hash("Current", "Body"),
+                    },
+                ]
+            )
+
+    class FakeDatabase:
+        def execute(self, _statement, _params=None):
+            return Result()
+
+    assert embedding_backlog_counts(FakeDatabase(), generation_id=7) == (1, 1)
 
 
 def test_encode_documents_uses_document_contract():

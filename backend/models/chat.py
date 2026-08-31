@@ -20,7 +20,7 @@ from pydantic import (
 
 StrictText = Annotated[str, StringConstraints(max_length=8000)]
 AuthorName = Annotated[str, StringConstraints(max_length=300)]
-FinishReason = Literal["success", "max_turns", "tool_limit"]
+FinishReason = Literal["success", "max_turns", "tool_limit", "scope_blocked"]
 ReasoningEffort = Literal["low", "high", "max"]
 
 
@@ -991,6 +991,60 @@ class ChatSandboxSpendResponse(BaseModel):
     prior_cycle: ChatSandboxPriorCycleResponse | None = None
     daily_spend: list[ChatSandboxDailySpendResponse]
     events: list[ChatSandboxSpendEventResponse]
+
+
+class ChatQualificationScopeRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    run_id: str = Field(pattern=r"^[a-z0-9][a-z0-9-]{0,63}$")
+    profile: Literal["32-functional-turns", "100-immediate-admission"]
+
+
+class ChatQualificationScopeResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    scope_id: uuid.UUID
+    run_id: str
+    profile: Literal["32-functional-turns", "100-immediate-admission"]
+    app_release_id: str
+    window_started_at: datetime
+    expires_at: datetime
+
+
+class ChatQualificationEvidenceRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    scope_id: uuid.UUID
+
+
+class ChatQualificationTeardownResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_tool_turns: Literal[0, 16]
+    targeted_sessions: int = Field(ge=0, le=16)
+    closed_intervals: int = Field(ge=0, le=16)
+    eviction_events: int = Field(ge=0, le=16)
+    source: Literal["exact_scope_canonical_eviction"]
+
+
+class ChatQualificationEvidenceResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    expected_users: Literal[32, 100]
+    admitted_turns: int = Field(ge=0, le=100)
+    admission_denominator_events: int = Field(ge=0, le=100)
+    terminal_turns: int = Field(ge=0, le=100)
+    queued_states: int = Field(ge=0, le=1_000_000)
+    stale_fences: int = Field(ge=0, le=1_000_000)
+    executor_starts: int = Field(ge=0, le=1_000_000)
+    duplicate_executor_starts: int = Field(ge=0, le=1_000_000)
+    workspace_creates: int = Field(ge=0, le=1_000_000)
+    workspace_reuses: int = Field(ge=0, le=1_000_000)
+    workspace_evictions: int = Field(ge=0, le=1_000_000)
+    billed_duration_ms: int = Field(ge=0, le=2**63 - 1)
+    window_started_at_ms: int = Field(ge=1, le=2**63 - 1)
+    window_ended_at_ms: int = Field(ge=1, le=2**63 - 1)
+    source: Literal["durable_qualification_records"]
 
 
 class _StrictEvent(BaseModel):

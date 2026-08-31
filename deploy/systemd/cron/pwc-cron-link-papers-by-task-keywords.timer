@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link papers by task keywords weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-link-papers-by-task-keywords.service
+
+[Install]
+WantedBy=timers.target

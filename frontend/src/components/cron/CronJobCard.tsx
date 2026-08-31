@@ -12,6 +12,7 @@ import {
   FileText,
   Images,
   Loader2,
+  ShieldAlert,
   TrendingUp,
   XCircle,
 } from "lucide-react";
@@ -519,6 +520,33 @@ export function CronJobCard({
                       </ul>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+            {job.health_findings && job.health_findings.some((finding) => finding.state !== "healthy") && (
+              <div className="md:col-span-2">
+                <div className="cron-section-heading">
+                  <ShieldAlert className="h-4 w-4" />
+                  <h4>Deterministic contract findings</h4>
+                </div>
+                <div className="cron-metric-card space-y-3 text-sm">
+                  {job.health_findings.filter((finding) => finding.state !== "healthy").map((finding) => (
+                    <div key={`${finding.plane}-${finding.contract}`}>
+                      <Badge variant="outline" className={`cron-status--${finding.state}`}>{finding.state}</Badge>{" "}
+                      <strong>{metricLabel(finding.contract)}</strong>: {finding.summary}
+                      {Object.entries(finding.evidence).length > 0 && (
+                        <div className="mt-1 text-xs cron-muted">
+                          {Object.entries(finding.evidence).map(([key, value]) => (
+                            <span className="mr-3" key={key}>{metricLabel(key)}: {String(value)}</span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                  <div className="flex gap-4">
+                    {job.operator_url && <a className="cron-info-text inline-flex items-center gap-1" href={job.operator_url}>Open operator <ExternalLink className="h-3.5 w-3.5" /></a>}
+                    {job.run_url && <a className="cron-info-text inline-flex items-center gap-1" href={job.run_url} target="_blank" rel="noreferrer">Open run <ExternalLink className="h-3.5 w-3.5" /></a>}
+                  </div>
                 </div>
               </div>
             )}

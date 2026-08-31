@@ -10,15 +10,17 @@ import re
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from posixpath import basename
-from typing import Any, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict
 
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
 from backend.config import get_settings
+from backend.services.autonomous_cron_probe import build_job_findings
 from backend.services.cron_registry import CronJobDefinition, list_cron_jobs
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
@@ -26,8 +28,31 @@ SCRIPTS_DIR = WORKFLOWS_DIR / "scripts"
 GITHUB_REPOSITORY = "huggingface/paperswithcode"
 WORKFLOW_STATUS_CACHE_SECONDS = 60
 WORKFLOW_RUN_BATCH_PAGES = 3
+MAX_LAUNCHER_EVIDENCE_BYTES = 1024 * 1024
+MAX_SCHEDULE_STATE_BYTES = 4096
 _WORKFLOW_STATUS_CACHE: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
 logger = logging.getLogger(__name__)
+
+HealthStatus = Literal["healthy", "running", "unknown", "degraded", "broken", "stuck"]
+
+
+class HealthResult(TypedDict):
+    status: HealthStatus
+    reason: str
+
+
+class ExecutionHealthResult(HealthResult, total=False):
+    scheduler: str
+    applicable: bool
+    last_expected_at: str | None
+    next_expected_at: str | None
+    last_started_at: str | None
+    last_completed_at: str | None
+    evidence_source: str | None
+
+
+class OutputHealthResult(HealthResult):
+    last_verified_at: str | None
 
 
 def _utcnow() -> datetime:
@@ -202,6 +227,14 @@ def fetch_db_freshness(query: str) -> Dict[str, Any]:
         conn.close()
 
 
+def _normalize_db_metric(_key: str, value: Any) -> Any:
+    if isinstance(value, datetime):
+        return to_iso8601(value)
+    if isinstance(value, str):
+        return value[:128]
+    return int(value or 0)
+
+
 def fetch_db_freshness_batch(
     jobs: list[CronJobDefinition],
 ) -> dict[str, Dict[str, Any]]:
@@ -234,7 +267,7 @@ def fetch_db_freshness_batch(
                         metrics["last_write_iso"] = to_iso8601(last_write)
                     for key, value in row.items():
                         if key != "last_write":
-                            metrics[key] = int(value or 0)
+                            metrics[key] = _normalize_db_metric(key, value)
                     results[job.id] = metrics
                 except Exception as exc:
                     results[job.id] = {
@@ -298,6 +331,149 @@ def fetch_chat_monitor_output() -> Dict[str, Any]:
         "undelivered_alert_events": max(0, int(payload.get("pending") or 0)),
         "new_alert_events": max(0, int(payload.get("new_events") or 0)),
         "delivered_alert_events": max(0, int(payload.get("delivered") or 0)),
+    }
+
+
+def fetch_submission_review_output() -> Dict[str, Any]:
+    path = (
+        Path(get_settings().cron_log_dir) / "autonomous-submission-review-health.json"
+    )
+    try:
+        raw = path.read_bytes()
+    except (FileNotFoundError, PermissionError, OSError):
+        return {"review_record_available": False}
+    if len(raw) > 16 * 1024:
+        return {"review_record_available": False}
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"review_record_available": False}
+    if not isinstance(payload, dict):
+        return {"review_record_available": False}
+    return {
+        "review_record_available": True,
+        "review_status": str(payload.get("status") or "unknown")[:16],
+        "review_completed_at": str(payload.get("completed_at") or "")[:64] or None,
+        "submissions_claimed": max(0, int(payload.get("claimed") or 0)),
+        "review_dry_run": bool(payload.get("dry_run")),
+        "review_remote_launch": bool(payload.get("remote_launch")),
+        "review_error_class": str(payload.get("error_class") or "")[:128] or None,
+    }
+
+
+def _persistent_execution_paths(settings: Any) -> tuple[Path, Path] | None:
+    if settings.environment not in {"production", "staging"}:
+        return None
+    return (
+        Path(settings.cron_log_dir) / "launcher.jsonl",
+        Path("/srv/paperswithcode/environments")
+        / settings.environment
+        / "current/release.json",
+    )
+
+
+def fetch_persistent_execution(
+    job: CronJobDefinition,
+    log_status: Dict[str, Any],
+    *,
+    launcher_path: Path | None = None,
+    manifest_path: Path | None = None,
+) -> Dict[str, Any] | None:
+    """Pair an exact-release launcher start with a terminal file-log result."""
+
+    if launcher_path is None or manifest_path is None:
+        paths = _persistent_execution_paths(get_settings())
+        if paths is None:
+            return None
+        launcher_path, manifest_path = paths
+
+    try:
+        manifest_raw = manifest_path.read_bytes()
+    except OSError:
+        return None
+    if len(manifest_raw) > 64 * 1024:
+        return None
+    try:
+        manifest = json.loads(manifest_raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    release_sha = manifest.get("git_sha") if isinstance(manifest, dict) else None
+    if not isinstance(release_sha, str) or not re.fullmatch(
+        r"[0-9a-f]{40}", release_sha
+    ):
+        return None
+
+    try:
+        with launcher_path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            size = handle.tell()
+            offset = max(0, size - MAX_LAUNCHER_EVIDENCE_BYTES)
+            handle.seek(offset)
+            raw = handle.read(MAX_LAUNCHER_EVIDENCE_BYTES)
+    except OSError:
+        return None
+    if offset:
+        raw = raw.partition(b"\n")[2]
+
+    terminal_status = str(log_status.get("status") or "unknown")
+    if terminal_status not in {"success", "success_no_work", "failed"}:
+        return None
+    completed = _parse_log_timestamp(log_status.get("last_run"))
+    if completed is None:
+        return None
+
+    for raw_line in reversed(raw.splitlines()):
+        try:
+            record = json.loads(raw_line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict):
+            continue
+        if record.get("job") != job.id and record.get("health_job") != job.id:
+            continue
+        if record.get("git_sha") != release_sha:
+            continue
+        started = _parse_log_timestamp(record.get("at"))
+        if started is None or completed < started:
+            return None
+        return {
+            "status": "failed" if terminal_status == "failed" else "success",
+            "started_at": to_iso8601(started),
+            "completed_at": to_iso8601(completed),
+            "release_sha": release_sha,
+            "source": "launcher_and_file_log",
+        }
+    return None
+
+
+def fetch_autonomous_cron_output() -> Dict[str, Any]:
+    path = Path(get_settings().cron_log_dir) / "autonomous-cron-operator-health.json"
+    try:
+        raw = path.read_bytes()
+    except (FileNotFoundError, PermissionError, OSError):
+        return {"operator_record_available": False}
+    if len(raw) > 16 * 1024:
+        return {"operator_record_available": False}
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"operator_record_available": False}
+    if not isinstance(payload, dict):
+        return {"operator_record_available": False}
+    status = str(payload.get("status") or "unknown")[:32]
+    healthy = status in {
+        "healthy",
+        "monitoring_only",
+        "noop",
+        "runtime_recovered",
+        "source_repaired",
+    }
+    return {
+        "operator_record_available": True,
+        "operator_status": "healthy" if healthy else "degraded",
+        "operator_completed_at": str(payload.get("completed_at") or "")[:64] or None,
+        "operator_mode": str(payload.get("mode") or "")[:16] or None,
+        "operator_reason_code": str(payload.get("reason_code") or "")[:128] or None,
     }
 
 
@@ -495,49 +671,61 @@ def fetch_workflow_status(
     return status
 
 
-def fetch_systemd_status(job: CronJobDefinition) -> Dict[str, Any]:
-    """Read bounded timer/service properties for a registry-owned unit pair."""
-
-    if job.scheduler != "systemd" or not job.systemd_timer or not job.systemd_service:
-        return {"available": False, "error": "systemd units are not registered"}
-
-    properties = {
-        job.systemd_timer: (
-            "LoadState,ActiveState,SubState,UnitFileState,LastTriggerUSec,"
-            "NextElapseUSecRealtime"
-        ),
-        job.systemd_service: (
-            "LoadState,ActiveState,SubState,Result,ExecMainStatus,"
-            "ExecMainStartTimestamp,ExecMainExitTimestamp"
-        ),
-    }
-    values: Dict[str, Dict[str, str]] = {}
-    for unit, requested in properties.items():
-        try:
-            result = subprocess.run(
-                ["systemctl", "show", unit, f"--property={requested}"],
-                capture_output=True,
-                check=False,
-                text=True,
-                timeout=5,
-            )
-        except (FileNotFoundError, subprocess.SubprocessError):
-            return {"available": False, "error": "systemd status is unavailable"}
-        if result.returncode != 0:
-            return {
-                "available": False,
-                "error": "systemd status permission denied or unavailable",
-            }
-        values[unit] = dict(
-            line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+def _systemd_show(unit: str, requested: str) -> Optional[Dict[str, str]]:
+    try:
+        result = subprocess.run(
+            ["systemctl", "show", unit, f"--property={requested}"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
         )
+    except (FileNotFoundError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0:
+        return None
+    return dict(
+        line.split("=", 1) for line in result.stdout.splitlines() if "=" in line
+    )
 
-    timer = values[job.systemd_timer]
-    service = values[job.systemd_service]
+
+def _system_boot_started_at() -> str | None:
+    try:
+        proc_stat = Path("/proc/stat").read_text(encoding="utf-8")
+    except OSError:
+        return None
+    match = re.search(r"^btime\s+(\d+)$", proc_stat, re.MULTILINE)
+    if match is None:
+        return None
+    started = datetime.fromtimestamp(int(match.group(1)), tz=timezone.utc)
+    return to_iso8601(started)
+
+
+def _read_systemd_pair(timer_unit: str, service_unit: str) -> Optional[Dict[str, Any]]:
+    timer = _systemd_show(
+        timer_unit,
+        "LoadState,ActiveState,SubState,UnitFileState,LastTriggerUSec,"
+        "NextElapseUSecRealtime",
+    )
+    service = _systemd_show(
+        service_unit,
+        "LoadState,ActiveState,SubState,Result,ExecMainStatus,"
+        "ExecMainStartTimestamp,ExecMainExitTimestamp,Job",
+    )
+    if timer is None or service is None:
+        return None
+    service_job = (
+        _systemd_show(service["Job"], "Type,State") if service.get("Job") else None
+    )
+    service_start_queued = bool(
+        service_job
+        and service_job.get("Type") == "start"
+        and service_job.get("State") in {"waiting", "running"}
+    )
     return {
         "available": True,
-        "timer": job.systemd_timer,
-        "service": job.systemd_service,
+        "timer": timer_unit,
+        "service": service_unit,
         "enabled": timer.get("UnitFileState") in {"enabled", "enabled-runtime"},
         "timer_active": timer.get("ActiveState") == "active",
         "timer_state": timer.get("ActiveState"),
@@ -549,7 +737,87 @@ def fetch_systemd_status(job: CronJobDefinition) -> Dict[str, Any]:
         "last_started_at": service.get("ExecMainStartTimestamp") or None,
         "last_completed_at": service.get("ExecMainExitTimestamp") or None,
         "service_active": service.get("ActiveState") == "active",
+        "service_start_queued": service_start_queued,
+        "boot_started_at": _system_boot_started_at(),
     }
+
+
+def fetch_systemd_status(
+    job: CronJobDefinition,
+    log_status: Dict[str, Any] | None = None,
+) -> Dict[str, Any]:
+    """Read bounded timer/service properties for the registry-owned units.
+
+    Duties driven by several timer/service pairs (for example the five
+    preload_thumbnails lanes) are merged: the pair with the most recent
+    completion provides the latest exit evidence, mirroring the previous
+    latest-scheduled-workflow semantics.
+    """
+
+    pairs = job.systemd_unit_pairs
+    if job.scheduler != "systemd" or not pairs:
+        return {"available": False, "error": "systemd units are not registered"}
+
+    statuses = []
+    for timer_unit, service_unit in pairs:
+        status = _read_systemd_pair(timer_unit, service_unit)
+        if status is None:
+            return {
+                "available": False,
+                "error": "systemd status permission denied or unavailable",
+            }
+        statuses.append(status)
+
+    def timestamp_key(field: str):
+        def key(status: Dict[str, Any]) -> datetime:
+            parsed = _parse_log_timestamp(status.get(field))
+            return parsed or datetime.min.replace(tzinfo=timezone.utc)
+
+        return key
+
+    latest = max(statuses, key=timestamp_key("last_completed_at"))
+    queued_statuses = [
+        status for status in statuses if status.get("service_start_queued")
+    ]
+    queued_triggers = [status.get("last_trigger_at") for status in queued_statuses]
+    queued_since_at = None
+    if queued_statuses and all(
+        _parse_log_timestamp(value) is not None for value in queued_triggers
+    ):
+        queued_since_at = min(
+            queued_triggers,
+            key=lambda value: _parse_log_timestamp(value)
+            or datetime.max.replace(tzinfo=timezone.utc),
+        )
+    merged = dict(latest)
+    merged.update(
+        enabled=all(status["enabled"] for status in statuses),
+        timer_active=all(status["timer_active"] for status in statuses),
+        service_active=any(status["service_active"] for status in statuses),
+        service_start_queued=any(
+            status.get("service_start_queued") for status in statuses
+        ),
+        queued_since_at=queued_since_at,
+        last_started_at=max(statuses, key=timestamp_key("last_started_at")).get(
+            "last_started_at"
+        ),
+        next_trigger_at=min(
+            (
+                status["next_trigger_at"]
+                for status in statuses
+                if status.get("next_trigger_at")
+            ),
+            key=lambda value: _parse_log_timestamp(value)
+            or datetime.max.replace(tzinfo=timezone.utc),
+            default=None,
+        ),
+        units=[status["service"] for status in statuses],
+    )
+    if not merged.get("last_completed_at") and log_status is not None:
+        persistent = fetch_persistent_execution(job, log_status)
+        if persistent is not None:
+            merged["persistent_execution"] = persistent
+    return merged
 
 
 def discover_scheduled_duties() -> set[str]:
@@ -563,15 +831,22 @@ def discover_scheduled_duties() -> set[str]:
         duties.update(re.findall(r"pwc-cron\s+([a-z0-9_]+)", source))
     duties.discard("status")
 
-    systemd_dir = WORKFLOWS_DIR.parents[1] / "deploy" / "systemd"
-    for service in systemd_dir.glob("pwc-*.service"):
-        match = re.search(
-            r"^ExecStart=.*/pwc-cron\s+([a-z0-9_]+)",
-            service.read_text(encoding="utf-8"),
-            re.MULTILINE,
-        )
-        if match:
-            duties.add(match.group(1))
+    deploy_dir = WORKFLOWS_DIR.parents[1] / "deploy"
+    for pattern in (
+        "systemd/pwc-*.service",
+        "systemd/cron/pwc-*.service",
+        "autonomous/*.service",
+    ):
+        for service in deploy_dir.glob(pattern):
+            if not service.with_suffix(".timer").is_file():
+                continue
+            match = re.search(
+                r"^ExecStart=.*/pwc-cron(?:-throttled)?\s+([a-z0-9_]+)",
+                service.read_text(encoding="utf-8"),
+                re.MULTILINE,
+            )
+            if match:
+                duties.add(match.group(1))
     return duties
 
 
@@ -584,6 +859,40 @@ def _schedule_slots(
     return max(pair[0] for pair in pairs), min(pair[1] for pair in pairs)
 
 
+def schedule_enabled(
+    job: CronJobDefinition, settings: Any | None = None
+) -> bool | None:
+    """Return the configured scheduler state for conditionally enabled duties."""
+
+    if not job.enablement_settings:
+        return None
+    active_settings = settings or get_settings()
+    cron_log_dir = getattr(active_settings, "cron_log_dir", None)
+    if cron_log_dir:
+        state_path = Path(cron_log_dir) / "submission-review-schedule.json"
+        try:
+            state_raw = state_path.read_bytes()
+        except FileNotFoundError:
+            pass
+        except OSError:
+            return None
+        else:
+            if len(state_raw) > MAX_SCHEDULE_STATE_BYTES:
+                return None
+            try:
+                state = json.loads(state_raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                return None
+            if not isinstance(state, dict) or not isinstance(
+                state.get("enabled"), bool
+            ):
+                return None
+            return state["enabled"]
+    return all(
+        bool(getattr(active_settings, setting)) for setting in job.enablement_settings
+    )
+
+
 def _execution_health(
     job: CronJobDefinition,
     *,
@@ -591,8 +900,9 @@ def _execution_health(
     log_status: Dict[str, Any],
     workflow_status: Dict[str, Any],
     systemd_status: Optional[Dict[str, Any]],
+    schedule_enabled: bool | None,
     now: datetime,
-) -> Dict[str, Any]:
+) -> ExecutionHealthResult:
     previous_expected, next_expected = _schedule_slots(job, now)
     base = {
         "scheduler": job.scheduler,
@@ -628,6 +938,33 @@ def _execution_health(
     grace = timedelta(minutes=job.schedule_grace_minutes)
     if job.scheduler == "systemd":
         evidence = systemd_status or {}
+        if schedule_enabled is False:
+            if not evidence.get("available"):
+                return {
+                    **base,
+                    "status": "unknown",
+                    "applicable": False,
+                    "reason": (
+                        "cannot verify disabled scheduler state because systemd "
+                        "evidence is unavailable"
+                    ),
+                }
+            if evidence.get("enabled") or evidence.get("timer_active"):
+                return {
+                    **base,
+                    "status": "broken",
+                    "applicable": False,
+                    "reason": (
+                        "autonomous submission review timer is active while "
+                        "disabled by configuration"
+                    ),
+                }
+            return {
+                **base,
+                "status": "healthy",
+                "applicable": False,
+                "reason": "autonomous submission review is disabled by configuration",
+            }
         if not evidence.get("available"):
             return {
                 **base,
@@ -655,6 +992,31 @@ def _execution_health(
                     "reason": f"systemd service exceeded its {job.expected_runtime_minutes}m runtime budget",
                 }
             return {**base, "status": "running", "reason": "systemd service is active"}
+        if evidence.get("service_start_queued"):
+            queue_budget = job.expected_runtime_minutes + job.schedule_grace_minutes
+            queue_age = _minutes_since(evidence.get("queued_since_at"), now=now)
+            if queue_age is None:
+                return {
+                    **base,
+                    "status": "unknown",
+                    "reason": (
+                        "systemd start is queued but its queue age is unavailable"
+                    ),
+                }
+            if queue_age > queue_budget:
+                return {
+                    **base,
+                    "status": "stuck",
+                    "reason": (
+                        "systemd start remained queued beyond its "
+                        f"{queue_budget}m budget"
+                    ),
+                }
+            return {
+                **base,
+                "status": "running",
+                "reason": "systemd start is queued",
+            }
         if evidence.get("service_result") not in {None, "", "success"} or evidence.get(
             "exec_main_status"
         ) not in {None, 0}:
@@ -664,6 +1026,35 @@ def _execution_health(
                 "reason": "latest systemd service invocation failed",
             }
         completed = _parse_log_timestamp(evidence.get("last_completed_at"))
+        if completed is None and (persistent := evidence.get("persistent_execution")):
+            base.update(
+                last_started_at=to_iso8601(persistent.get("started_at")),
+                last_completed_at=to_iso8601(persistent.get("completed_at")),
+                evidence_source=persistent.get("source"),
+            )
+            if persistent.get("status") == "failed":
+                return {
+                    **base,
+                    "status": "broken",
+                    "reason": "persistent execution evidence reports failure",
+                }
+            completed = _parse_log_timestamp(persistent.get("completed_at"))
+        if completed is None and previous_expected:
+            boot_started = _parse_log_timestamp(evidence.get("boot_started_at"))
+            last_trigger = _parse_log_timestamp(evidence.get("last_trigger_at"))
+            if (
+                boot_started is not None
+                and previous_expected < boot_started
+                and last_trigger is not None
+                and last_trigger < boot_started
+            ):
+                return {
+                    **base,
+                    "status": "unknown",
+                    "reason": (
+                        "pre-reboot systemd slot lacks persistent terminal evidence"
+                    ),
+                }
         if previous_expected and (
             completed is None or completed < previous_expected - grace
         ):
@@ -765,16 +1156,19 @@ def _execution_health(
     }
 
 
-def _aggregate_health(execution: str, output: str) -> str:
-    if "stuck" in {execution, output}:
+def _aggregate_health(
+    execution: ExecutionHealthResult, output: OutputHealthResult
+) -> HealthStatus:
+    statuses = {execution["status"], output["status"]}
+    if "stuck" in statuses:
         return "stuck"
-    if "broken" in {execution, output}:
+    if "broken" in statuses:
         return "broken"
-    if "degraded" in {execution, output}:
+    if "degraded" in statuses:
         return "degraded"
-    if "unknown" in {execution, output}:
+    if "unknown" in statuses:
         return "unknown"
-    if "running" in {execution, output}:
+    if "running" in statuses:
         return "running"
     return "healthy"
 
@@ -793,17 +1187,30 @@ def _worse_output(current: str, candidate: str) -> str:
     return candidate if _OUTPUT_RANK[candidate] > _OUTPUT_RANK[current] else current
 
 
+@dataclass(frozen=True)
+class OutputEvaluationContext:
+    """Typed evidence available to one registry-selected output policy."""
+
+    work: Dict[str, Any]
+    db: Dict[str, Any]
+    workflow: Dict[str, Any]
+    systemd: Dict[str, Any]
+    now: datetime
+    running: bool
+    recent_log_success: bool
+    db_reason: str | None
+    dependency_status: str | None
+
+
 def _workflow_output_contract(
     status: str,
     reasons: List[str],
-    _work: Dict[str, Any],
-    _db: Dict[str, Any],
-    workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
     if status != "unknown":
         return status, reasons
-    conclusion = workflow.get("conclusion")
-    completed = workflow.get("status") == "completed"
+    conclusion = context.workflow.get("conclusion")
+    completed = context.workflow.get("status") == "completed"
     if completed and conclusion in {"success", "skipped"}:
         return "healthy", ["workflow completed its job-owned output contract"]
     return status, reasons
@@ -812,10 +1219,9 @@ def _workflow_output_contract(
 def _paper_markdown_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    _db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work = context.work
     remaining = int(work.get("missing_after_upstream", 0) or 0)
     blocker = work.get("blocker_classification")
     budget_blocked = blocker in {"budget", "reliability_and_budget"}
@@ -839,6 +1245,26 @@ def _paper_markdown_contract(
                 "OCR budget is exhausted alongside a reliability blocker with "
                 f"{remaining} papers still missing{suffix}"
             )
+        )
+    semantic_invalid = int(work.get("semantic_invalid_existing", 0) or 0)
+    if semantic_invalid:
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"{semantic_invalid} semantic-invalid existing Markdown object(s) "
+            "are excluded from usable coverage"
+        )
+    semantic_failures = int(work.get("semantic_validation_failures", 0) or 0)
+    if semantic_failures:
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"{semantic_failures} Markdown semantic validation failure(s) were recorded"
+        )
+    semantic_unavailable = int(work.get("semantic_evidence_unavailable", 0) or 0)
+    if semantic_unavailable:
+        status = _worse_output(status, "unknown")
+        reasons.append(
+            f"semantic evidence is unavailable for {semantic_unavailable} "
+            "recent Markdown object(s)"
         )
     if work.get("remote_monitor_available") is False and status == "healthy":
         status = "unknown"
@@ -882,14 +1308,47 @@ def _paper_markdown_monitor_snapshot() -> Dict[str, Any]:
     return snapshot
 
 
+def _merge_paper_markdown_monitor_metrics(
+    work_metrics: Dict[str, Any],
+    remote: Dict[str, Any],
+) -> Dict[str, Any]:
+    metrics = dict(work_metrics)
+    summary = remote.get("summary") or {}
+    metrics["remote_monitor_available"] = bool(remote.get("available"))
+    summary_metrics = {
+        "progress_evidence_timeouts": "remote_progress_evidence_timeouts",
+        "latest_run_failed_jobs": "terminal_shard_failures",
+        "latest_run_interrupted_jobs": "interrupted_shards",
+        "oldest_active_checkpoint_age_minutes": (
+            "oldest_active_checkpoint_age_minutes"
+        ),
+        "unresolved_mount_failures": "unresolved_mount_failures",
+        "recovered_mount_failures": "recovered_mount_failures",
+    }
+    for summary_key, metric_key in summary_metrics.items():
+        if summary_key in summary:
+            metrics[metric_key] = int(summary.get(summary_key) or 0)
+    metrics.setdefault("remote_progress_evidence_timeouts", 0)
+    mode = str(metrics.get("mode") or "live")
+    budget = (remote.get("budgets") or {}).get(mode) or {}
+    blockers = remote.get("blockers") or {}
+    if mode in blockers:
+        metrics["blocker_classification"] = blockers.get(mode) or "none"
+    else:
+        metrics.setdefault("blocker_classification", "none")
+    if "next_admission_at" in budget:
+        metrics["next_admission_at"] = budget.get("next_admission_at")
+    return metrics
+
+
 def _paper_embeddings_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work, db = context.work, context.db
     missing = int(db.get("missing_embeddings", 0) or 0)
+    hash_mismatches = int(db.get("content_hash_mismatches", 0) or 0)
     candidates = work.get("candidates")
     embedded = int(work.get("embeddings_updated", work.get("embedded", 0)) or 0)
     if missing and candidates == 0:
@@ -900,22 +1359,32 @@ def _paper_embeddings_contract(
     elif missing and candidates is not None and embedded == 0:
         status = _worse_output(status, "degraded")
         reasons.append(f"no embeddings were written while {missing} remain eligible")
+    if hash_mismatches and candidates == 0:
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"{hash_mismatches} active-generation content hashes are stale "
+            "despite a no-work run"
+        )
+    elif hash_mismatches and candidates is not None and embedded == 0:
+        status = _worse_output(status, "degraded")
+        reasons.append(
+            f"no embeddings were written while {hash_mismatches} content hashes are stale"
+        )
     return status, reasons
 
 
 def _hf_import_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    _db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work = context.work
     if work.get("upstream_fetch_succeeded") is False:
         return "broken", reasons + ["Hugging Face daily-paper feed fetch failed"]
     if work.get("upstream_fetch_succeeded") is True:
         failed = int(work.get("failed", 0) or 0)
         if failed:
-            status = _worse_output(status, "degraded")
+            status = _worse_output(status, "broken")
             reasons.append(f"{failed} imported paper(s) failed")
         elif status == "unknown":
             status = "healthy"
@@ -926,10 +1395,34 @@ def _hf_import_contract(
 def _github_stars_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    _db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work = context.work
+    if not context.running:
+        for queue in ("fresh", "weekly"):
+            selected = int(work.get(f"{queue}_selected_groups", 0) or 0)
+            successes = int(work.get(f"{queue}_successes", 0) or 0)
+            failures = int(work.get(f"{queue}_failures", 0) or 0)
+            credential_failures = int(work.get(f"{queue}_credential_failures", 0) or 0)
+            credential = work.get(f"{queue}_credential", f"{queue} GitHub credential")
+            if selected and not successes and failures:
+                status = _worse_output(status, "broken")
+                if credential_failures:
+                    reasons.append(
+                        f"{credential} was rejected by GitHub; "
+                        f"the {queue} queue had no successful fetches"
+                    )
+                else:
+                    reasons.append(
+                        f"{queue} GitHub queue had no successful fetches "
+                        f"({failures} failures)"
+                    )
+            elif credential_failures:
+                status = _worse_output(status, "degraded")
+                reasons.append(
+                    f"{credential} had {credential_failures} rejected request(s)"
+                )
+
     for queue in ("fresh", "weekly"):
         stops = int(work.get(f"{queue}_rate_limit_stops", 0) or 0)
         selected = int(work.get(f"{queue}_selected_groups", 0) or 0)
@@ -941,13 +1434,59 @@ def _github_stars_contract(
     return status, reasons
 
 
+def _hot_github_trending_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    work, db = context.work, context.db
+    oldest_wait = int(db.get("oldest_eligible_wait_minutes", 0) or 0)
+    stale_scores = int(db.get("stale_paper_scores", 0) or 0)
+    one_snapshot = int(db.get("one_snapshot_over_30m", 0) or 0)
+    reserve_stops = int(work.get("rate_limit_stops", 0) or 0)
+    remaining = work.get("rate_limit_remaining")
+    reserve = work.get("rate_limit_reserve")
+    credential_failures = int(work.get("credential_failures", 0) or 0)
+    credential = work.get("credential", "GitHub credential")
+
+    if db.get("hot_repository_count") == 0 and context.recent_log_success:
+        status = "healthy"
+        if context.db_reason:
+            reasons = [reason for reason in reasons if reason != context.db_reason]
+
+    if oldest_wait > 30:
+        status = _worse_output(status, "broken")
+        reasons.append(f"oldest eligible hot repository has waited {oldest_wait}m")
+    if stale_scores:
+        status = _worse_output(status, "broken")
+        reasons.append(f"{stale_scores} hot paper scores are missing or stale")
+    if credential_failures:
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"{credential} was rejected by GitHub "
+            f"({credential_failures} failed requests)"
+        )
+    if one_snapshot and status == "healthy":
+        status = "degraded"
+        reasons.append(f"{one_snapshot} hot repositories have one snapshot after 30m")
+    if reserve_stops:
+        if status == "healthy":
+            status = "degraded"
+        reasons.append(f"rate-limit reserve stopped {reserve_stops} run(s)")
+    if remaining is not None and reserve is not None and int(remaining) < int(reserve):
+        status = _worse_output(status, "broken")
+        reasons.append(
+            f"rate-limit reserve violated ({remaining} remaining < {reserve})"
+        )
+    return status, reasons
+
+
 def _counter_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work, db = context.work, context.db
     scanned = work.get(
         "papers_scanned",
         work.get(
@@ -964,11 +1503,10 @@ def _counter_contract(
 def _provider_counter_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
-    status, reasons = _counter_contract(status, reasons, work, db, workflow)
+    work = context.work
+    status, reasons = _counter_contract(status, reasons, context)
     throttled = int(work.get("rate_limit_hits", 0) or 0)
     failures = int(
         work.get("api_errors", 0)
@@ -988,11 +1526,10 @@ def _provider_counter_contract(
 def _trending_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
-    status, reasons = _counter_contract(status, reasons, work, db, workflow)
+    db = context.db
+    status, reasons = _counter_contract(status, reasons, context)
     eligible = int(db.get("eligible_population", 0) or 0)
     positive = int(
         db.get("fresh_positive_scores", db.get("fresh_github_component_scores", 0)) or 0
@@ -1006,17 +1543,20 @@ def _trending_contract(
     elif status == "unknown" and positive and int(db.get("recent_writes", 0) or 0) > 0:
         status = "healthy"
         reasons.append("database confirms fresh positive trending output")
+    dependency_status = context.dependency_status
+    if dependency_status and dependency_status not in {"healthy", "running"}:
+        status = _worse_output(status, "degraded")
+        reasons.append(f"dependency calculate_trending_scores is {dependency_status}")
     return status, reasons
 
 
 def _organization_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
-    status, reasons = _counter_contract(status, reasons, work, db, workflow)
+    db = context.db
+    status, reasons = _counter_contract(status, reasons, context)
     missing = int(db.get("missing_today_snapshots", 0) or 0)
     if missing:
         status = _worse_output(status, "degraded")
@@ -1027,11 +1567,10 @@ def _organization_contract(
 def _thumbnail_preload_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
-    status, reasons = _workflow_output_contract(status, reasons, work, db, workflow)
+    work = context.work
+    status, reasons = _workflow_output_contract(status, reasons, context)
     failures = int(work.get("failed_downloads", 0) or 0)
     if failures:
         status = _worse_output(status, "degraded")
@@ -1042,10 +1581,9 @@ def _thumbnail_preload_contract(
 def _backfill_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work, db = context.work, context.db
     stale_running = int(db.get("stale_running", 0) or 0)
     if stale_running:
         status = _worse_output(status, "broken")
@@ -1056,6 +1594,13 @@ def _backfill_contract(
             reasons.append(f"blocking run age is {blocking_age}m")
         if cursor is not None:
             reasons.append(f"resume cursor is {cursor}")
+    elif int(db.get("running_runs", 0) or 0):
+        checkpoint_age = int(db.get("checkpoint_age_minutes", 0) or 0)
+        cursor = db.get("resume_cursor")
+        reasons.append(
+            f"fresh resumable checkpoint is {checkpoint_age}m old"
+            + (f" at cursor {cursor}" if cursor is not None else "")
+        )
     failed_runs = int(db.get("failed_runs", 0) or 0)
     if failed_runs:
         status = _worse_output(status, "degraded")
@@ -1077,13 +1622,57 @@ def _backfill_contract(
     return status, reasons
 
 
+def _daily_curation_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    db = context.db
+    pause_condition = db.get("pause_condition")
+    if pause_condition:
+        status = _worse_output(status, "broken")
+        reasons.append(f"scheduled dispatch is paused: {pause_condition}")
+
+    for metric, label in (
+        ("failed_workflows", "failed workflow"),
+        ("partial_workflows", "partial workflow"),
+    ):
+        count = int(db.get(metric, 0) or 0)
+        if count:
+            status = _worse_output(status, "broken")
+            reasons.append(f"{count} {label}(s) require attention")
+
+    for metric, label in (
+        ("oldest_queued_age_minutes", "queued curation job"),
+        ("oldest_running_age_minutes", "running curation job"),
+    ):
+        age = db.get(metric)
+        if age is None:
+            continue
+        age_minutes = float(age)
+        if age_minutes > 300:
+            status = _worse_output(status, "broken")
+            reasons.append(f"oldest {label} is {int(age_minutes)}m old")
+        elif age_minutes > 180:
+            status = _worse_output(status, "degraded")
+            reasons.append(f"oldest {label} is {int(age_minutes)}m old")
+    return status, reasons
+
+
 def _curation_thumbnail_contract(
     status: str,
     reasons: List[str],
-    _work: Dict[str, Any],
-    db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    db = context.db
+    queue_is_empty = not any(
+        int(db.get(key, 0) or 0)
+        for key in ("queued", "processing", "stale_processing", "failed")
+    )
+    if context.systemd.get("service_result") == "success" and queue_is_empty:
+        return "healthy", [
+            "latest queue poll completed and no thumbnail work is pending"
+        ]
     stale = int(db.get("stale_processing", 0) or 0)
     failed = int(db.get("failed", 0) or 0)
     if stale:
@@ -1098,15 +1687,14 @@ def _curation_thumbnail_contract(
 def _chat_alert_contract(
     status: str,
     reasons: List[str],
-    work: Dict[str, Any],
-    _db: Dict[str, Any],
-    _workflow: Dict[str, Any],
+    context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
+    work = context.work
     if not work.get("monitor_record_available"):
         return "unknown", reasons + [
             "content-free monitor output record is unavailable"
         ]
-    age = _minutes_since(work.get("monitor_completed_at"))
+    age = _minutes_since(work.get("monitor_completed_at"), now=context.now)
     if age is None or age > 5:
         return "broken", reasons + ["latest operational poll output is stale"]
     pending = int(work.get("undelivered_alert_events", 0) or 0)
@@ -1124,28 +1712,101 @@ def _chat_alert_contract(
     return "unknown", reasons + ["operational monitor output state is unknown"]
 
 
-OUTPUT_EVALUATORS = {
-    "generic": lambda status, reasons, _work, _db, _workflow: (status, reasons),
-    "github_stars": _github_stars_contract,
-    "hot_github_trending": lambda status, reasons, _work, _db, _workflow: (
-        status,
-        reasons,
+def _submission_review_contract(
+    _status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    work = context.work
+    if not work.get("review_record_available"):
+        return "unknown", reasons + [
+            "content-free submission review output record is unavailable"
+        ]
+    age = _minutes_since(work.get("review_completed_at"), now=context.now)
+    if age is None:
+        return "unknown", reasons + ["submission review completion time is unavailable"]
+    if age > 135:
+        return "broken", reasons + ["latest submission review output is stale"]
+    if work.get("review_status") == "failed":
+        return "broken", reasons + ["latest submission review pass failed"]
+    if work.get("review_status") == "healthy":
+        claimed = int(work.get("submissions_claimed", 0) or 0)
+        return "healthy", [
+            f"latest content-free submission review completed; claimed={claimed}"
+        ]
+    return "unknown", reasons + ["submission review output state is unknown"]
+
+
+def _autonomous_cron_contract(
+    _status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    work = context.work
+    if not work.get("operator_record_available"):
+        return "unknown", reasons + ["content-free operator record is unavailable"]
+    age = _minutes_since(work.get("operator_completed_at"), now=context.now)
+    if age is None:
+        return "unknown", reasons + ["operator completion time is unavailable"]
+    if age > 390:
+        return "broken", reasons + ["latest autonomous CRON pass is stale"]
+    if work.get("operator_status") == "healthy":
+        return "healthy", ["latest bounded autonomous CRON pass completed"]
+    return "broken", reasons + [
+        f"autonomous CRON pass reported {work.get('operator_reason_code') or 'failure'}"
+    ]
+
+
+OutputEvaluator = Callable[
+    [str, List[str], OutputEvaluationContext],
+    tuple[str, List[str]],
+]
+
+
+@dataclass(frozen=True)
+class OutputPolicy:
+    """Registry-selected output rules and their operator guidance."""
+
+    evaluate: OutputEvaluator
+    dependency_diagnostic: str | None = None
+    refresh_db_freshness: bool = False
+    accept_systemd_completion: bool = False
+
+
+OUTPUT_POLICIES = {
+    "generic": OutputPolicy(lambda status, reasons, _context: (status, reasons)),
+    "github_stars": OutputPolicy(_github_stars_contract),
+    "hot_github_trending": OutputPolicy(_hot_github_trending_contract),
+    "repository_trending": OutputPolicy(_trending_contract),
+    "paper_trending": OutputPolicy(
+        _trending_contract,
+        dependency_diagnostic=(
+            "Fix repo trending scores before trusting paper trending output"
+        ),
     ),
-    "repository_trending": _trending_contract,
-    "paper_trending": _trending_contract,
-    "hf_paper_import": _hf_import_contract,
-    "citations": _provider_counter_contract,
-    "hf_artifacts": _provider_counter_contract,
-    "paper_markdown": _paper_markdown_contract,
-    "paper_embeddings": _paper_embeddings_contract,
-    "organization_sync": _organization_contract,
-    "organization_trending": _organization_contract,
-    "backfill": _backfill_contract,
-    "thumbnail_preload": _thumbnail_preload_contract,
-    "thumbnail_mirror": _workflow_output_contract,
-    "weekly_linker": _workflow_output_contract,
-    "curation_thumbnails": _curation_thumbnail_contract,
-    "chat_alert_monitor": _chat_alert_contract,
+    "hf_paper_import": OutputPolicy(_hf_import_contract),
+    "daily_curation": OutputPolicy(_daily_curation_contract),
+    "citations": OutputPolicy(_provider_counter_contract),
+    "hf_artifacts": OutputPolicy(_provider_counter_contract),
+    "paper_markdown": OutputPolicy(_paper_markdown_contract),
+    "paper_embeddings": OutputPolicy(_paper_embeddings_contract),
+    "organization_sync": OutputPolicy(_organization_contract),
+    "organization_trending": OutputPolicy(_organization_contract),
+    "backfill": OutputPolicy(_backfill_contract),
+    "thumbnail_preload": OutputPolicy(_thumbnail_preload_contract),
+    "thumbnail_mirror": OutputPolicy(
+        _workflow_output_contract,
+        refresh_db_freshness=True,
+        accept_systemd_completion=True,
+    ),
+    "weekly_linker": OutputPolicy(
+        _workflow_output_contract,
+        accept_systemd_completion=True,
+    ),
+    "curation_thumbnails": OutputPolicy(_curation_thumbnail_contract),
+    "chat_alert_monitor": OutputPolicy(_chat_alert_contract),
+    "submission_review": OutputPolicy(_submission_review_contract),
+    "autonomous_cron_operator": OutputPolicy(_autonomous_cron_contract),
 }
 
 
@@ -1427,23 +2088,29 @@ def fetch_workflow_statuses(
     return statuses
 
 
-def _minutes_since(value: Optional[datetime | str]) -> Optional[float]:
+def _minutes_since(
+    value: Optional[datetime | str], *, now: Optional[datetime] = None
+) -> Optional[float]:
     dt = value if isinstance(value, datetime) else _parse_log_timestamp(value)
     if dt is None:
         return None
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
-    return (_utcnow() - dt.astimezone(timezone.utc)).total_seconds() / 60
+    reference = now or _utcnow()
+    return (reference - dt.astimezone(timezone.utc)).total_seconds() / 60
 
 
 def _db_is_stale(
-    db_metrics: Dict[str, Any], stale_after_minutes: int
+    db_metrics: Dict[str, Any],
+    stale_after_minutes: int,
+    *,
+    now: Optional[datetime] = None,
 ) -> tuple[bool, Optional[str]]:
     last_write = db_metrics.get("last_write")
     if last_write is None:
         return True, "no database writes recorded"
 
-    age = _minutes_since(last_write)
+    age = _minutes_since(last_write, now=now)
     if age is None:
         return True, "could not parse database write timestamp"
 
@@ -1461,11 +2128,14 @@ def _db_is_stale(
 
 
 def _recent_log_success(
-    job: CronJobDefinition, log_status: Dict[str, Any]
+    job: CronJobDefinition,
+    log_status: Dict[str, Any],
+    *,
+    now: Optional[datetime] = None,
 ) -> tuple[bool, Optional[str]]:
     if log_status.get("status") not in {"success", "success_no_work"}:
         return False, None
-    age = _minutes_since(log_status.get("last_run"))
+    age = _minutes_since(log_status.get("last_run"), now=now)
     if age is None:
         return False, None
     if age > job.stale_after_minutes:
@@ -1483,6 +2153,7 @@ def evaluate_job_health(
     systemd_status: Optional[Dict[str, Any]] = None,
     now: Optional[datetime] = None,
     process_running: bool | None = None,
+    schedule_enabled: bool | None = None,
 ) -> Dict[str, Any]:
     """Combine log, process, lock, and DB signals into a dashboard status."""
 
@@ -1498,6 +2169,7 @@ def evaluate_job_health(
     log_result = log_status.get("status", "unknown")
     work_metrics = dict(log_status.get("work_metrics") or {})
     db_metrics = db_metrics or {}
+    output_policy = OUTPUT_POLICIES[job.output_evaluator or "generic"]
     log_no_work = log_result == "success_no_work"
     safe_log_error = (
         _sanitized_job_error(log_status["error"], job.id)
@@ -1521,17 +2193,11 @@ def evaluate_job_health(
                 f"database freshness query failed: {db_metrics['freshness_error']}"
             )
         else:
-            db_stale, db_reason = _db_is_stale(db_metrics, job.stale_after_minutes)
+            db_stale, db_reason = _db_is_stale(
+                db_metrics, job.stale_after_minutes, now=now
+            )
 
-    recent_log_success, recent_log_reason = _recent_log_success(job, log_status)
-    if (
-        job.id == "update_hot_github_trending"
-        and db_metrics.get("hot_repository_count") == 0
-        and recent_log_success
-    ):
-        db_stale = False
-        db_reason = None
-
+    recent_log_success, _ = _recent_log_success(job, log_status, now=now)
     # An inode may persist forever; only a currently held kernel lock is evidence.
     # Give the wrapper a short handoff window before calling a held orphan broken.
     lock_blocks_job = (
@@ -1573,24 +2239,14 @@ def evaluate_job_health(
         status = "healthy"
         reasons.append("completed with no work (allowed for this job)")
     else:
-        if job.id == "mirror_thumbnails_to_disk":
-            db_stale, db_reason = _db_is_stale(db_metrics, job.stale_after_minutes)
+        if output_policy.refresh_db_freshness:
+            db_stale, db_reason = _db_is_stale(
+                db_metrics, job.stale_after_minutes, now=now
+            )
             if db_stale and db_reason:
                 reasons.append(db_reason or "thumbnail cache looks stale")
 
-        import_recent_no_work = (
-            job.id == "import_hf_daily_papers"
-            and db_stale
-            and recent_log_success
-            and job.healthy_no_work_allowed
-        )
-
-        if (
-            db_stale
-            and db_reason
-            and db_reason not in reasons
-            and not import_recent_no_work
-        ):
+        if db_stale and db_reason and db_reason not in reasons:
             reasons.append(db_reason)
 
         log_success = log_result in {"success", "success_no_work"}
@@ -1604,10 +2260,6 @@ def evaluate_job_health(
                 status = "degraded"
             else:
                 status = "degraded"
-        elif import_recent_no_work:
-            status = "healthy"
-            reasons.append(recent_log_reason or "recent import completed successfully")
-            reasons.append("no new papers imported in the freshness window")
         elif db_stale and job.db_freshness_query and job.critical:
             status = "broken"
             diagnostics.append(
@@ -1627,101 +2279,35 @@ def evaluate_job_health(
             status = "degraded"
             reasons.append(f"log status is {log_result}")
 
-    if job.id == "update_hot_github_trending":
-        oldest_wait = db_metrics.get("oldest_eligible_wait_minutes", 0)
-        stale_scores = db_metrics.get("stale_paper_scores", 0)
-        one_snapshot = db_metrics.get("one_snapshot_over_30m", 0)
-        reserve_stops = work_metrics.get("rate_limit_stops", 0)
-        remaining = work_metrics.get("rate_limit_remaining")
-        reserve = work_metrics.get("rate_limit_reserve")
-        credential_failures = work_metrics.get("credential_failures", 0)
-        credential = work_metrics.get("credential", "GitHub credential")
-
-        if oldest_wait > 30:
-            status = "broken"
-            reasons.append(f"oldest eligible hot repository has waited {oldest_wait}m")
-        if stale_scores:
-            status = "broken"
-            reasons.append(f"{stale_scores} hot paper scores are missing or stale")
-        if credential_failures:
-            status = "broken"
-            reasons.append(
-                f"{credential} was rejected by GitHub "
-                f"({credential_failures} failed requests)"
-            )
-        if one_snapshot and status == "healthy":
-            status = "degraded"
-            reasons.append(
-                f"{one_snapshot} hot repositories have one snapshot after 30m"
-            )
-        if reserve_stops:
-            if status == "healthy":
-                status = "degraded"
-            reasons.append(f"rate-limit reserve stopped {reserve_stops} run(s)")
-        if (
-            remaining is not None
-            and reserve is not None
-            and int(remaining) < int(reserve)
-        ):
-            status = "broken"
-            reasons.append(
-                f"rate-limit reserve violated ({remaining} remaining < {reserve})"
-            )
-
-    if job.id == "update_github_stars" and not running:
-        for queue in ("fresh", "weekly"):
-            selected = int(work_metrics.get(f"{queue}_selected_groups", 0) or 0)
-            successes = int(work_metrics.get(f"{queue}_successes", 0) or 0)
-            failures = int(work_metrics.get(f"{queue}_failures", 0) or 0)
-            credential_failures = int(
-                work_metrics.get(f"{queue}_credential_failures", 0) or 0
-            )
-            credential = work_metrics.get(
-                f"{queue}_credential", f"{queue} GitHub credential"
-            )
-            if selected and successes == 0 and failures:
-                status = "broken"
-                if credential_failures:
-                    reasons.append(
-                        f"{credential} was rejected by GitHub; "
-                        f"the {queue} queue had no successful fetches"
-                    )
-                else:
-                    reasons.append(
-                        f"{queue} GitHub queue had no successful fetches "
-                        f"({failures} failures)"
-                    )
-            elif credential_failures:
-                if status == "healthy":
-                    status = "degraded"
-                reasons.append(
-                    f"{credential} had {credential_failures} rejected request(s)"
-                )
-
-    if dependency_status and dependency_status not in {"healthy", "running"}:
-        if status == "healthy":
-            status = "degraded"
-        reasons.append(f"dependency calculate_trending_scores is {dependency_status}")
-        diagnostics.append(
-            "Fix repo trending scores before trusting paper trending output"
-        )
-
     workflow_status = workflow_status or {}
-    evaluator = OUTPUT_EVALUATORS[job.output_evaluator or "generic"]
-    status, reasons = evaluator(
-        status, reasons, work_metrics, db_metrics, workflow_status
+    evaluator = output_policy.evaluate
+    evaluation_context = OutputEvaluationContext(
+        work=work_metrics,
+        db=db_metrics,
+        workflow=workflow_status,
+        systemd=systemd_status or {},
+        now=now,
+        running=running,
+        recent_log_success=recent_log_success,
+        db_reason=db_reason,
+        dependency_status=dependency_status,
     )
+    semantic_status, semantic_reasons = evaluator("healthy", [], evaluation_context)
+    status, reasons = evaluator(status, reasons, evaluation_context)
     if (
-        job.id == "process_curation_thumbnails"
+        output_policy.dependency_diagnostic
+        and dependency_status
+        and dependency_status not in {"healthy", "running"}
+    ):
+        diagnostics.append(output_policy.dependency_diagnostic)
+    if (
+        output_policy.accept_systemd_completion
+        and status == "unknown"
         and systemd_status
         and systemd_status.get("service_result") == "success"
-        and not any(
-            int(db_metrics.get(key, 0) or 0)
-            for key in ("queued", "processing", "stale_processing", "failed")
-        )
     ):
         status = "healthy"
-        reasons = ["latest queue poll completed and no thumbnail work is pending"]
+        reasons = ["latest systemd invocation completed its job-owned output contract"]
     output_status = status
     output_reason = (
         "; ".join(dict.fromkeys(reasons)) if reasons else "job-owned output is fresh"
@@ -1732,9 +2318,24 @@ def evaluate_job_health(
         log_status=log_status,
         workflow_status=workflow_status,
         systemd_status=systemd_status,
+        schedule_enabled=schedule_enabled,
         now=now,
     )
-    status = _aggregate_health(execution_health["status"], output_status)
+    if (
+        execution_health.get("applicable") is False
+        and execution_health["status"] == "healthy"
+    ):
+        output_status = "healthy"
+        output_reason = "output is not applicable while the schedule is disabled"
+        semantic_status = "healthy"
+        semantic_reasons = [output_reason]
+        reasons = [output_reason]
+    output_health: OutputHealthResult = {
+        "status": output_status,
+        "reason": output_reason,
+        "last_verified_at": last_db_write_iso or last_run_iso,
+    }
+    status = _aggregate_health(execution_health, output_health)
     if execution_health["status"] not in {"healthy", "running"}:
         diagnostics.append(execution_health["reason"])
 
@@ -1779,10 +2380,14 @@ def evaluate_job_health(
         "workflow_status": workflow_status or None,
         "systemd_status": systemd_status,
         "execution_health": execution_health,
-        "output_health": {
-            "status": output_status,
-            "reason": output_reason,
-            "last_verified_at": last_db_write_iso or last_run_iso,
+        "output_health": output_health,
+        "output_contract_evidence": {
+            "semantic": {
+                "status": semantic_status,
+                "reason": "; ".join(dict.fromkeys(semantic_reasons))
+                or "job-owned semantic evaluator passed",
+                "evaluator": job.output_evaluator or "generic",
+            }
         },
         "lock_stale": bool(lock_state.get("stale")),
         "lock_state": lock_state,
@@ -1798,6 +2403,50 @@ def evaluate_job_health(
     }
 
 
+def _dashboard_job_summary(jobs: List[Dict[str, Any]]) -> Dict[str, Any]:
+    scheduled_jobs = [job for job in jobs if job["category"] != "manual"]
+    manual_jobs = [job for job in jobs if job["category"] == "manual"]
+    counts = {
+        state: sum(1 for job in scheduled_jobs if job["status"] == state)
+        for state in ("healthy", "degraded", "broken", "running", "stuck", "unknown")
+    }
+    passing = counts["healthy"] + counts["running"]
+    scheduled_total = len(scheduled_jobs)
+    return {
+        "total_jobs": len(jobs),
+        "scheduled_jobs": scheduled_total,
+        "manual_jobs": len(manual_jobs),
+        **counts,
+        "health_score": (passing / scheduled_total * 100) if scheduled_total else 0.0,
+    }
+
+
+def _paper_markdown_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return _merge_paper_markdown_monitor_metrics(
+        metrics, _paper_markdown_monitor_snapshot()
+    )
+
+
+def _chat_monitor_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_chat_monitor_output()}
+
+
+def _submission_review_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_submission_review_output()}
+
+
+def _autonomous_cron_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_autonomous_cron_output()}
+
+
+WORK_METRICS_PROVIDERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+    "paper_markdown_monitor": _paper_markdown_work_metrics,
+    "chat_monitor": _chat_monitor_work_metrics,
+    "submission_review": _submission_review_work_metrics,
+    "autonomous_cron": _autonomous_cron_work_metrics,
+}
+
+
 def build_cron_dashboard(
     previous_dashboard: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
@@ -1808,7 +2457,8 @@ def build_cron_dashboard(
     from scripts.utils.cron_helpers import get_cron_job_status
 
     collection_started = time.perf_counter()
-    today = _utcnow().strftime("%Y%m%d")
+    collection_now = _utcnow()
+    today = collection_now.strftime("%Y%m%d")
     definitions = list(list_cron_jobs())
     jobs: List[Dict[str, Any]] = []
     status_by_id: Dict[str, str] = {}
@@ -1855,66 +2505,43 @@ def build_cron_dashboard(
         database_by_id, database_ms = database_future.result()
         workflow_by_id, workflow_ms = workflow_future.result()
         thumbnail_metrics, thumbnail_ms = thumbnail_future.result()
+    supplemental_db_metrics = {"thumbnail_cache": thumbnail_metrics}
 
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
         max_days = max(0, min(14, job.stale_after_minutes // (24 * 60) + 1))
-        latest_status = get_cron_job_status(job.log_name, today)
+        log_directory = Path(job.log_directory) if job.log_directory else None
+        latest_status = get_cron_job_status(job.log_name, today, logs_dir=log_directory)
         if latest_status.get("exists") or max_days == 0:
             return latest_status
 
         for days_back in range(1, max_days + 1):
             date = (_utcnow() - timedelta(days=days_back)).strftime("%Y%m%d")
-            candidate = get_cron_job_status(job.log_name, date)
+            candidate = get_cron_job_status(job.log_name, date, logs_dir=log_directory)
             if candidate.get("exists"):
                 return candidate
         return latest_status
 
     for job in definitions:
         log_status = get_recent_log_status(job)
-        if job.id == "paper_markdown_backfill":
-            remote = _paper_markdown_monitor_snapshot()
-            metrics = dict(log_status.get("work_metrics") or {})
-            metrics["remote_monitor_available"] = bool(remote.get("available"))
-            if remote.get("available"):
-                summary = remote.get("summary") or {}
-                metrics["terminal_shard_failures"] = int(
-                    summary.get("latest_run_failed_jobs", 0) or 0
-                )
-                metrics["interrupted_shards"] = int(
-                    summary.get("latest_run_interrupted_jobs", 0) or 0
-                )
-                metrics["oldest_active_checkpoint_age_minutes"] = int(
-                    summary.get("oldest_active_checkpoint_age_minutes", 0) or 0
-                )
-                metrics["unresolved_mount_failures"] = int(
-                    summary.get("unresolved_mount_failures", 0) or 0
-                )
-                metrics["recovered_mount_failures"] = int(
-                    summary.get("recovered_mount_failures", 0) or 0
-                )
-                mode = str(metrics.get("mode") or "live")
-                budget = (remote.get("budgets") or {}).get(mode) or {}
-                metrics["blocker_classification"] = (remote.get("blockers") or {}).get(
-                    mode
-                ) or "none"
-                metrics["next_admission_at"] = budget.get("next_admission_at")
-            log_status["work_metrics"] = metrics
-        elif job.id == "monitor_chat_operational_alerts":
-            metrics = dict(log_status.get("work_metrics") or {})
-            metrics.update(fetch_chat_monitor_output())
-            log_status["work_metrics"] = metrics
+        if job.work_metrics_provider:
+            provider = WORK_METRICS_PROVIDERS[job.work_metrics_provider]
+            log_status["work_metrics"] = provider(
+                dict(log_status.get("work_metrics") or {})
+            )
 
         db_metrics = database_by_id.get(job.id, {})
-        if job.id == "mirror_thumbnails_to_disk":
-            db_metrics = thumbnail_metrics
+        if job.db_metrics_provider:
+            db_metrics = supplemental_db_metrics[job.db_metrics_provider]
 
         lock_state = get_lock_state(job.lock_file, job.expected_runtime_minutes)
-        dependency_status = None
-        if job.id == "calculate_paper_trending_scores":
-            dependency_status = status_by_id.get("calculate_trending_scores")
+        dependency_status = (
+            status_by_id.get(job.dependency_job_id) if job.dependency_job_id else None
+        )
         workflow_status = workflow_by_id.get(job.id)
         systemd_status = (
-            fetch_systemd_status(job) if job.scheduler == "systemd" else None
+            fetch_systemd_status(job, log_status)
+            if job.scheduler == "systemd"
+            else None
         )
 
         evaluated = evaluate_job_health(
@@ -1925,17 +2552,24 @@ def build_cron_dashboard(
             dependency_status=dependency_status,
             workflow_status=workflow_status,
             systemd_status=systemd_status,
+            schedule_enabled=schedule_enabled(job),
+            now=collection_now,
             process_running=running_by_id[job.id],
+        )
+        health_findings = build_job_findings(job, evaluated, collection_now)
+        evaluated["health_findings"] = [
+            finding.as_dict() for finding in health_findings
+        ]
+        evaluated["operator_url"] = health_findings[0].operator_url
+        evaluated["run_url"] = next(
+            (finding.run_url for finding in health_findings if finding.run_url),
+            None,
         )
         status_by_id[job.id] = evaluated["status"]
         jobs.append(evaluated)
 
-    scheduled_jobs = [job for job in jobs if job["category"] != "manual"]
     manual_jobs = [job for job in jobs if job["category"] == "manual"]
-    counts = {
-        state: sum(1 for job in scheduled_jobs if job["status"] == state)
-        for state in ("healthy", "degraded", "broken", "running", "stuck", "unknown")
-    }
+    job_summary = _dashboard_job_summary(jobs)
 
     critical_issues = [
         f"{job['display_name']}: {job['status_reason']}"
@@ -1948,9 +2582,6 @@ def build_cron_dashboard(
         "All monitored jobs look healthy",
     )
 
-    total = len(scheduled_jobs)
-    passing = counts["healthy"] + counts["running"]
-    healthy_score = (passing / total * 100) if total else 0.0
     registered_ids = {
         job.id
         for job in list_cron_jobs()
@@ -1967,9 +2598,7 @@ def build_cron_dashboard(
         "jobs": jobs,
         "manual_operations": manual_jobs,
         "summary": {
-            "total_jobs": total,
-            **counts,
-            "health_score": healthy_score,
+            **job_summary,
             "critical_issues": critical_issues,
             "what_to_check_next": what_to_check_next,
             "coverage": {
