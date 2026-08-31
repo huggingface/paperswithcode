@@ -69,6 +69,37 @@ The digest route and both urgent routes are CRON-only secrets. Verify a 2xx
 digest receipt from the daily audit before considering the mobile channel
 qualified.
 
+## Chat reliability monitoring
+
+The production chat alert monitor runs content-free Langfuse aggregate checks
+every 15 minutes. Its Langfuse requests select only `core`, `basic`, `time`, and
+`metrics`; they never request trace input, output, or metadata. End-to-end turn
+observations supply success, interruption, first-token, and completion timing,
+while provider observations supply provider/auth/billing classes. Existing
+sanitized operational counters supply persistence and capacity failures.
+
+A dedicated-account synthetic chat runs at most every four hours, plus explicit
+post-alert, deploy, rollback, and provider-route checks. It verifies login,
+admission, first token, complete stream, persisted/reopenable state, deletion,
+and deletion verification. Configure its username and session credential only
+in the root-owned CRON overlay:
+
+```text
+PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME=replace-dedicated-monitor-username
+PWC_CHAT_SYNTHETIC_SESSION_COOKIE=replace-dedicated-monitor-session
+```
+
+The synthetic prompt is fixed in source. Its durable state contains only step
+states and stable incident signatures, never the session identifier, response,
+credential, prompt, or trace identifier. Manual mode does not disable either
+monitor.
+
+Incident trace-content access is exceptional. It requires a degraded aggregate
+finding, a named operator and run, a trace ID inside a bounded incident window,
+an execution environment that explicitly guarantees telemetry retention is
+disabled, and a durable redacted audit acknowledgement before access is
+authorized. Normal monitoring has no trace-content access path.
+
 ## Budget controls
 
 Each Codex request is still capped by its provider-side per-run reservation.

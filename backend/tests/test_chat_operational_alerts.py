@@ -256,6 +256,57 @@ def test_monitor_pages_once_on_window_breach_and_recovers_once(monkeypatch):
     assert events[0]["classifications"] == {"executor_lost_rate": 1}
 
 
+def test_reliability_probe_runs_every_fifteen_minutes_and_after_alerts(monkeypatch):
+    now = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    state = monitor.empty_state()
+    calls = []
+    monkeypatch.setattr(
+        monitor,
+        "probe_chat_aggregates",
+        lambda window, **kwargs: calls.append((window, kwargs)) or (),
+    )
+
+    assert monitor.collect_reliability_events(state, Settings(), now, {}, []) == []
+    assert len(calls) == 1
+    assert calls[0][0] == timedelta(minutes=15)
+
+    assert (
+        monitor.collect_reliability_events(
+            state, Settings(), now + timedelta(minutes=14), {}, []
+        )
+        == []
+    )
+    assert len(calls) == 1
+
+    alert = monitor.new_event("chat_runtime_critical", now=now + timedelta(minutes=14))
+    assert (
+        monitor.collect_reliability_events(
+            state, Settings(), now + timedelta(minutes=14), {}, [alert]
+        )
+        == []
+    )
+    assert len(calls) == 2
+
+
+def test_release_change_forces_extra_reliability_and_synthetic_checks():
+    state = monitor.empty_state()
+    settings = Settings(release_id="new-release")
+
+    aggregate, synthetic = monitor.release_probe_triggers(state, settings)
+
+    assert aggregate is True
+    assert synthetic is True
+    assert state["observed_release_id"] == "new-release"
+
+    assert monitor.release_probe_triggers(state, settings) == (False, False)
+
+    changed_provider = Settings(
+        release_id="new-release",
+        chat_glm_5_3_flash_route="zai-org/GLM-5.3-Flash:alternate",
+    )
+    assert monitor.release_probe_triggers(state, changed_provider) == (True, True)
+
+
 def test_provider_health_counts_only_content_free_aggregates():
     class FakeSession:
         values = iter((10, 5))
