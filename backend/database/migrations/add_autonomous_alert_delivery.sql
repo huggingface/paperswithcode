@@ -34,7 +34,7 @@ CREATE TABLE IF NOT EXISTS autonomous_alert_delivery (
     ),
     operator VARCHAR(32) CHECK (
         operator IS NULL OR operator IN (
-            'submissions','cron_health','chat_reliability'
+            'submissions','curation','cron_health','chat_reliability'
         )
     ),
     resource_digest VARCHAR(64) NOT NULL CHECK (

@@ -1065,11 +1065,20 @@ def staging_durable_external_qualification_values(
             "staging durable external qualification baseline has drifted: "
             + ", ".join(drifted)
         )
-    return dict(
+    values = dict(
         _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
         if enabled
         else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED
     )
+    if not enabled:
+        values["PWC_ADMIN_API_TOKEN"] = ""
+        return values
+    existing_line = current.get("PWC_ADMIN_API_TOKEN")
+    existing = decoded_value(existing_line).strip() if existing_line else ""
+    values["PWC_ADMIN_API_TOKEN"] = (
+        existing if 32 <= len(existing) <= 8192 else secrets.token_urlsafe(48)
+    )
+    return values
 
 
 # Must match Settings.chat_deepseek_v4_flash_route when Hugging Face is selected.

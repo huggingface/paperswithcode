@@ -128,7 +128,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `continuous-control` — Continuous Control
 - `cross-view-object-correspondence` — Cross-view object correspondence
 - `deep-research-agents` — Deep Research Agents
-- `deepfake-and-forensics` — Deepfake Detection
+- `deepfake-detection` — Deepfake Detection
 - `depth-estimation` — Depth estimation
 - `document-layout-analysis` — Document Layout Analysis
 - `document-understanding` — Document Understanding

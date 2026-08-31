@@ -133,6 +133,9 @@ def node_environment(
     token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
     if len(token) < 32:
         raise ValueError("external Pi worker token is missing or too short")
+    state_root = protected.get("PWC_EXTERNAL_PI_STATE_ROOT", "")
+    if state_root != f"/run/paperswithcode/external-pi-{resolved.slot}":
+        raise ValueError("external Pi worker state root is invalid")
     return {
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
         "PWC_EXTERNAL_PI_PORT": str(resolved.port),
@@ -143,6 +146,7 @@ def node_environment(
         "PWC_EXTERNAL_PI_RELEASE_ID": resolved.release_id,
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
+        "PWC_EXTERNAL_PI_STATE_ROOT": state_root,
     }
 
 

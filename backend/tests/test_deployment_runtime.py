@@ -3965,6 +3965,8 @@ def test_staging_durable_external_qualification_profile_is_exact_and_reversible(
     enabled = configure_host_env.staging_durable_external_qualification_values(
         baseline, enabled=True
     )
+    qualification_admin_token = enabled.pop("PWC_ADMIN_API_TOKEN")
+    assert len(qualification_admin_token) >= 32
     assert enabled == {
         "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
         "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
@@ -3995,7 +3997,28 @@ def test_staging_durable_external_qualification_profile_is_exact_and_reversible(
         "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
         "PWC_CHAT_BLANK_POOL_ENABLED": "true",
         "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+        "PWC_ADMIN_API_TOKEN": "",
     }
+
+
+def test_staging_durable_external_qualification_installs_scoped_admin_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = _staging_durable_external_qualification_baseline()
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+
+    assert enabled["PWC_ADMIN_API_TOKEN"] == "q" * 64
+    active = configure_host_env.assign(baseline, enabled)
+    disabled = configure_host_env.staging_durable_external_qualification_values(
+        active, enabled=False
+    )
+    assert disabled["PWC_ADMIN_API_TOKEN"] == ""
 
 
 @pytest.mark.parametrize(
@@ -4026,6 +4049,9 @@ def test_staging_durable_external_qualification_mode_is_atomic_and_staging_only(
     capsys: pytest.CaptureFixture[str],
     enabled: bool,
 ):
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
     source = tmp_path / "source.env"
     source.write_text("SOURCE=unused\n", encoding="utf-8")
     config_root = tmp_path / "config"

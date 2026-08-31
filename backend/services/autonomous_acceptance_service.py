@@ -28,6 +28,14 @@ _REQUIREMENTS: dict[Operator, frozenset[str]] = {
             "callback_idempotency",
         }
     ),
+    Operator.CURATION: frozenset(
+        {
+            "dispatcher_preflight",
+            "capability_isolation",
+            "callback_idempotency",
+            "paused_callback_apply",
+        }
+    ),
     Operator.CRON_HEALTH: frozenset(
         {
             "shadow_diagnosis",

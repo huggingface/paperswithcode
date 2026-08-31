@@ -561,6 +561,24 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --disable-dispatch \
 sudo pwc-cron enqueue_hf_daily_paper_curation --enable-dispatch
 ```
 
+Scheduled curation has a separate `curation` autonomous operator. Enabling or
+disabling the submission reviewer does not grant or revoke curation writes.
+Before enabling scheduled dispatch, the curation operator must be enabled from
+the admin autonomous-operations control plane after recording acceptance
+evidence for `dispatcher_preflight`, `capability_isolation`,
+`callback_idempotency`, and `paused_callback_apply`; the dispatcher performs the
+same policy check before allocating a remote job and pauses with
+`autonomous_policy_denied` if it would be rejected. Pausing scheduled dispatch
+does not disable the curation operator, so callbacks from jobs already in flight
+can finish. Use the global manual-mode control or disable the curation operator
+only when already-running callbacks must also fail closed.
+
+Existing installations must apply
+`backend/database/migrations/add_curation_autonomous_operator.sql` before
+deploying source that uses this operator. The migration adds the disabled
+control row and expands only the autonomous operator constraints; it does not
+enable curation or release scheduled dispatch.
+
 Retry a terminal scheduled stage by its durable job UUID through the same
 allowlisted queue. Operator retries use priority 50 (ahead of ordinary daily
 work but behind priority-0 admin jobs), and repeating the command for an already
@@ -570,6 +588,19 @@ admin-triggered jobs:
 ```bash
 sudo pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-uuid>
 ```
+
+To launch one explicit queued daily or trending canary while normal dispatch
+remains paused by an explicit operator action, use its durable job UUID. This
+command rechecks the token guardrail and shared capacity, dispatches only the
+selected row, and never resumes the scheduler:
+
+```bash
+sudo pwc-cron enqueue_hf_daily_paper_curation --canary-job <job-uuid>
+```
+
+For a terminal daily job, first use `--retry-job` and then pass the returned
+queued retry UUID to `--canary-job`. Admin jobs and non-queued rows are rejected.
+The command exits nonzero if the remote job does not reach the running state.
 
 Replay a saved proposal through the currently deployed callback validators
 without applying writes. The command reports current policy validity and

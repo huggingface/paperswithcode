@@ -560,16 +560,18 @@ class ChatSandboxAcquisitionCoordinator:
 
         sandbox = None
         try:
-            with self.session_factory() as evidence_db:
-                qualification_profile = evidence_db.scalar(
-                    select(ChatTurnLatency.qualification_profile)
-                    .where(
-                        ChatTurnLatency.chat_session_id == chat_session_id,
-                        ChatTurnLatency.terminal_status == "running",
+            qualification_profile = None
+            if self.settings.environment == "staging":
+                with self.session_factory() as evidence_db:
+                    qualification_profile = evidence_db.scalar(
+                        select(ChatTurnLatency.qualification_profile)
+                        .where(
+                            ChatTurnLatency.chat_session_id == chat_session_id,
+                            ChatTurnLatency.terminal_status == "running",
+                        )
+                        .order_by(ChatTurnLatency.admitted_at.desc())
+                        .limit(1)
                     )
-                    .order_by(ChatTurnLatency.started_at.desc())
-                    .limit(1)
-                )
             async with asyncio.timeout(self.ready_timeout_seconds):
                 sandbox = await self.provider.create(
                     name=f"chat-{chat_session_id}",

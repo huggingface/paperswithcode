@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS autonomous_operator_state (
     updated_by VARCHAR(255) NOT NULL,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT autonomous_operator_state_operator_check CHECK (
-        operator IN ('global','submissions','cron_health','chat_reliability')
+        operator IN ('global','submissions','curation','cron_health','chat_reliability')
     ),
     CONSTRAINT autonomous_operator_state_manual_check CHECK (
         operator = 'global' OR NOT manual_mode
@@ -43,6 +43,7 @@ INSERT INTO autonomous_operator_state (
 ) VALUES
     ('global', false, true, 1, 'system:migration'),
     ('submissions', false, false, 1, 'system:migration'),
+    ('curation', false, false, 1, 'system:migration'),
     ('cron_health', false, false, 1, 'system:migration'),
     ('chat_reliability', false, false, 1, 'system:migration')
 ON CONFLICT (operator) DO NOTHING;
@@ -59,7 +60,7 @@ CREATE TABLE IF NOT EXISTS autonomous_execution_intent (
     pricing_policy_digest VARCHAR(64) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT autonomous_execution_intent_operator_check CHECK (
-        operator IN ('submissions','cron_health','chat_reliability')
+        operator IN ('submissions','curation','cron_health','chat_reliability')
     ),
     CONSTRAINT autonomous_execution_intent_model_alias_check CHECK (
         model_alias IN ('diagnosis','independent_review')
@@ -88,7 +89,7 @@ CREATE TABLE IF NOT EXISTS autonomous_run (
         DEFAULT repeat('0', 64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT autonomous_run_operator_check CHECK (
-        operator IN ('submissions','cron_health','chat_reliability')
+        operator IN ('submissions','curation','cron_health','chat_reliability')
     ),
     CONSTRAINT autonomous_run_status_check CHECK (
         status IN ('completed','rejected','failed','budget_exhausted','cancelled')
@@ -208,7 +209,7 @@ CREATE TABLE IF NOT EXISTS autonomous_budget_reservation (
     released_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT autonomous_budget_reservation_operator_check CHECK (
-        operator IN ('submissions','cron_health','chat_reliability')
+        operator IN ('submissions','curation','cron_health','chat_reliability')
     ),
     CONSTRAINT autonomous_budget_reservation_provider_check CHECK (
         provider = 'openai'
@@ -273,7 +274,7 @@ CREATE TABLE IF NOT EXISTS autonomous_action (
     after_digest VARCHAR(64),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     CONSTRAINT autonomous_action_operator_check CHECK (
-        operator IN ('submissions','cron_health','chat_reliability')
+        operator IN ('submissions','curation','cron_health','chat_reliability')
     ),
     CONSTRAINT autonomous_action_before_digest_check CHECK (
         before_digest IS NULL OR length(before_digest) = 64

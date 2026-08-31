@@ -357,7 +357,9 @@ def test_qualification_turns_have_a_fixed_provider_request_ceiling():
 
     database = SimpleNamespace(scalar=lambda _query: "32-functional-turns")
     limits = _provider_turn_limits(
-        SimpleNamespace(turn_id=object(), scopes=[]), database
+        SimpleNamespace(turn_id=object(), scopes=[]),
+        database,
+        SimpleNamespace(environment="staging"),
     )
 
     assert limits == (
@@ -365,6 +367,21 @@ def test_qualification_turns_have_a_fixed_provider_request_ceiling():
         QUALIFICATION_PROVIDER_TURN_TOKENS,
     )
     assert limits[0] == 2
+
+
+def test_production_provider_limits_never_query_staging_qualification_tables():
+    from backend.chat_gateway_app import MAX_PROVIDER_REQUESTS, _provider_turn_limits
+
+    def unexpected_query(_query):
+        raise AssertionError("production queried staging qualification state")
+
+    limits = _provider_turn_limits(
+        SimpleNamespace(turn_id=object(), scopes=[]),
+        SimpleNamespace(scalar=unexpected_query),
+        SimpleNamespace(environment="production"),
+    )
+
+    assert limits[0] == MAX_PROVIDER_REQUESTS
 
 
 class _ConcurrencyDB:

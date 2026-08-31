@@ -55,6 +55,7 @@ from backend.services.curation_thumbnail_queue_service import (
     queue_thumbnail,
     serialize_thumbnail,
 )
+from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
@@ -144,8 +145,6 @@ class CodexCurationCallbackService:
         """Authorize the authenticated scheduled callback before any write."""
         if getattr(row, "trigger", "admin") == "admin":
             raise AutonomousCapabilityDenied("admin_callback_is_not_autonomous")
-        if row.kind == "resolve-model-paper":
-            raise AutonomousCapabilityDenied("capability_not_in_manifest")
         for capability, resource in self._validate_scheduled_capability_boundary(
             row, body
         ):
@@ -1395,20 +1394,10 @@ class CodexCurationCallbackService:
         self, row, body: ApplyMutationRequest
     ) -> tuple[tuple[Capability, ResourceRef], ...]:
         """Resolve the callback's closed mutation surface from catalog state."""
-        paper_id = getattr(row, "paper_id", None)
-        if row.kind == "add-evals":
-            capability = Capability.APPLY_EXISTING_LEADERBOARD_EVAL
-        elif row.kind == "enrich-paper":
-            capability = Capability.APPLY_EXISTING_TAXONOMY_EDIT
-        else:
-            raise AutonomousCapabilityDenied("capability_not_in_manifest")
-        resources: list[ResourceRef] = [
-            ResourceRef(
-                ResourceKind.PAPER,
-                "missing" if paper_id is None else str(paper_id),
-                paper_id is not None and self.db.get(Paper, paper_id) is not None,
-            )
-        ]
+        capability, primary_resource = curation_primary_authorization(self.db, row)
+        if row.kind == "resolve-model-paper":
+            return ((capability, primary_resource),)
+        resources: list[ResourceRef] = [primary_resource]
         if body.enrich is not None:
             resources.extend(
                 ResourceRef(

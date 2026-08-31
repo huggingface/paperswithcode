@@ -23,6 +23,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend import cli_submissions
 from backend.config import Settings
+from backend.models.api import ApplyMutationRequest
 from backend.models.database import (
     Base,
     CatalogMutationEvent,
@@ -30,9 +31,12 @@ from backend.models.database import (
     PaperProjectPage,
     PaperRepository,
     PaperTask,
+    PaperCurationSchedulerState,
+    PaperCurationJob,
     PendingPaperEdit,
     TaskDataset,
     TaskDatasetMetric,
+    TrendingModelCandidate,
     UserProfile,
 )
 from backend.models.database import (
@@ -69,6 +73,7 @@ from backend.services.autonomous_operations_repository import (
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
 )
+from backend.services.curation_autonomy import curation_run_context
 from backend.services.pending_edit_service import (
     PendingEditAlreadyReviewedError,
     PendingEditConflictError,
@@ -797,6 +802,83 @@ def test_real_manual_mode_blocks_scheduled_curation_callback(db_session, paper_f
         CodexCurationCallbackService(db_session).authorize_autonomous_callback(
             row, body, context=context
         )
+
+
+def test_pausing_dispatch_does_not_revoke_an_inflight_curation_callback(
+    db_session, paper_fixture
+):
+    operations = AutonomousOperationsRepository()
+    state = operations.get_control_state(db_session)
+    state = operations.set_manual_mode(
+        db_session,
+        enabled=False,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+    operations.set_operator_enabled(
+        db_session,
+        operator=Operator.CURATION,
+        enabled=True,
+        expected_revision=state.revision,
+        actor="admin:test",
+        now=datetime.now(timezone.utc),
+    )
+    candidate = TrendingModelCandidate(
+        repo_id="org/paused-canary-model",
+        author="org",
+        readme_sha="a" * 64,
+        status="resolving",
+    )
+    db_session.add(candidate)
+    db_session.flush()
+    row = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="resolve-model-paper",
+        candidate_id=candidate.id,
+        requested_by="hf-trending-cron",
+        trigger="hf-trending-cron",
+        policy_version="hf-trending-v1",
+        priority=25,
+        status="running",
+    )
+    db_session.add(row)
+    context = curation_run_context(row)
+    operations.append_run(
+        db_session,
+        context=context,
+        status="completed",
+        now=datetime.now(timezone.utc),
+    )
+    db_session.add(
+        PaperCurationSchedulerState(
+            id=1,
+            dispatch_enabled=False,
+            paused_at=datetime.now(timezone.utc),
+            pause_condition="operator",
+            pause_reason="canary observation",
+        )
+    )
+    db_session.commit()
+
+    result = CodexCurationCallbackService(db_session).apply(
+        row,
+        ApplyMutationRequest.model_validate(
+            {
+                "resolve_model_paper": {
+                    "decision": "reject",
+                    "reason": "The repository only repackages existing weights.",
+                    "novelty_kind": "repackaging",
+                    "evidence_urls": ["https://huggingface.co/org/paused-canary-model"],
+                }
+            }
+        ),
+        autonomous_context=context,
+    )
+
+    assert result["status"] == "rejected"
+    assert row.applied_at is not None
+    assert candidate.status == "rejected"
 
 
 def test_codex_cli_applies_terminal_approval(db_session, tmp_path, monkeypatch):

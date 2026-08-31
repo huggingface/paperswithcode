@@ -969,8 +969,8 @@ def test_external_pi_runner_fences_socket_and_run_with_distinct_claims():
     assert connection["kwargs"]["ping_timeout"] == 20
     assert json.loads(socket.sent[0])["turnClaim"] == {
         "turnId": str(turn_id),
-        "workerId": "api-1",
-        "workerGeneration": 4,
+        "workerId": "external-pi-1",
+        "workerGeneration": 7,
         "leaseGeneration": 9,
     }
 
@@ -1225,7 +1225,7 @@ def _tool_runner(executor, workspace_manager):
         reasoning_effort="low",
         durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
     )
-    return ExternalPiChatTurnRunner(
+    runner = ExternalPiChatTurnRunner(
         settings=settings,
         admission=admission,
         prompt="answer",
@@ -1243,6 +1243,34 @@ def _tool_runner(executor, workspace_manager):
         session_factory=SessionContext,
         turn_state_transition=_ignore_turn_state,
     )
+    runner.external_worker_claim = ExternalWorkerClaim(
+        "external-pi-1", uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+    return runner
+
+
+def test_external_run_frame_omits_absent_paper_descriptor():
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.external_worker_claim = ExternalWorkerClaim(
+        "external-pi-1", uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+
+    assert runner.admission.paper_descriptor is None
+    assert "paper_descriptor" not in runner._run_frame()
+
+
+def test_external_run_frame_uses_bounded_external_worker_fence():
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.external_worker_claim = ExternalWorkerClaim(
+        "staging-green", uuid.uuid4(), 72, "release-a", "external-pi-v1"
+    )
+
+    assert runner._turn_claim_frame() == {
+        "turnId": str(runner.admission.turn_id),
+        "workerId": "staging-green",
+        "workerGeneration": 72,
+        "leaseGeneration": runner.admission.durable_claim.lease_generation,
+    }
 
 
 def test_tool_execution_persists_waiting_tool_until_safe_settlement():
@@ -1706,8 +1734,8 @@ def test_external_pi_runner_reattaches_same_run_from_last_acknowledged_sequence(
         "request_id": "request-1",
         "turnClaim": {
             "turnId": str(turn_id),
-            "workerId": "api-1",
-            "workerGeneration": 4,
+            "workerId": "external-pi-1",
+            "workerGeneration": 7,
             "leaseGeneration": 9,
         },
         "afterSequence": 1,
@@ -1718,8 +1746,8 @@ def test_external_pi_runner_reattaches_same_run_from_last_acknowledged_sequence(
         "request_id": "request-1",
         "turnClaim": {
             "turnId": str(turn_id),
-            "workerId": "api-1",
-            "workerGeneration": 4,
+            "workerId": "external-pi-1",
+            "workerGeneration": 7,
             "leaseGeneration": 9,
         },
         "sequence": 3,

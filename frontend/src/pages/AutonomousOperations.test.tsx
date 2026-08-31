@@ -17,6 +17,7 @@ const snapshot = (state: AutonomousOperationsResponse["display_state"] = "manual
   display_state: state,
   operators: [
     { operator: "submissions", enabled: true, status: "healthy", monitoring_active: true, next_scheduled_run: "2026-08-28T13:00:00Z" },
+    { operator: "curation", enabled: false, status: "degraded", monitoring_active: false, next_scheduled_run: null },
     { operator: "cron_health", enabled: true, status: "repairing", monitoring_active: true, next_scheduled_run: null },
     { operator: "chat_reliability", enabled: false, status: "degraded", monitoring_active: false, next_scheduled_run: null },
   ],
@@ -70,7 +71,9 @@ describe("AutonomousOperations", () => {
     await waitFor(() => expect(mutation).toHaveBeenCalledWith("submissions", false, 7, "SET_OPERATOR_STATE"));
 
     fireEvent.change(screen.getByLabelText("Chat reliability confirmation"), { target: { value: "SET_OPERATOR_STATE" } });
-    expect(screen.getByRole("button", { name: "Enable" })).toBeDisabled();
+    for (const enableButton of screen.getAllByRole("button", { name: "Enable" })) {
+      expect(enableButton).toBeDisabled();
+    }
   });
 
   it("sends revisioned, typed control mutations through the API client", async () => {

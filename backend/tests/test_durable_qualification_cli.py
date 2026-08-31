@@ -299,6 +299,74 @@ def test_protected_staging_settings_ignore_ambient_admin_credential(
     assert settings.release_id == "development"
 
 
+def test_protected_staging_settings_ignore_unrelated_pwc_keys(tmp_path):
+    from backend.services.durable_external_qualification_system import (
+        load_protected_staging_settings,
+    )
+
+    path = tmp_path / "staging.env"
+    path.write_text(
+        "PWC_ENVIRONMENT=staging\n"
+        f"PWC_ADMIN_API_TOKEN={'p' * 40}\n"
+        f"PWC_JWT_SECRET={'j' * 40}\n"
+        "PWC_TRENDING_PIN_ARXIV_IDS=2601.00001:72\n"
+    )
+    path.chmod(0o640)
+    os.chown(path, 0, grp.getgrnam("pwc-staging").gr_gid)
+
+    settings = load_protected_staging_settings(path)
+
+    assert settings.environment == "staging"
+
+
+def test_bind_active_staging_worker_uses_verified_slot(tmp_path):
+    from backend.config import Settings
+    from backend.services.durable_external_qualification_system import (
+        bind_active_staging_worker,
+        configured_worker_ids,
+    )
+
+    slot = tmp_path / "environments" / "staging" / "slots" / "green"
+    slot.mkdir(parents=True)
+    active = slot.parents[1] / "active"
+    active.symlink_to(slot)
+    settings = Settings(
+        environment="staging",
+        chat_external_pi_worker_token="t" * 64,
+    )
+
+    bound = bind_active_staging_worker(settings, app_root=tmp_path)
+
+    assert bound.chat_external_pi_worker_id == "staging-green"
+    assert bound.chat_external_pi_worker_url == "http://127.0.0.1:8767"
+    assert configured_worker_ids(bound) == ("staging-green",)
+
+
+def test_system_resource_sampler_uses_active_slot_backend_unit(tmp_path, monkeypatch):
+    from backend.services import durable_external_qualification_system as system
+
+    slot = tmp_path / "environments" / "staging" / "slots" / "blue"
+    slot.mkdir(parents=True)
+    (slot.parents[1] / "active").symlink_to(slot)
+    control = SimpleNamespace(app_root=tmp_path)
+    evidence = system._SystemResourceEvidence(control)
+    monkeypatch.setattr(evidence, "_scope_counts", lambda: (3, 1, 2))
+    monkeypatch.setattr(evidence, "_cpu_percent", lambda: 12.5)
+    monkeypatch.setattr(system, "_proc_memory_value", lambda _name: 10_000)
+    units = []
+    monkeypatch.setattr(
+        system, "_systemctl_memory", lambda unit: units.append(unit) or 1_000
+    )
+
+    sample = evidence.sample()
+
+    assert sample.active_backend_turns == 3
+    assert units == [
+        "paperswithcode-staging-backend@blue.service",
+        "paperswithcode-staging-external-pi-worker@blue.service",
+    ]
+
+
 @pytest.mark.parametrize("mode", (0o600, 0o644, 0o660))
 def test_protected_staging_settings_reject_wrong_mode(tmp_path, mode):
     from backend.services.durable_external_qualification_system import (

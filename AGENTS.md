@@ -1,128 +1,106 @@
 # AGENTS.md
 
-Guidance for agents working in this repository.
+Guidance for agents working in the Papers with Code monorepo. The site at
+https://paperswithcode.co makes open AI research and its artifacts accessible.
+It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
 
 ## Guardrails
 
-- Production and staging run from immutable releases under
-  `/srv/paperswithcode`; treat this checkout as production-adjacent release
-  source, never as a runtime directory.
-- During routine development, do not restart or stop services, kill processes,
-  rebuild/repoint the production frontend, or reload nginx. Deploy only when the
-  publishing workflow below calls for a release.
-- Treat approval to implement a repository source change as approval to validate
-  it, commit the intended changes directly to `main`, push `origin main`, and
-  deploy that exact commit to production. Do not wait for separate commit, push,
-  or production deployment requests unless the user explicitly asks for
-  local-only work or no deployment. The chat-interface exception below always
-  takes precedence.
+- Production and staging use immutable releases under `/srv/paperswithcode`;
+  this checkout is production-adjacent release source, not a runtime directory.
+- During development, do not stop services, kill processes, rebuild or repoint
+  the production frontend, reload nginx, or otherwise mutate live runtime state.
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
-- Preserve unrelated work in the dirty tree and edit files narrowly.
+- Preserve unrelated work in dirty trees and edit files narrowly.
 - Run Python and repository CLIs with
-  `uv run --env-file backend/keys.env …`.
-- Follow `docs/database.md` before accessing PostgreSQL.
+  `uv run --env-file backend/keys.env …`. Read `docs/database.md` before
+  accessing PostgreSQL.
 - Prefer `DBPaper.is_latest_version` to `== True` and
   `~DBPaper.urls_extracted` to `== False`.
-- The VPS is resource constrained (about 8 GB RAM / 80 GB disk, with little disk
-  headroom). Stream large inputs, use bounded batches, and check capacity first.
-  For large JSON arrays such as the legacy PwC dumps, prefer incremental parsing
-  with `ijson`; never load the entire file with `json.load()`.
+- Disk headroom is limited. Stream large inputs, use bounded batches, and check
+  capacity first. Parse large JSON arrays incrementally with `ijson`; never load
+  an entire legacy dump with `json.load()`.
 
-## Development
+## Development workflow
 
+- Give each implementation task an isolated worktree and a dedicated
+  `codex/<short-feature-name>` branch. If Codex supplies a detached-HEAD
+  worktree, create the branch before the first commit. Do not develop independent
+  features in the primary `main` checkout.
+- Commit only the task's intended changes. Never switch, reset, delete, or reuse
+  another task's worktree or branch.
+- Implementation approval includes validation and a commit to the feature
+  branch. An ordinary feature task then stops and reports its branch, commit, and
+  verification; it does not update `main`, push `origin main`, or deploy.
+- Concurrent feature tasks are allowed, but one explicitly designated publishing
+  task must serialize integration, pushing, and deployment. Do not create a pull
+  request unless the user asks for one.
 - Put domain logic in `backend/services/`, HTTP adapters in `backend/routers/`,
   API models in bounded modules under `backend/models/` (with
-  `backend/models/api.py` as the compatibility re-export surface), and persistence models/migrations in
-  `backend/models/database.py` and `backend/database/migrations/`.
-- Run targeted tests and linters. Do not run the entire suite when a focused check
-  is sufficient.
-- For an isolated backend, first verify a free non-production port; ports 8000 and
-  8001 are currently production/staging and must not be replaced.
-- For frontend work, use `npm run dev` and `npm run lint`. Do not run
-  `npm run build` as a routine check; it writes `frontend/dist` and consumes scarce
-  disk. Keep routes before the catch-all and use `frontend/src/lib/api.ts` plus
-  TanStack Query for server state.
-- Never reload nginx during development.
+  `backend/models/api.py` as the compatibility re-export surface), and
+  persistence models and migrations in `backend/models/database.py` and
+  `backend/database/migrations/`.
+- Run targeted tests and linters; a focused check is preferable to the entire
+  suite when sufficient.
+- For an isolated backend, first confirm a free non-production port. Ports 8000
+  and 8001 belong to production and staging.
+- For frontend work, use `npm run dev` and `npm run lint`. Do not routinely run
+  `npm run build`; it writes `frontend/dist` and consumes scarce disk. Define
+  routes before the catch-all, and use `frontend/src/lib/api.ts` with TanStack
+  Query for server state.
 
-## Publishing changes
+## Publishing and releases
 
-- After completing and validating a repository source change, commit the
-  intended changes directly to `main`, push `origin main`, and deploy the exact
-  pushed commit to production with `pwc-deploy`.
-- Changes related to the chat interface at `staging.paperswithcode.co/chat`,
-  including chat-specific frontend, backend, configuration, and infrastructure,
-  must be deployed only to staging unless the user explicitly authorizes that
-  chat work for production. Do not include chat-related changes in a production
-  release merely because the same task also contains non-chat changes.
-- Keep chat-related and non-chat source changes in separate commits when needed
-  for deployment. Deploy the non-chat commit to production and the chat commit
-  to staging; if they cannot be safely separated, stop before deployment and ask
-  the user how to proceed.
+- The publishing task fetches `origin main`, integrates completed feature
+  commits onto current `main`, resolves conflicts deliberately, reruns
+  proportionate validation, pushes `origin main`, and deploys that exact commit
+  with `pwc-deploy`. Never force-push. If local and remote `main` have diverged,
+  stop and resolve the divergence safely before pushing.
+- Production is the default for publishable non-chat source changes unless the
+  user requests local-only work or no deployment.
+- Chat-interface changes for `staging.paperswithcode.co/chat`—including its
+  frontend, backend, configuration, and infrastructure—go only to staging unless
+  the user explicitly authorizes production. Keep chat and non-chat changes in
+  separate commits when necessary. If they cannot be separated safely, ask the
+  user before deployment.
 - Planning documents (`PLAN*.md`), scratch notes, temporary artifacts,
-  diagnostic output, and generated reports are local working files by default.
-  Do not stage, commit, push, or deploy them unless the user explicitly asks to
-  publish that specific file.
-- A task that changes only local working files does not require a commit, push,
-  or deployment. When a task also changes publishable source, commit only the
-  intended source changes and leave local working files unstaged.
-- Read-only investigation and reporting, data-only curation, database operations,
-  and other work that does not change deployed source do not require a commit or
-  application deployment.
-- Do not create a feature branch or pull request unless the user explicitly
-  requests one.
-- Fetch `origin main` before publishing and never force-push. If local and
-  remote `main` have diverged, stop and resolve the divergence safely before
-  pushing.
-- Production deployment is the default for publishable non-chat source changes.
-  Staging deployment or implementation approval for chat-related work never
-  implies authorization to deploy that chat work to production.
-
-## Production releases
-
-Production topology can change, so inspect the active processes and nginx config
-before a release. Currently:
-
-- production is `paperswithcode-backend@production` on `:8000`;
-- staging is `paperswithcode-backend@staging` on `:8001`;
-- nginx serves each environment's `current/frontend-dist`;
-- `pwc-status`, `pwc-deploy`, and `pwc-rollback` are the supported lifecycle
-  interfaces.
-
-Use `pwc-deploy` for a complete backend-plus-frontend release. Nginx changes use
-the separate `pwc-nginx` command. The retired service scripts never mutate live
-state. Scheduled work must use the installed `pwc-cron` allowlist; never run a
-production job from `.github/workflows/scripts/` or source `backend/keys.env`
-into a deployed process.
-
-After any release, smoke-test `/health`, `/`, one SPA route, and one API route.
-Restore the previous release if validation fails.
+  diagnostic output, and generated reports are local by default. Do not stage,
+  commit, or publish them unless explicitly requested. Tasks changing only local
+  files need no commit or deployment; read-only investigations, data curation,
+  and database operations need no application deployment.
+- Inspect active processes and nginx configuration before releasing. Currently,
+  production is `paperswithcode-backend@production` on `:8000`, staging is
+  `paperswithcode-backend@staging` on `:8001`, and nginx serves each environment's
+  `current/frontend-dist`.
+- Use `pwc-status`, `pwc-deploy`, and `pwc-rollback` for lifecycle operations.
+  Use `pwc-nginx` separately for nginx changes. Retired service scripts never
+  mutate live state.
+- Scheduled production work must use the installed `pwc-cron` allowlist. Never
+  run a production job from `.github/workflows/scripts/` or source
+  `backend/keys.env` into a deployed process.
+- After a release, smoke-test `/health`, `/`, one SPA route, and one API route.
+  Restore the previous release if validation fails.
 
 ## Project map
 
-Papers With Code is a React/Vite frontend with a FastAPI, SQLAlchemy, PostgreSQL,
-and pgvector backend. Data comes from Hugging Face papers and the legacy dumps in
-`data/legacy_pwc_data/`; scheduled imports and refreshes live under
-`.github/workflows/scripts/`.
+Papers With Code uses React/Vite, FastAPI, SQLAlchemy, PostgreSQL, and pgvector.
+Data comes from Hugging Face papers and legacy dumps in `data/legacy_pwc_data/`;
+scheduled imports and refreshes live under `.github/workflows/scripts/`.
 
 - Production: `https://paperswithcode.co`
+- Staging: `https://staging.paperswithcode.co`
 - Local API: `http://localhost:8000/api/v1/`
-- OpenAPI docs: `http://localhost:8000/docs`
-- Development guide: `docs/development-guide.md`
-- Database access: `docs/database.md`
+- OpenAPI: `http://localhost:8000/docs`
+- Development: `docs/development-guide.md`
+- Database: `docs/database.md`
 - Data workflows: `docs/data-workflows.md`
 - Operations: `docs/operations.md`
-- CRON implementation: `.github/workflows/scripts/README.md`
+- CRON: `.github/workflows/scripts/README.md`
 - Schema: `docs/DATABASE_SCHEMA_UML.md`
 
-## Agent skills
+## Agent docs
 
-### Issue tracker
-
-Issues are tracked in GitHub Issues for `huggingface/paperswithcode`. See
-`docs/agents/issue-tracker.md`.
-
-### Domain docs
-
-This is a single-context repository. See `docs/agents/domain.md`.
+- GitHub issue workflow: `docs/agents/issue-tracker.md`
+- Domain context: `docs/agents/domain.md`

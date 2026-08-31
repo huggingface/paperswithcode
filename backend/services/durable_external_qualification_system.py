@@ -258,7 +258,21 @@ def configured_worker_ids(settings: object) -> tuple[str, ...]:
         if not isinstance(worker_id, str) or not worker_id:
             return ()
         result.append(worker_id)
-    return tuple(result)
+    if result:
+        return tuple(result)
+    worker_id = getattr(settings, "chat_external_pi_worker_id", "")
+    worker_url = getattr(settings, "chat_external_pi_worker_url", "")
+    worker_token = getattr(settings, "chat_external_pi_worker_token", "")
+    if (
+        isinstance(worker_id, str)
+        and worker_id
+        and isinstance(worker_url, str)
+        and worker_url
+        and isinstance(worker_token, str)
+        and len(worker_token) >= 32
+    ):
+        return (worker_id,)
+    return ()
 
 
 def load_protected_staging_settings(
@@ -284,7 +298,9 @@ def load_protected_staging_settings(
     values = {
         key.removeprefix("PWC_").lower(): value
         for key, value in raw.items()
-        if key.startswith("PWC_") and value is not None
+        if key.startswith("PWC_")
+        and value is not None
+        and key.removeprefix("PWC_").lower() in Settings.model_fields
     }
     try:
         settings = Settings.model_validate(values)
@@ -297,6 +313,41 @@ def load_protected_staging_settings(
     ):
         raise QualificationRefused("protected_staging_settings_invalid")
     return settings
+
+
+def bind_active_staging_worker(
+    settings: object, *, app_root: Path = Path("/srv/paperswithcode")
+):
+    """Bind protected settings to the exact active staging loopback worker."""
+    active = app_root / "environments/staging/active"
+    try:
+        resolved = active.resolve(strict=True)
+    except OSError:
+        raise QualificationRefused("active_staging_worker_required") from None
+    slot = resolved.name
+    expected = app_root / f"environments/staging/slots/{slot}"
+    token = getattr(settings, "chat_external_pi_worker_token", "")
+    if (
+        not active.is_symlink()
+        or slot not in {"blue", "green"}
+        or resolved != expected.resolve(strict=True)
+        or getattr(settings, "environment", "") != "staging"
+        or getattr(settings, "chat_external_pi_worker_endpoints", ())
+        or getattr(settings, "chat_external_pi_worker_id", "")
+        or getattr(settings, "chat_external_pi_worker_url", "")
+        or not isinstance(token, str)
+        or len(token) < 32
+    ):
+        raise QualificationRefused("active_staging_worker_required")
+    port = {"blue": 8766, "green": 8767}[slot]
+    return settings.model_copy(
+        update={
+            "chat_external_pi_worker_id": f"staging-{slot}",
+            "chat_external_pi_worker_url": f"http://127.0.0.1:{port}",
+            "chat_external_pi_worker_contract_version": "external-pi-v1",
+            "chat_external_pi_worker_max_sessions": 32,
+        }
+    )
 
 
 def _proc_memory_value(name: str) -> int:
@@ -452,7 +503,7 @@ class _SystemResourceEvidence:
             raise QualificationRefused("active_staging_worker_required")
         return DurableResourceSample(
             process_memory_bytes=_systemctl_memory(
-                "paperswithcode-backend@staging.service"
+                f"paperswithcode-staging-backend@{slot}.service"
             ),
             worker_memory_bytes=_systemctl_memory(
                 f"paperswithcode-staging-external-pi-worker@{slot}.service"

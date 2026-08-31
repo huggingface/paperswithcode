@@ -10,6 +10,7 @@ from datetime import date
 
 from backend.config import get_settings
 from backend.database.connection import get_database_session
+from backend.services.codex_add_evals_service import CanaryDispatchFailed
 from backend.services.hf_daily_curation_service import HFDailyCurationService
 
 
@@ -22,6 +23,7 @@ def main() -> int:
     action = parser.add_mutually_exclusive_group()
     action.add_argument("--enable-dispatch", action="store_true")
     action.add_argument("--disable-dispatch", action="store_true")
+    action.add_argument("--canary-job", type=uuid.UUID)
     action.add_argument("--retry-job", type=uuid.UUID)
     action.add_argument("--validate-job", type=uuid.UUID)
     action.add_argument("--status", action="store_true")
@@ -33,6 +35,15 @@ def main() -> int:
         service = HFDailyCurationService(db, get_settings())
         if args.status:
             result = service.status()
+        elif args.canary_job:
+            try:
+                result = service.dispatch_canary_job(args.canary_job)
+            except CanaryDispatchFailed as error:
+                result = {
+                    "error": str(error),
+                    "job_id": str(args.canary_job),
+                    "launched": False,
+                }
         elif args.retry_job:
             result = service.retry_scheduled_job(args.retry_job)
         elif args.validate_job:
@@ -51,7 +62,9 @@ def main() -> int:
         summary = json.dumps(result, default=str, sort_keys=True)
         print(f"HF_DAILY_CURATION_SUMMARY {summary}", file=sys.stderr)
         print(summary)
-        return 1 if result.get("valid") is False else 0
+        return (
+            1 if result.get("valid") is False or result.get("launched") is False else 0
+        )
     finally:
         try:
             next(session)

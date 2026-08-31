@@ -228,7 +228,7 @@ export interface AutonomousOperationsResponse {
   monitoring_active: boolean;
   display_state: AutonomousDisplayState;
   operators: Array<{
-    operator: "submissions" | "cron_health" | "chat_reliability";
+    operator: "submissions" | "curation" | "cron_health" | "chat_reliability";
     enabled: boolean;
     status: AutonomousDisplayState;
     monitoring_active: boolean;
@@ -257,7 +257,7 @@ export interface AutonomousOperationsResponse {
   }>;
   recent_runs: Array<{
     run_id: string;
-    operator: "submissions" | "cron_health" | "chat_reliability";
+    operator: "submissions" | "curation" | "cron_health" | "chat_reliability";
     dry_run: boolean;
     status: string;
     exit_classification: string;
@@ -269,7 +269,7 @@ export interface AutonomousOperationsResponse {
   recent_actions: Array<{
     action_id: string;
     run_id: string;
-    operator: "submissions" | "cron_health" | "chat_reliability";
+    operator: "submissions" | "curation" | "cron_health" | "chat_reliability";
     capability: string;
     reason_code: string;
     resource_kind: string;

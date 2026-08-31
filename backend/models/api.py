@@ -1277,12 +1277,15 @@ class TrendsResponse(BaseModel):
 AutonomousDisplayState = Literal[
     "healthy", "degraded", "repairing", "rolled-back", "manual"
 ]
+AutonomousOperatorName = Literal[
+    "submissions", "curation", "cron_health", "chat_reliability"
+]
 
 
 class AutonomousOperatorStatus(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    operator: Literal["submissions", "cron_health", "chat_reliability"]
+    operator: AutonomousOperatorName
     enabled: bool
     status: AutonomousDisplayState
     monitoring_active: bool
@@ -1330,7 +1333,7 @@ class AutonomousRunSummary(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     run_id: str
-    operator: Literal["submissions", "cron_health", "chat_reliability"]
+    operator: AutonomousOperatorName
     dry_run: bool
     status: str
     exit_classification: str
@@ -1345,7 +1348,7 @@ class AutonomousActionSummary(BaseModel):
 
     action_id: str
     run_id: str
-    operator: Literal["submissions", "cron_health", "chat_reliability"]
+    operator: AutonomousOperatorName
     capability: str
     reason_code: str
     resource_kind: str
@@ -1405,7 +1408,7 @@ class AutonomousAcceptanceEvidenceRequest(BaseModel):
 class AutonomousAcceptanceReadinessResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    operator: Literal["submissions", "cron_health", "chat_reliability"]
+    operator: AutonomousOperatorName
     ready: bool
     passed_gates: List[str]
     missing_gates: List[str]

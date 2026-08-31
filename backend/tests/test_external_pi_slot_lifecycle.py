@@ -112,6 +112,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_OPENAI_API_KEY": "must-not-leak",
         "MODAL_TOKEN_ID": "must-not-leak",
         "PWC_CHAT_SANDBOX_EXECUTOR_TOKEN": "must-not-leak",
+        "PWC_EXTERNAL_PI_STATE_ROOT": "/run/paperswithcode/external-pi-green",
         "PATH": "/usr/bin",
     }
 
@@ -128,6 +129,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_RELEASE_ID": "release-green",
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
+        "PWC_EXTERNAL_PI_STATE_ROOT": "/run/paperswithcode/external-pi-green",
     }
     assert set(supervisor) == {
         "PWC_ENVIRONMENT",
@@ -1047,6 +1049,9 @@ def test_launcher_execs_release_python_with_only_scrubbed_settings(
     )
     monkeypatch.setattr(launcher, "resolve_external_pi_slot", lambda *_args: resolved)
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
+    monkeypatch.setenv(
+        "PWC_EXTERNAL_PI_STATE_ROOT", "/run/paperswithcode/external-pi-blue"
+    )
     monkeypatch.setenv("PWC_HF_TOKEN", "must-not-leak")
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
     monkeypatch.setattr(launcher.os, "chdir", lambda path: None)
@@ -1095,6 +1100,9 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         worker_launcher, "resolve_external_pi_slot", lambda *_args: resolved
     )
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
+    monkeypatch.setenv(
+        "PWC_EXTERNAL_PI_STATE_ROOT", "/run/paperswithcode/external-pi-blue"
+    )
     monkeypatch.setenv("PWC_DB_PASSWORD", "must-not-leak")
     monkeypatch.setenv("PWC_OPENAI_API_KEY", "must-not-leak")
     monkeypatch.setattr(worker_launcher.os, "chdir", lambda _path: None)
@@ -1131,6 +1139,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         "PWC_EXTERNAL_PI_RELEASE_ID",
         "PWC_EXTERNAL_PI_PROMPT_PATH",
         "PWC_EXTERNAL_PI_TOOL_NAMES",
+        "PWC_EXTERNAL_PI_STATE_ROOT",
     }
     assert "PWC_DB_PASSWORD" not in executed["environment"]
 
@@ -1767,6 +1776,8 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
     assert "external_pi_slot_launcher.py staging %i" in supervisor
     assert "User=pwc-external-pi" in worker
     assert "EnvironmentFile=/etc/paperswithcode/external-pi-worker.env" in worker
+    assert "RuntimeDirectory=paperswithcode/external-pi-%i" in worker
+    assert "PWC_EXTERNAL_PI_STATE_ROOT=/run/paperswithcode/external-pi-%i" in worker
     assert "external_pi_worker_launcher.py staging %i" in worker
     assert "staging.env" not in worker
     assert "ProtectProc=invisible" in worker

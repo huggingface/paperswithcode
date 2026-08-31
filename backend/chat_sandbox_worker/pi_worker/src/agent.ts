@@ -1,4 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
+import { mkdir } from "node:fs/promises";
+import path from "node:path";
 import {
   createAgentSession,
   DefaultResourceLoader,
@@ -41,6 +43,17 @@ export interface RunTurn {
   reasoning_effort: "low" | "high" | "max";
   hf_username: string;
 }
+
+const externalStateRoot = process.env.PWC_EXTERNAL_PI_STATE_ROOT;
+const harnessWorkspace = externalStateRoot
+  ? path.join(externalStateRoot, "workspace")
+  : "/workspace";
+const sessionDirectory = externalStateRoot
+  ? path.join(externalStateRoot, "sessions")
+  : "/home/pwc-chat/.pi-sessions";
+const agentDirectory = externalStateRoot
+  ? path.join(externalStateRoot, "agent")
+  : "/home/pwc-chat/.pi-disabled";
 
 export class PiWorker {
   private session: AgentSession | undefined;
@@ -93,6 +106,11 @@ export class PiWorker {
   }
 
   private async initializeImmutableProfile(): Promise<void> {
+    await Promise.all([
+      mkdir(harnessWorkspace, { recursive: true, mode: 0o700 }),
+      mkdir(sessionDirectory, { recursive: true, mode: 0o700 }),
+      mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
+    ]);
     // pi-mcp-adapter's viewer is useful locally but would expose an unreachable
     // Modal loopback URL.  Browser rendering is owned by the React App host.
     process.env.MCP_UI_VIEWER = "none";
@@ -164,8 +182,8 @@ export class PiWorker {
       return { manager: this.manager, initialCount: this.manager.getEntries().length + 1, created: false };
     }
     if (run.resume) {
-      const restored = await restoreFile(run.resume, "/home/pwc-chat/.pi-sessions", this.gateway);
-      const manager = SessionManager.open(restored.file, "/home/pwc-chat/.pi-sessions", "/workspace");
+      const restored = await restoreFile(run.resume, sessionDirectory, this.gateway);
+      const manager = SessionManager.open(restored.file, sessionDirectory, harnessWorkspace);
       if (manager.getSessionId() !== run.resume || manager.getLeafId() !== restored.snapshot.current_leaf_id) {
         throw new Error("Pi restored session identity mismatch");
       }
@@ -174,24 +192,24 @@ export class PiWorker {
       return { manager, initialCount: restored.snapshot.entry_count, created: false };
     }
     const id = randomUUID();
-    const manager = SessionManager.create("/workspace", "/home/pwc-chat/.pi-sessions", { id });
+    const manager = SessionManager.create(harnessWorkspace, sessionDirectory, { id });
     const bound = await createOrBind(id, this.gateway);
     if (bound.agent_session_id !== id) {
       if (bound.entry_count === 0) {
         const reboundManager = SessionManager.create(
-          "/workspace",
-          "/home/pwc-chat/.pi-sessions",
+          harnessWorkspace,
+          sessionDirectory,
           { id: bound.agent_session_id },
         );
         this.manager = reboundManager;
         this.boundAgentSession = bound.agent_session_id;
         return { manager: reboundManager, initialCount: 0, created: true };
       }
-      const restored = await restoreFile(bound.agent_session_id, "/home/pwc-chat/.pi-sessions", this.gateway);
+      const restored = await restoreFile(bound.agent_session_id, sessionDirectory, this.gateway);
       const restoredManager = SessionManager.open(
         restored.file,
-        "/home/pwc-chat/.pi-sessions",
-        "/workspace",
+        sessionDirectory,
+        harnessWorkspace,
       );
       if (
         restoredManager.getSessionId() !== bound.agent_session_id ||
@@ -284,8 +302,8 @@ export class PiWorker {
       retry: { enabled: false },
     });
     const loader = new DefaultResourceLoader({
-      cwd: "/workspace",
-      agentDir: "/home/pwc-chat/.pi-disabled",
+      cwd: harnessWorkspace,
+      agentDir: agentDirectory,
       settingsManager: settings,
       noExtensions: true,
       noSkills: true,
@@ -306,8 +324,8 @@ export class PiWorker {
     await loader.reload();
     this.emit(run.request_id, { type: "_latency", phase: "resource_loading", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     const created = await createAgentSession({
-      cwd: "/workspace",
-      agentDir: "/home/pwc-chat/.pi-disabled",
+      cwd: harnessWorkspace,
+      agentDir: agentDirectory,
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),

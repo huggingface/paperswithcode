@@ -68,6 +68,7 @@ from backend.services.entity_search import (
 from backend.services.metric_value_service import parse_metric_value
 from backend.utils.slug_utils import slugify
 from backend.utils.task_hierarchy import collect_descendant_task_ids
+from backend.utils.task_slugs import task_slug_candidates
 
 # Separator unlikely to collide with real data, used to build the logical
 # leaderboard-row key (see `_leaderboard_row_count`).
@@ -131,18 +132,21 @@ class DatasetService:
         except ValueError:
             pass
 
-        slug_filter = (
-            DBTask.slug == identifier
-            if case_sensitive_slug
-            else func.lower(DBTask.slug) == identifier.lower()
-        )
         try:
-            row = self.db.query(DBTask.id).filter(slug_filter).first()
+            for candidate in task_slug_candidates(identifier):
+                slug_filter = (
+                    DBTask.slug == candidate
+                    if case_sensitive_slug
+                    else func.lower(DBTask.slug) == candidate.lower()
+                )
+                row = self.db.query(DBTask.id).filter(slug_filter).first()
+                if row is not None:
+                    return int(row[0])
         except SQLAlchemyError as error:
             raise CatalogPersistenceError(
                 f"Failed to retrieve task by slug: {error!s}"
             ) from error
-        return int(row[0]) if row is not None else None
+        return None
 
     def get_dataset_by_identifier(
         self,

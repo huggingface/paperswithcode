@@ -106,6 +106,27 @@ def test_urgent_alert_uses_acknowledged_primary_and_persists_content_free_receip
     assert not hasattr(row, "payload")
 
 
+def test_curation_alert_persists_operator_receipt(db):
+    service = AutonomousAlertService(
+        primary_url="https://slack.test/primary",
+        fallback_url="https://alerts.test/fallback",
+        sender=lambda _url, _payload: 200,
+    )
+    curation_alert = AutonomousAlert(
+        event_kind="operator_failure",
+        operator=Operator.CURATION,
+        resource_key="trending-model-candidate",
+        environment="production",
+        release_id="a" * 12 + "-production",
+        occurred_at=NOW,
+        runbook_url="https://paperswithcode.co/docs/autonomous#curation",
+    )
+
+    receipt = service.send_autonomous_alert(db, curation_alert)
+
+    assert db.get(AutonomousAlertDelivery, receipt.id).operator == "curation"
+
+
 def test_unacknowledged_primary_uses_distinct_fallback_and_deduplicates(db):
     calls = []
 

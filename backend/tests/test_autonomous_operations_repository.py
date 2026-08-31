@@ -41,6 +41,10 @@ NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 MIGRATION = (
     Path(__file__).parents[1] / "database/migrations/add_autonomous_operations.sql"
 )
+CURATION_MIGRATION = (
+    Path(__file__).parents[1]
+    / "database/migrations/add_curation_autonomous_operator.sql"
+)
 
 
 @pytest.fixture
@@ -71,6 +75,8 @@ def postgres_engine():
         pytest.fail("PostgreSQL autonomy tests require a disposable test database")
     engine = create_engine(database_url, pool_size=8)
     cleanup_sql = """
+        DROP SCHEMA IF EXISTS staging CASCADE;
+        DROP TABLE IF EXISTS autonomous_alert_delivery CASCADE;
         DROP TABLE IF EXISTS chat_provider_runtime_state CASCADE;
         DROP TABLE IF EXISTS chat_reliability_baseline CASCADE;
         DROP TABLE IF EXISTS autonomous_incident_attempt CASCADE;
@@ -131,6 +137,7 @@ def test_operator_switches_are_independent_and_default_disabled(db):
     assert state.manual_mode is True
     assert state.enabled == {
         Operator.SUBMISSIONS: True,
+        Operator.CURATION: False,
         Operator.CRON_HEALTH: False,
         Operator.CHAT_RELIABILITY: False,
     }
@@ -675,6 +682,81 @@ def test_postgres_migration_is_rerunnable_and_ledgers_reject_truncate(
             db.commit()
         db.rollback()
         assert db.scalar(select(func.count()).select_from(AutonomousRun)) == 1
+
+
+def test_curation_migration_cannot_fall_through_to_public_schema(postgres_engine):
+    migration_sql = (
+        CURATION_MIGRATION.read_text(encoding="utf-8")
+        .strip()
+        .removeprefix("BEGIN;")
+        .removesuffix("COMMIT;")
+        .strip()
+    )
+    connection = postgres_engine.raw_connection()
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "DELETE FROM public.autonomous_operator_state "
+                "WHERE operator = 'curation'"
+            )
+            cursor.execute(
+                "ALTER TABLE public.autonomous_operator_state "
+                "DROP CONSTRAINT autonomous_operator_state_operator_check; "
+                "ALTER TABLE public.autonomous_operator_state "
+                "ADD CONSTRAINT autonomous_operator_state_operator_check CHECK ("
+                "operator IN ("
+                "'global','submissions','cron_health','chat_reliability'"
+                "))"
+            )
+            cursor.execute(
+                "CREATE TABLE public.autonomous_alert_delivery ("
+                "operator VARCHAR(32), "
+                "CONSTRAINT autonomous_alert_delivery_operator_check CHECK ("
+                "operator IS NULL OR operator IN ("
+                "'submissions','cron_health','chat_reliability'"
+                ")))"
+            )
+            cursor.execute("CREATE SCHEMA staging")
+            for relation in (
+                "autonomous_operator_state",
+                "autonomous_execution_intent",
+                "autonomous_run",
+                "autonomous_budget_reservation",
+                "autonomous_action",
+            ):
+                cursor.execute(
+                    f"CREATE TABLE staging.{relation} "
+                    f"(LIKE public.{relation} INCLUDING ALL)"
+                )
+            cursor.execute("SET LOCAL search_path = staging,public")
+            cursor.execute(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conrelid = 'public.autonomous_operator_state'::regclass "
+                "AND conname = 'autonomous_operator_state_operator_check'"
+            )
+            before = cursor.fetchone()[0]
+            cursor.execute("SAVEPOINT curation_migration")
+            with pytest.raises(
+                postgres_engine.dialect.dbapi.Error,
+                match="missing staging.autonomous_alert_delivery prerequisite",
+            ):
+                cursor.execute(migration_sql)
+            cursor.execute("ROLLBACK TO SAVEPOINT curation_migration")
+            cursor.execute(
+                "SELECT pg_get_constraintdef(oid) FROM pg_constraint "
+                "WHERE conrelid = 'public.autonomous_operator_state'::regclass "
+                "AND conname = 'autonomous_operator_state_operator_check'"
+            )
+            after = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT count(*) FROM public.autonomous_operator_state "
+                "WHERE operator = 'curation'"
+            )
+            assert cursor.fetchone()[0] == 0
+            assert after == before
+    finally:
+        connection.rollback()
+        connection.close()
 
 
 def test_postgres_serializes_baseline_attempts_leases_and_manual_mode(

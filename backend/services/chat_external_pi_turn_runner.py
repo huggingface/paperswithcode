@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import AbstractContextManager
@@ -58,6 +59,7 @@ from backend.services.chat_qualification_stale_boundary import (
 
 MAX_EXTERNAL_TURN_FRAME_BYTES = 2 * 1024 * 1024 + 256 * 1024
 type LifecycleObserver = Callable[[str, str | None, int], None]
+logger = logging.getLogger("uvicorn.error")
 
 
 def _worker_websocket_url(base_url: str) -> str:
@@ -268,7 +270,18 @@ class ExternalPiChatTurnRunner:
                         yield event
                         acknowledged_sequence = sequence
                     raise OSError("External Pi transport ended before terminal")
-            except (OSError, TimeoutError, WebSocketException):
+            except (OSError, TimeoutError, WebSocketException) as error:
+                received = getattr(error, "rcvd", None)
+                close_code = getattr(received, "code", None)
+                close_reason = getattr(received, "reason", None)
+                logger.warning(
+                    "external Pi transport ended: error=%s code=%s reason=%s",
+                    type(error).__name__,
+                    close_code if isinstance(close_code, int) else "unknown",
+                    close_reason
+                    if isinstance(close_reason, str) and len(close_reason) <= 64
+                    else "unknown",
+                )
                 if not started:
                     raise
             finally:
@@ -421,14 +434,19 @@ class ExternalPiChatTurnRunner:
         }
 
     def _turn_claim_frame(self) -> dict[str, object]:
-        claim = self.admission.durable_claim
-        if claim is None or claim.turn_id != self.admission.turn_id:
+        durable_claim = self.admission.durable_claim
+        worker_claim = self.external_worker_claim
+        if (
+            durable_claim is None
+            or durable_claim.turn_id != self.admission.turn_id
+            or worker_claim is None
+        ):
             raise RuntimeError("External Pi turn requires the durable turn claim")
         return {
-            "turnId": str(claim.turn_id),
-            "workerId": claim.worker_id,
-            "workerGeneration": claim.worker_generation,
-            "leaseGeneration": claim.lease_generation,
+            "turnId": str(durable_claim.turn_id),
+            "workerId": worker_claim.worker_id,
+            "workerGeneration": worker_claim.generation,
+            "leaseGeneration": durable_claim.lease_generation,
         }
 
     def _attach_frame(self, after_sequence: int) -> dict[str, object]:
@@ -450,7 +468,7 @@ class ExternalPiChatTurnRunner:
         }
 
     def _run_frame(self) -> dict[str, object]:
-        return {
+        frame = {
             "v": 1,
             "type": "run_turn",
             "request_id": self.request_id,
@@ -469,7 +487,6 @@ class ExternalPiChatTurnRunner:
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
             "paper_artifacts_enabled": self.admission.paper_artifacts_enabled,
-            "paper_descriptor": self.admission.paper_descriptor,
             "reasoning_effort": self.admission.reasoning_effort,
             "fetchable_urls": list(self.admission.fetchable_urls),
             "hf_username": self.hf_username,
@@ -477,6 +494,9 @@ class ExternalPiChatTurnRunner:
             "capability": self.capability.token,
             "gateway_url": self.settings.chat_gateway_url,
         }
+        if self.admission.paper_descriptor is not None:
+            frame["paper_descriptor"] = self.admission.paper_descriptor
+        return frame
 
     @staticmethod
     def _decode(raw: str | bytes) -> dict[str, object]:

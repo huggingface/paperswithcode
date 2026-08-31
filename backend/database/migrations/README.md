@@ -63,6 +63,7 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_autonomous_submission_claims.sql` + `add_autonomous_submission_remote_jobs.sql` | Existing-taxonomy submission claims, scoped callbacks, and remote HF Job lifecycle state |
 | `add_autonomous_alert_delivery.sql` | Append-only, content-free, deduplicated urgent/mobile delivery receipts |
 | `add_autonomous_acceptance_evidence.sql` | Append-only rollout gate evidence and idempotency index |
+| `add_curation_autonomous_operator.sql` | Add the disabled curation operator and widen its autonomous ledger and alert-receipt constraints; apply after the autonomous operations and alert-delivery migrations |
 | `add_curation_thumbnail_queue.sql` | transactionally queued, CRON-owned thumbnail work and accepted-submission state for paper-curation Jobs |
 | `add_external_resources_schema.sql` + `run_add_external_resources_schema.py` | external resources |
 | `add_trending_score.sql` + `run_add_trending_score.py` + `update_trending_view_for_ema.sql` | repository (GitHub) trending scores |

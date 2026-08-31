@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 import uuid
-from hashlib import sha256
 from datetime import UTC, date, datetime
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
@@ -30,16 +29,11 @@ from backend.models.evaluations import (
     EvaluationCreateRequest as EvaluationCreateRequest,
 )
 from backend.models.database import (
-    AutonomousRun,
     PaperCurationJob,
     PaperCurationSchedulerState,
 )
 from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
-from backend.services.autonomous_operations_repository import (
-    AutonomousOperationsRepository,
-    Operator,
-    RunContext,
-)
+from backend.services.autonomous_operations_repository import RunContext
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_add_evals_service import (
     CodexPaperJob,
@@ -56,6 +50,7 @@ from backend.services.codex_curation_callback_service import (
     CodexCurationPaperNotFoundError,
 )
 from backend.services.curation_thumbnail_queue_service import serialize_thumbnail
+from backend.services.curation_autonomy import ensure_curation_run
 from backend.services.curation_trace_service import CurationTraceService
 from backend.services.evaluation_service import EvaluationService
 from backend.services.hf_daily_curation_service import HFDailyCurationService
@@ -116,24 +111,7 @@ def _service(db: Session) -> CodexCurationCallbackService:
 
 
 def _autonomous_callback_context(db: Session, row: PaperCurationJob) -> RunContext:
-    policy_version = getattr(row, "policy_version", "scheduled-v1")
-    revision = sha256(policy_version.encode()).hexdigest()
-    context = RunContext(
-        run_id=row.id,
-        operator=Operator.SUBMISSIONS,
-        dry_run=False,
-        manifest_revision=f"curation:{revision}",
-    )
-    repository = AutonomousOperationsRepository()
-    if db.get(AutonomousRun, context.run_id) is None:
-        repository.append_run(
-            db,
-            context=context,
-            status="completed",
-            now=datetime.now(UTC),
-        )
-    else:
-        repository.assert_run_context(db, context)
+    context = ensure_curation_run(db, row)
     # Monitoring remains durable while a later policy check may reject writes.
     db.commit()
     return context

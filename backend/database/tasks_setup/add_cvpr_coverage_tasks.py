@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import text
+from sqlalchemy import bindparam, text
 
 from backend.database.connection import db_manager
 from backend.models.api import TaskCreateRequest
@@ -66,13 +66,19 @@ TASKS = [
         "keywords": "remote sensing, satellite imagery, aerial imagery, drone imagery",
     },
     {
-        "slug": "deepfake-and-forensics",
-        "name": "Deepfake and Forensics",
+        "slug": "deepfake-detection",
+        "legacy_slugs": ("deepfake-and-forensics",),
+        "name": "Deepfake Detection",
         "area_id": GENERAL_AREA_ID,
         "description": (
-            "Deepfake detection and media forensics identify synthetic, manipulated, "
-            "or spoofed visual and audiovisual content, including anti-spoofing and "
-            "security-oriented authenticity verification."
+            "Deepfake detection identifies AI-generated or manipulated visual, video, "
+            "audio, and audiovisual media. It covers source-defined in-distribution and "
+            "cross-dataset or generalization protocols. Because results are highly "
+            "protocol-sensitive, leaderboards keep the training data and regime, dataset "
+            "version, modality, frame- versus video-level granularity, frame-sampling "
+            "count, score aggregation, and metric explicit; frame-level and video-level "
+            "results are not directly comparable. Common metrics include AUC, accuracy, "
+            "F1, and EER."
         ),
         "keywords": (
             "deepfake detection, media forensics, face forensics, anti-spoofing, "
@@ -153,17 +159,27 @@ TASKS = [
 
 
 def ensure_task(session, spec: dict) -> int:
+    lookup_slugs = (spec["slug"], *spec.get("legacy_slugs", ()))
     row = session.execute(
-        text("SELECT id, area_id, description, keywords FROM tasks WHERE slug = :slug"),
-        {"slug": spec["slug"]},
+        text(
+            "SELECT id, slug, area_id, description, keywords FROM tasks "
+            "WHERE slug IN :slugs "
+            "ORDER BY CASE WHEN slug = :canonical_slug THEN 0 ELSE 1 END "
+            "LIMIT 1"
+        ).bindparams(bindparam("slugs", expanding=True)),
+        {"slugs": lookup_slugs, "canonical_slug": spec["slug"]},
     ).first()
     if row:
         task_id = int(row[0])
         updates: dict[str, object] = {"id": task_id}
         changed_fields: list[str] = []
 
+        if row._mapping["slug"] != spec["slug"]:
+            updates["slug"] = spec["slug"]
+            changed_fields.append("slug")
+
         for field in ("area_id", "description", "keywords"):
-            if row[field] != spec[field]:
+            if row._mapping[field] != spec[field]:
                 updates[field] = spec[field]
                 changed_fields.append(field)
 

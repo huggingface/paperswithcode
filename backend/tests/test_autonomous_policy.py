@@ -64,6 +64,7 @@ def test_manifest_allows_only_declared_operator_capabilities(operator, capabilit
         Capability.REPAIR_DECLARED_CRON_SOURCE: ResourceKind.SOURCE_REPAIR,
         Capability.SWITCH_CHAT_PROVIDER: ResourceKind.CHAT_PROVIDER,
         Capability.REPAIR_CHAT_SOURCE: ResourceKind.SOURCE_REPAIR,
+        Capability.RESOLVE_MODEL_PAPER: ResourceKind.TRENDING_MODEL_CANDIDATE,
     }[capability]
     decision = policy.authorize(
         object(),
@@ -113,6 +114,15 @@ def test_runtime_controls_fail_closed(blocked_by, reason):
     assert decision.reason_code == reason
 
 
+def test_curation_capabilities_are_isolated_from_submission_review():
+    curation = CAPABILITY_MANIFESTS[Operator.CURATION]
+    submissions = CAPABILITY_MANIFESTS[Operator.SUBMISSIONS]
+
+    assert Capability.RESOLVE_MODEL_PAPER in curation
+    assert Capability.REVIEW_SUBMISSION not in curation
+    assert Capability.RESOLVE_MODEL_PAPER not in submissions
+
+
 def test_unknown_and_mismatched_run_fail_closed():
     repository = FakeRepository()
     policy = AutonomousPolicy(repository)
@@ -140,6 +150,28 @@ def test_unknown_and_mismatched_run_fail_closed():
         ).reason_code
         == "invalid_run_context"
     )
+
+
+def test_admission_enforces_controls_without_requiring_a_terminal_run():
+    repository = FakeRepository()
+    repository.run_valid = False
+    policy = AutonomousPolicy(repository)
+    decision = policy.authorize_admission(
+        object(),
+        context(Operator.CURATION),
+        Capability.APPLY_EXISTING_TAXONOMY_EDIT,
+        ResourceRef(ResourceKind.PAPER, "42", True),
+    )
+    assert decision.allowed
+
+    repository.blocked_by = OperatorDisabled("off")
+    decision = policy.authorize_admission(
+        object(),
+        context(Operator.CURATION),
+        Capability.APPLY_EXISTING_TAXONOMY_EDIT,
+        ResourceRef(ResourceKind.PAPER, "42", True),
+    )
+    assert decision.reason_code == "operator_disabled"
 
 
 def test_manifests_are_closed_and_complete():

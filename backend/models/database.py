@@ -4976,7 +4976,7 @@ class AutonomousOperatorState(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "operator IN ('global','submissions','cron_health','chat_reliability')",
+            "operator IN ('global','submissions','curation','cron_health','chat_reliability')",
             name="autonomous_operator_state_operator_check",
         ),
         CheckConstraint(
@@ -5017,7 +5017,7 @@ class AutonomousExecutionIntent(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "operator IN ('submissions','cron_health','chat_reliability')",
+            "operator IN ('submissions','curation','cron_health','chat_reliability')",
             name="autonomous_execution_intent_operator_check",
         ),
         CheckConstraint(
@@ -5078,7 +5078,7 @@ class AutonomousRun(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "operator IN ('submissions','cron_health','chat_reliability')",
+            "operator IN ('submissions','curation','cron_health','chat_reliability')",
             name="autonomous_run_operator_check",
         ),
         CheckConstraint(
@@ -5159,7 +5159,7 @@ class AutonomousBudgetReservation(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "operator IN ('submissions','cron_health','chat_reliability')",
+            "operator IN ('submissions','curation','cron_health','chat_reliability')",
             name="autonomous_budget_reservation_operator_check",
         ),
         CheckConstraint(
@@ -5216,7 +5216,7 @@ class AutonomousAction(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "operator IN ('submissions','cron_health','chat_reliability')",
+            "operator IN ('submissions','curation','cron_health','chat_reliability')",
             name="autonomous_action_operator_check",
         ),
         CheckConstraint(
@@ -5272,7 +5272,7 @@ class AutonomousAlertDelivery(Base):
         ),
         CheckConstraint(
             "operator IS NULL OR operator IN "
-            "('submissions','cron_health','chat_reliability')",
+            "('submissions','curation','cron_health','chat_reliability')",
             name="autonomous_alert_delivery_operator_check",
         ),
         CheckConstraint(

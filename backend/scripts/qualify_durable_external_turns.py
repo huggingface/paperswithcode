@@ -43,6 +43,7 @@ from backend.services.durable_external_qualification import (
 )
 from backend.services.durable_external_qualification_system import (
     SystemDurableQualificationControlPlane,
+    bind_active_staging_worker,
     build_system_control_plane,
     load_protected_staging_settings,
 )
@@ -462,7 +463,9 @@ def main() -> int:
         active_release_id = validated_active_release_id(
             args.release_id, release_settings
         )
-        protected_settings = load_protected_staging_settings()
+        protected_settings = bind_active_staging_worker(
+            load_protected_staging_settings()
+        )
         settings = merge_release_settings(protected_settings, release_settings)
         control_plane = build_system_control_plane(
             release_id=args.release_id,

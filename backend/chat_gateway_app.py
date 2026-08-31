@@ -233,8 +233,16 @@ def _output_tokens_allowed(value: int) -> bool:
     return 1 <= value <= MAX_PROVIDER_OUTPUT_TOKENS
 
 
-def _provider_turn_limits(row: ChatTurnCapability, db: Session) -> tuple[int, int]:
-    qualification_scope_id = _qualification_scope_claim(row, db)
+def _provider_turn_limits(
+    row: ChatTurnCapability,
+    db: Session | None = None,
+    settings: Settings | None = None,
+) -> tuple[int, int]:
+    qualification_scope_id = (
+        _qualification_scope_claim(row, db, settings)
+        if db is not None and settings is not None
+        else None
+    )
     if qualification_scope_id is not None:
         return QUALIFICATION_PROVIDER_REQUESTS, QUALIFICATION_PROVIDER_TURN_TOKENS
     if {"artifact", "paper_grant"} & set(getattr(row, "scopes", ())):
@@ -243,8 +251,10 @@ def _provider_turn_limits(row: ChatTurnCapability, db: Session) -> tuple[int, in
 
 
 def _qualification_scope_claim(
-    row: ChatTurnCapability, db: Session
+    row: ChatTurnCapability, db: Session, settings: Settings
 ) -> uuid.UUID | None:
+    if settings.environment != "staging":
+        return None
     return db.scalar(
         select(ChatQualificationScope.id)
         .join(
@@ -1422,9 +1432,9 @@ async def responses(
         raise HTTPException(status_code=413, detail="Model request is too large")
     owner_id = _capability_owner(row, db)
     capability_id = row.id
-    qualification_scope_id = _qualification_scope_claim(row, db)
+    qualification_scope_id = _qualification_scope_claim(row, db, settings)
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(trusted_raw) // 4) + maximum_tokens,
@@ -1754,7 +1764,7 @@ async def messages(
     capability_id = row.id
     funded_call_id: uuid.UUID | None = None
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(raw) // 4) + maximum_tokens,

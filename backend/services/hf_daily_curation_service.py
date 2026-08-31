@@ -261,6 +261,21 @@ class HFDailyCurationService:
             )
         return retried.model_dump(mode="json")
 
+    def dispatch_canary_job(self, job_id: uuid.UUID) -> dict:
+        """Dispatch exactly one queued scheduled job while normal dispatch is paused."""
+        row = self.db.get(PaperCurationJob, job_id)
+        if row is None:
+            raise LookupError("Curation job not found")
+        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+            raise ValueError("Only scheduled curation jobs may be canary-dispatched")
+        if row.status != "queued":
+            raise ValueError("Canary dispatch requires a queued curation job")
+        state = self.db.get(PaperCurationSchedulerState, 1)
+        if state is None or state.dispatch_enabled or state.paused_at is None:
+            raise ValueError("Canary dispatch requires normal dispatch to be paused")
+        row = self.job_service.dispatch_canary(self.db, self.settings, row)
+        return self.job_service.serialize(row, self.settings).model_dump(mode="json")
+
     def validator_replay(self, job_id: uuid.UUID) -> dict:
         """Run a saved proposal through current read-only policy validators."""
         row = self.db.get(PaperCurationJob, job_id)

@@ -96,6 +96,14 @@ def test_legacy_username_fallback_is_admin_only(monkeypatch):
     [
         (None, 401),
         ({"sub": "unlisted", "username": "person"}, 403),
+        (
+            {
+                "sub": "operator:pi-qualification:test-run:0",
+                "username": "operator:pi-qualification:test-run:0",
+                "chat_qualification_owner": "operator:pi-qualification:test-run:0",
+            },
+            204,
+        ),
         ({"sub": "contributor-sub", "username": "person"}, 204),
         ({"sub": "admin-sub", "username": "person"}, 204),
     ],

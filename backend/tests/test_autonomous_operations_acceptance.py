@@ -162,6 +162,44 @@ def test_cron_enablement_requires_every_recovery_and_rollback_drill(db):
     assert db.get(AutonomousOperatorState, "cron_health").enabled is True
 
 
+def test_curation_enablement_requires_every_dispatch_and_callback_drill(db):
+    service = AutonomousAcceptanceService()
+    gates = (
+        "dispatcher_preflight",
+        "capability_isolation",
+        "callback_idempotency",
+        "paused_callback_apply",
+    )
+
+    for index, gate in enumerate(gates[:-1], start=1):
+        record(service, db, Operator.CURATION, gate, index)
+
+    readiness = service.readiness(db, Operator.CURATION)
+    assert readiness.ready is False
+    assert readiness.missing_gates == ("paused_callback_apply",)
+    with pytest.raises(AcceptanceNotReady):
+        service.set_operator_enabled(
+            db,
+            operator=Operator.CURATION,
+            enabled=True,
+            expected_revision=1,
+            actor="admin:owner",
+            now=NOW,
+        )
+
+    record(service, db, Operator.CURATION, gates[-1], len(gates))
+    assert service.readiness(db, Operator.CURATION).ready is True
+    service.set_operator_enabled(
+        db,
+        operator=Operator.CURATION,
+        enabled=True,
+        expected_revision=1,
+        actor="admin:owner",
+        now=NOW,
+    )
+    assert db.get(AutonomousOperatorState, "curation").enabled is True
+
+
 def test_global_manual_mode_still_blocks_mutation_after_acceptance(db):
     repository = AutonomousOperationsRepository()
     service = AutonomousAcceptanceService(repository)

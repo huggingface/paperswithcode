@@ -33,6 +33,7 @@ _EXISTING_ONLY = frozenset(
         ResourceKind.METRIC,
         ResourceKind.PAPER,
         ResourceKind.EVALUATION,
+        ResourceKind.TRENDING_MODEL_CANDIDATE,
         ResourceKind.DECLARED_CRON,
     }
 )
@@ -55,6 +56,43 @@ class AutonomousPolicy:
         incident_signature: str | None = None,
         incident_attempt_id: uuid.UUID | None = None,
     ) -> AuthorizationDecision:
+        return self._authorize(
+            db,
+            context,
+            capability,
+            resource,
+            incident_signature=incident_signature,
+            incident_attempt_id=incident_attempt_id,
+            require_durable_run=True,
+        )
+
+    def authorize_admission(
+        self,
+        db: Session,
+        context: RunContext,
+        capability: Capability,
+        resource: ResourceRef,
+    ) -> AuthorizationDecision:
+        """Validate a prospective run without recording terminal run state."""
+        return self._authorize(
+            db,
+            context,
+            capability,
+            resource,
+            require_durable_run=False,
+        )
+
+    def _authorize(
+        self,
+        db: Session,
+        context: RunContext,
+        capability: Capability,
+        resource: ResourceRef,
+        *,
+        incident_signature: str | None = None,
+        incident_attempt_id: uuid.UUID | None = None,
+        require_durable_run: bool,
+    ) -> AuthorizationDecision:
         if not isinstance(context, RunContext) or not isinstance(
             context.operator, Operator
         ):
@@ -75,10 +113,11 @@ class AutonomousPolicy:
             return AuthorizationDecision(False, "operator_disabled")
         except DryRunMutation:
             return AuthorizationDecision(False, "dry_run")
-        try:
-            self.repository.assert_run_context(db, context)
-        except (TypeError, ValueError):
-            return AuthorizationDecision(False, "invalid_run_context")
+        if require_durable_run:
+            try:
+                self.repository.assert_run_context(db, context)
+            except (TypeError, ValueError):
+                return AuthorizationDecision(False, "invalid_run_context")
         if resource.kind in _EXISTING_ONLY and not resource.exists:
             return AuthorizationDecision(False, "resource_not_found")
         if capability in _REPAIR_CAPABILITIES:
