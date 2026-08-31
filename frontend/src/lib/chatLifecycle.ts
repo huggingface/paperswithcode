@@ -1,13 +1,13 @@
 import type { ChatBlock, ChatEvent, ChatMessage } from "./chat";
 
-export const WORKSPACE_STATUS = "Preparing research workspace…";
-export const LIFECYCLE_STATUS = {
+const WORKSPACE_STATUS = "Preparing research workspace…";
+const LIFECYCLE_STATUS = {
   preparing_workspace: "Preparing secure workspace…",
   starting_agent: "Starting research agent…",
   connecting_model: "Connecting to model…",
 } as const;
 
-export type ChatLifecyclePhase =
+type ChatLifecyclePhase =
   | "idle"
   | "streaming"
   | "complete"

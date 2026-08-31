@@ -1,8 +1,7 @@
 /**
  * Global ⌘K search overlay.
  *
- * Switched from the v2 prototype's hardcoded `PAPERS.filter(...)` to debounced
- * server-side search via `/api/v1/papers/?search=…` (PLAN.md §6).
+ * Debounced server-side search via `/api/v1/papers/?search=…`.
  */
 
 import React, { useEffect, useRef } from "react";

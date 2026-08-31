@@ -172,7 +172,7 @@ const newExternalPaper = variant(
   record,
 );
 
-export const pendingPaperEditSchema = z.discriminatedUnion("edit_type", [
+const pendingPaperEditSchema = z.discriminatedUnion("edit_type", [
   taskEdit,
   methodEdit,
   evaluationEdit,
@@ -211,23 +211,6 @@ export function pendingEditSubmission<Type extends PendingEditType>(
     proposed_payload: proposedPayload,
   } as Pick<EditOf<Type>, "paper_id" | "edit_type" | "proposed_payload">;
 }
-
-export const pendingEditTypes: PendingEditType[] = [
-  "tasks",
-  "methods",
-  "evaluations",
-  "repositories",
-  "project_pages",
-  "source_url",
-  "hf_artifacts",
-  "organizations",
-  "new_task",
-  "new_method",
-  "new_benchmark",
-  "new_metric",
-  "new_conference",
-  "new_external_paper",
-];
 
 export interface PendingPaperEditsResponse {
   count: number;

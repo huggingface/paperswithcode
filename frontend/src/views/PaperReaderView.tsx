@@ -32,7 +32,7 @@ function storedRatio(): number {
   return Number.isFinite(value) && value >= 45 && value <= 75 ? value : DEFAULT_RATIO;
 }
 
-export function directArxivPdfHref(value: unknown): string | null {
+function directArxivPdfHref(value: unknown): string | null {
   const href = safeExternalHref(value);
   if (!href) return null;
   const parsed = new URL(href);

@@ -94,7 +94,7 @@ export interface CronJobsResponse {
 }
 
 
-export interface PaperMarkdownJobProgress {
+interface PaperMarkdownJobProgress {
   status: string;
   total_papers: number;
   processed_papers: number;
@@ -129,7 +129,7 @@ export interface PaperMarkdownRemoteJob {
   progress?: PaperMarkdownJobProgress | null;
 }
 
-export interface PaperMarkdownLogicalShard {
+interface PaperMarkdownLogicalShard {
   run_id: string;
   shard_id: string;
   mode?: string | null;
@@ -171,7 +171,7 @@ export interface PaperMarkdownJobsResponse {
   error?: string | null;
 }
 
-export interface PaperMarkdownCoverage {
+interface PaperMarkdownCoverage {
   observed_at: string;
   scope: string;
   eligible_papers: number;
@@ -215,7 +215,7 @@ export interface PaperMarkdownBudget {
   reason?: string | null;
 }
 
-export type AutonomousDisplayState =
+type AutonomousDisplayState =
   | "healthy"
   | "degraded"
   | "repairing"

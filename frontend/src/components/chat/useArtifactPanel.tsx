@@ -3,7 +3,7 @@ import React from "react";
 
 import type { ArtifactBlock } from "@/lib/chat";
 
-export type ArtifactTab = "preview" | "source" | "files";
+type ArtifactTab = "preview" | "source" | "files";
 
 const ARTIFACT_NAVIGATION_EVENT = "pwc:artifact-navigation";
 
@@ -13,7 +13,7 @@ export function canNavigateAwayFromArtifact(): boolean {
   return window.dispatchEvent(new Event(ARTIFACT_NAVIGATION_EVENT, { cancelable: true }));
 }
 
-export interface ArtifactPanelState {
+interface ArtifactPanelState {
   open: boolean;
   selectedKey: string | null;
   selected: ArtifactBlock | null;
@@ -52,7 +52,7 @@ const initialState = (): ArtifactPanelState => ({
   manuallyClosed: {},
 });
 
-export function artifactPanelReducer(
+function artifactPanelReducer(
   state: ArtifactPanelState,
   action: Action,
 ): ArtifactPanelState {

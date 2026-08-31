@@ -737,7 +737,7 @@ function assertNever(value: never): never {
   throw new Error(`Unhandled pending edit: ${JSON.stringify(value)}`);
 }
 
-export function PendingEditDiff({ edit }: PendingEditDiffProps) {
+function PendingEditDiff({ edit }: PendingEditDiffProps) {
   let content: React.ReactNode;
   switch (edit.edit_type) {
     case "tasks":

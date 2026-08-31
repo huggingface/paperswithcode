@@ -85,9 +85,6 @@ const PaperDetailView: React.FC = () => {
   const isAdmin = user?.is_admin ?? false;
   const isSignedIn = !!user;
   const editSubmitMode = paperEditSubmitMode(user);
-  // Show edit affordances to every visitor on the paper page. Signed-out users
-  // are routed through a sign-in prompt before they can actually submit.
-  const canEditPaper = true;
 
   const {
     arxivId,
@@ -467,13 +464,13 @@ const PaperDetailView: React.FC = () => {
             ) : null}
             {safeAbstractUrl && (
               <EditableActionButton
-                showEdit={paper.source === "external" && canEditPaper}
+                showEdit={paper.source === "external"}
                 onEdit={() => openEdit("source-url")}
                 editAriaLabel="Edit source URL"
               >
                 <a
                   className={
-                    paper.source === "external" && canEditPaper
+                    paper.source === "external"
                       ? "action-btn-segment action-btn-main"
                       : "action-btn"
                   }
@@ -498,14 +495,12 @@ const PaperDetailView: React.FC = () => {
             )}
             {repoSummary.githubUrl && (
               <EditableActionButton
-                showEdit={canEditPaper}
+                showEdit
                 onEdit={() => openEdit("repositories")}
                 editAriaLabel="Edit code repositories"
               >
                 <a
-                  className={
-                    canEditPaper ? "action-btn-segment action-btn-main" : "action-btn"
-                  }
+                  className="action-btn-segment action-btn-main"
                   href={repoSummary.githubUrl}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -517,7 +512,7 @@ const PaperDetailView: React.FC = () => {
                 </a>
               </EditableActionButton>
             )}
-            {canEditPaper && !repoSummary.githubUrl ? (
+            {!repoSummary.githubUrl ? (
               <button
                 type="button"
                 className="action-btn"
@@ -529,14 +524,12 @@ const PaperDetailView: React.FC = () => {
             ) : null}
             {projectPages.length === 1 ? (
               <EditableActionButton
-                showEdit={canEditPaper}
+                showEdit
                 onEdit={() => openEdit("project-pages")}
                 editAriaLabel="Edit project pages"
               >
                 <a
-                  className={
-                    canEditPaper ? "action-btn-segment action-btn-main" : "action-btn"
-                  }
+                  className="action-btn-segment action-btn-main"
                   href={projectPages[0].safeHref ?? undefined}
                   target="_blank"
                   rel="noopener noreferrer"
@@ -547,7 +540,7 @@ const PaperDetailView: React.FC = () => {
             ) : null}
             {projectPages.length > 1 ? (
               <EditableActionButton
-                showEdit={canEditPaper}
+                showEdit
                 onEdit={() => openEdit("project-pages")}
                 editAriaLabel="Edit project pages"
               >
@@ -555,9 +548,7 @@ const PaperDetailView: React.FC = () => {
                   <DropdownMenuTrigger asChild>
                     <button
                       type="button"
-                      className={
-                        canEditPaper ? "action-btn-segment action-btn-main" : "action-btn"
-                      }
+                      className="action-btn-segment action-btn-main"
                     >
                       <Icon name="globe" size={12} /> Project page
                     </button>
@@ -578,7 +569,7 @@ const PaperDetailView: React.FC = () => {
                 </DropdownMenu>
               </EditableActionButton>
             ) : null}
-            {canEditPaper && projectPages.length === 0 && isSignedIn ? (
+            {projectPages.length === 0 && isSignedIn ? (
               <button
                 type="button"
                 className="action-btn"
@@ -762,14 +753,14 @@ const PaperDetailView: React.FC = () => {
           )}
 
           <PaperMetadataSections
-            canEdit={canEditPaper}
+            canEdit
             onEditMethods={() => openEdit("methods")}
             onEditTasks={() => openEdit("tasks")}
             paper={paper}
           />
           <PaperResultsSection
             canCopyBadge={copyableRanks.length > 0}
-            canEdit={canEditPaper}
+            canEdit
             evaluationsByTask={evaluationsByTask}
             evaluationsLoading={evaluationsLoading}
             isAdmin={isAdmin}

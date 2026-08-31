@@ -1,10 +1,8 @@
 /**
- * MethodFigure: 3-tier fallback chain (PLAN.md §4.3):
+ * MethodFigure: 3-tier fallback chain:
  *   1. Hand-drawn SVG keyed by canonical slug (this dictionary).
  *   2. method.image_url — covers ~95% of methods in live DB.
  *   3. GenericFig — shaped, captioned schematic.
- *
- * The SVG figures below are ported verbatim from the v2 design prototype.
  */
 
 import React from "react";
@@ -38,26 +36,14 @@ interface MFBoxProps {
   stroke: string;
   label?: string;
   fontSize?: number;
-  multiline?: [string, string];
 }
 
-const MFBox: React.FC<MFBoxProps> = ({ x, y, w, h, fill, stroke, label, fontSize = 10, multiline }) => (
+const MFBox: React.FC<MFBoxProps> = ({ x, y, w, h, fill, stroke, label, fontSize = 10 }) => (
   <g>
     <rect x={x} y={y} width={w} height={h} rx="3" ry="3" fill={fill} stroke={stroke} strokeWidth="1" />
-    {multiline ? (
-      <>
-        <text x={x + w / 2} y={y + h / 2 - 2} fontSize={fontSize} fontFamily="var(--sans)" fill={C.ink} textAnchor="middle" dominantBaseline="middle">
-          {multiline[0]}
-        </text>
-        <text x={x + w / 2} y={y + h / 2 + fontSize - 1} fontSize={fontSize} fontFamily="var(--sans)" fill={C.ink} textAnchor="middle" dominantBaseline="middle">
-          {multiline[1]}
-        </text>
-      </>
-    ) : (
-      <text x={x + w / 2} y={y + h / 2} fontSize={fontSize} fontFamily="var(--sans)" fill={C.ink} textAnchor="middle" dominantBaseline="middle">
-        {label}
-      </text>
-    )}
+    <text x={x + w / 2} y={y + h / 2} fontSize={fontSize} fontFamily="var(--sans)" fill={C.ink} textAnchor="middle" dominantBaseline="middle">
+      {label}
+    </text>
   </g>
 );
 

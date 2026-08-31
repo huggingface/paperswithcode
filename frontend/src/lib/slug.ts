@@ -31,17 +31,3 @@ export function slugify(text: string): string {
     .replace(/-+/g, '-')              // Remove consecutive hyphens
     .replace(/^-|-$/g, '');           // Strip leading/trailing hyphens
 }
-
-/**
- * Get the method slug from a method object or name.
- * Prefers the slug field if available, otherwise generates one.
- *
- * @param method - Method object with optional slug field, or method name string
- * @returns URL-friendly slug
- */
-export function getMethodSlug(method: { slug?: string; name: string } | string): string {
-  if (typeof method === 'string') {
-    return slugify(method);
-  }
-  return method.slug || slugify(method.name);
-}

@@ -2,7 +2,7 @@ import { apiUrl } from "@/lib/apiUrl";
 
 export type CodexPaperJobStatus = "queued" | "dispatching" | "running" | "completed" | "failed" | "canceled";
 
-export interface CodexThumbnailResult {
+interface CodexThumbnailResult {
   requested: boolean;
   status: "queued" | "processing" | "succeeded" | "failed";
   attempt_count: number;
@@ -61,7 +61,7 @@ export interface CodexPaperJob {
   audit_status: string;
 }
 
-export interface CodexPaperWorkflow {
+interface CodexPaperWorkflow {
   id: string;
   paper_id: number;
   cohort_date: string;
@@ -76,7 +76,7 @@ export interface CodexPaperWorkflow {
   stages: CodexPaperJob[];
 }
 
-export interface BenchmarkCurationCandidate {
+interface BenchmarkCurationCandidate {
   id: string;
   canonical_name: string;
   gap_type: string;

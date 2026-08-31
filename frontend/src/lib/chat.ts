@@ -4,12 +4,11 @@
  * The chat UI consumes a flat stream of `ChatEvent`s describing one assistant
  * turn: reasoning tokens, `search_papers` tool calls with their results, and
  * final answer tokens. This is the exact event vocabulary the FastAPI SSE
- * endpoint (`POST /api/v1/chat/stream`, `text/event-stream`) will emit — each
+ * endpoint (`POST /api/v1/chat/stream`, `text/event-stream`) emits — each
  * SSE message carries one JSON-encoded `ChatEvent` in its `data:` field.
  *
- * Until that endpoint ships, `streamChat` replays a scripted mock stream
- * (see `chatMock.ts`). Set `VITE_CHAT_LIVE=1` at build time to switch to the
- * real endpoint without touching any UI code.
+ * Builds without `VITE_CHAT_LIVE=1` replay a scripted mock stream instead
+ * (see `chatMock.ts`), so the chat UI can be exercised without a live backend.
  *
  * Answer text protocol: answer deltas concatenate into GitHub-flavored Markdown,
  * with inline paper citations of the form `[label](paper:<route_id>)`.
@@ -17,11 +16,10 @@
  * per-block citation snapshot. Legacy search-result metadata remains supported
  * for historical sessions (see `ChatMarkdown.tsx`).
  *
- * The wire contract below (hit shape, event vocabulary) is the one agreed in
- * PLAN_CHAT_ENDPOINT.md (decisions 8–12): hits carry bounded `content` plus a
- * structured `metadata` dict, are keyed by `route_id` (arXiv ID for arXiv
- * papers, internal numeric ID for external resources), and deliberately carry
- * no relevance score until a calibrated reranker exists.
+ * Wire contract: hits carry bounded `content` plus a structured `metadata`
+ * dict, are keyed by `route_id` (arXiv ID for arXiv papers, internal numeric
+ * ID for external resources), and deliberately carry no relevance score until
+ * a calibrated reranker exists.
  */
 
 import { chatApi } from "@/lib/api/chat";
@@ -31,7 +29,7 @@ import { mockChatStream } from "@/lib/chatMock";
 
 export type ReasoningEffort = "low" | "high" | "max";
 
-/** Structured metadata for one search hit (PLAN_CHAT_ENDPOINT.md, decision 12).
+/** Structured metadata for one search hit.
  * Keys are always present; unavailable values are null / empty lists. */
 export interface ChatPaperMetadata {
   arxiv_id: string | null;
@@ -205,7 +203,7 @@ export interface PaperMentionDraft {
   unavailable?: boolean;
 }
 
-export type PaperMentionWire = Pick<PaperMentionDraft, "route_id" | "title" | "start" | "end">;
+type PaperMentionWire = Pick<PaperMentionDraft, "route_id" | "title" | "start" | "end">;
 
 export interface PaperSelectionDraft {
   routeId: string;
@@ -257,7 +255,7 @@ export interface ToolBlock {
   open: boolean;
 }
 
-export interface McpAppResult {
+interface McpAppResult {
   content: { type: "text"; text: string; truncated: boolean }[];
   structuredContent: { checkpointId?: string };
   isError: boolean;
@@ -310,7 +308,7 @@ export interface ArtifactBlock {
   error_message?: string;
 }
 
-export interface PaperArtifactEvent {
+interface PaperArtifactEvent {
   type: "paper_artifact";
   operation: "create" | "begin-edit" | "draft" | "repair";
   activated: boolean;

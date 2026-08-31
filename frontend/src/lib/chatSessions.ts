@@ -105,7 +105,7 @@ export interface ChatShareSummary {
   updated_at: string;
 }
 
-export interface PublicChatMessage {
+interface PublicChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -147,9 +147,9 @@ export interface ChatModelChoice {
 }
 
 export const DEFAULT_CHAT_MODEL = "gpt-5.6-luna@openai";
-export const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
-export const GLM_CHAT_MODEL = "zai-org/GLM-5.3-Flash";
-export const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
+const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
+const GLM_CHAT_MODEL = "zai-org/GLM-5.3-Flash";
+const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
 
 export function providerForChatModel(
   models: ChatModelChoice[],
@@ -208,10 +208,6 @@ export const STAGING_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
     provider: "openai",
   },
 ];
-// Compatibility export for staging-focused consumers and tests. Deployed UI
-// code must choose the environment-specific list explicitly.
-export const FALLBACK_CHAT_MODELS = STAGING_FALLBACK_CHAT_MODELS;
-
 export class ChatRequestError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);

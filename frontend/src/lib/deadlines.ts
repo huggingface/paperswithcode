@@ -2,7 +2,7 @@ import type { Conference, ConferenceDeadline } from "@/lib/api/catalog.types";
 
 export const DAY_MS = 1000 * 60 * 60 * 24;
 
-export const URGENCY = {
+const URGENCY = {
   urgent: "#c0392b", // <= 7 days
   soon: "#b9770e", // <= 30 days
   normal: "#3f7d3f", // > 30 days
@@ -19,7 +19,7 @@ export const labelFromTag = (tag: string) =>
 // contains malformed or one-off tags (e.g. "software engineering", free-text
 // duplicates like "machine learning"); only recognized research domains are
 // shown, matching the categories surfaced on the ai-deadlines space.
-export const DOMAIN_ALLOWLIST = new Set<string>([
+const DOMAIN_ALLOWLIST = new Set<string>([
   "machine-learning",
   "computer-vision",
   "natural-language-processing",
@@ -38,7 +38,7 @@ export const DOMAIN_ALLOWLIST = new Set<string>([
   "mathematics",
 ]);
 
-export const normalizeTag = (tag: string) =>
+const normalizeTag = (tag: string) =>
   tag.trim().toLowerCase().replace(/\s+/g, "-");
 
 // Normalized, allowlisted, de-duplicated domain tags for a conference.

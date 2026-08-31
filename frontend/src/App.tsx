@@ -1,8 +1,5 @@
 /**
- * Root app for the v2 frontend.
- *
- * Replaces the prototype's manual `setView(...)` state machine (App.jsx) with
- * react-router-dom routes (PLAN.md §3). Every page is bookmarkable and the
+ * Root app: react-router-dom routes. Every page is bookmarkable and the
  * browser back button works as expected.
  */
 
@@ -51,7 +48,7 @@ if (!useHashRouter && typeof window !== "undefined") {
 
 // Lazy-load route components so visitors only download the chunks for the
 // pages they actually navigate to. Saves ~150-200 KB gzipped on first paint
-// for visitors landing on a single route. See PLAN.md §4.
+// for visitors landing on a single route.
 const FeedView = React.lazy(() => import("@/views/FeedView"));
 const ChatView = React.lazy(() => import("@/views/ChatView"));
 const SharedChatView = React.lazy(() => import("@/views/SharedChatView"));

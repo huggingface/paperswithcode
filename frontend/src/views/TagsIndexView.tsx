@@ -13,9 +13,7 @@ import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 const taskKey = (value?: string) => value?.trim().toLowerCase().replace(/[\s_]+/g, "-") ?? "";
 
 /**
- * Browse page: render the backend areas verbatim, each with their tasks
- * (PLAN.md §4.2). v2's curated MODALITY_GROUPS is dropped — we use the
- * `Area` rows from the backend directly.
+ * Browse page: render the backend areas verbatim, each with their tasks.
  *
  * Uses the consolidated `/api/v1/areas/with-tasks/` endpoint, which returns
  * every area populated with its tasks (and aggregated paper counts) in one

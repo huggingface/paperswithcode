@@ -431,8 +431,6 @@ export function CronJobCard({
   const hasRemoteJobs = job.job_name === "paper_markdown_backfill";
   const livePaperMarkdownBudget = hasRemoteJobs ? paperMarkdownJobs?.budgets.live : undefined;
   const livePaperMarkdownUnmetered = livePaperMarkdownBudget?.cost_policy === "unmetered_hf" || livePaperMarkdownBudget?.budget_enforced === false;
-  const hasDetails = true;
-
   return (
     <div className="cron-job-card">
       <button type="button" className="cron-job-summary" onClick={onToggle} aria-expanded={expanded}>
@@ -446,7 +444,7 @@ export function CronJobCard({
                 {job.lock_stale && <Badge variant="outline" className="cron-status--broken">Held lock</Badge>}
                 <AxisBadge label="Execution" axis={job.execution_health} />
                 <AxisBadge label="Output" axis={job.output_health} />
-                {hasDetails && (expanded ? <ChevronUp className="h-4 w-4 cron-muted" /> : <ChevronDown className="h-4 w-4 cron-muted" />)}
+                {expanded ? <ChevronUp className="h-4 w-4 cron-muted" /> : <ChevronDown className="h-4 w-4 cron-muted" />}
               </div>
               <p className="text-sm cron-muted mb-2">{job.status_reason}</p>
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2 text-sm cron-muted">
@@ -472,7 +470,7 @@ export function CronJobCard({
         </div>
       </button>
 
-      {expanded && hasDetails && (
+      {expanded && (
         <div className="cron-job-details">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>

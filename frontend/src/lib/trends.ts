@@ -1,6 +1,6 @@
 import { statsApi } from "@/lib/api/stats";
 
-export type { TrendPoint, TrendsResponse } from "@/lib/api/stats";
+export type { TrendPoint } from "@/lib/api/stats";
 
 export const formatTrendMonth = (month: string): string => {
   const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(month);
