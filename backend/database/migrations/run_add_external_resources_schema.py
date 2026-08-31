@@ -4,7 +4,6 @@ Adds the minimal source split (`source`, `source_url`) to the `papers` table,
 relaxes `arxiv_id` to be nullable, and replaces the existing
 `(arxiv_id, version)` unique constraint with partial unique indexes.
 
-See `.cursor/plans/external_resources_model_*.plan.md` for the design notes.
 Idempotent - safe to re-run.
 """
 

@@ -5,8 +5,6 @@ External resources are vendor blog posts, technical reports, model release
 pages, and similar content that should appear alongside ArXiv papers but
 do not have an ArXiv identifier. They are stored in the same `papers` table
 with `source='external'` and a populated `source_url`.
-
-See `.cursor/plans/external_resources_model_*.plan.md` for the design.
 """
 
 from __future__ import annotations

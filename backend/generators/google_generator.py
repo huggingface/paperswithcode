@@ -77,18 +77,15 @@ class GoogleGenerator(RateLimitingMixin, Generator):
                     if is_string_content
                     else [Part(text=text) for text in message.content]
                 )
-                # Handle image URLs (new multiple images support)
+                # Image inputs are only supported by OpenRouterGenerator.
                 if message.image_urls:
-                    # TODO: Implement image handling when media_utils is available
                     print(
-                        f"Warning: Image URLs provided but media_utils not available: {message.image_urls}"
+                        f"Warning: image URLs are not supported by GoogleGenerator: {message.image_urls}"
                     )
 
-                # Handle image paths (new multiple images support)
                 if message.image_paths:
-                    # TODO: Implement image handling when media_utils is available
                     print(
-                        f"Warning: Image paths provided but media_utils not available: {message.image_paths}"
+                        f"Warning: image paths are not supported by GoogleGenerator: {message.image_paths}"
                     )
 
                 if message.pdf_path is not None:

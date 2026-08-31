@@ -28,14 +28,14 @@ A modern FastAPI-based backend that re-implements the deprecated PapersWithCode 
 # Install dependencies
 uv sync
 
-# Set up the database (if not already done)
-cd database/setup
-python setup_database.py
+# Initialize database tables (if not already done)
+uv run python -m backend.database.connection init
 ```
 
 ### Environment Configuration
 
-Create a `.env` file in the project root:
+Create an env file (this repository uses `backend/keys.env`, loaded with
+`uv run --env-file backend/keys.env …`):
 
 > **Note**: For optimal performance, configure API tokens:
 > - **Hugging Face** (`PWC_HF_TOKEN`): Increases rate limits from 1,000 to 2,500+ requests per 5-minute window. Get your token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
@@ -151,7 +151,7 @@ curl "http://localhost:8000/api/v1/papers/?page=1&page_size=10"
 - `end_date`: Inclusive latest publication date (YYYY-MM-DD)
 - `conference`: Filter by conference name
 - `latest_only`: Only include latest versions (default: true)
-- `order_by`: Sort field (default: date_published)
+- `order_by`: Sort field (`trending`, `date_published`, `citation_count`; default: trending)
 - `order_dir`: Sort direction (asc/desc, default: desc)
 
 ## API Response Format
@@ -202,22 +202,21 @@ The backend uses SQLAlchemy with PostgreSQL and builds upon the existing databas
 ### Project Structure
 ```
 backend/
-├── __init__.py
-├── main.py                 # FastAPI application entry point
-├── config.py              # Configuration management
+├── main.py                # FastAPI application entry point
+├── config.py              # Configuration management (PWC_* env vars)
 ├── run_server.py          # Development server runner
+├── cli.py                 # `pwc` maintenance CLI (plus cli_*.py subcommands)
 ├── models/
-│   ├── api.py            # Pydantic models for API responses
-│   └── database.py       # SQLAlchemy models
-├── services/
-│   └── paper_service.py  # Business logic for paper operations
-├── routers/
-│   └── papers.py         # FastAPI route handlers
+│   ├── api.py             # Pydantic models for API responses
+│   └── database.py        # SQLAlchemy models
+├── routers/               # FastAPI route handlers (papers, tasks, datasets, …)
+├── services/              # Business logic (one module per domain)
 ├── database/
-│   └── connection.py     # Database connection management
-└── utils/
-    ├── urls.py           # URL construction utilities
-    └── exceptions.py     # Custom exception classes
+│   ├── connection.py      # Database connection management
+│   └── migrations/        # Idempotent schema migrations
+├── scripts/               # Operational and cron-invoked scripts
+├── tests/                 # Pytest suite
+└── utils/                 # Shared helpers (URLs, slugs, exceptions, …)
 ```
 
 ### Adding New Endpoints
@@ -326,7 +325,7 @@ After=network.target postgresql.service
 [Service]
 Type=simple
 User=www-data
-WorkingDirectory=/path/to/ai-paper-nexus
+WorkingDirectory=/path/to/paperswithcode
 Environment=PWC_ENVIRONMENT=production
 ExecStart=/path/to/uv/run uvicorn backend.main:app --host 0.0.0.0 --port 8000 --workers 4
 Restart=always
@@ -340,7 +339,7 @@ WantedBy=multi-user.target
 ```nginx
 server {
     listen 80;
-    server_name api.paperswithcode.ai;
+    server_name paperswithcode.co;
 
     location / {
         proxy_pass http://127.0.0.1:8000;
