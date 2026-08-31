@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field, ValidationError
 
-from backend.models.api import (
+from backend.models.evaluations import (
     Evaluation,
     Evaluations,
     EvaluationCreateRequest,

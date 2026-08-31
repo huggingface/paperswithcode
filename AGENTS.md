@@ -33,7 +33,8 @@ Guidance for agents working in this repository.
 ## Development
 
 - Put domain logic in `backend/services/`, HTTP adapters in `backend/routers/`,
-  API models in `backend/models/api.py`, and persistence models/migrations in
+  API models in bounded modules under `backend/models/` (with
+  `backend/models/api.py` as the compatibility re-export surface), and persistence models/migrations in
   `backend/models/database.py` and `backend/database/migrations/`.
 - Run targeted tests and linters. Do not run the entire suite when a focused check
   is sufficient.

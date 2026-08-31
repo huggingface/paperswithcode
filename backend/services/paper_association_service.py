@@ -8,7 +8,7 @@ from typing import Any, Protocol
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.models.database import Method as DBMethod
 from backend.models.database import Organization as DBOrganization
 from backend.models.database import Paper as DBPaper

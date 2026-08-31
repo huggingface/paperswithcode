@@ -16,7 +16,7 @@ from agents import function_tool
 from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager
-from backend.models.api import DatasetCreateRequest
+from backend.models.evaluations import DatasetCreateRequest
 from backend.models.database import (
     Area as DBArea,
     Dataset as DBDataset,
@@ -745,7 +745,7 @@ async def update_dataset(
             )
 
         # Build the update request with only provided fields
-        from backend.models.api import DatasetUpdateRequest
+        from backend.models.evaluations import DatasetUpdateRequest
 
         update_data = {}
         if description is not None:

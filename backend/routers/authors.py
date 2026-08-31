@@ -10,7 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Path
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import Author, Authors, Papers
+from backend.models.papers import (
+    Author,
+    Authors,
+    Papers,
+)
 from backend.services.author_service import AuthorService
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 

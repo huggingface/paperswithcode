@@ -8,7 +8,7 @@ from typing import Any, Callable, Dict, List, Optional
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.services.author_service import normalize_arxiv_author_name
 from backend.models.database import (
     Author as DBAuthor,

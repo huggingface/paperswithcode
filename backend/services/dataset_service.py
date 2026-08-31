@@ -12,14 +12,14 @@ from sqlalchemy import String, asc, case, cast, desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
-from backend.models.api import (
+from backend.models.api import Task
+from backend.models.evaluations import (
     Dataset,
     DatasetCreateRequest,
     DatasetLeaderboardSummary,
     Datasets,
     DatasetUpdateRequest,
     IntroducingPaper,
-    Task,
 )
 from backend.models.database import (
     Dataset as DBDataset,

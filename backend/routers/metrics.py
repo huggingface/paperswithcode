@@ -8,7 +8,11 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from backend.models.api import Metric, Metrics, MetricDirections
+from backend.models.evaluations import (
+    Metric,
+    Metrics,
+    MetricDirections,
+)
 from backend.services.metric_service import MetricService
 from backend.database.connection import get_database_session
 

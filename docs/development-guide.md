@@ -24,7 +24,8 @@ served by nginx in production.
 
 ## Backend
 
-- Define request and response models in `backend/models/api.py`.
+- Define request and response models in bounded modules under `backend/models/`;
+  preserve `backend/models/api.py` as the compatibility re-export surface.
 - Put persistence models in `backend/models/database.py` and schema changes in
   `backend/database/migrations/`.
 - Put domain logic in the matching `backend/services/*_service.py`.

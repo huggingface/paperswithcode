@@ -26,7 +26,7 @@ from backend.models.api import (
 from backend.models.api import (
     EnrichPaperMutation as EnrichPaperMutation,
 )
-from backend.models.api import (
+from backend.models.evaluations import (
     EvaluationCreateRequest as EvaluationCreateRequest,
 )
 from backend.models.database import (

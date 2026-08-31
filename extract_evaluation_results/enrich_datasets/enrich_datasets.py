@@ -34,7 +34,7 @@ from extract_evaluation_results.step_base import AgentStep
 from extract_evaluation_results.tools import get_tasks_by_area, find_dataset
 from backend.database.connection import db_manager
 from backend.models.database import Dataset, Evaluation
-from backend.models.api import DatasetUpdateRequest
+from backend.models.evaluations import DatasetUpdateRequest
 from backend.services.dataset_service import DatasetService
 from sqlalchemy import func, or_
 

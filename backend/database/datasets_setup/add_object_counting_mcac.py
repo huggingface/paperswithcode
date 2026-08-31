@@ -9,7 +9,7 @@ from datetime import date
 from sqlalchemy import text
 
 from backend.database.connection import db_manager
-from backend.models.api import DatasetCreateRequest
+from backend.models.evaluations import DatasetCreateRequest
 from backend.models.database import Paper
 from backend.utils.slug_utils import slugify
 from backend.services.dataset_service import DatasetService

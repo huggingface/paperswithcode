@@ -10,7 +10,7 @@ from datetime import date
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.services.paper_ingestion_service import (
     PaperIngestionError,
     PaperIngestionService,

@@ -37,7 +37,7 @@ from backend.services.thumbnail_service import (
     build_thumbnail_filename,
     build_thumbnail_url,
 )
-from backend.models.api import (
+from backend.models.papers import (
     Paper,
     PaperFeedScope,
     Papers,

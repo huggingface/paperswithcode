@@ -8,11 +8,13 @@ from typing import Sequence, TypeVar
 from sqlalchemy import Integer, and_, cast, desc, func, or_
 from sqlalchemy.orm import Session, aliased
 
-from backend.models.api import (
-    AuthorLink,
+from backend.models.evaluations import (
     BenchmarkSummary,
-    FrameworkSummary,
     LeaderboardRankSummary,
+)
+from backend.models.papers import (
+    AuthorLink,
+    FrameworkSummary,
     MethodSummary,
     OrganizationSummary,
     ProjectPage,

@@ -14,8 +14,8 @@ from backend.models.api import (
     ConferenceAreasWithTasks,
     ConferenceDeadlines,
     Conferences,
-    Papers,
 )
+from backend.models.papers import Papers
 from backend.services.conference_service import ConferenceService
 from backend.utils.exceptions import PaperNotFoundError
 from backend.utils.entity_images import (

@@ -26,7 +26,10 @@ from backend.models.database import (
     TaskDatasetMetric,
     Metric as DBMetric,
 )
-from backend.models.api import Evaluation, Evaluations
+from backend.models.evaluations import (
+    Evaluation,
+    Evaluations,
+)
 from backend.utils.exceptions import DatabaseError
 from backend.utils.task_hierarchy import collect_descendant_task_ids
 from backend.utils.urls import external_source_url_to_paper_url, parse_arxiv_url

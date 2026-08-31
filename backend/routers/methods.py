@@ -15,8 +15,8 @@ from backend.models.api import (
     MethodIndex,
     Methods,
     MethodTrend,
-    Papers,
 )
+from backend.models.papers import Papers
 from backend.services.method_service import MethodService
 from backend.services.method_trend_service import MethodTrendService
 from backend.database.connection import get_database_session
