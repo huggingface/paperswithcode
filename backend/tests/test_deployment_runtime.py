@@ -558,7 +558,10 @@ def test_staging_latex_paper_activation_requires_complete_private_qualification(
             namespace="nielsr",
         ),
     )
-    evidence = tmp_path / "latex-qualification.json"
+    evidence_directory = tmp_path / "staging-compiler-qualification"
+    evidence_directory.mkdir()
+    os.chmod(evidence_directory, 0o750)
+    evidence = evidence_directory / "latex-qualification.json"
     evidence.write_text(
         json.dumps(
             {
@@ -580,21 +583,12 @@ def test_staging_latex_paper_activation_requires_complete_private_qualification(
         ),
         encoding="utf-8",
     )
-    os.chmod(evidence, 0o600)
-    original_lstat = type(evidence).lstat
-
-    def root_owned_lstat(path: Path):
-        observed = original_lstat(path)
-        if path == evidence:
-            return SimpleNamespace(
-                st_mode=observed.st_mode,
-                st_uid=0,
-                st_nlink=1,
-                st_size=observed.st_size,
-            )
-        return observed
-
-    monkeypatch.setattr(type(evidence), "lstat", root_owned_lstat)
+    os.chmod(evidence, 0o640)
+    monkeypatch.setattr(
+        configure_host_env.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
+    )
 
     values = configure_host_env.staging_latex_paper_activation_values(
         current, evidence_path=evidence
@@ -675,6 +669,58 @@ def test_staging_latex_paper_activation_rejects_stale_or_nonprivate_evidence(
         )
 
 
+def test_staging_latex_paper_activation_rejects_legacy_service_owned_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    current = configure_host_env.assign(
+        {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+        configure_host_env.staging_latex_compiler_provision_values(
+            {"PWC_HF_TOKEN": "PWC_HF_TOKEN=existing-staging-token"},
+            image=image,
+            namespace="nielsr",
+        ),
+    )
+    legacy_directory = tmp_path / "staging"
+    legacy_directory.mkdir()
+    os.chmod(legacy_directory, 0o700)
+    evidence = legacy_directory / "latex-compiler-qualification.json"
+    evidence.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "environment": "staging",
+                "compiler_image": image,
+                "passed": 7,
+                "total": 7,
+                "checks": {
+                    "hostile_input": True,
+                    "cancellation": True,
+                    "health": True,
+                    "metrics": True,
+                    "image_isolation": True,
+                    "reconciliation": True,
+                    "restart": True,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    os.chmod(evidence, 0o600)
+    monkeypatch.setattr(
+        configure_host_env.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
+    )
+
+    with pytest.raises(ValueError, match="qualification evidence"):
+        configure_host_env.staging_latex_paper_activation_values(
+            current, evidence_path=evidence
+        )
+
+
 def test_staging_latex_compiler_provision_mode_keeps_every_feature_off(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -728,6 +774,45 @@ def test_staging_latex_compiler_provision_mode_keeps_every_feature_off(
         "PWC_CHAT_POSTERLY_ENABLED",
     ):
         assert configure_host_env.decoded_value(written["lines"][key]) == "false"
+
+
+def test_staging_latex_compiler_evidence_layout_mode_touches_only_root_handoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    evidence = tmp_path / "staging-compiler-qualification" / "evidence.json"
+    monkeypatch.setattr(
+        configure_host_env,
+        "STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE",
+        evidence,
+    )
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env.grp,
+        "getgrnam",
+        lambda _name: SimpleNamespace(gr_gid=os.getegid()),
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-latex-compiler-evidence-layout-only",
+            "--confirm",
+            "LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE",
+        ],
+    )
+
+    assert configure_host_env.main() == 0
+    layout = evidence.parent
+    assert layout.is_dir()
+    assert layout.stat().st_mode & 0o777 == 0o750
+    assert layout.stat().st_uid == 0
+    assert layout.stat().st_gid == os.getegid()
+    assert not evidence.exists()
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):
@@ -1396,6 +1481,9 @@ class _ChatSchemaDB:
         include_qualification_columns: bool = True,
         include_reader_context_columns: bool = True,
         include_artifact_foundation: bool = True,
+        include_paper_figure_tables: bool = True,
+        include_paper_provenance: bool = True,
+        include_restore_digest_constraint: bool = False,
     ):
         self.transaction_read_only = transaction_read_only
         self.include_edit_columns = include_edit_columns
@@ -1406,11 +1494,27 @@ class _ChatSchemaDB:
         self.include_qualification_columns = include_qualification_columns
         self.include_reader_context_columns = include_reader_context_columns
         self.include_artifact_foundation = include_artifact_foundation
+        self.include_paper_figure_tables = include_paper_figure_tables
+        self.include_paper_provenance = include_paper_provenance
+        self.include_restore_digest_constraint = include_restore_digest_constraint
 
     def execute(self, statement):
         sql = str(statement)
         if "SHOW transaction_read_only" in sql:
             return _ChatSchemaResult(scalar=self.transaction_read_only)
+        if "chat_latex_paper_figure_blobs" in sql and "to_regclass" in sql:
+            names = (
+                "chat_latex_paper_figure_blobs",
+                "chat_latex_paper_figure_references",
+                "chat_latex_paper_storage_cleanup",
+            )
+            if not self.include_paper_figure_tables:
+                names = names[1:]
+            return _ChatSchemaResult(rows=[(name, name) for name in names])
+        if "uq_chat_latex_paper_versions_digest" in sql:
+            return _ChatSchemaResult(
+                first=(1,) if self.include_restore_digest_constraint else None
+            )
         if "to_regclass" in sql:
             names = (
                 "chat_sessions",
@@ -1435,6 +1539,20 @@ class _ChatSchemaDB:
                 names += ("chat_artifacts", "chat_latex_paper_versions")
             return _ChatSchemaResult(rows=[(name, name) for name in names])
         if "information_schema.columns" in sql:
+            if "generation_provenance" in sql:
+                rows = [
+                    ("chat_latex_paper_figure_blobs", "digest"),
+                    ("chat_latex_paper_figure_blobs", "byte_count"),
+                    ("chat_latex_paper_figure_blobs", "media_type"),
+                    ("chat_latex_paper_figure_blobs", "storage_key"),
+                    ("chat_latex_paper_figure_references", "version_id"),
+                    ("chat_latex_paper_figure_references", "path"),
+                    ("chat_latex_paper_figure_references", "blob_digest"),
+                    ("chat_latex_paper_storage_cleanup", "storage_prefix"),
+                ]
+                if self.include_paper_provenance:
+                    rows.append(("chat_latex_paper_versions", "generation_provenance"))
+                return _ChatSchemaResult(rows=rows)
             rows = [
                 ("chat_sessions", "execution_backend"),
                 ("chat_sessions", "reasoning_effort"),
@@ -1697,6 +1815,39 @@ def test_chat_schema_requires_latency_telemetry_columns():
         validate_chat_schema(
             _ChatSchemaDB("off", include_latency_columns=False),
             Settings(environment="staging", chat_openrouter_server_funded_enabled=True),
+        )
+
+
+def _armed_private_paper_schema_settings() -> Settings:
+    return Settings(
+        environment="staging",
+        chat_artifacts_enabled=True,
+        chat_latex_paper_enabled=True,
+        chat_latex_compiler_jobs_enabled=True,
+    )
+
+
+def test_chat_schema_requires_figure_storage_migration_when_paper_jobs_are_armed():
+    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_paper_figure_tables=False),
+            _armed_private_paper_schema_settings(),
+        )
+
+
+def test_chat_schema_requires_repair_provenance_when_paper_jobs_are_armed():
+    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_paper_provenance=False),
+            _armed_private_paper_schema_settings(),
+        )
+
+
+def test_chat_schema_requires_restore_digest_migration_when_paper_jobs_are_armed():
+    with pytest.raises(RuntimeError, match="required private paper schema is missing"):
+        validate_chat_schema(
+            _ChatSchemaDB("off", include_restore_digest_constraint=True),
+            _armed_private_paper_schema_settings(),
         )
 
 

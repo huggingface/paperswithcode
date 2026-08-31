@@ -136,6 +136,37 @@ def qualification_cases() -> tuple[QualificationCase, ...]:
             "failed",
         ),
         QualificationCase(
+            "aggregate-disk-limit",
+            _zip(
+                {
+                    "main.tex": _document(
+                        "\\newwrite\\pwcA \\newwrite\\pwcB \\newwrite\\pwcC "
+                        "\\newwrite\\pwcD \\newwrite\\pwcE \\newwrite\\pwcF "
+                        "\\newwrite\\pwcG \\newwrite\\pwcH "
+                        "\\immediate\\openout\\pwcA=pwc-fill-a.tmp "
+                        "\\immediate\\openout\\pwcB=pwc-fill-b.tmp "
+                        "\\immediate\\openout\\pwcC=pwc-fill-c.tmp "
+                        "\\immediate\\openout\\pwcD=pwc-fill-d.tmp "
+                        "\\immediate\\openout\\pwcE=pwc-fill-e.tmp "
+                        "\\immediate\\openout\\pwcF=pwc-fill-f.tmp "
+                        "\\immediate\\openout\\pwcG=pwc-fill-g.tmp "
+                        "\\immediate\\openout\\pwcH=pwc-fill-h.tmp "
+                        "\\newcount\\pwcLine \\pwcLine=0 \\loop "
+                        "\\immediate\\write\\pwcA{" + disk_line + "} "
+                        "\\immediate\\write\\pwcB{" + disk_line + "} "
+                        "\\immediate\\write\\pwcC{" + disk_line + "} "
+                        "\\immediate\\write\\pwcD{" + disk_line + "} "
+                        "\\immediate\\write\\pwcE{" + disk_line + "} "
+                        "\\immediate\\write\\pwcF{" + disk_line + "} "
+                        "\\immediate\\write\\pwcG{" + disk_line + "} "
+                        "\\immediate\\write\\pwcH{" + disk_line + "} "
+                        "\\advance\\pwcLine by 1 \\ifnum\\pwcLine<14000 \\repeat"
+                    )
+                }
+            ),
+            "failed",
+        ),
+        QualificationCase(
             "oversized-output",
             _zip(
                 {

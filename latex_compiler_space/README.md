@@ -18,14 +18,26 @@ credential, and the provisioning command pauses it after building.
 ## Private builder setup
 
 Create a **private Docker Space** whose name is
-`pwc-latex-compiler-<source>-staging`. From the PwC checkout, assemble the
-image and resolve its authenticated OCI manifest digest:
+`pwc-latex-compiler-<source>-staging`. From the already authenticated staging
+Hub identity, verify the non-secret account name, then assemble the image and
+resolve its authenticated OCI manifest digest. Do not place a token on the
+command line, print it, or add it as a Space secret or variable:
 
 ```bash
-HF_TOKEN=<private-builder-write-token> uv run python scripts/deploy_latex_compiler_space.py \
+sudo systemd-run --quiet --wait --pipe --collect \
+  --uid=pwc-staging --gid=pwc-staging \
+  --working-directory=/srv/paperswithcode/environments/staging/current \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  /srv/paperswithcode/.venv/bin/python \
+  scripts/deploy_latex_compiler_space.py \
   --space <namespace>/pwc-latex-compiler-<source>-staging \
-  --confirm DEPLOY_PRIVATE_LATEX_COMPILER_SPACE
+  --verify-identity --confirm DEPLOY_PRIVATE_LATEX_COMPILER_SPACE
 ```
+
+After the identity-only command returns the approved non-secret account name,
+run the same command without `--verify-identity` to build and pause the private
+builder. The helper prefers the protected `PWC_HF_TOKEN` made available by the
+staging environment and never prints it.
 
 The command verifies that the Space remains private, waits only long enough to
 obtain `Docker-Content-Digest`, prints the non-secret source revision and

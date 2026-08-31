@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import grp
 import hashlib
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -32,11 +34,33 @@ from backend.services.chat_runtime_contract import (
     dedicated_gateway_hostname,
     require_immutable_image_id,
 )
+from latex_compiler_contract import (
+    EnvelopeError,
+    validate_staging_sandbox_compiler_identity,
+)
 
 _ASSET_RE = re.compile(
     r"""(?:src|href)=["'](?P<path>/assets/[^"'?#]+\.(?:js|css))(?:[?#][^"']*)?["']"""
 )
 _RELEASE_ROOT = Path("/srv/paperswithcode/releases")
+_STAGING_LATEX_COMPILER_ARTIFACT_BUCKET = "nielsr/pwc-chat-artifacts-staging"
+_STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
+_STAGING_LATEX_COMPILER_EVIDENCE_GROUP = "pwc-staging"
+STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
+    "/var/lib/paperswithcode/staging-compiler-qualification/"
+    "latex-compiler-qualification.json"
+)
+_STAGING_LATEX_QUALIFICATION_CHECKS = frozenset(
+    {
+        "hostile_input",
+        "cancellation",
+        "health",
+        "metrics",
+        "image_isolation",
+        "reconciliation",
+        "restart",
+    }
+)
 
 
 def _resolved_absolute(name: str, value: str) -> Path:
@@ -335,6 +359,136 @@ def validate_environment_policy(settings: Settings) -> None:
             raise RuntimeError("staging must not reuse the production JWT secret")
         if not settings.chat_enabled:
             raise RuntimeError("staging chat feature must be enabled")
+
+
+def _validate_private_paper_compiler_settings(settings: Settings) -> str:
+    """Verify the only supported staging compiler transport without logging secrets."""
+    try:
+        image = validate_staging_sandbox_compiler_identity(
+            settings.chat_latex_compiler_hf_sandbox_image,
+            settings.chat_latex_compiler_hf_sandbox_namespace,
+        )
+    except EnvelopeError as error:
+        raise RuntimeError(
+            "private paper runtime requires an immutable Sandbox image"
+        ) from error
+    if not settings.chat_latex_compiler_hf_sandbox_token:
+        raise RuntimeError("private paper runtime requires a Sandbox credential")
+    if not settings.hf_token:
+        raise RuntimeError("private paper runtime requires the staging Hub identity")
+    if (
+        settings.chat_latex_compiler_hf_sandbox_flavor != "cpu-upgrade"
+        or settings.chat_latex_compiler_hf_sandbox_idle_timeout_seconds != 180
+    ):
+        raise RuntimeError("private paper runtime Sandbox limits are invalid")
+    if (
+        settings.chat_latex_compiler_hf_sandbox_egress_policy_attestation
+        != _STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
+    ):
+        raise RuntimeError("private paper runtime Sandbox egress is unattested")
+    if settings.chat_latex_compiler_url or settings.chat_latex_compiler_hf_token:
+        raise RuntimeError("private paper runtime must not configure a compiler Space")
+    try:
+        encoded = settings.chat_latex_compiler_signing_private_key
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        Ed25519PrivateKey.from_private_bytes(raw)
+    except ValueError as error:
+        raise RuntimeError("private paper runtime signing key is invalid") from error
+    return image
+
+
+def _validate_private_paper_qualification_evidence(*, image: str) -> None:
+    """Bind paper activation to root-produced, content-free staging evidence."""
+    evidence_path = STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE
+    try:
+        evidence_gid = grp.getgrnam(_STAGING_LATEX_COMPILER_EVIDENCE_GROUP).gr_gid
+        directory_stat = evidence_path.parent.lstat()
+        evidence_stat = evidence_path.lstat()
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or stat.S_IMODE(directory_stat.st_mode) != 0o750
+            or directory_stat.st_uid != 0
+            or directory_stat.st_gid != evidence_gid
+            or not stat.S_ISREG(evidence_stat.st_mode)
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o640
+            or evidence_stat.st_uid != 0
+            or evidence_stat.st_gid != evidence_gid
+            or evidence_stat.st_nlink != 1
+            or evidence_stat.st_size > 16_384
+        ):
+            raise ValueError
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (KeyError, OSError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "private paper qualification evidence is unavailable"
+        ) from error
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or set(payload)
+        != {
+            "schema_version",
+            "environment",
+            "compiler_image",
+            "passed",
+            "total",
+            "checks",
+        }
+        or not isinstance(checks, dict)
+        or set(checks) != _STAGING_LATEX_QUALIFICATION_CHECKS
+        or payload.get("schema_version") != 1
+        or payload.get("environment") != "staging"
+        or payload.get("compiler_image") != image
+        or type(payload.get("passed")) is not int
+        or type(payload.get("total")) is not int
+        or payload["passed"] != payload["total"]
+        or payload["total"] < len(_STAGING_LATEX_QUALIFICATION_CHECKS)
+        or any(checks[name] is not True for name in _STAGING_LATEX_QUALIFICATION_CHECKS)
+    ):
+        raise RuntimeError("private paper qualification evidence is incomplete")
+
+
+def validate_private_paper_runtime(settings: Settings) -> None:
+    """Fail closed unless the private per-job paper path has all staging gates."""
+    user_paper_flags = (
+        settings.chat_artifacts_enabled,
+        settings.chat_latex_paper_enabled,
+        settings.chat_latex_compiler_jobs_enabled,
+    )
+    any_private_paper_flag = any(user_paper_flags) or (
+        settings.chat_latex_compiler_qualification_mode
+    )
+    if not any_private_paper_flag:
+        if settings.environment == "staging" and (
+            settings.chat_posterly_enabled
+            or settings.chat_artifact_shared_preview_enabled
+        ):
+            raise RuntimeError(
+                "staging Posterly and shared previews must remain disabled"
+            )
+        return
+    if settings.environment != "staging":
+        raise RuntimeError("private paper runtime is staging-only")
+    if settings.chat_posterly_enabled:
+        raise RuntimeError("staging Posterly must remain disabled")
+    if settings.chat_artifact_shared_preview_enabled:
+        raise RuntimeError("private paper runtime shared previews must remain disabled")
+    if (
+        settings.chat_artifact_storage_backend != "hf_bucket"
+        or settings.chat_artifact_hf_bucket_id
+        != _STAGING_LATEX_COMPILER_ARTIFACT_BUCKET
+    ):
+        raise RuntimeError("private paper runtime requires the private bucket")
+    image = _validate_private_paper_compiler_settings(settings)
+    if settings.chat_latex_compiler_qualification_mode:
+        if any(user_paper_flags):
+            raise RuntimeError(
+                "private paper qualification must keep user features disabled"
+            )
+        return
+    if not all(user_paper_flags):
+        raise RuntimeError("private paper runtime flags must be coherent")
+    _validate_private_paper_qualification_evidence(image=image)
 
 
 def validate_chat_runtime_descriptor(settings: Settings) -> bool:
@@ -1028,6 +1182,7 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
     validate_runtime_storage(settings)
     validate_codex_jobs_configuration(settings)
     validate_environment_policy(settings)
+    validate_private_paper_runtime(settings)
     validate_chat_configuration = validate_chat_runtime_descriptor(settings)
     if validate_chat_configuration:
         validate_chat_provider_policy(settings, include_openrouter=False)
@@ -1360,3 +1515,85 @@ def validate_chat_schema(db, settings: Settings) -> None:
         ("chat_artifacts_preview_head_version_fkey",),
     }:
         raise RuntimeError("required chat sandbox schema is missing")
+    if (
+        settings.chat_artifacts_enabled
+        and settings.chat_latex_paper_enabled
+        and settings.chat_latex_compiler_jobs_enabled
+    ):
+        _validate_private_paper_schema(db)
+
+
+def _validate_private_paper_schema(db) -> None:
+    """Require every private-paper migration before user job admission.
+
+    This deliberately checks the active schema rather than allowing an
+    identically named public table to satisfy a staging readiness probe.
+    """
+
+    required_tables = {
+        "chat_latex_paper_figure_blobs",
+        "chat_latex_paper_figure_references",
+        "chat_latex_paper_storage_cleanup",
+    }
+    table_rows = dict(
+        db.execute(
+            text("""
+                SELECT name,
+                       to_regclass(format('%I.%I', current_schema(), name))::text
+                FROM (VALUES
+                    ('chat_latex_paper_figure_blobs'),
+                    ('chat_latex_paper_figure_references'),
+                    ('chat_latex_paper_storage_cleanup')
+                ) AS required(name)
+                """)
+        ).all()
+    )
+    if any(table_rows.get(name) is None for name in required_tables):
+        raise RuntimeError("required private paper schema is missing")
+
+    required_columns = {
+        ("chat_latex_paper_versions", "generation_provenance"),
+        ("chat_latex_paper_figure_blobs", "digest"),
+        ("chat_latex_paper_figure_blobs", "byte_count"),
+        ("chat_latex_paper_figure_blobs", "media_type"),
+        ("chat_latex_paper_figure_blobs", "storage_key"),
+        ("chat_latex_paper_figure_references", "version_id"),
+        ("chat_latex_paper_figure_references", "path"),
+        ("chat_latex_paper_figure_references", "blob_digest"),
+        ("chat_latex_paper_storage_cleanup", "storage_prefix"),
+    }
+    present_columns = set(
+        db.execute(
+            text("""
+                SELECT table_name, column_name
+                FROM information_schema.columns
+                WHERE table_schema = current_schema()
+                  AND (table_name, column_name) IN (
+                    ('chat_latex_paper_versions', 'generation_provenance'),
+                    ('chat_latex_paper_figure_blobs', 'digest'),
+                    ('chat_latex_paper_figure_blobs', 'byte_count'),
+                    ('chat_latex_paper_figure_blobs', 'media_type'),
+                    ('chat_latex_paper_figure_blobs', 'storage_key'),
+                    ('chat_latex_paper_figure_references', 'version_id'),
+                    ('chat_latex_paper_figure_references', 'path'),
+                    ('chat_latex_paper_figure_references', 'blob_digest'),
+                    ('chat_latex_paper_storage_cleanup', 'storage_prefix')
+                )
+                """)
+        ).all()
+    )
+    if not required_columns.issubset(present_columns):
+        raise RuntimeError("required private paper schema is missing")
+
+    restore_digest_constraint = db.execute(
+        text("""
+            SELECT 1
+            FROM pg_constraint
+            WHERE conrelid = to_regclass(
+                format('%I.%I', current_schema(), 'chat_latex_paper_versions')
+            )
+              AND conname = 'uq_chat_latex_paper_versions_digest'
+            """)
+    ).first()
+    if restore_digest_constraint is not None:
+        raise RuntimeError("required private paper schema is missing")

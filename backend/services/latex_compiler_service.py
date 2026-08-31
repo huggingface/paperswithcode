@@ -8,7 +8,8 @@ import logging
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Protocol
+from functools import wraps
+from typing import Any, ParamSpec, Protocol, TypeVar
 
 import httpx
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -23,6 +24,8 @@ from latex_compiler_contract import (
     CompilerStatus,
     CompileSubmission,
     EnvelopeError,
+    SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+    SANDBOX_WORKSPACE_LIMIT_BYTES,
     sign_envelope,
     validate_result,
     validate_staging_sandbox_compiler_identity,
@@ -31,6 +34,25 @@ from latex_compiler_contract import (
 logger = logging.getLogger(__name__)
 _SANDBOX_PORT = 7860
 _SANDBOX_EGRESS_ATTESTATION = "sandbox-netns-v1"
+_SandboxParameters = ParamSpec("_SandboxParameters")
+_SandboxResult = TypeVar("_SandboxResult")
+
+
+def _fail_closed_sandbox_errors(
+    operation: Callable[_SandboxParameters, _SandboxResult],
+) -> Callable[_SandboxParameters, _SandboxResult]:
+    """Prevent provider diagnostics from crossing the compiler boundary."""
+
+    @wraps(operation)
+    def guarded(
+        *args: _SandboxParameters.args, **kwargs: _SandboxParameters.kwargs
+    ) -> _SandboxResult:
+        try:
+            return operation(*args, **kwargs)
+        except SandboxError:
+            raise RuntimeError("LaTeX Sandbox provider operation failed") from None
+
+    return guarded
 
 
 class LatexCompilerTransport(Protocol):
@@ -192,6 +214,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
         self._sessions: dict[str, _SandboxSession] = {}
         self._canceled: set[str] = set()
 
+    @_fail_closed_sandbox_errors
     def submit(
         self,
         *,
@@ -218,12 +241,13 @@ class HuggingFaceSandboxLatexCompilerTransport:
             )
             response.raise_for_status()
             status = _status(response, job_id)
-        except (SandboxError, httpx.HTTPError, OSError, RuntimeError):
+        except (SandboxError, httpx.HTTPError, OSError, RuntimeError, ValueError):
             self._release(job_id, session)
             raise
         self._sessions[job_id] = session
         return status.model_copy(update={"provider_job_id": session.sandbox.id})
 
+    @_fail_closed_sandbox_errors
     def resume(
         self,
         *,
@@ -247,22 +271,28 @@ class HuggingFaceSandboxLatexCompilerTransport:
             )
             try:
                 session = self._session_after_health(sandbox, envelope)
-            except (SandboxError, httpx.HTTPError, OSError, RuntimeError):
+            except (SandboxError, httpx.HTTPError, OSError, RuntimeError, ValueError):
                 sandbox.kill()
                 raise
             self._sessions[job_id] = session
         return self.status(job_id)
 
+    @_fail_closed_sandbox_errors
     def status(self, job_id: str) -> CompilerStatus:
         session = self._session(job_id)
-        response = session.client.get(
-            session.sandbox.proxy_url_for(_SANDBOX_PORT, f"/v1/jobs/{job_id}")
-        )
-        response.raise_for_status()
-        return _status(response, job_id).model_copy(
-            update={"provider_job_id": session.sandbox.id}
-        )
+        try:
+            response = session.client.get(
+                session.sandbox.proxy_url_for(_SANDBOX_PORT, f"/v1/jobs/{job_id}")
+            )
+            response.raise_for_status()
+            return _status(response, job_id).model_copy(
+                update={"provider_job_id": session.sandbox.id}
+            )
+        except ValueError:
+            self._release(job_id, session)
+            raise
 
+    @_fail_closed_sandbox_errors
     def result(self, job_id: str) -> CompilerResult:
         session = self._session(job_id)
         try:
@@ -282,6 +312,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
         finally:
             self._release(job_id, session)
 
+    @_fail_closed_sandbox_errors
     def cancel(self, job_id: str) -> CompilerStatus:
         if job_id in self._canceled:
             return CompilerStatus(job_id=job_id, state=CompilerJobState.CANCELED)
@@ -299,15 +330,31 @@ class HuggingFaceSandboxLatexCompilerTransport:
         finally:
             self._release(job_id, session)
 
+    @_fail_closed_sandbox_errors
+    def cancel_provider_job(self, provider_job_id: str) -> None:
+        """Kill a detached Sandbox by its durable provider handle only."""
+
+        sandbox = self.sandbox_connect(
+            provider_job_id, namespace=self.namespace, token=self.token
+        )
+        sandbox.kill()
+        logger.info("latex_compiler_event event=sandbox_provider_job_canceled")
+
+    @_fail_closed_sandbox_errors
     def health(self, job_id: str) -> dict[str, object]:
         """Read the content-free in-sandbox operational snapshot."""
         session = self._session(job_id)
-        response = session.client.get(
-            session.sandbox.proxy_url_for(_SANDBOX_PORT, "/health")
-        )
-        response.raise_for_status()
-        return self._qualified_health_snapshot(response.json())
+        try:
+            response = session.client.get(
+                session.sandbox.proxy_url_for(_SANDBOX_PORT, "/health")
+            )
+            response.raise_for_status()
+            return self._qualified_health_snapshot(response.json())
+        except (RuntimeError, ValueError):
+            self._release(job_id, session)
+            raise
 
+    @_fail_closed_sandbox_errors
     def metrics(self, job_id: str) -> dict[str, object]:
         session = self._session(job_id)
         response = session.client.get(
@@ -316,6 +363,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
         response.raise_for_status()
         return response.json()
 
+    @_fail_closed_sandbox_errors
     def isolation(self, job_id: str) -> dict[str, object]:
         """Return the non-secret Sandbox isolation contract for qualification."""
         snapshot = self.health(job_id)
@@ -325,8 +373,11 @@ class HuggingFaceSandboxLatexCompilerTransport:
             "secrets": False,
             "volumes": False,
             "network_isolation": snapshot["network_isolation"],
+            "workspace_isolation": snapshot["workspace_isolation"],
+            "workspace_limit_bytes": snapshot["workspace_limit_bytes"],
         }
 
+    @_fail_closed_sandbox_errors
     def reconnect_after_restart(
         self,
         *,
@@ -387,7 +438,7 @@ class HuggingFaceSandboxLatexCompilerTransport:
                 background=True,
             )
             return self._session_after_health(sandbox, envelope)
-        except (SandboxError, httpx.HTTPError, OSError, RuntimeError):
+        except (SandboxError, httpx.HTTPError, OSError, RuntimeError, ValueError):
             self._release(
                 envelope.job_id, _SandboxSession(sandbox, httpx.Client(), envelope)
             )
@@ -398,20 +449,27 @@ class HuggingFaceSandboxLatexCompilerTransport:
     ) -> _SandboxSession:
         client = self.http_client_factory(sandbox.proxy_headers)
         session = _SandboxSession(sandbox=sandbox, client=client, envelope=envelope)
-        for _ in range(30):
-            try:
-                response = client.get(sandbox.proxy_url_for(_SANDBOX_PORT, "/health"))
-                if response.status_code == 200:
-                    snapshot = self._qualified_health_snapshot(response.json())
-                    if snapshot.get("status") != "ready":
-                        raise RuntimeError("LaTeX Sandbox compiler is not ready")
-                    logger.info("latex_compiler_event event=sandbox_ready")
-                    return session
-            except httpx.HTTPError:
-                pass
-            self.sleep(0.5)
-        client.close()
-        raise RuntimeError("LaTeX Sandbox compiler did not become ready")
+        ready = False
+        try:
+            for _ in range(30):
+                try:
+                    response = client.get(
+                        sandbox.proxy_url_for(_SANDBOX_PORT, "/health")
+                    )
+                    if response.status_code == 200:
+                        snapshot = self._qualified_health_snapshot(response.json())
+                        if snapshot.get("status") != "ready":
+                            raise RuntimeError("LaTeX Sandbox compiler is not ready")
+                        logger.info("latex_compiler_event event=sandbox_ready")
+                        ready = True
+                        return session
+                except httpx.HTTPError:
+                    pass
+                self.sleep(0.5)
+            raise RuntimeError("LaTeX Sandbox compiler did not become ready")
+        finally:
+            if not ready:
+                client.close()
 
     def _qualified_health_snapshot(self, snapshot: object) -> dict[str, object]:
         if not isinstance(snapshot, dict):
@@ -422,6 +480,12 @@ class HuggingFaceSandboxLatexCompilerTransport:
             )
         if snapshot.get("network_isolation") != _SANDBOX_EGRESS_ATTESTATION:
             raise RuntimeError("LaTeX Sandbox compiler network isolation is unattested")
+        if (
+            snapshot.get("workspace_isolation")
+            != SANDBOX_WORKSPACE_ISOLATION_ATTESTATION
+            or snapshot.get("workspace_limit_bytes") != SANDBOX_WORKSPACE_LIMIT_BYTES
+        ):
+            raise RuntimeError("LaTeX Sandbox compiler workspace quota is unattested")
         return snapshot
 
     def _session(self, job_id: str) -> _SandboxSession:

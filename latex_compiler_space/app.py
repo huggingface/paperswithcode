@@ -32,6 +32,8 @@ from latex_compiler_contract import (
     CompilerStatus,
     CompileSubmission,
     EnvelopeError,
+    SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+    SANDBOX_WORKSPACE_LIMIT_BYTES,
     validate_qualified_compiler_image,
     validate_public_key,
     validate_result,
@@ -49,6 +51,7 @@ _TEX_SOURCE = re.compile(
 )
 ENGINE_VERSION = os.environ.get("PWC_LATEX_COMPILER_ENGINE", "pdfLaTeX")
 NETWORK_ISOLATION_ATTESTATION = "sandbox-netns-v1"
+WORKSPACE_LIMIT_BYTES = SANDBOX_WORKSPACE_LIMIT_BYTES
 
 
 class BundleError(ValueError):
@@ -266,46 +269,55 @@ class LatexCompilerRunner:
             with tempfile.TemporaryDirectory(prefix="pwc-latex-") as temporary:
                 root = Path(temporary)
                 _extract_bundle(bundle, root, envelope)
-                log_path = root / "compiler.log"
-                with log_path.open("xb") as log:
-                    process = subprocess.Popen(
-                        self._command(envelope),
-                        cwd=root,
-                        stdin=subprocess.DEVNULL,
-                        stdout=log,
-                        stderr=subprocess.STDOUT,
-                        env=_compiler_environment(root),
-                        start_new_session=True,
+                workspace_root = root / ".workspace"
+                result_root = root / ".results"
+                workspace_root.mkdir(mode=0o700)
+                result_root.mkdir(mode=0o700)
+                process = subprocess.Popen(
+                    self._command(
+                        envelope,
+                        source_root=root,
+                        result_root=result_root,
+                    ),
+                    cwd=root,
+                    stdin=subprocess.DEVNULL,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    start_new_session=True,
+                )
+                with self._lock:
+                    self.processes[envelope.job_id] = process
+                    canceled = envelope.job_id in self._canceled
+                if canceled:
+                    os.killpg(process.pid, signal.SIGKILL)
+                try:
+                    process.wait(timeout=envelope.limits.timeout_seconds)
+                except subprocess.TimeoutExpired:
+                    os.killpg(process.pid, signal.SIGKILL)
+                    process.wait()
+                    return _failed_result(
+                        envelope,
+                        _read_tail(
+                            result_root / "compiler.log",
+                            envelope.limits.max_log_bytes,
+                        ),
+                        started_at,
+                        "Compilation exceeded its time limit",
+                        compiler_image=self.compiler_image,
+                        failure_category="timeout",
                     )
+                finally:
                     with self._lock:
-                        self.processes[envelope.job_id] = process
+                        self.processes.pop(envelope.job_id, None)
                         canceled = envelope.job_id in self._canceled
-                    if canceled:
-                        os.killpg(process.pid, signal.SIGKILL)
-                    try:
-                        process.wait(timeout=envelope.limits.timeout_seconds)
-                    except subprocess.TimeoutExpired:
-                        os.killpg(process.pid, signal.SIGKILL)
-                        process.wait()
-                        return _failed_result(
-                            envelope,
-                            _read_tail(log_path, envelope.limits.max_log_bytes),
-                            started_at,
-                            "Compilation exceeded its time limit",
-                            compiler_image=self.compiler_image,
-                            failure_category="timeout",
-                        )
-                    finally:
-                        with self._lock:
-                            self.processes.pop(envelope.job_id, None)
-                            canceled = envelope.job_id in self._canceled
-                            self._canceled.discard(envelope.job_id)
-                    if canceled:
-                        return CompilerResult.canceled(
-                            envelope,
-                            compiler_image=self.compiler_image,
-                            engine_version=ENGINE_VERSION,
-                        )
+                        self._canceled.discard(envelope.job_id)
+                if canceled:
+                    return CompilerResult.canceled(
+                        envelope,
+                        compiler_image=self.compiler_image,
+                        engine_version=ENGINE_VERSION,
+                    )
+                log_path = result_root / "compiler.log"
                 output = _read_tail(log_path, envelope.limits.max_log_bytes)
                 if process.returncode != 0:
                     return _failed_result(
@@ -315,7 +327,7 @@ class LatexCompilerRunner:
                         None,
                         compiler_image=self.compiler_image,
                     )
-                pdf_path = root / PurePosixPath(envelope.entrypoint).with_suffix(".pdf")
+                pdf_path = result_root / "output.pdf"
                 if pdf_path.stat().st_size > envelope.limits.max_pdf_bytes:
                     return _failed_result(
                         envelope,
@@ -354,7 +366,13 @@ class LatexCompilerRunner:
                 failure_category="execution_error",
             )
 
-    def _command(self, envelope: CompilerEnvelope) -> list[str]:
+    def _command(
+        self,
+        envelope: CompilerEnvelope,
+        *,
+        source_root: Path | str,
+        result_root: Path | str,
+    ) -> list[str]:
         command = [
             "prlimit",
             "--cpu=120:120",
@@ -372,22 +390,50 @@ class LatexCompilerRunner:
             "-no-shell-escape",
             envelope.entrypoint,
         ]
-        return (
-            network_isolation_command() + command
-            if self.network_isolation_required
-            else command
-        )
+        workspace_root = Path(source_root) / ".workspace"
+        return workspace_isolation_command(
+            network_isolation=self.network_isolation_required
+        ) + [
+            "python3",
+            "/app/latex_compiler_space/workspace_runner.py",
+            "--source-root",
+            str(source_root),
+            "--workspace-root",
+            str(workspace_root),
+            "--result-root",
+            str(result_root),
+            "--entrypoint",
+            envelope.entrypoint,
+            "--max-source-bytes",
+            str(envelope.limits.max_source_bytes),
+            "--max-pdf-bytes",
+            str(envelope.limits.max_pdf_bytes),
+            "--max-log-bytes",
+            str(envelope.limits.max_log_bytes),
+            "--workspace-limit-bytes",
+            str(WORKSPACE_LIMIT_BYTES),
+            "--",
+            *command,
+        ]
 
 
 def network_isolation_command() -> list[str]:
     """Fail closed into a fresh user/network/PID namespace for each compile."""
+    return workspace_isolation_command(network_isolation=True)
+
+
+def workspace_isolation_command(*, network_isolation: bool) -> list[str]:
+    """Create a private user/mount/PID namespace before compiler setup."""
     return [
         "unshare",
         "--user",
         "--map-root-user",
-        "--net",
+        *(["--net"] if network_isolation else []),
         "--pid",
         "--fork",
+        "--mount",
+        "--propagation",
+        "private",
         "--mount-proc",
         "--",
     ]
@@ -400,7 +446,40 @@ def verify_network_isolation() -> None:
         + [
             "sh",
             "-ceu",
-            'if awk \'NR > 1 && $2 == "00000000" && $3 != "00000000" { found=1 } END { exit found ? 0 : 1 }\' /proc/net/route; then exit 1; fi',
+            (
+                'if awk \'NR > 1 && $2 == "00000000" { found=1 } '
+                "END { exit found ? 0 : 1 }' /proc/net/route; then exit 1; fi; "
+                'if awk \'NR > 2 { interface=$1; sub(/:$/, "", interface); '
+                'if (interface != "lo") found=1 } END { exit found ? 0 : 1 }\' '
+                "/proc/net/dev; then exit 1; fi; "
+                "if [ ! -r /proc/net/ipv6_route ]; then exit 1; fi; "
+                'if awk \'$1 == "00000000000000000000000000000000" && '
+                '$2 == "00" && $10 != "lo" { found=1 } '
+                "END { exit found ? 0 : 1 }' "
+                "/proc/net/ipv6_route; then exit 1; fi"
+            ),
+        ],
+        check=True,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        timeout=10,
+    )
+
+
+def verify_workspace_quota_isolation() -> None:
+    """Prove the required namespace can mount and enforce a bounded tmpfs."""
+    subprocess.run(
+        workspace_isolation_command(network_isolation=True)
+        + [
+            "sh",
+            "-ceu",
+            (
+                "workspace=$(mktemp -d); "
+                'trap "umount \\"$workspace\\" 2>/dev/null || true; rmdir \\"$workspace\\"" EXIT; '
+                'mount -t tmpfs -o size=1048576,mode=0700,nosuid,nodev,noexec tmpfs "$workspace"; '
+                'if dd if=/dev/zero of="$workspace/quota" bs=1024 count=1025 status=none 2>/dev/null; then exit 1; fi'
+            ),
         ],
         check=True,
         stdin=subprocess.DEVNULL,
@@ -445,6 +524,7 @@ def create_app(
         if network_isolation_required:
             try:
                 verify_network_isolation()
+                verify_workspace_quota_isolation()
             except (OSError, subprocess.SubprocessError) as error:
                 raise RuntimeError(
                     "Compiler network isolation is unavailable"
@@ -534,6 +614,8 @@ def create_app(
             "status": "ready",
             "qualified_image": qualified_image,
             "network_isolation": NETWORK_ISOLATION_ATTESTATION,
+            "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+            "workspace_limit_bytes": WORKSPACE_LIMIT_BYTES,
             **manager.metrics(),
         }
 
@@ -684,10 +766,13 @@ def _log_tail(output: bytes, maximum: int) -> str:
 
 
 def _read_tail(path: Path, maximum: int) -> bytes:
-    with path.open("rb") as log:
-        log.seek(0, os.SEEK_END)
-        log.seek(max(0, log.tell() - maximum))
-        return log.read(maximum)
+    try:
+        with path.open("rb") as log:
+            log.seek(0, os.SEEK_END)
+            log.seek(max(0, log.tell() - maximum))
+            return log.read(maximum)
+    except FileNotFoundError:
+        return b""
 
 
 def _elapsed_ms(started_at: float) -> int:

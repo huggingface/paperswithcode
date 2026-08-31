@@ -8,6 +8,7 @@ diagnostics, provider handles, URLs, envelopes, or credentials.
 from __future__ import annotations
 
 import argparse
+import grp
 import json
 import os
 import stat
@@ -18,6 +19,7 @@ from pathlib import Path
 from typing import Protocol
 
 import httpx
+from huggingface_hub.errors import SandboxError
 
 from backend.config import Settings, get_settings
 from backend.scripts.qualify_latex_compiler_space import (
@@ -32,17 +34,37 @@ from backend.services.latex_compiler_service import (
 from latex_compiler_contract import (
     CompilerJobState,
     EnvelopeError,
+    SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+    SANDBOX_WORKSPACE_LIMIT_BYTES,
     validate_staging_sandbox_compiler_identity,
 )
 
 CONFIRMATION = "QUALIFY_PRIVATE_LATEX_COMPILER_SANDBOX"
 POLL_SECONDS = 0.5
 EVIDENCE_PATH = Path(
-    "/var/lib/paperswithcode/staging/latex-compiler-qualification.json"
+    "/var/lib/paperswithcode/staging-compiler-qualification/"
+    "latex-compiler-qualification.json"
 )
-_CANCELLATION_BUNDLE = qualification_cases()[0].bundle
+EVIDENCE_GROUP = "pwc-staging"
+_CANCELLATION_CASE_NAME = "cpu-limit"
+_CANCELLATION_BUNDLE = next(
+    case.bundle
+    for case in qualification_cases()
+    if case.name == _CANCELLATION_CASE_NAME
+)
 _OPERATIONAL_CHECKS = ("health", "metrics", "image-isolation")
 _RECOVERY_CHECKS = ("restart", "reconciliation")
+_EVIDENCE_CHECKS = frozenset(
+    {
+        "hostile_input",
+        "cancellation",
+        "health",
+        "metrics",
+        "image_isolation",
+        "reconciliation",
+        "restart",
+    }
+)
 
 
 class SandboxQualificationTransport(LatexCompilerTransport, Protocol):
@@ -109,7 +131,7 @@ def run_case(
 
 
 def run_cancellation_case(compiler: LatexCompilerTransport) -> tuple[str, int]:
-    """Exercise immediate, idempotent disposal using an empty synthetic archive."""
+    """Cancel a deterministic long-running synthetic compile before it can succeed."""
     job_id = str(uuid.uuid4())
     started = time.monotonic()
     compiler.submit(job_id=job_id, bundle=_CANCELLATION_BUNDLE, entrypoint="main.tex")
@@ -136,6 +158,9 @@ def run_operational_checks(
             if health.get("status") == "ready"
             and health.get("qualified_image") == compiler.image
             and health.get("network_isolation") == "sandbox-netns-v1"
+            and health.get("workspace_isolation")
+            == SANDBOX_WORKSPACE_ISOLATION_ATTESTATION
+            and health.get("workspace_limit_bytes") == SANDBOX_WORKSPACE_LIMIT_BYTES
             else "failed"
         )
         outcomes["metrics"] = (
@@ -161,6 +186,8 @@ def run_operational_checks(
                 "secrets": False,
                 "volumes": False,
                 "network_isolation": "sandbox-netns-v1",
+                "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
             }
             else "failed"
         )
@@ -276,34 +303,77 @@ def qualification_evidence(
     }
 
 
+def _validate_qualification_evidence_payload(payload: dict[str, object]) -> None:
+    """Keep the root-to-service handoff structurally incapable of source text."""
+
+    checks = payload.get("checks")
+    if (
+        set(payload)
+        != {
+            "schema_version",
+            "environment",
+            "compiler_image",
+            "passed",
+            "total",
+            "checks",
+        }
+        or payload.get("schema_version") != 1
+        or payload.get("environment") != "staging"
+        or not isinstance(payload.get("compiler_image"), str)
+        or type(payload.get("passed")) is not int
+        or type(payload.get("total")) is not int
+        or not isinstance(checks, dict)
+        or set(checks) != _EVIDENCE_CHECKS
+        or any(checks[name] is not True for name in _EVIDENCE_CHECKS)
+        or payload["passed"] != payload["total"]
+        or payload["total"] < len(_EVIDENCE_CHECKS)
+    ):
+        raise ValueError("Qualification evidence does not satisfy its contract")
+    try:
+        validate_staging_sandbox_compiler_identity(payload["compiler_image"], "nielsr")
+    except EnvelopeError as error:
+        raise ValueError("Qualification evidence compiler image is invalid") from error
+
+
 def _require_root_evidence_writer() -> None:
     if os.geteuid() != 0:
         raise PermissionError("Qualification evidence must be written by root")
 
 
 def _require_trusted_evidence_directory(path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    directory_stat = path.parent.lstat()
+    try:
+        evidence_gid = grp.getgrnam(EVIDENCE_GROUP).gr_gid
+        directory_stat = path.parent.lstat()
+    except (KeyError, OSError) as error:
+        raise PermissionError(
+            "Qualification evidence directory is unavailable"
+        ) from error
     if (
         not stat.S_ISDIR(directory_stat.st_mode)
         or directory_stat.st_uid != 0
-        or stat.S_IMODE(directory_stat.st_mode) & 0o077
+        or directory_stat.st_gid != evidence_gid
+        or stat.S_IMODE(directory_stat.st_mode) != 0o750
     ):
-        raise PermissionError("Qualification evidence directory is not root-only")
+        raise PermissionError("Qualification evidence directory is not trusted")
 
 
 def write_qualification_evidence(
     payload: dict[str, object], path: Path = EVIDENCE_PATH
 ) -> None:
-    """Atomically replace root-owned qualification evidence with mode 0600."""
+    """Atomically hand root-produced evidence to the read-only staging group."""
     _require_root_evidence_writer()
     _require_trusted_evidence_directory(path)
+    _validate_qualification_evidence_payload(payload)
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n"
+    if len(encoded.encode("utf-8")) > 16_384:
+        raise ValueError("Qualification evidence exceeds its bounded contract")
     temporary = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    descriptor = os.open(temporary, flags, 0o600)
+    descriptor = os.open(temporary, flags, 0o640)
     try:
-        os.fchmod(descriptor, 0o600)
+        evidence_gid = grp.getgrnam(EVIDENCE_GROUP).gr_gid
+        os.fchown(descriptor, 0, evidence_gid)
+        os.fchmod(descriptor, 0o640)
         with os.fdopen(descriptor, "w", encoding="utf-8") as evidence:
             evidence.write(encoded)
             evidence.flush()
@@ -312,9 +382,11 @@ def write_qualification_evidence(
         evidence_stat = path.lstat()
         if (
             not stat.S_ISREG(evidence_stat.st_mode)
-            or stat.S_IMODE(evidence_stat.st_mode) != 0o600
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o640
             or evidence_stat.st_uid != 0
+            or evidence_stat.st_gid != evidence_gid
             or evidence_stat.st_nlink != 1
+            or evidence_stat.st_size > 16_384
         ):
             raise PermissionError("Qualification evidence ownership is not trusted")
     finally:
@@ -341,6 +413,8 @@ def main() -> int:
     args = _parse_args()
     if args.confirm != CONFIRMATION:
         raise SystemExit(f"Pass --confirm {CONFIRMATION}")
+    if args.evidence_path != EVIDENCE_PATH:
+        raise SystemExit("Sandbox qualification evidence path is fixed")
     settings: Settings = get_settings()
     try:
         validate_settings(settings)
@@ -373,7 +447,14 @@ def main() -> int:
             )
             results.extend(run_operational_checks(compiler))
             results.extend(run_restart_reconciliation_checks(compiler))
-    except (EnvelopeError, httpx.HTTPError, OSError, RuntimeError):
+    except (
+        EnvelopeError,
+        SandboxError,
+        httpx.HTTPError,
+        OSError,
+        RuntimeError,
+        ValueError,
+    ):
         raise SystemExit("Sandbox qualification failed") from None
     payload = report(results)
     if not args.case and not args.no_write_evidence:

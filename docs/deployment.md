@@ -189,24 +189,24 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    `allow_chat_latex_paper_restore_digests.sql`,
    `add_chat_latex_paper_figure_storage.sql`,
    `add_chat_latex_repair_provenance.sql`, and
-   `add_chat_warm_assignment_race.sql` as
-   PostgreSQL superuser with
+   `add_chat_warm_assignment_race.sql` as PostgreSQL superuser with
    `search_path=staging,public`. The guarded migrations refuse any other schema,
    assign the new tables to `pwc_staging_owner`, grant `pwc_staging`, and
-   revoke the production application role. The pool migration remains required
-   even while `PWC_CHAT_BLANK_POOL_ENABLED=false`, because readiness validates
-   the rollback-safe audit schema before pool activation.
+   revoke the production application role. The artifact foundation is required
+   for the private-paper ORM, but does not authorize Posterly or paper
+   admission. The pool migration remains required even while
+   `PWC_CHAT_BLANK_POOL_ENABLED=false`, because readiness validates the
+   rollback-safe audit schema before pool activation.
 5. Keep `PWC_CHAT_WORKSPACE_SNAPSHOTS_ENABLED=false`; snapshot activation is
    outside the latency project and requires a separate approved plan. V1 uses
    Modal's isolated, automatically reclaimed ephemeral disk; PID and memory
    ceilings remain hard qualification probes.
 
-Posterly's additive gateway contract uses one zero-assignment bridge release.
-Deploy the first gateway-29 release with `POSTERLY_ENABLED=false`; only after
-that release is both current and the rollback target accepts contract 29 may a
-second exact-SHA release set `POSTERLY_ENABLED=true`. The bridge contains the
-image, schema, storage provenance, and routes, but the launcher keeps artifact
-admission and publication disabled.
+Posterly is permanently disabled for staging paper authoring:
+`PWC_CHAT_POSTERLY_ENABLED=false` on every bridge, qualification, activation,
+and rollback release. The additive artifact schema remains only for typed
+private-paper compatibility and historical reads; no release or configuration
+refresh may set Posterly true or create a public paper artifact/share snapshot.
 
 Staging web search uses a server-owned Exa key and remains fail-closed unless
 the feature flag, protected credential, monthly circuit, database tables, and
@@ -339,13 +339,30 @@ credentials, or tool output. Full model,
 SDK compaction, resume, edit/retry, and citation qualification still runs
 through authenticated staging chats before increasing the rollout percentage.
 
-### Private LaTeX paper staging gate
+### Private LaTeX compiler and paper staging gate
 
-After the private artifact and compiler switches have been enabled in staging,
-run the paper gate through the active staging Unix socket. It requires Luna to
-be both the discovered staging API default and the explicitly selected model;
-the runner never falls back to whichever model happens to be first in a local
-configuration.
+The private compiler is an independent, staging-only release gate. Follow the
+full [private compiler runbook](latex-compiler-runbook.md) in order: publish and
+pin the matching staging Pi/Modal worker image, deploy the exact source SHA
+with all paper controls disabled, create the private digest-pinned `nielsr`
+builder, provision the protected Sandbox contract, apply the staging-only
+migrations, qualify isolated Sandboxes, record root-owned evidence, then enable
+the paper/compiler controls and refresh that same exact SHA. Never run the
+builder, migration, host-configuration, or deployment sequence against
+production.
+
+The compiler evidence handoff is
+`/var/lib/paperswithcode/staging-compiler-qualification/latex-compiler-qualification.json`.
+Its parent must be `root:pwc-staging` mode `0750`; the content-free regular,
+single-link evidence file must be `root:pwc-staging` mode `0640` and bind to the
+configured immutable image. The activation helper refuses absent, stale,
+misowned, malformed, or non-passing evidence, and keeps shared preview and
+Posterly disabled.
+
+Only after that activation refresh succeeds, run the paper gate through the
+active staging Unix socket. It requires Luna to be both the discovered staging
+API default and the explicitly selected model; the runner never falls back to
+whichever model happens to be first in a local configuration.
 
 ```bash
 sudo systemd-run --quiet --wait --pipe --collect \
@@ -395,9 +412,9 @@ the disabled phase must list. It deletes all secondary sessions and preserves
 the one primary Luna paper only if every executed deterministic preparation
 check passed; otherwise `finally` deletes everything.
 
-After an operator has independently disabled all three paper/compiler switches
-through the documented staging host-configuration procedure, run the disabled
-historical phase with that exact same owner:
+After an operator has independently disabled the paper/compiler controls through
+the documented staging host-configuration procedure and refreshed that exact
+staging SHA, run the disabled historical phase with that exact same owner:
 
 ```bash
 sudo systemd-run --quiet --wait --pipe --collect \

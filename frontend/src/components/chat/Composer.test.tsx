@@ -133,6 +133,24 @@ describe("Composer paper mentions", () => {
 });
 
 describe("Composer paper commands", () => {
+  it("marks the private chat draft surface as excluded from analytics capture", () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const { container } = render(
+      <QueryClientProvider client={client}>
+        <Composer onSend={vi.fn()} />
+      </QueryClientProvider>,
+    );
+
+    const surface = container.querySelector(".chat-composer");
+    const textarea = screen.getByRole("combobox");
+    expect(surface).toHaveClass("ph-no-capture");
+    expect(surface).toHaveAttribute("data-ph-no-capture", "true");
+    expect(surface).toHaveAttribute("data-ph-no-autocapture", "true");
+    expect(textarea).toHaveClass("ph-no-capture");
+    expect(textarea).toHaveAttribute("data-ph-no-capture", "true");
+    expect(textarea).toHaveAttribute("data-ph-no-autocapture", "true");
+  });
+
   it("suggests /write-paper only when paper artifacts are enabled and slash is typed", () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const { rerender } = render(

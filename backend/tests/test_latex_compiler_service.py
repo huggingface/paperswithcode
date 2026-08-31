@@ -22,6 +22,8 @@ from latex_compiler_contract import (
     CompilerEnvelope,
     CompilerResult,
     EnvelopeError,
+    SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+    SANDBOX_WORKSPACE_LIMIT_BYTES,
 )
 
 
@@ -143,6 +145,8 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
                     "status": "ready",
                     "qualified_image": image,
                     "network_isolation": "sandbox-netns-v1",
+                    "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                    "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
                 },
             )
         if request.method == "POST":
@@ -238,6 +242,8 @@ def test_sandbox_transport_fails_closed_when_result_image_is_not_the_pinned_imag
                     "status": "ready",
                     "qualified_image": image,
                     "network_isolation": "sandbox-netns-v1",
+                    "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                    "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
                 },
             )
         if request.method == "POST":
@@ -388,6 +394,219 @@ def test_sandbox_transport_kills_a_job_when_preflight_raises_sandbox_error() -> 
         )
 
     assert sandbox.killed
+
+
+def test_sandbox_transport_normalizes_provider_creation_errors() -> None:
+    """Provider details must not escape the compiler service boundary."""
+
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=(
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64
+        ),
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_kwargs: (_ for _ in ()).throw(
+            SandboxError("untrusted-provider-detail")
+        ),
+        sandbox_connect=lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(
+        RuntimeError, match="Sandbox provider operation failed"
+    ) as error:
+        transport.submit(
+            job_id=str(uuid.uuid4()), bundle=b"zip bytes", entrypoint="main.tex"
+        )
+
+    assert "untrusted-provider-detail" not in str(error.value)
+
+
+def test_sandbox_transport_normalizes_provider_reconnect_errors() -> None:
+    """Reattachment must not expose a provider response after process restart."""
+
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=(
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64
+        ),
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_kwargs: None,
+        sandbox_connect=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            SandboxError("untrusted-provider-detail")
+        ),
+    )
+
+    with pytest.raises(
+        RuntimeError, match="Sandbox provider operation failed"
+    ) as error:
+        transport.resume(
+            job_id=str(uuid.uuid4()),
+            provider_job_id="provider-job",
+            bundle=b"zip bytes",
+            entrypoint="main.tex",
+        )
+
+    assert "untrusted-provider-detail" not in str(error.value)
+
+
+def test_sandbox_transport_cancels_a_detached_provider_job_without_submission() -> None:
+    """Deletion can terminate a durable Sandbox handle without source bytes."""
+
+    class FakeSandbox:
+        def __init__(self) -> None:
+            self.killed = False
+
+        def kill(self) -> None:
+            self.killed = True
+
+    sandbox = FakeSandbox()
+    connected: list[tuple[str, str, str]] = []
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=(
+            "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:"
+            + "a" * 64
+        ),
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_kwargs: pytest.fail(
+            "provider-handle cancellation must not submit a compiler job"
+        ),
+        sandbox_connect=lambda provider_job_id, *, namespace, token: (
+            connected.append((provider_job_id, namespace, token)) or sandbox
+        ),
+    )
+
+    transport.cancel_provider_job("opaque-sandbox-job")
+
+    assert connected == [("opaque-sandbox-job", "nielsr", "sandbox-token")]
+    assert sandbox.killed
+    assert transport._sessions == {}
+
+
+def test_sandbox_transport_cleans_up_a_malformed_health_payload() -> None:
+    """Invalid readiness JSON cannot leave the newly-created Sandbox alive."""
+
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+
+    class FakeSandbox:
+        id = "malformed-health-sandbox"
+
+        def __init__(self) -> None:
+            self.proxy_headers = {"X-Sandbox-Token": "ephemeral"}
+            self.killed = False
+
+        def run(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        def proxy_url_for(self, _port: int, path: str = "/") -> str:
+            return f"https://sandbox.example.invalid{path}"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    sandbox = FakeSandbox()
+    clients: list[httpx.Client] = []
+
+    def make_client(headers: dict[str, str]) -> httpx.Client:
+        client = httpx.Client(
+            headers=headers,
+            transport=httpx.MockTransport(
+                lambda _request: httpx.Response(200, content=b"not-json")
+            ),
+        )
+        clients.append(client)
+        return client
+
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=image,
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_kwargs: sandbox,
+        sandbox_connect=lambda *_args, **_kwargs: sandbox,
+        http_client_factory=make_client,
+    )
+
+    with pytest.raises(RuntimeError, match="isolation preflight failed"):
+        transport.submit(
+            job_id=str(uuid.uuid4()), bundle=b"zip bytes", entrypoint="main.tex"
+        )
+
+    assert sandbox.killed
+    assert clients[0].is_closed
+
+
+def test_sandbox_transport_cleans_up_an_attached_job_with_malformed_status() -> None:
+    """Pydantic status validation failures must release the per-job Sandbox."""
+
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
+    job_id = str(uuid.uuid4())
+
+    class FakeSandbox:
+        id = "malformed-status-sandbox"
+
+        def __init__(self) -> None:
+            self.proxy_headers = {"X-Sandbox-Token": "ephemeral"}
+            self.killed = False
+
+        def run(self, *_args: object, **_kwargs: object) -> None:
+            return None
+
+        def proxy_url_for(self, _port: int, path: str = "/") -> str:
+            return f"https://sandbox.example.invalid{path}"
+
+        def kill(self) -> None:
+            self.killed = True
+
+    sandbox = FakeSandbox()
+    clients: list[httpx.Client] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ready",
+                    "qualified_image": image,
+                    "network_isolation": "sandbox-netns-v1",
+                    "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                    "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
+                },
+            )
+        if request.method == "POST":
+            return httpx.Response(202, json={"job_id": job_id, "state": "queued"})
+        return httpx.Response(200, json={"job_id": job_id})
+
+    def make_client(headers: dict[str, str]) -> httpx.Client:
+        client = httpx.Client(headers=headers, transport=httpx.MockTransport(handler))
+        clients.append(client)
+        return client
+
+    transport = HuggingFaceSandboxLatexCompilerTransport(
+        image=image,
+        namespace="nielsr",
+        token="sandbox-token",
+        private_key=Ed25519PrivateKey.generate(),
+        sandbox_create=lambda **_kwargs: sandbox,
+        sandbox_connect=lambda *_args, **_kwargs: sandbox,
+        http_client_factory=make_client,
+    )
+    transport.submit(job_id=job_id, bundle=b"zip bytes", entrypoint="main.tex")
+
+    with pytest.raises(ValueError):
+        transport.status(job_id)
+
+    assert sandbox.killed
+    assert clients[0].is_closed
 
 
 def test_compiler_transport_refuses_non_staging_configuration() -> None:

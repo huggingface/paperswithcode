@@ -1,10 +1,20 @@
 from __future__ import annotations
 
+import grp
 import json
 import os
 from argparse import Namespace
+from io import BytesIO
+from zipfile import ZipFile
 
 import pytest
+
+
+def _trusted_evidence_directory(path):
+    path.mkdir()
+    os.chown(path, 0, grp.getgrnam("pwc-staging").gr_gid)
+    os.chmod(path, 0o750)
+    return path
 
 
 def test_qualification_cases_cover_the_required_hostile_boundaries() -> None:
@@ -22,11 +32,30 @@ def test_qualification_cases_cover_the_required_hostile_boundaries() -> None:
         "cpu-limit",
         "memory-limit",
         "disk-limit",
+        "aggregate-disk-limit",
         "oversized-output",
         "path-traversal-archive",
         "malformed-archive",
         "hostile-pdf",
     } <= names
+
+
+def test_aggregate_disk_fixture_writes_multiple_files_below_the_per_file_limit() -> (
+    None
+):
+    from backend.scripts.qualify_latex_compiler_space import qualification_cases
+
+    aggregate = next(
+        case for case in qualification_cases() if case.name == "aggregate-disk-limit"
+    )
+    with ZipFile(BytesIO(aggregate.bundle)) as archive:
+        source = archive.read("main.tex")
+
+    assert all(
+        f"pwc-fill-{suffix}.tmp".encode() in source
+        for suffix in ("a", "b", "c", "d", "e", "f", "g", "h")
+    )
+    assert b"pwcLine<14000" in source
 
 
 def test_qualification_report_is_bounded_and_never_contains_case_source() -> None:
@@ -49,7 +78,10 @@ def test_qualification_report_is_bounded_and_never_contains_case_source() -> Non
 def test_sandbox_qualification_uses_the_transport_contract() -> None:
     from backend.scripts.qualify_latex_compiler_sandbox import run_case
     from backend.scripts.qualify_latex_compiler_space import QualificationCase
-    from latex_compiler_contract import CompilerJobState, CompilerStatus
+    from latex_compiler_contract import (
+        CompilerJobState,
+        CompilerStatus,
+    )
 
     class Compiler:
         def __init__(self) -> None:
@@ -102,6 +134,56 @@ def test_sandbox_qualification_cancels_a_fresh_synthetic_job() -> None:
     assert outcome == "canceled"
     assert elapsed >= 0
     assert len(compiler.cancelled) == 1
+
+
+def test_sandbox_cancellation_uses_a_long_running_fixture_to_avoid_fast_success() -> (
+    None
+):
+    from backend.scripts.qualify_latex_compiler_sandbox import (
+        _CANCELLATION_BUNDLE,
+        run_cancellation_case,
+    )
+    from latex_compiler_contract import CompilerJobState, CompilerStatus
+
+    class Compiler:
+        def __init__(self) -> None:
+            self.completed_before_cancel = False
+            self.submitted_bundle: bytes | None = None
+
+        def submit(
+            self, *, job_id: str, bundle: bytes, entrypoint: str
+        ) -> CompilerStatus:
+            self.submitted_bundle = bundle
+            with ZipFile(BytesIO(bundle)) as archive:
+                self.completed_before_cancel = (
+                    b"pwcCounter<1000000000" not in archive.read("main.tex")
+                )
+            return CompilerStatus(
+                job_id=job_id,
+                state=(
+                    CompilerJobState.SUCCEEDED
+                    if self.completed_before_cancel
+                    else CompilerJobState.COMPILING
+                ),
+            )
+
+        def cancel(self, job_id: str) -> CompilerStatus:
+            return CompilerStatus(
+                job_id=job_id,
+                state=(
+                    CompilerJobState.SUCCEEDED
+                    if self.completed_before_cancel
+                    else CompilerJobState.CANCELED
+                ),
+            )
+
+    compiler = Compiler()
+    outcome, _elapsed = run_cancellation_case(compiler)
+
+    with ZipFile(BytesIO(_CANCELLATION_BUNDLE)) as archive:
+        assert b"pwcCounter<1000000000" in archive.read("main.tex")
+    assert compiler.submitted_bundle == _CANCELLATION_BUNDLE
+    assert outcome == "canceled"
 
 
 def test_sandbox_qualification_requires_explicit_mode_and_private_artifact_store() -> (
@@ -170,7 +252,12 @@ def test_sandbox_qualification_refuses_all_user_facing_artifact_surfaces(
 
 def test_sandbox_qualification_collects_content_free_operational_checks() -> None:
     from backend.scripts.qualify_latex_compiler_sandbox import run_operational_checks
-    from latex_compiler_contract import CompilerJobState, CompilerStatus
+    from latex_compiler_contract import (
+        CompilerJobState,
+        CompilerStatus,
+        SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+        SANDBOX_WORKSPACE_LIMIT_BYTES,
+    )
 
     image = (
         "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
@@ -194,6 +281,8 @@ def test_sandbox_qualification_collects_content_free_operational_checks() -> Non
                 "status": "ready",
                 "qualified_image": image,
                 "network_isolation": "sandbox-netns-v1",
+                "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
             }
 
         def metrics(self, job_id: str) -> dict[str, object]:
@@ -214,6 +303,8 @@ def test_sandbox_qualification_collects_content_free_operational_checks() -> Non
                 "secrets": False,
                 "volumes": False,
                 "network_isolation": "sandbox-netns-v1",
+                "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
             }
 
         def cancel(self, job_id: str) -> CompilerStatus:
@@ -284,7 +375,9 @@ def test_sandbox_qualification_exercises_transport_restart_and_reconciliation() 
     assert all(outcome == "passed" for _, outcome, _ in rows)
 
 
-def test_sandbox_qualification_evidence_is_private_and_mode_0600(tmp_path) -> None:
+def test_sandbox_qualification_evidence_is_root_owned_and_staging_readable(
+    tmp_path,
+) -> None:
     from backend.scripts.qualify_latex_compiler_sandbox import (
         qualification_evidence,
         write_qualification_evidence,
@@ -295,7 +388,9 @@ def test_sandbox_qualification_evidence_is_private_and_mode_0600(tmp_path) -> No
         report,
     )
 
-    image = "registry.hf.space/pwc-test-latex-compiler-staging@sha256:" + "a" * 64
+    image = (
+        "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
+    )
     rows = [(case, case.expected, 1) for case in qualification_cases()]
     rows.extend(
         (
@@ -319,14 +414,18 @@ def test_sandbox_qualification_evidence_is_private_and_mode_0600(tmp_path) -> No
         )
     )
     payload = qualification_evidence(rows, image=image)
-    evidence = tmp_path / "qualification.json"
+    evidence = (
+        _trusted_evidence_directory(tmp_path / "staging-compiler-qualification")
+        / "qualification.json"
+    )
 
     write_qualification_evidence(payload, evidence)
 
     assert report(rows)["passed"] == report(rows)["total"]
     assert json.loads(evidence.read_text()) == payload
-    assert os.stat(evidence).st_mode & 0o777 == 0o600
+    assert os.stat(evidence).st_mode & 0o777 == 0o640
     assert os.stat(evidence).st_uid == 0
+    assert os.stat(evidence).st_gid == grp.getgrnam("pwc-staging").gr_gid
     assert os.stat(evidence).st_nlink == 1
     assert payload["checks"] == {
         "hostile_input": True,
@@ -380,7 +479,10 @@ def test_full_qualification_invalidates_stale_evidence_before_running(tmp_path) 
         invalidate_qualification_evidence,
     )
 
-    evidence = tmp_path / "qualification.json"
+    evidence = (
+        _trusted_evidence_directory(tmp_path / "staging-compiler-qualification")
+        / "qualification.json"
+    )
     evidence.write_text('{"checks":{"hostile_input":true}}')
 
     invalidate_qualification_evidence(evidence)
@@ -388,13 +490,10 @@ def test_full_qualification_invalidates_stale_evidence_before_running(tmp_path) 
     assert not evidence.exists()
 
 
-def test_sandbox_qualification_redacts_transport_failures(
-    monkeypatch, tmp_path
-) -> None:
-    import httpx
-
+def test_sandbox_qualification_redacts_transport_failures(monkeypatch) -> None:
     from backend.config import Settings
     from backend.scripts import qualify_latex_compiler_sandbox as qualification
+    from huggingface_hub.errors import SandboxError
 
     image = (
         "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-staging@sha256:" + "a" * 64
@@ -405,7 +504,7 @@ def test_sandbox_qualification_redacts_transport_failures(
             self.image = image
 
         def submit(self, **kwargs: object) -> None:
-            raise httpx.ConnectError("https://private-sandbox.example.invalid")
+            raise SandboxError("untrusted-provider-detail")
 
     monkeypatch.setattr(
         qualification,
@@ -413,7 +512,7 @@ def test_sandbox_qualification_redacts_transport_failures(
         lambda: Namespace(
             confirm=qualification.CONFIRMATION,
             case=["valid-document"],
-            evidence_path=tmp_path / "qualification.json",
+            evidence_path=qualification.EVIDENCE_PATH,
             no_write_evidence=True,
         ),
     )
@@ -436,4 +535,4 @@ def test_sandbox_qualification_redacts_transport_failures(
     with pytest.raises(SystemExit, match="Sandbox qualification failed") as error:
         qualification.main()
 
-    assert "private-sandbox.example.invalid" not in str(error.value)
+    assert "untrusted-provider-detail" not in str(error.value)

@@ -166,7 +166,8 @@ _LATEX_REQUIRED_SETTINGS = {
     _LATEX_SIGNING_KEY,
 }
 STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
-    "/var/lib/paperswithcode/staging/latex-compiler-qualification.json"
+    "/var/lib/paperswithcode/staging-compiler-qualification/"
+    "latex-compiler-qualification.json"
 )
 _LATEX_QUALIFICATION_CHECKS = frozenset(
     {
@@ -371,6 +372,10 @@ def staging_latex_compiler_provision_values(
         "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION": (
             STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
         ),
+        # The retired direct-Space client must never become an alternate
+        # manuscript path when this immutable Sandbox configuration is armed.
+        "PWC_CHAT_LATEX_COMPILER_URL": "",
+        "PWC_CHAT_LATEX_COMPILER_HF_TOKEN": "",
         _LATEX_SIGNING_KEY: _staging_latex_signing_key(current),
     }
 
@@ -416,17 +421,24 @@ def _qualified_staging_latex_compiler(
     """Require a complete, content-free result from the staging-only qualifier."""
 
     try:
+        evidence_gid = grp.getgrnam("pwc-staging").gr_gid
+        directory_stat = evidence_path.parent.lstat()
         evidence_stat = evidence_path.lstat()
         if (
-            not stat.S_ISREG(evidence_stat.st_mode)
-            or stat.S_IMODE(evidence_stat.st_mode) != 0o600
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or stat.S_IMODE(directory_stat.st_mode) != 0o750
+            or directory_stat.st_uid != 0
+            or directory_stat.st_gid != evidence_gid
+            or not stat.S_ISREG(evidence_stat.st_mode)
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o640
             or evidence_stat.st_uid != 0
+            or evidence_stat.st_gid != evidence_gid
             or evidence_stat.st_nlink != 1
             or evidence_stat.st_size > 16_384
         ):
             raise ValueError
         payload = json.loads(evidence_path.read_text(encoding="utf-8"))
-    except (OSError, ValueError, json.JSONDecodeError) as error:
+    except (KeyError, OSError, ValueError, json.JSONDecodeError) as error:
         raise ValueError(
             "staging LaTeX qualification evidence is unavailable"
         ) from error
@@ -454,6 +466,40 @@ def _qualified_staging_latex_compiler(
         or any(checks[name] is not True for name in _LATEX_QUALIFICATION_CHECKS)
     ):
         raise ValueError("staging LaTeX qualification evidence is incomplete")
+
+
+def ensure_staging_latex_compiler_evidence_layout() -> None:
+    """Create only the root-controlled evidence handoff directory.
+
+    This is deliberately narrower than the host-layout installer: operators can
+    prepare the read-only staging handoff without touching units, releases, or
+    any other runtime path.
+    """
+
+    path = STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE.parent
+    try:
+        existing = path.lstat()
+    except FileNotFoundError:
+        path.mkdir(mode=0o750)
+    else:
+        if not stat.S_ISDIR(existing.st_mode):
+            raise ValueError("staging LaTeX qualification directory is invalid")
+    try:
+        gid = grp.getgrnam("pwc-staging").gr_gid
+        os.chown(path, 0, gid)
+        os.chmod(path, 0o750)
+        trusted = path.lstat()
+    except (KeyError, OSError) as error:
+        raise ValueError(
+            "staging LaTeX qualification directory is unavailable"
+        ) from error
+    if (
+        not stat.S_ISDIR(trusted.st_mode)
+        or trusted.st_uid != 0
+        or trusted.st_gid != gid
+        or stat.S_IMODE(trusted.st_mode) != 0o750
+    ):
+        raise ValueError("staging LaTeX qualification directory is not trusted")
 
 
 def staging_latex_compiler_qualification_values(
@@ -1372,6 +1418,9 @@ def main() -> int:
     parser.add_argument("--staging-openai-direct-only", action="store_true")
     parser.add_argument("--staging-openai-direct-disable-only", action="store_true")
     parser.add_argument("--staging-latex-compiler-provision-only", action="store_true")
+    parser.add_argument(
+        "--staging-latex-compiler-evidence-layout-only", action="store_true"
+    )
     parser.add_argument("--staging-latex-compiler-image")
     parser.add_argument(
         "--staging-latex-compiler-qualification-enable-only", action="store_true"
@@ -1459,6 +1508,7 @@ def main() -> int:
     legacy = read_lines(args.legacy_env)
     latex_modes = (
         args.staging_latex_compiler_provision_only,
+        args.staging_latex_compiler_evidence_layout_only,
         args.staging_latex_compiler_qualification_enable_only,
         args.staging_latex_compiler_qualification_disable_only,
         args.staging_latex_paper_enable_only,
@@ -1469,6 +1519,7 @@ def main() -> int:
             parser.error("staging LaTeX modes are mutually exclusive")
         latex_mode_names = {
             "staging_latex_compiler_provision_only",
+            "staging_latex_compiler_evidence_layout_only",
             "staging_latex_compiler_qualification_enable_only",
             "staging_latex_compiler_qualification_disable_only",
             "staging_latex_paper_enable_only",
@@ -1483,6 +1534,14 @@ def main() -> int:
             parser.error("staging LaTeX modes must run alone")
         current = read_lines(CONFIG_ROOT / "staging.env")
         try:
+            if args.staging_latex_compiler_evidence_layout_only:
+                if args.confirm != "LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE":
+                    parser.error(
+                        "--confirm must be LAYOUT_PRIVATE_STAGING_LATEX_COMPILER_EVIDENCE"
+                    )
+                ensure_staging_latex_compiler_evidence_layout()
+                print("prepared private staging LaTeX qualification evidence layout")
+                return 0
             if args.staging_latex_compiler_provision_only:
                 if args.confirm != "PROVISION_PRIVATE_STAGING_LATEX_COMPILER":
                     parser.error(

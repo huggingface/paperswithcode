@@ -927,6 +927,36 @@ def test_sse_event_accepts_posterly_artifact_frames():
     assert json.loads(error[6:-2])["code"] == "poster_validation_failed"
 
 
+def test_sse_event_accepts_private_paper_artifact_draft_frame():
+    artifact_id = "a9129b6f-b758-4ee7-b8df-6a202404d6c2"
+
+    frame = sse_event(
+        "paper_artifact",
+        operation="draft",
+        activated=True,
+        descriptor={
+            "artifact_id": artifact_id,
+            "title": "Private draft",
+            "source_head": None,
+            "preview_head": None,
+            "editing_enabled": False,
+        },
+    )
+
+    assert json.loads(frame[6:-2]) == {
+        "type": "paper_artifact",
+        "operation": "draft",
+        "activated": True,
+        "descriptor": {
+            "artifact_id": artifact_id,
+            "title": "Private draft",
+            "source_head": None,
+            "preview_head": None,
+            "editing_enabled": False,
+        },
+    }
+
+
 def test_poster_tool_events_show_safe_arguments_and_hide_private_evidence():
     call = _public_poster_tool_event(
         "tool_call",

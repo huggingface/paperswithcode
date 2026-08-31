@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import tempfile
@@ -42,6 +43,11 @@ def _parse_args() -> argparse.Namespace:
         "--space", required=True, help="Private staging builder Space ID"
     )
     parser.add_argument("--confirm", required=True)
+    parser.add_argument(
+        "--verify-identity",
+        action="store_true",
+        help="Verify only the protected staging Hub identity; do not mutate a Space",
+    )
     return parser.parse_args()
 
 
@@ -99,11 +105,33 @@ def _wait_for_running_builder(
     raise RuntimeError("Private compiler image builder did not become ready")
 
 
-def _resolve_registry_digest(space_id: str) -> str:
-    """Read only the authenticated OCI manifest header; never emit auth state."""
+def _authenticated_hub_token() -> str:
+    """Use only the protected staging identity, without exposing its token."""
+
+    for token in (os.environ.get("PWC_HF_TOKEN"), os.environ.get("HF_TOKEN")):
+        if token and token.strip():
+            return token.strip()
     token = get_token()
-    if not token:
-        raise RuntimeError("An authenticated Hugging Face identity is required")
+    if token and token.strip():
+        return token.strip()
+    raise RuntimeError("An authenticated Hugging Face identity is required")
+
+
+def _verify_staging_identity(api: HfApi) -> str:
+    """Refuse a cached or injected identity outside the approved namespace."""
+
+    identity = api.whoami()
+    account = identity.get("name") if isinstance(identity, dict) else None
+    if account != STAGING_SANDBOX_COMPILER_NAMESPACE:
+        raise RuntimeError(
+            "authenticated Hub identity is not the approved staging account"
+        )
+    return account
+
+
+def _resolve_registry_digest(space_id: str, *, token: str | None = None) -> str:
+    """Read only the authenticated OCI manifest header; never emit auth state."""
+    token = token or _authenticated_hub_token()
     repository = space_id.replace("/", "-")
     with httpx.Client(follow_redirects=True, timeout=30.0) as client:
         response = client.head(
@@ -180,7 +208,20 @@ def main() -> None:
     args = _parse_args()
     if args.confirm != CONFIRMATION:
         raise SystemExit(f"Pass --confirm {CONFIRMATION} to build the private image")
-    identity = provision_compiler_image(args.space, api=HfApi())
+    _validate_space_id(args.space)
+    token = _authenticated_hub_token()
+    api = HfApi(token=token)
+    account = _verify_staging_identity(api)
+    if args.verify_identity:
+        print(json.dumps({"account": account}, sort_keys=True))
+        return
+    identity = provision_compiler_image(
+        args.space,
+        api=api,
+        resolve_registry_digest=lambda space_id: _resolve_registry_digest(
+            space_id, token=token
+        ),
+    )
     print(
         json.dumps(
             {

@@ -4,9 +4,12 @@ from types import SimpleNamespace
 
 import pytest
 
+import scripts.deploy_latex_compiler_space as compiler_deploy
 from scripts.deploy_latex_compiler_space import (
     _assemble,
+    _authenticated_hub_token,
     _validate_space_id,
+    _verify_staging_identity,
     compiler_image_reference,
     provision_compiler_image,
 )
@@ -17,7 +20,31 @@ def test_private_space_assembly_includes_the_shared_contract(tmp_path) -> None:
 
     assert (tmp_path / "Dockerfile").is_file()
     assert (tmp_path / "latex_compiler_space" / "app.py").is_file()
+    assert (tmp_path / "latex_compiler_space" / "workspace_runner.py").is_file()
     assert (tmp_path / "latex_compiler_contract" / "__init__.py").is_file()
+
+
+def test_private_builder_uses_the_protected_staging_token_without_printing_it(
+    monkeypatch,
+) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.setenv("PWC_HF_TOKEN", "staging-token")
+    monkeypatch.setattr(
+        compiler_deploy,
+        "get_token",
+        lambda: pytest.fail("must prefer the protected staging environment"),
+    )
+
+    assert _authenticated_hub_token() == "staging-token"
+
+
+def test_private_builder_refuses_a_non_staging_authenticated_identity() -> None:
+    class Api:
+        def whoami(self) -> dict[str, str]:
+            return {"name": "another-account"}
+
+    with pytest.raises(RuntimeError, match="approved staging account"):
+        _verify_staging_identity(Api())
 
 
 @pytest.mark.parametrize(

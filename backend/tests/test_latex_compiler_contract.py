@@ -22,9 +22,12 @@ from latex_compiler_contract import (
     sign_envelope,
     verify_envelope,
 )
+import latex_compiler_space.app as compiler_app
 from latex_compiler_space.app import (
     BundleError,
     JobManager,
+    LatexCompilerRunner,
+    WORKSPACE_LIMIT_BYTES,
     _diagnostics,
     _extract_bundle,
     _read_tail,
@@ -305,6 +308,60 @@ def test_network_isolation_preflight_uses_a_new_network_namespace() -> None:
         "--pid",
     ]
     assert "--mount-proc" in command
+    assert "--mount" in command
+    propagation = command.index("--propagation")
+    assert command[propagation + 1] == "private"
+
+
+def test_network_isolation_preflight_rejects_all_egress_capable_default_routes(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(compiler_app.subprocess, "run", fake_run)
+
+    compiler_app.verify_network_isolation()
+
+    probe = captured["command"][-1]
+    assert '$2 == "00000000"' in probe
+    assert '$3 != "00000000"' not in probe
+    assert "/proc/net/dev" in probe
+    assert 'interface != "lo"' in probe
+    assert "/proc/net/ipv6_route" in probe
+    assert '"00000000000000000000000000000000"' in probe
+    assert '$2 == "00"' in probe
+    assert '$10 != "lo"' in probe
+
+
+def test_compiler_runner_places_every_compile_in_a_bounded_tmpfs_workspace() -> None:
+    private_key, _ = _keys()
+    envelope = _submission(private_key).envelope
+    runner = LatexCompilerRunner(
+        compiler_image=TEST_QUALIFIED_IMAGE, network_isolation_required=True
+    )
+
+    command = runner._command(
+        envelope,
+        source_root="/private/source",
+        result_root="/private/result",
+    )
+
+    assert command[:5] == [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--net",
+        "--pid",
+    ]
+    assert "--mount" in command
+    assert "/app/latex_compiler_space/workspace_runner.py" in command
+    assert "--workspace-limit-bytes" in command
+    assert str(WORKSPACE_LIMIT_BYTES) in command
+    assert command[-1] == envelope.entrypoint
 
 
 def test_compiler_diagnostics_include_a_safe_bundle_relative_tex_filename() -> None:
