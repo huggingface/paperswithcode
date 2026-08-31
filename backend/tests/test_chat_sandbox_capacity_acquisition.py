@@ -21,6 +21,7 @@ from backend.models.database import (
     ChatSandboxLease,
     ChatSandboxPool,
     ChatSession,
+    ChatTurnLatency,
 )
 from backend.services.chat_sandbox_acquisition_coordinator import (
     LeaseReused,
@@ -90,6 +91,7 @@ def _database():
     ChatSandboxBudgetState.__table__.create(engine)
     ChatSandboxComputeInterval.__table__.create(engine)
     ChatSandboxCircuitEvent.__table__.create(engine)
+    ChatTurnLatency.__table__.create(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
@@ -104,6 +106,7 @@ def _file_database(path):
     ChatSandboxBudgetState.__table__.create(engine)
     ChatSandboxComputeInterval.__table__.create(engine)
     ChatSandboxCircuitEvent.__table__.create(engine)
+    ChatTurnLatency.__table__.create(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
@@ -775,6 +778,86 @@ def test_created_acquisition_preserves_public_result_and_keeps_provider_io_outsi
     assert lease.worker_generation == provider.calls[0][1]
     assert lease.lease_token_hash is None
     assert lease.lease_expires_at is None
+
+
+def test_production_cold_start_does_not_query_staging_qualification_profile():
+    settings = _settings(environment="production")
+    sessions = _database()
+    session_id = uuid.uuid4()
+    with sessions() as db, db.begin():
+        db.add(_session(session_id))
+
+    qualification_queries: list[str] = []
+
+    def record_qualification_query(
+        _connection, _cursor, statement, _parameters, _context, _executemany
+    ):
+        if "chat_turn_latency" in statement:
+            qualification_queries.append(statement)
+
+    event.listen(
+        sessions.kw["bind"], "before_cursor_execute", record_qualification_query
+    )
+    provider = _Provider(transactions=[])
+
+    sandbox, _elapsed_ms, created, outcome, _pool_lookup_ms = asyncio.run(
+        _manager(settings, sessions, provider).ensure_ready(session_id)
+    )
+
+    assert sandbox is provider.created
+    assert created is True
+    assert outcome == "created"
+    assert qualification_queries == []
+
+
+def test_staging_qualification_cold_start_tags_latest_running_profile():
+    settings = _settings(environment="staging")
+    sessions = _database()
+    session_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    now = datetime.now(UTC)
+    with sessions() as db, db.begin():
+        db.add(_session(session_id))
+        latency_defaults = {
+            "chat_session_id": session_id,
+            "traffic_class": "new_chat",
+            "execution_backend": "modal_cli",
+            "agent_harness": "pi",
+            "acquisition_outcome": "pending",
+            "model_route": "gpt-5.6-luna@openai",
+            "app_release_id": settings.release_id,
+            "terminal_status": "running",
+            "updated_at": now,
+        }
+        db.add_all(
+            [
+                ChatTurnLatency(
+                    turn_id=uuid.uuid4(),
+                    request_id=uuid.uuid4(),
+                    qualification_profile="100-immediate-admission",
+                    admitted_at=now - timedelta(seconds=1),
+                    **latency_defaults,
+                ),
+                ChatTurnLatency(
+                    turn_id=turn_id,
+                    request_id=uuid.uuid4(),
+                    qualification_profile="32-functional-turns",
+                    admitted_at=now,
+                    **latency_defaults,
+                ),
+            ]
+        )
+
+    class TagCapturingProvider(_Provider):
+        async def create(self, **options):
+            self.tags = options["tags"]
+            return await super().create(**options)
+
+    provider = TagCapturingProvider(transactions=[])
+
+    asyncio.run(_manager(settings, sessions, provider).ensure_ready(session_id))
+
+    assert provider.tags["qualification_profile"] == "32-functional-turns"
 
 
 @pytest.mark.parametrize(
