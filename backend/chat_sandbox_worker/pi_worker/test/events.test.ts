@@ -185,7 +185,7 @@ test("emits a paper artifact from a quoted literal create title", () => {
     type: "tool_execution_start",
     toolCallId: "create-paper",
     toolName: "bash",
-    args: { command: 'pwc-paper create --title "Study: 2026"' },
+    args: { command: 'pwc-paper create --title "Attention (2017)"' },
   });
   const events = adapter.feed({
     type: "tool_execution_end",
@@ -193,7 +193,7 @@ test("emits a paper artifact from a quoted literal create title", () => {
     result: {
       content: [{
         type: "text",
-        text: '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{"artifact_id":"create-1","title":"Study: 2026"}}',
+        text: '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{"artifact_id":"create-1","title":"Attention (2017)"}}',
       }],
     },
     isError: false,

@@ -250,3 +250,59 @@ def test_worker_routes_paper_events_only_from_successful_pwc_paper_receipts():
     assert mismatched_hooks.paper_activated is False
     assert not any(event["type"] == "paper_artifact" for event in failed)
     assert failed_hooks.paper_activated is False
+
+
+def test_worker_trusts_a_quoted_paper_title_with_literal_parentheses():
+    hooks = WorkerToolHooks(WorkerSettings())
+    tool_id = "quoted-paper-title"
+    command = 'pwc-paper create --title "Attention (2017)"'
+    receipt = (
+        '@@PWC_PAPER@@{"operation":"create","activated":true,'
+        '"paper":{"artifact_id":"paper-1","title":"Attention (2017)"}}'
+    )
+
+    async def collect() -> list[dict]:
+        await hooks.pre(
+            {"tool_name": "Bash", "tool_input": {"command": command}}, tool_id, None
+        )
+        await hooks.post(
+            {
+                "tool_name": "Bash",
+                "tool_response": {"stdout": receipt, "stderr": "", "is_error": False},
+            },
+            tool_id,
+            None,
+        )
+
+        async def messages():
+            yield AssistantMessage(
+                model="test",
+                content=[
+                    ToolUseBlock(id=tool_id, name="Bash", input={"command": command})
+                ],
+            )
+            yield UserMessage(
+                content=[
+                    ToolResultBlock(
+                        tool_use_id=tool_id, content=receipt, is_error=False
+                    )
+                ]
+            )
+
+        return [
+            event
+            async for event in agent._adapt_messages(
+                messages(),
+                request_id="request-1",
+                hooks=hooks,
+                adapter=agent.SDKEventAdapter(
+                    show_reasoning=False,
+                    policy=agent._sdk_event_policy(hooks),
+                ),
+            )
+        ]
+
+    events = asyncio.run(collect())
+
+    assert hooks.paper_activated is True
+    assert any(event["type"] == "paper_artifact" for event in events)

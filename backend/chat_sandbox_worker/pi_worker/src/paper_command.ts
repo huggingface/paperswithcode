@@ -6,8 +6,28 @@ export interface PwcPaperCommand {
 
 const UNSAFE_SHELL = /[\\\r\n;&|<>()`$*?\[\]{}!~]/u;
 
+function hasUnsafeShellSyntax(command: string): boolean {
+  let quoted: "'" | '"' | undefined;
+  for (const character of command) {
+    if (quoted) {
+      if (character === quoted) {
+        quoted = undefined;
+      } else if (quoted === '"' && /[\\`$]/u.test(character)) {
+        return true;
+      }
+      continue;
+    }
+    if (character === "'" || character === '"') {
+      quoted = character;
+    } else if (UNSAFE_SHELL.test(character)) {
+      return true;
+    }
+  }
+  return quoted !== undefined;
+}
+
 function splitQuotedArguments(command: string): string[] | undefined {
-  if (UNSAFE_SHELL.test(command)) return undefined;
+  if (hasUnsafeShellSyntax(command)) return undefined;
 
   const arguments_: string[] = [];
   let current = "";

@@ -600,6 +600,12 @@ async def public_share_omits_paper(
         f"/api/v1/chat/sessions/{session_id}/share", headers=_MUTATION_HEADERS
     )
     share = _json_object(response)
+    if (
+        response.status_code == 409
+        and isinstance(share.get("detail") if share else None, dict)
+        and share["detail"].get("code") == "paper_share_disabled"
+    ):
+        return True
     share_id = share.get("share_id") if share else None
     if response.status_code != 200 or not isinstance(share_id, str):
         return False

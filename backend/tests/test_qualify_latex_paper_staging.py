@@ -678,6 +678,30 @@ def test_archive_keeps_the_private_paper_readable_to_its_dedicated_owner() -> No
     )
 
 
+def test_private_paper_share_block_is_a_passing_privacy_observation() -> None:
+    from backend.scripts.qualify_latex_paper_staging import public_share_omits_paper
+
+    class Response:
+        status_code = 409
+
+        def json(self):
+            return {"detail": {"code": "paper_share_disabled"}}
+
+    class Client:
+        async def post(self, path, **_kwargs):
+            assert path == "/api/v1/chat/sessions/session-1/share"
+            return Response()
+
+        async def get(self, _path):
+            raise AssertionError("a blocked private-paper share has no public snapshot")
+
+    assert asyncio.run(
+        public_share_omits_paper(
+            Client(), session_id="session-1", artifact_id="paper-1"
+        )
+    )
+
+
 def test_historical_kill_switch_phase_reads_only_one_preserved_owner_artifact() -> None:
     from backend.scripts.qualify_latex_paper_staging import (
         historical_private_artifact_readable,

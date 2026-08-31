@@ -66,9 +66,27 @@ _PAPER_COMMAND_ARGUMENTS = {
 _PAPER_UNSAFE_SHELL_CHARACTERS = frozenset("\\\r\n;&|<>()`$*?[]{}!~")
 
 
+def _has_unsafe_paper_shell_syntax(command: str) -> bool:
+    """Reject shell control syntax while permitting quoted literal metadata."""
+
+    quote: str | None = None
+    for character in command:
+        if quote is not None:
+            if character == quote:
+                quote = None
+            elif quote == '"' and character in "\\`$":
+                return True
+            continue
+        if character in {"'", '"'}:
+            quote = character
+        elif character in _PAPER_UNSAFE_SHELL_CHARACTERS:
+            return True
+    return quote is not None
+
+
 def _pwc_paper_command(command: str) -> str | None:
     """Recognize one direct, documented pwc-paper invocation only."""
-    if any(character in _PAPER_UNSAFE_SHELL_CHARACTERS for character in command):
+    if _has_unsafe_paper_shell_syntax(command):
         return None
     try:
         arguments = shlex.split(command, posix=True, comments=False)
