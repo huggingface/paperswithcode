@@ -10,10 +10,16 @@ from sqlalchemy.exc import IntegrityError
 from backend.config import get_settings
 from backend.models.database import ChatMessageRecord
 from backend.services import chat_session_service as chat_session_module
+from backend.services.chat_external_worker_capacity import (
+    ExternalWorkerEndpoint,
+    ExternalWorkerReservation,
+)
+from backend.services.chat_external_worker_registry import ExternalWorkerClaim
 from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
     ChatSessionService,
+    _bound_external_worker_reservation,
 )
 from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_turn_admission_coordinator import (
@@ -74,6 +80,38 @@ def test_qualification_capacity_is_scoped_to_one_durable_preflight():
     )
 
     assert capacities == [32, 2]
+
+
+def test_bound_external_reservation_carries_the_admitted_turn():
+    endpoint = ExternalWorkerEndpoint(
+        endpoint_id="green",
+        worker_id="external-pi-green",
+        base_url="http://127.0.0.1:18102",
+        token="g" * 32,
+    )
+    reservation = ExternalWorkerReservation(
+        request_id="client-message-1",
+        turn_id=None,
+        endpoint=endpoint,
+        worker_claim=ExternalWorkerClaim(
+            endpoint.worker_id,
+            uuid.uuid4(),
+            7,
+            "release-a",
+            "external-pi-v1",
+        ),
+        maximum_sessions=2,
+    )
+    preflight = SimpleNamespace(external_reservation=reservation)
+    turn_id = uuid.uuid4()
+
+    bound = _bound_external_worker_reservation(preflight, turn_id)
+
+    assert bound is not None
+    assert bound.turn_id == turn_id
+    assert bound.request_id == reservation.request_id
+    assert bound.endpoint == reservation.endpoint
+    assert bound.worker_claim == reservation.worker_claim
 
 
 def test_enabled_completed_replay_validates_durable_revision_before_return(monkeypatch):

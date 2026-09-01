@@ -65,6 +65,17 @@ if TYPE_CHECKING:
     )
 
 
+def _bound_external_worker_reservation(
+    preflight: DurableAdmissionPreflight | None, turn_id: uuid.UUID
+) -> ExternalWorkerReservation | None:
+    reservation = preflight.external_reservation if preflight is not None else None
+    if reservation is None:
+        return None
+    if reservation.turn_id not in {None, turn_id}:
+        raise RuntimeError("External worker reservation turn mismatches")
+    return replace(reservation, turn_id=turn_id)
+
+
 class ChatServiceError(Exception):
     def __init__(
         self,
@@ -2024,9 +2035,9 @@ class ChatSessionService:
             plan,
             fetchable_urls,
             external_worker_reservation=(
-                durable_preflight.external_reservation
-                if durable_preflight is not None
-                else None
+                _bound_external_worker_reservation(
+                    durable_preflight, plan.replacement.turn_id
+                )
             ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
