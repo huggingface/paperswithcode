@@ -1069,7 +1069,7 @@ def test_failed_report_accepts_only_controller_producible_reason_prefixes(
     assert report.reason == reason
 
 
-def test_failed_report_rejects_a_retained_nonpassing_profile() -> None:
+def test_failed_report_retains_one_nonpassing_profile_for_diagnostics() -> None:
     from backend.scripts.qualify_durable_external_turns import (
         run_durable_qualification,
     )
@@ -1085,8 +1085,12 @@ def test_failed_report_rejects_a_retained_nonpassing_profile() -> None:
         profiles=(failed_profile,),
     )
 
-    with pytest.raises(ValidationError, match="profiles are invalid"):
-        DurableQualificationReport.model_validate(payload)
+    report = DurableQualificationReport.model_validate(payload)
+
+    assert report.status == "failed"
+    assert report.reason == "durable_profile_failed"
+    assert report.profiles == (failed_profile,)
+    assert report.passed is False
 
 
 def test_ordinal_routing_is_deterministic_and_balanced_after_loss():

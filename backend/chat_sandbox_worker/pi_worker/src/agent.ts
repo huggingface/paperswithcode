@@ -99,6 +99,7 @@ export class PiWorker {
   private prewarmedProtocol: ProviderProtocol | undefined;
   private policyExtension: ReturnType<typeof pwcExtension> | undefined;
   private webMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
+  private noWebMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
   private mcpStatus: McpStatusSnapshot | undefined;
   private mcpReadiness: McpReadinessSnapshot | undefined;
   private activeProfile: string | undefined;
@@ -168,6 +169,16 @@ export class PiWorker {
             this.gateway.turnClaim.leaseGeneration,
           ),
         } } : {}),
+      },
+    );
+    this.noWebMcpExtension = createWebMcpExtension(
+      process.execPath,
+      [new URL("./exa_mcp_server.js", import.meta.url).pathname],
+      {
+        exa: false,
+        onStatus: (snapshot) => {
+          this.mcpStatus = snapshot;
+        },
       },
     );
     if (process.env.PWC_CHAT_PI_PREWARM_ENABLED !== "true") return;
@@ -374,7 +385,13 @@ export class PiWorker {
       systemPrompt: prompt,
       extensionFactories: [
         { name: "pwc-policy", factory: this.policyExtension!, hidden: true },
-        { name: "pwc-exa-mcp", factory: this.webMcpExtension!, hidden: true },
+        {
+          name: "pwc-mcp",
+          factory: run.web_search_enabled
+            ? this.webMcpExtension!
+            : this.noWebMcpExtension!,
+          hidden: true,
+        },
         ...(this.remoteTools ? [{
           name: "pwc-remote-tools",
           factory: createRemoteToolsExtension(this.remoteTools),

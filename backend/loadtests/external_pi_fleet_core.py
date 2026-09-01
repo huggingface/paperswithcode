@@ -376,12 +376,17 @@ class DurableQualificationReport(BaseModel):
         names = tuple(item.profile for item in self.profiles)
         expected = ("32-functional-turns",)
         if names != expected[: len(names)] or any(
-            not item.passed or item.modal_rate_release_id != self.release_id
-            for item in self.profiles
+            item.modal_rate_release_id != self.release_id for item in self.profiles
         ):
             raise ValueError("durable report profiles are invalid")
+        failed_profiles = sum(not item.passed for item in self.profiles)
         if self.status == "completed":
-            if self.reason is not None or names != expected or not self.cleanup_passed:
+            if (
+                self.reason is not None
+                or names != expected
+                or failed_profiles
+                or not self.cleanup_passed
+            ):
                 raise ValueError(
                     "completed durable report requires an approved profile sequence and cleanup"
                 )
@@ -397,7 +402,7 @@ class DurableQualificationReport(BaseModel):
                 raise ValueError("failed durable report requires a typed reason")
             failed_profile_limits = {
                 "durable_qualification_failed": 0,
-                "durable_profile_failed": 0,
+                "durable_profile_failed": 1,
                 "cleanup_failed": 1,
                 "staging_isolation_required": 0,
                 "exact_staging_release_required": 0,
@@ -427,6 +432,14 @@ class DurableQualificationReport(BaseModel):
             maximum_profiles = failed_profile_limits.get(self.reason or "")
             if maximum_profiles is None or len(names) > maximum_profiles:
                 raise ValueError("failed durable report reason or profiles are invalid")
+            if (
+                self.reason == "durable_profile_failed"
+                and names
+                and failed_profiles != 1
+            ) or (self.reason != "durable_profile_failed" and failed_profiles):
+                raise ValueError(
+                    "failed durable report profile evidence is inconsistent"
+                )
             if (
                 self.reason == "public_external_admission_flags_are_invalid"
                 and self.flags_restored
