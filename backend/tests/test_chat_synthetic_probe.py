@@ -4,7 +4,7 @@ import asyncio
 import importlib
 import json
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 from backend.config import Settings
@@ -193,6 +193,40 @@ def test_monitor_pages_on_synthetic_failure_without_content(monkeypatch):
     assert events[0]["classifications"] == {"chat:persistence:reopen_failed": 1}
     assert "prompt" not in repr(events).lower()
     assert "answer" not in repr(events).lower()
+
+
+def test_critical_alert_forces_at_most_once_per_four_hours():
+    job = importlib.import_module("backend.scripts.run_chat_synthetic_probe")
+    operational_state = monitor.empty_state()
+    operational_state["events"] = [
+        monitor.new_event(
+            "chat_runtime_critical",
+            now=NOW + timedelta(minutes=1),
+        ),
+        monitor.new_event(
+            "chat_runtime_critical",
+            now=NOW + timedelta(minutes=2),
+        ),
+    ]
+
+    assert job._critical_alert_after(
+        operational_state,
+        NOW,
+        None,
+        NOW + timedelta(minutes=1),
+    )
+    assert not job._critical_alert_after(
+        operational_state,
+        NOW,
+        NOW + timedelta(minutes=1),
+        NOW + timedelta(minutes=2),
+    )
+    assert job._critical_alert_after(
+        operational_state,
+        NOW,
+        NOW + timedelta(minutes=1),
+        NOW + timedelta(hours=4, minutes=1),
+    )
 
 
 def test_separate_synthetic_job_runs_release_trigger_and_persists_before_delivery(
