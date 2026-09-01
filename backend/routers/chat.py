@@ -1785,13 +1785,11 @@ async def cancel_active_turn(
     owner = owner_from_user(user)
     if getattr(settings, "chat_durable_turn_dispatch_enabled", False):
         try:
-            coordinator_kwargs = {}
-            if settings.chat_external_pi_admission_enabled:
-                runtime = detached_chat_runtime(settings)
-                coordinator_kwargs = {
-                    "external_cancel": runtime.cancel,
-                    "external_release": runtime.release_terminal_reservation,
-                }
+            coordinator_kwargs = (
+                {"external_cancel": detached_chat_runtime(settings).cancel}
+                if settings.chat_external_pi_admission_enabled
+                else {}
+            )
             await ChatTurnCancellationCoordinator(
                 db,
                 settings,

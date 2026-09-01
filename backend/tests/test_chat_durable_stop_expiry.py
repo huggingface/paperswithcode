@@ -120,20 +120,12 @@ def test_missing_process_local_external_control_interrupts_with_exact_code():
         calls.append("control-missing")
         return CancelControlResult.MISSING
 
-    async def release_external(requested_turn_id):
-        assert requested_turn_id == turn_id
-        calls.append("release-external-reservation")
-
     class Manager:
         async def cancel_status(self, *_args):
             pytest.fail("must not start or search for replacement model control")
 
     coordinator = ChatTurnCancellationCoordinator(
-        DB(),
-        _enabled_settings(),
-        Manager(),
-        external_cancel=missing,
-        external_release=release_external,
+        DB(), _enabled_settings(), Manager(), external_cancel=missing
     )
     coordinator.sessions = Service()
 
@@ -144,7 +136,6 @@ def test_missing_process_local_external_control_interrupts_with_exact_code():
         "control-missing",
         "cancel-control-missing",
         "commit",
-        "release-external-reservation",
     ]
 
 
@@ -482,47 +473,6 @@ def test_enabled_cancel_route_delegates_to_coordinator_and_preserves_204(monkeyp
 
     assert response.status_code == 204
     assert calls == [(db, settings, manager), ("owner-1", session_id)]
-
-
-def test_external_cancel_route_wires_terminal_reservation_cleanup(monkeypatch):
-    session_id = uuid.uuid4()
-    captured = {}
-
-    class Runtime:
-        async def cancel(self, _request):
-            return CancelControlResult.MISSING
-
-        async def release_terminal_reservation(self, _turn_id):
-            return None
-
-    runtime = Runtime()
-
-    class Coordinator:
-        def __init__(self, _db, _settings, _manager, **kwargs):
-            captured.update(kwargs)
-
-        async def cancel(self, _owner, _session_id):
-            return None
-
-    settings = _enabled_settings().model_copy(
-        update={"chat_external_pi_admission_enabled": True}
-    )
-    monkeypatch.setattr(chat_router, "ChatTurnCancellationCoordinator", Coordinator)
-    monkeypatch.setattr(chat_router, "shared_sandbox_manager", lambda _: object())
-    monkeypatch.setattr(chat_router, "detached_chat_runtime", lambda _: runtime)
-
-    response = asyncio.run(
-        chat_router.cancel_active_turn(
-            session_id,
-            user={"hf_user_id": "owner-1", "username": "owner"},
-            db=SimpleNamespace(),
-            settings=settings,
-        )
-    )
-
-    assert response.status_code == 204
-    assert captured["external_cancel"] == runtime.cancel
-    assert captured["external_release"] == runtime.release_terminal_reservation
 
 
 def test_admission_reconciles_globally_expired_claim_before_capacity_count():

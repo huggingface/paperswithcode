@@ -143,11 +143,6 @@ class ChatDetachedRuntime:
                 type(cleanup_error).__name__,
             )
 
-    async def release_terminal_reservation(self, turn_id: uuid.UUID) -> None:
-        await self._release_external_reservation_after_failure(
-            turn_id, stage="terminal_without_control"
-        )
-
     async def cancel(self, request) -> CancelControlResult:
         orchestrator = self._orchestrators.get(request.turn_id)
         if orchestrator is None:
