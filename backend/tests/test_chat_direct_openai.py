@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import backend.chat_gateway_app as gateway_app
+import anyio
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import create_engine
@@ -254,6 +255,28 @@ def test_openai_stream_terminal_classification(outcome, cancelled, expected):
     assert (
         gateway_app._openai_stream_error_code(outcome, cancelled=cancelled) == expected
     )
+
+
+def test_openai_stream_closes_inside_an_already_cancelled_anyio_scope():
+    class Closeable:
+        closed = False
+
+        async def aclose(self):
+            await anyio.sleep(0)
+            self.closed = True
+
+    upstream = Closeable()
+    client = Closeable()
+
+    async def cancel_during_stream():
+        with anyio.CancelScope() as scope:
+            scope.cancel()
+            await gateway_app._close_openai_stream(upstream, client)
+
+    asyncio.run(cancel_during_stream())
+
+    assert upstream.closed is True
+    assert client.closed is True
 
 
 def test_oversized_openai_request_returns_a_typed_public_error():

@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
+import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from huggingface_hub.errors import HfHubHTTPError
@@ -654,6 +655,12 @@ def _openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | 
     if outcome == "incomplete":
         return "openai_incomplete"
     return "openai_unavailable"
+
+
+async def _close_openai_stream(upstream: Any, client: Any) -> None:
+    with anyio.CancelScope(shield=True):
+        await upstream.aclose()
+        await client.aclose()
 
 
 def _settle_openai_call(
@@ -1691,8 +1698,7 @@ async def responses(
             cancelled = True
             raise
         finally:
-            await upstream.aclose()
-            await client.aclose()
+            await _close_openai_stream(upstream, client)
             elapsed_ms = round((time.perf_counter() - started) * 1000)
             error_code = _openai_stream_error_code(
                 extractor.result().outcome,
