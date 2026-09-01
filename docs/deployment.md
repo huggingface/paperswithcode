@@ -597,10 +597,10 @@ sudo systemd-run --quiet --wait --pipe --collect \
   --uid=root --gid=root \
   --working-directory="$qualification_release" \
   --property=EnvironmentFile=/etc/paperswithcode/staging.env \
-  --property=RuntimeDirectory=pwc-staging-qualifier \
+  --property=PrivateTmp=yes \
   -- /usr/bin/env \
   PWC_RELEASE_ID="$(basename -- "$qualification_release")" \
-  UV_PROJECT_ENVIRONMENT=/run/pwc-staging-qualifier/project \
+  UV_PROJECT_ENVIRONMENT=/tmp/pwc-staging-qualifier-project \
   "$uv_bin" run --frozen --with locust python \
   -m backend.scripts.qualify_durable_external_turns \
   --environment staging \
