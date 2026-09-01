@@ -120,6 +120,7 @@ class PoolTerminationClaim:
     sandbox_id: str | None
     token_hash: str
     failure_code: str | None
+    accounting_settled: bool = False
 
 
 class PoolTerminationFinishOutcome(StrEnum):
@@ -649,6 +650,7 @@ class ChatSandboxPoolRepository:
             stale_draining_before
         ):
             return None
+        accounting_settled = row.state == "claimed"
         effective_failure = self._termination_failure(row.failure_code, failure_code)
         token_hash = self._token_hash(self.token_factory())
         row.state = "draining"
@@ -660,6 +662,7 @@ class ChatSandboxPoolRepository:
             sandbox_id=row.modal_sandbox_id,
             token_hash=token_hash,
             failure_code=effective_failure,
+            accounting_settled=accounting_settled,
         )
 
     @staticmethod
@@ -714,7 +717,8 @@ class ChatSandboxPoolRepository:
         failure_code = claim.failure_code
         if claim.sandbox_id is not None and not confirmed:
             failure_code = "termination_uncertain"
-        self.finalize_cost(row, now)
+        if not claim.accounting_settled:
+            self.finalize_cost(row, now)
         row.state = "failed" if failure_code else "terminated"
         row.failure_code = failure_code
         row.terminated_at = now
