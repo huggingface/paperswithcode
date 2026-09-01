@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import json
 import threading
@@ -1302,6 +1303,18 @@ def test_external_run_frame_omits_absent_paper_descriptor():
 
     assert runner.admission.paper_descriptor is None
     assert "paper_descriptor" not in runner._run_frame()
+
+
+def test_external_new_turn_frame_carries_prebound_pi_session():
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    agent_session_id = uuid.uuid4()
+    runner.admission = replace(
+        runner.admission,
+        sdk_session_id=agent_session_id,
+        is_first_turn=True,
+    )
+
+    assert runner._run_frame()["agent_session_id"] == str(agent_session_id)
 
 
 def test_external_run_frame_preserves_exact_durable_turn_fence_as_strings():

@@ -162,7 +162,7 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
   }
   const optional = new Set([
     "turn_id", "assignment_token", "worker_generation", "reader_mode", "poster_mode",
-    "paper_artifacts_enabled", "paper_descriptor", "provider_protocol",
+    "paper_artifacts_enabled", "paper_descriptor", "provider_protocol", "agent_session_id",
   ]);
   if (Object.keys(frame).some((key) => !required.has(key) && !optional.has(key))) {
     throw new TurnProtocolError("Invalid Pi run frame keys");
@@ -177,6 +177,11 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     (frame.provider_protocol !== undefined
       && !new Set(["anthropic-messages", "openai-responses"]).has(String(frame.provider_protocol))) ||
     (frame.resume !== null && typeof frame.resume !== "string") ||
+    (frame.agent_session_id !== undefined && (
+      typeof frame.agent_session_id !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(frame.agent_session_id)
+      || frame.resume !== null
+    )) ||
     typeof frame.web_search_enabled !== "boolean" ||
     (frame.reader_mode !== undefined && typeof frame.reader_mode !== "boolean") ||
     (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||

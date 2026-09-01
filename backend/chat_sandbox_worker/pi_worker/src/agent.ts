@@ -36,6 +36,7 @@ export interface RunTurn {
   model: string;
   provider_protocol?: ProviderProtocol;
   resume: string | null;
+  agent_session_id?: string;
   web_search_enabled: boolean;
   reader_mode: boolean;
   poster_mode: boolean;
@@ -242,6 +243,16 @@ export class PiWorker {
       this.boundAgentSession = run.resume;
       return { manager, initialCount: restored.snapshot.entry_count, created: false };
     }
+    if (run.agent_session_id) {
+      const manager = SessionManager.create(
+        harnessWorkspace,
+        sessionDirectory,
+        { id: run.agent_session_id },
+      );
+      this.manager = manager;
+      this.boundAgentSession = run.agent_session_id;
+      return { manager, initialCount: 0, created: true };
+    }
     const id = randomUUID();
     const manager = SessionManager.create(harnessWorkspace, sessionDirectory, { id });
     const bound = await createOrBind(id, this.gateway);
@@ -355,7 +366,7 @@ export class PiWorker {
         const header = state.manager.getHeader();
         if (!header) throw new Error("Pi native session header is missing");
         this.mirror.append(header as unknown as Record<string, unknown>);
-        mirrorInitialization = this.mirror.flush();
+        if (!run.agent_session_id) mirrorInitialization = this.mirror.flush();
       }
     }
     if (this.session && this.activeProfile === profile) {

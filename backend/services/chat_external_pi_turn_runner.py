@@ -501,6 +501,8 @@ class ExternalPiChatTurnRunner:
         }
         if self.admission.paper_descriptor is not None:
             frame["paper_descriptor"] = self.admission.paper_descriptor
+        if self.resume_id is None and self.admission.sdk_session_id is not None:
+            frame["agent_session_id"] = str(self.admission.sdk_session_id)
         return frame
 
     @staticmethod

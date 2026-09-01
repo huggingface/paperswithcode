@@ -39,6 +39,7 @@ from backend.services.chat_edit_service import (
     user_message_projection_bytes,
 )
 from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
+from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
 from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_title_service import normalize_title
 from backend.services.chat_turn_admission_coordinator import (
@@ -1879,6 +1880,7 @@ class ChatSessionService:
             capacity = self._load_capacity_snapshot(owner, session)
             self._validate_capacity(capacity)
 
+        created_session = session is None
         # Capacity admission precedes creation so a rejected new-chat request
         # cannot leave behind a session or any message state.
         if session is None:
@@ -1972,6 +1974,13 @@ class ChatSessionService:
             update_web_search_preference=update_web_search_preference,
             now=now,
         )
+        if (
+            created_session
+            and target_harness == "pi"
+            and durable_preflight is not None
+            and durable_preflight.external_reservation is not None
+        ):
+            ChatPiTranscriptService(self.db, self.settings).prebind_new_session(session)
         if durable_coordinator is not None:
             assert durable_preflight is not None
             try:

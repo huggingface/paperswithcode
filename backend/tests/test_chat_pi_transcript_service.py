@@ -1,12 +1,50 @@
+import uuid
+from types import SimpleNamespace
+
 import pytest
 
+from backend.config import get_settings
 from backend.services.chat_pi_transcript_service import (
+    ChatPiTranscriptService,
     PiTranscriptError,
     _database_entry,
     _envelope,
     _native_entry,
     _serialized,
 )
+
+
+def test_prebind_new_pi_session_uses_admission_transaction_without_flushing():
+    class DB:
+        def __init__(self):
+            self.added = []
+            self.flush_calls = 0
+
+        def add(self, row):
+            self.added.append(row)
+
+        def flush(self):
+            self.flush_calls += 1
+
+    db = DB()
+    chat = SimpleNamespace(
+        id=uuid.uuid4(),
+        agent_harness="pi",
+        sdk_session_id=None,
+        sdk_project_key=None,
+        transcript_status="pending",
+    )
+    agent_session_id = uuid.uuid4()
+
+    row = ChatPiTranscriptService(db, get_settings()).prebind_new_session(
+        chat, agent_session_id
+    )
+
+    assert row.agent_session_id == agent_session_id
+    assert row.chat_session_id == chat.id
+    assert chat.sdk_session_id == agent_session_id
+    assert db.added == [row]
+    assert db.flush_calls == 0
 
 
 def test_pi_session_header_is_not_indexed_as_a_tree_entry():
