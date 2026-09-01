@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -58,6 +58,11 @@ from backend.services.chat_turn_job_repository import (
     TurnNotClaimable,
 )
 from backend.services.latex_paper_service import LatexPaperService
+
+if TYPE_CHECKING:
+    from backend.services.chat_external_worker_capacity import (
+        ExternalWorkerReservation,
+    )
 
 
 class ChatServiceError(Exception):
@@ -139,6 +144,7 @@ class TurnAdmission:
     paper_descriptor: dict[str, object] | None = None
     fetchable_urls: tuple[str, ...] = ()
     durable_claim: TurnLeaseClaim | None = None
+    external_worker_reservation: ExternalWorkerReservation | None = None
     attach_only: bool = False
     durable_event_sequence: int = 0
 
@@ -1601,6 +1607,7 @@ class ChatSessionService:
         plan: _TurnCreationPlan,
         fetchable_urls: tuple[str, ...],
         *,
+        external_worker_reservation: ExternalWorkerReservation | None,
         web_search_enabled: bool,
         reasoning_effort: str,
         poster_mode: bool,
@@ -1667,6 +1674,7 @@ class ChatSessionService:
             paper_artifacts_enabled=paper_artifacts_enabled,
             paper_descriptor=paper_descriptor,
             fetchable_urls=fetchable_urls,
+            external_worker_reservation=external_worker_reservation,
         )
 
     def begin_turn(
@@ -2015,6 +2023,11 @@ class ChatSessionService:
             session,
             plan,
             fetchable_urls,
+            external_worker_reservation=(
+                durable_preflight.external_reservation
+                if durable_preflight is not None
+                else None
+            ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
             poster_mode=(

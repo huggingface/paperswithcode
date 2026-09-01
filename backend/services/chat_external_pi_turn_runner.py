@@ -346,6 +346,20 @@ class ExternalPiChatTurnRunner:
             endpoints = external_worker_endpoints(self.settings)
         except ValueError:
             endpoints = ()
+        admission_reservation = self.admission.external_worker_reservation
+        if admission_reservation is not None:
+            if (
+                admission_reservation.request_id != self.request_id
+                or admission_reservation.turn_id != self.admission.turn_id
+                or admission_reservation.endpoint not in endpoints
+                or admission_reservation.worker_claim.worker_id
+                != admission_reservation.endpoint.worker_id
+            ):
+                raise StaleWorkerClaim(
+                    "External worker admission reservation mismatches"
+                )
+            self.external_worker_endpoint = admission_reservation.endpoint
+            return admission_reservation.worker_claim
         if endpoints:
             capacity = (
                 self.worker_capacity_repository

@@ -1254,6 +1254,80 @@ def test_external_pi_runner_keeps_reserved_endpoint_database_checks_off_event_lo
     assert all(thread != event_loop_thread for thread in database_threads)
 
 
+def test_external_pi_runner_uses_admission_reservation_without_requerying():
+    settings = get_settings().model_copy(
+        deep=True,
+        update={
+            "environment": "staging",
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "green",
+                    "worker_id": "external-pi-green",
+                    "base_url": "http://127.0.0.1:18102",
+                    "token": "g" * 32,
+                }
+            ],
+        },
+    )
+    turn_id = uuid.uuid4()
+    endpoint = ExternalWorkerEndpoint(
+        endpoint_id="green",
+        worker_id="external-pi-green",
+        base_url="http://127.0.0.1:18102",
+        token="g" * 32,
+    )
+    claim = ExternalWorkerClaim(
+        endpoint.worker_id, uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+    reservation = ExternalWorkerReservation("request-1", turn_id, endpoint, claim, 2)
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="test",
+        model_route=settings.chat_deepseek_v4_flash_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        reasoning_effort="low",
+        durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
+        external_worker_reservation=reservation,
+    )
+    socket = FakeSocket(
+        ['{"type":"worker_done","status":"complete","worker_sequence":1}']
+    )
+    connection = {}
+
+    def connect(url, **kwargs):
+        connection.update(url=url, kwargs=kwargs)
+        return SocketContext(socket)
+
+    runner = ExternalPiChatTurnRunner(
+        settings=settings,
+        admission=admission,
+        prompt="answer",
+        request_id="request-1",
+        resume_id=None,
+        capability=IssuedCapability(
+            token="opaque-capability",
+            capability_id=None,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        ),
+        hf_username="qualification",
+        websocket_connector=connect,
+        worker_status_resolver=lambda: pytest.fail("status was reloaded"),
+        session_factory=lambda: pytest.fail("reservation was reloaded"),
+    )
+
+    assert asyncio.run(_collect(runner)) == []
+    assert connection["url"] == "ws://127.0.0.1:18102/v1/turn"
+    assert connection["kwargs"]["additional_headers"] == {
+        "Authorization": f"Bearer {'g' * 32}",
+        "X-PWC-Worker-Generation": "7",
+    }
+
+
 def test_external_pi_runner_rejects_worker_becoming_full_before_connect():
     class FullWorkerRepository(FakeWorkerRepository):
         def require_ready_claim(self, db, *, claim, now):
