@@ -1725,6 +1725,55 @@ def _unclaimed_worker_status() -> dict:
     }
 
 
+def test_stale_failed_supervisor_proves_zero_use_bound_worker_is_expired(tmp_path):
+    status_path = tmp_path / "staging-blue-00.json"
+    status_path.write_text("{}")
+    os.utime(status_path, (0, 0))
+    counters = {
+        "shadow_requests": 0,
+        "model_calls": 0,
+        "tool_calls": 0,
+        "provider_calls": 0,
+        "modal_calls": 0,
+        "billing_events": 0,
+    }
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "state": "ready",
+        "active_sessions": 0,
+        "maximum_sessions": 2,
+        "worker_generation": 5,
+        "operation_counters": counters,
+    }
+    durable = {
+        "protocol": "external-pi-v1",
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "state": "failed",
+        "maximum_sessions": 2,
+        "generation": 5,
+    }
+
+    assert lifecycle._stale_bound_worker_is_proven(
+        endpoint,
+        durable,
+        status_path=status_path,
+        trusted_release_ids=frozenset({"release-blue"}),
+        lease_seconds=30,
+        now=100,
+    )
+    assert not lifecycle._stale_bound_worker_is_proven(
+        endpoint,
+        durable,
+        status_path=status_path,
+        trusted_release_ids=frozenset({"release-blue"}),
+        lease_seconds=30,
+        now=20,
+    )
+
+
 def test_stop_slot_cleans_exact_unclaimed_request_free_worker(
     monkeypatch: pytest.MonkeyPatch,
 ):

@@ -8,6 +8,7 @@ import json
 import math
 import os
 import signal
+import stat
 import subprocess
 import time
 import urllib.error
@@ -67,6 +68,7 @@ OPERATION_COUNTER_NAMES = (
     "modal_calls",
     "billing_events",
 )
+LEASE_EXPIRY_CLOCK_SKEW_SECONDS = 5
 
 _SUPERVISOR_PROTECTED_KEYS = (
     "PWC_DB_HOST",
@@ -480,6 +482,55 @@ def protected_lease_seconds(environment: str) -> int:
     return lease_seconds
 
 
+def _stale_bound_worker_is_proven(
+    endpoint_status: object,
+    durable_status: object,
+    *,
+    status_path: Path,
+    trusted_release_ids: frozenset[str],
+    lease_seconds: int,
+    now: float,
+) -> bool:
+    """Prove an idle worker's failed supervisor lease has expired."""
+    if not isinstance(endpoint_status, dict) or not isinstance(durable_status, dict):
+        return False
+    counters = endpoint_status.get("operation_counters")
+    generation = endpoint_status.get("worker_generation")
+    release_id = endpoint_status.get("release_id")
+    maximum_sessions = endpoint_status.get("maximum_sessions")
+    if not (
+        endpoint_status.get("protocol") == CONTRACT_VERSION
+        and release_id in trusted_release_ids
+        and endpoint_status.get("state") == "ready"
+        and type(endpoint_status.get("active_sessions")) is int
+        and endpoint_status["active_sessions"] == 0
+        and type(maximum_sessions) is int
+        and maximum_sessions > 0
+        and type(generation) is int
+        and generation > 0
+        and isinstance(counters, dict)
+        and set(counters) == set(OPERATION_COUNTER_NAMES)
+        and all(
+            type(counters[name]) is int and counters[name] == 0
+            for name in OPERATION_COUNTER_NAMES
+        )
+        and durable_status.get("protocol") == CONTRACT_VERSION
+        and durable_status.get("worker_id") == endpoint_status.get("worker_id")
+        and durable_status.get("release_id") == release_id
+        and durable_status.get("state") == "failed"
+        and durable_status.get("maximum_sessions") == maximum_sessions
+        and durable_status.get("generation") == generation
+    ):
+        return False
+    try:
+        metadata = status_path.lstat()
+    except OSError:
+        return False
+    return stat.S_ISREG(metadata.st_mode) and (
+        now - metadata.st_mtime >= lease_seconds + LEASE_EXPIRY_CLOCK_SKEW_SECONDS
+    )
+
+
 def sync_worker_environment(environment: str) -> None:
     """Publish only the worker token to the dedicated protected environment."""
     token = _protected_environment_values(environment).get(
@@ -526,8 +577,16 @@ def _stop_proven_orphaned_worker_if_active(
     trusted_release_ids = validated_orphan_release_ids
     if expected_release_id is not None:
         trusted_release_ids = trusted_release_ids | {expected_release_id}
+    lease_seconds = protected_lease_seconds(environment)
+    now = time.time()
 
-    def safe_status(status: object, worker_id: str, maximum_sessions: int) -> bool:
+    def safe_status(
+        status: object,
+        worker_id: str,
+        maximum_sessions: int,
+        durable_status: object,
+        status_path: Path,
+    ) -> bool:
         counters = (
             status.get("operation_counters") if isinstance(status, dict) else None
         )
@@ -554,7 +613,16 @@ def _stop_proven_orphaned_worker_if_active(
             )
         )
         return identity_and_capacity_match and (
-            status.get("state") == "draining" or request_free_unclaimed
+            status.get("state") == "draining"
+            or request_free_unclaimed
+            or _stale_bound_worker_is_proven(
+                status,
+                durable_status,
+                status_path=status_path,
+                trusted_release_ids=trusted_release_ids,
+                lease_seconds=lease_seconds,
+                now=now,
+            )
         )
 
     legacy_worker_id = f"{environment}-{slot}"
@@ -572,7 +640,13 @@ def _stop_proven_orphaned_worker_if_active(
     except (OSError, ValueError, urllib.error.URLError):
         pass
     if isinstance(legacy_status, dict):
-        if not safe_status(legacy_status, legacy_worker_id, MAXIMUM_SESSIONS):
+        if not safe_status(
+            legacy_status,
+            legacy_worker_id,
+            MAXIMUM_SESSIONS,
+            _read_status(environment, slot),
+            _status_path(environment, slot),
+        ):
             raise ExternalPiSlotError(
                 "external Pi active worker is not proven safe to restart"
             )
@@ -608,7 +682,18 @@ def _stop_proven_orphaned_worker_if_active(
             raise ExternalPiSlotError(
                 "external Pi active worker status is unavailable"
             ) from error
-        if not safe_status(status, spec.worker_id, spec.maximum_sessions):
+        status_path = _environment_status_path(environment, spec.worker_id)
+        try:
+            durable_status = json.loads(status_path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            durable_status = {}
+        if not safe_status(
+            status,
+            spec.worker_id,
+            spec.maximum_sessions,
+            durable_status,
+            status_path,
+        ):
             raise ExternalPiSlotError(
                 "external Pi active worker is not proven safe to restart"
             )
