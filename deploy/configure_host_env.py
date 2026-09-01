@@ -2964,7 +2964,7 @@ def main() -> int:
             ),
             "UVICORN_HOST": "127.0.0.1",
             "UVICORN_PORT": "8001",
-            "WEB_CONCURRENCY": "4",
+            "WEB_CONCURRENCY": "5",
         },
     )
     staging = without_cron_only_credentials(staging)

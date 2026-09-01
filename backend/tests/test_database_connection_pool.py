@@ -15,12 +15,12 @@ def test_single_staging_worker_can_serve_32_simultaneous_chat_turns(monkeypatch)
 
 
 def test_staging_pool_budget_is_partitioned_across_web_workers(monkeypatch):
-    monkeypatch.setenv("WEB_CONCURRENCY", "4")
+    monkeypatch.setenv("WEB_CONCURRENCY", "5")
     settings = SimpleNamespace(environment="staging")
 
     assert database_pool_configuration(settings) == {
-        "pool_size": 8,
-        "max_overflow": 2,
+        "pool_size": 6,
+        "max_overflow": 1,
         "pool_timeout": 5,
     }
 
