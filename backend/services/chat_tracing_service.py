@@ -483,6 +483,7 @@ class ChatTurnTrace:
         self.usage_by_phase: dict[str, dict[str, int]] = {}
         self.cost: dict[str, float] = {}
         self.answer = ""
+        self.answer_present = False
         self.status = "interrupted"
         self.terminal_code: str | None = None
         self.interruption_reason: str | None = None
@@ -723,6 +724,7 @@ class ChatTurnTrace:
         terminal_code: str | None = None,
         interruption_reason: str | None = None,
     ) -> None:
+        self.answer_present = bool(answer.strip())
         self.answer = "" if getattr(self, "content_free", False) else answer
         self.status = status
         if terminal_code is not None:
@@ -734,11 +736,14 @@ class ChatTurnTrace:
         if self.closed:
             return
         self.closed = True
+        if self.status == "success" and not self.answer_present:
+            self.status = "error"
+            self.terminal_code = "empty_assistant_response"
         level = (
             "ERROR"
             if self.status == "error"
             else "WARNING"
-            if self.status == "interrupted"
+            if self.status in {"interrupted", "stopped"}
             else "DEFAULT"
         )
         for observation in (
@@ -903,6 +908,7 @@ class ProviderRequestTrace:
         }
         if tool_call_returned is not None:
             metadata["tool_call_returned"] = tool_call_returned
+        cancelled = error_code == "openai_stream_cancelled"
         try:
             self.observation.update(
                 usage_details=usage_details or None,
@@ -911,7 +917,11 @@ class ProviderRequestTrace:
                 ),
                 metadata=metadata,
                 level=(
-                    "ERROR" if error_code or (status_code or 500) >= 400 else "DEFAULT"
+                    "WARNING"
+                    if cancelled
+                    else "ERROR"
+                    if error_code or (status_code or 500) >= 400
+                    else "DEFAULT"
                 ),
                 status_message=(
                     error_code or (str(status_code) if status_code else None)

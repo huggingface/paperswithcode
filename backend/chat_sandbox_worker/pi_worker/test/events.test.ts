@@ -373,6 +373,27 @@ test("surfaces terminal provider errors without exposing provider details", () =
   assert.equal(adapter.failed, true);
 });
 
+test("preserves a safe oversized-context classification", () => {
+  const adapter = new PiEventAdapter(false);
+  assert.deepEqual(
+    adapter.feed({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "request_too_large: sensitive provider detail",
+        content: [],
+      },
+    }),
+    [{
+      type: "error",
+      code: "context_too_large",
+      message: "This conversation is too large for the selected model. Start a new chat or shorten the context.",
+    }],
+  );
+  assert.equal(adapter.failed, true);
+});
+
 test("provider content indexes are reusable across tool rounds", () => {
   const adapter = new PiEventAdapter(false);
   const start = (id: string) => adapter.feed({

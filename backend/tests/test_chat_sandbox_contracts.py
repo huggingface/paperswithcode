@@ -100,6 +100,7 @@ from backend.services.chat_capability_service import (
     _digest,
 )
 from backend.services.chat_gateway_service import ChatGatewayService
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_sandbox_service import (
     RunningWorker,
     SandboxSessionManager,
@@ -1793,6 +1794,38 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
     assert exc_info.value.detail == (
         "Task with ID, slug, or name 'speech recognition' not found"
     )
+
+
+def test_gateway_catalog_maps_typed_not_found_errors(monkeypatch):
+    class DB:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
+    )
+
+    def missing_catalog_entity(*_args, **_kwargs):
+        raise CatalogNotFoundError("Method 'missing' not found")
+
+    monkeypatch.setattr(ChatGatewayService, "catalog", missing_catalog_entity)
+
+    with pytest.raises(HTTPException) as exc_info:
+        catalog(
+            CatalogRequest(operation="method_detail", arguments={"method": "missing"}),
+            authorization="Bearer test",
+            x_pwc_session=str(uuid.uuid4()),
+            x_pwc_turn=str(uuid.uuid4()),
+            turn_fence=None,
+            db=DB(),
+            settings=SimpleNamespace(chat_max_direct_search_calls=4),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Method 'missing' not found"
 
 
 @pytest.mark.parametrize("operation", ["draft", "repair"])

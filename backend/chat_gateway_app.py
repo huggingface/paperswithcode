@@ -52,6 +52,7 @@ from backend.services.chat_capability_service import (
     CapabilityError,
     ChatCapabilityService,
 )
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_gateway_service import ChatGatewayService
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
@@ -127,7 +128,6 @@ from backend.services.openrouter_user_budget_service import (
     RequestBounds,
     opaque_owner,
 )
-from backend.utils.exceptions import PaperNotFoundError
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger(__name__)
@@ -646,6 +646,16 @@ def _safe_openai_request_id(value: str | None) -> str | None:
     return value
 
 
+def _openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | None:
+    if outcome == "completed":
+        return None
+    if cancelled:
+        return "openai_stream_cancelled"
+    if outcome == "incomplete":
+        return "openai_incomplete"
+    return "openai_unavailable"
+
+
 def _settle_openai_call(
     settings: Settings,
     call_id: uuid.UUID,
@@ -870,8 +880,8 @@ def catalog(
         result = ChatGatewayService(db, settings).catalog(
             body.operation, body.arguments
         )
-    except PaperNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from None
+    except CatalogNotFoundError as error:
+        raise HTTPException(status_code=404, detail=error.detail) from None
     except (HfHubHTTPError, OSError):
         raise HTTPException(
             status_code=502, detail="Paper Markdown could not be read"
@@ -1426,7 +1436,11 @@ async def responses(
         raise HTTPException(status_code=403, detail="Capability rejected") from None
     raw = await request.body()
     if not raw or len(raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     try:
         untrusted_payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -1461,7 +1475,11 @@ async def responses(
         raise
     trusted_raw = json.dumps(payload, separators=(",", ":")).encode()
     if len(trusted_raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=trusted_request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     owner_id = _capability_owner(row, db)
     capability_id = row.id
     qualification_scope_id = _qualification_scope_claim(row, db, settings)
@@ -1652,6 +1670,7 @@ async def responses(
     async def chunks():
         first_body_byte_ms: int | None = None
         ttft_ms: int | None = None
+        cancelled = False
         try:
             async for chunk in upstream.aiter_bytes():
                 extractor.feed(chunk)
@@ -1668,14 +1687,16 @@ async def responses(
                     ttft_ms = elapsed_ms
                     provider_trace.first_byte(ttft_ms)
                 yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            cancelled = True
+            raise
         finally:
             await upstream.aclose()
             await client.aclose()
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            error_code = (
-                None
-                if extractor.result().outcome == "completed"
-                else "openai_unavailable"
+            error_code = _openai_stream_error_code(
+                extractor.result().outcome,
+                cancelled=cancelled,
             )
             try:
                 trace_usage = _settle_openai_call(

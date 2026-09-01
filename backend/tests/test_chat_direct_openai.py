@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import uuid
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 
 import backend.chat_gateway_app as gateway_app
@@ -16,6 +17,8 @@ from backend.config import Settings
 from backend.models.database import ChatOpenAIMonthlyUsage, ChatOpenAIProviderCall
 from backend.services.chat_capability_service import ChatCapabilityService
 from backend.services.chat_openai_budget_service import (
+    MAX_BILLABLE_INPUT_TOKENS,
+    MAX_REQUEST_BYTES,
     ChatOpenAIBudgetService,
     OpenAIAccountingInvariantError,
     OpenAILimitExceeded,
@@ -198,6 +201,84 @@ def test_direct_openai_pricing_uses_per_million_rates_and_fails_stale():
             OpenAIRequestBounds(request_bytes=1000, maximum_output_tokens=1000),
             now=datetime(2026, 8, 20, tzinfo=UTC),
         )
+
+
+def test_direct_openai_accepts_broker_sized_payload_without_reserving_bytes_as_tokens():
+    settings = _settings()
+
+    assert MAX_REQUEST_BYTES == 512 * 1024
+    maximum = safe_maximum_microusd(
+        settings,
+        OpenAIRequestBounds(
+            request_bytes=MAX_REQUEST_BYTES,
+            maximum_output_tokens=8_000,
+        ),
+        now=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+    token_bounded = safe_maximum_microusd(
+        settings,
+        OpenAIRequestBounds(
+            request_bytes=MAX_BILLABLE_INPUT_TOKENS,
+            maximum_output_tokens=8_000,
+        ),
+        now=datetime(2026, 8, 20, tzinfo=UTC),
+    )
+
+    assert maximum == token_bounded
+
+
+def test_direct_openai_billing_bound_matches_pi_model_context_contract():
+    provider_source = (
+        Path(__file__).resolve().parents[1]
+        / "chat_sandbox_worker"
+        / "pi_worker"
+        / "src"
+        / "provider.ts"
+    ).read_text()
+
+    formatted_context_window = f"{MAX_BILLABLE_INPUT_TOKENS:_}"
+    assert f"? {formatted_context_window} : 200_000" in provider_source
+
+
+@pytest.mark.parametrize(
+    ("outcome", "cancelled", "expected"),
+    [
+        ("completed", False, None),
+        ("incomplete", False, "openai_incomplete"),
+        ("failed", False, "openai_unavailable"),
+        (None, True, "openai_stream_cancelled"),
+        (None, False, "openai_unavailable"),
+    ],
+)
+def test_openai_stream_terminal_classification(outcome, cancelled, expected):
+    assert (
+        gateway_app._openai_stream_error_code(outcome, cancelled=cancelled) == expected
+    )
+
+
+def test_oversized_openai_request_returns_a_typed_public_error():
+    class OversizedRequest:
+        async def body(self):
+            return b"x" * (MAX_REQUEST_BYTES + 1)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            gateway_app.responses(
+                OversizedRequest(),
+                "Bearer capability",
+                str(uuid.uuid4()),
+                str(uuid.uuid4()),
+                None,
+                object(),
+                _settings(
+                    chat_openai_direct_enabled=True,
+                    openai_api_key="test-openai-key",
+                ),
+            )
+        )
+
+    assert exc_info.value.status_code == 413
+    assert exc_info.value.detail == "request_too_large: Model request is too large"
 
 
 @pytest.mark.parametrize(
