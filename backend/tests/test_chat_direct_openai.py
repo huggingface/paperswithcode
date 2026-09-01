@@ -99,6 +99,20 @@ def test_direct_openai_releases_request_database_session_before_upstream_stream(
     assert source.index("db.close()") < source.index("client = httpx.AsyncClient")
 
 
+def test_direct_openai_records_gateway_entry_and_upstream_headers_separately():
+    source = inspect.getsource(gateway_app.responses)
+
+    gateway_received = source.index(
+        "_record_gateway_timing(settings, turn_id, received_at=received_at)"
+    )
+    request_body = source.index("raw = await request.body()")
+    upstream_send = source.index("upstream = await client.send(")
+    response_headers = source.index('phase="upstream_response_headers"')
+
+    assert gateway_received < request_body
+    assert upstream_send < response_headers
+
+
 def test_trusted_responses_payload_overwrites_every_security_boundary_field():
     settings = _settings()
     capability = _capability()

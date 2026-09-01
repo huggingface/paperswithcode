@@ -1441,6 +1441,8 @@ async def responses(
         turn_id = uuid.UUID(x_pwc_turn)
     except ValueError:
         raise HTTPException(status_code=403, detail="Capability rejected") from None
+    received_at = datetime.now(UTC)
+    _record_gateway_timing(settings, turn_id, received_at=received_at)
     raw = await request.body()
     if not raw or len(raw) > MAX_OPENAI_REQUEST_BYTES:
         logger.warning("chat OpenAI gateway rejected phase=request_size")
@@ -1636,6 +1638,12 @@ async def responses(
                 "message": "Direct OpenAI is unavailable.",
             },
         ) from None
+    _record_gateway_timing(
+        settings,
+        turn_id,
+        phase="upstream_response_headers",
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
 
     request_id = _safe_openai_request_id(
         upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
@@ -1733,7 +1741,6 @@ async def responses(
                 tool_call_returned=extractor.saw_tool_call,
             )
 
-    _record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
     return StreamingResponse(
         chunks(),
         status_code=upstream.status_code,
