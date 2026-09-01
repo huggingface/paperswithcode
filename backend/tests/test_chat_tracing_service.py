@@ -79,6 +79,47 @@ def test_completed_trace_stays_successful_when_stream_generator_closes(monkeypat
     assert client.root.fields["metadata"] == {"terminal_status": "success"}
 
 
+def test_failed_trace_keeps_error_code_when_stream_generator_closes(monkeypatch):
+    client = Client()
+
+    @contextmanager
+    def attributes(**_values):
+        yield
+
+    monkeypatch.setattr(tracing, "_configured_client", lambda _settings: client)
+    monkeypatch.setattr(tracing, "propagate_attributes", attributes)
+
+    with pytest.raises(GeneratorExit):
+        with tracing.trace_chat_turn(
+            settings=Settings(
+                environment="staging",
+                release_id="release-1",
+                chat_langfuse_enabled=True,
+            ),
+            request_id="request-1",
+            session_id="session-1",
+            user_id="private-user",
+            prompt="Find papers",
+            model="research-model",
+            execution_backend="external_pi",
+            is_replacement=False,
+        ) as trace:
+            trace.finish(
+                "Partial answer",
+                "error",
+                terminal_code="provider_error",
+            )
+            raise GeneratorExit
+
+    assert client.root is not None
+    assert client.root.fields["level"] == "ERROR"
+    assert client.root.fields["status_message"] == "provider_error"
+    assert client.root.fields["metadata"] == {
+        "terminal_status": "error",
+        "terminal_code": "provider_error",
+    }
+
+
 def test_scope_guardrail_trace_never_contains_suppressed_main_content(monkeypatch):
     client = Client()
 

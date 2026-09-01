@@ -26,6 +26,34 @@ test("advertises a context window that compacts before the gateway byte ceiling"
   assert.equal(direct.model.maxTokens, 8_000);
 });
 
+test("rejects oversized direct OpenAI payloads before the gateway request", async () => {
+  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+  let requests = 0;
+
+  const result = await direct.runtime.completeSimple(
+    direct.model,
+    {
+      messages: [
+        {
+          role: "user",
+          content: "x".repeat(256 * 1024),
+          timestamp: Date.now(),
+        },
+      ],
+    },
+    {
+      fetch: async () => {
+        requests += 1;
+        throw new Error("oversized request reached the network");
+      },
+    },
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(result.stopReason, "error");
+  assert.match(result.errorMessage ?? "", /request_too_large/u);
+});
+
 test("external provider authenticates directly to the fenced chat gateway", async () => {
   const provider = await createProvider("gpt-5.6-luna", "openai-responses", {
     url: "https://gateway.example.test/api/internal/chat-gateway",

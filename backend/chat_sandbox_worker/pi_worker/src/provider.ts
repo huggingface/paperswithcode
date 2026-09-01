@@ -1,9 +1,18 @@
-import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
+import {
+  type Api,
+  type AssistantMessageEventStream,
+  type Context,
+  InMemoryCredentialStore,
+  type Model,
+  type SimpleStreamOptions,
+} from "@earendil-works/pi-ai";
+import { streamSimple as streamOpenAIResponses } from "@earendil-works/pi-ai/api/openai-responses";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { type TurnClaimFrame } from "./turn_protocol.js";
 
 export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
+const OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
 
 export type ProviderProtocol = "anthropic-messages" | "openai-responses";
 
@@ -13,6 +22,32 @@ export interface GatewayContext {
   sessionId: string;
   turnId: string;
   turnClaim: TurnClaimFrame;
+}
+
+function boundedOpenAIResponsesStream(
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+  const callerPayload = options?.onPayload;
+  return streamOpenAIResponses(
+    model as Model<"openai-responses">,
+    context,
+    {
+      ...options,
+      onPayload: async (payload, payloadModel) => {
+        const replacement = await callerPayload?.(payload, payloadModel);
+        const requestPayload = replacement ?? payload;
+        const requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+        if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
+          // Pi recognizes this provider-style signal and performs its bounded
+          // compact-and-retry path before the 256 KiB gateway limit is reached.
+          throw new Error("request_too_large: direct OpenAI context requires compaction");
+        }
+        return requestPayload;
+      },
+    },
+  );
 }
 
 export function gatewayHeaders(
@@ -54,6 +89,9 @@ export async function createProvider(
     apiKey: gateway?.capability ?? PLACEHOLDER_KEY,
     api,
     authHeader: true,
+    ...(api === "openai-responses"
+      ? { streamSimple: boundedOpenAIResponsesStream }
+      : {}),
     ...(headers ? { headers } : {}),
     models: [
       {
