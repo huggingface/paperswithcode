@@ -353,13 +353,9 @@ class ExternalPiChatTurnRunner:
                     environment=self.settings.environment
                 )
             )
-            with self.session_factory() as db:
-                reservation = capacity.require_turn(
-                    db,
-                    turn_id=self.admission.turn_id,
-                    endpoints=endpoints,
-                    now=self.now(),
-                )
+            reservation = await asyncio.to_thread(
+                self._require_reserved_worker, capacity, endpoints
+            )
             self.worker_capacity_repository = capacity
             self.external_worker_endpoint = reservation.endpoint
             status = await self._endpoint_status()
@@ -376,10 +372,9 @@ class ExternalPiChatTurnRunner:
                 or status.maximum_sessions != reservation.maximum_sessions
             ):
                 raise StaleWorkerClaim("External worker endpoint identity mismatches")
-            with self.session_factory() as db:
-                self.worker_repository.require_live_claim(
-                    db, claim=reservation.worker_claim, now=self.now()
-                )
+            await asyncio.to_thread(
+                self._require_live_worker_claim, reservation.worker_claim
+            )
             return reservation.worker_claim
         status = await self._endpoint_status()
         if status.active_sessions >= status.maximum_sessions:
@@ -397,19 +392,7 @@ class ExternalPiChatTurnRunner:
             release_id=status.release_id,
             contract_version=status.protocol,
         )
-        with self.session_factory() as db:
-            selected_at = self.now()
-            claim = self.worker_repository.select_ready_claim(
-                db,
-                claim=endpoint_claim,
-                now=selected_at,
-            )
-            self.worker_repository.require_ready_claim(
-                db,
-                claim=claim,
-                now=self.now(),
-            )
-            return claim
+        return await asyncio.to_thread(self._select_ready_worker_claim, endpoint_claim)
 
     async def _require_same_external_worker_claim(
         self, claim: ExternalWorkerClaim
@@ -424,12 +407,44 @@ class ExternalPiChatTurnRunner:
         )
         if endpoint_claim != claim or status.state not in {"ready", "draining"}:
             raise StaleWorkerClaim("External worker claim was fenced")
+        await asyncio.to_thread(self._require_live_worker_claim, claim)
+
+    def _require_reserved_worker(
+        self,
+        capacity: ChatExternalWorkerCapacityRepository | Any,
+        endpoints: tuple[ExternalWorkerEndpoint, ...],
+    ):
+        with self.session_factory() as db:
+            return capacity.require_turn(
+                db,
+                turn_id=self.admission.turn_id,
+                endpoints=endpoints,
+                now=self.now(),
+            )
+
+    def _require_live_worker_claim(self, claim: ExternalWorkerClaim) -> None:
         with self.session_factory() as db:
             self.worker_repository.require_live_claim(
                 db,
                 claim=claim,
                 now=self.now(),
             )
+
+    def _select_ready_worker_claim(
+        self, endpoint_claim: ExternalWorkerClaim
+    ) -> ExternalWorkerClaim:
+        with self.session_factory() as db:
+            claim = self.worker_repository.select_ready_claim(
+                db,
+                claim=endpoint_claim,
+                now=self.now(),
+            )
+            self.worker_repository.require_ready_claim(
+                db,
+                claim=claim,
+                now=self.now(),
+            )
+            return claim
 
     @staticmethod
     def _worker_lost_event() -> dict[str, object]:

@@ -1174,6 +1174,86 @@ def test_external_pi_runner_uses_the_exact_durable_reserved_endpoint():
     assert [event["event_type"] for event in stale_events] == ["stale_fence"]
 
 
+def test_external_pi_runner_keeps_reserved_endpoint_database_checks_off_event_loop():
+    settings = get_settings().model_copy(
+        deep=True,
+        update={
+            "environment": "staging",
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "green",
+                    "worker_id": "external-pi-green",
+                    "base_url": "http://127.0.0.1:18102",
+                    "token": "g" * 32,
+                }
+            ],
+        },
+    )
+    turn_id = uuid.uuid4()
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="test",
+        model_route=settings.chat_deepseek_v4_flash_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        reasoning_effort="low",
+        durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
+    )
+    endpoint = ExternalWorkerEndpoint(
+        endpoint_id="green",
+        worker_id="external-pi-green",
+        base_url="http://127.0.0.1:18102",
+        token="g" * 32,
+    )
+    claim = ExternalWorkerClaim(
+        endpoint.worker_id, uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+    database_threads = []
+
+    class Capacity:
+        def require_turn(self, _db, *, turn_id, endpoints, now):
+            database_threads.append(threading.get_ident())
+            return ExternalWorkerReservation("request-1", turn_id, endpoint, claim, 8)
+
+    class Repository(FakeWorkerRepository):
+        def require_live_claim(self, db, *, claim, now):
+            database_threads.append(threading.get_ident())
+            super().require_live_claim(db, claim=claim, now=now)
+
+    runner = ExternalPiChatTurnRunner(
+        settings=settings,
+        admission=admission,
+        prompt="answer",
+        request_id="request-1",
+        resume_id=None,
+        capability=IssuedCapability(
+            token="opaque-capability",
+            capability_id=None,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        ),
+        hf_username="qualification",
+        worker_repository=Repository(claim),
+        worker_capacity_repository=Capacity(),
+        worker_status_resolver=lambda: _async_value(worker_status(claim)),
+        session_factory=SessionContext,
+    )
+
+    async def select():
+        event_loop_thread = threading.get_ident()
+        selected = await runner._select_worker_claim()
+        return event_loop_thread, selected
+
+    event_loop_thread, selected = asyncio.run(select())
+
+    assert selected == claim
+    assert len(database_threads) == 2
+    assert all(thread != event_loop_thread for thread in database_threads)
+
+
 def test_external_pi_runner_rejects_worker_becoming_full_before_connect():
     class FullWorkerRepository(FakeWorkerRepository):
         def require_ready_claim(self, db, *, claim, now):
