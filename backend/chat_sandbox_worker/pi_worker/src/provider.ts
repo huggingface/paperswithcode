@@ -13,6 +13,8 @@ import { type TurnClaimFrame } from "./turn_protocol.js";
 export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
 const OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
+const COMPACTION_SYSTEM_PROMPT_PREFIX = "You are a context summarization assistant.";
+const COMPACTION_OMISSION_MARKER = "\n\n[...older compaction input omitted to fit the gateway...]\n\n";
 
 export type ProviderProtocol = "anthropic-messages" | "openai-responses";
 
@@ -22,6 +24,59 @@ export interface GatewayContext {
   sessionId: string;
   turnId: string;
   turnClaim: TurnClaimFrame;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | undefined {
+  return typeof value === "object" && value !== null
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function compactionText(
+  payload: unknown,
+): { payload: Record<string, unknown>; text: string; textPart: Record<string, unknown> } | undefined {
+  const record = asRecord(payload);
+  const input = record?.input;
+  if (!record || !Array.isArray(input)) return undefined;
+  const developer = input.map(asRecord).find((entry) => entry?.role === "developer");
+  if (
+    typeof developer?.content !== "string"
+    || !developer.content.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
+  ) return undefined;
+  const user = input.map(asRecord).find((entry) => entry?.role === "user");
+  if (!Array.isArray(user?.content)) return undefined;
+  const textPart = user.content
+    .map(asRecord)
+    .find((entry) => entry?.type === "input_text" && typeof entry.text === "string");
+  return textPart && typeof textPart.text === "string"
+    ? { payload: record, text: textPart.text, textPart }
+    : undefined;
+}
+
+function fitCompactionPayload(payload: unknown): unknown {
+  const compaction = compactionText(payload);
+  if (!compaction) return payload;
+  let best: unknown = payload;
+  let lower = 0;
+  let upper = compaction.text.length;
+  while (lower <= upper) {
+    const retainedCharacters = Math.floor((lower + upper) / 2);
+    const headCharacters = Math.ceil(retainedCharacters / 2);
+    const tailCharacters = Math.floor(retainedCharacters / 2);
+    const candidate = structuredClone(compaction.payload);
+    const candidateCompaction = compactionText(candidate);
+    if (!candidateCompaction) return payload;
+    candidateCompaction.textPart.text = compaction.text.slice(0, headCharacters)
+      + COMPACTION_OMISSION_MARKER
+      + compaction.text.slice(compaction.text.length - tailCharacters);
+    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") <= OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
+      best = candidate;
+      lower = retainedCharacters + 1;
+    } else {
+      upper = retainedCharacters - 1;
+    }
+  }
+  return best;
 }
 
 function boundedOpenAIResponsesStream(
@@ -37,7 +92,8 @@ function boundedOpenAIResponsesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        const requestPayload = replacement ?? payload;
+        let requestPayload = replacement ?? payload;
+        requestPayload = fitCompactionPayload(requestPayload);
         const requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
         if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
           // Pi recognizes this provider-style signal and performs its bounded

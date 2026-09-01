@@ -9,6 +9,39 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { createProvider } from "../src/provider.js";
 
+function openAITextResponse(text: string, sequence: number): Response {
+  const item = {
+    id: `message-${sequence}`,
+    type: "message",
+    status: "completed",
+    role: "assistant",
+    content: [{ type: "output_text", text, annotations: [] }],
+  };
+  const response = {
+    id: `response-${sequence}`,
+    status: "completed",
+    output: [item],
+    usage: {
+      input_tokens: 1,
+      input_tokens_details: { cached_tokens: 0 },
+      output_tokens: 1,
+      output_tokens_details: { reasoning_tokens: 0 },
+      total_tokens: 2,
+    },
+  };
+  const events = [
+    { type: "response.created", response },
+    { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } },
+    { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: text },
+    { type: "response.output_item.done", output_index: 0, item },
+    { type: "response.completed", response },
+  ];
+  return new Response(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    { status: 200, headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
 test("registers direct OpenAI with the native Responses base path", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
   assert.equal(direct.model.api, "openai-responses");
@@ -52,6 +85,91 @@ test("rejects oversized direct OpenAI payloads before the gateway request", asyn
   assert.equal(requests, 0);
   assert.equal(result.stopReason, "error");
   assert.match(result.errorMessage ?? "", /request_too_large/u);
+});
+
+test("compacts an oversized direct OpenAI session and retries successfully", async () => {
+  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+  const requestBodies: string[] = [];
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", async () => {
+      const body = Buffer.concat(chunks).toString("utf8");
+      requestBodies.push(body);
+      const isSummary = body.includes("context summarization assistant");
+      const providerResponse = openAITextResponse(
+        isSummary ? "compact summary" : "recovered",
+        requestBodies.length,
+      );
+      response.writeHead(providerResponse.status, Object.fromEntries(providerResponse.headers));
+      response.end(await providerResponse.text());
+    });
+  });
+  await new Promise<void>((resolve, reject) => server.listen(8765, "127.0.0.1", resolve).once("error", reject));
+  const sessionManager = SessionManager.inMemory("/workspace");
+  for (let index = 0; index < 5; index += 1) {
+    sessionManager.appendMessage({
+      role: "user",
+      content: `history-${index}:${"x".repeat(90_000)}`,
+      timestamp: Date.now() + index * 2,
+    });
+    sessionManager.appendMessage({
+      role: "assistant",
+      content: [{ type: "text", text: "ack" }],
+      api: "openai-responses",
+      provider: "pwc-gateway",
+      model: "gpt-5.6-luna",
+      usage: {
+        input: 1,
+        output: 1,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: Date.now() + index * 2 + 1,
+    });
+  }
+  const settings = SettingsManager.inMemory({
+    compaction: { enabled: true, reserveTokens: 4_000, keepRecentTokens: 2_000 },
+    retry: { enabled: false },
+  });
+  const loader = new DefaultResourceLoader({
+    cwd: "/workspace",
+    agentDir: "/tmp/pwc-pi-test-compaction",
+    settingsManager: settings,
+    noExtensions: true,
+    noSkills: true,
+    noPromptTemplates: true,
+    noThemes: true,
+    noContextFiles: true,
+    systemPrompt: "PwC test prompt",
+  });
+  await loader.reload();
+  const { session } = await createAgentSession({
+    cwd: "/workspace",
+    modelRuntime: direct.runtime,
+    model: direct.model,
+    tools: [],
+    resourceLoader: loader,
+    settingsManager: settings,
+    sessionManager,
+  });
+  try {
+    await session.prompt("continue", { expandPromptTemplates: false });
+
+    const assistant = session.messages.at(-1);
+    assert.equal(requestBodies.length, 2);
+    assert.ok(requestBodies.every((body) => Buffer.byteLength(body, "utf8") <= 240 * 1024));
+    assert.match(requestBodies[0] ?? "", /older compaction input omitted/u);
+    assert.equal(assistant?.role, "assistant");
+    assert.equal(assistant?.content[0]?.type, "text");
+    assert.equal(assistant?.content[0]?.text, "recovered");
+  } finally {
+    session.dispose();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
 });
 
 test("external provider authenticates directly to the fenced chat gateway", async () => {
