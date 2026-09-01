@@ -1279,7 +1279,9 @@ def test_external_pi_runner_uses_admission_reservation_without_requerying():
     claim = ExternalWorkerClaim(
         endpoint.worker_id, uuid.uuid4(), 7, "release-a", "external-pi-v1"
     )
-    reservation = ExternalWorkerReservation("request-1", turn_id, endpoint, claim, 2)
+    reservation = ExternalWorkerReservation(
+        "client-message-1", turn_id, endpoint, claim, 2
+    )
     admission = TurnAdmission(
         session_id=uuid.uuid4(),
         turn_id=turn_id,

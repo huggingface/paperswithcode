@@ -349,8 +349,7 @@ class ExternalPiChatTurnRunner:
         admission_reservation = self.admission.external_worker_reservation
         if admission_reservation is not None:
             if (
-                admission_reservation.request_id != self.request_id
-                or admission_reservation.turn_id != self.admission.turn_id
+                admission_reservation.turn_id != self.admission.turn_id
                 or admission_reservation.endpoint not in endpoints
                 or admission_reservation.worker_claim.worker_id
                 != admission_reservation.endpoint.worker_id
