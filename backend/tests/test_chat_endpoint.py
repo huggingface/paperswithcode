@@ -3768,16 +3768,18 @@ def test_trace_id_persistence_does_not_block_event_loop(monkeypatch):
         release_admission=lambda: asyncio.sleep(0),
     )
 
-    async def no_events():
-        if False:
-            yield None
+    async def dispatched_events():
+        yield chat_stream_service.ChatStreamFrame("stream_start")
+        assert persistence_threads == []
+        yield chat_stream_service.ChatStreamFrame("workspace_ready")
 
-    monkeypatch.setattr(orchestrator, "_events", no_events)
+    monkeypatch.setattr(orchestrator, "_events", dispatched_events)
 
     async def consume():
         event_loop_thread = threading.get_ident()
         async for _frame in orchestrator.events():
             pass
+        await orchestrator.trace_id_persistence_task
         return event_loop_thread
 
     event_loop_thread = asyncio.run(consume())

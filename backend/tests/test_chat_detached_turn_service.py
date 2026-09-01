@@ -271,8 +271,12 @@ def test_durable_scope_block_has_one_replayable_canonical_terminal(
         monkeypatch.setattr(
             chat_stream_service.ScopeGuardrailService, "classify", classify
         )
+
+        def unexpected_eager_heartbeat(*_args):
+            raise AssertionError("A newly validated durable claim must not be renewed")
+
         monkeypatch.setattr(
-            chat_stream_service, "_heartbeat_local_turn", lambda *_args: None
+            chat_stream_service, "_heartbeat_local_turn", unexpected_eager_heartbeat
         )
         monkeypatch.setattr(
             chat_stream_service, "_start_local_turn", lambda *_args: None

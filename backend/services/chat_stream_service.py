@@ -1517,6 +1517,7 @@ class ChatStreamOrchestrator:
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
+        self.trace_id_persistence_task: asyncio.Task[None] | None = None
         self.sdk_session_persistence_task: asyncio.Task[None] | None = None
         self.lease_heartbeat_task: asyncio.Task | None = None
         self.lease_heartbeat_error: Exception | None = None
@@ -1672,15 +1673,24 @@ class ChatStreamOrchestrator:
             content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
-            await asyncio.to_thread(
-                _persist_trace_id,
-                self.owner,
-                self.settings,
-                self.admission,
-                self.trace.trace_id,
-            )
             try:
                 async for frame in self._events():
+                    if (
+                        frame.event == "workspace_ready"
+                        and self.trace_id_persistence_task is None
+                    ):
+                        self.trace_id_persistence_task = asyncio.create_task(
+                            asyncio.to_thread(
+                                _persist_trace_id,
+                                self.owner,
+                                self.settings,
+                                self.admission,
+                                self.trace.trace_id,
+                            )
+                        )
+                        self.trace_id_persistence_task.add_done_callback(
+                            _log_background_task_result
+                        )
                     yield frame
             except GeneratorExit:
                 self._finish_stream_exit_trace(InterruptionReason.STREAM_CLOSED)
@@ -1741,7 +1751,6 @@ class ChatStreamOrchestrator:
                 yield await self._finalize_cancellation(cancel_runner=False)
                 return
 
-            await self._renew_durable_turn()
             if self.settings.chat_durable_turn_dispatch_enabled:
                 await asyncio.to_thread(
                     _start_local_turn, self.settings, self.admission
@@ -2075,13 +2084,6 @@ class ChatStreamOrchestrator:
             raise
         except (TurnJobError, SQLAlchemyError, ValueError) as exc:
             self.lease_heartbeat_error = exc
-
-    async def _renew_durable_turn(self) -> None:
-        if not self.settings.chat_durable_turn_dispatch_enabled:
-            return
-        self._assert_durable_lease()
-        await asyncio.to_thread(_heartbeat_local_turn, self.settings, self.admission)
-        self._assert_durable_lease()
 
     def _assert_durable_lease(self) -> None:
         if not self.settings.chat_durable_turn_dispatch_enabled:
@@ -2909,6 +2911,9 @@ class ChatStreamOrchestrator:
                 await self.research_task
         if self.title_task and not self.title_task.done():
             self.title_task.add_done_callback(_log_background_task_result)
+        if self.trace_id_persistence_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self.trace_id_persistence_task
         logger.info(
             "chat request complete request_id=%s principal=%s duration_ms=%.1f finish=%s",
             self.request_id,
