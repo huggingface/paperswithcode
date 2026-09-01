@@ -1398,6 +1398,7 @@ def test_maintenance_plan_drains_claimed_pool_row_after_assignment_is_settled():
     sessions = _database()
     now = datetime.now(UTC)
     row = _pool(settings, state="claimed", sandbox_id="sb-settled-claim")
+    row.claimed_at = now - timedelta(minutes=1)
     row.blank_billable_seconds = 123
     row.estimated_blank_cost_usd = 1.25
     interval = _interval(
@@ -1411,7 +1412,10 @@ def test_maintenance_plan_drains_claimed_pool_row_after_assignment_is_settled():
     with sessions() as db, db.begin():
         db.add_all([row, interval])
 
-    repository = _repository(settings, tokens=("settled-claim-cleanup",))
+    repository = _repository(
+        settings,
+        tokens=("settled-claim-cleanup", "settled-claim-cleanup-retry"),
+    )
     with sessions() as db, db.begin():
         plan = repository.plan_maintenance(
             db,
@@ -1430,11 +1434,22 @@ def test_maintenance_plan_drains_claimed_pool_row_after_assignment_is_settled():
     assert plan.termination_claims[0].sandbox_id == row.modal_sandbox_id
     assert plan.termination_claims[0].accounting_settled is True
     with sessions() as db, db.begin():
+        retry = repository.claim_termination(
+            db,
+            row.id,
+            row.modal_sandbox_id,
+            failure_code=None,
+            now=now + timedelta(minutes=31),
+            stale_draining_before=now + timedelta(minutes=30),
+        )
+    assert isinstance(retry, PoolTerminationClaim)
+    assert retry.accounting_settled is True
+    with sessions() as db, db.begin():
         outcome = repository.finish_termination(
             db,
-            plan.termination_claims[0],
+            retry,
             confirmed=True,
-            now=now + timedelta(minutes=30),
+            now=now + timedelta(minutes=32),
         )
     assert outcome is PoolTerminationFinishOutcome.FINISHED
     with sessions() as db:

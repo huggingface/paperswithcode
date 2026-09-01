@@ -650,7 +650,7 @@ class ChatSandboxPoolRepository:
             stale_draining_before
         ):
             return None
-        accounting_settled = row.state == "claimed"
+        accounting_settled = row.claimed_at is not None
         effective_failure = self._termination_failure(row.failure_code, failure_code)
         token_hash = self._token_hash(self.token_factory())
         row.state = "draining"

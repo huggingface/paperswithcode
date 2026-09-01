@@ -2140,6 +2140,7 @@ def test_maintenance_terminates_settled_claimed_pool_orphan():
         spend_factory=lambda _db: Spend(),
     )
     row = _pool(harness, state="claimed", release_id="release-previous")
+    row.claimed_at = harness.clock.utcnow() - timedelta(minutes=1)
     row.blank_billable_seconds = 123
     row.estimated_blank_cost_usd = 1.25
     interval = _interval(harness, row)
