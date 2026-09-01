@@ -320,12 +320,35 @@ def _draining_replica_specs(
     previous_statuses = _read_replica_statuses(
         environment, slot, current[:PREVIOUS_REPLICA_COUNT]
     )
+
+    def previous_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
+        identity_matches = (
+            status.get("release_id") == release_id
+            and status.get("worker_id") == spec.worker_id
+        )
+        current_contract = (
+            status.get("protocol") == CONTRACT_VERSION
+            and type(status.get("maximum_sessions")) is int
+            and status.get("maximum_sessions") == PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+        )
+        legacy_supervisor_contract = (
+            "protocol" not in status
+            and "maximum_sessions" not in status
+            and status.get("authenticated") is True
+            and status.get("registered") is True
+            and type(status.get("generation")) is int
+            and status["generation"] > 0
+            and type(status.get("heartbeats")) is int
+            and status["heartbeats"] >= 1
+            and (
+                (status.get("state") == "ready" and status.get("drained") is False)
+                or (status.get("state") == "offline" and status.get("drained") is True)
+            )
+        )
+        return identity_matches and (current_contract or legacy_supervisor_contract)
+
     previous_topology_is_proven = all(
-        status.get("protocol") == CONTRACT_VERSION
-        and status.get("release_id") == release_id
-        and status.get("worker_id") == spec.worker_id
-        and type(status.get("maximum_sessions")) is int
-        and status.get("maximum_sessions") == PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+        previous_status_is_proven(status, spec)
         for status, spec in zip(
             previous_statuses, current[:PREVIOUS_REPLICA_COUNT], strict=True
         )

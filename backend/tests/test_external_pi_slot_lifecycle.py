@@ -645,12 +645,14 @@ def test_sixteen_replica_tooling_drains_previous_eight_replica_slot(
         (tmp_path / f"{spec.worker_id}.json").write_text(
             json.dumps(
                 {
-                    "protocol": lifecycle.CONTRACT_VERSION,
                     "release_id": "old-release",
                     "worker_id": spec.worker_id,
                     "state": "ready",
                     "drained": False,
-                    "maximum_sessions": 4,
+                    "authenticated": True,
+                    "registered": True,
+                    "generation": 1,
+                    "heartbeats": 1,
                 }
             )
         )
@@ -666,12 +668,14 @@ def test_sixteen_replica_tooling_drains_previous_eight_replica_slot(
                 (tmp_path / f"{spec.worker_id}.json").write_text(
                     json.dumps(
                         {
-                            "protocol": lifecycle.CONTRACT_VERSION,
                             "release_id": "old-release",
                             "worker_id": spec.worker_id,
                             "state": "offline",
                             "drained": True,
-                            "maximum_sessions": 4,
+                            "authenticated": True,
+                            "registered": True,
+                            "generation": 1,
+                            "heartbeats": 2,
                         }
                     )
                 )
@@ -689,6 +693,22 @@ def test_sixteen_replica_tooling_drains_previous_eight_replica_slot(
             "paperswithcode-staging-external-pi-worker@green.service",
         ],
     ]
+
+
+def test_supervisor_status_attests_contract_and_capacity():
+    from backend.scripts.run_external_pi_slot import _initial_status
+
+    status = _initial_status(
+        SimpleNamespace(
+            release_id="release-a",
+            chat_external_pi_worker_contract_version="external-pi-v1",
+            chat_external_pi_worker_max_sessions=2,
+        ),
+        "staging-blue-08",
+    )
+
+    assert status["protocol"] == "external-pi-v1"
+    assert status["maximum_sessions"] == 2
 
 
 def test_partial_sixteen_replica_status_cannot_be_treated_as_previous_topology(

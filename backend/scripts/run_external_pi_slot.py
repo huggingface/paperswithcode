@@ -24,12 +24,12 @@ def _write_status(path: Path, value: dict) -> None:
     os.replace(temporary, path)
 
 
-async def run() -> None:
-    settings = get_settings()
-    status_path = Path(os.environ["PWC_EXTERNAL_PI_STATUS_PATH"])
-    state = {
+def _initial_status(settings, worker_id: str) -> dict:
+    return {
+        "protocol": settings.chat_external_pi_worker_contract_version,
         "release_id": settings.release_id,
-        "worker_id": os.environ["PWC_EXTERNAL_PI_WORKER_ID"],
+        "worker_id": worker_id,
+        "maximum_sessions": settings.chat_external_pi_worker_max_sessions,
         "state": "starting",
         "authenticated": False,
         "registered": False,
@@ -37,6 +37,12 @@ async def run() -> None:
         "heartbeats": 0,
         "drained": False,
     }
+
+
+async def run() -> None:
+    settings = get_settings()
+    status_path = Path(os.environ["PWC_EXTERNAL_PI_STATUS_PATH"])
+    state = _initial_status(settings, os.environ["PWC_EXTERNAL_PI_WORKER_ID"])
     _write_status(status_path, state)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
