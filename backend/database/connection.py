@@ -5,6 +5,7 @@ This module provides SQLAlchemy integration for the FastAPI backend,
 building on top of the existing psycopg2-based database utilities.
 """
 
+import os
 from typing import Generator
 
 from sqlalchemy import create_engine, Engine
@@ -17,7 +18,12 @@ from backend.models.database import Base
 
 def database_pool_configuration(settings) -> dict[str, int]:
     if settings.environment == "staging":
-        return {"pool_size": 32, "max_overflow": 8, "pool_timeout": 5}
+        worker_count = max(1, int(os.environ.get("WEB_CONCURRENCY", "1")))
+        return {
+            "pool_size": max(1, 32 // worker_count),
+            "max_overflow": 8 // worker_count,
+            "pool_timeout": 5,
+        }
     return {"pool_size": 5, "max_overflow": 10, "pool_timeout": 5}
 
 
@@ -49,7 +55,8 @@ class DatabaseManager:
                 poolclass=QueuePool,
                 # Production stays conservative because it shares Postgres with
                 # CRON jobs. Staging is sized for the isolated 32-turn durability
-                # qualification while remaining bounded below `max_connections`.
+                # qualification. Divide that aggregate budget across Uvicorn
+                # workers so scaling the web tier cannot multiply connections.
                 pool_size=pool_configuration["pool_size"],
                 max_overflow=pool_configuration["max_overflow"],
                 # Under burst traffic, fail DB checkout quickly so requests
