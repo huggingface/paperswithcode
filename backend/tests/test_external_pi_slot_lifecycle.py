@@ -1971,7 +1971,7 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
     assert "staging.env" not in worker
     assert "ProtectProc=invisible" in worker
     assert "CPUQuota=400%" in worker
-    assert "MemoryMax=4294967296" in worker
+    assert "MemoryMax=6442450944" in worker
     assert "TasksMax=512" in worker
     assert "CPUQuota=200%" in supervisor
     assert "MemoryMax=2147483648" in supervisor
