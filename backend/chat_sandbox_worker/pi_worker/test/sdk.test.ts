@@ -87,6 +87,34 @@ test("rejects oversized direct OpenAI payloads before the gateway request", asyn
   assert.match(result.errorMessage ?? "", /request_too_large/u);
 });
 
+test("leaves fitting OpenAI compaction payloads unchanged", async () => {
+  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+  let requestBody = "";
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", async () => {
+      requestBody = Buffer.concat(chunks).toString("utf8");
+      const providerResponse = openAITextResponse("summary", 1);
+      response.writeHead(providerResponse.status, Object.fromEntries(providerResponse.headers));
+      response.end(await providerResponse.text());
+    });
+  });
+  await new Promise<void>((resolve, reject) => server.listen(8765, "127.0.0.1", resolve).once("error", reject));
+  try {
+    const result = await direct.runtime.completeSimple(direct.model, {
+      systemPrompt: "You are a context summarization assistant. Summarize faithfully.",
+      messages: [{ role: "user", content: "small compaction input", timestamp: Date.now() }],
+    });
+
+    assert.equal(result.stopReason, "stop");
+    assert.match(requestBody, /small compaction input/u);
+    assert.doesNotMatch(requestBody, /older compaction input omitted/u);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
 test("compacts an oversized direct OpenAI session and retries successfully", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
   const requestBodies: string[] = [];

@@ -93,8 +93,11 @@ function boundedOpenAIResponsesStream(
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
         let requestPayload = replacement ?? payload;
-        requestPayload = fitCompactionPayload(requestPayload);
-        const requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+        let requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+        if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
+          requestPayload = fitCompactionPayload(requestPayload);
+          requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+        }
         if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
           // Pi recognizes this provider-style signal and performs its bounded
           // compact-and-retry path before the 256 KiB gateway limit is reached.
