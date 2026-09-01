@@ -348,6 +348,16 @@ def test_chat_alert_timer_uses_only_the_allowlisted_cron_interface():
     assert "WantedBy=timers.target" in timer
 
 
+def test_chat_synthetic_timer_uses_the_bounded_allowlisted_job():
+    systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd" / "cron"
+    service = (systemd / "pwc-cron-run-chat-synthetic-probe.service").read_text()
+    timer = (systemd / "pwc-cron-run-chat-synthetic-probe.timer").read_text()
+
+    assert "pwc-cron-throttled run_chat_synthetic_probe" in service
+    assert "OnCalendar=*-*-* *:*:00" in timer
+    assert "Persistent=true" in timer
+
+
 def test_production_sha_resolves_from_bare_main_ref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -2639,6 +2649,33 @@ def test_production_chat_activation_requires_enabled_operational_monitor(
     (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=false\n")
     require_production_chat_monitor("production")
     assert observed == []
+
+
+def test_production_chat_activation_requires_enabled_synthetic_probe_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(deploy_cli, "CONFIG_ROOT", tmp_path)
+    (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=true\n")
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return SimpleNamespace(returncode=0 if len(observed) == 1 else 1)
+
+    monkeypatch.setattr(deploy_cli.subprocess, "run", fake_run)
+
+    with pytest.raises(deploy_cli.DeployError, match="synthetic chat probe"):
+        require_production_chat_monitor("production")
+
+    assert observed == [
+        ["systemctl", "is-enabled", "--quiet", "pwc-chat-alert-monitor.timer"],
+        [
+            "systemctl",
+            "is-enabled",
+            "--quiet",
+            "pwc-cron-run-chat-synthetic-probe.timer",
+        ],
+    ]
 
 
 def test_production_chat_activation_requires_protected_environment_switch(
@@ -6134,6 +6171,8 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
 def test_cron_jobs_declare_bounded_execution_contracts():
     assert cron_launcher.COMMANDS
+    assert cron_launcher.COMMANDS["monitor_chat_operational_alerts"].timeout == "1m"
+    assert cron_launcher.COMMANDS["run_chat_synthetic_probe"].timeout == "6m"
     read_only_jobs = {
         "alert_submission_review_failure",
         "export_enrichment_dashboard",
@@ -6141,7 +6180,7 @@ def test_cron_jobs_declare_bounded_execution_contracts():
     }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command
-        assert spec.timeout in {"1m", "30m", "45m", "50m", "2h", "6h"}
+        assert spec.timeout in {"1m", "6m", "30m", "45m", "50m", "2h", "6h"}
         assert spec.mutates_shared_data is (name not in read_only_jobs)
         assert spec.idempotency
         assert spec.health_job

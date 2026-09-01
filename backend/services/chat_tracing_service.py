@@ -30,6 +30,8 @@ PROVIDER_OUTCOMES = frozenset(
         "provider_rate_limit",
         "provider_timeout",
         "provider_unavailable",
+        "openai_unavailable",
+        "openrouter_unavailable",
         "auth_error",
         "billing_error",
     }
@@ -207,6 +209,22 @@ def _safe_provider_outcome(level: object, status_message: object) -> str:
     return "provider_error" if normalized_level == "ERROR" else "success"
 
 
+def _safe_turn_outcome(level: object, status_message: object) -> str:
+    value = status_message if isinstance(status_message, str) else ""
+    if value in AUTH_OUTCOMES:
+        return "auth_error"
+    if value in BILLING_OUTCOMES:
+        return "billing_error"
+    if value in PROVIDER_OUTCOMES:
+        return "provider_error"
+    normalized_level = str(getattr(level, "value", level)).upper()
+    if normalized_level == "ERROR":
+        return "error"
+    if normalized_level == "WARNING" or value in {"interrupted", "stopped"}:
+        return "interrupted"
+    return "success"
+
+
 def _milliseconds(value: object) -> int | None:
     if not isinstance(value, (int, float)) or value < 0:
         return None
@@ -280,20 +298,9 @@ def fetch_chat_turn_observations(
             for row in page.data:
                 if row.end_time is None:
                     continue
-                level = str(getattr(row.level, "value", row.level)).upper()
-                status = (
-                    row.status_message if isinstance(row.status_message, str) else ""
-                )
-                outcome = (
-                    "error"
-                    if level == "ERROR"
-                    else "interrupted"
-                    if level == "WARNING" or status in {"interrupted", "stopped"}
-                    else "success"
-                )
                 observations.append(
                     SafeChatTurnObservation(
-                        outcome=outcome,
+                        outcome=_safe_turn_outcome(row.level, row.status_message),
                         ttft_ms=_milliseconds(row.time_to_first_token),
                         duration_ms=_milliseconds(row.latency),
                     )

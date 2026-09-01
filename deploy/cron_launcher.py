@@ -158,6 +158,15 @@ COMMANDS: dict[str, Job] = {
         ),
         mutates_shared_data=False,
     ),
+    "run_chat_synthetic_probe": job(
+        "-m",
+        "backend.scripts.run_chat_synthetic_probe",
+        timeout="6m",
+        idempotency=(
+            "run at most one due or release/alert-triggered content-free synthetic "
+            "production chat and deliver each transition once"
+        ),
+    ),
     "update_hot_github_trending": job(
         "-m",
         "scripts.hourly.update_hot_github_trending",

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -18,6 +19,10 @@ from backend.services.chat_operational_alert_service import (
     provider_health,
     provider_transition,
     runtime_failure_counts,
+)
+from backend.services.chat_reliability_probe import (
+    ChatAggregateSnapshot,
+    classify_chat_aggregates,
 )
 
 
@@ -288,6 +293,57 @@ def test_reliability_probe_runs_every_fifteen_minutes_and_after_alerts(monkeypat
     assert len(calls) == 2
 
 
+def test_reliability_probe_persists_unknown_source_until_recovery(monkeypatch):
+    now = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    state = monitor.empty_state()
+    incomplete = classify_chat_aggregates(
+        ChatAggregateSnapshot(
+            total_requests=0,
+            successful_requests=0,
+            provider_errors=0,
+            auth_errors=0,
+            billing_errors=0,
+            ttft_ms=(),
+            completion_ms=(),
+            stream_interruptions=0,
+            persistence_failures=0,
+            capacity_failures=0,
+            collection_complete=False,
+            window_start=now - timedelta(minutes=15),
+            window_end=now,
+        )
+    )
+    healthy = tuple(
+        SimpleNamespace(
+            state=monitor.FindingState.HEALTHY,
+            contract=finding.contract,
+            evidence=finding.evidence,
+        )
+        for finding in incomplete
+    )
+    findings = incomplete
+    monkeypatch.setattr(
+        monitor, "probe_chat_aggregates", lambda *_args, **_kwargs: findings
+    )
+
+    events = monitor.collect_reliability_events(state, Settings(), now, {}, [])
+
+    assert [event["signal"] for event in events] == [
+        "chat_reliability_monitor_unavailable"
+    ]
+    assert state.get("reliability_monitor_failed") is True
+
+    findings = healthy
+    events = monitor.collect_reliability_events(
+        state, Settings(), now + timedelta(minutes=15), {}, []
+    )
+
+    assert [event["signal"] for event in events] == [
+        "chat_reliability_monitor_recovered"
+    ]
+    assert state.get("reliability_monitor_failed") is False
+
+
 def test_release_change_forces_extra_reliability_and_synthetic_checks():
     state = monitor.empty_state()
     settings = Settings(release_id="new-release")
@@ -305,6 +361,43 @@ def test_release_change_forces_extra_reliability_and_synthetic_checks():
         chat_glm_5_3_flash_route="zai-org/GLM-5.3-Flash:alternate",
     )
     assert monitor.release_probe_triggers(state, changed_provider) == (True, True)
+
+
+def test_minute_monitor_never_runs_the_paid_synthetic_probe(monkeypatch, tmp_path):
+    settings = Settings(
+        environment="production",
+        chat_enabled=True,
+        chat_operational_alerts_enabled=True,
+        cron_log_dir=str(tmp_path),
+    )
+    state = monitor.empty_state()
+    monkeypatch.setattr(monitor, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitor, "load_state", lambda _path: state)
+    monkeypatch.setattr(
+        monitor, "release_probe_triggers", lambda _state, _settings: (False, False)
+    )
+    monkeypatch.setattr(
+        monitor, "collect_events", lambda _state, _settings, _now: ([], False)
+    )
+    monkeypatch.setattr(
+        monitor,
+        "collect_reliability_events",
+        lambda *_args, **_kwargs: [],
+    )
+
+    async def forbidden_synthetic(*_args, **_kwargs):
+        raise AssertionError("paid synthetic work belongs to its bounded job")
+
+    async def no_delivery(_state, _settings):
+        return 0
+
+    monkeypatch.setattr(monitor, "collect_synthetic_events", forbidden_synthetic)
+    monkeypatch.setattr(monitor, "deliver_pending", no_delivery)
+    monkeypatch.setattr(monitor, "write_state", lambda _path, _state: None)
+    monkeypatch.setattr(monitor, "write_health_record", lambda _path, _result: None)
+    monkeypatch.setattr(sys, "argv", ["monitor_chat_operational_alerts"])
+
+    assert monitor.main() == 0
 
 
 def test_provider_health_counts_only_content_free_aggregates():

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import uuid
@@ -128,6 +129,9 @@ async def run_synthetic_chat(
     *,
     transport: SyntheticChatTransport | None = None,
     now: datetime | None = None,
+    lifecycle_timeout_seconds: float = 270,
+    cleanup_timeout_seconds: float = 45,
+    close_timeout_seconds: float = 5,
 ) -> SyntheticChatResult:
     """Verify login through deletion without retaining prompt or response content."""
 
@@ -159,52 +163,58 @@ async def run_synthetic_chat(
     session_id: str | None = None
     signature = "chat:synthetic:healthy"
     try:
-        if not await transport.verify_login():
-            steps["login"] = "degraded"
-            return _result(
-                environment,
-                FindingState.DEGRADED,
-                "chat:authentication:login_failed",
-                steps,
-                observed_at,
-            )
-        steps["login"] = "healthy"
-        session_id = await transport.create_session()
-        steps["admission"] = "healthy"
-        first_token = False
-        terminal = None
-        async for event in transport.stream_turn(session_id):
-            event_type = event.get("type")
-            if event_type in {"answer_delta", "reasoning_delta"}:
-                first_token = True
-            if event_type in {"done", "error"}:
-                terminal = str(event_type)
-        steps["first_token"] = "healthy" if first_token else "degraded"
-        steps["complete_stream"] = "healthy" if terminal == "done" else "degraded"
-        if not first_token:
-            signature = "chat:stream:first_token_missing"
-        elif terminal != "done":
-            signature = "chat:stream:terminal_error"
-        reopenable = await transport.session_is_reopenable(session_id)
-        steps["persistence_reopen"] = "healthy" if reopenable else "degraded"
-        if signature == "chat:synthetic:healthy" and not reopenable:
-            signature = "chat:persistence:reopen_failed"
+        async with asyncio.timeout(lifecycle_timeout_seconds):
+            if not await transport.verify_login():
+                steps["login"] = "degraded"
+                return _result(
+                    environment,
+                    FindingState.DEGRADED,
+                    "chat:authentication:login_failed",
+                    steps,
+                    observed_at,
+                )
+            steps["login"] = "healthy"
+            session_id = await transport.create_session()
+            steps["admission"] = "healthy"
+            first_token = False
+            terminal = None
+            async for event in transport.stream_turn(session_id):
+                event_type = event.get("type")
+                if event_type in {"answer_delta", "reasoning_delta"}:
+                    first_token = True
+                if event_type in {"done", "error"}:
+                    terminal = str(event_type)
+            steps["first_token"] = "healthy" if first_token else "degraded"
+            steps["complete_stream"] = "healthy" if terminal == "done" else "degraded"
+            if not first_token:
+                signature = "chat:stream:first_token_missing"
+            elif terminal != "done":
+                signature = "chat:stream:terminal_error"
+            reopenable = await transport.session_is_reopenable(session_id)
+            steps["persistence_reopen"] = "healthy" if reopenable else "degraded"
+            if signature == "chat:synthetic:healthy" and not reopenable:
+                signature = "chat:persistence:reopen_failed"
+    except TimeoutError:
+        signature = "chat:synthetic:timeout"
+        steps.setdefault("complete_stream", "degraded")
     except (httpx.HTTPError, KeyError, TypeError, ValueError):
         signature = "chat:synthetic:transport_error"
         steps.setdefault("admission", "degraded")
     finally:
         if session_id is not None:
             try:
-                await transport.delete_session(session_id)
-                absent = await transport.session_is_absent(session_id)
-            except (httpx.HTTPError, KeyError, TypeError, ValueError):
+                async with asyncio.timeout(cleanup_timeout_seconds):
+                    await transport.delete_session(session_id)
+                    absent = await transport.session_is_absent(session_id)
+            except (TimeoutError, httpx.HTTPError, KeyError, TypeError, ValueError):
                 absent = False
             steps["cleanup"] = "healthy" if absent else "degraded"
             if not absent and signature == "chat:synthetic:healthy":
                 signature = "chat:cleanup:deletion_failed"
         try:
-            await transport.close()
-        except httpx.HTTPError:
+            async with asyncio.timeout(close_timeout_seconds):
+                await transport.close()
+        except (TimeoutError, httpx.HTTPError):
             steps["cleanup"] = "degraded"
             if signature == "chat:synthetic:healthy":
                 signature = "chat:cleanup:transport_close_failed"

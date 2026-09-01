@@ -51,6 +51,7 @@ def empty_state() -> dict[str, Any]:
         "provider_monitor_failed": False,
         "lifecycle_active": [],
         "reliability_active": [],
+        "reliability_monitor_failed": False,
         "last_reliability_probe_at": None,
         "last_synthetic_probe_at": None,
         "synthetic_active": None,
@@ -71,6 +72,7 @@ def load_state(path: Path) -> dict[str, Any]:
         raise TypeError("chat operational alert state has invalid events")
     state.setdefault("lifecycle_active", [])
     state.setdefault("reliability_active", [])
+    state.setdefault("reliability_monitor_failed", False)
     state.setdefault("last_reliability_probe_at", None)
     state.setdefault("last_synthetic_probe_at", None)
     state.setdefault("synthetic_active", None)
@@ -95,6 +97,8 @@ def load_state(path: Path) -> dict[str, Any]:
         or len(set(state["reliability_active"])) != len(state["reliability_active"])
     ):
         raise TypeError("chat operational alert state has invalid reliability state")
+    if not isinstance(state["reliability_monitor_failed"], bool):
+        raise TypeError("chat operational alert state has invalid reliability status")
     if state["synthetic_active"] is not None and (
         not isinstance(state["synthetic_active"], str)
         or len(state["synthetic_active"]) > 160
@@ -182,6 +186,13 @@ def collect_reliability_events(
         operational_counts=operational_counts,
     )
     state["last_reliability_probe_at"] = now.isoformat()
+    source_unknown = any(
+        finding.state == FindingState.UNKNOWN
+        and finding.evidence.get("incident_signature")
+        == "chat:aggregate_source:incomplete"
+        for finding in findings
+    )
+    source_was_unknown = state.get("reliability_monitor_failed") is True
     active = set(state.get("reliability_active", []))
     projected = reliability_alert_classifications(findings)
     current = set(projected)
@@ -195,6 +206,30 @@ def collect_reliability_events(
     }
     entered = current - active
     events: list[dict[str, Any]] = []
+    if source_unknown and not source_was_unknown:
+        events.append(
+            new_event(
+                "chat_reliability_monitor_unavailable",
+                now=now,
+                count=sum(
+                    finding.state == FindingState.UNKNOWN
+                    and finding.evidence.get("incident_signature")
+                    == "chat:aggregate_source:incomplete"
+                    for finding in findings
+                ),
+                classifications={"chat:aggregate_source:incomplete": 1},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
+    elif not source_unknown and source_was_unknown:
+        events.append(
+            new_event(
+                "chat_reliability_monitor_recovered",
+                now=now,
+                classifications={"chat:aggregate_source:incomplete": 1},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
     if entered:
         events.append(
             new_event(
@@ -216,6 +251,7 @@ def collect_reliability_events(
             )
         )
     state["reliability_active"] = sorted((active - recovered) | current)
+    state["reliability_monitor_failed"] = source_unknown
     return events
 
 
@@ -270,10 +306,12 @@ def write_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def write_health_record(directory: Path, payload: dict[str, Any]) -> None:
+def write_health_record(
+    directory: Path, payload: dict[str, Any], *, filename: str = HEALTH_RECORD
+) -> None:
     """Persist only bounded, content-free output evidence for the dashboard."""
 
-    path = directory / HEALTH_RECORD
+    path = directory / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -563,9 +601,8 @@ def main() -> int:
     )
     state = load_state(state_path)
     now = datetime.now(UTC)
-    force_aggregate, force_synthetic = release_probe_triggers(state, settings)
+    force_aggregate, _force_synthetic = release_probe_triggers(state, settings)
     events, collection_failed = collect_events(state, settings, now)
-    critical_trigger = any(event.get("severity") == "critical" for event in events)
     events.extend(
         collect_reliability_events(
             state,
@@ -576,15 +613,8 @@ def main() -> int:
             force=force_aggregate,
         )
     )
-    events.extend(
-        asyncio.run(
-            collect_synthetic_events(
-                state,
-                settings.environment,
-                now,
-                force=force_synthetic or critical_trigger,
-            )
-        )
+    collection_failed = collection_failed or bool(
+        state.get("reliability_monitor_failed")
     )
     for event in events:
         append_event(state, event)

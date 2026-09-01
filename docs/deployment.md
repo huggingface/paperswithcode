@@ -768,18 +768,24 @@ five failures and a 50% failure rate in a five-minute window, then send one
 recovery event after a fully clean five-minute window. Primary failure routes
 the same content-free event to the fallback destination. The timer is safe to
 enable while production chat is disabled because the job reports `dormant`
-without reading chat state or sending alerts.
+without reading chat state or sending alerts. Paid synthetic turns run in the
+separate allowlisted `run_chat_synthetic_probe` job with a six-minute launcher
+timeout. Its minute timer enforces the four-hour due gate and reacts to new
+releases, provider routes, and critical alert timestamps without blocking the
+journal poll.
 
 The committed timer is installed with the deployment tools but is never enabled
 implicitly. Enabling it is a reviewed production preparation mutation:
 
 ```bash
+sudo python deploy/install_deploy_tools.py <exact-main-sha>
 sudo systemctl enable --now pwc-chat-alert-monitor.timer
+sudo systemctl enable --now pwc-cron-run-chat-synthetic-probe.timer
 ```
 
-An enabled production-chat deployment fails closed unless this timer is
-enabled. The timer invokes only the `pwc-cron` allowlist, and only this job's
-transient unit receives read access to the system journal.
+An enabled production-chat deployment fails closed unless both timers are
+enabled. Both timers invoke only the `pwc-cron` allowlist, and only the
+operational monitor's transient unit receives read access to the system journal.
 
 Seal the reviewed production preparation inputs into a root-owned, non-loaded
 overlay. The named mode-`0600` Modal profile is imported in memory, so its token
