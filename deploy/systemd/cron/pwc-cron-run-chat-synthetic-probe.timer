@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Evaluate due and triggered production synthetic chat probes
+
+[Timer]
+OnCalendar=*-*-* *:*:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-run-chat-synthetic-probe.service
+
+[Install]
+WantedBy=timers.target

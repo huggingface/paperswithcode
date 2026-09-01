@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
+import json
+import sys
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
+from backend.config import Settings
 from backend.services.autonomous_cron_probe import FindingState
 from backend.services.chat_synthetic_probe import run_synthetic_chat
 from backend.scripts import monitor_chat_operational_alerts as monitor
@@ -52,6 +57,15 @@ class FakeSyntheticTransport:
         self.calls.append("close")
 
 
+class HangingSyntheticTransport(FakeSyntheticTransport):
+    async def stream_turn(self, session_id):
+        self.calls.append("stream")
+        assert session_id == "synthetic-session"
+        await asyncio.sleep(1)
+        if False:
+            yield {}
+
+
 def test_synthetic_probe_verifies_full_lifecycle_and_cleanup():
     transport = FakeSyntheticTransport()
 
@@ -90,6 +104,24 @@ def test_synthetic_probe_classifies_stream_failure_and_still_cleans_up():
     assert result.incident_signature == "chat:stream:terminal_error"
     assert result.steps["complete_stream"] == "degraded"
     assert transport.deleted is True
+
+
+def test_synthetic_probe_bounds_lifecycle_and_still_cleans_up():
+    transport = HangingSyntheticTransport()
+
+    result = asyncio.run(
+        run_synthetic_chat(
+            "production",
+            transport=transport,
+            now=NOW,
+            lifecycle_timeout_seconds=0.001,
+        )
+    )
+
+    assert result.state == FindingState.DEGRADED
+    assert result.incident_signature == "chat:synthetic:timeout"
+    assert transport.deleted is True
+    assert transport.calls[-3:] == ["delete", "absent", "close"]
 
 
 def test_synthetic_probe_rejects_non_production_target():
@@ -161,3 +193,97 @@ def test_monitor_pages_on_synthetic_failure_without_content(monkeypatch):
     assert events[0]["classifications"] == {"chat:persistence:reopen_failed": 1}
     assert "prompt" not in repr(events).lower()
     assert "answer" not in repr(events).lower()
+
+
+def test_separate_synthetic_job_runs_release_trigger_and_persists_before_delivery(
+    monkeypatch, tmp_path, capsys
+):
+    job = importlib.import_module("backend.scripts.run_chat_synthetic_probe")
+    settings = Settings(
+        environment="production",
+        release_id="new-release",
+        chat_enabled=True,
+        chat_operational_alerts_enabled=True,
+        cron_log_dir=str(tmp_path),
+    )
+    state = monitor.empty_state()
+    calls = []
+
+    async def collect(active_state, environment, now, *, force=False):
+        calls.append((environment, force))
+        active_state["last_synthetic_probe_at"] = now.isoformat()
+        return []
+
+    async def deliver(active_state, _settings):
+        assert active_state["last_synthetic_probe_at"] == NOW.isoformat()
+        assert calls == [("production", True)]
+        return 0
+
+    monkeypatch.setattr(job, "get_settings", lambda: settings)
+    monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: None)
+    monkeypatch.setattr(job, "load_state", lambda _path: state)
+    monkeypatch.setattr(job, "collect_synthetic_events", collect)
+    monkeypatch.setattr(job, "deliver_pending", deliver)
+    monkeypatch.setattr(job, "datetime", SimpleNamespace(now=lambda _tz: NOW))
+    writes = []
+    monkeypatch.setattr(
+        job,
+        "write_state",
+        lambda path, payload: writes.append((path.name, dict(payload))),
+    )
+    health = []
+    monkeypatch.setattr(
+        job,
+        "write_health_record",
+        lambda _directory, payload, **_kwargs: health.append(payload),
+    )
+    monkeypatch.setattr(sys, "argv", ["run_chat_synthetic_probe"])
+
+    assert job.main() == 0
+    assert len(writes) == 2
+    assert health[-1]["status"] == "healthy"
+    assert json.loads(capsys.readouterr().out)["status"] == "healthy"
+
+
+def test_separate_synthetic_job_pauses_paid_work_in_manual_mode(
+    monkeypatch, tmp_path, capsys
+):
+    job = importlib.import_module("backend.scripts.run_chat_synthetic_probe")
+    settings = Settings(
+        environment="production",
+        chat_enabled=True,
+        chat_operational_alerts_enabled=True,
+        cron_log_dir=str(tmp_path),
+    )
+    monkeypatch.setattr(job, "get_settings", lambda: settings)
+    monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: "manual_mode")
+    monkeypatch.setattr(
+        job,
+        "collect_synthetic_events",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("paid synthetic chat must remain paused")
+        ),
+    )
+    health = []
+    monkeypatch.setattr(
+        job,
+        "write_health_record",
+        lambda _directory, payload, **_kwargs: health.append(payload),
+    )
+    monkeypatch.setattr(job, "datetime", SimpleNamespace(now=lambda _tz: NOW))
+    monkeypatch.setattr(sys, "argv", ["run_chat_synthetic_probe"])
+
+    assert job.main() == 0
+    assert health == [
+        {
+            "environment": "production",
+            "status": "paused",
+            "reason_code": "manual_mode",
+            "completed_at": NOW.isoformat(),
+            "pending": 0,
+            "new_events": 0,
+            "delivered": 0,
+            "release_id": settings.release_id,
+        }
+    ]
+    assert json.loads(capsys.readouterr().out)["status"] == "paused"

@@ -310,8 +310,8 @@ def fetch_thumbnail_cache_freshness() -> Dict[str, Any]:
     }
 
 
-def fetch_chat_monitor_output() -> Dict[str, Any]:
-    path = Path(get_settings().cron_log_dir) / "chat-operational-alert-health.json"
+def _fetch_chat_health_output(filename: str) -> Dict[str, Any]:
+    path = Path(get_settings().cron_log_dir) / filename
     try:
         raw = path.read_bytes()
     except (FileNotFoundError, PermissionError, OSError):
@@ -327,11 +327,20 @@ def fetch_chat_monitor_output() -> Dict[str, Any]:
     return {
         "monitor_record_available": True,
         "monitor_status": str(payload.get("status") or "unknown")[:16],
+        "monitor_reason_code": str(payload.get("reason_code") or "")[:64] or None,
         "monitor_completed_at": str(payload.get("completed_at") or "")[:64] or None,
         "undelivered_alert_events": max(0, int(payload.get("pending") or 0)),
         "new_alert_events": max(0, int(payload.get("new_events") or 0)),
         "delivered_alert_events": max(0, int(payload.get("delivered") or 0)),
     }
+
+
+def fetch_chat_monitor_output() -> Dict[str, Any]:
+    return _fetch_chat_health_output("chat-operational-alert-health.json")
+
+
+def fetch_chat_synthetic_output() -> Dict[str, Any]:
+    return _fetch_chat_health_output("chat-synthetic-probe-health.json")
 
 
 def fetch_submission_review_output() -> Dict[str, Any]:
@@ -1705,6 +1714,11 @@ def _chat_alert_contract(
         ]
     if monitor_status == "dormant":
         return "healthy", ["monitor is dormant because production chat is disabled"]
+    if monitor_status == "paused":
+        reason = work.get("monitor_reason_code")
+        return "healthy", [
+            f"paid synthetic probe is paused by autonomous control ({reason})"
+        ]
     if monitor_status == "healthy":
         return "healthy", [
             "latest content-free operational poll completed successfully"
@@ -2431,6 +2445,10 @@ def _chat_monitor_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     return {**metrics, **fetch_chat_monitor_output()}
 
 
+def _chat_synthetic_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_chat_synthetic_output()}
+
+
 def _submission_review_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     return {**metrics, **fetch_submission_review_output()}
 
@@ -2442,6 +2460,7 @@ def _autonomous_cron_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
 WORK_METRICS_PROVIDERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     "paper_markdown_monitor": _paper_markdown_work_metrics,
     "chat_monitor": _chat_monitor_work_metrics,
+    "chat_synthetic": _chat_synthetic_work_metrics,
     "submission_review": _submission_review_work_metrics,
     "autonomous_cron": _autonomous_cron_work_metrics,
 }

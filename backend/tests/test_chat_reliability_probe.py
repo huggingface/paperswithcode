@@ -102,6 +102,82 @@ def test_turn_query_classifies_interruption_without_fetching_io(monkeypatch):
     assert calls[0]["name"] == "generate-research-response"
 
 
+def test_turn_query_classifies_predispatch_auth_and_billing_errors(monkeypatch):
+    page = SimpleNamespace(
+        data=[
+            SimpleNamespace(
+                level="ERROR",
+                status_message="provider_unauthorized",
+                end_time=NOW,
+                latency=0.2,
+                time_to_first_token=None,
+            ),
+            SimpleNamespace(
+                level="ERROR",
+                status_message="openrouter_monthly_budget_exhausted",
+                end_time=NOW,
+                latency=0.3,
+                time_to_first_token=None,
+            ),
+        ],
+        meta=SimpleNamespace(cursor=None),
+    )
+    client = SimpleNamespace(
+        api=SimpleNamespace(
+            observations=SimpleNamespace(get_many=lambda **_kwargs: page)
+        )
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.configured_chat_client",
+        lambda _settings: client,
+    )
+
+    result = fetch_chat_turn_observations(
+        Settings(environment="production"), NOW - timedelta(minutes=15), NOW
+    )
+
+    assert result is not None
+    assert [item.outcome for item in result.observations] == [
+        "auth_error",
+        "billing_error",
+    ]
+
+
+def test_turn_query_classifies_actual_predispatch_provider_failures(monkeypatch):
+    page = SimpleNamespace(
+        data=[
+            SimpleNamespace(
+                level="ERROR",
+                status_message=code,
+                end_time=NOW,
+                latency=0.2,
+                time_to_first_token=None,
+            )
+            for code in ("openai_unavailable", "openrouter_unavailable")
+        ],
+        meta=SimpleNamespace(cursor=None),
+    )
+    client = SimpleNamespace(
+        api=SimpleNamespace(
+            observations=SimpleNamespace(get_many=lambda **_kwargs: page)
+        )
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.configured_chat_client",
+        lambda _settings: client,
+    )
+
+    result = fetch_chat_turn_observations(
+        Settings(environment="production"), NOW - timedelta(minutes=15), NOW
+    )
+
+    assert result is not None
+    assert [item.outcome for item in result.observations] == [
+        "provider_error",
+        "provider_error",
+    ]
+
+
 def test_aggregate_classification_is_deterministic_and_content_free():
     snapshot = ChatAggregateSnapshot(
         total_requests=10,
@@ -181,6 +257,41 @@ def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkey
     assert by_contract["provider_errors"].state == FindingState.DEGRADED
     assert by_contract["persistence"].evidence["failure_count"] == 1
     assert by_contract["capacity"].evidence["failure_count"] == 2
+
+
+def test_probe_counts_predispatch_turn_provider_auth_and_billing_failures(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.chat_reliability_probe.fetch_provider_request_observations",
+        lambda _settings, _start, _end: SimpleNamespace(
+            complete=True,
+            observations=(SafeProviderObservation("success", 300, 1000),),
+        ),
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_reliability_probe.fetch_chat_turn_observations",
+        lambda _settings, _start, _end: SimpleNamespace(
+            complete=True,
+            observations=(
+                SafeChatTurnObservation("provider_error", None, 100),
+                SafeChatTurnObservation("auth_error", None, 200),
+                SafeChatTurnObservation("billing_error", None, 300),
+            ),
+        ),
+    )
+
+    findings = probe_chat_aggregates(
+        timedelta(minutes=15),
+        settings=Settings(environment="production"),
+        now=NOW,
+    )
+
+    by_contract = {item.contract: item for item in findings}
+    assert by_contract["provider_errors"].state == FindingState.DEGRADED
+    assert by_contract["provider_errors"].evidence["failure_count"] == 1
+    assert by_contract["auth_errors"].state == FindingState.DEGRADED
+    assert by_contract["auth_errors"].evidence["failure_count"] == 1
+    assert by_contract["billing_errors"].state == FindingState.DEGRADED
+    assert by_contract["billing_errors"].evidence["failure_count"] == 1
 
 
 def test_unavailable_or_truncated_aggregate_source_is_unknown(monkeypatch):

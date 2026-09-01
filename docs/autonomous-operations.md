@@ -78,8 +78,10 @@ observations supply success, interruption, first-token, and completion timing,
 while provider observations supply provider/auth/billing classes. Existing
 sanitized operational counters supply persistence and capacity failures.
 
-A dedicated-account synthetic chat runs at most every four hours, plus explicit
-post-alert, deploy, rollback, and provider-route checks. It verifies login,
+A separately allowlisted synthetic job polls its due/trigger state every minute
+under a six-minute execution envelope and runs a dedicated-account chat at most
+every four hours, plus explicit post-alert, deploy, rollback, and provider-route
+checks. It verifies login,
 admission, first token, complete stream, persisted/reopenable state, deletion,
 and deletion verification. Configure its username and session credential only
 in the root-owned CRON overlay:
@@ -89,7 +91,9 @@ PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME=replace-dedicated-monitor-username
 PWC_CHAT_SYNTHETIC_SESSION_COOKIE=replace-dedicated-monitor-session
 ```
 
-The synthetic prompt is fixed in source. Its durable state contains only step
+The paid lifecycle is bounded below the launcher timeout and cleanup has its own
+deadline, so the minute-level journal monitor never owns or interrupts a paid
+turn. The synthetic prompt is fixed in source. Its durable state contains only step
 states and stable incident signatures, never the session identifier, response,
 credential, prompt, or trace identifier. Manual mode does not disable either
 monitor.

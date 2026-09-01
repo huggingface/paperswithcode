@@ -207,9 +207,15 @@ def _snapshot(
     return ChatAggregateSnapshot(
         total_requests=len(turns),
         successful_requests=turn_outcomes.count("success"),
-        provider_errors=outcomes.count("provider_error"),
-        auth_errors=outcomes.count("auth_error"),
-        billing_errors=outcomes.count("billing_error"),
+        provider_errors=max(
+            outcomes.count("provider_error"), turn_outcomes.count("provider_error")
+        ),
+        auth_errors=max(
+            outcomes.count("auth_error"), turn_outcomes.count("auth_error")
+        ),
+        billing_errors=max(
+            outcomes.count("billing_error"), turn_outcomes.count("billing_error")
+        ),
         ttft_ms=tuple(item.ttft_ms for item in turns if item.ttft_ms is not None),
         completion_ms=tuple(
             item.duration_ms for item in turns if item.duration_ms is not None

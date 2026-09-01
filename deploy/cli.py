@@ -348,16 +348,25 @@ def require_production_chat_monitor(environment: str) -> None:
 
     if environment != "production" or not _configured_chat_enabled(environment):
         return
-    enabled = subprocess.run(
-        ["systemctl", "is-enabled", "--quiet", "pwc-chat-alert-monitor.timer"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    required_timers = (
+        (
+            "pwc-chat-alert-monitor.timer",
+            "enabled production chat requires the operational alert monitor timer",
+        ),
+        (
+            "pwc-cron-run-chat-synthetic-probe.timer",
+            "enabled production chat requires the synthetic chat probe timer",
+        ),
     )
-    if enabled.returncode:
-        raise DeployError(
-            "enabled production chat requires the operational alert monitor timer"
+    for timer, error in required_timers:
+        enabled = subprocess.run(
+            ["systemctl", "is-enabled", "--quiet", timer],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        if enabled.returncode:
+            raise DeployError(error)
 
 
 def frontend_feature_environment(
