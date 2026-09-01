@@ -31,6 +31,7 @@ from backend.services.durable_external_qualification import (
     StagingQualificationPrerequisites,
     WholeWindowResourceSampler,
 )
+from deploy.external_pi_slot_topology import REPLICA_COUNT
 
 
 class SystemDurableQualificationControlPlane:
@@ -424,7 +425,7 @@ class _SystemResourceEvidence:
         if scope_id is None:
             raise QualificationRefused("qualification_scope_invalid")
         worker_ids = configured_worker_ids(self.control_plane.settings)
-        if not 1 <= len(worker_ids) <= 4:
+        if len(worker_ids) != REPLICA_COUNT:
             raise QualificationRefused("staging_prerequisite_missing")
         from sqlalchemy import text
 

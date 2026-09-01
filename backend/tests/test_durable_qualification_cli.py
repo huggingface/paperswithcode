@@ -454,6 +454,63 @@ def test_system_resource_sampler_uses_active_slot_backend_unit(tmp_path, monkeyp
     ]
 
 
+def test_system_resource_scope_counts_accept_exact_eight_worker_topology(monkeypatch):
+    import uuid
+
+    from backend.database import connection
+    from backend.services import durable_external_qualification_system as system
+
+    class FakeSession:
+        def execute(self, _statement, _parameters):
+            return SimpleNamespace(scalar_one=lambda: 0)
+
+    class SessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        connection,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: SessionContext()),
+    )
+    control = SimpleNamespace(
+        qualification_scope_id=uuid.uuid4(),
+        release_id="0123456789ab-staging",
+        settings=SimpleNamespace(
+            chat_external_pi_worker_endpoints=tuple(
+                SimpleNamespace(worker_id=f"staging-blue-{index:02d}")
+                for index in range(8)
+            )
+        ),
+    )
+
+    assert system._SystemResourceEvidence(control)._scope_counts() == (0, 0, 0)
+
+
+@pytest.mark.parametrize("worker_count", (0, 4, 7, 9))
+def test_system_resource_scope_counts_reject_non_current_topology(worker_count):
+    import uuid
+
+    from backend.services import durable_external_qualification_system as system
+
+    control = SimpleNamespace(
+        qualification_scope_id=uuid.uuid4(),
+        release_id="0123456789ab-staging",
+        settings=SimpleNamespace(
+            chat_external_pi_worker_endpoints=tuple(
+                SimpleNamespace(worker_id=f"staging-blue-{index:02d}")
+                for index in range(worker_count)
+            )
+        ),
+    )
+
+    with pytest.raises(system.QualificationRefused, match="staging_prerequisite"):
+        system._SystemResourceEvidence(control)._scope_counts()
+
+
 @pytest.mark.parametrize("mode", (0o600, 0o644, 0o660))
 def test_protected_staging_settings_reject_wrong_mode(tmp_path, mode):
     from backend.services.durable_external_qualification_system import (
