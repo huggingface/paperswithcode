@@ -712,32 +712,34 @@ def test_staging_launcher_disables_only_posterly_artifact_generation(
         assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
 
 
-@pytest.mark.parametrize(
-    ("slot", "worker_id", "url"),
-    (
-        ("blue", "staging-blue", "http://127.0.0.1:8766"),
-        ("green", "staging-green", "http://127.0.0.1:8767"),
-    ),
-)
-def test_staging_slot_launcher_binds_external_pi_loopback_identity(
-    monkeypatch: pytest.MonkeyPatch, slot: str, worker_id: str, url: str
+@pytest.mark.parametrize("slot", ("blue", "green"))
+def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
+    monkeypatch: pytest.MonkeyPatch, slot: str
 ):
     for key in (
         "PWC_CHAT_EXTERNAL_PI_WORKER_ID",
         "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
         "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
 
     slot_launcher.configure_external_pi_slot("staging", slot)
 
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == worker_id
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == url
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert len(endpoints) == 4
+    assert [item["worker_id"] for item in endpoints] == [
+        f"staging-{slot}-{index:02d}" for index in range(4)
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
 
 
 def test_production_slot_launcher_binds_isolated_external_pi_worker(
@@ -748,16 +750,23 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
         "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
         "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
     slot_launcher.configure_external_pi_slot("production", "blue")
 
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == "production-blue"
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8776"
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert [item["base_url"] for item in endpoints] == [
+        f"http://127.0.0.1:{port}" for port in range(8830, 8834)
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):

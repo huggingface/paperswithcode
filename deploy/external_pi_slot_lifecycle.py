@@ -12,13 +12,15 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 try:
     from deploy.external_pi_runtime import external_pi_runtime_manifest
+    from deploy.external_pi_slot_topology import replica_specs
 except ModuleNotFoundError:
     from external_pi_runtime import external_pi_runtime_manifest  # type: ignore[no-redef]
+    from external_pi_slot_topology import replica_specs  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
 CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode"))
@@ -95,13 +97,22 @@ class ExternalPiSlot:
     status_path: Path
 
 
-def _environment_status_path(environment: str, slot: str) -> Path:
+def _environment_status_path(environment: str, worker_id: str) -> Path:
     if environment == "staging":
-        return STATUS_ROOT / f"staging-{slot}.json"
-    return (
-        PRODUCTION_STATUS_ROOT.with_name(f"{PRODUCTION_STATUS_ROOT.name}-{slot}")
-        / "status.json"
-    )
+        return STATUS_ROOT / f"{worker_id}.json"
+    parts = worker_id.split("-")
+    if (
+        len(parts) not in {2, 3}
+        or parts[0] != "production"
+        or parts[1]
+        not in {
+            "blue",
+            "green",
+        }
+    ):
+        raise ValueError("external Pi production worker identity is invalid")
+    root = PRODUCTION_STATUS_ROOT.with_name(f"{PRODUCTION_STATUS_ROOT.name}-{parts[1]}")
+    return root / (f"{worker_id}.json" if len(parts) == 3 else "status.json")
 
 
 def resolve_external_pi_slot(environment: str, slot: str) -> ExternalPiSlot:
@@ -127,17 +138,33 @@ def resolve_external_pi_slot(environment: str, slot: str) -> ExternalPiSlot:
         expected_contract=contract,
     )
     entry_point = runtime / str(runtime_value["entry_point"])
+    worker_id = f"{environment}-{slot}"
     return ExternalPiSlot(
         slot=slot,
         port=ports[slot],
-        worker_id=f"{environment}-{slot}",
+        worker_id=worker_id,
         release=release,
         release_id=str(manifest["release_id"]),
         runtime=runtime,
         node=runtime / "node/bin/node",
         entry_point=entry_point,
         prompt=runtime / "assets/pi-system-prompt.txt",
-        status_path=_environment_status_path(environment, slot),
+        status_path=_environment_status_path(environment, worker_id),
+    )
+
+
+def resolve_external_pi_replicas(
+    environment: str, slot: str, base_token: str
+) -> tuple[ExternalPiSlot, ...]:
+    resolved = resolve_external_pi_slot(environment, slot)
+    return tuple(
+        replace(
+            resolved,
+            port=spec.port,
+            worker_id=spec.worker_id,
+            status_path=_environment_status_path(environment, spec.worker_id),
+        )
+        for spec in replica_specs(environment, slot, base_token)
     )
 
 
@@ -147,22 +174,36 @@ def node_environment(
     *,
     instance_id: str,
 ) -> dict[str, str]:
-    token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
-    if len(token) < 32:
+    base_token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
+    if len(base_token) < 32:
         raise ValueError("external Pi worker token is missing or too short")
-    state_root = protected.get("PWC_EXTERNAL_PI_STATE_ROOT", "")
-    expected_state_root = (
+    base_state_root = protected.get("PWC_EXTERNAL_PI_STATE_ROOT", "")
+    expected_base_state_root = (
         f"/run/paperswithcode/external-pi-{resolved.slot}"
         if resolved.worker_id.startswith("staging-")
-        else f"/run/paperswithcode/external-pi-{resolved.worker_id}"
+        else f"/run/paperswithcode/external-pi-production-{resolved.slot}"
     )
-    if state_root != expected_state_root:
+    if base_state_root != expected_base_state_root:
         raise ValueError("external Pi worker state root is invalid")
+    specs = replica_specs(
+        resolved.worker_id.split("-", 1)[0], resolved.slot, base_token
+    )
+    spec = next((item for item in specs if item.worker_id == resolved.worker_id), None)
+    legacy_worker_id = f"{resolved.worker_id.split('-', 1)[0]}-{resolved.slot}"
+    if spec is None and resolved.worker_id != legacy_worker_id:
+        raise ValueError("external Pi worker replica is invalid")
+    state_root = (
+        str(Path(base_state_root) / resolved.worker_id)
+        if spec is not None
+        else base_state_root
+    )
     return {
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
         "PWC_EXTERNAL_PI_PORT": str(resolved.port),
-        "PWC_EXTERNAL_PI_TOKEN": token,
-        "PWC_EXTERNAL_PI_MAX_SESSIONS": str(MAXIMUM_SESSIONS),
+        "PWC_EXTERNAL_PI_TOKEN": spec.token if spec is not None else base_token,
+        "PWC_EXTERNAL_PI_MAX_SESSIONS": str(
+            spec.maximum_sessions if spec is not None else MAXIMUM_SESSIONS
+        ),
         "PWC_EXTERNAL_PI_WORKER_ID": resolved.worker_id,
         "PWC_EXTERNAL_PI_INSTANCE_ID": instance_id,
         "PWC_EXTERNAL_PI_RELEASE_ID": resolved.release_id,
@@ -175,18 +216,36 @@ def node_environment(
 def supervisor_environment(
     resolved: ExternalPiSlot, protected: dict[str, str]
 ) -> dict[str, str]:
+    environment = resolved.worker_id.split("-", 1)[0]
+    base_token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
+    spec = next(
+        (
+            item
+            for item in replica_specs(environment, resolved.slot, base_token)
+            if item.worker_id == resolved.worker_id
+        ),
+        None,
+    )
+    legacy_worker_id = f"{environment}-{resolved.slot}"
+    if spec is None and resolved.worker_id != legacy_worker_id:
+        raise ValueError("external Pi worker replica is invalid")
     values = {
         key: protected[key] for key in _SUPERVISOR_PROTECTED_KEYS if key in protected
     }
+    values["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] = (
+        spec.token if spec is not None else base_token
+    )
     values.update(
         {
-            "PWC_ENVIRONMENT": resolved.worker_id.rsplit("-", 1)[0],
+            "PWC_ENVIRONMENT": environment,
             "PWC_RELEASE_ID": resolved.release_id,
             "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": "true",
             "PWC_CHAT_EXTERNAL_PI_WORKER_ID": resolved.worker_id,
             "PWC_CHAT_EXTERNAL_PI_WORKER_URL": f"http://127.0.0.1:{resolved.port}",
             "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": CONTRACT_VERSION,
-            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(MAXIMUM_SESSIONS),
+            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(
+                spec.maximum_sessions if spec is not None else MAXIMUM_SESSIONS
+            ),
             "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": protected.get(
                 "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS", "10"
             ),
@@ -233,7 +292,15 @@ def _status_path(environment: str, slot: str) -> Path:
         or slot not in ENVIRONMENT_SLOT_PORTS[environment]
     ):
         raise ValueError("external Pi deployment slot is invalid")
-    return _environment_status_path(environment, slot)
+    worker_id = f"{environment}-{slot}"
+    return _environment_status_path(environment, worker_id)
+
+
+def _status_paths(environment: str, slot: str) -> tuple[Path, ...]:
+    return tuple(
+        _environment_status_path(environment, spec.worker_id)
+        for spec in replica_specs(environment, slot, "x" * 32)
+    )
 
 
 def _read_status(environment: str, slot: str) -> dict:
@@ -245,9 +312,36 @@ def _read_status(environment: str, slot: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
+def _read_replica_statuses(environment: str, slot: str) -> tuple[dict, ...]:
+    values = []
+    for path in _status_paths(environment, slot):
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            value = {}
+        values.append(value if isinstance(value, dict) else {})
+    return tuple(values)
+
+
+def _read_primary_status(environment: str, slot: str) -> dict:
+    replicas = _read_replica_statuses(environment, slot)
+    return replicas[0] if any(replicas) else _read_status(environment, slot)
+
+
 def slot_status(environment: str, slot: str) -> dict:
-    """Return the release-managed lifecycle evidence for one staging slot."""
-    return _read_status(environment, slot)
+    """Return aggregate release-managed lifecycle evidence for one slot."""
+    replicas = _read_replica_statuses(environment, slot)
+    if not any(replicas):
+        return _read_status(environment, slot)
+    return {
+        "replicas": list(replicas),
+        "ready_replicas": sum(value.get("state") == "ready" for value in replicas),
+        "maximum_sessions": sum(
+            value.get("maximum_sessions", 0)
+            for value in replicas
+            if type(value.get("maximum_sessions")) is int
+        ),
+    }
 
 
 def _read_protected_values(environment: str) -> dict[str, str]:
@@ -350,58 +444,91 @@ def _stop_proven_orphaned_worker_if_active(
         return
     if not _supervisor_is_inactive(environment, slot):
         raise ExternalPiSlotError("external Pi supervisor is still active")
-    token = _protected_environment_values(environment).get(
+    base_token = _protected_environment_values(environment).get(
         "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", ""
     )
-    if len(token) < 32:
+    if len(base_token) < 32:
         raise ExternalPiSlotError("external Pi worker token is unavailable")
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{ENVIRONMENT_SLOT_PORTS[environment][slot]}/v1/status",
-        headers={"Authorization": f"Bearer {token}"},
-        method="GET",
-    )
-    try:
-        with urllib.request.urlopen(request, timeout=5) as response:
-            payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
-            if len(payload) > MAXIMUM_WORKER_STATUS_BYTES:
-                raise ValueError("external Pi worker status is too large")
-            status = json.loads(payload)
-    except (OSError, ValueError, urllib.error.URLError) as error:
-        raise ExternalPiSlotError(
-            "external Pi active worker status is unavailable"
-        ) from error
-    identity_and_capacity_match = (
-        isinstance(status, dict)
-        and status.get("protocol") == CONTRACT_VERSION
-        and status.get("worker_id") == f"{environment}-{slot}"
-        and type(status.get("active_sessions")) is int
-        and status.get("active_sessions") == 0
-        and type(status.get("maximum_sessions")) is int
-        and status.get("maximum_sessions") == MAXIMUM_SESSIONS
-    )
-    counters = status.get("operation_counters") if isinstance(status, dict) else None
     trusted_release_ids = validated_orphan_release_ids
     if expected_release_id is not None:
         trusted_release_ids = trusted_release_ids | {expected_release_id}
-    request_free_unclaimed = (
-        isinstance(status, dict)
-        and status.get("release_id") in trusted_release_ids
-        and status.get("state") == "ready"
-        and "worker_generation" in status
-        and status.get("worker_generation") is None
-        and isinstance(counters, dict)
-        and set(counters) == set(OPERATION_COUNTER_NAMES)
-        and all(
-            type(counters[name]) is int and counters[name] == 0
-            for name in OPERATION_COUNTER_NAMES
+
+    def safe_status(status: object, worker_id: str, maximum_sessions: int) -> bool:
+        counters = (
+            status.get("operation_counters") if isinstance(status, dict) else None
         )
+        identity_and_capacity_match = (
+            isinstance(status, dict)
+            and status.get("protocol") == CONTRACT_VERSION
+            and status.get("worker_id") == worker_id
+            and type(status.get("active_sessions")) is int
+            and status.get("active_sessions") == 0
+            and type(status.get("maximum_sessions")) is int
+            and status.get("maximum_sessions") == maximum_sessions
+        )
+        request_free_unclaimed = (
+            isinstance(status, dict)
+            and status.get("release_id") in trusted_release_ids
+            and status.get("state") == "ready"
+            and "worker_generation" in status
+            and status.get("worker_generation") is None
+            and isinstance(counters, dict)
+            and set(counters) == set(OPERATION_COUNTER_NAMES)
+            and all(
+                type(counters[name]) is int and counters[name] == 0
+                for name in OPERATION_COUNTER_NAMES
+            )
+        )
+        return identity_and_capacity_match and (
+            status.get("state") == "draining" or request_free_unclaimed
+        )
+
+    legacy_worker_id = f"{environment}-{slot}"
+    legacy_request = urllib.request.Request(
+        f"http://127.0.0.1:{ENVIRONMENT_SLOT_PORTS[environment][slot]}/v1/status",
+        headers={"Authorization": f"Bearer {base_token}"},
+        method="GET",
     )
-    if not identity_and_capacity_match or not (
-        status.get("state") == "draining" or request_free_unclaimed
-    ):
-        raise ExternalPiSlotError(
-            "external Pi active worker is not proven safe to restart"
+    legacy_status: object = None
+    try:
+        with urllib.request.urlopen(legacy_request, timeout=5) as response:
+            payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
+            if len(payload) <= MAXIMUM_WORKER_STATUS_BYTES:
+                legacy_status = json.loads(payload)
+    except (OSError, ValueError, urllib.error.URLError):
+        pass
+    if isinstance(legacy_status, dict):
+        if not safe_status(legacy_status, legacy_worker_id, MAXIMUM_SESSIONS):
+            raise ExternalPiSlotError(
+                "external Pi active worker is not proven safe to restart"
+            )
+        subprocess.run(
+            ["systemctl", "stop", _worker_unit(environment, slot)], check=True
         )
+        if not _worker_is_inactive(environment, slot):
+            raise ExternalPiSlotError("external Pi active worker did not stop")
+        return
+
+    for spec in replica_specs(environment, slot, base_token):
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{spec.port}/v1/status",
+            headers={"Authorization": f"Bearer {spec.token}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
+                if len(payload) > MAXIMUM_WORKER_STATUS_BYTES:
+                    raise ValueError("external Pi worker status is too large")
+                status = json.loads(payload)
+        except (OSError, ValueError, urllib.error.URLError) as error:
+            raise ExternalPiSlotError(
+                "external Pi active worker status is unavailable"
+            ) from error
+        if not safe_status(status, spec.worker_id, spec.maximum_sessions):
+            raise ExternalPiSlotError(
+                "external Pi active worker is not proven safe to restart"
+            )
     subprocess.run(["systemctl", "stop", _worker_unit(environment, slot)], check=True)
     if not _worker_is_inactive(environment, slot):
         raise ExternalPiSlotError("external Pi active worker did not stop")
@@ -409,6 +536,8 @@ def _stop_proven_orphaned_worker_if_active(
 
 def start_slot(environment: str, slot: str) -> None:
     _status_path(environment, slot).unlink(missing_ok=True)
+    for path in _status_paths(environment, slot):
+        path.unlink(missing_ok=True)
     sync_worker_environment(environment)
     _stop_proven_orphaned_worker_if_active(environment, slot)
     subprocess.run(["systemctl", "start", _worker_unit(environment, slot)], check=True)
@@ -431,22 +560,43 @@ def qualify_candidate(
     timeout_seconds: float = 65,
 ) -> int:
     deadline = time.monotonic() + timeout_seconds
-    last: dict = {}
+    last: tuple[dict, ...] = ()
+    worker_ids = tuple(
+        spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
+    )
     while time.monotonic() < deadline:
-        last = _read_status(environment, slot)
-        generation = last.get("generation")
-        if (
-            last.get("release_id") == release_id
-            and last.get("worker_id") == f"{environment}-{slot}"
-            and last.get("state") == "ready"
-            and last.get("authenticated") is True
-            and last.get("registered") is True
+        last = _read_replica_statuses(environment, slot)
+        if not any(last):
+            legacy = _read_status(environment, slot)
+            generation = legacy.get("generation")
+            if (
+                legacy.get("release_id") == release_id
+                and legacy.get("worker_id") == f"{environment}-{slot}"
+                and legacy.get("state") == "ready"
+                and legacy.get("authenticated") is True
+                and legacy.get("registered") is True
+                and isinstance(generation, int)
+                and generation >= 1
+                and isinstance(legacy.get("heartbeats"), int)
+                and legacy["heartbeats"] >= 1
+            ):
+                return generation
+        generations = tuple(value.get("generation") for value in last)
+        if len(last) == len(worker_ids) and all(
+            value.get("release_id") == release_id
+            and value.get("worker_id") == worker_id
+            and value.get("state") == "ready"
+            and value.get("authenticated") is True
+            and value.get("registered") is True
             and isinstance(generation, int)
             and generation >= 1
-            and isinstance(last.get("heartbeats"), int)
-            and last["heartbeats"] >= 1
+            and isinstance(value.get("heartbeats"), int)
+            and value["heartbeats"] >= 1
+            for value, worker_id, generation in zip(
+                last, worker_ids, generations, strict=True
+            )
         ):
-            return generation
+            return min(generations)
         time.sleep(0.25)
     raise ExternalPiSlotError(f"external Pi candidate qualification failed: {last!r}")
 
@@ -507,11 +657,15 @@ def _restart_supervisor_after_lease_expiry(
         deadline = time.monotonic() + 70
         last: dict = {}
         while time.monotonic() < deadline:
-            last = _read_status(environment, slot)
+            last = _read_primary_status(environment, slot)
             generation = last.get("generation")
+            expected_worker_ids = {
+                f"{environment}-{slot}",
+                replica_specs(environment, slot, "x" * 32)[0].worker_id,
+            }
             if (
                 last.get("release_id") == release_id
-                and last.get("worker_id") == f"{environment}-{slot}"
+                and last.get("worker_id") in expected_worker_ids
                 and last.get("state") == "ready"
                 and last.get("authenticated") is True
                 and last.get("registered") is True
@@ -623,7 +777,10 @@ def stop_slot(
     validated_orphan_release_ids: frozenset[str] = frozenset(),
 ) -> None:
     timeout_seconds = drain_stop_timeout_seconds(environment)
-    previous = _read_status(environment, slot)
+    previous = _read_replica_statuses(environment, slot)
+    legacy = not any(previous)
+    if legacy:
+        previous = (_read_status(environment, slot),)
     try:
         subprocess.run(
             ["systemctl", "stop", _supervisor_unit(environment, slot)],
@@ -632,12 +789,22 @@ def stop_slot(
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise ExternalPiSlotError("external Pi worker drain timed out") from error
-    value = _read_status(environment, slot)
-    if _worker_stop_is_safe(
-        previous,
-        value,
-        release_id=release_id,
-        worker_id=f"{environment}-{slot}",
+    value = _read_replica_statuses(environment, slot)
+    if legacy:
+        value = (_read_status(environment, slot),)
+        worker_ids = (f"{environment}-{slot}",)
+    else:
+        worker_ids = tuple(
+            spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
+        )
+    if len(previous) == len(value) == len(worker_ids) and all(
+        _worker_stop_is_safe(
+            prior,
+            current,
+            release_id=release_id,
+            worker_id=worker_id,
+        )
+        for prior, current, worker_id in zip(previous, value, worker_ids, strict=True)
     ):
         subprocess.run(
             ["systemctl", "stop", _worker_unit(environment, slot)], check=True

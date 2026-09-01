@@ -7,6 +7,7 @@ import signal
 import subprocess
 import urllib.request
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -115,8 +116,8 @@ def test_wrong_or_unrecorded_runtime_is_rejected(
 def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
     resolved = lifecycle.ExternalPiSlot(
         slot="green",
-        port=8767,
-        worker_id="staging-green",
+        port=8820,
+        worker_id="staging-green-00",
         release=tmp_path / "release",
         release_id="release-green",
         runtime=tmp_path / "runtime",
@@ -143,18 +144,21 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
 
     node = lifecycle.node_environment(resolved, protected, instance_id="i" * 36)
     supervisor = lifecycle.supervisor_environment(resolved, protected)
+    derived_token = lifecycle.replica_specs("staging", "green", "t" * 32)[0].token
 
     assert node == {
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
-        "PWC_EXTERNAL_PI_PORT": "8767",
-        "PWC_EXTERNAL_PI_TOKEN": "t" * 32,
-        "PWC_EXTERNAL_PI_MAX_SESSIONS": "32",
-        "PWC_EXTERNAL_PI_WORKER_ID": "staging-green",
+        "PWC_EXTERNAL_PI_PORT": "8820",
+        "PWC_EXTERNAL_PI_TOKEN": derived_token,
+        "PWC_EXTERNAL_PI_MAX_SESSIONS": "8",
+        "PWC_EXTERNAL_PI_WORKER_ID": "staging-green-00",
         "PWC_EXTERNAL_PI_INSTANCE_ID": "i" * 36,
         "PWC_EXTERNAL_PI_RELEASE_ID": "release-green",
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
-        "PWC_EXTERNAL_PI_STATE_ROOT": "/run/paperswithcode/external-pi-green",
+        "PWC_EXTERNAL_PI_STATE_ROOT": (
+            "/run/paperswithcode/external-pi-green/staging-green-00"
+        ),
     }
     assert set(supervisor) == {
         "PWC_ENVIRONMENT",
@@ -179,16 +183,16 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_STATUS_PATH",
         "PWC_EXTERNAL_PI_WORKER_ID",
     }
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8767"
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8820"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
     assert "PWC_HF_TOKEN" not in supervisor
 
 
-@pytest.mark.parametrize(("slot", "port"), (("blue", 8766), ("green", 8767)))
+@pytest.mark.parametrize(("slot", "port"), (("blue", 8820), ("green", 8824)))
 def test_supervisor_child_settings_resolve_complete_slot_worker_topology(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slot: str, port: int
 ):
-    worker_id = f"staging-{slot}"
+    worker_id = f"staging-{slot}-00"
     resolved = lifecycle.ExternalPiSlot(
         slot=slot,
         port=port,
@@ -221,32 +225,35 @@ def test_supervisor_child_settings_resolve_complete_slot_worker_topology(
     assert endpoint.endpoint_id == "legacy"
     assert endpoint.worker_id == worker_id
     assert endpoint.base_url == f"http://127.0.0.1:{port}"
-    assert endpoint.token == "t" * 32
+    assert endpoint.token == lifecycle.replica_specs("staging", slot, "t" * 32)[0].token
 
 
 def test_candidate_requires_authenticated_durable_lifecycle_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
-    status = tmp_path / "staging-blue.json"
-    status.write_text(
-        json.dumps(
-            {
-                "release_id": "release-blue",
-                "worker_id": "staging-blue",
-                "state": "ready",
-                "authenticated": True,
-                "registered": True,
-                "generation": 3,
-                "heartbeats": 1,
-            }
+    statuses = []
+    for spec in lifecycle.replica_specs("staging", "blue", "x" * 32):
+        status = tmp_path / f"{spec.worker_id}.json"
+        status.write_text(
+            json.dumps(
+                {
+                    "release_id": "release-blue",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "authenticated": True,
+                    "registered": True,
+                    "generation": 3,
+                    "heartbeats": 1,
+                }
+            )
         )
-    )
+        statuses.append(status)
 
     assert lifecycle.qualify_candidate("staging", "blue", "release-blue") == 3
-    value = json.loads(status.read_text())
+    value = json.loads(statuses[0].read_text())
     value["authenticated"] = False
-    status.write_text(json.dumps(value))
+    statuses[0].write_text(json.dumps(value))
     with pytest.raises(lifecycle.ExternalPiSlotError, match="qualification"):
         lifecycle.qualify_candidate(
             "staging", "blue", "release-blue", timeout_seconds=0.01
@@ -1072,38 +1079,55 @@ def test_launcher_execs_release_python_with_only_scrubbed_settings(
             {"release_id": "release-blue"},
         ),
     )
-    monkeypatch.setattr(launcher, "resolve_external_pi_slot", lambda *_args: resolved)
+    fleet = tuple(
+        replace(
+            resolved,
+            port=spec.port,
+            worker_id=spec.worker_id,
+            status_path=tmp_path / f"{spec.worker_id}.json",
+        )
+        for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
+    )
+    monkeypatch.setattr(launcher, "resolve_external_pi_replicas", lambda *_args: fleet)
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
     monkeypatch.setenv(
         "PWC_EXTERNAL_PI_STATE_ROOT", "/run/paperswithcode/external-pi-blue"
     )
     monkeypatch.setenv("PWC_HF_TOKEN", "must-not-leak")
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
-    monkeypatch.setattr(launcher.os, "chdir", lambda path: None)
     executed: dict = {}
 
-    def execve(executable, arguments, environment):
-        executed.update(
-            executable=executable, arguments=arguments, environment=environment
-        )
+    def run_fleet(commands, environments, *, cwd):
+        executed.update(commands=commands, environments=environments, cwd=cwd)
         raise RuntimeError("exec")
 
-    monkeypatch.setattr(launcher.os, "execve", execve)
+    monkeypatch.setattr(launcher, "run_process_fleet", run_fleet)
     monkeypatch.setattr(launcher.sys, "argv", ["launcher", "staging", "blue"])
 
     with pytest.raises(RuntimeError, match="exec"):
         launcher.main()
 
-    assert executed["executable"] == str(python)
-    assert executed["arguments"] == [
-        str(python),
-        "-m",
-        "backend.scripts.run_external_pi_slot",
+    assert (
+        executed["commands"]
+        == [
+            [
+                str(python),
+                "-m",
+                "backend.scripts.run_external_pi_slot",
+            ]
+        ]
+        * 4
+    )
+    assert [
+        value["PWC_EXTERNAL_PI_WORKER_ID"] for value in executed["environments"]
+    ] == [
+        spec.worker_id for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
     ]
-    assert executed["environment"]["PWC_EXTERNAL_PI_WORKER_ID"] == "staging-blue"
-    assert "PWC_EXTERNAL_PI_PORT" not in executed["environment"]
-    assert "PWC_HF_TOKEN" not in executed["environment"]
-    assert "OPENAI_API_KEY" not in executed["environment"]
+    assert all(
+        "PWC_EXTERNAL_PI_PORT" not in value for value in executed["environments"]
+    )
+    assert all("PWC_HF_TOKEN" not in value for value in executed["environments"])
+    assert all("OPENAI_API_KEY" not in value for value in executed["environments"])
 
 
 def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
@@ -1121,8 +1145,17 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         prompt=tmp_path / "runtime/assets/pi-system-prompt.txt",
         status_path=tmp_path / "status.json",
     )
+    fleet = tuple(
+        replace(
+            resolved,
+            port=spec.port,
+            worker_id=spec.worker_id,
+            status_path=tmp_path / f"{spec.worker_id}.json",
+        )
+        for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
+    )
     monkeypatch.setattr(
-        worker_launcher, "resolve_external_pi_slot", lambda *_args: resolved
+        worker_launcher, "resolve_external_pi_replicas", lambda *_args: fleet
     )
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
     monkeypatch.setenv(
@@ -1130,16 +1163,14 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
     )
     monkeypatch.setenv("PWC_DB_PASSWORD", "must-not-leak")
     monkeypatch.setenv("PWC_OPENAI_API_KEY", "must-not-leak")
-    monkeypatch.setattr(worker_launcher.os, "chdir", lambda _path: None)
+    monkeypatch.setattr(worker_launcher.Path, "mkdir", lambda *_args, **_kwargs: None)
     executed: dict = {}
 
-    def execve(executable, arguments, environment):
-        executed.update(
-            executable=executable, arguments=arguments, environment=environment
-        )
+    def run_fleet(commands, environments, *, cwd):
+        executed.update(commands=commands, environments=environments, cwd=cwd)
         raise RuntimeError("exec")
 
-    monkeypatch.setattr(worker_launcher.os, "execve", execve)
+    monkeypatch.setattr(worker_launcher, "run_process_fleet", run_fleet)
     monkeypatch.setattr(
         worker_launcher.sys, "argv", ["worker-launcher", "staging", "blue"]
     )
@@ -1147,14 +1178,14 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
     with pytest.raises(RuntimeError, match="exec"):
         worker_launcher.main()
 
-    assert executed["executable"] == str(resolved.node)
-    assert executed["arguments"] == [
+    assert executed["commands"][0] == [
         str(resolved.node),
         "--import",
         str(resolved.runtime / "app/node_modules/tsx/dist/loader.mjs"),
         str(resolved.entry_point),
     ]
-    assert set(executed["environment"]) == {
+    assert len(executed["commands"]) == 4
+    assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",
         "PWC_EXTERNAL_PI_TOKEN",
@@ -1166,7 +1197,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         "PWC_EXTERNAL_PI_TOOL_NAMES",
         "PWC_EXTERNAL_PI_STATE_ROOT",
     }
-    assert "PWC_DB_PASSWORD" not in executed["environment"]
+    assert all("PWC_DB_PASSWORD" not in value for value in executed["environments"])
 
 
 @pytest.mark.parametrize(
@@ -1479,7 +1510,7 @@ def test_lifecycle_bounds_active_worker_status_body(monkeypatch: pytest.MonkeyPa
     with pytest.raises(lifecycle.ExternalPiSlotError, match="status is unavailable"):
         lifecycle._stop_proven_orphaned_worker_if_active("staging", "blue")
 
-    assert read_sizes == [65_537]
+    assert read_sizes == [65_537, 65_537]
 
 
 def _install_active_worker_status(
@@ -1812,9 +1843,9 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
     assert "CPUQuota=400%" in worker
     assert "MemoryMax=4294967296" in worker
     assert "TasksMax=512" in worker
-    assert "CPUQuota=50%" in supervisor
-    assert "MemoryMax=536870912" in supervisor
-    assert "TasksMax=64" in supervisor
+    assert "CPUQuota=200%" in supervisor
+    assert "MemoryMax=2147483648" in supervisor
+    assert "TasksMax=256" in supervisor
     timeout_line = next(
         line for line in supervisor.splitlines() if line.startswith("TimeoutStopSec=")
     )

@@ -587,7 +587,8 @@ def main() -> int:
         slot = active_slot()
         lifecycle, runtime = _lifecycle_modules()
 
-        resolved = lifecycle.resolve_external_pi_slot("staging", slot)
+        token = _read_env(CONFIG_ROOT / "staging.env").get(TOKEN_KEY, "")
+        resolved = lifecycle.resolve_external_pi_replicas("staging", slot, token)[0]
         release = (APP_ROOT / "environments/staging/current").resolve(strict=True)
         python = APP_ROOT / "runtimes" / runtime.runtime_id(release) / "bin/python"
 
