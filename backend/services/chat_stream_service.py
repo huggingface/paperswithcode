@@ -1517,6 +1517,7 @@ class ChatStreamOrchestrator:
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
+        self.sdk_session_persistence_task: asyncio.Task[None] | None = None
         self.lease_heartbeat_task: asyncio.Task | None = None
         self.lease_heartbeat_error: Exception | None = None
         self.lifecycle = ChatTurnLifecycle()
@@ -2105,6 +2106,7 @@ class ChatStreamOrchestrator:
         *args: object,
         lifecycle_event: ChatTurnEvent | None = None,
     ) -> Any:
+        await self._await_sdk_session_persistence()
         if not self.terminal_persistence.begin():
             return
         persistence = asyncio.create_task(asyncio.to_thread(function, *args))
@@ -2217,19 +2219,31 @@ class ChatStreamOrchestrator:
         self, event: PersistenceEvent
     ) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        persistence = asyncio.create_task(
+        if self.sdk_session_persistence_task is not None:
+            await self._await_sdk_session_persistence()
+        self.sdk_session_persistence_task = asyncio.create_task(
             asyncio.to_thread(self._bind_sdk_session, payload)
         )
+        self.sdk_session_persistence_task.add_done_callback(_log_background_task_result)
+        return _HandledTurnEvent()
+
+    async def _await_sdk_session_persistence(self) -> None:
+        persistence = self.sdk_session_persistence_task
+        if persistence is None:
+            return
         cancellation: asyncio.CancelledError | None = None
-        while True:
-            try:
-                await asyncio.shield(persistence)
-                break
-            except asyncio.CancelledError as exc:
-                cancellation = cancellation or exc
+        try:
+            while True:
+                try:
+                    await asyncio.shield(persistence)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancellation = cancellation or exc
+        finally:
+            if persistence.done():
+                self.sdk_session_persistence_task = None
         if cancellation is not None:
             raise cancellation
-        return _HandledTurnEvent()
 
     async def _handle_mirror_failure(
         self, event: MirrorFailureEvent

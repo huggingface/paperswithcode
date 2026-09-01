@@ -277,7 +277,21 @@ export class PiWorker {
     await this.initialize();
     const phaseStarted = performance.now();
     this.failurePhase = "session_bind_restore";
-    const state = await this.sessionManager(run);
+    const statePromise = this.sessionManager(run);
+    const protocol = run.provider_protocol ?? "anthropic-messages";
+    const coldProviderPromise = !this.session
+      && !(this.prewarmedModel === run.model
+        && this.prewarmedProtocol === protocol
+        && this.prewarmedProvider)
+      ? createProvider(run.model, protocol, this.gateway)
+      : undefined;
+    let state: Awaited<typeof statePromise>;
+    try {
+      state = await statePromise;
+    } catch (error) {
+      await coldProviderPromise?.catch(() => undefined);
+      throw error;
+    }
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     this.failurePhase = "prompt_render";
     const taskCatalog = taskCatalogForPrompt();
@@ -292,6 +306,7 @@ export class PiWorker {
       ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
     });
+    const coldProvider = await coldProviderPromise;
     this.policy.reset(run.web_search_enabled, prompt, run.poster_mode);
     const profile = JSON.stringify({
       model: run.model,
@@ -306,6 +321,7 @@ export class PiWorker {
         ? "baked-fallback"
         : createHash("sha256").update(taskCatalog).digest("hex"),
     });
+    let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
       this.failurePhase = "transcript_initialize";
       // The remote count includes the session header; getEntries() contains
@@ -321,7 +337,7 @@ export class PiWorker {
         const header = state.manager.getHeader();
         if (!header) throw new Error("Pi native session header is missing");
         this.mirror.append(header as unknown as Record<string, unknown>);
-        await this.mirror.flush();
+        mirrorInitialization = this.mirror.flush();
       }
     }
     if (this.session && this.activeProfile === profile) {
@@ -330,12 +346,11 @@ export class PiWorker {
     }
     await this.disposeSession();
     this.failurePhase = "agent_session";
-    const protocol = run.provider_protocol ?? "anthropic-messages";
     const provider = this.prewarmedModel === run.model
       && this.prewarmedProtocol === protocol
       && this.prewarmedProvider
       ? this.prewarmedProvider
-      : await createProvider(run.model, protocol, this.gateway);
+      : coldProvider ?? await createProvider(run.model, protocol, this.gateway);
     const settings = SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: false },
@@ -360,7 +375,7 @@ export class PiWorker {
         }] : []),
       ],
     });
-    await loader.reload();
+    await Promise.all([loader.reload(), mirrorInitialization]);
     this.emit(run.request_id, { type: "_latency", phase: "resource_loading", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     const created = await createAgentSession({
       cwd: harnessWorkspace,

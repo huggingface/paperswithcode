@@ -76,7 +76,7 @@ def test_latency_telemetry_does_not_block_the_stream_on_database_latency(
     assert time.perf_counter() - started < 0.05
 
 
-def test_sdk_session_persistence_does_not_block_other_streams(monkeypatch) -> None:
+def test_sdk_session_persistence_does_not_block_first_token_path(monkeypatch) -> None:
     entered = threading.Event()
     release = threading.Event()
     orchestrator = _orchestrator()
@@ -88,15 +88,15 @@ def test_sdk_session_persistence_does_not_block_other_streams(monkeypatch) -> No
     monkeypatch.setattr(orchestrator, "_bind_sdk_session", slow_bind)
 
     async def exercise() -> None:
-        persistence = asyncio.create_task(
-            orchestrator._handle_persistence_event(
-                PersistenceEvent(session_id=str(uuid.uuid4()))
-            )
+        await orchestrator._handle_persistence_event(
+            PersistenceEvent(session_id=str(uuid.uuid4()))
         )
         while not entered.is_set():
             await asyncio.sleep(0)
+        assert orchestrator.sdk_session_persistence_task is not None
+        assert not orchestrator.sdk_session_persistence_task.done()
         release.set()
-        await persistence
+        await orchestrator._await_sdk_session_persistence()
 
     started = time.perf_counter()
     asyncio.run(exercise())
@@ -120,13 +120,13 @@ def test_sdk_session_persistence_finishes_before_cancellation_is_delivered(
     monkeypatch.setattr(orchestrator, "_bind_sdk_session", slow_bind)
 
     async def exercise() -> None:
-        persistence = asyncio.create_task(
-            orchestrator._handle_persistence_event(
-                PersistenceEvent(session_id=str(uuid.uuid4()))
-            )
+        await orchestrator._handle_persistence_event(
+            PersistenceEvent(session_id=str(uuid.uuid4()))
         )
         while not entered.is_set():
             await asyncio.sleep(0)
+        persistence = asyncio.create_task(orchestrator._await_sdk_session_persistence())
+        await asyncio.sleep(0)
         persistence.cancel()
         await asyncio.sleep(0)
         assert not persistence.done()
@@ -134,6 +134,42 @@ def test_sdk_session_persistence_finishes_before_cancellation_is_delivered(
         with pytest.raises(asyncio.CancelledError):
             await persistence
         assert completed.is_set()
+
+    asyncio.run(exercise())
+
+
+def test_terminal_persistence_waits_for_sdk_session_binding(monkeypatch) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    bound = threading.Event()
+    terminal = threading.Event()
+    orchestrator = _orchestrator()
+
+    def slow_bind(_payload) -> None:
+        entered.set()
+        release.wait(timeout=0.5)
+        bound.set()
+
+    def persist_terminal() -> None:
+        assert bound.is_set()
+        terminal.set()
+
+    monkeypatch.setattr(orchestrator, "_bind_sdk_session", slow_bind)
+
+    async def exercise() -> None:
+        await orchestrator._handle_persistence_event(
+            PersistenceEvent(session_id=str(uuid.uuid4()))
+        )
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        persistence = asyncio.create_task(
+            orchestrator._persist_terminal_with_lease(persist_terminal)
+        )
+        await asyncio.sleep(0)
+        assert not terminal.is_set()
+        release.set()
+        await persistence
+        assert terminal.is_set()
 
     asyncio.run(exercise())
 
