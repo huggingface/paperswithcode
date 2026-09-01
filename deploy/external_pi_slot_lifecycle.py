@@ -17,10 +17,13 @@ from pathlib import Path
 
 try:
     from deploy.external_pi_runtime import external_pi_runtime_manifest
-    from deploy.external_pi_slot_topology import replica_specs
+    from deploy.external_pi_slot_topology import ExternalPiReplicaSpec, replica_specs
 except ModuleNotFoundError:
     from external_pi_runtime import external_pi_runtime_manifest  # type: ignore[no-redef]
-    from external_pi_slot_topology import replica_specs  # type: ignore[no-redef]
+    from external_pi_slot_topology import (  # type: ignore[no-redef]
+        ExternalPiReplicaSpec,
+        replica_specs,
+    )
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
 CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode"))
@@ -40,6 +43,8 @@ ENVIRONMENT_SLOT_PORTS = {
     "production": {"blue": 8776, "green": 8777},
 }
 MAXIMUM_SESSIONS = 32
+PREVIOUS_REPLICA_COUNT = 4
+PREVIOUS_REPLICA_MAXIMUM_SESSIONS = 8
 CONTRACT_VERSION = "external-pi-v1"
 DRAIN_SECONDS_MINIMUM = 5
 DRAIN_SECONDS_MAXIMUM = 300
@@ -303,6 +308,40 @@ def _status_paths(environment: str, slot: str) -> tuple[Path, ...]:
     )
 
 
+def _draining_replica_specs(
+    environment: str, slot: str, base_token: str, release_id: str
+) -> tuple[ExternalPiReplicaSpec, ...]:
+    current = replica_specs(environment, slot, base_token)
+    paths = tuple(
+        _environment_status_path(environment, spec.worker_id) for spec in current
+    )
+    previous_paths = paths[:PREVIOUS_REPLICA_COUNT]
+    added_paths = paths[PREVIOUS_REPLICA_COUNT:]
+    previous_statuses = _read_replica_statuses(
+        environment, slot, current[:PREVIOUS_REPLICA_COUNT]
+    )
+    previous_topology_is_proven = all(
+        status.get("protocol") == CONTRACT_VERSION
+        and status.get("release_id") == release_id
+        and status.get("worker_id") == spec.worker_id
+        and type(status.get("maximum_sessions")) is int
+        and status.get("maximum_sessions") == PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+        for status, spec in zip(
+            previous_statuses, current[:PREVIOUS_REPLICA_COUNT], strict=True
+        )
+    )
+    if (
+        all(path.is_file() for path in previous_paths)
+        and not any(path.exists() for path in added_paths)
+        and previous_topology_is_proven
+    ):
+        return tuple(
+            replace(spec, maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS)
+            for spec in current[:PREVIOUS_REPLICA_COUNT]
+        )
+    return current
+
+
 def _read_status(environment: str, slot: str) -> dict:
     path = _status_path(environment, slot)
     try:
@@ -312,9 +351,20 @@ def _read_status(environment: str, slot: str) -> dict:
     return value if isinstance(value, dict) else {}
 
 
-def _read_replica_statuses(environment: str, slot: str) -> tuple[dict, ...]:
+def _read_replica_statuses(
+    environment: str,
+    slot: str,
+    specs: tuple[ExternalPiReplicaSpec, ...] | None = None,
+) -> tuple[dict, ...]:
     values = []
-    for path in _status_paths(environment, slot):
+    paths = (
+        _status_paths(environment, slot)
+        if specs is None
+        else tuple(
+            _environment_status_path(environment, spec.worker_id) for spec in specs
+        )
+    )
+    for path in paths:
         try:
             value = json.loads(path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
@@ -439,6 +489,7 @@ def _stop_proven_orphaned_worker_if_active(
     worker_active_proven: bool = False,
     expected_release_id: str | None = None,
     validated_orphan_release_ids: frozenset[str] = frozenset(),
+    draining_specs: tuple[ExternalPiReplicaSpec, ...] | None = None,
 ) -> None:
     if not worker_active_proven and _worker_is_inactive(environment, slot):
         return
@@ -509,7 +560,16 @@ def _stop_proven_orphaned_worker_if_active(
             raise ExternalPiSlotError("external Pi active worker did not stop")
         return
 
-    for spec in replica_specs(environment, slot, base_token):
+    current_specs = replica_specs(environment, slot, base_token)
+    specs = (
+        current_specs
+        if draining_specs is None
+        else tuple(
+            replace(current, maximum_sessions=selected.maximum_sessions)
+            for current, selected in zip(current_specs, draining_specs, strict=False)
+        )
+    )
+    for spec in specs:
         request = urllib.request.Request(
             f"http://127.0.0.1:{spec.port}/v1/status",
             headers={"Authorization": f"Bearer {spec.token}"},
@@ -777,7 +837,8 @@ def stop_slot(
     validated_orphan_release_ids: frozenset[str] = frozenset(),
 ) -> None:
     timeout_seconds = drain_stop_timeout_seconds(environment)
-    previous = _read_replica_statuses(environment, slot)
+    draining_specs = _draining_replica_specs(environment, slot, "x" * 32, release_id)
+    previous = _read_replica_statuses(environment, slot, draining_specs)
     legacy = not any(previous)
     if legacy:
         previous = (_read_status(environment, slot),)
@@ -789,14 +850,12 @@ def stop_slot(
         )
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
         raise ExternalPiSlotError("external Pi worker drain timed out") from error
-    value = _read_replica_statuses(environment, slot)
+    value = _read_replica_statuses(environment, slot, draining_specs)
     if legacy:
         value = (_read_status(environment, slot),)
         worker_ids = (f"{environment}-{slot}",)
     else:
-        worker_ids = tuple(
-            spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
-        )
+        worker_ids = tuple(spec.worker_id for spec in draining_specs)
     if len(previous) == len(value) == len(worker_ids) and all(
         _worker_stop_is_safe(
             prior,
@@ -819,6 +878,7 @@ def stop_slot(
             worker_active_proven=True,
             expected_release_id=release_id,
             validated_orphan_release_ids=validated_orphan_release_ids,
+            draining_specs=draining_specs,
         )
     except ExternalPiSlotError as error:
         raise ExternalPiSlotError(

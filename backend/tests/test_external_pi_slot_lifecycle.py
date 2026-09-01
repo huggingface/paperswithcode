@@ -635,6 +635,114 @@ def test_maximum_configured_drain_can_finish_and_releases_durable_ownership(
     ]
 
 
+def test_eight_replica_tooling_drains_previous_four_replica_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "drain_stop_timeout_seconds", lambda _env: 10)
+    old_specs = lifecycle.replica_specs("staging", "green", "x" * 32)[:4]
+    for spec in old_specs:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "old-release",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "drained": False,
+                    "maximum_sessions": 8,
+                }
+            )
+        )
+    commands: list[list[str]] = []
+
+    def stop(command, **_kwargs):
+        commands.append(command)
+        if command[1] == "show":
+            state = "inactive" if "external-pi@" in command[-1] else "active"
+            return SimpleNamespace(returncode=0, stdout=f"{state}\n")
+        if "external-pi@" in command[-1]:
+            for spec in old_specs:
+                (tmp_path / f"{spec.worker_id}.json").write_text(
+                    json.dumps(
+                        {
+                            "protocol": lifecycle.CONTRACT_VERSION,
+                            "release_id": "old-release",
+                            "worker_id": spec.worker_id,
+                            "state": "offline",
+                            "drained": True,
+                            "maximum_sessions": 8,
+                        }
+                    )
+                )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", stop)
+
+    lifecycle.stop_slot("staging", "green", "old-release")
+
+    assert commands == [
+        ["systemctl", "stop", "paperswithcode-staging-external-pi@green.service"],
+        [
+            "systemctl",
+            "stop",
+            "paperswithcode-staging-external-pi-worker@green.service",
+        ],
+    ]
+
+
+def test_partial_eight_replica_status_cannot_be_treated_as_previous_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "drain_stop_timeout_seconds", lambda _env: 10)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for spec in current_specs[:4]:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "current-release",
+                    "worker_id": spec.worker_id,
+                    "state": "offline",
+                    "drained": True,
+                    "maximum_sessions": 4,
+                }
+            )
+        )
+    commands: list[list[str]] = []
+
+    def stop(command, **_kwargs):
+        commands.append(command)
+        return SimpleNamespace(returncode=0, stdout="active\n")
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", stop)
+    monkeypatch.setattr(
+        lifecycle,
+        "_stop_proven_orphaned_worker_if_active",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            lifecycle.ExternalPiSlotError("unproven replicas")
+        ),
+    )
+
+    with pytest.raises(
+        lifecycle.ExternalPiSlotError,
+        match="external Pi worker did not prove graceful drain",
+    ):
+        lifecycle.stop_slot("staging", "green", "current-release")
+
+    assert commands == [
+        ["systemctl", "stop", "paperswithcode-staging-external-pi@green.service"],
+        [
+            "systemctl",
+            "show",
+            "--property=ActiveState",
+            "--value",
+            "paperswithcode-staging-external-pi-worker@green.service",
+        ],
+    ]
+
+
 def test_stop_without_durable_drain_evidence_leaves_worker_running(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
