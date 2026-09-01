@@ -563,7 +563,7 @@ def staging_latex_paper_mode_values(
         if sandbox_token == hf_token:
             raise ValueError("staging Sandbox credential must not reuse PWC_HF_TOKEN")
     return {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
+        "PWC_CHAT_ARTIFACTS_ENABLED": str(mode != "qualification").lower(),
         "PWC_CHAT_POSTERLY_ENABLED": "false",
         "PWC_CHAT_LATEX_PAPER_ENABLED": str(mode == "activation").lower(),
         "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": str(mode == "activation").lower(),

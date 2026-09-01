@@ -5529,7 +5529,7 @@ def test_staging_latex_paper_modes_are_coherent_and_fail_closed():
     assert configure_host_env.staging_latex_paper_mode_values(
         current, mode="qualification"
     ) == {
-        "PWC_CHAT_ARTIFACTS_ENABLED": "true",
+        "PWC_CHAT_ARTIFACTS_ENABLED": "false",
         "PWC_CHAT_POSTERLY_ENABLED": "false",
         "PWC_CHAT_LATEX_PAPER_ENABLED": "false",
         "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": "false",

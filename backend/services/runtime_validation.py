@@ -557,6 +557,13 @@ def validate_private_paper_runtime(settings: Settings) -> None:
             raise RuntimeError(
                 "private paper qualification must keep user features disabled"
             )
+        if (
+            settings.chat_artifacts_enabled
+            or settings.chat_artifact_shared_preview_enabled
+        ):
+            raise RuntimeError(
+                "private paper qualification must disable user-facing artifacts"
+            )
         return
     if not all(user_paper_flags):
         raise RuntimeError("private paper runtime flags must be coherent")
@@ -654,7 +661,10 @@ def validate_chat_scope_guardrail_configuration(settings: Settings) -> None:
         or settings.chat_latex_compiler_qualification_mode
     )
     if settings.environment == "staging" and (
-        not settings.chat_artifacts_enabled
+        (
+            not settings.chat_artifacts_enabled
+            and not settings.chat_latex_compiler_qualification_mode
+        )
         or (
             not private_paper_mode and not settings.chat_artifact_shared_preview_enabled
         )

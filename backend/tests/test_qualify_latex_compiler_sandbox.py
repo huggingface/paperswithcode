@@ -1,6 +1,31 @@
 from __future__ import annotations
 
 
+def test_qualification_settings_disable_all_user_facing_artifacts() -> None:
+    from backend.config import Settings
+    from backend.scripts.qualify_latex_compiler_sandbox import validate_settings
+
+    settings = Settings(
+        environment="staging",
+        chat_scope_guardrail_enabled=True,
+        chat_latex_compiler_qualification_mode=True,
+        chat_artifacts_enabled=True,
+        chat_artifact_shared_preview_enabled=True,
+        chat_posterly_enabled=False,
+        chat_artifact_storage_backend="hf_bucket",
+        chat_artifact_hf_bucket_id="nielsr/pwc-chat-artifacts-staging",
+        chat_latex_compiler_hf_sandbox_image=(
+            "registry.hf.space/"
+            "nielsr-pwc-latex-compiler-private-staging@sha256:" + "a" * 64
+        ),
+        chat_latex_compiler_hf_sandbox_namespace="nielsr",
+    )
+
+    assert settings.chat_artifacts_enabled is False
+    assert settings.chat_artifact_shared_preview_enabled is False
+    validate_settings(settings)
+
+
 def test_qualification_cases_cover_the_required_hostile_boundaries() -> None:
     from backend.services.latex_compiler_qualification_service import (
         qualification_cases,
