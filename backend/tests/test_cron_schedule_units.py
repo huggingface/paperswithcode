@@ -61,7 +61,7 @@ def test_generated_units_match_the_schedule_table():
     assert {path.name for path in UNIT_DIR.iterdir()} == expected
 
 
-def test_method_keyword_backfill_can_cover_the_catalog_in_one_run():
+def test_method_keyword_backfill_uses_250k_capacity_with_runtime_bound():
     spec = next(
         spec for spec in cron_schedules.TIMERS if spec.job == "backfill_method_keywords"
     )
