@@ -42,6 +42,13 @@ const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
   "new_external_paper",
 ];
 const COUNT_STATUSES: PendingEditStatus[] = ["pending", "approved", "rejected"];
+const ADMINISTRATIVE_SUGGESTION_TYPES = new Set<PendingEditType>([
+  "new_task",
+  "new_method",
+  "new_benchmark",
+  "new_metric",
+  "new_conference",
+]);
 
 interface ListData {
   count: number;
@@ -182,6 +189,9 @@ function SubmissionCard({
   const { toast } = useToast();
   const paperId = submission.paper_id;
   const isDirectorySuggestion = paperId === null;
+  const isAdministrativeSuggestion = ADMINISTRATIVE_SUGGESTION_TYPES.has(
+    submission.edit_type,
+  );
   const directoryLabels = DIRECTORY_SUGGESTION_LABELS[submission.edit_type] ?? {
     title: "Taxonomy directory",
     subtitle: "Directory suggestion",
@@ -222,7 +232,9 @@ function SubmissionCard({
       invalidateAfterReview(reviewed);
       toast({
         title: "Submission approved",
-        description: `Applied ${formatLabel(submission.edit_type)} changes for ${paperTitle}.`,
+        description: isAdministrativeSuggestion
+          ? `Marked ${formatLabel(submission.edit_type)} suggestion as approved. No catalog changes were applied.`
+          : `Applied ${formatLabel(submission.edit_type)} changes for ${paperTitle}.`,
       });
     },
     onError: (error) => {
@@ -360,7 +372,9 @@ function SubmissionCard({
             )}
             {submission.applied_payload && (
               <details>
-                <summary>Applied payload</summary>
+                <summary>
+                  {isAdministrativeSuggestion ? "Reviewed payload" : "Applied payload"}
+                </summary>
                 <pre>{JSON.stringify(submission.applied_payload, null, 2)}</pre>
               </details>
             )}

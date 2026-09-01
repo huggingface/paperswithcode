@@ -35,6 +35,7 @@ const fixtures: Array<{
   proposed: object;
   current?: object;
   expected: string;
+  secondaryExpected?: string;
 }> = [
   { type: "tasks", proposed: { task_ids: [1] }, current: { tasks: [{ id: 1, name: "Task one" }] }, expected: "Task one" },
   { type: "methods", proposed: { method_ids: [1] }, current: { methods: [{ id: 1, name: "Method one" }] }, expected: "Method one" },
@@ -46,7 +47,7 @@ const fixtures: Array<{
   { type: "hf_artifacts", proposed: { hf_models: ["https://huggingface.co/org/model"], hf_datasets: [], hf_spaces: [] }, current: { hf_models: [], hf_datasets: [], hf_spaces: [] }, expected: "https://huggingface.co/org/model" },
   { type: "new_task", proposed: { name: "New task" }, expected: "New task" },
   { type: "new_method", proposed: { name: "New method" }, expected: "New method" },
-  { type: "new_benchmark", proposed: { name: "New benchmark", description: "Benchmark description", task_ids: [1] }, expected: "New benchmark" },
+  { type: "new_benchmark", proposed: { benchmark: "New benchmark", task: "New task", description: "Benchmark description" }, expected: "New benchmark", secondaryExpected: "New task" },
   { type: "new_metric", proposed: { name: "New metric", description: "Metric description", direction: "higher_is_better", task_id: 1, dataset_id: 2 }, expected: "New metric" },
   { type: "new_conference", proposed: { name: "New conference", year: 2026, url: "https://example.com/conference" }, expected: "New conference" },
   { type: "new_external_paper", proposed: { title: "External paper", source_url: "https://example.com/paper", authors: ["Ada"], date_published: "2026-08-10" }, expected: "External paper" },
@@ -71,6 +72,9 @@ describe("PendingEditDiff", () => {
   it.each(fixtures)("renders the $type contract", (fixture) => {
     renderFixture(fixture);
     expect(screen.getAllByText(fixture.expected).length).toBeGreaterThan(0);
+    if (fixture.secondaryExpected) {
+      expect(screen.getByText(fixture.secondaryExpected)).toBeInTheDocument();
+    }
     expect(screen.queryByText(/No custom renderer exists/)).not.toBeInTheDocument();
   });
 

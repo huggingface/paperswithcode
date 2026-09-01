@@ -26,7 +26,9 @@ interface UrlItem {
 }
 
 interface TaxonomyPayload extends JsonRecord {
-  name: string;
+  name?: string;
+  benchmark?: string;
+  task?: string;
   description?: string;
   image?: {
     data_url?: string;
@@ -554,7 +556,12 @@ function TaxonomySuggestionDiff({
   kind: "task" | "method" | "benchmark" | "metric" | "conference";
   proposedPayload: TaxonomyPayload;
 }) {
-  const name = typeof proposedPayload.name === "string" ? proposedPayload.name : "";
+  const name =
+    typeof proposedPayload.benchmark === "string"
+      ? proposedPayload.benchmark
+      : typeof proposedPayload.name === "string"
+        ? proposedPayload.name
+        : "";
   const description =
     typeof proposedPayload.description === "string" ? proposedPayload.description : "";
   const year = typeof proposedPayload.year === "number" ? proposedPayload.year : null;
@@ -621,8 +628,12 @@ function TaxonomySuggestionDiff({
         </DiffColumn>
       )}
       {kind === "benchmark" && (
-        <DiffColumn title="Intended task IDs">
-          <span className="submission-field-value">{JSON.stringify(proposedPayload.task_ids ?? [])}</span>
+        <DiffColumn title="Task">
+          <span className="submission-field-value">
+            {typeof proposedPayload.task === "string"
+              ? proposedPayload.task
+              : JSON.stringify(proposedPayload.task_ids ?? [])}
+          </span>
         </DiffColumn>
       )}
       {kind === "metric" && (

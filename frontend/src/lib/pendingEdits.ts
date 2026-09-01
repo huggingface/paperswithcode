@@ -59,16 +59,23 @@ const newMethodPayload = suggestionBase.extend({
   source_url: z.string().optional(),
   source_title: z.string().optional(),
 });
-const newBenchmarkPayload = suggestionBase.extend({
-  description: z.string(),
-  task_ids: z.array(z.number()),
-  full_name: z.string().optional(),
-  url: z.string().optional(),
-  hf_url: z.string().optional(),
-  paper_url: z.string().optional(),
-  license_name: z.string().optional(),
-  license_url: z.string().optional(),
-});
+const newBenchmarkPayload = z.union([
+  z.object({
+    benchmark: z.string(),
+    task: z.string(),
+    description: z.string(),
+  }),
+  suggestionBase.extend({
+    description: z.string(),
+    task_ids: z.array(z.number()),
+    full_name: z.string().optional(),
+    url: z.string().optional(),
+    hf_url: z.string().optional(),
+    paper_url: z.string().optional(),
+    license_name: z.string().optional(),
+    license_url: z.string().optional(),
+  }),
+]);
 const newMetricPayload = suggestionBase.extend({
   description: z.string(),
   direction: z.enum(["higher_is_better", "lower_is_better"]),

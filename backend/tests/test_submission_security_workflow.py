@@ -16,10 +16,6 @@ from backend.services.thumbnail_service import ThumbnailService
 
 
 def test_taxonomy_payloads_require_application_context():
-    with pytest.raises(PendingEditError, match="task_ids"):
-        validate_payload(
-            "new_benchmark", {"name": "Bench", "description": "Description"}
-        )
     with pytest.raises(PendingEditError, match="both task_id and dataset_id"):
         validate_payload(
             "new_metric",
@@ -32,6 +28,22 @@ def test_taxonomy_payloads_require_application_context():
         )
     with pytest.raises(PendingEditError, match="source URL"):
         validate_payload("new_conference", {"name": "Venue 2027", "year": 2027})
+
+
+def test_benchmark_suggestion_normalizes_free_text_names():
+    payload = validate_payload(
+        "new_benchmark",
+        {
+            "benchmark": "  New Benchmark  ",
+            "task": "  Uncatalogued Task  ",
+            "description": "  Administrative suggestion  ",
+        },
+    )
+    assert payload == {
+        "benchmark": "New Benchmark",
+        "task": "Uncatalogued Task",
+        "description": "Administrative suggestion",
+    }
 
 
 def test_taxonomy_payload_normalizes_typed_fields():
