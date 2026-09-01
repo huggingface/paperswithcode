@@ -3492,6 +3492,66 @@ def test_closing_stream_persists_interrupted_turn(monkeypatch):
     assert released == [True]
 
 
+def test_closing_completed_stream_preserves_successful_trace(monkeypatch):
+    from backend.services import chat_stream_service
+
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        user_message_id=uuid.uuid4(),
+        selected_model="smoke-model",
+        model_route="smoke-route",
+        sdk_session_id=None,
+        sdk_project_key=None,
+        is_first_turn=True,
+    )
+
+    class Trace(chat_stream_service.NullChatTurnTrace):
+        def __init__(self):
+            self.finishes = []
+
+        def finish(self, answer, status, **details):
+            self.finishes.append((answer, status, details))
+
+    trace = Trace()
+
+    @contextmanager
+    def trace_turn(**_kwargs):
+        yield trace
+
+    monkeypatch.setattr(chat_stream_service, "trace_chat_turn", trace_turn)
+
+    async def scenario():
+        orchestrator = ChatStreamOrchestrator(
+            settings=get_settings().model_copy(update={"environment": "development"}),
+            owner=ChatOwner(hf_user_id="hf-user", hf_username="tester"),
+            admission=admission,
+            prompt="hello",
+            request_id=str(uuid.uuid4()),
+            title_token=None,
+            is_disconnected=lambda: asyncio.sleep(0, result=False),
+            release_admission=lambda: asyncio.sleep(0),
+        )
+
+        async def completed_events():
+            orchestrator._transition_completion_reason("success")
+            yield chat_stream_service.ChatStreamFrame(
+                "done", {"followups": [], "finish_reason": "success"}
+            )
+
+        monkeypatch.setattr(orchestrator, "_events", completed_events)
+        stream = orchestrator.events()
+        frame = await anext(stream)
+        await stream.aclose()
+        return frame, orchestrator
+
+    frame, orchestrator = asyncio.run(scenario())
+
+    assert frame.event == "done"
+    assert orchestrator.terminal_label == "success"
+    assert trace.finishes[-1] == ("", "success", {})
+
+
 def test_chat_endpoint_rejects_when_capacity_is_occupied(monkeypatch, caplog):
     from backend.routers import chat as chat_router
 

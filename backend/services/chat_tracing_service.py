@@ -690,10 +690,10 @@ def trace_chat_turn(
             try:
                 yield trace
             except BaseException as exc:
-                trace.finish(
-                    trace.answer,
-                    "interrupted" if not isinstance(exc, Exception) else "error",
-                )
+                if isinstance(exc, Exception):
+                    trace.finish(trace.answer, "error")
+                elif trace.status == "interrupted":
+                    trace.finish(trace.answer, "interrupted")
                 raise
             finally:
                 try:

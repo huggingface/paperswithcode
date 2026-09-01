@@ -1562,6 +1562,17 @@ class ChatStreamOrchestrator:
             interruption_reason=reason.value,
         )
 
+    def _finish_stream_exit_trace(self, reason: str) -> None:
+        if self.lifecycle.terminal is TurnTerminalState.ACTIVE:
+            self.interruption_reason = self.interruption_reason or reason
+            self.trace.finish(
+                "".join(self.projection.answer_parts),
+                "interrupted",
+                interruption_reason=self.interruption_reason,
+            )
+            return
+        self.trace.finish("".join(self.projection.answer_parts), self.terminal_label)
+
     async def events(self) -> AsyncIterator[ChatStreamFrame]:
         if self.admission.replay_assistant:
             async for frame in self._events():
@@ -1587,22 +1598,10 @@ class ChatStreamOrchestrator:
                 async for frame in self._events():
                     yield frame
             except GeneratorExit:
-                self.interruption_reason = self.interruption_reason or "stream_closed"
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    "interrupted",
-                    interruption_reason=self.interruption_reason,
-                )
+                self._finish_stream_exit_trace("stream_closed")
                 raise
             except asyncio.CancelledError:
-                self.interruption_reason = (
-                    self.interruption_reason or "stream_cancelled"
-                )
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    "interrupted",
-                    interruption_reason=self.interruption_reason,
-                )
+                self._finish_stream_exit_trace("stream_cancelled")
                 raise
 
     async def _events(self) -> AsyncIterator[ChatStreamFrame]:
