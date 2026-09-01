@@ -12,7 +12,6 @@ from backend.chat_execution_policy import effective_tool_rounds, prompt_contract
 _CURRENT_DATE_PLACEHOLDER = "{current_date}"
 _SELECTED_MODEL_PLACEHOLDER = "__PWC_SELECTED_MODEL__"
 _HF_USERNAME_PLACEHOLDER = "__PWC_HF_USERNAME__"
-_AGENT_HARNESS_PLACEHOLDER = "__PWC_AGENT_HARNESS__"
 _TASK_CATALOG_PLACEHOLDER = "__PWC_LIVE_TASK_CATALOG__"
 TASK_CATALOG_START = "<!-- PWC_TASK_CATALOG_START -->"
 TASK_CATALOG_END = "<!-- PWC_TASK_CATALOG_END -->"
@@ -310,25 +309,33 @@ def render(
     )
     method_catalog_text = method_catalog.read_text(encoding="utf-8")
     rendered_date = current_date or datetime.now(UTC).date()
-    return (
-        _render_template().format(
-            max_turns=effective_tool_rounds(max_turns),
-            max_calls=max_calls,
-            max_searches=max_searches,
-            max_web_searches=max_web_searches,
-            retrieval_turns=min(2, effective_tool_rounds(max_turns)),
-            planned_searches=min(2, max_searches),
-            paper_system_prompt=(
-                PAPER_SYSTEM_PROMPT.strip()
-                if paper_artifacts_enabled and not reader_mode
-                else ""
-            ),
+    prompt = _render_template().format(
+        max_turns=effective_tool_rounds(max_turns),
+        max_calls=max_calls,
+        max_searches=max_searches,
+        max_web_searches=max_web_searches,
+        retrieval_turns=min(2, effective_tool_rounds(max_turns)),
+        planned_searches=min(2, max_searches),
+        paper_system_prompt=(
+            PAPER_SYSTEM_PROMPT.strip()
+            if paper_artifacts_enabled and not reader_mode
+            else ""
+        ),
+    )
+    # Pi exposes the complete CLI references as allowlisted Read targets. Do
+    # not duplicate those large, static appendices in every provider request:
+    # under a full concurrent fleet, repeatedly parsing them delays dispatch.
+    # The legacy harness still receives the historical self-contained prompt.
+    if agent_harness != "pi":
+        prompt += (
+            f"\n\n{TASK_CATALOG_START}\n{catalog_text.rstrip()}\n{TASK_CATALOG_END}"
+            f"\n\n{method_catalog_text}"
+            f"\n\n# pwc CLI skill\n\n{guide_text}"
+            f"\n\n# s2 CLI skill\n\n{s2_guide_text}"
+            f"\n\n# restricted hf CLI skill\n\n{hf_guide_text}"
         )
-        + f"\n\n{TASK_CATALOG_START}\n{catalog_text.rstrip()}\n{TASK_CATALOG_END}"
-        + f"\n\n{method_catalog_text}"
-        + f"\n\n# pwc CLI skill\n\n{guide_text}"
-        + f"\n\n# s2 CLI skill\n\n{s2_guide_text}"
-        + f"\n\n# restricted hf CLI skill\n\n{hf_guide_text}"
+    return (
+        prompt
         + (
             f"\n\n# private paper authoring guide\n\n{paper_guide.read_text(encoding='utf-8')}"
             if paper_artifacts_enabled and not reader_mode
@@ -357,7 +364,7 @@ def sha256(**kwargs) -> str:
         selected_model=_SELECTED_MODEL_PLACEHOLDER,
         web_search_enabled=False,
         hf_username=_HF_USERNAME_PLACEHOLDER,
-        agent_harness=_AGENT_HARNESS_PLACEHOLDER,
+        agent_harness="pi",
         reader_mode=False,
         task_catalog_text=_TASK_CATALOG_PLACEHOLDER,
         **kwargs,
@@ -366,7 +373,7 @@ def sha256(**kwargs) -> str:
         prompt.replace("2000-01-01", _CURRENT_DATE_PLACEHOLDER, 1)
         .replace(_SELECTED_MODEL_PLACEHOLDER, "{selected_model}", 1)
         .replace(_HF_USERNAME_PLACEHOLDER, "{hf_username}", 1)
-        .replace(_AGENT_HARNESS_PLACEHOLDER, "{agent_harness}", 1)
+        .replace('"agent_harness":"pi"', '"agent_harness":"{agent_harness}"', 1)
         .replace('"web_search_enabled":false', '"web_search_enabled":{boolean}', 1)
         .replace('"reader_mode":false', '"reader_mode":{boolean}', 1)
     )

@@ -3388,6 +3388,19 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert CONTROL_PORT == 8080
 
 
+def test_pi_prompt_keeps_cli_contract_without_embedding_reference_appendices():
+    prompt = render(agent_harness="pi")
+
+    assert len(prompt.encode("utf-8")) < 20_000
+    assert "pwc task --name TASK" in prompt
+    assert "pwc benchmark list --task TASK" in prompt
+    assert "/opt/pwc/PWC_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/HF_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/S2_CLI_SKILL.md" in prompt
+    assert "# pwc CLI skill" not in prompt
+    assert "## Complete live task lookup index" not in prompt
+
+
 @pytest.mark.parametrize(
     ("command", "returncode"),
     [

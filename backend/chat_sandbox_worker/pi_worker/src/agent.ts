@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -24,7 +24,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
-import { loadPromptAsset, renderPrompt, taskCatalogForPrompt } from "./prompt.js";
+import { loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
 import { shouldResetSession } from "./session.js";
@@ -319,7 +319,6 @@ export class PiWorker {
     }
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     this.failurePhase = "prompt_render";
-    const taskCatalog = taskCatalogForPrompt();
     const prompt = await renderPrompt({
       model: run.model,
       hfUsername: run.hf_username,
@@ -328,7 +327,6 @@ export class PiWorker {
       posterlyEnabled: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
-      ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
     });
     const coldProviderResult = await coldProviderPromise;
@@ -346,9 +344,7 @@ export class PiWorker {
       posterMode: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       hfUsername: run.hf_username,
-      taskCatalogDigest: taskCatalog === undefined
-        ? "baked-fallback"
-        : createHash("sha256").update(taskCatalog).digest("hex"),
+      promptProfile: "compact-pi-v1",
     });
     let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
