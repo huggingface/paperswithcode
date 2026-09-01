@@ -759,7 +759,7 @@ def validate_chat_provider_policy(
             },
         )
         if settings.chat_openai_direct_enabled:
-            expected_discovery += (direct_choice,)
+            expected_discovery = (direct_choice,) + expected_discovery
     if settings.chat_alternative_model_enabled:
         if settings.environment != "staging":
             raise RuntimeError("alternative chat models are staging-only")
