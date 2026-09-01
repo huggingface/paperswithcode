@@ -1,0 +1,32 @@
+from sqlalchemy import create_mock_engine
+from sqlalchemy.dialects import postgresql
+
+from backend.models.database import Base, PaperCurationJob, PaperCurationWorkflow
+
+
+def test_paper_curation_cycle_can_be_dropped_on_postgresql():
+    """Cyclic curation foreign keys must be removable by the CI schema teardown."""
+    statements = []
+    engine = create_mock_engine(
+        "postgresql://",
+        lambda sql, *_multiparams, **_params: statements.append(
+            str(sql.compile(dialect=postgresql.dialect()))
+        ),
+    )
+
+    Base.metadata.drop_all(
+        engine,
+        tables=[PaperCurationJob.__table__, PaperCurationWorkflow.__table__],
+        checkfirst=False,
+    )
+
+    dropped_constraints = {
+        statement.rsplit(" ", 1)[-1]
+        for statement in statements
+        if "DROP CONSTRAINT" in statement
+    }
+    assert dropped_constraints == {
+        "fk_paper_curation_jobs_parent_workflow",
+        "fk_paper_curation_workflows_enrich_satisfied_by_job",
+        "fk_paper_curation_workflows_evals_satisfied_by_job",
+    }
