@@ -73,7 +73,7 @@ export async function createProvider(
         },
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: 200000,
+        contextWindow: api === "openai-responses" ? 48_000 : 200_000,
         maxTokens: 8000,
         compat: api === "anthropic-messages"
           ? {

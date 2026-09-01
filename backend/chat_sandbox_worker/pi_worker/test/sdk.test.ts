@@ -16,6 +16,14 @@ test("registers direct OpenAI with the native Responses base path", async () => 
   const rollback = await createProvider("deepseek", "anthropic-messages");
   assert.equal(rollback.model.api, "anthropic-messages");
   assert.equal(rollback.model.baseUrl, "http://127.0.0.1:8765");
+  assert.equal(rollback.model.contextWindow, 200_000);
+});
+
+test("advertises a context window that compacts before the gateway byte ceiling", async () => {
+  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+
+  assert.ok(direct.model.contextWindow <= 48_000);
+  assert.equal(direct.model.maxTokens, 8_000);
 });
 
 test("external provider authenticates directly to the fenced chat gateway", async () => {
