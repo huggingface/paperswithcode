@@ -24,7 +24,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
-import { fetchLiveTaskCatalog, loadPromptAsset, renderPrompt } from "./prompt.js";
+import { loadPromptAsset, renderPrompt, taskCatalogForPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
 import { shouldResetSession } from "./session.js";
@@ -280,12 +280,7 @@ export class PiWorker {
     const state = await this.sessionManager(run);
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     this.failurePhase = "prompt_render";
-    let taskCatalog: string | undefined;
-    try {
-      taskCatalog = await fetchLiveTaskCatalog();
-    } catch (error) {
-      process.stderr.write(`Live task catalog unavailable; using baked fallback: ${error instanceof Error ? error.message : "unknown error"}\n`);
-    }
+    const taskCatalog = taskCatalogForPrompt();
     const prompt = await renderPrompt({
       model: run.model,
       hfUsername: run.hf_username,

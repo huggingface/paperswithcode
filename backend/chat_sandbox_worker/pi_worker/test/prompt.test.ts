@@ -4,7 +4,51 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 
-import { fetchLiveTaskCatalog, loadPromptAsset, renderPrompt } from "../src/prompt.js";
+import {
+  fetchLiveTaskCatalog,
+  loadPromptAsset,
+  renderPrompt,
+  taskCatalogForPrompt,
+} from "../src/prompt.js";
+
+test("cold prompt rendering uses the baked catalog while one live refresh runs", async () => {
+  let resolveCatalog!: (value: string) => void;
+  const pending = new Promise<string>((resolve) => {
+    resolveCatalog = resolve;
+  });
+  let loads = 0;
+  const load = () => {
+    loads += 1;
+    return pending;
+  };
+  const url = "https://catalog-background.example.test/api/v1";
+
+  assert.equal(taskCatalogForPrompt(url, load), undefined);
+  assert.equal(taskCatalogForPrompt(url, load), undefined);
+  assert.equal(loads, 1);
+
+  resolveCatalog("live catalog");
+  await pending;
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.equal(taskCatalogForPrompt(url, load), "live catalog");
+  assert.equal(loads, 1);
+});
+
+test("failed background catalog refresh keeps using the baked catalog without retry churn", async () => {
+  let loads = 0;
+  const load = async () => {
+    loads += 1;
+    throw new Error("catalog unavailable");
+  };
+  const url = "https://catalog-cooldown.example.test/api/v1";
+
+  assert.equal(taskCatalogForPrompt(url, load), undefined);
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(taskCatalogForPrompt(url, load), undefined);
+
+  assert.equal(loads, 1);
+});
 
 test("coalesces concurrent live task catalog loads and reuses the successful result", async () => {
   const originalFetch = globalThis.fetch;

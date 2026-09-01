@@ -282,6 +282,19 @@ class _HandledTurnEvent:
     frame: ChatStreamFrame | None = None
 
 
+@dataclass(frozen=True)
+class _LatencyPhase:
+    phase: str
+    elapsed_ms: int
+    acquisition_outcome: str | None = None
+    first_semantic_event_class: str | None = None
+    pool_miss_reason: str | None = None
+    session_reuse_cohort: str | None = None
+    failure_stage: str | None = None
+    failure_class: str | None = None
+    attempt_kind: str | None = None
+
+
 class _ToolTimingFallback:
     """Measure Pi tool lifecycles until the active worker image reports them."""
 
@@ -1512,6 +1525,7 @@ class ChatStreamOrchestrator:
         self.mirror_recovery: tuple[str, uuid.UUID] | None = None
         self.edit_activated = False
         self.first_application_delta_recorded = False
+        self.pending_latency_phases: list[_LatencyPhase] = []
         self.interruption_reason: str | None = None
         self.trace: ChatTurnTrace | NullChatTurnTrace = NullChatTurnTrace()
         self.private_paper_tool_ids: set[str] = set()
@@ -2203,7 +2217,7 @@ class ChatStreamOrchestrator:
         self, event: PersistenceEvent
     ) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        self._bind_sdk_session(payload)
+        await asyncio.to_thread(self._bind_sdk_session, payload)
         return _HandledTurnEvent()
 
     async def _handle_mirror_failure(
@@ -2236,7 +2250,7 @@ class ChatStreamOrchestrator:
 
     async def _handle_latency_event(self, event: LatencyEvent) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        self._record_latency_phase(
+        self._buffer_latency_phase(
             str(payload["phase"]),
             int(payload["elapsed_ms"]),
             acquisition_outcome=payload.get("acquisition_outcome"),
@@ -2386,7 +2400,7 @@ class ChatStreamOrchestrator:
 
         elapsed_ms = round((time.perf_counter() - self.started) * 1000)
         if kind == "workspace_ready":
-            self._record_latency_phase("sdk_query_dispatched", elapsed_ms)
+            self._buffer_latency_phase("sdk_query_dispatched", elapsed_ms)
         if not self.first_application_delta_recorded and kind in {
             "reasoning_delta",
             "tool_call",
@@ -2395,7 +2409,7 @@ class ChatStreamOrchestrator:
         }:
             self.first_application_delta_recorded = True
             self.lifecycle_observer("ttft_ms", None, elapsed_ms)
-            self._record_latency_phase(
+            self._buffer_latency_phase(
                 "first_semantic_event",
                 elapsed_ms,
                 first_semantic_event_class={
@@ -2405,7 +2419,7 @@ class ChatStreamOrchestrator:
                     "answer_delta": "answer",
                 }[kind],
             )
-            self._record_latency_phase("first_application_sse_delta", elapsed_ms)
+            self._buffer_latency_phase("first_application_sse_delta", elapsed_ms)
 
         self.projection.apply(kind, payload)
         if kind in {"tool_call", "tool_call_arguments_done"}:
@@ -2880,13 +2894,7 @@ class ChatStreamOrchestrator:
         total_ms = round((time.perf_counter() - self.started) * 1000)
         self.lifecycle_observer("terminal_latency_ms", None, total_ms)
         try:
-            with db_manager.session_local() as db:
-                ChatLatencyService(db).finalize(
-                    self.request_id,
-                    status,
-                    total_ms,
-                )
-                db.commit()
+            await asyncio.to_thread(self._persist_latency, status, total_ms)
         except Exception as exc:
             logger.warning(
                 "chat latency finalize failed request_id=%s error=%s",
@@ -2895,7 +2903,7 @@ class ChatStreamOrchestrator:
             )
         await self.release_admission()
 
-    def _record_latency_phase(
+    def _buffer_latency_phase(
         self,
         phase: str,
         elapsed_ms: int,
@@ -2908,31 +2916,40 @@ class ChatStreamOrchestrator:
         failure_class: str | None = None,
         attempt_kind: str | None = None,
     ) -> None:
-        try:
-            with db_manager.session_local() as db:
-                latency = ChatLatencyService(db)
+        self.pending_latency_phases.append(
+            _LatencyPhase(
+                phase=phase,
+                elapsed_ms=elapsed_ms,
+                acquisition_outcome=acquisition_outcome,
+                first_semantic_event_class=first_semantic_event_class,
+                pool_miss_reason=pool_miss_reason,
+                session_reuse_cohort=session_reuse_cohort,
+                failure_stage=failure_stage,
+                failure_class=failure_class,
+                attempt_kind=attempt_kind,
+            )
+        )
+
+    def _persist_latency(self, status: str, total_ms: int) -> None:
+        with db_manager.session_local() as db:
+            latency = ChatLatencyService(db)
+            for phase in self.pending_latency_phases:
                 latency.record_phase(
                     self.request_id,
-                    phase,
-                    elapsed_ms,
-                    acquisition_outcome=acquisition_outcome,
-                    first_semantic_event_class=first_semantic_event_class,
-                    pool_miss_reason=pool_miss_reason,
-                    session_reuse_cohort=session_reuse_cohort,
-                    failure_stage=failure_stage,
-                    failure_class=failure_class,
-                    attempt_kind=attempt_kind,
+                    phase.phase,
+                    phase.elapsed_ms,
+                    acquisition_outcome=phase.acquisition_outcome,
+                    first_semantic_event_class=phase.first_semantic_event_class,
+                    pool_miss_reason=phase.pool_miss_reason,
+                    session_reuse_cohort=phase.session_reuse_cohort,
+                    failure_stage=phase.failure_stage,
+                    failure_class=phase.failure_class,
+                    attempt_kind=phase.attempt_kind,
                 )
                 if (
-                    acquisition_outcome == "pool_miss"
-                    and pool_miss_reason == "unhealthy_blank"
+                    phase.acquisition_outcome == "pool_miss"
+                    and phase.pool_miss_reason == "unhealthy_blank"
                 ):
                     latency.record_pool_assignment_fallback(self.request_id)
-                db.commit()
-        except Exception as exc:
-            logger.warning(
-                "chat latency phase failed request_id=%s phase=%s error=%s",
-                self.request_id,
-                phase,
-                type(exc).__name__,
-            )
+            latency.finalize(self.request_id, status, total_ms)
+            db.commit()
