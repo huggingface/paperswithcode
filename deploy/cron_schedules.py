@@ -195,7 +195,7 @@ TIMERS: tuple[TimerSpec, ...] = (
         args=(
             "--resume",
             "--limit",
-            "10000",
+            "250000",
             "--max-runtime-seconds",
             "3300",
         ),

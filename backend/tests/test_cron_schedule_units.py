@@ -61,6 +61,18 @@ def test_generated_units_match_the_schedule_table():
     assert {path.name for path in UNIT_DIR.iterdir()} == expected
 
 
+def test_method_keyword_backfill_can_cover_the_catalog_in_one_run():
+    spec = next(
+        spec for spec in cron_schedules.TIMERS if spec.job == "backfill_method_keywords"
+    )
+
+    limit_index = spec.args.index("--limit")
+    runtime_index = spec.args.index("--max-runtime-seconds")
+
+    assert int(spec.args[limit_index + 1]) >= 250_000
+    assert spec.args[runtime_index + 1] == "3300"
+
+
 def test_every_migrated_registry_job_owns_committed_unit_pairs():
     for job in _systemd_jobs():
         pairs = job.systemd_unit_pairs
