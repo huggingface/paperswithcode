@@ -89,7 +89,6 @@ class ChatExternalPiSupervisorRuntime:
     async def run(self) -> ExternalPiSupervisorRunResult:
         started_at = self.monotonic()
         while True:
-            registration_started_at = self.monotonic()
             registration_now = self.now()
             try:
                 claim: ExternalWorkerClaim = await self._transaction(
@@ -111,7 +110,7 @@ class ChatExternalPiSupervisorRuntime:
                 ):
                     return ExternalPiSupervisorRunResult(0, 0, False)
 
-        last_heartbeat_at = registration_started_at
+        last_heartbeat_at = self.monotonic()
         heartbeats = 0
 
         while True:

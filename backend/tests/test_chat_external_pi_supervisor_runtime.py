@@ -169,6 +169,54 @@ def test_runtime_recovers_from_a_transient_startup_failure():
     assert sessions[0].commit.call_count == 0
 
 
+def test_successful_slow_registration_starts_a_fresh_lease_window():
+    claim = ExternalWorkerClaim(
+        "worker-1",
+        uuid.UUID("10000000-0000-4000-8000-000000000001"),
+        3,
+        "release-a",
+        "external-pi-v1",
+    )
+    supervisor = Mock(lease_seconds=15, drain_seconds=60)
+    clock = [0.0]
+
+    async def register(*_args, **_kwargs):
+        clock[0] += 25
+        return claim
+
+    supervisor.register = AsyncMock(side_effect=register)
+    supervisor.heartbeat = AsyncMock(return_value=_status(generation=3))
+    supervisor.begin_drain = AsyncMock(return_value=_status(state="draining"))
+    supervisor.finish_drain = AsyncMock(return_value=None)
+
+    @contextmanager
+    def session_factory():
+        yield Mock()
+
+    waits = iter((False, True))
+
+    async def wait_for_stop(seconds):
+        clock[0] += seconds
+        return next(waits)
+
+    runtime = ChatExternalPiSupervisorRuntime(
+        supervisor=supervisor,
+        session_factory=session_factory,
+        now=lambda: datetime(2026, 8, 26, 12, tzinfo=UTC),
+        monotonic=lambda: clock[0],
+        wait_for_stop=wait_for_stop,
+        sleep=AsyncMock(),
+        heartbeat_interval_seconds=5,
+        startup_timeout_seconds=30,
+        drain_poll_seconds=1,
+    )
+
+    result = asyncio.run(runtime.run())
+
+    assert result.heartbeats == 1
+    supervisor.heartbeat.assert_awaited_once()
+
+
 def test_runtime_fails_closed_when_heartbeat_outage_consumes_the_lease():
     claim = ExternalWorkerClaim(
         "worker-1",
