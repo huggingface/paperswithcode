@@ -436,8 +436,7 @@ def test_production_external_pi_requires_complete_authenticated_topology(
         runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
-def test_production_accepts_complete_durable_external_contract(settings_factory):
-    settings, _release = settings_factory("production")
+def _durable_external_admission_resource_profile(settings):
     settings.chat_external_pi_worker_url = "http://127.0.0.1:8776"
     settings.chat_external_pi_worker_id = "production-blue"
     settings.chat_external_pi_worker_token = "p" * 32
@@ -458,14 +457,42 @@ def test_production_accepts_complete_durable_external_contract(settings_factory)
     settings.chat_max_concurrency = 32
     settings.chat_user_max_concurrency = 1
     settings.chat_sandbox_total_live_cap = 16
+    settings.chat_openai_global_max_concurrency = 32
+    settings.chat_openai_user_max_concurrency = 1
+    settings.chat_openai_global_rate_limit_calls = 512
     settings.chat_openai_direct_enabled = True
     settings.openai_api_key = "test-only"
     settings.chat_blank_pool_enabled = False
     settings.chat_pi_prewarm_enabled = False
+    return settings
+
+
+def test_production_accepts_complete_durable_external_contract(settings_factory):
+    settings, _release = settings_factory("production")
+    _durable_external_admission_resource_profile(settings)
 
     runtime_validation.validate_external_pi_migration_policy(settings)
     runtime_validation._validate_chat_capacity_policy(settings)
     runtime_validation._validate_chat_resource_policy(settings)
+
+
+@pytest.mark.parametrize(
+    ("field", "invalid"),
+    (
+        ("chat_openai_global_max_concurrency", 4),
+        ("chat_openai_user_max_concurrency", 2),
+        ("chat_openai_global_rate_limit_calls", 80),
+    ),
+)
+def test_production_rejects_durable_external_provider_capacity_drift(
+    settings_factory, field, invalid
+):
+    settings, _release = settings_factory("production")
+    _durable_external_admission_resource_profile(settings)
+    setattr(settings, field, invalid)
+
+    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+        runtime_validation._validate_chat_resource_policy(settings)
 
 
 def test_staging_can_qualify_durable_bridge_without_external_admission(

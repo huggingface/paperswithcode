@@ -3961,6 +3961,9 @@ def test_production_durable_external_values_enable_32_with_isolated_token(
     assert values["PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED"] == "true"
     assert values["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
     assert values["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == "p" * 64
+    assert values["PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY"] == "32"
+    assert values["PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY"] == "1"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS"] == "512"
     assert values["PWC_CHAT_REMOTE_BASH_ENABLED"] == "true"
     assert values["PWC_CHAT_REMOTE_READ_ENABLED"] == "true"
 
@@ -3977,6 +3980,9 @@ def test_production_durable_external_values_preserve_token_on_disable():
 
     assert "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN" not in values
     assert values["PWC_CHAT_MAX_CONCURRENCY"] == "2"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY"] == "4"
+    assert values["PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY"] == "2"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS"] == "80"
     assert values["PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED"] == "false"
     assert values["PWC_CHAT_BLANK_POOL_ENABLED"] == "true"
     assert values["PWC_CHAT_PI_PREWARM_ENABLED"] == "true"

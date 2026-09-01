@@ -1075,6 +1075,9 @@ def _is_durable_external_admission_profile(settings: Settings) -> bool:
             not settings.chat_pi_prewarm_enabled,
             settings.chat_max_concurrency == 32,
             settings.chat_user_max_concurrency == 1,
+            settings.chat_openai_global_max_concurrency == 32,
+            settings.chat_openai_user_max_concurrency == 1,
+            settings.chat_openai_global_rate_limit_calls == 512,
             settings.chat_sandbox_total_live_cap == 16,
         )
     )
