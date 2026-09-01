@@ -17,6 +17,7 @@ export const EXCALIDRAW_APP_TOOLS = [
 export const MAX_EXCALIDRAW_ELEMENTS_BYTES = 128 * 1024;
 export const MAX_EXCALIDRAW_CONTEXT_BYTES = 8 * 1024;
 export const EMPTY_EGRESS_POLICY_DIGEST = "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945";
+export const EXCALIDRAW_READINESS_TIMEOUT_MS = 2_000;
 export const INVALID_EXCALIDRAW_ELEMENTS =
   "create_view.elements must be a JSON array of diagram elements. Fix the JSON and call create_view again.";
 export const EXCALIDRAW_ELEMENTS_TOO_LARGE = "Diagram input is too large. Answer in text.";

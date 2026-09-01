@@ -13,6 +13,7 @@ import { type McpStatusSnapshot } from "pi-mcp-adapter";
 import { createWebMcpExtension } from "./mcp.js";
 import {
   EXCALIDRAW_MODEL_TOOLS,
+  EXCALIDRAW_READINESS_TIMEOUT_MS,
   assessExcalidrawReadiness,
   excalidrawEnabled,
   isExcalidrawModelTool,
@@ -404,7 +405,7 @@ export class PiWorker {
 
   private async settleMcpReadiness(session: AgentSession, refreshTools: () => void): Promise<McpReadinessSnapshot> {
     const started = performance.now();
-    const timeoutMs = 12_000;
+    const timeoutMs = EXCALIDRAW_READINESS_TIMEOUT_MS;
     const snapshotOf = (timedOut = false): McpReadinessSnapshot => {
       const server = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw");
       const view = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw_view");

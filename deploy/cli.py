@@ -1605,17 +1605,20 @@ def protected_runtime_ids() -> set[str]:
 def protected_external_pi_runtime_ids() -> set[str]:
     protected: set[str] = set()
     has_legacy_release = False
-    for release in protected_environment_release_paths("staging"):
-        recorded = recorded_external_pi_runtime_id(release)
-        if recorded is not None:
-            protected.add(recorded)
-            continue
-        has_legacy_release = True
-        try:
-            protected.add(external_pi_runtime_id(release))
-        except ValueError:
-            # Older protected releases predate the external Pi package inputs.
-            continue
+    for environment in ("staging", "production"):
+        for release in protected_environment_release_paths(environment):
+            recorded = recorded_external_pi_runtime_id(release)
+            if recorded is not None:
+                protected.add(recorded)
+                continue
+            if environment != "staging":
+                continue
+            has_legacy_release = True
+            try:
+                protected.add(external_pi_runtime_id(release))
+            except ValueError:
+                # Older protected releases predate the external Pi package inputs.
+                continue
     if has_legacy_release:
         protected.add(RETAIN_ALL_RUNTIMES)
     return protected

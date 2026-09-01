@@ -2,12 +2,17 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMPTY_EGRESS_POLICY_DIGEST,
+  EXCALIDRAW_READINESS_TIMEOUT_MS,
   INVALID_EXCALIDRAW_ELEMENTS,
   assessExcalidrawReadiness,
   egressPolicyDigest,
   enabledWorkerMcpProviders,
   serializeExcalidrawElements,
 } from "../src/mcp_app_registry.js";
+
+test("optional Excalidraw readiness cannot consume the TTFT budget", () => {
+  assert.equal(EXCALIDRAW_READINESS_TIMEOUT_MS, 2_000);
+});
 
 test("disabled Excalidraw keeps an empty provider digest", () => {
   process.env.PWC_CHAT_EXCALIDRAW_ENABLED = "false";
