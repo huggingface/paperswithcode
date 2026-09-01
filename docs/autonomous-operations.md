@@ -101,7 +101,8 @@ monitor.
 Incident trace-content access is exceptional. It requires a degraded aggregate
 finding, a named operator and run, a trace ID inside a bounded incident window,
 an execution environment that explicitly guarantees telemetry retention is
-disabled, and a durable redacted audit acknowledgement before access is
+disabled (`PWC_CHAT_LANGFUSE_TRACE_CONTENT_ACCESS_ENABLED=true`), and a durable
+redacted audit acknowledgement before a short-lived, single-use permit is
 authorized. Normal monitoring has no trace-content access path.
 
 ## Budget controls

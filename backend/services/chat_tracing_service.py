@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import logging
 import os
 import re
@@ -12,11 +13,15 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
-from typing import Any, Callable
+from pathlib import Path
+from typing import Any
 
+import httpx
 from langfuse import Langfuse, propagate_attributes
+from langfuse.api.core.api_error import ApiError
+from pydantic import ValidationError
 
-from backend.config import Settings
+from backend.config import Settings, get_settings
 from backend.services.autonomous_cron_probe import FindingState, HealthFinding
 
 logger = logging.getLogger(__name__)
@@ -92,11 +97,34 @@ class IncidentTraceContentQuery:
     window_end: datetime
 
 
-@dataclass(frozen=True, slots=True)
+_TRACE_CONTENT_PERMIT_TOKEN = object()
+_ACTIVE_TRACE_CONTENT_PERMITS: dict[str, datetime] = {}
+TRACE_CONTENT_PERMIT_LIFETIME = timedelta(minutes=5)
+TRACE_CONTENT_AUDIT_FILENAME = "chat-incident-trace-access-audit.jsonl"
+
+
+@dataclass(frozen=True, slots=True, init=False)
 class IncidentTraceContentPermit:
     incident_signature: str
     query: IncidentTraceContentQuery
     audited_at: datetime
+    nonce: str
+
+    def __init__(
+        self,
+        incident_signature: str,
+        query: IncidentTraceContentQuery,
+        audited_at: datetime,
+        nonce: str,
+        *,
+        _authorization: object | None = None,
+    ) -> None:
+        if _authorization is not _TRACE_CONTENT_PERMIT_TOKEN:
+            raise PermissionError("use the authorization helper to create a permit")
+        object.__setattr__(self, "incident_signature", incident_signature)
+        object.__setattr__(self, "query", query)
+        object.__setattr__(self, "audited_at", audited_at)
+        object.__setattr__(self, "nonce", nonce)
 
 
 def authorize_incident_trace_content_access(
@@ -105,15 +133,14 @@ def authorize_incident_trace_content_access(
     actor: str,
     run_id: uuid.UUID,
     query: IncidentTraceContentQuery,
-    telemetry_retention_disabled: bool,
-    durable_audit: Callable[[dict[str, object]], bool],
     now: datetime | None = None,
 ) -> IncidentTraceContentPermit:
     """Authorize exceptional trace I/O access only after a durable redacted audit."""
 
+    settings = get_settings()
     if finding.state != FindingState.DEGRADED:
         raise PermissionError("a degraded aggregate finding is required")
-    if not telemetry_retention_disabled:
+    if not settings.chat_langfuse_trace_content_access_enabled:
         raise PermissionError("telemetry retention must be disabled")
     if re.fullmatch(r"operator:[A-Za-z0-9._-]{1,200}", actor) is None:
         raise PermissionError("a named operator actor is required")
@@ -145,9 +172,76 @@ def authorize_incident_trace_content_access(
         },
         "run_id": str(run_id),
     }
-    if durable_audit(record) is not True:
-        raise PermissionError("durable audit acknowledgement is required")
-    return IncidentTraceContentPermit(signature, query, accessed_at)
+    append_incident_trace_access_audit(settings, record)
+    nonce = uuid.uuid4().hex
+    _ACTIVE_TRACE_CONTENT_PERMITS[nonce] = accessed_at + TRACE_CONTENT_PERMIT_LIFETIME
+    return IncidentTraceContentPermit(
+        signature,
+        query,
+        accessed_at,
+        nonce,
+        _authorization=_TRACE_CONTENT_PERMIT_TOKEN,
+    )
+
+
+def fetch_incident_trace_content(
+    permit: IncidentTraceContentPermit,
+    *,
+    now: datetime | None = None,
+) -> Any:
+    """Fetch one authorized trace without persisting or projecting its content."""
+
+    settings = get_settings()
+    if not settings.chat_langfuse_trace_content_access_enabled:
+        raise PermissionError("trace content access is disabled")
+    expires_at = _ACTIVE_TRACE_CONTENT_PERMITS.pop(permit.nonce, None)
+    if expires_at is None:
+        raise PermissionError("trace content permit is single-use")
+    accessed_at = (now or datetime.now(UTC)).astimezone(UTC)
+    if accessed_at > expires_at:
+        raise PermissionError("trace content permit has expired")
+    client = configured_chat_client(settings)
+    if client is None:
+        raise RuntimeError("chat Langfuse client is unavailable")
+    trace = client.api.trace.get(
+        permit.query.trace_id,
+        fields="core,io,observations",
+    )
+    timestamp = trace.timestamp
+    if timestamp.tzinfo is None:
+        raise PermissionError("trace timestamp is not timezone-aware")
+    observed_at = timestamp.astimezone(UTC)
+    if (
+        trace.id != permit.query.trace_id
+        or trace.environment != settings.environment
+        or observed_at < permit.query.window_start
+        or observed_at > permit.query.window_end
+    ):
+        raise PermissionError("trace content exceeds the authorized query")
+    return trace
+
+
+def append_incident_trace_access_audit(
+    settings: Settings,
+    record: dict[str, object],
+) -> None:
+    """Append and fsync one private content-free authorization record."""
+
+    directory = Path(settings.cron_log_dir)
+    directory.mkdir(parents=True, exist_ok=True)
+    path = directory / TRACE_CONTENT_AUDIT_FILENAME
+    flags = os.O_APPEND | os.O_CREAT | os.O_WRONLY | os.O_CLOEXEC
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    payload = (json.dumps(record, sort_keys=True) + "\n").encode()
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        os.fchmod(descriptor, 0o600)
+        if os.write(descriptor, payload) != len(payload):
+            raise OSError("incident trace audit append was incomplete")
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 
 @lru_cache(maxsize=4)
@@ -266,7 +360,7 @@ def fetch_provider_request_observations(
             cursor = page.meta.cursor
             if cursor is None:
                 return SafeProviderObservationPage(tuple(observations), complete=True)
-    except Exception:
+    except (ApiError, httpx.HTTPError, TypeError, ValueError, ValidationError):
         logger.exception("content-free chat aggregate query failed")
         return None
     return SafeProviderObservationPage(tuple(observations), complete=False)
@@ -308,7 +402,7 @@ def fetch_chat_turn_observations(
             cursor = page.meta.cursor
             if cursor is None:
                 return SafeChatTurnObservationPage(tuple(observations), complete=True)
-    except Exception:
+    except (ApiError, httpx.HTTPError, TypeError, ValueError, ValidationError):
         logger.exception("content-free chat turn aggregate query failed")
         return None
     return SafeChatTurnObservationPage(tuple(observations), complete=False)

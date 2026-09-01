@@ -12,11 +12,32 @@ from datetime import UTC, datetime
 from typing import Protocol
 
 import httpx
+from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import get_settings
+from backend.database.connection import db_manager
+from backend.services.autonomous_operations_repository import (
+    AutonomousOperationsRepository,
+    Operator,
+)
 from backend.services.autonomous_cron_probe import FindingState
 
 SYNTHETIC_PROMPT = "Reply with the single word healthy."
+
+
+def synthetic_mutation_pause_reason() -> str | None:
+    """Enforce autonomous controls at the paid mutation capability boundary."""
+
+    try:
+        with db_manager.session_local() as db:
+            control = AutonomousOperationsRepository().get_control_state(db)
+    except SQLAlchemyError:
+        return "control_state_unavailable"
+    if control.manual_mode:
+        return "manual_mode"
+    if not control.enabled[Operator.CHAT_RELIABILITY]:
+        return "operator_disabled"
+    return None
 
 
 class SyntheticChatTransport(Protocol):
@@ -141,6 +162,15 @@ async def run_synthetic_chat(
             environment,
             FindingState.UNKNOWN,
             "chat:synthetic:environment_refused",
+            {},
+            observed_at,
+        )
+    pause_reason = synthetic_mutation_pause_reason()
+    if pause_reason is not None:
+        return _result(
+            environment,
+            FindingState.UNKNOWN,
+            f"chat:synthetic:{pause_reason}",
             {},
             observed_at,
         )

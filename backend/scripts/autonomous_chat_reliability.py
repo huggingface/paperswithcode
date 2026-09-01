@@ -9,8 +9,8 @@ from datetime import UTC, datetime, timedelta
 
 from backend.config import get_settings
 from backend.services.autonomous_cron_probe import FindingState
-from backend.services.chat_reliability_probe import probe_chat_aggregates
-from backend.services.chat_synthetic_probe import run_synthetic_chat
+from backend.services.chat_reliability_service import probe_chat_aggregates
+from backend.services.chat_synthetic_service import run_synthetic_chat
 
 
 def main() -> int:

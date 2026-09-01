@@ -1,14 +1,15 @@
 from __future__ import annotations
 
+import json
+import uuid
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
-import uuid
 
 import pytest
 
 from backend.config import Settings
 from backend.services.autonomous_cron_probe import FindingState
-from backend.services.chat_reliability_probe import (
+from backend.services.chat_reliability_service import (
     ChatAggregateSnapshot,
     classify_chat_aggregates,
     probe_chat_aggregates,
@@ -17,11 +18,13 @@ from backend.services.chat_operational_alert_service import (
     reliability_alert_classifications,
 )
 from backend.services.chat_tracing_service import (
+    IncidentTraceContentPermit,
     IncidentTraceContentQuery,
     SafeChatTurnObservation,
     SafeProviderObservation,
     authorize_incident_trace_content_access,
     fetch_chat_turn_observations,
+    fetch_incident_trace_content,
     fetch_provider_request_observations,
 )
 
@@ -223,7 +226,7 @@ def test_aggregate_classification_is_deterministic_and_content_free():
 
 def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_provider_request_observations",
+        "backend.services.chat_reliability_service.fetch_provider_request_observations",
         lambda _settings, _start, _end: SimpleNamespace(
             complete=True,
             observations=(
@@ -233,7 +236,7 @@ def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkey
         ),
     )
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_chat_turn_observations",
+        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
         lambda _settings, _start, _end: SimpleNamespace(
             complete=True,
             observations=(
@@ -261,14 +264,14 @@ def test_probe_combines_safe_langfuse_observations_and_operational_counts(monkey
 
 def test_probe_counts_predispatch_turn_provider_auth_and_billing_failures(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_provider_request_observations",
+        "backend.services.chat_reliability_service.fetch_provider_request_observations",
         lambda _settings, _start, _end: SimpleNamespace(
             complete=True,
             observations=(SafeProviderObservation("success", 300, 1000),),
         ),
     )
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_chat_turn_observations",
+        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
         lambda _settings, _start, _end: SimpleNamespace(
             complete=True,
             observations=(
@@ -296,11 +299,11 @@ def test_probe_counts_predispatch_turn_provider_auth_and_billing_failures(monkey
 
 def test_unavailable_or_truncated_aggregate_source_is_unknown(monkeypatch):
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_provider_request_observations",
+        "backend.services.chat_reliability_service.fetch_provider_request_observations",
         lambda _settings, _start, _end: None,
     )
     monkeypatch.setattr(
-        "backend.services.chat_reliability_probe.fetch_chat_turn_observations",
+        "backend.services.chat_reliability_service.fetch_chat_turn_observations",
         lambda _settings, _start, _end: None,
     )
 
@@ -342,7 +345,9 @@ def test_alert_projection_contains_only_contract_and_stable_signature():
     assert "trace" not in repr(projected).lower()
 
 
-def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit():
+def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit(
+    monkeypatch, tmp_path
+):
     finding = next(
         item
         for item in classify_chat_aggregates(
@@ -369,7 +374,11 @@ def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit():
         window_start=NOW - timedelta(minutes=5),
         window_end=NOW,
     )
-    audit_records = []
+    audit_path = tmp_path / "chat-incident-trace-access-audit.jsonl"
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.get_settings",
+        lambda: Settings(environment="production", cron_log_dir=str(tmp_path)),
+    )
 
     with pytest.raises(PermissionError, match="telemetry retention"):
         authorize_incident_trace_content_access(
@@ -377,23 +386,31 @@ def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit():
             actor="operator:alice",
             run_id=uuid.uuid4(),
             query=query,
-            telemetry_retention_disabled=False,
-            durable_audit=lambda record: audit_records.append(record) or True,
             now=NOW,
         )
-    assert audit_records == []
+    assert not audit_path.exists()
+
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.get_settings",
+        lambda: Settings(
+            environment="production",
+            cron_log_dir=str(tmp_path),
+            chat_langfuse_trace_content_access_enabled=True,
+        ),
+    )
 
     permit = authorize_incident_trace_content_access(
         finding=finding,
         actor="operator:alice",
         run_id=uuid.UUID("11111111-1111-1111-1111-111111111111"),
         query=query,
-        telemetry_retention_disabled=True,
-        durable_audit=lambda record: audit_records.append(record) or True,
         now=NOW,
     )
 
     assert permit.incident_signature == "chat:provider:provider_error"
+    audit_records = [
+        json.loads(line) for line in audit_path.read_text(encoding="utf-8").splitlines()
+    ]
     assert audit_records == [
         {
             "actor": "operator:alice",
@@ -407,10 +424,11 @@ def test_trace_content_access_requires_finding_no_telemetry_and_durable_audit():
             "run_id": "11111111-1111-1111-1111-111111111111",
         }
     ]
+    assert audit_path.stat().st_mode & 0o777 == 0o600
     assert "content" not in repr(audit_records).lower()
 
 
-def test_trace_content_access_rejects_failed_durable_audit():
+def test_trace_content_access_rejects_failed_durable_audit(monkeypatch, tmp_path):
     snapshot = ChatAggregateSnapshot(
         total_requests=1,
         successful_requests=0,
@@ -428,7 +446,24 @@ def test_trace_content_access_rejects_failed_durable_audit():
     )
     finding = classify_chat_aggregates(snapshot)[1]
 
-    with pytest.raises(PermissionError, match="durable audit"):
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.get_settings",
+        lambda: Settings(
+            environment="production",
+            cron_log_dir=str(tmp_path),
+            chat_langfuse_trace_content_access_enabled=True,
+        ),
+    )
+
+    def fail_audit(_settings, _record):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.append_incident_trace_access_audit",
+        fail_audit,
+    )
+
+    with pytest.raises(OSError, match="disk full"):
         authorize_incident_trace_content_access(
             finding=finding,
             actor="operator:alice",
@@ -438,7 +473,101 @@ def test_trace_content_access_rejects_failed_durable_audit():
                 window_start=NOW - timedelta(minutes=5),
                 window_end=NOW,
             ),
-            telemetry_retention_disabled=True,
-            durable_audit=lambda _record: False,
             now=NOW,
+        )
+
+
+def test_authorized_incident_trace_content_fetch_is_bounded_to_permit(
+    monkeypatch, tmp_path
+):
+    finding = next(
+        item
+        for item in classify_chat_aggregates(
+            ChatAggregateSnapshot(
+                total_requests=1,
+                successful_requests=0,
+                provider_errors=1,
+                auth_errors=0,
+                billing_errors=0,
+                ttft_ms=(),
+                completion_ms=(),
+                stream_interruptions=0,
+                persistence_failures=0,
+                capacity_failures=0,
+                collection_complete=True,
+                window_start=NOW - timedelta(minutes=15),
+                window_end=NOW,
+            )
+        )
+        if item.contract == "provider_errors"
+    )
+    query = IncidentTraceContentQuery(
+        trace_id="d" * 32,
+        window_start=NOW - timedelta(minutes=10),
+        window_end=NOW,
+    )
+    settings = Settings(
+        environment="production",
+        cron_log_dir=str(tmp_path),
+        chat_langfuse_trace_content_access_enabled=True,
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.get_settings", lambda: settings
+    )
+    permit = authorize_incident_trace_content_access(
+        finding=finding,
+        actor="operator:chat-reliability",
+        run_id=uuid.uuid4(),
+        query=query,
+        now=NOW,
+    )
+    trace = SimpleNamespace(
+        id=query.trace_id,
+        timestamp=NOW - timedelta(minutes=5),
+        environment="production",
+        input={"role": "user", "content": "private"},
+        output="private response",
+        observations=[],
+    )
+    calls = []
+    client = SimpleNamespace(
+        api=SimpleNamespace(
+            trace=SimpleNamespace(
+                get=lambda trace_id, **kwargs: calls.append((trace_id, kwargs)) or trace
+            )
+        )
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_tracing_service.configured_chat_client",
+        lambda _settings: client,
+    )
+
+    result = fetch_incident_trace_content(
+        permit,
+        now=NOW,
+    )
+
+    assert result is trace
+    assert calls == [(query.trace_id, {"fields": "core,io,observations"})]
+
+    with pytest.raises(PermissionError, match="single-use"):
+        fetch_incident_trace_content(
+            permit,
+            now=NOW,
+        )
+
+
+def test_incident_trace_content_permit_cannot_be_constructed_directly():
+    query = IncidentTraceContentQuery(
+        trace_id="e" * 32,
+        window_start=NOW - timedelta(minutes=5),
+        window_end=NOW,
+    )
+
+    with pytest.raises(PermissionError, match="authorization helper"):
+        IncidentTraceContentPermit(
+            "chat:provider:provider_error",
+            query,
+            NOW,
+            "forged-nonce",
         )

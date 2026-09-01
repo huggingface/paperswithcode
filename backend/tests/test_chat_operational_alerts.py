@@ -20,7 +20,7 @@ from backend.services.chat_operational_alert_service import (
     provider_transition,
     runtime_failure_counts,
 )
-from backend.services.chat_reliability_probe import (
+from backend.services.chat_reliability_service import (
     ChatAggregateSnapshot,
     classify_chat_aggregates,
 )
@@ -363,6 +363,44 @@ def test_release_change_forces_extra_reliability_and_synthetic_checks():
     assert monitor.release_probe_triggers(state, changed_provider) == (True, True)
 
 
+def test_runtime_provider_revision_forces_checks_without_static_settings_change():
+    state = monitor.empty_state()
+    settings = Settings(release_id="same-release")
+
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:3:openai",
+    ) == (True, True)
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:3:openai",
+    ) == (False, False)
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:4:huggingface",
+    ) == (True, True)
+
+
+def test_runtime_provider_revision_db_failure_does_not_stop_monitor(monkeypatch):
+    class FailingSession:
+        def __enter__(self):
+            raise monitor.SQLAlchemyError("database unavailable")
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        type(monitor.db_manager),
+        "session_local",
+        property(lambda _self: FailingSession),
+    )
+
+    assert monitor.current_provider_runtime_revision("production") is None
+
+
 def test_minute_monitor_never_runs_the_paid_synthetic_probe(monkeypatch, tmp_path):
     settings = Settings(
         environment="production",
@@ -373,8 +411,11 @@ def test_minute_monitor_never_runs_the_paid_synthetic_probe(monkeypatch, tmp_pat
     state = monitor.empty_state()
     monkeypatch.setattr(monitor, "get_settings", lambda: settings)
     monkeypatch.setattr(monitor, "load_state", lambda _path: state)
+    monkeypatch.setattr(monitor, "current_provider_runtime_revision", lambda _env: None)
     monkeypatch.setattr(
-        monitor, "release_probe_triggers", lambda _state, _settings: (False, False)
+        monitor,
+        "release_probe_triggers",
+        lambda _state, _settings, **_kwargs: (False, False),
     )
     monkeypatch.setattr(
         monitor, "collect_events", lambda _state, _settings, _now: ([], False)

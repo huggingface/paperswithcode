@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import hashlib
 import json
 import os
 import subprocess
@@ -23,13 +22,17 @@ from backend.services.chat_operational_alert_service import (
     lifecycle_window_alerts,
     post_operational_alert,
     provider_health,
+    provider_runtime_revision,
     provider_transition,
     reliability_alert_classifications,
     runtime_failure_counts,
 )
 from backend.services.autonomous_cron_probe import FindingState
-from backend.services.chat_reliability_probe import probe_chat_aggregates
-from backend.services.chat_synthetic_probe import run_synthetic_chat
+from backend.services.chat_reliability_service import (
+    probe_chat_aggregates,
+    release_probe_triggers,
+)
+from backend.services.chat_synthetic_service import run_synthetic_chat
 
 PRODUCTION_JOURNAL_UNITS = (
     "paperswithcode-backend@production",
@@ -57,6 +60,7 @@ def empty_state() -> dict[str, Any]:
         "synthetic_active": None,
         "observed_release_id": None,
         "observed_provider_digest": None,
+        "observed_provider_runtime_revision": None,
         "operational_counts": {},
         "events": [],
     }
@@ -78,6 +82,7 @@ def load_state(path: Path) -> dict[str, Any]:
     state.setdefault("synthetic_active", None)
     state.setdefault("observed_release_id", None)
     state.setdefault("observed_provider_digest", None)
+    state.setdefault("observed_provider_runtime_revision", None)
     state.setdefault("operational_counts", {})
     if (
         not isinstance(state["lifecycle_active"], list)
@@ -120,6 +125,11 @@ def load_state(path: Path) -> dict[str, Any]:
         or any(character not in "0123456789abcdef" for character in provider_digest)
     ):
         raise TypeError("chat operational alert state has invalid provider digest")
+    provider_revision = state["observed_provider_runtime_revision"]
+    if provider_revision is not None and (
+        not isinstance(provider_revision, str) or len(provider_revision) > 320
+    ):
+        raise TypeError("chat operational alert state has invalid provider revision")
     return state
 
 
@@ -135,30 +145,12 @@ def _timestamp(value: object) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def release_probe_triggers(
-    state: dict[str, Any], settings: Settings
-) -> tuple[bool, bool]:
-    """Force checks after any deploy, rollback, or provider-route release change."""
-
-    release = settings.release_id
-    provider_manifest = [
-        {
-            "id": choice["id"],
-            "provider": choice["provider"],
-            "route": choice["route"],
-        }
-        for choice in settings.chat_model_choices
-    ]
-    provider_digest = hashlib.sha256(
-        json.dumps(provider_manifest, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
-    changed = (
-        state.get("observed_release_id") != release
-        or state.get("observed_provider_digest") != provider_digest
-    )
-    state["observed_release_id"] = release
-    state["observed_provider_digest"] = provider_digest
-    return changed, changed
+def current_provider_runtime_revision(environment: str) -> str | None:
+    try:
+        with db_manager.session_local() as db:
+            return provider_runtime_revision(db, environment)
+    except SQLAlchemyError:
+        return None
 
 
 def collect_reliability_events(
@@ -601,7 +593,13 @@ def main() -> int:
     )
     state = load_state(state_path)
     now = datetime.now(UTC)
-    force_aggregate, _force_synthetic = release_probe_triggers(state, settings)
+    force_aggregate, _force_synthetic = release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision=current_provider_runtime_revision(
+            settings.environment
+        ),
+    )
     events, collection_failed = collect_events(state, settings, now)
     events.extend(
         collect_reliability_events(

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from math import ceil
-from typing import Mapping
+from typing import Any, Mapping
 
 from backend.config import Settings
 from backend.services.autonomous_cron_probe import FindingState, HealthFinding
@@ -27,6 +29,41 @@ CONTRACTS = (
     "persistence",
     "capacity",
 )
+
+
+def release_probe_triggers(
+    state: dict[str, Any],
+    settings: Settings,
+    *,
+    provider_runtime_revision: str | None = None,
+) -> tuple[bool, bool]:
+    """Record release/provider identity and report whether checks must run now."""
+
+    provider_manifest = [
+        {
+            "id": choice["id"],
+            "provider": choice["provider"],
+            "route": choice["route"],
+        }
+        for choice in settings.chat_model_choices
+    ]
+    provider_digest = hashlib.sha256(
+        json.dumps(provider_manifest, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    changed = (
+        state.get("observed_release_id") != settings.release_id
+        or state.get("observed_provider_digest") != provider_digest
+        or (
+            provider_runtime_revision is not None
+            and state.get("observed_provider_runtime_revision")
+            != provider_runtime_revision
+        )
+    )
+    state["observed_release_id"] = settings.release_id
+    state["observed_provider_digest"] = provider_digest
+    if provider_runtime_revision is not None:
+        state["observed_provider_runtime_revision"] = provider_runtime_revision
+    return changed, changed
 
 
 @dataclass(frozen=True, slots=True)

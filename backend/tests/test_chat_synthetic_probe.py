@@ -7,14 +7,26 @@ import sys
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
+import pytest
+
 from backend.config import Settings
+from backend.services import chat_synthetic_service
 from backend.services.autonomous_cron_probe import FindingState
-from backend.services.chat_synthetic_probe import run_synthetic_chat
+from backend.services.chat_synthetic_service import run_synthetic_chat
 from backend.scripts import monitor_chat_operational_alerts as monitor
-from backend.services.chat_synthetic_probe import SyntheticChatResult
+from backend.services.chat_synthetic_service import SyntheticChatResult
 
 
 NOW = datetime(2026, 8, 31, 12, tzinfo=UTC)
+
+
+@pytest.fixture(autouse=True)
+def allow_synthetic_mutation(monkeypatch):
+    monkeypatch.setattr(
+        chat_synthetic_service,
+        "synthetic_mutation_pause_reason",
+        lambda: None,
+    )
 
 
 class FakeSyntheticTransport:
@@ -131,6 +143,21 @@ def test_synthetic_probe_rejects_non_production_target():
 
     assert result.state == FindingState.UNKNOWN
     assert result.incident_signature == "chat:synthetic:environment_refused"
+
+
+def test_synthetic_probe_enforces_manual_mode_inside_mutating_service(monkeypatch):
+    transport = FakeSyntheticTransport()
+    monkeypatch.setattr(
+        chat_synthetic_service,
+        "synthetic_mutation_pause_reason",
+        lambda: "manual_mode",
+    )
+
+    result = asyncio.run(run_synthetic_chat("production", transport=transport, now=NOW))
+
+    assert result.state == FindingState.UNKNOWN
+    assert result.incident_signature == "chat:synthetic:manual_mode"
+    assert transport.calls == []
 
 
 def test_monitor_runs_synthetic_every_four_hours_and_after_release(monkeypatch):
@@ -255,6 +282,7 @@ def test_separate_synthetic_job_runs_release_trigger_and_persists_before_deliver
 
     monkeypatch.setattr(job, "get_settings", lambda: settings)
     monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: None)
+    monkeypatch.setattr(job, "current_provider_runtime_revision", lambda _env: None)
     monkeypatch.setattr(job, "load_state", lambda _path: state)
     monkeypatch.setattr(job, "collect_synthetic_events", collect)
     monkeypatch.setattr(job, "deliver_pending", deliver)
@@ -291,12 +319,30 @@ def test_separate_synthetic_job_pauses_paid_work_in_manual_mode(
     )
     monkeypatch.setattr(job, "get_settings", lambda: settings)
     monkeypatch.setattr(job, "synthetic_mutation_pause_reason", lambda: "manual_mode")
+    state = monitor.empty_state()
+    state["events"] = [monitor.new_event("chat_synthetic_failure", now=NOW)]
+    monkeypatch.setattr(job, "load_state", lambda _path: state)
     monkeypatch.setattr(
         job,
         "collect_synthetic_events",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             AssertionError("paid synthetic chat must remain paused")
         ),
+    )
+    deliveries = []
+
+    async def deliver(active_state, _settings):
+        deliveries.append(active_state)
+        active_state["events"][0]["primary_delivery_state"] = "delivered"
+        active_state["events"][0]["fallback_delivery_state"] = "not_needed"
+        return 1
+
+    monkeypatch.setattr(job, "deliver_pending", deliver)
+    writes = []
+    monkeypatch.setattr(
+        job,
+        "write_state",
+        lambda path, payload: writes.append((path.name, dict(payload))),
     )
     health = []
     monkeypatch.setattr(
@@ -308,6 +354,8 @@ def test_separate_synthetic_job_pauses_paid_work_in_manual_mode(
     monkeypatch.setattr(sys, "argv", ["run_chat_synthetic_probe"])
 
     assert job.main() == 0
+    assert deliveries == [state]
+    assert len(writes) == 1
     assert health == [
         {
             "environment": "production",
@@ -316,7 +364,7 @@ def test_separate_synthetic_job_pauses_paid_work_in_manual_mode(
             "completed_at": NOW.isoformat(),
             "pending": 0,
             "new_events": 0,
-            "delivered": 0,
+            "delivered": 1,
             "release_id": settings.release_id,
         }
     ]

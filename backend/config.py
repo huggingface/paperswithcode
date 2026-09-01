@@ -801,6 +801,7 @@ class Settings(BaseSettings):
     chat_require_auth: bool = Field(default=True)
     chat_show_reasoning: bool = Field(default=True)
     chat_langfuse_enabled: bool = Field(default=False)
+    chat_langfuse_trace_content_access_enabled: bool = Field(default=False)
     catalog_mutations_enabled: bool = Field(default=True)
     thumbnail_mutations_enabled: bool = Field(default=True)
     cron_enabled: bool = Field(default=True)

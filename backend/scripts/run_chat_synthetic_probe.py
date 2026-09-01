@@ -11,35 +11,21 @@ from pathlib import Path
 from typing import Any
 
 from backend.config import get_settings
-from backend.database.connection import db_manager
 from backend.scripts.monitor_chat_operational_alerts import (
     _timestamp,
     append_event,
     collect_synthetic_events,
+    current_provider_runtime_revision,
     deliver_pending,
     load_state,
-    release_probe_triggers,
     write_health_record,
     write_state,
 )
-from backend.services.autonomous_operations_repository import (
-    AutonomousOperationsRepository,
-    Operator,
-)
+from backend.services.chat_reliability_service import release_probe_triggers
+from backend.services.chat_synthetic_service import synthetic_mutation_pause_reason
 
 HEALTH_RECORD = "chat-synthetic-probe-health.json"
 CRITICAL_ALERT_FORCE_COOLDOWN = timedelta(hours=4)
-
-
-def synthetic_mutation_pause_reason() -> str | None:
-    """Return the autonomous control that currently blocks paid probe mutation."""
-    with db_manager.session_local() as db:
-        control = AutonomousOperationsRepository().get_control_state(db)
-    if control.manual_mode:
-        return "manual_mode"
-    if not control.enabled[Operator.CHAT_RELIABILITY]:
-        return "operator_disabled"
-    return None
 
 
 def _critical_alert_after(
@@ -92,25 +78,33 @@ def main() -> int:
     if not settings.chat_operational_alerts_enabled:
         parser.error("PWC_CHAT_OPERATIONAL_ALERTS_ENABLED is required")
 
+    state_path = args.state_file or Path(settings.cron_log_dir).joinpath(
+        "chat-synthetic-probe-state.json"
+    )
     pause_reason = synthetic_mutation_pause_reason()
     if pause_reason is not None:
+        state = load_state(state_path)
+        delivered = asyncio.run(deliver_pending(state, settings))
+        write_state(state_path, state)
+        pending = sum(
+            event["primary_delivery_state"] != "delivered"
+            and event["fallback_delivery_state"] != "delivered"
+            for event in state["events"]
+        )
         result = {
             "environment": "production",
             "status": "paused",
             "reason_code": pause_reason,
             "completed_at": completed_at,
-            "pending": 0,
+            "pending": pending,
             "new_events": 0,
-            "delivered": 0,
+            "delivered": delivered,
             "release_id": settings.release_id,
         }
         write_health_record(Path(settings.cron_log_dir), result, filename=HEALTH_RECORD)
         print(json.dumps(result, sort_keys=True))
         return 0
 
-    state_path = args.state_file or Path(settings.cron_log_dir).joinpath(
-        "chat-synthetic-probe-state.json"
-    )
     operational_state_path = args.operational_state_file or Path(
         settings.cron_log_dir
     ).joinpath("chat-operational-alert-state.json")
@@ -118,7 +112,13 @@ def main() -> int:
     now = datetime.now(UTC)
     previous = _timestamp(state.get("last_synthetic_probe_at"))
     last_forced_alert = _timestamp(state.get("last_critical_alert_probe_at"))
-    _force_aggregate, force_release = release_probe_triggers(state, settings)
+    _force_aggregate, force_release = release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision=current_provider_runtime_revision(
+            settings.environment
+        ),
+    )
     operational_state = load_state(operational_state_path)
     force_alert = _critical_alert_after(
         operational_state,
