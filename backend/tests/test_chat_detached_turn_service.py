@@ -815,6 +815,60 @@ def test_second_start_is_rejected_without_consuming_replacement() -> None:
     assert asyncio.run(scenario()) == (True, False)
 
 
+def test_independent_turn_start_validations_run_concurrently() -> None:
+    async def scenario() -> int:
+        validation_count = 0
+        both_validating = asyncio.Event()
+        hold_sources = asyncio.Event()
+
+        class Jobs:
+            @staticmethod
+            def require_live_claim(_db, *, claim, now):
+                return claim
+
+        async def transaction(operation):
+            nonlocal validation_count
+            validation_count += 1
+            if validation_count == 2:
+                both_validating.set()
+            await asyncio.wait_for(both_validating.wait(), timeout=0.1)
+            return operation(None)
+
+        async def persist_terminal(_claim, _state, _failure_code):
+            return None
+
+        coordinator = DetachedTurnCoordinator(
+            transaction=transaction,
+            jobs=Jobs(),
+            persist_terminal=persist_terminal,
+            clock=lambda: NOW,
+        )
+        turns = [
+            DetachedTurn(
+                turn_id=(turn_id := uuid.uuid4()),
+                claim=TurnLeaseClaim(turn_id, "worker-a", 7, 3),
+            )
+            for _ in range(2)
+        ]
+
+        async def source():
+            await hold_sources.wait()
+            yield ChatStreamFrame("done", {"finish_reason": "success"})
+
+        handles = await asyncio.gather(
+            *(coordinator.start(turn=turn, source=source()) for turn in turns)
+        )
+        concurrent_start_validations = validation_count
+        for handle in handles:
+            handle.source_task.cancel()
+        await asyncio.gather(
+            *(handle.source_task for handle in handles), return_exceptions=True
+        )
+        return concurrent_start_validations
+
+    assert asyncio.run(scenario()) == 2
+
+
 def test_active_source_remains_strongly_owned() -> None:
     async def scenario() -> tuple[int, int]:
         harness = Harness()
