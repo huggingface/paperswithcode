@@ -1313,8 +1313,10 @@ def test_external_new_turn_frame_carries_prebound_pi_session():
         sdk_session_id=agent_session_id,
         is_first_turn=True,
     )
+    runner.resume_id = agent_session_id
 
     assert runner._run_frame()["agent_session_id"] == str(agent_session_id)
+    assert runner._run_frame()["resume"] is None
 
 
 def test_external_run_frame_preserves_exact_durable_turn_fence_as_strings():

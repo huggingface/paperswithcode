@@ -473,6 +473,13 @@ class ExternalPiChatTurnRunner:
         }
 
     def _run_frame(self) -> dict[str, object]:
+        prebound_agent_session_id = (
+            self.admission.sdk_session_id
+            if self.admission.is_first_turn
+            and not self.admission.is_replacement
+            and self.resume_id in {None, self.admission.sdk_session_id}
+            else None
+        )
         frame = {
             "v": 1,
             "type": "run_turn",
@@ -487,7 +494,13 @@ class ExternalPiChatTurnRunner:
             "provider_protocol": self.settings.chat_route_protocols[
                 self.admission.model_route
             ],
-            "resume": str(self.resume_id) if self.resume_id else None,
+            "resume": (
+                None
+                if prebound_agent_session_id is not None
+                else str(self.resume_id)
+                if self.resume_id
+                else None
+            ),
             "web_search_enabled": self.admission.web_search_enabled,
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
@@ -501,8 +514,8 @@ class ExternalPiChatTurnRunner:
         }
         if self.admission.paper_descriptor is not None:
             frame["paper_descriptor"] = self.admission.paper_descriptor
-        if self.resume_id is None and self.admission.sdk_session_id is not None:
-            frame["agent_session_id"] = str(self.admission.sdk_session_id)
+        if prebound_agent_session_id is not None:
+            frame["agent_session_id"] = str(prebound_agent_session_id)
         return frame
 
     @staticmethod
