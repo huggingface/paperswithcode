@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import and_, case, exists, func, or_, select
@@ -87,6 +87,7 @@ class TurnAdmissionPreflight:
     requested_session_id: uuid.UUID | None
     emergency_capacity: int
     existing_job: ChatTurnJob | None
+    global_capacity_authorized: bool
     session: Session = field(repr=False, compare=False)
     transaction: SessionTransaction = field(repr=False, compare=False)
 
@@ -130,6 +131,7 @@ class ChatTurnJobRepository:
         emergency_capacity: int,
         turn_id: uuid.UUID | None = None,
         authority_locked: bool = False,
+        defer_global_capacity: bool = False,
         now: datetime | None = None,
     ) -> TurnAdmissionPreflight:
         """Lock and decide admission before any session or message is written."""
@@ -142,7 +144,9 @@ class ChatTurnJobRepository:
         ):
             raise ValueError("Turn admission preflight is invalid")
         if not authority_locked:
-            self.lock_admission_authority(db, hf_user_id=hf_user_id)
+            self.lock_user_admission_authority(db, hf_user_id=hf_user_id)
+            if not defer_global_capacity:
+                self.lock_global_admission_authority(db)
         now = now or datetime.now(UTC)
         if now.tzinfo is None:
             raise ValueError("Turn admission timestamp is invalid")
@@ -186,6 +190,7 @@ class ChatTurnJobRepository:
                 requested_session_id=chat_session_id,
                 emergency_capacity=emergency_capacity,
                 existing_job=existing,
+                global_capacity_authorized=True,
                 session=db,
                 transaction=self._active_transaction(db),
             )
@@ -204,6 +209,34 @@ class ChatTurnJobRepository:
         )
         if owner_active:
             raise AccountBusy("This account already has a nonterminal turn")
+        if not defer_global_capacity:
+            self._assert_global_capacity(db, emergency_capacity, now=now)
+        return TurnAdmissionPreflight(
+            hf_user_id=hf_user_id,
+            request_id=request_id,
+            requested_session_id=chat_session_id,
+            emergency_capacity=emergency_capacity,
+            existing_job=None,
+            global_capacity_authorized=not defer_global_capacity,
+            session=db,
+            transaction=self._active_transaction(db),
+        )
+
+    def lock_user_admission_authority(self, db: Session, *, hf_user_id: str) -> None:
+        self._advisory_locker(db, f"chat-user:{hf_user_id}")
+
+    def lock_global_admission_authority(self, db: Session) -> None:
+        self._advisory_locker(db, "chat-global-active-turns")
+
+    def lock_admission_authority(self, db: Session, *, hf_user_id: str) -> None:
+        """Acquire user then global admission authority for the transaction."""
+        self.lock_user_admission_authority(db, hf_user_id=hf_user_id)
+        self.lock_global_admission_authority(db)
+
+    @staticmethod
+    def _assert_global_capacity(
+        db: Session, emergency_capacity: int, *, now: datetime
+    ) -> None:
         active_total = db.scalar(
             select(func.count())
             .select_from(ChatTurnJob)
@@ -217,20 +250,27 @@ class ChatTurnJobRepository:
         )
         if (active_total or 0) >= emergency_capacity:
             raise ChatOverload("Emergency chat capacity is full")
-        return TurnAdmissionPreflight(
-            hf_user_id=hf_user_id,
-            request_id=request_id,
-            requested_session_id=chat_session_id,
-            emergency_capacity=emergency_capacity,
-            existing_job=None,
-            session=db,
-            transaction=self._active_transaction(db),
-        )
 
-    def lock_admission_authority(self, db: Session, *, hf_user_id: str) -> None:
-        """Acquire user then global admission authority for the transaction."""
-        self._advisory_locker(db, f"chat-user:{hf_user_id}")
-        self._advisory_locker(db, "chat-global-active-turns")
+    def authorize_global_capacity(
+        self,
+        db: Session,
+        preflight: TurnAdmissionPreflight,
+        *,
+        now: datetime | None = None,
+    ) -> TurnAdmissionPreflight:
+        if preflight.existing_job is not None or preflight.global_capacity_authorized:
+            return preflight
+        if (
+            preflight.session is not db
+            or preflight.transaction is not self._active_transaction(db)
+        ):
+            raise ValueError("Turn admission preflight transaction changed")
+        now = now or datetime.now(UTC)
+        if now.tzinfo is None:
+            raise ValueError("Turn admission timestamp is invalid")
+        self.lock_global_admission_authority(db)
+        self._assert_global_capacity(db, preflight.emergency_capacity, now=now)
+        return replace(preflight, global_capacity_authorized=True)
 
     def load_expired_claims(
         self,

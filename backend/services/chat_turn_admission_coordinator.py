@@ -71,7 +71,7 @@ class ChatTurnAdmissionCoordinator:
         now = now or datetime.now(UTC)
         if now.tzinfo is None:
             raise ValueError("Durable admission timestamp is invalid")
-        self.repository.lock_admission_authority(self.db, hf_user_id=hf_user_id)
+        self.repository.lock_user_admission_authority(self.db, hf_user_id=hf_user_id)
         reconciled_expired_count = self._reconcile_expired_claims(
             hf_user_id=hf_user_id, now=now
         )
@@ -86,6 +86,7 @@ class ChatTurnAdmissionCoordinator:
                 else self.settings.chat_max_concurrency
             ),
             authority_locked=True,
+            defer_global_capacity=True,
             now=now,
         )
         return DurableAdmissionPreflight(
@@ -120,6 +121,14 @@ class ChatTurnAdmissionCoordinator:
             raise ChatOverload("External worker capacity is full") from error
         self.external_capacity = capacity
         return replace(preflight, external_reservation=reservation)
+
+    def authorize_global_capacity(
+        self, preflight: DurableAdmissionPreflight, *, now: datetime
+    ) -> DurableAdmissionPreflight:
+        authorized = self.repository.authorize_global_capacity(
+            self.db, preflight.repository_preflight, now=now
+        )
+        return replace(preflight, repository_preflight=authorized)
 
     def _reconcile_expired_claims(self, *, hf_user_id: str, now: datetime) -> int:
         """Atomically repair bounded durable and legacy expiry projections."""
@@ -201,6 +210,12 @@ class ChatTurnAdmissionCoordinator:
         worker_contract_version: str,
         now: datetime,
     ) -> ChatTurnJob:
+        if (
+            preflight.existing_job is None
+            and preflight.external_reservation is None
+            and not preflight.repository_preflight.global_capacity_authorized
+        ):
+            raise RuntimeError("Durable admission capacity authority is missing")
         admitted = self.repository.admit_preflighted(
             self.db,
             preflight=preflight.repository_preflight,

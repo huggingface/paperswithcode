@@ -224,7 +224,11 @@ class ChatDurableQualificationEvidenceService:
         )
 
     def require_active_scope(
-        self, scope_id: uuid.UUID, *, settings: Settings, lock: bool = False
+        self,
+        scope_id: uuid.UUID,
+        *,
+        settings: Settings,
+        lock: bool | Literal["key_share"] = False,
     ) -> ChatQualificationScope:
         return self._require_scope(
             scope_id,
@@ -249,13 +253,15 @@ class ChatDurableQualificationEvidenceService:
         scope_id: uuid.UUID,
         *,
         settings: Settings,
-        lock: bool,
+        lock: bool | Literal["key_share"],
         allow_ended: bool,
     ) -> ChatQualificationScope:
         statement = select(ChatQualificationScope).where(
             ChatQualificationScope.id == scope_id
         )
-        if lock:
+        if lock == "key_share":
+            statement = statement.with_for_update(read=True, key_share=True)
+        elif lock:
             statement = statement.with_for_update()
         scope = self.db.execute(statement).scalar_one_or_none()
         now = self.now()
@@ -277,7 +283,7 @@ class ChatDurableQualificationEvidenceService:
         workload: str,
         settings: Settings,
     ) -> QualificationContext:
-        scope = self.require_active_scope(scope_id, settings=settings, lock=True)
+        scope = self.require_active_scope(scope_id, settings=settings, lock="key_share")
         if (
             not settings.chat_durable_turn_dispatch_enabled
             or scope.profile != "32-functional-turns"

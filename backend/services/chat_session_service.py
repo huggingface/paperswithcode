@@ -1866,6 +1866,13 @@ class ChatSessionService:
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
                 raise self._durable_admission_error(error) from error
+        elif durable_coordinator is not None and durable_preflight is not None:
+            try:
+                durable_preflight = durable_coordinator.authorize_global_capacity(
+                    durable_preflight, now=now
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
 
         if durable_coordinator is None:
             self._lock_admission_keys(owner)

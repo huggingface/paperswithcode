@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -77,6 +78,7 @@ def _scope(
 
 def test_active_functional_scope_derives_server_trusted_capacity_context(engine):
     lock_requests = []
+    statements = []
 
     class LockedService(ChatDurableQualificationEvidenceService):
         def require_active_scope(self, scope_id, *, settings, lock=False):
@@ -86,6 +88,13 @@ def test_active_functional_scope_derives_server_trusted_capacity_context(engine)
     with Session(engine) as db:
         db.add(_scope())
         db.commit()
+        execute = db.execute
+
+        def capture(statement, *args, **kwargs):
+            statements.append(statement)
+            return execute(statement, *args, **kwargs)
+
+        db.execute = capture  # type: ignore[method-assign]
 
         context = LockedService(db, now=lambda: START).require_active_context(
             SCOPE_ID,
@@ -104,7 +113,13 @@ def test_active_functional_scope_derives_server_trusted_capacity_context(engine)
         turn_capacity=32,
         executor_live_cap=16,
     )
-    assert lock_requests == [True]
+    assert lock_requests == ["key_share"]
+    scope_query = next(
+        statement
+        for statement in statements
+        if "chat_qualification_scopes" in str(statement)
+    )
+    assert "FOR KEY SHARE" in str(scope_query.compile(dialect=postgresql.dialect()))
 
 
 @pytest.mark.parametrize(

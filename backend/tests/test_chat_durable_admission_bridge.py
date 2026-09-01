@@ -39,7 +39,7 @@ def test_qualification_capacity_is_scoped_to_one_durable_preflight():
     capacities = []
 
     class Repository:
-        def lock_admission_authority(self, *_args, **_kwargs):
+        def lock_user_admission_authority(self, *_args, **_kwargs):
             return None
 
         def load_expired_claims(self, *_args, **_kwargs):
@@ -317,6 +317,9 @@ def test_ordinary_new_turn_does_not_reserve_external_capacity_when_global_off(
         def reserve_external_capacity(self, *_args, **_kwargs):
             pytest.fail("ordinary turn reserved external capacity")
 
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
+
     monkeypatch.setattr(
         chat_session_module, "ChatTurnAdmissionCoordinator", _Coordinator
     )
@@ -352,6 +355,9 @@ def test_qualified_existing_non_pi_session_is_rejected_before_replay(monkeypatch
 
         def preflight(self, **_kwargs):
             return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
+
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
 
     monkeypatch.setattr(
         chat_session_module, "ChatTurnAdmissionCoordinator", _Coordinator
@@ -587,6 +593,9 @@ def test_enabled_different_active_message_remains_rejected(monkeypatch):
         def preflight(self, **_kwargs):
             return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
 
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
+
     monkeypatch.setattr(
         chat_session_module, "ChatTurnAdmissionCoordinator", _Coordinator
     )
@@ -619,6 +628,9 @@ def test_enabled_integrity_failure_rolls_back_session_and_message(monkeypatch):
 
         def preflight(self, **_kwargs):
             return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
+
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
 
         def admit(self, *_args, **_kwargs):
             raise IntegrityError("insert chat_turn_jobs", {}, RuntimeError("conflict"))
