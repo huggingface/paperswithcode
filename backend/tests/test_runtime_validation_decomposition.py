@@ -436,7 +436,7 @@ def test_production_external_pi_requires_complete_authenticated_topology(
         runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
-def _durable_external_admission_resource_profile(settings):
+def _configure_durable_external_admission_resource_profile(settings):
     settings.chat_external_pi_worker_url = "http://127.0.0.1:8776"
     settings.chat_external_pi_worker_id = "production-blue"
     settings.chat_external_pi_worker_token = "p" * 32
@@ -464,12 +464,11 @@ def _durable_external_admission_resource_profile(settings):
     settings.openai_api_key = "test-only"
     settings.chat_blank_pool_enabled = False
     settings.chat_pi_prewarm_enabled = False
-    return settings
 
 
 def test_production_accepts_complete_durable_external_contract(settings_factory):
     settings, _release = settings_factory("production")
-    _durable_external_admission_resource_profile(settings)
+    _configure_durable_external_admission_resource_profile(settings)
 
     runtime_validation.validate_external_pi_migration_policy(settings)
     runtime_validation._validate_chat_capacity_policy(settings)
@@ -488,7 +487,7 @@ def test_production_rejects_durable_external_provider_capacity_drift(
     settings_factory, field, invalid
 ):
     settings, _release = settings_factory("production")
-    _durable_external_admission_resource_profile(settings)
+    _configure_durable_external_admission_resource_profile(settings)
     setattr(settings, field, invalid)
 
     with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
