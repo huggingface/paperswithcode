@@ -7,12 +7,13 @@ import {
   type SimpleStreamOptions,
 } from "@earendil-works/pi-ai";
 import { streamSimple as streamOpenAIResponses } from "@earendil-works/pi-ai/api/openai-responses";
+import { streamSimple as streamAnthropicMessages } from "@earendil-works/pi-ai/api/anthropic-messages";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { type TurnClaimFrame } from "./turn_protocol.js";
 
 export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
-const OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
+const GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
 const COMPACTION_SYSTEM_PROMPT_PREFIX = "You are a context summarization assistant.";
 const COMPACTION_OMISSION_MARKER = "\n\n[...older compaction input omitted to fit the gateway...]\n\n";
 
@@ -34,22 +35,51 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
 
 function compactionText(
   payload: unknown,
-): { payload: Record<string, unknown>; text: string; textPart: Record<string, unknown> } | undefined {
+): { payload: Record<string, unknown>; text: string; replace: (text: string) => void } | undefined {
   const record = asRecord(payload);
   const input = record?.input;
-  if (!record || !Array.isArray(input)) return undefined;
-  const developer = input.map(asRecord).find((entry) => entry?.role === "developer");
+  if (!record) return undefined;
+  if (Array.isArray(input)) {
+    const developer = input.map(asRecord).find((entry) => entry?.role === "developer");
+    if (
+      typeof developer?.content !== "string"
+      || !developer.content.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
+    ) return undefined;
+    const user = input.map(asRecord).find((entry) => entry?.role === "user");
+    if (!Array.isArray(user?.content)) return undefined;
+    const textPart = user.content
+      .map(asRecord)
+      .find((entry) => entry?.type === "input_text" && typeof entry.text === "string");
+    return textPart && typeof textPart.text === "string"
+      ? {
+          payload: record,
+          text: textPart.text,
+          replace: (text) => { textPart.text = text; },
+        }
+      : undefined;
+  }
+
+  const system = record.system;
+  const messages = record.messages;
+  if (!Array.isArray(system) || !Array.isArray(messages)) return undefined;
+  const systemText = system
+    .map(asRecord)
+    .find((entry) => entry?.type === "text" && typeof entry.text === "string");
   if (
-    typeof developer?.content !== "string"
-    || !developer.content.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
+    typeof systemText?.text !== "string"
+    || !systemText.text.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
   ) return undefined;
-  const user = input.map(asRecord).find((entry) => entry?.role === "user");
+  const user = messages.map(asRecord).find((entry) => entry?.role === "user");
   if (!Array.isArray(user?.content)) return undefined;
   const textPart = user.content
     .map(asRecord)
-    .find((entry) => entry?.type === "input_text" && typeof entry.text === "string");
+    .find((entry) => entry?.type === "text" && typeof entry.text === "string");
   return textPart && typeof textPart.text === "string"
-    ? { payload: record, text: textPart.text, textPart }
+    ? {
+        payload: record,
+        text: textPart.text,
+        replace: (text) => { textPart.text = text; },
+      }
     : undefined;
 }
 
@@ -66,10 +96,10 @@ function fitCompactionPayload(payload: unknown): unknown {
     const candidate = structuredClone(compaction.payload);
     const candidateCompaction = compactionText(candidate);
     if (!candidateCompaction) return payload;
-    candidateCompaction.textPart.text = compaction.text.slice(0, headCharacters)
+    candidateCompaction.replace(compaction.text.slice(0, headCharacters)
       + COMPACTION_OMISSION_MARKER
-      + compaction.text.slice(compaction.text.length - tailCharacters);
-    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") <= OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
+      + compaction.text.slice(compaction.text.length - tailCharacters));
+    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") < GATEWAY_PAYLOAD_LIMIT_BYTES) {
       best = candidate;
       lower = retainedCharacters + 1;
     } else {
@@ -77,6 +107,21 @@ function fitCompactionPayload(payload: unknown): unknown {
     }
   }
   return best;
+}
+
+function boundedGatewayPayload(payload: unknown): unknown {
+  let requestPayload = payload;
+  let requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+  if (requestBytes >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
+    requestPayload = fitCompactionPayload(requestPayload);
+    requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
+  }
+  if (requestBytes >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
+    // Pi recognizes this provider-style signal and performs its bounded
+    // compact-and-retry path before the gateway limit is reached.
+    throw new Error("request_too_large: provider context requires compaction");
+  }
+  return requestPayload;
 }
 
 function boundedOpenAIResponsesStream(
@@ -92,18 +137,26 @@ function boundedOpenAIResponsesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        let requestPayload = replacement ?? payload;
-        let requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
-        if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
-          requestPayload = fitCompactionPayload(requestPayload);
-          requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
-        }
-        if (requestBytes > OPENAI_GATEWAY_PAYLOAD_LIMIT_BYTES) {
-          // Pi recognizes this provider-style signal and performs its bounded
-          // compact-and-retry path before the 256 KiB gateway limit is reached.
-          throw new Error("request_too_large: direct OpenAI context requires compaction");
-        }
-        return requestPayload;
+        return boundedGatewayPayload(replacement ?? payload);
+      },
+    },
+  );
+}
+
+function boundedAnthropicMessagesStream(
+  model: Model<Api>,
+  context: Context,
+  options?: SimpleStreamOptions,
+): AssistantMessageEventStream {
+  const callerPayload = options?.onPayload;
+  return streamAnthropicMessages(
+    model as Model<"anthropic-messages">,
+    context,
+    {
+      ...options,
+      onPayload: async (payload, payloadModel) => {
+        const replacement = await callerPayload?.(payload, payloadModel);
+        return boundedGatewayPayload(replacement ?? payload);
       },
     },
   );
@@ -148,9 +201,9 @@ export async function createProvider(
     apiKey: gateway?.capability ?? PLACEHOLDER_KEY,
     api,
     authHeader: true,
-    ...(api === "openai-responses"
-      ? { streamSimple: boundedOpenAIResponsesStream }
-      : {}),
+    streamSimple: api === "openai-responses"
+      ? boundedOpenAIResponsesStream
+      : boundedAnthropicMessagesStream,
     ...(headers ? { headers } : {}),
     models: [
       {

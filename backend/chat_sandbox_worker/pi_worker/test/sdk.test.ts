@@ -42,6 +42,36 @@ function openAITextResponse(text: string, sequence: number): Response {
   );
 }
 
+function anthropicTextResponse(text: string): Response {
+  const events = [
+    { type: "message_start", message: { id: "m1", type: "message", role: "assistant", content: [], model: "test-route", stop_reason: null, stop_sequence: null, usage: { input_tokens: 2, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 } } },
+    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
+    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text } },
+    { type: "content_block_stop", index: 0 },
+    { type: "message_delta", delta: { stop_reason: "end_turn", stop_sequence: null }, usage: { output_tokens: 1 } },
+    { type: "message_stop" },
+  ];
+  return new Response(
+    events.map((event) => `event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`).join(""),
+    { status: 200, headers: { "Content-Type": "text/event-stream" } },
+  );
+}
+
+function testGateway(port: number) {
+  return {
+    url: `http://127.0.0.1:${port}`,
+    capability: "test-capability",
+    sessionId: "10000000-0000-4000-8000-000000000001",
+    turnId: "20000000-0000-4000-8000-000000000001",
+    turnClaim: {
+      turnId: "20000000-0000-4000-8000-000000000001",
+      workerId: "test-worker",
+      workerGeneration: 1,
+      leaseGeneration: 1,
+    },
+  };
+}
+
 test("registers direct OpenAI with the native Responses base path", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
   assert.equal(direct.model.api, "openai-responses");
@@ -198,6 +228,93 @@ test("compacts an oversized direct OpenAI session and retries successfully", asy
     session.dispose();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
+});
+
+test("leaves fitting Anthropic-compatible compaction payloads unchanged", async () => {
+  let requestBody = "";
+  let callerBody = "";
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", async () => {
+      requestBody = Buffer.concat(chunks).toString("utf8");
+      const providerResponse = anthropicTextResponse("summary");
+      response.writeHead(providerResponse.status, Object.fromEntries(providerResponse.headers));
+      response.end(await providerResponse.text());
+    });
+  });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    const provider = await createProvider("test-route", "anthropic-messages", testGateway(address.port));
+    const result = await provider.runtime.completeSimple(
+      provider.model,
+      {
+        systemPrompt: "You are a context summarization assistant. Summarize faithfully.",
+        messages: [{ role: "user", content: "small compaction input", timestamp: Date.now() }],
+      },
+      { onPayload: (payload) => { callerBody = JSON.stringify(payload); } },
+    );
+
+    assert.equal(result.stopReason, "stop");
+    assert.equal(requestBody, callerBody);
+    assert.doesNotMatch(requestBody, /older compaction input omitted/u);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("compacts oversized Anthropic-compatible summaries before the gateway", async () => {
+  let requestBody = "";
+  const server = http.createServer((request, response) => {
+    const chunks: Buffer[] = [];
+    request.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    request.on("end", async () => {
+      requestBody = Buffer.concat(chunks).toString("utf8");
+      const providerResponse = anthropicTextResponse("summary");
+      response.writeHead(providerResponse.status, Object.fromEntries(providerResponse.headers));
+      response.end(await providerResponse.text());
+    });
+  });
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  try {
+    const provider = await createProvider("test-route", "anthropic-messages", testGateway(address.port));
+    const result = await provider.runtime.completeSimple(provider.model, {
+      systemPrompt: "You are a context summarization assistant. Summarize faithfully.",
+      messages: [{ role: "user", content: "x".repeat(300 * 1024), timestamp: Date.now() }],
+    });
+
+    assert.equal(result.stopReason, "stop");
+    assert.ok(Buffer.byteLength(requestBody, "utf8") < 240 * 1024);
+    assert.match(requestBody, /older compaction input omitted/u);
+  } finally {
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+  }
+});
+
+test("rejects oversized non-compaction Anthropic-compatible payloads before the gateway", async () => {
+  const provider = await createProvider("test-route", "anthropic-messages");
+  let requests = 0;
+
+  const result = await provider.runtime.completeSimple(
+    provider.model,
+    {
+      messages: [{ role: "user", content: "x".repeat(300 * 1024), timestamp: Date.now() }],
+    },
+    {
+      fetch: async () => {
+        requests += 1;
+        throw new Error("oversized request reached the network");
+      },
+    },
+  );
+
+  assert.equal(requests, 0);
+  assert.equal(result.stopReason, "error");
+  assert.match(result.errorMessage ?? "", /request_too_large/u);
 });
 
 test("external provider authenticates directly to the fenced chat gateway", async () => {
