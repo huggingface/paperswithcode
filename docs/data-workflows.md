@@ -135,7 +135,6 @@ Checks performed:
 - Service layer: `backend/services/dataset_service.py`, `backend/services/evaluation_service.py`
 - Metric tooling: `backend/database/validate_evaluation_metrics.py`
 - Triple reference: `docs/DATABASE_SCHEMA_UML.md` (`task_dataset_metrics` section)
-- Evaluation ingestion pipeline: `extract_evaluation_results/`
 - Migration convention: `backend/database/migrations/README.md`
 
 _Last updated: 7 November 2025_

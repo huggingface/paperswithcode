@@ -7,7 +7,7 @@ description: Add or update conference rows in the paperswithcode repo database. 
 
 This skill adds curated rows to the `conferences` table so conference pages at `/conferences/<slug>` render correctly with metadata, hero images, deadlines, and linked papers. Prefer small idempotent migrations plus applying the same change to the live database.
 
-> **Image storage:** seed PNG → `data/entity_image_seeds/conferences/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/conferences/<slug>/image`. Do **not** put conference heroes in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
+> **Image storage:** seed PNG → `/tmp/paperswithcode_entity_image_seeds/conferences/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/conferences/<slug>/image`. Do **not** put conference heroes in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
 
 When the user says **"similarly add X"** (often with just a venue name and year), run the full workflow below without re-asking — same metadata pattern, thumbnail import, and verification steps as the prior conference in the conversation unless they specify otherwise.
 
@@ -18,7 +18,7 @@ For a typical new conference edition:
 1. Confirm the conference does not already exist (`slug`, `name`, `year`).
 2. Pick a stable slug: `<short-name-lowercase>-<year>` (e.g. `cvpr-2026`, `iclr-2026`, `icra-2026`).
 3. Write metadata + migration SQL (or idempotent Python upsert script).
-4. Add hero image: save seed PNG under `data/entity_image_seeds/conferences/<slug>.png`, then import into SQL (see Thumbnail).
+4. Add hero image: save seed PNG under `/tmp/paperswithcode_entity_image_seeds/conferences/<slug>.png`, then import into SQL (see Thumbnail).
 5. Apply migration to the live DB.
 6. Link papers when the user provides a CSV or asks for import (see Paper linking).
 7. Verify API + report production URL.
@@ -74,21 +74,21 @@ Conference hero images are DB-backed. Save a seed PNG, import it, then verify th
 **If the user provides an image**, copy it to:
 
 ```text
-data/entity_image_seeds/conferences/<slug>.png
+/tmp/paperswithcode_entity_image_seeds/conferences/<slug>.png
 ```
 
 **Otherwise**, source a suitable logo or venue graphic:
 
 1. Prefer the official conference logo or branding from the conference homepage.
 2. Crop to a clear hero image (avoid tiny favicons); PNG is preferred.
-3. Save to `data/entity_image_seeds/conferences/<slug>.png`.
+3. Save to `/tmp/paperswithcode_entity_image_seeds/conferences/<slug>.png`.
 4. Set `image_credit` to the official site or source.
 
 After the conference row exists, import the PNG into SQL:
 
 ```bash
 uv run --env-file backend/keys.env python backend/database/import_entity_image.py \
-    conferences <slug> data/entity_image_seeds/conferences/<slug>.png
+    conferences <slug> /tmp/paperswithcode_entity_image_seeds/conferences/<slug>.png
 ```
 
 No frontend rebuild is needed for entity images — they are served from the backend API.

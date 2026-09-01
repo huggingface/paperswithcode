@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import tempfile
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
@@ -11,6 +12,7 @@ from PIL import Image
 
 from backend import cli
 from backend.services.entity_image_service import add_entity_image
+from backend.utils.entity_image_import import IMAGE_SEED_ROOT
 
 
 def _png_bytes() -> bytes:
@@ -60,6 +62,14 @@ def test_add_entity_image_downloads_seeds_and_updates_row(
     assert row.image_mime_type == "image/png"
     assert row.image_credit == "https://source.example/page"
     assert row.updated_at is not None
+
+
+def test_default_seed_root_is_not_repository_relative() -> None:
+    assert (
+        IMAGE_SEED_ROOT
+        == Path(tempfile.gettempdir()) / "paperswithcode_entity_image_seeds"
+    )
+    assert IMAGE_SEED_ROOT != Path("data") / "entity_image_seeds"
 
 
 def test_add_entity_image_rejects_non_image(tmp_path: Path) -> None:
