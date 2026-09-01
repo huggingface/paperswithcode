@@ -39,12 +39,14 @@ class ChatTurnCancellationCoordinator:
         *,
         external_cancel: Callable[[CancelTurnRequest], Awaitable[CancelControlResult]]
         | None = None,
+        external_release: Callable[[uuid.UUID], Awaitable[None]] | None = None,
         observe: Callable[[str, str | None, int], None] | None = None,
     ) -> None:
         self.db = db
         self.settings = settings
         self.manager = manager
         self.external_cancel = external_cancel
+        self.external_release = external_release
         self.observe = observe or (lambda _event, _code, _value: None)
         self.sessions = ChatSessionService(db, settings)
 
@@ -73,6 +75,8 @@ class ChatTurnCancellationCoordinator:
             if control is not CancelControlResult.REQUESTED:
                 self.sessions.interrupt_cancel_without_control(owner, request)
                 self.db.commit()
+                if self.external_release is not None:
+                    await self.external_release(request.turn_id)
                 self.observe("typed_failure", "cancel_control_missing", 1)
             return
         status: WorkerCancelStatus | None = None
