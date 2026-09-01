@@ -169,6 +169,7 @@ image = (
         "runuser -u pwc-chat -- test -r /opt/posterly/SKILL.md",
         "runuser -u pwc-chat -- pwc-artifact --help >/dev/null",
         "runuser -u pwc-chat -- pwc-paper --help >/dev/null",
+        "runuser -u pwc-chat -- pwc-paper draft --help >/dev/null",
     )
     .env(
         {

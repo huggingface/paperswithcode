@@ -38,6 +38,7 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/METHOD_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
+    "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
     "backend/chat_sandbox_worker/prompt.py",
     "backend/services/__init__.py",

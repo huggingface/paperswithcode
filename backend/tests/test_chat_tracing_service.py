@@ -314,6 +314,57 @@ def test_langfuse_client_exports_trace_content_without_a_mask(monkeypatch):
     assert "mask_otel_spans" not in captured
 
 
+def test_private_paper_trace_never_exports_manuscript_or_tool_content(monkeypatch):
+    client = Client()
+
+    @contextmanager
+    def attributes(**_values):
+        yield
+
+    monkeypatch.setattr(tracing, "_configured_client", lambda _settings: client)
+    monkeypatch.setattr(tracing, "propagate_attributes", attributes)
+    settings = Settings(environment="staging", chat_langfuse_enabled=True)
+    manuscript = "MANUSCRIPT-CANARY: theorem proof and unpublished result"
+
+    with tracing.trace_chat_turn(
+        settings=settings,
+        request_id="request-1",
+        session_id="session-1",
+        user_id="private-user",
+        prompt=manuscript,
+        display_prompt=manuscript,
+        model="gpt-5.6-luna@openai",
+        execution_backend="pi",
+        is_replacement=False,
+        content_free=True,
+    ) as trace:
+        trace.start_title("title-model")
+        trace.finish_title(manuscript, fallback=False)
+        trace.start_tool(
+            {
+                "id": "tool-1",
+                "name": "Bash",
+                "args": {"command": f"printf '%s' '{manuscript}'"},
+            }
+        )
+        trace.finish_tool(
+            {
+                "id": "tool-1",
+                "status": "success",
+                "content": [{"type": "text", "text": manuscript}],
+            }
+        )
+        trace.finish(manuscript, "success")
+
+    assert client.root is not None
+    serialized = repr(client.root.fields) + repr(
+        [(child.name, child.fields) for child in client.root.children]
+    )
+    assert manuscript not in serialized
+    assert client.root.fields["metadata"]["content_policy"] == "content-free"
+    assert all(child.name != "generate-session-title" for child in client.root.children)
+
+
 def test_tracing_supports_production_when_explicitly_enabled(monkeypatch):
     monkeypatch.setenv("LANGFUSE_PUBLIC_KEY", "pk-test")
     monkeypatch.setenv("LANGFUSE_SECRET_KEY", "sk-test")

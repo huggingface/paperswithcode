@@ -44,4 +44,4 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=yes \
               "${VPS_USER}@${VPS_HOST}" \
-              'sudo /usr/local/sbin/pwc-cron backfill_method_keywords --resume --limit 10000 --max-runtime-seconds 3300'
+              'sudo /usr/local/sbin/pwc-cron backfill_method_keywords --resume --limit 250000 --max-runtime-seconds 3300'

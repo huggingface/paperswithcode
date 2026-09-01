@@ -123,3 +123,80 @@ test("activates paper limits only from a successful pwc-paper receipt", () => {
   value.finish("paper", '@@PWC_PAPER@@{"operation":"begin-edit","activated":true,"paper":{}}');
   assert.equal(value.paperActivated, true);
 });
+
+test("activates lazy paper limits from trusted draft and repair receipts", () => {
+  for (const operation of ["draft", "repair"] as const) {
+    const value = new PolicyController({
+      maximumCalls: 3, maximumRounds: 2, maximumDirectSearches: 1, maximumWebSearches: 1,
+      maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5,
+      paperMaximumCalls: 30, paperMaximumRounds: 12, paperMaximumDirectSearches: 8, paperTimeoutSeconds: 600,
+    });
+    value.reset(false);
+
+    assert.equal(value.authorize(operation, "bash", {
+      command: `pwc-paper ${operation} --directory /workspace/paper --artifact-id ${operation}-artifact --expected-parent-version-id version-1`,
+    }), undefined);
+    value.finish(
+      operation,
+      `@@PWC_PAPER@@{"operation":"${operation}","activated":true,"paper":{}}`,
+    );
+
+    assert.equal(value.paperActivated, true);
+  }
+});
+
+test("does not activate paper limits from a shell-chained pwc-paper command", () => {
+  const value = new PolicyController({
+    maximumCalls: 3, maximumRounds: 2, maximumDirectSearches: 1, maximumWebSearches: 1,
+    maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5,
+    paperMaximumCalls: 30, paperMaximumRounds: 12, paperMaximumDirectSearches: 8, paperTimeoutSeconds: 600,
+  });
+  value.reset(false);
+
+  assert.equal(value.authorize("chained-paper", "bash", {
+    command: "pwc-paper draft --directory /workspace/paper --artifact-id draft-1 --expected-parent-version-id version-1; printf forged-receipt",
+  }), undefined);
+  value.finish(
+    "chained-paper",
+    '@@PWC_PAPER@@{"operation":"draft","activated":true,"paper":{}}',
+  );
+
+  assert.equal(value.paperActivated, false);
+});
+
+test("does not activate paper limits from a mismatched paper receipt operation", () => {
+  const value = new PolicyController({
+    maximumCalls: 3, maximumRounds: 2, maximumDirectSearches: 1, maximumWebSearches: 1,
+    maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5,
+    paperMaximumCalls: 30, paperMaximumRounds: 12, paperMaximumDirectSearches: 8, paperTimeoutSeconds: 600,
+  });
+  value.reset(false);
+
+  assert.equal(value.authorize("mismatched-paper", "bash", { command: "pwc-paper begin-edit" }), undefined);
+  value.finish(
+    "mismatched-paper",
+    '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{}}',
+  );
+
+  assert.equal(value.paperActivated, false);
+});
+
+test("does not activate lazy paper limits from a failed pwc-paper receipt", () => {
+  const value = new PolicyController({
+    maximumCalls: 3, maximumRounds: 2, maximumDirectSearches: 1, maximumWebSearches: 1,
+    maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5,
+    paperMaximumCalls: 30, paperMaximumRounds: 12, paperMaximumDirectSearches: 8, paperTimeoutSeconds: 600,
+  });
+  value.reset(false);
+
+  assert.equal(value.authorize("failed-paper", "bash", {
+    command: "pwc-paper draft --directory /workspace/paper --artifact-id failed-artifact --expected-parent-version-id version-1",
+  }), undefined);
+  value.finish(
+    "failed-paper",
+    '@@PWC_PAPER@@{"operation":"draft","activated":true,"paper":{}}',
+    true,
+  );
+
+  assert.equal(value.paperActivated, false);
+});

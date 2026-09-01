@@ -1236,6 +1236,15 @@ class ArtifactErrorEvent(_StrictEvent):
     message: str = Field(min_length=1, max_length=500)
 
 
+class PaperArtifactEvent(_StrictEvent):
+    """Private-paper lifecycle marker emitted after a trusted worker receipt."""
+
+    type: Literal["paper_artifact"]
+    operation: Literal["create", "begin-edit", "draft", "repair"]
+    activated: bool
+    descriptor: LatexPaperArtifactDescriptor
+
+
 ChatEvent = Annotated[
     Union[
         StreamStartEvent,
@@ -1252,6 +1261,7 @@ ChatEvent = Annotated[
         ArtifactStartEvent,
         ArtifactReadyEvent,
         ArtifactErrorEvent,
+        PaperArtifactEvent,
         SandboxStartEvent,
         SandboxReadyEvent,
         WorkspaceReadyEvent,

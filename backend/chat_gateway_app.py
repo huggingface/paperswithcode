@@ -215,7 +215,7 @@ class ArtifactPrepareRequest(BaseModel):
 
 class PaperCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "begin-edit", "repair-context", "repair"]
+    operation: Literal["create", "begin-edit", "repair-context", "draft", "repair"]
     title: str | None = Field(default=None, max_length=300)
     artifact_id: uuid.UUID | None = None
     expected_parent_version_id: uuid.UUID | None = None
@@ -1207,11 +1207,30 @@ def paper_command(
                     for path, data in files.items()
                 ],
             }
-        else:
+        elif body.operation == "draft":
+            if body.artifact_id is None or body.expected_parent_version_id is None:
+                raise ArtifactError(
+                    "artifact_invalid", "Draft needs the current paper version"
+                )
+            current = service.get_descriptor(owner_id, capability.chat_session_id)
+            if current is None or current.artifact_id != body.artifact_id:
+                raise ArtifactError("paper_missing", "This chat has no paper yet")
+            descriptor = service.save_ai_version(
+                owner_id=owner_id,
+                artifact_id=body.artifact_id,
+                expected_parent_version_id=body.expected_parent_version_id,
+                files={file.path: file.content.encode("utf-8") for file in body.files},
+                model_identity=session.selected_model,
+            )
+            result = {"paper": descriptor.model_dump(mode="json")}
+        elif body.operation == "repair":
             if body.artifact_id is None or body.expected_parent_version_id is None:
                 raise ArtifactError(
                     "artifact_invalid", "Repair needs the failed paper version"
                 )
+            current = service.get_descriptor(owner_id, capability.chat_session_id)
+            if current is None or current.artifact_id != body.artifact_id:
+                raise ArtifactError("paper_missing", "This chat has no paper yet")
             outcome = service.repair_failed_version(
                 owner_id=owner_id,
                 artifact_id=body.artifact_id,
@@ -1224,6 +1243,8 @@ def paper_command(
                 "repaired": outcome.repaired,
                 "exhausted": outcome.exhausted,
             }
+        else:  # Pydantic limits the operation, but keep this boundary explicit.
+            raise ArtifactError("artifact_invalid", "Unknown paper operation")
     except ArtifactError as error:
         db.rollback()
         raise HTTPException(

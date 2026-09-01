@@ -35,13 +35,18 @@ class _Result:
 
 
 class _ShareDB:
-    def __init__(self, session, messages):
+    def __init__(self, session, messages, *, private_paper_artifact=None):
         self.session = session
         self.source_messages = messages
+        self.private_paper_artifact = private_paper_artifact
         self.share = None
+        self.queries: list[str] = []
 
-    def execute(self, statement):
+    def execute(self, statement, params=None):
         sql = str(statement)
+        self.queries.append(sql)
+        if "pg_advisory_xact_lock" in sql:
+            return _Result()
         if "FROM chat_sessions" in sql:
             parameters = set(statement.compile().params.values())
             if self.session.id in parameters and self.session.hf_user_id in parameters:
@@ -49,6 +54,8 @@ class _ShareDB:
             return _Result(None)
         if "FROM chat_messages" in sql:
             return _Result(values=self.source_messages)
+        if "FROM chat_artifacts" in sql:
+            return _Result(self.private_paper_artifact)
         if "FROM chat_shares" in sql:
             return _Result(self.share)
         raise AssertionError(sql)
@@ -56,6 +63,9 @@ class _ShareDB:
     def add(self, value):
         if isinstance(value, ChatShare):
             self.share = value
+
+    def scalar(self, statement):
+        return self.execute(statement).scalar_one_or_none()
 
     def flush(self):
         if self.share and self.share.created_at is None:
@@ -138,6 +148,28 @@ def test_create_or_refresh_retains_capability_and_replaces_owned_snapshot():
     assert refreshed.updated_at >= created.created_at
 
 
+def test_share_serializes_with_private_paper_creation_before_querying_artifacts():
+    session = _session()
+    db = _ShareDB(session, [_row(1)])
+    db.bind = SimpleNamespace(dialect=SimpleNamespace(name="postgresql"))
+
+    ChatShareService(db, get_settings()).create_or_refresh(
+        ChatOwner(hf_user_id="hf-owner", hf_username="owner"), session.id
+    )
+
+    lock_index = next(
+        index
+        for index, query in enumerate(db.queries)
+        if "pg_advisory_xact_lock" in query
+    )
+    artifact_index = next(
+        index
+        for index, query in enumerate(db.queries)
+        if "FROM chat_artifacts" in query
+    )
+    assert lock_index < artifact_index
+
+
 def test_only_immutable_subject_owner_can_create_share():
     session = _session()
     service = ChatShareService(_ShareDB(session, [_row(1)]), get_settings())
@@ -171,15 +203,16 @@ def test_private_message_purge_cannot_change_stored_public_snapshot():
     assert share.messages == stored_messages
 
 
-def test_private_paper_artifacts_are_omitted_before_a_share_is_materialized():
-    """A paper descriptor or its private IDs must never become a share capability."""
+def test_private_paper_chats_fail_closed_before_a_share_can_capture_turn_text():
+    """Paper-turn output can quote manuscript context, so it is never shareable."""
     paper_id = uuid.uuid4()
     version_id = uuid.uuid4()
     row = _row(
         1,
         role="assistant",
-        content="I prepared a draft.",
+        content="I prepared a draft with PRIVATE-PAPER-CANARY.",
         display_blocks=[
+            {"kind": "reasoning", "text": "PRIVATE-PAPER-CANARY"},
             {
                 "kind": "artifact",
                 "schema_version": 1,
@@ -194,23 +227,20 @@ def test_private_paper_artifacts_are_omitted_before_a_share_is_materialized():
                 "preview_mime": "application/pdf",
                 "source_language": "latex",
                 "total_bytes": 2048,
-            }
+            },
         ],
     )
-    db = _ShareDB(_session(), [row])
-    share = ChatShareService(db, get_settings()).create_or_refresh(
-        ChatOwner(hf_user_id="hf-owner", hf_username="owner"), db.session.id
-    )
-    detail = ChatShareService(_PublicDB(share), get_settings()).get_public(
-        str(share.id)
-    )
+    db = _ShareDB(_session(), [row], private_paper_artifact=paper_id)
 
-    assert detail.messages[0].display_blocks == []
-    serialized = str(detail.model_dump(mode="json"))
-    assert "latex-paper" not in serialized
-    assert "Private manuscript" not in serialized
-    assert str(paper_id) not in serialized
-    assert str(version_id) not in serialized
+    with pytest.raises(ChatServiceError) as exc_info:
+        ChatShareService(db, get_settings()).create_or_refresh(
+            ChatOwner(hf_user_id="hf-owner", hf_username="owner"), db.session.id
+        )
+
+    assert exc_info.value.code == "paper_share_disabled"
+    assert db.share is None
+    assert "PRIVATE-PAPER-CANARY" not in str(getattr(db.share, "messages", []))
+    assert str(version_id) not in str(getattr(db.share, "messages", []))
 
 
 @pytest.mark.parametrize(

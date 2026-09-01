@@ -32,7 +32,12 @@ export const LatexSourceEditor: React.FC<{
         bracketMatching(),
         StreamLanguage.define(stex),
         keymap.of([...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
-        EditorView.contentAttributes.of({ "aria-label": `Editing ${path}` }),
+        EditorView.contentAttributes.of({
+          "aria-label": `Editing ${path}`,
+          class: "ph-no-capture",
+          "data-ph-no-autocapture": "true",
+          "data-ph-no-capture": "true",
+        }),
         editability.current.of(EditorView.editable.of(!readOnly)),
         EditorView.updateListener.of((update) => {
           if (update.docChanged) onChangeRef.current(update.state.doc.toString());
@@ -57,5 +62,13 @@ export const LatexSourceEditor: React.FC<{
     });
   }, [readOnly]);
 
-  return <div className="latex-source-editor" data-testid="latex-source-editor" ref={host} />;
+  return (
+    <div
+      className="latex-source-editor ph-no-capture"
+      data-ph-no-autocapture="true"
+      data-ph-no-capture="true"
+      data-testid="latex-source-editor"
+      ref={host}
+    />
+  );
 };

@@ -593,9 +593,12 @@ class Settings(BaseSettings):
     chat_latex_paper_max_tool_calls: int = Field(default=30, ge=12, le=40)
     chat_latex_paper_max_direct_search_calls: int = Field(default=8, ge=1, le=8)
     # Private staging-only compiler boundary. The signing private key belongs
-    # only in the PwC backend environment; the Space gets its matching public
-    # key as a private Space secret.
+    # only in the PwC backend environment; each disposable Sandbox receives
+    # its matching public key only through its per-job environment.
     chat_latex_compiler_jobs_enabled: bool = Field(default=False)
+    # Qualification may exercise a sealed Sandbox while paper/compiler job
+    # admission remains off. This staging-only flag never enables user work.
+    chat_latex_compiler_qualification_mode: bool = Field(default=False)
     # A per-job HF Sandbox is the only application transport. The image is
     # deliberately blank by default so staging cannot accidentally create a VM.
     chat_latex_compiler_hf_sandbox_image: str = Field(default="", max_length=1000)
@@ -856,7 +859,7 @@ class Settings(BaseSettings):
                 glm,
             )
         if self.environment == "staging":
-            choices = choices + (
+            staging_choices = (
                 {
                     "id": "moonshotai/Kimi-K3",
                     "label": "Kimi K3",
@@ -877,7 +880,10 @@ class Settings(BaseSettings):
                 },
             )
             if self.chat_openai_direct_enabled:
-                choices = choices + (
+                # Staging paper qualification deliberately uses the direct Luna
+                # route as the default.  The remaining choices stay available
+                # for comparative ordinary-chat testing and existing sessions.
+                choices = (
                     {
                         "id": "gpt-5.6-luna@openai",
                         "label": "GPT-5.6 Luna (Direct)",
@@ -887,7 +893,11 @@ class Settings(BaseSettings):
                         "protocol": "openai-responses",
                         "funding_mode": "openai_funded",
                     },
+                    *choices,
+                    *staging_choices,
                 )
+            else:
+                choices = choices + staging_choices
         if self.environment != "staging" or not self.chat_alternative_model_enabled:
             return choices
         # The old comparison flag used the misleading historical Luna ID. Luna

@@ -184,6 +184,14 @@ def main() -> int:
             0o750,
         )
     ensure_dir(STATE_ROOT / "shared", "root", "root", 0o755)
+    # Root publishes only content-free compiler qualification evidence here.
+    # The staging service can read it but cannot replace its directory or file.
+    ensure_dir(
+        STATE_ROOT / "staging-compiler-qualification",
+        "root",
+        "pwc-staging",
+        0o750,
+    )
     ensure_dir(
         STATE_ROOT / "shared" / "thumbnails",
         "pwc-cron",

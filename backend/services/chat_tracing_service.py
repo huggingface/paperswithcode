@@ -103,22 +103,29 @@ class ChatTurnTrace:
         execution_backend: str,
         reasoning_effort: str = "high",
         display_prompt: str | None = None,
+        content_free: bool = False,
     ) -> None:
         self.root = root
-        self.prompt = prompt
-        self.display_prompt = display_prompt or prompt
+        self.content_free = content_free
+        self.prompt = "" if content_free else prompt
+        self.display_prompt = "" if content_free else display_prompt or prompt
         self.execution_backend = execution_backend
-        self.generation = root.start_observation(
-            name="generate-research-response",
-            as_type="generation",
-            input=[{"role": "user", "content": prompt}],
-            model=model,
-            metadata={
-                "aggregation": "agent-run",
-                "ttft_semantics": "first-worker-delta",
-                "reasoning_effort": reasoning_effort,
-            },
-        )
+        generation_metadata = {
+            "aggregation": "agent-run",
+            "ttft_semantics": "first-worker-delta",
+            "reasoning_effort": reasoning_effort,
+        }
+        if content_free:
+            generation_metadata["content_policy"] = "content-free"
+        generation_fields: dict[str, Any] = {
+            "name": "generate-research-response",
+            "as_type": "generation",
+            "model": model,
+            "metadata": generation_metadata,
+        }
+        if not content_free:
+            generation_fields["input"] = [{"role": "user", "content": prompt}]
+        self.generation = root.start_observation(**generation_fields)
         self.title_generation: Any | None = None
         self.tools: dict[str, Any] = {}
         self.sandbox_acquisition: Any | None = None
@@ -140,6 +147,8 @@ class ChatTurnTrace:
         return self.root.trace_id
 
     def start_title(self, model: str) -> None:
+        if getattr(self, "content_free", False):
+            return
         if self.title_generation is None:
             self.title_generation = self.root.start_observation(
                 name="generate-session-title",
@@ -329,27 +338,35 @@ class ChatTurnTrace:
         }
         tool_name = str(event.get("name") or "tool")
         observation_type = "retriever" if tool_name == "search_papers" else "tool"
-        self.tools[tool_id] = self.root.start_observation(
-            name=names.get(tool_name, "use-tool"),
-            as_type=observation_type,
-            input=event.get("args") or {},
-            metadata={"tool_name": tool_name},
-        )
+        fields: dict[str, Any] = {
+            "name": names.get(tool_name, "use-tool"),
+            "as_type": observation_type,
+            "metadata": (
+                {"content_policy": "content-free"}
+                if getattr(self, "content_free", False)
+                else {"tool_name": tool_name}
+            ),
+        }
+        if not getattr(self, "content_free", False):
+            fields["input"] = event.get("args") or {}
+        self.tools[tool_id] = self.root.start_observation(**fields)
 
     def finish_tool(self, event: dict[str, Any]) -> None:
         tool = self.tools.pop(str(event.get("id") or ""), None)
         if tool is None:
             return
         status = str(event.get("status") or "success")
-        output = event.get("results")
-        if output is None:
-            output = event.get("content") or []
-        tool.update(
-            output=output,
-            metadata={"duration_ms": event.get("took_ms", 0)},
-            level="ERROR" if status == "error" else "DEFAULT",
-            status_message=status,
-        ).end()
+        fields: dict[str, Any] = {
+            "metadata": {"duration_ms": event.get("took_ms", 0)},
+            "level": "ERROR" if status == "error" else "DEFAULT",
+            "status_message": status,
+        }
+        if not getattr(self, "content_free", False):
+            output = event.get("results")
+            if output is None:
+                output = event.get("content") or []
+            fields["output"] = output
+        tool.update(**fields).end()
 
     def finish(
         self,
@@ -359,7 +376,7 @@ class ChatTurnTrace:
         terminal_code: str | None = None,
         interruption_reason: str | None = None,
     ) -> None:
-        self.answer = answer
+        self.answer = "" if getattr(self, "content_free", False) else answer
         self.status = status
         if terminal_code is not None:
             self.terminal_code = terminal_code
@@ -399,28 +416,33 @@ class ChatTurnTrace:
                 level="WARNING", status_message="title generation did not finish"
             ).end()
             self.title_generation = None
-        output = [{"role": "assistant", "content": self.answer}]
         terminal_metadata = {"terminal_status": self.status}
         if self.terminal_code:
             terminal_metadata["terminal_code"] = self.terminal_code
         if self.interruption_reason:
             terminal_metadata["interruption_reason"] = self.interruption_reason
         terminal_metadata = {**self.warm_assignment_metadata, **terminal_metadata}
+        if getattr(self, "content_free", False):
+            terminal_metadata["content_policy"] = "content-free"
         status_message = self.terminal_code or self.interruption_reason or self.status
-        self.generation.update(
-            output=output,
-            usage_details=self.usage or None,
-            cost_details=self.cost or None,
-            level=level,
-            status_message=status_message,
-            metadata=terminal_metadata,
-        ).end()
-        self.root.update(
-            output=output,
-            level=level,
-            status_message=status_message,
-            metadata=terminal_metadata,
-        ).end()
+        generation_fields: dict[str, Any] = {
+            "usage_details": self.usage or None,
+            "cost_details": self.cost or None,
+            "level": level,
+            "status_message": status_message,
+            "metadata": terminal_metadata,
+        }
+        root_fields: dict[str, Any] = {
+            "level": level,
+            "status_message": status_message,
+            "metadata": terminal_metadata,
+        }
+        if not getattr(self, "content_free", False):
+            output = [{"role": "assistant", "content": self.answer}]
+            generation_fields["output"] = output
+            root_fields["output"] = output
+        self.generation.update(**generation_fields).end()
+        self.root.update(**root_fields).end()
 
 
 class NullChatTurnTrace:
@@ -643,6 +665,7 @@ def trace_chat_turn(
     is_replacement: bool,
     display_prompt: str | None = None,
     reasoning_effort: str = "high",
+    content_free: bool = False,
 ) -> Iterator[ChatTurnTrace | NullChatTurnTrace]:
     """Create one trace per turn and one Langfuse session per conversation."""
 
@@ -658,27 +681,40 @@ def trace_chat_turn(
     trace_id = client.create_trace_id(seed=request_id)
     trace: ChatTurnTrace | None = None
     try:
+        propagation_metadata = {
+            "request_id": request_id,
+            "execution_backend": execution_backend,
+            "is_replacement": str(is_replacement).lower(),
+            "reasoning_effort": reasoning_effort,
+        }
+        if content_free:
+            propagation_metadata["content_policy"] = "content-free"
         with propagate_attributes(
             user_id=pseudonymous_user,
             session_id=session_id,
-            metadata={
-                "request_id": request_id,
-                "execution_backend": execution_backend,
-                "is_replacement": str(is_replacement).lower(),
-                "reasoning_effort": reasoning_effort,
-            },
+            metadata=propagation_metadata,
             version=settings.release_id,
-            tags=["chat", "research-assistant", execution_backend],
+            tags=[
+                "chat",
+                "research-assistant",
+                execution_backend,
+                *(["content-free"] if content_free else []),
+            ],
             trace_name="answer-research-question",
             environment=settings.environment,
         ):
-            root = client.start_observation(
-                trace_context={"trace_id": trace_id},
-                name="answer-research-question",
-                as_type="agent",
-                input=[{"role": "user", "content": prompt}],
-                metadata={"request_id": request_id},
-            )
+            root_fields: dict[str, Any] = {
+                "trace_context": {"trace_id": trace_id},
+                "name": "answer-research-question",
+                "as_type": "agent",
+                "metadata": {
+                    "request_id": request_id,
+                    **({"content_policy": "content-free"} if content_free else {}),
+                },
+            }
+            if not content_free:
+                root_fields["input"] = [{"role": "user", "content": prompt}]
+            root = client.start_observation(**root_fields)
             trace = ChatTurnTrace(
                 root,
                 prompt=prompt,
@@ -686,6 +722,7 @@ def trace_chat_turn(
                 model=model,
                 execution_backend=execution_backend,
                 reasoning_effort=reasoning_effort,
+                content_free=content_free,
             )
             try:
                 yield trace
