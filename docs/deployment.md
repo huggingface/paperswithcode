@@ -564,14 +564,20 @@ import json
 from pathlib import Path
 
 slot = Path("/srv/paperswithcode/environments/staging/active").resolve().name
-status = json.loads(
-    Path(f"/run/paperswithcode/external-pi/staging-{slot}.json").read_text()
-)
-assert status["state"] == "ready"
-assert status["authenticated"] is True
-assert status["registered"] is True
-assert status["maximum_sessions"] == 32
-print("external worker ready; maximum_sessions=32")
+statuses = [
+    json.loads(
+        Path(
+            f"/run/paperswithcode/external-pi/staging-{slot}-{index:02d}.json"
+        ).read_text()
+    )
+    for index in range(4)
+]
+assert all(status["state"] == "ready" for status in statuses)
+assert all(status["authenticated"] is True for status in statuses)
+assert all(status["registered"] is True for status in statuses)
+assert all(status["maximum_sessions"] == 8 for status in statuses)
+assert sum(status["maximum_sessions"] for status in statuses) == 32
+print("four external workers ready; aggregate maximum_sessions=32")
 PY
 sudo -u postgres psql -d paperswithcode_hf -Atc \
   "SELECT count(*) FROM staging.chat_sandbox_pool WHERE state IN ('starting','blank_ready','claimed','draining');"
