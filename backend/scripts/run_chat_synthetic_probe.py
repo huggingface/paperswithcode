@@ -6,7 +6,7 @@ import argparse
 import asyncio
 import json
 import os
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +28,7 @@ from backend.services.autonomous_operations_repository import (
 )
 
 HEALTH_RECORD = "chat-synthetic-probe-health.json"
+CRITICAL_ALERT_FORCE_COOLDOWN = timedelta(hours=4)
 
 
 def synthetic_mutation_pause_reason() -> str | None:
@@ -41,7 +42,14 @@ def synthetic_mutation_pause_reason() -> str | None:
     return None
 
 
-def _critical_alert_after(state: dict[str, Any], previous: datetime | None) -> bool:
+def _critical_alert_after(
+    state: dict[str, Any],
+    previous: datetime | None,
+    last_forced: datetime | None,
+    now: datetime,
+) -> bool:
+    if last_forced is not None and now - last_forced < CRITICAL_ALERT_FORCE_COOLDOWN:
+        return False
     for event in state.get("events", []):
         if not isinstance(event, dict) or event.get("severity") != "critical":
             continue
@@ -109,9 +117,15 @@ def main() -> int:
     state = load_state(state_path)
     now = datetime.now(UTC)
     previous = _timestamp(state.get("last_synthetic_probe_at"))
+    last_forced_alert = _timestamp(state.get("last_critical_alert_probe_at"))
     _force_aggregate, force_release = release_probe_triggers(state, settings)
     operational_state = load_state(operational_state_path)
-    force_alert = _critical_alert_after(operational_state, previous)
+    force_alert = _critical_alert_after(
+        operational_state,
+        previous,
+        last_forced_alert,
+        now,
+    )
     events = asyncio.run(
         collect_synthetic_events(
             state,
@@ -120,6 +134,8 @@ def main() -> int:
             force=force_release or force_alert,
         )
     )
+    if force_alert:
+        state["last_critical_alert_probe_at"] = now.isoformat()
     for event in events:
         append_event(state, event)
     write_state(state_path, state)
