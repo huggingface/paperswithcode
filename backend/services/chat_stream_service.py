@@ -2217,7 +2217,18 @@ class ChatStreamOrchestrator:
         self, event: PersistenceEvent
     ) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        await asyncio.to_thread(self._bind_sdk_session, payload)
+        persistence = asyncio.create_task(
+            asyncio.to_thread(self._bind_sdk_session, payload)
+        )
+        cancellation: asyncio.CancelledError | None = None
+        while True:
+            try:
+                await asyncio.shield(persistence)
+                break
+            except asyncio.CancelledError as exc:
+                cancellation = cancellation or exc
+        if cancellation is not None:
+            raise cancellation
         return _HandledTurnEvent()
 
     async def _handle_mirror_failure(
@@ -2931,25 +2942,46 @@ class ChatStreamOrchestrator:
         )
 
     def _persist_latency(self, status: str, total_ms: int) -> None:
-        with db_manager.session_local() as db:
-            latency = ChatLatencyService(db)
-            for phase in self.pending_latency_phases:
-                latency.record_phase(
-                    self.request_id,
-                    phase.phase,
-                    phase.elapsed_ms,
-                    acquisition_outcome=phase.acquisition_outcome,
-                    first_semantic_event_class=phase.first_semantic_event_class,
-                    pool_miss_reason=phase.pool_miss_reason,
-                    session_reuse_cohort=phase.session_reuse_cohort,
-                    failure_stage=phase.failure_stage,
-                    failure_class=phase.failure_class,
-                    attempt_kind=phase.attempt_kind,
-                )
-                if (
-                    phase.acquisition_outcome == "pool_miss"
-                    and phase.pool_miss_reason == "unhealthy_blank"
-                ):
-                    latency.record_pool_assignment_fallback(self.request_id)
-            latency.finalize(self.request_id, status, total_ms)
-            db.commit()
+        try:
+            with db_manager.session_local() as db:
+                latency = ChatLatencyService(db)
+                for phase in self.pending_latency_phases:
+                    try:
+                        latency.record_phase(
+                            self.request_id,
+                            phase.phase,
+                            phase.elapsed_ms,
+                            acquisition_outcome=phase.acquisition_outcome,
+                            first_semantic_event_class=(
+                                phase.first_semantic_event_class
+                            ),
+                            pool_miss_reason=phase.pool_miss_reason,
+                            session_reuse_cohort=phase.session_reuse_cohort,
+                            failure_stage=phase.failure_stage,
+                            failure_class=phase.failure_class,
+                            attempt_kind=phase.attempt_kind,
+                        )
+                    except ValueError as exc:
+                        logger.warning(
+                            "chat latency phase failed request_id=%s phase=%s error=%s",
+                            self.request_id,
+                            phase.phase,
+                            type(exc).__name__,
+                        )
+                        continue
+                    if (
+                        phase.acquisition_outcome == "pool_miss"
+                        and phase.pool_miss_reason == "unhealthy_blank"
+                    ):
+                        latency.record_pool_assignment_fallback(self.request_id)
+                latency.finalize(self.request_id, status, total_ms)
+                db.commit()
+        except Exception as exc:
+            logger.warning(
+                "chat latency phase batch failed request_id=%s error=%s",
+                self.request_id,
+                type(exc).__name__,
+            )
+            with db_manager.session_local() as db:
+                ChatLatencyService(db).finalize(self.request_id, status, total_ms)
+                db.commit()

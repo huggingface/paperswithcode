@@ -5,6 +5,8 @@ import threading
 import time
 import uuid
 
+import pytest
+
 from backend.config import get_settings
 from backend.services.chat_session_service import ChatOwner, TurnAdmission
 from backend.services.chat_stream_service import ChatStreamOrchestrator
@@ -102,6 +104,40 @@ def test_sdk_session_persistence_does_not_block_other_streams(monkeypatch) -> No
     assert time.perf_counter() - started < 0.1
 
 
+def test_sdk_session_persistence_finishes_before_cancellation_is_delivered(
+    monkeypatch,
+) -> None:
+    entered = threading.Event()
+    release = threading.Event()
+    completed = threading.Event()
+    orchestrator = _orchestrator()
+
+    def slow_bind(_payload) -> None:
+        entered.set()
+        release.wait(timeout=0.5)
+        completed.set()
+
+    monkeypatch.setattr(orchestrator, "_bind_sdk_session", slow_bind)
+
+    async def exercise() -> None:
+        persistence = asyncio.create_task(
+            orchestrator._handle_persistence_event(
+                PersistenceEvent(session_id=str(uuid.uuid4()))
+            )
+        )
+        while not entered.is_set():
+            await asyncio.sleep(0)
+        persistence.cancel()
+        await asyncio.sleep(0)
+        assert not persistence.done()
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await persistence
+        assert completed.is_set()
+
+    asyncio.run(exercise())
+
+
 def test_terminal_latency_flushes_buffered_phases_in_one_transaction(
     monkeypatch,
 ) -> None:
@@ -156,4 +192,110 @@ def test_terminal_latency_flushes_buffered_phases_in_one_transaction(
         "fallback",
         "finalize",
         "commit",
+    ]
+
+
+def test_invalid_latency_phase_does_not_drop_other_phases_or_finalize(
+    monkeypatch,
+) -> None:
+    from backend.services import chat_stream_service
+
+    calls: list[tuple] = []
+
+    class Session:
+        def commit(self) -> None:
+            calls.append(("commit",))
+
+    @contextmanager
+    def session_local():
+        yield Session()
+
+    class LatencyService:
+        def __init__(self, _db) -> None:
+            pass
+
+        def record_phase(self, _request_id, phase, _elapsed_ms, **_kwargs) -> bool:
+            calls.append(("phase", phase))
+            if phase == "unsupported":
+                raise ValueError("unsupported phase")
+            return True
+
+        def record_pool_assignment_fallback(self, _request_id) -> bool:
+            return True
+
+        def finalize(self, _request_id, status, total_ms) -> bool:
+            calls.append(("finalize", status, total_ms))
+            return True
+
+    monkeypatch.setattr(
+        chat_stream_service,
+        "db_manager",
+        SimpleNamespace(session_local=session_local),
+    )
+    monkeypatch.setattr(chat_stream_service, "ChatLatencyService", LatencyService)
+    orchestrator = _orchestrator()
+    orchestrator._buffer_latency_phase("unsupported", 10)
+    orchestrator._buffer_latency_phase("agent_session_ready", 125)
+
+    orchestrator._persist_latency("complete", 500)
+
+    assert calls == [
+        ("phase", "unsupported"),
+        ("phase", "agent_session_ready"),
+        ("finalize", "complete", 500),
+        ("commit",),
+    ]
+
+
+def test_latency_database_failure_retries_terminal_finalize_in_a_fresh_session(
+    monkeypatch,
+) -> None:
+    from backend.services import chat_stream_service
+
+    calls: list[tuple] = []
+    session_count = 0
+
+    class Session:
+        def __init__(self, number: int) -> None:
+            self.number = number
+
+        def commit(self) -> None:
+            calls.append(("commit", self.number))
+
+    @contextmanager
+    def session_local():
+        nonlocal session_count
+        session_count += 1
+        yield Session(session_count)
+
+    class LatencyService:
+        def __init__(self, db) -> None:
+            self.session_number = db.number
+
+        def record_phase(self, *_args, **_kwargs) -> bool:
+            calls.append(("phase", self.session_number))
+            raise RuntimeError("database write failed")
+
+        def record_pool_assignment_fallback(self, _request_id) -> bool:
+            return True
+
+        def finalize(self, _request_id, status, total_ms) -> bool:
+            calls.append(("finalize", self.session_number, status, total_ms))
+            return True
+
+    monkeypatch.setattr(
+        chat_stream_service,
+        "db_manager",
+        SimpleNamespace(session_local=session_local),
+    )
+    monkeypatch.setattr(chat_stream_service, "ChatLatencyService", LatencyService)
+    orchestrator = _orchestrator()
+    orchestrator._buffer_latency_phase("agent_session_ready", 125)
+
+    orchestrator._persist_latency("complete", 500)
+
+    assert calls == [
+        ("phase", 1),
+        ("finalize", 2, "complete", 500),
+        ("commit", 2),
     ]
