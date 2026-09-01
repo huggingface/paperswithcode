@@ -2126,6 +2126,24 @@ def test_disabled_maintenance_drains_pool_without_touching_assigned_lease():
     assert assigned.modal_sandbox_id == "sb-assigned"
 
 
+def test_maintenance_terminates_settled_claimed_pool_orphan():
+    harness = _Harness(settings=_settings(chat_blank_pool_enabled=False), owner=True)
+    row = _pool(harness, state="claimed", release_id="release-previous")
+    interval = _interval(harness, row)
+    interval.claimed_at = harness.clock.utcnow() - timedelta(minutes=1)
+    interval.terminal_at = harness.clock.utcnow() - timedelta(seconds=30)
+    with harness.sessions() as db, db.begin():
+        db.add_all([row, interval])
+
+    result = asyncio.run(harness.coordinator.maintain_pool())
+
+    assert result.drained == 1
+    assert harness.provider.termination_calls == [row.modal_sandbox_id]
+    with harness.sessions() as db:
+        persisted = db.get(ChatSandboxPool, row.id)
+    assert persisted.state == "terminated"
+
+
 def test_maintenance_commits_claim_before_provider_io():
     events: list[str] = []
 
