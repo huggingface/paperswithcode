@@ -2248,6 +2248,7 @@ class ChatStreamOrchestrator:
     async def _handle_mirror_failure(
         self, event: MirrorFailureEvent
     ) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         _kind, payload = self._legacy_payload(event)
         if self.settings.chat_durable_turn_dispatch_enabled:
             self.lifecycle = self.lifecycle.transition(event)
@@ -2269,6 +2270,7 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent(frame=frame)
 
     async def _handle_cancellation(self, event: CancellationEvent) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         return _HandledTurnEvent(
             frame=await self._finalize_cancellation(cancel_runner=False)
         )
@@ -2462,6 +2464,7 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent(frame=ChatStreamFrame(kind, payload))
 
     async def _handle_failure_event(self, event: FailureEvent) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected
@@ -2545,6 +2548,7 @@ class ChatStreamOrchestrator:
     async def _handle_completion_event(
         self, event: CompletionEvent
     ) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected

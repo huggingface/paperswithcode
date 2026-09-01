@@ -11,6 +11,7 @@ from backend.config import get_settings
 from backend.services.chat_session_service import ChatOwner, TurnAdmission
 from backend.services.chat_stream_service import ChatStreamOrchestrator
 from backend.services.chat_turn_event_service import (
+    CompletionEvent,
     LatencyEvent,
     PersistenceEvent,
     from_legacy_event,
@@ -170,6 +171,28 @@ def test_terminal_persistence_waits_for_sdk_session_binding(monkeypatch) -> None
         release.set()
         await persistence
         assert terminal.is_set()
+
+    asyncio.run(exercise())
+
+
+def test_sdk_session_bind_failure_prevents_durable_terminal_frame() -> None:
+    orchestrator = _orchestrator()
+    orchestrator.settings = orchestrator.settings.model_copy(
+        update={"chat_durable_turn_dispatch_enabled": True}
+    )
+    completion = from_legacy_event(
+        {"type": "done", "followups": [], "finish_reason": "success"}
+    )
+    assert isinstance(completion, CompletionEvent)
+
+    async def fail_bind() -> None:
+        raise RuntimeError("sdk bind failed")
+
+    async def exercise() -> None:
+        orchestrator.sdk_session_persistence_task = asyncio.create_task(fail_bind())
+        with pytest.raises(RuntimeError, match="sdk bind failed"):
+            await orchestrator._handle_completion_event(completion)
+        assert orchestrator.terminal_persistence.completion is None
 
     asyncio.run(exercise())
 

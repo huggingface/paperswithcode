@@ -283,13 +283,16 @@ export class PiWorker {
       && !(this.prewarmedModel === run.model
         && this.prewarmedProtocol === protocol
         && this.prewarmedProvider)
-      ? createProvider(run.model, protocol, this.gateway)
+      ? createProvider(run.model, protocol, this.gateway).then(
+        (provider) => ({ provider }),
+        (error: unknown) => ({ error }),
+      )
       : undefined;
     let state: Awaited<typeof statePromise>;
     try {
       state = await statePromise;
     } catch (error) {
-      await coldProviderPromise?.catch(() => undefined);
+      await coldProviderPromise;
       throw error;
     }
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
@@ -306,7 +309,11 @@ export class PiWorker {
       ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
     });
-    const coldProvider = await coldProviderPromise;
+    const coldProviderResult = await coldProviderPromise;
+    if (coldProviderResult && "error" in coldProviderResult) {
+      throw coldProviderResult.error;
+    }
+    const coldProvider = coldProviderResult?.provider;
     this.policy.reset(run.web_search_enabled, prompt, run.poster_mode);
     const profile = JSON.stringify({
       model: run.model,
