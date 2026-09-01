@@ -45,18 +45,75 @@ digest, a protected Sandbox-only credential, and the exact
 authenticated developer identity, reuse an unrelated credential, or invent a
 target.
 
+## Guarded staging configuration
+
+Do not edit compiler secrets or paper gates directly in `staging.env`. First
+create a root-owned, mode-`0600` source file outside the checkout containing
+exactly the approved values below. Keep the Sandbox credential distinct from
+`PWC_HF_TOKEN`.
+
+```text
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE=registry.hf.space/nielsr-pwc-latex-compiler-<private-name>-staging@sha256:<digest>
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE=nielsr
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN=<sandbox-only-token>
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR=cpu-upgrade
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS=180
+PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION=sandbox-netns-v1
+PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY=<base64url-ed25519-private-key>
+```
+
+Install the validated pins and credentials with every user and qualification
+gate off:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /root/protected/staging-latex-paper.env \
+  --staging-latex-paper-install-only \
+  --confirm INSTALL_STAGING_LATEX_PAPER
+```
+
+After the exact private image and Sandbox boundary have been approved, arm only
+the qualification path. This keeps `/write-paper`, agent-created paper
+artifacts, and compiler job submission unavailable to users:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-latex-paper-qualification-enable-only \
+  --confirm ENABLE_STAGING_LATEX_PAPER_QUALIFICATION
+```
+
+Deploy that exact source commit to staging, run the qualification suite below,
+and inspect its root-owned evidence. Only after every required check passes may
+an operator configure the coherent user-facing state and deploy staging again:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-latex-paper-activation-enable-only \
+  --confirm ENABLE_STAGING_LATEX_PAPER
+```
+
+Activation remains fail-closed when the qualification evidence is absent,
+incomplete, for another image digest, or has unsafe ownership or permissions.
+Each command changes protected configuration only; it does not restart or
+deploy a service.
+
 ## Kill switch
 
 To stop all **new** compiler submissions while preserving owner reads of stored
-source and historical PDFs, set this in `/etc/paperswithcode/staging.env` and
-deploy staging:
+source and historical PDFs, run the guarded disable transition:
 
-```text
-PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED=false
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-latex-paper-disable-only \
+  --confirm DISABLE_STAGING_LATEX_PAPER
 ```
 
-`PWC_CHAT_LATEX_PAPER_ENABLED=false` is the stricter paper-creation switch.
-Neither control deletes artifacts or invalidates safe historical previews.
+Then deploy staging. This atomically restores both paper gates and qualification
+mode to false while leaving Posterly and shared previews disabled. It does not
+delete artifacts or invalidate safe historical previews.
 
 ## Health and metrics
 
