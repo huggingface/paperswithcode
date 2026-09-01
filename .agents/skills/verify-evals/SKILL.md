@@ -587,7 +587,6 @@ Copy and use per row:
 
 - **Adding** new evaluation rows → `add-evals`
 - **Creating** benchmarks or wiring metrics → `add-benchmark`
-- **Bulk extracting** evals from a paper via the automated pipeline → `extract-evals-paper`
 - **Moving paper lineage** → `pwc paper lineage add/list/remove`
 
 ## Quick reference
