@@ -39,6 +39,7 @@ class _Response:
         self.status_code = status_code
         self._chunks = chunks
         self._payload = payload
+        self.iter_content_kwargs = []
 
     def __enter__(self):
         return self
@@ -46,7 +47,8 @@ class _Response:
     def __exit__(self, *_args):
         return False
 
-    def iter_content(self, **_kwargs):
+    def iter_content(self, **kwargs):
+        self.iter_content_kwargs.append(kwargs)
         yield from self._chunks
 
     def json(self):
@@ -87,6 +89,28 @@ def _frame(sequence: int, event: str, payload: dict) -> bytes:
         + json.dumps({"type": event, **payload}, separators=(",", ":"))
         + "\n\n"
     ).encode()
+
+
+def test_sse_transport_yields_prompt_event_before_later_response_bytes():
+    from backend.loadtests.durable_chat_transport import _SSEParser
+    from backend.loadtests.durable_chat_transport import HttpSSEDurableChatTransport
+
+    class PromptDeliveryResponse(_Response):
+        def iter_content(self, *, chunk_size):
+            self.iter_content_kwargs.append({"chunk_size": chunk_size})
+            if chunk_size > 256:
+                raise AssertionError("prompt event was buffered behind later bytes")
+            yield _frame(1, "answer_delta", {"text": "first"})
+            raise AssertionError("test consumed bytes after the first prompt event")
+
+    response = PromptDeliveryResponse(200)
+    events = HttpSSEDurableChatTransport._events(response, _SSEParser())
+
+    first = next(events)
+
+    assert first.event == "answer_delta"
+    assert response.iter_content_kwargs == [{"chunk_size": 256}]
+    events.close()
 
 
 def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_content():

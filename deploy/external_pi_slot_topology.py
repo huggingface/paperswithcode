@@ -1,4 +1,4 @@
-"""Fixed four-replica topology for release-managed external Pi workers."""
+"""Fixed eight-replica topology for release-managed external Pi workers."""
 
 from __future__ import annotations
 
@@ -7,17 +7,17 @@ import hmac
 import json
 from dataclasses import dataclass
 
-REPLICA_COUNT = 4
-REPLICA_MAXIMUM_SESSIONS = 8
+REPLICA_COUNT = 8
+REPLICA_MAXIMUM_SESSIONS = 4
 
 _SLOT_PORTS = {
     "staging": {
-        "blue": (8820, 8821, 8822, 8823),
-        "green": (8824, 8825, 8826, 8827),
+        "blue": (8820, 8821, 8822, 8823, 8838, 8839, 8840, 8841),
+        "green": (8824, 8825, 8826, 8827, 8842, 8843, 8844, 8845),
     },
     "production": {
-        "blue": (8830, 8831, 8832, 8833),
-        "green": (8834, 8835, 8836, 8837),
+        "blue": (8830, 8831, 8832, 8833, 8846, 8847, 8848, 8849),
+        "green": (8834, 8835, 8836, 8837, 8850, 8851, 8852, 8853),
     },
 }
 

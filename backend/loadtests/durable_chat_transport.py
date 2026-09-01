@@ -367,7 +367,7 @@ class HttpSSEDurableChatTransport:
 
     @staticmethod
     def _events(response, parser: _SSEParser) -> Iterator[_SSEEvent]:
-        for chunk in response.iter_content(chunk_size=4096):
+        for chunk in response.iter_content(chunk_size=256):
             for event in parser.feed(chunk):
                 yield event
         parser.close()

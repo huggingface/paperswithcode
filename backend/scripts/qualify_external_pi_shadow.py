@@ -20,7 +20,10 @@ from backend.services.chat_external_pi_shadow import (
     ExternalPiShadowRequest,
     ExternalPiWorkerControlClient,
 )
+from deploy.external_pi_slot_topology import REPLICA_MAXIMUM_SESSIONS
 from deploy.release import validate_manifest
+
+ISOLATED_SESSION_COUNT = 8
 
 
 @dataclass(frozen=True, slots=True)
@@ -50,6 +53,7 @@ class QualificationIdentity:
     release_id: str
     worker_id: str
     worker_generation: int
+    maximum_sessions: int
 
 
 class QualificationHarness(Protocol):
@@ -57,7 +61,7 @@ class QualificationHarness(Protocol):
         self, case_name: str, request: ExternalPiShadowRequest
     ) -> Mapping[str, object]: ...
 
-    async def capacity_rejected_without_queue(self) -> bool: ...
+    async def capacity_rejected_without_queue(self, maximum_sessions: int) -> bool: ...
 
     async def restart_after_lease_expiry(self) -> tuple[int, int]: ...
 
@@ -252,15 +256,20 @@ async def run_qualification(
             ),
             prompt=prompt,
         )
-        for index in range(8)
+        for index in range(ISOLATED_SESSION_COUNT)
     ]
     try:
-        projections = await asyncio.gather(
-            *(
-                harness.compare(f"isolated_session_{index}", request)
-                for index, request in enumerate(concurrent_requests)
+        projections: list[Mapping[str, object]] = []
+        for offset in range(0, ISOLATED_SESSION_COUNT, identity.maximum_sessions):
+            batch = concurrent_requests[offset : offset + identity.maximum_sessions]
+            projections.extend(
+                await asyncio.gather(
+                    *(
+                        harness.compare(f"isolated_session_{offset + index}", request)
+                        for index, request in enumerate(batch)
+                    )
+                )
             )
-        )
         isolated_passed = all(
             _projection_matches(request, projection)
             for request, projection in zip(
@@ -274,7 +283,7 @@ async def run_qualification(
         QualificationCase(
             name="eight_isolated_sessions",
             passed=isolated_passed,
-            count=8,
+            count=ISOLATED_SESSION_COUNT,
             duration_ms=int((time.monotonic() - concurrent_started) * 1000),
             failure_code=isolated_code,
         )
@@ -299,7 +308,7 @@ async def run_qualification(
 
     await boolean_case(
         "capacity_no_queue",
-        harness.capacity_rejected_without_queue,
+        lambda: harness.capacity_rejected_without_queue(identity.maximum_sessions),
         "capacity_was_queued",
     )
     restart_started = time.monotonic()
@@ -392,7 +401,7 @@ class HttpQualificationHarness:
             "transcript_sha256": projection.transcript_sha256,
         }
 
-    async def capacity_rejected_without_queue(self) -> bool:
+    async def capacity_rejected_without_queue(self, maximum_sessions: int) -> bool:
         header = {"type": "session", "id": "replaced", "version": 3}
         requests = [
             _request(
@@ -413,7 +422,7 @@ class HttpQualificationHarness:
                     ),
                 ),
             ).model_copy(update={"prompt": self.prompt})
-            for index in range(9)
+            for index in range(maximum_sessions + 1)
         ]
         started = time.monotonic()
         results = await asyncio.gather(
@@ -474,13 +483,16 @@ async def _run_http_qualification(
             or status.worker_id != args.worker_id
             or status.worker_generation is None
             or status.state != "ready"
-            or status.maximum_sessions != 8
+            or status.maximum_sessions != REPLICA_MAXIMUM_SESSIONS
         ):
             raise RuntimeError("qualification worker identity is invalid")
         if status.worker_generation != args.expected_generation:
             raise RuntimeError("qualification worker generation is invalid")
         identity = QualificationIdentity(
-            status.release_id, status.worker_id, status.worker_generation
+            status.release_id,
+            status.worker_id,
+            status.worker_generation,
+            status.maximum_sessions,
         )
         harness = HttpQualificationHarness(
             shadow=ExternalPiShadowClient(args.worker_url, token, http),

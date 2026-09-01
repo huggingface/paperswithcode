@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run one slot's four external Pi registrars from recorded runtimes only."""
+"""Run one slot's eight external Pi registrars from recorded runtimes only."""
 
 from __future__ import annotations
 

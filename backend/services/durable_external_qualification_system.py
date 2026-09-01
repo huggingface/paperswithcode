@@ -173,7 +173,7 @@ class SystemDurableQualificationControlPlane:
             or evidence.worker_release_id != self.release_id
             or evidence.worker_state != "ready"
             or evidence.worker_contract_version != "external-pi-v1"
-            or evidence.maximum_sessions < 32
+            or evidence.maximum_sessions != 32
             or evidence.active_sessions != 0
             or getattr(self.settings, "chat_new_session_pi_percentage", None) != 100
             or not all(
@@ -344,7 +344,10 @@ def bind_active_staging_worker(
         or len(token) < 32
     ):
         raise QualificationRefused("active_staging_worker_required")
-    from deploy.external_pi_slot_topology import external_pi_endpoints
+    from deploy.external_pi_slot_topology import (
+        REPLICA_MAXIMUM_SESSIONS,
+        external_pi_endpoints,
+    )
 
     endpoints = json.loads(external_pi_endpoints("staging", slot, token))
     return settings.model_copy(
@@ -354,7 +357,7 @@ def bind_active_staging_worker(
             "chat_external_pi_worker_token": "",
             "chat_external_pi_worker_endpoints": endpoints,
             "chat_external_pi_worker_contract_version": "external-pi-v1",
-            "chat_external_pi_worker_max_sessions": 8,
+            "chat_external_pi_worker_max_sessions": REPLICA_MAXIMUM_SESSIONS,
         }
     )
 

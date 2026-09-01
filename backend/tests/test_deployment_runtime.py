@@ -729,9 +729,9 @@ def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
     slot_launcher.configure_external_pi_slot("staging", slot)
 
     endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
-    assert len(endpoints) == 4
+    assert len(endpoints) == 8
     assert [item["worker_id"] for item in endpoints] == [
-        f"staging-{slot}-{index:02d}" for index in range(4)
+        f"staging-{slot}-{index:02d}" for index in range(8)
     ]
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
@@ -739,7 +739,7 @@ def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_slot_launcher_binds_isolated_external_pi_worker(
@@ -758,7 +758,14 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
 
     endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
     assert [item["base_url"] for item in endpoints] == [
-        f"http://127.0.0.1:{port}" for port in range(8830, 8834)
+        "http://127.0.0.1:8830",
+        "http://127.0.0.1:8831",
+        "http://127.0.0.1:8832",
+        "http://127.0.0.1:8833",
+        "http://127.0.0.1:8846",
+        "http://127.0.0.1:8847",
+        "http://127.0.0.1:8848",
+        "http://127.0.0.1:8849",
     ]
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
@@ -766,7 +773,7 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):

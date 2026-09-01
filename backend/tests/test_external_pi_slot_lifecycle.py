@@ -150,7 +150,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
         "PWC_EXTERNAL_PI_PORT": "8820",
         "PWC_EXTERNAL_PI_TOKEN": derived_token,
-        "PWC_EXTERNAL_PI_MAX_SESSIONS": "8",
+        "PWC_EXTERNAL_PI_MAX_SESSIONS": "4",
         "PWC_EXTERNAL_PI_WORKER_ID": "staging-green-00",
         "PWC_EXTERNAL_PI_INSTANCE_ID": "i" * 36,
         "PWC_EXTERNAL_PI_RELEASE_ID": "release-green",
@@ -184,7 +184,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_WORKER_ID",
     }
     assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8820"
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
     assert "PWC_HF_TOKEN" not in supervisor
 
 
@@ -311,7 +311,9 @@ def test_lease_expiry_restart_ignores_stale_status_until_generation_advances(
     commands = []
     sleeps = []
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
-    monkeypatch.setattr(lifecycle, "_read_status", lambda *_args: next(statuses))
+    monkeypatch.setattr(
+        lifecycle, "_read_primary_status", lambda *_args: next(statuses)
+    )
     monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(lifecycle.time, "sleep", lambda seconds: sleeps.append(seconds))
     monkeypatch.setattr(
@@ -395,7 +397,7 @@ def test_lease_expiry_interruption_recovers_claim_before_propagating(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: {
             "release_id": "release-blue",
             "worker_id": "staging-blue",
@@ -444,7 +446,7 @@ def test_lease_expiry_restart_failure_recovers_before_propagating(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: {
             "release_id": "release-blue",
             "worker_id": "staging-blue",
@@ -513,7 +515,7 @@ def test_lease_expiry_status_failure_expires_fresh_recovery_lease_before_stop(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: (_ for _ in ()).throw(OSError("status write missing")),
     )
     monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
@@ -1116,7 +1118,7 @@ def test_launcher_execs_release_python_with_only_scrubbed_settings(
                 "backend.scripts.run_external_pi_slot",
             ]
         ]
-        * 4
+        * 8
     )
     assert [
         value["PWC_EXTERNAL_PI_WORKER_ID"] for value in executed["environments"]
@@ -1184,7 +1186,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         str(resolved.runtime / "app/node_modules/tsx/dist/loader.mjs"),
         str(resolved.entry_point),
     ]
-    assert len(executed["commands"]) == 4
+    assert len(executed["commands"]) == 8
     assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",

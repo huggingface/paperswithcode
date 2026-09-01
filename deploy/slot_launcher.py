@@ -128,7 +128,7 @@ def configure_release(manifest: dict, release: Path, environment: str) -> None:
 
 
 def configure_external_pi_slot(environment: str, slot: str) -> None:
-    """Bind a deployed backend slot to four environment-isolated workers."""
+    """Bind a deployed backend slot to eight environment-isolated workers."""
     base_token = os.environ.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
     endpoints = external_pi_endpoints(environment, slot, base_token)
     os.environ.update(

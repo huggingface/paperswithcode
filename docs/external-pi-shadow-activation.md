@@ -49,8 +49,9 @@ The guard supplies replica zero's actual worker ID, port, derived credential,
 and immutable prompt path. The temporary credential file is mode `0600` and is
 removed immediately after the subprocess exits. The command refuses production
 and a release other than the exact staging
-`current`. It submits linear, branching, tool-history, and eight concurrent
-isolated native JSONL trees. It compares current leaf, entry count, canonical
+`current`. It submits linear, branching, tool-history, and eight isolated
+native JSONL trees in two concurrent batches matching one replica's configured
+capacity. It compares current leaf, entry count, canonical
 transcript digest, system-prompt digest, and registered-tool-name digest. It
 also proves immediate capacity rejection without a queue, lease-expiry restart
 with a higher generation, stale-generation fencing, drain, and clean recovery.
@@ -104,7 +105,7 @@ Stopping a slot preserves that draining proof and adds one narrowly bounded
 pre-registration recovery proof. An exact `ready` worker may be stopped only
 when its authenticated loopback status matches the slot worker ID and expected
 release, `worker_generation` is explicitly null, `active_sessions` is the exact
-integer zero, `maximum_sessions` is the exact integer eight, and all six
+integer zero, `maximum_sessions` is the exact integer four, and all six
 operation counters are present as exact integer zeros. Any missing, differently
 typed, non-zero, or mismatched evidence fails closed.
 
@@ -310,7 +311,7 @@ authorization.
 ## Retired singleton overload baseline
 
 The old single-worker 100-user overload baseline is not a scale-out acceptance
-gate and must not be used with the four-replica fleet. Use the protected
-32-functional-turn procedure in `docs/deployment.md`; it exercises all four
+gate and must not be used with the eight-replica fleet. Use the protected
+32-functional-turn procedure in `docs/deployment.md`; it exercises all eight
 workers through the real admission and generation path and retains the TTFT,
 completion, resource, cost, and cleanup verdicts required for activation.

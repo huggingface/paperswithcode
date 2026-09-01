@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run four immutable external Pi Node workers without backend credentials."""
+"""Run eight immutable external Pi Node workers without backend credentials."""
 
 from __future__ import annotations
 
