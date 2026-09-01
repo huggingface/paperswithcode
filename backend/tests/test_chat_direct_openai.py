@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -90,6 +91,12 @@ def test_existing_gateway_path_dispatches_explicit_responses_protocol(monkeypatc
         db,
         settings,
     )
+
+
+def test_direct_openai_releases_request_database_session_before_upstream_stream():
+    source = inspect.getsource(gateway_app.responses)
+
+    assert source.index("db.close()") < source.index("client = httpx.AsyncClient")
 
 
 def test_trusted_responses_payload_overwrites_every_security_boundary_field():

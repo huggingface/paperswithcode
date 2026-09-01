@@ -1595,6 +1595,11 @@ async def responses(
         offered_tool_names=inventory["offered_tool_names"],
         offered_tool_digest=inventory["offered_tool_digest"],
     )
+    # A FastAPI yield dependency otherwise retains this connection until the
+    # StreamingResponse finishes. At fleet concurrency that exhausts the pool
+    # while the gateway is merely waiting on OpenAI, blocking sibling calls.
+    # All subsequent accounting uses its own short-lived session.
+    db.close()
     client = httpx.AsyncClient(timeout=180, follow_redirects=False)
     try:
         upstream = await client.send(
