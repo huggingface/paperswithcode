@@ -1016,6 +1016,7 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED = {
     "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
     "PWC_CHAT_BLANK_POOL_ENABLED": "false",
     "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
 }
 _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
     "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
@@ -1029,6 +1030,7 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
     "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
     "PWC_CHAT_BLANK_POOL_ENABLED": "true",
     "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
 }
 
 
@@ -1050,15 +1052,20 @@ def staging_durable_external_qualification_values(
             else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
         ),
     }
+
+    def observed_value(key: str, expected: str) -> str:
+        if expected in {"true", "false"}:
+            return _decoded_flag(current, key)
+        if key in current:
+            return decoded_value(current[key]).strip()
+        if key == "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY" and expected == "4":
+            return "4"
+        return ""
+
     drifted = sorted(
         key
         for key, expected in required.items()
-        if (
-            _decoded_flag(current, key)
-            if expected in {"true", "false"}
-            else (decoded_value(current[key]).strip() if key in current else "")
-        )
-        != expected
+        if observed_value(key, expected) != expected
     )
     if drifted:
         raise ValueError(

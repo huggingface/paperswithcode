@@ -557,7 +557,7 @@ the active external worker without exposing its bearer token:
 
 ```bash
 pwc-status || exit 1
-sudo grep -E '^(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED|PWC_CHAT_MAX_CONCURRENCY|PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP|PWC_CHAT_BLANK_POOL_ENABLED|PWC_CHAT_PI_PREWARM_ENABLED)=' \
+sudo grep -E '^(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED|PWC_CHAT_MAX_CONCURRENCY|PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY|PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP|PWC_CHAT_BLANK_POOL_ENABLED|PWC_CHAT_PI_PREWARM_ENABLED)=' \
   /etc/paperswithcode/staging.env
 sudo /srv/paperswithcode/.venv/bin/python - <<'PY'
 import json
@@ -580,9 +580,35 @@ sudo -u postgres psql -d paperswithcode_hf -Atc \
 The selected environment values must include
 `PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false`,
 `PWC_CHAT_MAX_CONCURRENCY=2`, `PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3`, and both
-pool/prewarm flags set to `false`. The pool query must return `0`; any other
+pool/prewarm flags set to `false`. The qualification profile must also set
+`PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY=32`; otherwise the ordinary four-call
+gateway limit serializes the 32-user cohort and invalidates its TTFT result.
+The pool query must return `0`; any other
 value is a stop gate, not authorization to delete rows. The qualifier itself is
 a separate, explicitly authorized operation.
+
+Run the qualifier with Locust in a transient environment outside the immutable
+release. The deployed application runtime intentionally does not contain load-
+testing dependencies:
+
+```bash
+uv_bin="$(command -v uv)" || exit 1
+sudo systemd-run --quiet --wait --pipe --collect \
+  --uid=root --gid=root \
+  --working-directory="$qualification_release" \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  --property=RuntimeDirectory=pwc-staging-qualifier \
+  -- /usr/bin/env \
+  PWC_RELEASE_ID="$(basename -- "$qualification_release")" \
+  UV_PROJECT_ENVIRONMENT=/run/pwc-staging-qualifier/project \
+  "$uv_bin" run --frozen --with locust python \
+  -m backend.scripts.qualify_durable_external_turns \
+  --environment staging \
+  --release-id "$(basename -- "$qualification_release")" \
+  --profile 32-functional-turns \
+  --max-spend-usd 10 \
+  --confirm QUALIFY_STAGING_DURABLE_EXTERNAL_TURNS
+```
 
 Restore the paired baseline with the same still-active release and refresh the
 same SHA whether qualification passes or fails:
