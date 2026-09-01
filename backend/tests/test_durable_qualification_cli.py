@@ -340,18 +340,11 @@ def test_bind_active_staging_worker_uses_verified_slot(tmp_path):
     assert bound.chat_external_pi_worker_id == ""
     assert bound.chat_external_pi_worker_url == ""
     assert bound.chat_external_pi_worker_token == ""
-    assert configured_worker_ids(bound) == (
-        "staging-green-00",
-        "staging-green-01",
-        "staging-green-02",
-        "staging-green-03",
-        "staging-green-04",
-        "staging-green-05",
-        "staging-green-06",
-        "staging-green-07",
+    assert configured_worker_ids(bound) == tuple(
+        f"staging-green-{index:02d}" for index in range(16)
     )
-    assert len(bound.chat_external_pi_worker_endpoints) == 8
-    assert bound.chat_external_pi_worker_max_sessions == 4
+    assert len(bound.chat_external_pi_worker_endpoints) == 16
+    assert bound.chat_external_pi_worker_max_sessions == 2
 
 
 def test_system_prerequisites_aggregate_all_configured_workers(monkeypatch):
@@ -359,7 +352,7 @@ def test_system_prerequisites_aggregate_all_configured_workers(monkeypatch):
     from backend.services import durable_external_qualification_system as system
     from backend.services import runtime_validation
 
-    worker_ids = tuple(f"staging-blue-{index:02d}" for index in range(8))
+    worker_ids = tuple(f"staging-blue-{index:02d}" for index in range(16))
     workers = tuple(
         SimpleNamespace(
             worker_id=worker_id,
@@ -367,8 +360,8 @@ def test_system_prerequisites_aggregate_all_configured_workers(monkeypatch):
             release_id="0123456789ab-staging",
             state="ready",
             contract_version="external-pi-v1",
-            maximum_sessions=4,
-            active_sessions=index % 4,
+            maximum_sessions=2,
+            active_sessions=index % 2,
         )
         for index, worker_id in enumerate(worker_ids)
     )
@@ -424,7 +417,7 @@ def test_system_prerequisites_aggregate_all_configured_workers(monkeypatch):
     assert evidence.worker_release_id == "0123456789ab-staging"
     assert evidence.worker_state == "ready"
     assert evidence.maximum_sessions == 32
-    assert evidence.active_sessions == 12
+    assert evidence.active_sessions == 8
     assert evidence.runtime_ready is True
     assert evidence.migrations_ready is True
 
@@ -454,7 +447,7 @@ def test_system_resource_sampler_uses_active_slot_backend_unit(tmp_path, monkeyp
     ]
 
 
-def test_system_resource_scope_counts_accept_exact_eight_worker_topology(monkeypatch):
+def test_system_resource_scope_counts_accept_exact_sixteen_worker_topology(monkeypatch):
     import uuid
 
     from backend.database import connection
@@ -482,7 +475,7 @@ def test_system_resource_scope_counts_accept_exact_eight_worker_topology(monkeyp
         settings=SimpleNamespace(
             chat_external_pi_worker_endpoints=tuple(
                 SimpleNamespace(worker_id=f"staging-blue-{index:02d}")
-                for index in range(8)
+                for index in range(16)
             )
         ),
     )
@@ -490,7 +483,7 @@ def test_system_resource_scope_counts_accept_exact_eight_worker_topology(monkeyp
     assert system._SystemResourceEvidence(control)._scope_counts() == (0, 0, 0)
 
 
-@pytest.mark.parametrize("worker_count", (0, 4, 7, 9))
+@pytest.mark.parametrize("worker_count", (0, 8, 15, 17))
 def test_system_resource_scope_counts_reject_non_current_topology(worker_count):
     import uuid
 

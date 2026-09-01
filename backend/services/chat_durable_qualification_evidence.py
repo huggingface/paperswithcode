@@ -22,6 +22,7 @@ from backend.models.database import (
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
+from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 
 logger = logging.getLogger(__name__)
 QUALIFICATION_PROFILES = {
@@ -613,7 +614,11 @@ class ChatDurableQualificationEvidenceService:
             len(rows) != expected_users
             or len({row.chat_session_id for row in rows}) != expected_users
             or Counter(row.qualification_workload for row in rows) != expected_workloads
-            or any(row.terminal_status != "complete" for row in rows)
+            or any(
+                row.terminal_status
+                not in {"complete", "stopped", "error", "interrupted"}
+                for row in rows
+            )
         ):
             raise QualificationEvidenceUnavailable(
                 "qualification teardown cohort is incomplete"
@@ -630,16 +635,26 @@ class ChatDurableQualificationEvidenceService:
                 ) from None
 
         self.db.expire_all()
+        tool_session_ids = tuple(row.chat_session_id for row in tool_rows)
+        open_session_ids = tuple(
+            self.db.scalars(
+                select(ChatSandboxComputeInterval.chat_session_id).where(
+                    ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids),
+                    ChatSandboxComputeInterval.terminal_at.is_(None),
+                )
+            )
+        )
+        if open_session_ids:
+            ChatSandboxSpendService(self.db, settings).reconcile_terminal_sessions(
+                open_session_ids, now=self.now()
+            )
+            self.db.expire_all()
         interval_rows = self.db.execute(
             select(
                 ChatSandboxComputeInterval.chat_session_id,
                 ChatSandboxComputeInterval.terminal_at,
                 ChatSandboxComputeInterval.app_release_id,
-            ).where(
-                ChatSandboxComputeInterval.chat_session_id.in_(
-                    tuple(row.chat_session_id for row in tool_rows)
-                )
-            )
+            ).where(ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids))
         ).all()
         intervals_by_session = Counter(row.chat_session_id for row in interval_rows)
         if (

@@ -150,7 +150,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
         "PWC_EXTERNAL_PI_PORT": "8820",
         "PWC_EXTERNAL_PI_TOKEN": derived_token,
-        "PWC_EXTERNAL_PI_MAX_SESSIONS": "4",
+        "PWC_EXTERNAL_PI_MAX_SESSIONS": "2",
         "PWC_EXTERNAL_PI_WORKER_ID": "staging-green-00",
         "PWC_EXTERNAL_PI_INSTANCE_ID": "i" * 36,
         "PWC_EXTERNAL_PI_RELEASE_ID": "release-green",
@@ -184,7 +184,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_WORKER_ID",
     }
     assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8820"
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "2"
     assert "PWC_HF_TOKEN" not in supervisor
 
 
@@ -635,12 +635,12 @@ def test_maximum_configured_drain_can_finish_and_releases_durable_ownership(
     ]
 
 
-def test_eight_replica_tooling_drains_previous_four_replica_slot(
+def test_sixteen_replica_tooling_drains_previous_eight_replica_slot(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
     monkeypatch.setattr(lifecycle, "drain_stop_timeout_seconds", lambda _env: 10)
-    old_specs = lifecycle.replica_specs("staging", "green", "x" * 32)[:4]
+    old_specs = lifecycle.replica_specs("staging", "green", "x" * 32)[:8]
     for spec in old_specs:
         (tmp_path / f"{spec.worker_id}.json").write_text(
             json.dumps(
@@ -650,7 +650,7 @@ def test_eight_replica_tooling_drains_previous_four_replica_slot(
                     "worker_id": spec.worker_id,
                     "state": "ready",
                     "drained": False,
-                    "maximum_sessions": 8,
+                    "maximum_sessions": 4,
                 }
             )
         )
@@ -671,7 +671,7 @@ def test_eight_replica_tooling_drains_previous_four_replica_slot(
                             "worker_id": spec.worker_id,
                             "state": "offline",
                             "drained": True,
-                            "maximum_sessions": 8,
+                            "maximum_sessions": 4,
                         }
                     )
                 )
@@ -691,13 +691,13 @@ def test_eight_replica_tooling_drains_previous_four_replica_slot(
     ]
 
 
-def test_partial_eight_replica_status_cannot_be_treated_as_previous_topology(
+def test_partial_sixteen_replica_status_cannot_be_treated_as_previous_topology(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
     monkeypatch.setattr(lifecycle, "drain_stop_timeout_seconds", lambda _env: 10)
     current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
-    for spec in current_specs[:4]:
+    for spec in current_specs[:8]:
         (tmp_path / f"{spec.worker_id}.json").write_text(
             json.dumps(
                 {
@@ -706,7 +706,7 @@ def test_partial_eight_replica_status_cannot_be_treated_as_previous_topology(
                     "worker_id": spec.worker_id,
                     "state": "offline",
                     "drained": True,
-                    "maximum_sessions": 4,
+                    "maximum_sessions": 2,
                 }
             )
         )
@@ -1226,7 +1226,7 @@ def test_launcher_execs_release_python_with_only_scrubbed_settings(
                 "backend.scripts.run_external_pi_slot",
             ]
         ]
-        * 8
+        * 16
     )
     assert [
         value["PWC_EXTERNAL_PI_WORKER_ID"] for value in executed["environments"]
@@ -1294,7 +1294,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         str(resolved.runtime / "app/node_modules/tsx/dist/loader.mjs"),
         str(resolved.entry_point),
     ]
-    assert len(executed["commands"]) == 8
+    assert len(executed["commands"]) == 16
     assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",

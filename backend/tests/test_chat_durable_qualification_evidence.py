@@ -767,6 +767,50 @@ def test_exact_scope_teardown_is_isolated_and_idempotent(engine):
     assert evictions == 16
 
 
+def test_exact_scope_teardown_cleans_terminal_error_without_passing_evidence(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        failed_turn = db.scalar(
+            select(ChatTurnLatency).where(
+                ChatTurnLatency.qualification_scope_id == SCOPE_ID,
+                ChatTurnLatency.qualification_workload == "bash",
+            )
+        )
+        failed_turn.terminal_status = "error"
+        db.query(ChatQualificationEvidenceEvent).filter_by(
+            event_type="workspace_evicted"
+        ).delete()
+        for interval in db.query(ChatSandboxComputeInterval):
+            interval.terminal_at = None
+
+    class Manager:
+        async def snapshot_and_terminate(self, session_id):
+            with Session(engine) as db, db.begin():
+                interval = db.scalar(
+                    select(ChatSandboxComputeInterval).where(
+                        ChatSandboxComputeInterval.chat_session_id == session_id
+                    )
+                )
+                interval.terminal_at = END
+            return True
+
+    with Session(engine) as db:
+        proof = asyncio.run(
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).teardown_scope(
+                scope_id=SCOPE_ID,
+                settings=_settings(),
+                sandbox_manager=Manager(),
+            )
+        )
+
+    assert proof.targeted_sessions == 16
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
+
+
 @pytest.mark.parametrize("event_type", ("stale_fence", "workspace_evicted"))
 def test_scope_turn_fence_events_are_atomically_unique(engine, event_type):
     from sqlalchemy.exc import IntegrityError

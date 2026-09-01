@@ -1,4 +1,4 @@
-"""Fixed eight-replica topology for release-managed external Pi workers."""
+"""Fixed sixteen-replica topology for release-managed external Pi workers."""
 
 from __future__ import annotations
 
@@ -7,17 +7,85 @@ import hmac
 import json
 from dataclasses import dataclass
 
-REPLICA_COUNT = 8
-REPLICA_MAXIMUM_SESSIONS = 4
+REPLICA_COUNT = 16
+REPLICA_MAXIMUM_SESSIONS = 2
 
 _SLOT_PORTS = {
     "staging": {
-        "blue": (8820, 8821, 8822, 8823, 8838, 8839, 8840, 8841),
-        "green": (8824, 8825, 8826, 8827, 8842, 8843, 8844, 8845),
+        "blue": (
+            8820,
+            8821,
+            8822,
+            8823,
+            8838,
+            8839,
+            8840,
+            8841,
+            8854,
+            8855,
+            8856,
+            8857,
+            8858,
+            8859,
+            8860,
+            8861,
+        ),
+        "green": (
+            8824,
+            8825,
+            8826,
+            8827,
+            8842,
+            8843,
+            8844,
+            8845,
+            8862,
+            8863,
+            8864,
+            8865,
+            8866,
+            8867,
+            8868,
+            8869,
+        ),
     },
     "production": {
-        "blue": (8830, 8831, 8832, 8833, 8846, 8847, 8848, 8849),
-        "green": (8834, 8835, 8836, 8837, 8850, 8851, 8852, 8853),
+        "blue": (
+            8830,
+            8831,
+            8832,
+            8833,
+            8846,
+            8847,
+            8848,
+            8849,
+            8870,
+            8871,
+            8872,
+            8873,
+            8874,
+            8875,
+            8876,
+            8877,
+        ),
+        "green": (
+            8834,
+            8835,
+            8836,
+            8837,
+            8850,
+            8851,
+            8852,
+            8853,
+            8878,
+            8879,
+            8880,
+            8881,
+            8882,
+            8883,
+            8884,
+            8885,
+        ),
     },
 }
 
