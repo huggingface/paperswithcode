@@ -1,10 +1,28 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 
+afterEach(() => vi.restoreAllMocks());
+
 describe("PaperDateFilter", () => {
+  it("calls the only calendar year field Year on mobile", async () => {
+    vi.spyOn(window, "matchMedia").mockImplementation((query) => ({
+      matches: query === "(max-width: 640px)",
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList));
+
+    render(<PaperDateFilter currentDate="2026-08-21" onChange={vi.fn()} />);
+    await userEvent.click(screen.getByRole("button", { name: "Select a range" }));
+
+    const dialog = screen.getByRole("dialog", { name: "Select a date range" });
+    expect(within(dialog).getByRole("spinbutton", { name: "Year" })).toHaveValue(2026);
+    expect(within(dialog).queryByRole("spinbutton", { name: "Start year" })).not.toBeInTheDocument();
+    expect(within(dialog).queryByRole("spinbutton", { name: "End year" })).not.toBeInTheDocument();
+  });
+
   it("applies an inclusive range from the two-month calendar", async () => {
     const onChange = vi.fn();
     const user = userEvent.setup();

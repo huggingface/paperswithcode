@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -23,6 +23,23 @@ const SHORT_MONTH_FORMATTER = new Intl.DateTimeFormat("en", {
   month: "short",
   timeZone: "UTC",
 });
+const SINGLE_CALENDAR_QUERY = "(max-width: 640px)";
+
+const useSingleCalendar = () => {
+  const [singleCalendar, setSingleCalendar] = useState(
+    () => typeof window !== "undefined" && window.matchMedia(SINGLE_CALENDAR_QUERY).matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia(SINGLE_CALENDAR_QUERY);
+    const update = (event: MediaQueryListEvent) => setSingleCalendar(event.matches);
+    setSingleCalendar(query.matches);
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  return singleCalendar;
+};
 
 const isoDate = (value: Date) => value.toISOString().slice(0, 10);
 const utcDate = (value: string) => new Date(`${value}T00:00:00Z`);
@@ -175,6 +192,7 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
   onChange: (value: PaperDateRangeValue) => void;
   currentDate?: string;
 }> = ({ startDate, endDate, onChange, currentDate }) => {
+  const singleCalendar = useSingleCalendar();
   const currentDay = currentDate ? utcDate(currentDate) : utcToday();
   const [open, setOpen] = useState(false);
   const [draftStart, setDraftStart] = useState<string>();
@@ -243,7 +261,11 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
   };
 
   return (
-    <div className="paper-date-filter" role="group" aria-label="Publication date">
+    <div
+      className={`paper-date-filter${singleCalendar ? " paper-date-filter-single-calendar" : ""}`}
+      role="group"
+      aria-label="Publication date"
+    >
       <button
         type="button"
         className={`sort-btn sort-btn-time${sameRange(current, week) ? " active" : ""}`}
@@ -283,7 +305,7 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
         </PopoverTrigger>
         <PopoverContent
           align="end"
-          className="paper-date-popover"
+          className={`paper-date-popover${singleCalendar ? " paper-date-popover-single-calendar" : ""}`}
           role="dialog"
           aria-label="Select a date range"
         >
@@ -311,26 +333,28 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
                 )
               }
             />
-            <MonthNavigation
-              calendar="end"
-              onPrevious={() =>
-                navigateMonth(
-                  endVisibleMonth,
-                  -1,
-                  setEndVisibleMonth,
-                  setEndYear,
-                )
-              }
-              onNext={() =>
-                navigateMonth(
-                  endVisibleMonth,
-                  1,
-                  setEndVisibleMonth,
-                  setEndYear,
-                )
-              }
-              secondary
-            />
+            {!singleCalendar && (
+              <MonthNavigation
+                calendar="end"
+                onPrevious={() =>
+                  navigateMonth(
+                    endVisibleMonth,
+                    -1,
+                    setEndVisibleMonth,
+                    setEndYear,
+                  )
+                }
+                onNext={() =>
+                  navigateMonth(
+                    endVisibleMonth,
+                    1,
+                    setEndVisibleMonth,
+                    setEndYear,
+                  )
+                }
+                secondary
+              />
+            )}
           </div>
           <div className="paper-date-calendars">
             <MonthCalendar
@@ -339,21 +363,23 @@ export const PaperDateFilter: React.FC<PaperDateRangeValue & {
               startDate={draftStart}
               endDate={draftEnd}
               onSelect={selectDate}
-              yearLabel="Start year"
+              yearLabel={singleCalendar ? "Year" : "Start year"}
               yearValue={startYear}
               onYearChange={(value) => changeYear(value, setStartYear, setStartVisibleMonth)}
             />
-            <MonthCalendar
-              month={endVisibleMonth}
-              today={today}
-              startDate={draftStart}
-              endDate={draftEnd}
-              onSelect={selectDate}
-              yearLabel="End year"
-              yearValue={endYear}
-              onYearChange={(value) => changeYear(value, setEndYear, setEndVisibleMonth)}
-              secondary
-            />
+            {!singleCalendar && (
+              <MonthCalendar
+                month={endVisibleMonth}
+                today={today}
+                startDate={draftStart}
+                endDate={draftEnd}
+                onSelect={selectDate}
+                yearLabel="End year"
+                yearValue={endYear}
+                onYearChange={(value) => changeYear(value, setEndYear, setEndVisibleMonth)}
+                secondary
+              />
+            )}
           </div>
           <div className="paper-date-actions">
             <button type="button" className="paper-date-clear" onClick={clear}>Clear range</button>
