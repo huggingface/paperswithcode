@@ -367,7 +367,10 @@ class HttpSSEDurableChatTransport:
 
     @staticmethod
     def _events(response, parser: _SSEParser) -> Iterator[_SSEEvent]:
-        for chunk in response.iter_content(chunk_size=256):
+        # Qualification measures the first semantic SSE event, so it must not
+        # wait for a later event merely to fill urllib3's requested read size.
+        # This path carries only the bounded synthetic staging workload.
+        for chunk in response.iter_content(chunk_size=1):
             for event in parser.feed(chunk):
                 yield event
         parser.close()

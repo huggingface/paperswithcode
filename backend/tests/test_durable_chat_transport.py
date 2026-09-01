@@ -98,7 +98,7 @@ def test_sse_transport_yields_prompt_event_before_later_response_bytes():
     class PromptDeliveryResponse(_Response):
         def iter_content(self, *, chunk_size):
             self.iter_content_kwargs.append({"chunk_size": chunk_size})
-            if chunk_size > 256:
+            if chunk_size != 1:
                 raise AssertionError("prompt event was buffered behind later bytes")
             yield _frame(1, "answer_delta", {"text": "first"})
             raise AssertionError("test consumed bytes after the first prompt event")
@@ -109,7 +109,7 @@ def test_sse_transport_yields_prompt_event_before_later_response_bytes():
     first = next(events)
 
     assert first.event == "answer_delta"
-    assert response.iter_content_kwargs == [{"chunk_size": 256}]
+    assert response.iter_content_kwargs == [{"chunk_size": 1}]
     events.close()
 
 
