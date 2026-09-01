@@ -1672,8 +1672,12 @@ class ChatStreamOrchestrator:
             content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
-            _persist_trace_id(
-                self.owner, self.settings, self.admission, self.trace.trace_id
+            await asyncio.to_thread(
+                _persist_trace_id,
+                self.owner,
+                self.settings,
+                self.admission,
+                self.trace.trace_id,
             )
             try:
                 async for frame in self._events():
