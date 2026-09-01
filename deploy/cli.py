@@ -1317,7 +1317,7 @@ def activate_slot(
     preserved_previous = original_previous if refresh_environment else old_release
     candidate_manifest = validate_manifest(release, environment)
     active_manifest = validate_manifest(old_release, environment)
-    external_pi_lifecycle_enabled(environment)
+    external_pi_enabled = external_pi_lifecycle_enabled(environment)
     validate_rolling_compatibility(active_manifest, candidate_manifest)
     _write_journal(
         environment,
@@ -1417,7 +1417,6 @@ def activate_slot(
     try:
         smoke_public(release, environment, candidate_manifest["release_id"])
         _persist_active_slot_socket(environment, inactive)
-        stop_slot_if_enabled(environment, active, active_manifest["release_id"])
     except (
         DeployError,
         ExternalPiSlotError,
@@ -1488,6 +1487,18 @@ def activate_slot(
     reporting_deadline = time.monotonic() + _drain_report_seconds(environment)
     while time.monotonic() < reporting_deadline:
         if _stop_drained_slot(environment, active):
+            if external_pi_enabled:
+                _write_journal(
+                    environment,
+                    "live-with-old-external-pi-draining",
+                    active_slot=inactive,
+                    draining_slot=active,
+                    active_release=release.name,
+                    draining_release=old_release.name,
+                    streams_surviving_cutover=streams_surviving_cutover,
+                    forced_termination_count=0,
+                )
+                return "success-with-draining"
             _write_journal(
                 environment,
                 "settled",
@@ -1925,10 +1936,9 @@ def reap(args: argparse.Namespace) -> int:
             "/internal/deployment-status",
             check=False,
         )
-        if status_value is None:
-            print(f"{args.environment}/{draining} is already stopped")
-            return 0
-        if not _stop_drained_slot(args.environment, draining):
+        if status_value is not None and not _stop_drained_slot(
+            args.environment, draining
+        ):
             print(
                 json.dumps(
                     {
@@ -1946,6 +1956,14 @@ def reap(args: argparse.Namespace) -> int:
                 )
             )
             return 0
+        draining_release = _slot_release(args.environment, draining)
+        if draining_release is None:
+            raise DeployError("draining slot has no release")
+        stop_slot_if_enabled(
+            args.environment,
+            draining,
+            validate_manifest(draining_release, args.environment)["release_id"],
+        )
         pointers = read_pointers(ENVIRONMENTS_ROOT / args.environment)
         _write_journal(
             args.environment,

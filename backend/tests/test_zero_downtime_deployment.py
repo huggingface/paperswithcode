@@ -4,6 +4,7 @@ import asyncio
 import socket
 import urllib.error
 import uuid
+from contextlib import nullcontext
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -550,6 +551,9 @@ def _activation_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         deploy_cli, "prepare_candidate_if_enabled", lambda *_args, **_kwargs: True
     )
     monkeypatch.setattr(
+        deploy_cli, "external_pi_lifecycle_enabled", lambda *_args, **_kwargs: False
+    )
+    monkeypatch.setattr(
         deploy_cli, "stop_slot_if_enabled", lambda *_args, **_kwargs: True
     )
     monkeypatch.setattr(
@@ -588,37 +592,6 @@ def test_live_smoke_failure_restores_complete_activation(
     assert (root / "current").resolve() == old
     assert (root / "previous").resolve() == older
     assert smokes == [candidate, old]
-
-
-def test_automatic_rollback_restores_old_slot_boot_persistence_after_candidate(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-):
-    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
-    persisted: list[str] = []
-    monkeypatch.setattr(
-        deploy_cli,
-        "_persist_active_slot_socket",
-        lambda _environment, slot: persisted.append(slot),
-    )
-    monkeypatch.setattr(deploy_cli, "smoke_public", lambda *_args: None)
-    monkeypatch.setattr(
-        deploy_cli,
-        "_unix_json",
-        lambda *args, **kwargs: {"accepting_chat_turns": True},
-    )
-
-    def stop(_environment: str, slot: str, _release_id: str) -> None:
-        if slot == "blue":
-            raise deploy_cli.ExternalPiSlotError("old slot drain failed")
-
-    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
-
-    with pytest.raises(deploy_cli.DeployError, match="prior activation was restored"):
-        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
-
-    assert persisted == ["green", "blue"]
-    assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
-    assert (root / "current").resolve() == old
 
 
 def test_automatic_rollback_proves_old_slot_ready_before_repointing(
@@ -729,11 +702,12 @@ def test_slot_rollback_qualifies_previous_as_one_complete_activation(
     assert (root / "previous").resolve() == old
 
 
-def test_shadow_candidate_is_fenced_before_cutover_and_old_worker_drains_after(
+def test_old_external_worker_cleanup_is_deferred_until_after_backend_drain(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
     events: list[tuple[str, str, str]] = []
+    journals: list[tuple[str, dict]] = []
 
     def prepare(environment, slot, release_id):
         assert (root / "active").resolve() == (root / "slots" / "blue").resolve()
@@ -741,19 +715,68 @@ def test_shadow_candidate_is_fenced_before_cutover_and_old_worker_drains_after(
         events.append(("prepare", slot, release_id))
         return True
 
-    def stop(environment, slot, release_id):
-        assert (root / "active").resolve() == (root / "slots" / "green").resolve()
-        assert (root / "current").resolve() == candidate
-        events.append(("stop", slot, release_id))
-        return True
-
     monkeypatch.setattr(deploy_cli, "prepare_candidate_if_enabled", prepare)
-    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
+    monkeypatch.setattr(deploy_cli, "external_pi_lifecycle_enabled", lambda *_: True)
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda *_args, **_kwargs: pytest.fail(
+            "activation must not wait for external worker cleanup"
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **values: journals.append((phase, values)),
+    )
     monkeypatch.setattr(deploy_cli, "smoke_public", lambda *args: None)
+
+    def unix(_environment, slot, path, *, method="GET", **_kwargs):
+        if path == "/internal/drain":
+            events.append(("drain", slot, old.name))
+        return {
+            "drain_started_at": "now",
+            "active_http_requests": 0,
+            "active_chat_streams": 0,
+            "active_gateway_streams": 0,
+        }
+
+    monkeypatch.setattr(deploy_cli, "_unix_json", unix)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_stop_drained_slot",
+        lambda _environment, slot: events.append(("backend-stopped", slot, old.name))
+        or True,
+    )
+    monkeypatch.setattr(deploy_cli, "_drain_report_seconds", lambda _environment: 1)
+
+    assert (
+        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+        == "success-with-draining"
+    )
+    assert events == [
+        ("prepare", "green", "candidate"),
+        ("drain", "blue", "old"),
+        ("backend-stopped", "blue", "old"),
+    ]
+    assert journals[-1][0] == "live-with-old-external-pi-draining"
+
+
+def test_old_external_worker_cleanup_is_not_run_inside_activation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    journals: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **values: journals.append((phase, values)),
+    )
+    monkeypatch.setattr(deploy_cli, "smoke_public", lambda *_args: None)
     monkeypatch.setattr(
         deploy_cli,
         "_unix_json",
-        lambda *args, **kwargs: {
+        lambda *_args, **_kwargs: {
             "drain_started_at": "now",
             "active_http_requests": 0,
             "active_chat_streams": 0,
@@ -762,15 +785,106 @@ def test_shadow_candidate_is_fenced_before_cutover_and_old_worker_drains_after(
     )
     monkeypatch.setattr(deploy_cli, "_stop_drained_slot", lambda *_args: True)
     monkeypatch.setattr(deploy_cli, "_drain_report_seconds", lambda _environment: 1)
-
-    assert (
-        deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
-        == "success"
+    monkeypatch.setattr(deploy_cli, "external_pi_lifecycle_enabled", lambda *_: True)
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ValueError("slow or invalid external cleanup must be deferred")
+        ),
     )
+
+    result = deploy_cli.activate_slot(candidate, "staging", tmp_path / "runtime")
+
+    assert result == "success-with-draining"
+    assert (root / "active").resolve() == (root / "slots" / "green").resolve()
+    assert (root / "current").resolve() == candidate
+    assert journals[-1][0] == "live-with-old-external-pi-draining"
+    assert journals[-1][1]["draining_slot"] == "blue"
+    assert journals[-1][1]["draining_release"] == old.name
+
+
+def _reap_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    backend_running: bool,
+) -> list[tuple[str, str, str]]:
+    current = tmp_path / "current"
+    previous = tmp_path / "previous"
+    current.mkdir()
+    previous.mkdir()
+    events: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(deploy_cli, "require_root", lambda: None)
+    monkeypatch.setattr(deploy_cli, "deployment_lock", nullcontext)
+    monkeypatch.setattr(deploy_cli, "_active_slot", lambda _environment: "blue")
+    status = (
+        {
+            "active_http_requests": 0,
+            "active_chat_streams": 0,
+            "active_gateway_streams": 0,
+        }
+        if backend_running
+        else None
+    )
+    monkeypatch.setattr(deploy_cli, "_unix_json", lambda *_args, **_kwargs: status)
+
+    def stop_backend(environment: str, slot: str) -> bool:
+        if not backend_running:
+            pytest.fail("already-stopped backend was stopped again")
+        events.append(("backend", environment, slot))
+        return True
+
+    monkeypatch.setattr(deploy_cli, "_stop_drained_slot", stop_backend)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_slot_release",
+        lambda _environment, slot: previous if slot == "green" else current,
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda release, *_args: {"release_id": release.name},
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda environment, slot, release_id: events.append(
+            ("external", environment, f"{slot}:{release_id}")
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "read_pointers",
+        lambda _root: SimpleNamespace(current=current, previous=previous),
+    )
+    monkeypatch.setattr(deploy_cli, "_write_journal", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(deploy_cli, "cleanup_releases", lambda: None)
+    monkeypatch.setattr(deploy_cli, "cleanup_runtimes", lambda *_args: None)
+    monkeypatch.setattr(deploy_cli, "cleanup_external_pi_runtimes", lambda *_args: None)
+    monkeypatch.setattr(deploy_cli, "protected_external_pi_runtime_ids", lambda: set())
+    return events
+
+
+def test_reap_stops_drained_backend_before_its_external_worker(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    events = _reap_fixture(tmp_path, monkeypatch, backend_running=True)
+
+    assert deploy_cli.reap(SimpleNamespace(environment="staging")) == 0
     assert events == [
-        ("prepare", "green", "candidate"),
-        ("stop", "blue", "old"),
+        ("backend", "staging", "green"),
+        ("external", "staging", "green:previous"),
     ]
+
+
+def test_reap_finishes_external_cleanup_when_backend_is_already_stopped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    events = _reap_fixture(tmp_path, monkeypatch, backend_running=False)
+
+    assert deploy_cli.reap(SimpleNamespace(environment="staging")) == 0
+    assert events == [("external", "staging", "green:previous")]
 
 
 def test_initial_slot_bridge_qualifies_shadow_before_activation(
