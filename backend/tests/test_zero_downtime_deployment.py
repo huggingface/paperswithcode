@@ -82,6 +82,90 @@ def test_drain_is_idempotent_and_blocks_only_new_admission():
     assert lifecycle.undrain().accepting_chat_turns
 
 
+def test_multiworker_lifecycle_shares_drain_and_aggregates_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PWC_ENVIRONMENT", "staging")
+    monkeypatch.setenv("PWC_DEPLOYMENT_SLOT", "green")
+    monkeypatch.setenv("PWC_RELEASE_ID", "release-1")
+    monkeypatch.setenv("PWC_RUNTIME_ID", "runtime-1")
+    live = {(1001, "start-1"), (1002, "start-2")}
+
+    def is_alive(pid: int, started: str) -> bool:
+        return (pid, started) in live
+
+    first = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1001,
+        process_start_token="start-1",
+        process_is_alive=is_alive,
+    )
+    second = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1002,
+        process_start_token="start-2",
+        process_is_alive=is_alive,
+    )
+
+    with first.request("/api/v1/chat/stream"):
+        with second.request("/api/internal/chat-gateway/v1/responses"):
+            status = first.status()
+            assert status.active_http_requests == 2
+            assert status.active_chat_streams == 1
+            assert status.active_gateway_streams == 1
+
+            drained = first.drain()
+            assert not drained.accepting_chat_turns
+            assert second.status().drain_started_at == drained.drain_started_at
+            assert not second.status().accepting_chat_turns
+
+            assert second.undrain().accepting_chat_turns
+            assert first.status().accepting_chat_turns
+
+    assert first.status().active_http_requests == 0
+    assert first.status().active_chat_streams == 0
+    assert first.status().active_gateway_streams == 0
+
+
+def test_multiworker_lifecycle_excludes_stale_and_other_release_records(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PWC_ENVIRONMENT", "production")
+    monkeypatch.setenv("PWC_DEPLOYMENT_SLOT", "blue")
+    monkeypatch.setenv("PWC_RELEASE_ID", "release-1")
+    monkeypatch.setenv("PWC_RUNTIME_ID", "runtime-1")
+    live = {(1001, "start-1"), (1002, "start-2"), (1003, "start-3")}
+
+    def is_alive(pid: int, started: str) -> bool:
+        return (pid, started) in live
+
+    current = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1001,
+        process_start_token="start-1",
+        process_is_alive=is_alive,
+    )
+    stale = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1002,
+        process_start_token="start-2",
+        process_is_alive=is_alive,
+    )
+    with stale.request("/api/v1/chat/stream"):
+        live.remove((1002, "start-2"))
+        assert current.status().active_chat_streams == 0
+
+    monkeypatch.setenv("PWC_RELEASE_ID", "release-2")
+    other_release = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1003,
+        process_start_token="start-3",
+        process_is_alive=is_alive,
+    )
+    with other_release.request("/api/v1/chat/stream"):
+        assert current.status().active_chat_streams == 0
+
+
 def test_only_active_slot_owns_environment_background_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
