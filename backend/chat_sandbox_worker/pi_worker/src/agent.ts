@@ -9,11 +9,10 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
-import { type McpStatusSnapshot } from "pi-mcp-adapter";
+import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
 import { createWebMcpExtension } from "./mcp.js";
 import {
   EXCALIDRAW_MODEL_TOOLS,
-  EXCALIDRAW_READINESS_TIMEOUT_MS,
   assessExcalidrawReadiness,
   excalidrawEnabled,
   isExcalidrawModelTool,
@@ -101,7 +100,6 @@ export class PiWorker {
   private policyExtension: ReturnType<typeof pwcExtension> | undefined;
   private webMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
   private noWebMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
-  private mcpStatus: McpStatusSnapshot | undefined;
   private mcpReadiness: McpReadinessSnapshot | undefined;
   private activeProfile: string | undefined;
   private failurePhase: TurnFailurePhase = "initialize";
@@ -154,9 +152,7 @@ export class PiWorker {
       process.execPath,
       [new URL("./exa_mcp_server.js", import.meta.url).pathname],
       {
-        onStatus: (snapshot) => {
-          this.mcpStatus = snapshot;
-        },
+        excalidraw: false,
         ...(this.gateway ? { exaEnv: {
           PWC_EXTERNAL_GATEWAY_URL: this.gateway.url,
           PWC_EXTERNAL_GATEWAY_CAPABILITY: this.gateway.capability,
@@ -177,9 +173,7 @@ export class PiWorker {
       [new URL("./exa_mcp_server.js", import.meta.url).pathname],
       {
         exa: false,
-        onStatus: (snapshot) => {
-          this.mcpStatus = snapshot;
-        },
+        excalidraw: false,
       },
     );
     if (process.env.PWC_CHAT_PI_PREWARM_ENABLED !== "true") return;
@@ -416,6 +410,11 @@ export class PiWorker {
             : this.noWebMcpExtension!,
           hidden: true,
         },
+        ...(excalidrawEnabled() ? [{
+          name: "pwc-excalidraw",
+          factory: createNativeExcalidrawExtension(),
+          hidden: true,
+        }] : []),
         ...(this.remoteTools ? [{
           name: "pwc-remote-tools",
           factory: createRemoteToolsExtension(this.remoteTools),
@@ -439,8 +438,12 @@ export class PiWorker {
     });
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
-    this.mcpReadiness = await this.settleMcpReadiness(created.session, () => {
-      created.extensionsResult.runtime.refreshTools();
+    this.mcpReadiness = assessExcalidrawReadiness({
+      enabled: excalidrawEnabled(),
+      connectionMode: "lazy",
+      activeTools: created.session.getActiveToolNames(),
+      createViewDefinition: created.session.getToolDefinition("create_view") as
+        { parameters?: unknown } | undefined,
     });
     if (excalidrawEnabled() && !this.mcpReadiness.ready) {
       const withoutExcalidraw = () =>
@@ -459,38 +462,6 @@ export class PiWorker {
     this.session = created.session;
     this.activeProfile = profile;
     this.emit(run.request_id, { type: "_latency", phase: "agent_session_ready", elapsed_ms: Math.round(performance.now() - phaseStarted) });
-  }
-
-  private async settleMcpReadiness(session: AgentSession, refreshTools: () => void): Promise<McpReadinessSnapshot> {
-    const started = performance.now();
-    const timeoutMs = EXCALIDRAW_READINESS_TIMEOUT_MS;
-    const snapshotOf = (timedOut = false): McpReadinessSnapshot => {
-      const server = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw");
-      const view = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw_view");
-      const viewPending = view !== undefined && view.status !== "connected" && view.status !== "failed";
-      return assessExcalidrawReadiness({
-        enabled: excalidrawEnabled(),
-        serverStatus: viewPending ? "not-connected" : server?.status,
-        activeTools: session.getActiveToolNames(),
-        createViewDefinition: session.getToolDefinition("create_view") as { parameters?: unknown } | undefined,
-        latencyMs: Math.round(performance.now() - started),
-        timedOut,
-      });
-    };
-    const stillSettling = (snapshot: McpReadinessSnapshot) =>
-      snapshot.failure_class === "configured_not_connected" || snapshot.failure_class === "connected_missing_tools";
-    if (!excalidrawEnabled()) return snapshotOf();
-    const deadline = started + timeoutMs;
-    let current = snapshotOf();
-    while (!current.ready && stillSettling(current) && performance.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      refreshTools();
-      current = snapshotOf();
-    }
-    if (!current.ready && current.failure_class === "configured_not_connected" && performance.now() >= deadline) {
-      return snapshotOf(true);
-    }
-    return current;
   }
 
   private mirrorNativeEntries(): void {

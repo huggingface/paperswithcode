@@ -4,29 +4,11 @@ import { pathToFileURL } from "node:url";
 import * as z from "zod/v4";
 
 import {
-  INVALID_EXCALIDRAW_ELEMENTS,
   MAX_EXCALIDRAW_ELEMENTS_BYTES,
-  serializeExcalidrawElements,
 } from "./mcp_app_registry.js";
+import { createViewResult } from "./excalidraw_result.js";
 
-const ACK = "Diagram displayed in the chat. Continue with a concise textual explanation.";
-
-export function createViewResult(elements: unknown): {
-  content: Array<{ type: "text"; text: string }>;
-  isError?: boolean;
-  structuredContent?: { checkpointId: string };
-} {
-  if (serializeExcalidrawElements(elements) === undefined) {
-    return {
-      content: [{ type: "text", text: INVALID_EXCALIDRAW_ELEMENTS }],
-      isError: true,
-    };
-  }
-  return {
-    content: [{ type: "text", text: ACK }],
-    structuredContent: { checkpointId: "local" },
-  };
-}
+export { createViewResult } from "./excalidraw_result.js";
 
 export function createExcalidrawViewServer(): McpServer {
   const server = new McpServer({ name: "excalidraw_view", version: "1.0.0" });
