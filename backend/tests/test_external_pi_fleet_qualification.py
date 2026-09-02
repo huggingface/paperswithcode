@@ -78,6 +78,44 @@ _MODAL_RATE = ModalRateEvidence(
     release_id="0123456789ab-staging",
     attested_at_ms=1,
 )
+_SERVER_LATENCY_P95 = {
+    "no_tool": {
+        "provider_gateway_received_ms": 300,
+        "provider_ttft_ms": 400,
+        "first_semantic_event_ms": 500,
+    },
+    "read": {
+        "provider_gateway_received_ms": 310,
+        "provider_ttft_ms": 410,
+        "first_semantic_event_ms": 510,
+    },
+    "bash": {
+        "provider_gateway_received_ms": 320,
+        "provider_ttft_ms": 420,
+        "first_semantic_event_ms": 520,
+    },
+}
+
+
+def _live_qualification_evidence():
+    return DurableQualificationEvidence(
+        expected_users=32,
+        admitted_turns=32,
+        admission_denominator_events=32,
+        terminal_turns=32,
+        queued_states=0,
+        stale_fences=0,
+        executor_starts=16,
+        duplicate_executor_starts=0,
+        workspace_creates=1,
+        workspace_reuses=15,
+        workspace_evictions=16,
+        billed_duration_ms=16_000,
+        window_started_at_ms=1,
+        window_ended_at_ms=2,
+        p95_server_latency_ms_by_workload=_SERVER_LATENCY_P95,
+        source="durable_qualification_records",
+    )
 
 
 class _LifecycleSource:
@@ -192,6 +230,8 @@ def test_durable_profile_report_records_required_content_free_measurements():
         DurableTurnObservation(
             workload=workload,
             outcome="completed",
+            admission_ms=20 + index,
+            reconnect_ready_ms=40 + index,
             ttft_ms=100 + index,
             completion_ms=1_000 + index,
             reconnects=1 if index == 0 else 0,
@@ -213,7 +253,7 @@ def test_durable_profile_report_records_required_content_free_measurements():
         peak_active_backend_turns=32,
         peak_active_external_workers=4,
         peak_active_sandboxes=8,
-        modal_lifecycle=_FUNCTIONAL_MODAL,
+        qualification_evidence=_live_qualification_evidence(),
         modal_rate=_MODAL_RATE,
     )
 
@@ -225,12 +265,41 @@ def test_durable_profile_report_records_required_content_free_measurements():
         "no_tool": 115,
         "read": 123,
     }
+    assert report.model_dump()["p95_latency_attribution_ms_by_workload"] == {
+        "bash": {
+            "client_admission_ms": 51,
+            "client_reconnect_ready_ms": 71,
+            "client_post_reconnect_to_ttft_ms": 60,
+            "server_provider_gateway_received_ms": 320,
+            "provider_ttft_ms": 420,
+            "server_first_semantic_event_ms": 520,
+            "end_to_end_ttft_ms": 131,
+        },
+        "no_tool": {
+            "client_admission_ms": 35,
+            "client_reconnect_ready_ms": 55,
+            "client_post_reconnect_to_ttft_ms": 60,
+            "server_provider_gateway_received_ms": 300,
+            "provider_ttft_ms": 400,
+            "server_first_semantic_event_ms": 500,
+            "end_to_end_ttft_ms": 115,
+        },
+        "read": {
+            "client_admission_ms": 43,
+            "client_reconnect_ready_ms": 63,
+            "client_post_reconnect_to_ttft_ms": 60,
+            "server_provider_gateway_received_ms": 310,
+            "provider_ttft_ms": 410,
+            "server_first_semantic_event_ms": 510,
+            "end_to_end_ttft_ms": 123,
+        },
+    }
     assert report.p99_completion_ms == 1_031
     assert report.ttft_observations == report.completion_observations == 32
     assert report.reconnects == report.reconnect_successes == 1
     assert report.modal_creates == 1
     assert report.modal_reuses == 15
-    assert report.modal_evictions == 0
+    assert report.modal_evictions == 16
     assert report.modal_active_ms > 0
     assert report.modal_rate_microusd_per_second > 0
     assert report.modal_estimated_cost_microusd == math.ceil(
@@ -244,6 +313,8 @@ def test_live_report_requires_durable_executor_start_and_duplicate_evidence():
         DurableTurnObservation(
             workload=workload,
             outcome="completed",
+            admission_ms=20,
+            reconnect_ready_ms=40,
             ttft_ms=100,
             completion_ms=1_000,
             model_starts=1,
@@ -266,6 +337,7 @@ def test_live_report_requires_durable_executor_start_and_duplicate_evidence():
         "billed_duration_ms": 16_000,
         "window_started_at_ms": 1,
         "window_ended_at_ms": 2,
+        "p95_server_latency_ms_by_workload": _SERVER_LATENCY_P95,
         "source": "durable_qualification_records",
     }
 

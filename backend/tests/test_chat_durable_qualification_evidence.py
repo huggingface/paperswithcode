@@ -2,6 +2,7 @@ import uuid
 import asyncio
 import os
 import threading
+from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
@@ -19,6 +20,7 @@ from backend.models.database import (
     ChatQualificationScope,
     ChatExternalWorker,
     ChatExternalWorkerReservation,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
@@ -54,6 +56,7 @@ def engine():
     ChatQualificationEvidenceEvent.__table__.create(value)
     ChatExternalWorker.__table__.create(value)
     ChatExternalWorkerReservation.__table__.create(value)
+    ChatOpenAIProviderCall.__table__.create(value)
     return value
 
 
@@ -334,6 +337,34 @@ def _latency(
         qualification_scenario="reliability",
         terminal_status="complete",
         admitted_at=START,
+        provider_gateway_received_ms=100 + index,
+        first_semantic_event_ms=300 + index,
+    )
+
+
+def _provider_call(index: int):
+    return ChatOpenAIProviderCall(
+        id=uuid.UUID(f"e0000000-0000-4000-8000-{index:012x}"),
+        turn_id=_latency(index).turn_id,
+        call_sequence=1,
+        owner_id="qualification-owner",
+        environment="staging",
+        month_start=date(2026, 8, 1),
+        public_model_id="model:test",
+        provider_model="model:test",
+        reasoning_effort="low",
+        service_tier="default",
+        request_bytes=100,
+        provider_latency_ms=400 + index,
+        provider_ttft_ms=200 + index,
+        outcome="completed",
+        state="settled",
+        reserved_microusd=1,
+        actual_microusd=1,
+        reserved_at=START,
+        dispatched_at=START,
+        settled_at=START + timedelta(seconds=1),
+        updated_at=START + timedelta(seconds=1),
     )
 
 
@@ -367,6 +398,7 @@ def _add_valid_functional_evidence(
 ) -> None:
     db.add(_scope())
     db.add_all(_latency(index) for index in range(32))
+    db.add_all(_provider_call(index) for index in range(32))
     db.add_all(
         _interval(index, started_at=START, terminal_at=END) for index in range(16, 32)
     )
@@ -420,6 +452,7 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     with Session(engine) as first, first.begin():
         first.add(_scope())
         first.add_all(_latency(index) for index in range(32))
+        first.add_all(_provider_call(index) for index in range(32))
         first.add(
             _interval(
                 16,
@@ -509,6 +542,37 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     assert evidence.workspace_evictions == 16
     assert evidence.stale_fences == 0
     assert evidence.billed_duration_ms == 940_000
+    assert asdict(evidence)["p95_server_latency_ms_by_workload"] == {
+        "no_tool": {
+            "provider_gateway_received_ms": 115,
+            "provider_ttft_ms": 215,
+            "first_semantic_event_ms": 315,
+        },
+        "read": {
+            "provider_gateway_received_ms": 123,
+            "provider_ttft_ms": 223,
+            "first_semantic_event_ms": 323,
+        },
+        "bash": {
+            "provider_gateway_received_ms": 131,
+            "provider_ttft_ms": 231,
+            "first_semantic_event_ms": 331,
+        },
+    }
+
+
+def test_functional_cohort_refuses_missing_first_provider_timing(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        db.query(ChatOpenAIProviderCall).filter_by(
+            turn_id=_latency(31).turn_id, call_sequence=1
+        ).delete()
+
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable, match="latency evidence"):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
 
 
 def test_collect_locks_scope_before_closing_authorization(engine):

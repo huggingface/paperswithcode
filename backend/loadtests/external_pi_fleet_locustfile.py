@@ -126,6 +126,8 @@ def build_durable_observation(**evidence) -> DurableTurnObservation:
     allowed = {
         "workload",
         "outcome",
+        "admission_ms",
+        "reconnect_ready_ms",
         "ttft_ms",
         "completion_ms",
         "reconnects",

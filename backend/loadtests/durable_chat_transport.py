@@ -259,6 +259,7 @@ class HttpSSEDurableChatTransport:
         request_id: str | None = None
         cursor = 0
         model_starts = 0
+        admission_ms: int | None = None
         with first:
             parser = _SSEParser()
             detached = False
@@ -268,9 +269,10 @@ class HttpSSEDurableChatTransport:
                     raise FleetRunRefused("durable stream did not begin with admission")
                 session_id, request_id, starts = self._stream_identity(event)
                 model_starts += starts
+                admission_ms = self._elapsed_ms(started)
                 detached = True
                 break
-            if not detached:
+            if not detached or admission_ms is None:
                 raise FleetRunRefused("durable stream admission evidence is missing")
 
         body["session_id"] = session_id
@@ -279,6 +281,7 @@ class HttpSSEDurableChatTransport:
         )
         if second.status_code != 200:
             raise FleetRunRefused("durable reconnect was refused")
+        reconnect_ready_ms = self._elapsed_ms(started)
         ttft_ms: int | None = None
         terminal_cause: str | None = None
         failure_code: str | None = None
@@ -326,6 +329,8 @@ class HttpSSEDurableChatTransport:
         return {
             "workload": spec.workload,
             "outcome": terminal_cause,
+            "admission_ms": admission_ms,
+            "reconnect_ready_ms": reconnect_ready_ms,
             "ttft_ms": ttft_ms,
             "completion_ms": completion_ms,
             "reconnects": 1,

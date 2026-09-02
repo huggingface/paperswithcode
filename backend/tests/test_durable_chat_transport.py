@@ -113,7 +113,9 @@ def test_sse_transport_yields_prompt_event_before_later_response_bytes():
     events.close()
 
 
-def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_content():
+def test_real_transport_records_admission_and_reconnect_milestones_without_content(
+    monkeypatch,
+):
     from backend.loadtests.durable_chat_transport import (
         DurableChatTransportConfig,
         HttpSSEDurableChatTransport,
@@ -164,6 +166,8 @@ def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_
         ),
         session_factory=lambda: session,
     )
+    elapsed = iter((120, 185, 640, 900))
+    monkeypatch.setattr(transport, "_elapsed_ms", lambda _started: next(elapsed))
 
     evidence = transport.open_durable_stream(_spec(0, "bash"))
 
@@ -190,6 +194,10 @@ def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_
     assert session.proxies == {}
     assert evidence["outcome"] == "completed"
     assert evidence["model_starts"] == 1
+    assert evidence["admission_ms"] == 120
+    assert evidence["reconnect_ready_ms"] == 185
+    assert evidence["ttft_ms"] == 640
+    assert evidence["completion_ms"] == 900
     assert "operation_start_ids" not in evidence
     assert evidence["reconnects"] == evidence["reconnect_successes"] == 1
     assert "TOP_SECRET" not in repr(evidence)
@@ -628,6 +636,14 @@ def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
                     "billed_duration_ms": 4,
                     "window_started_at_ms": 1,
                     "window_ended_at_ms": 2,
+                    "p95_server_latency_ms_by_workload": {
+                        workload: {
+                            "provider_gateway_received_ms": 100,
+                            "provider_ttft_ms": 200,
+                            "first_semantic_event_ms": 300,
+                        }
+                        for workload in ("no_tool", "read", "bash")
+                    },
                     "source": "durable_qualification_records",
                 },
             ),
@@ -664,6 +680,7 @@ def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
     assert proof["closed_intervals"] == 16
     assert session.calls.count(("close",)) == 4
     assert snapshot.billed_duration_ms == 4
+    assert snapshot.p95_server_latency_ms_by_workload["no_tool"].provider_ttft_ms == 200
     assert "signed-cookie" not in repr(snapshot)
 
 

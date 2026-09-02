@@ -19,6 +19,7 @@ from backend.database.connection import db_manager
 from backend.models.database import (
     ChatQualificationEvidenceEvent,
     ChatQualificationScope,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
@@ -95,7 +96,20 @@ class DurableQualificationEvidence:
     billed_duration_ms: int
     window_started_at_ms: int
     window_ended_at_ms: int
+    p95_server_latency_ms_by_workload: dict[str, QualificationServerLatencyP95]
     source: str = "durable_qualification_records"
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationServerLatencyP95:
+    provider_gateway_received_ms: int
+    provider_ttft_ms: int
+    first_semantic_event_ms: int
+
+
+def _nearest_rank(values: list[int], percentile: int) -> int:
+    ordered = sorted(values)
+    return ordered[max(0, (percentile * len(ordered) + 99) // 100 - 1)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -430,6 +444,8 @@ class ChatDurableQualificationEvidenceService:
                 ChatTurnLatency.chat_session_id,
                 ChatTurnLatency.terminal_status,
                 ChatTurnLatency.qualification_workload,
+                ChatTurnLatency.provider_gateway_received_ms,
+                ChatTurnLatency.first_semantic_event_ms,
             ).where(
                 ChatTurnLatency.qualification_scope_id == scope.id,
                 ChatTurnLatency.qualification_run_id == scope.run_id,
@@ -462,6 +478,59 @@ class ChatDurableQualificationEvidenceService:
             raise QualificationEvidenceUnavailable(
                 "qualification workload evidence is incomplete"
             )
+        latency_p95: dict[str, QualificationServerLatencyP95] = {}
+        if scope.profile == "32-functional-turns":
+            first_provider_rows = self.db.execute(
+                select(
+                    ChatOpenAIProviderCall.turn_id,
+                    ChatOpenAIProviderCall.provider_ttft_ms,
+                ).where(
+                    ChatOpenAIProviderCall.turn_id.in_(turn_ids),
+                    ChatOpenAIProviderCall.call_sequence == 1,
+                    ChatOpenAIProviderCall.environment == settings.environment,
+                    ChatOpenAIProviderCall.reserved_at >= started,
+                    ChatOpenAIProviderCall.reserved_at <= ended,
+                )
+            ).all()
+            provider_ttft_by_turn = {
+                row.turn_id: row.provider_ttft_ms for row in first_provider_rows
+            }
+            if (
+                len(first_provider_rows) != expected_users
+                or set(provider_ttft_by_turn) != turn_ids
+            ):
+                raise QualificationEvidenceUnavailable(
+                    "qualification latency evidence is incomplete"
+                )
+            for workload, expected_count in expected_workloads.items():
+                workload_rows = [
+                    row
+                    for row in latency_rows
+                    if row.qualification_workload == workload
+                ]
+                gateway_values = [
+                    row.provider_gateway_received_ms for row in workload_rows
+                ]
+                provider_values = [
+                    provider_ttft_by_turn[row.turn_id] for row in workload_rows
+                ]
+                semantic_values = [row.first_semantic_event_ms for row in workload_rows]
+                if len(workload_rows) != expected_count or any(
+                    not isinstance(value, int) or isinstance(value, bool) or value < 0
+                    for value in (
+                        *gateway_values,
+                        *provider_values,
+                        *semantic_values,
+                    )
+                ):
+                    raise QualificationEvidenceUnavailable(
+                        "qualification latency evidence is incomplete"
+                    )
+                latency_p95[workload] = QualificationServerLatencyP95(
+                    provider_gateway_received_ms=_nearest_rank(gateway_values, 95),
+                    provider_ttft_ms=_nearest_rank(provider_values, 95),
+                    first_semantic_event_ms=_nearest_rank(semantic_values, 95),
+                )
         events = self.db.execute(
             select(
                 ChatQualificationEvidenceEvent.turn_id,
@@ -574,6 +643,7 @@ class ChatDurableQualificationEvidenceService:
             billed_duration_ms=billed_duration_ms,
             window_started_at_ms=round(started.timestamp() * 1_000),
             window_ended_at_ms=round(ended.timestamp() * 1_000),
+            p95_server_latency_ms_by_workload=latency_p95,
         )
 
     async def teardown_scope(
