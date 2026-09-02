@@ -22,6 +22,9 @@ except ModuleNotFoundError:
     from process_fleet import run_process_fleet  # type: ignore[no-redef]
 
 
+WORKER_LAUNCH_INTERVAL_SECONDS = 0.5
+
+
 def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: external_pi_worker_launcher.py staging SLOT")
@@ -55,6 +58,7 @@ def main() -> None:
         commands,
         environments,
         cwd=resolved_fleet[0].release,
+        launch_interval_seconds=WORKER_LAUNCH_INTERVAL_SECONDS,
     )
     if code:
         raise SystemExit(code)

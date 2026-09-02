@@ -1296,8 +1296,13 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
     monkeypatch.setattr(worker_launcher.Path, "mkdir", lambda *_args, **_kwargs: None)
     executed: dict = {}
 
-    def run_fleet(commands, environments, *, cwd):
-        executed.update(commands=commands, environments=environments, cwd=cwd)
+    def run_fleet(commands, environments, *, cwd, launch_interval_seconds=0):
+        executed.update(
+            commands=commands,
+            environments=environments,
+            cwd=cwd,
+            launch_interval_seconds=launch_interval_seconds,
+        )
         raise RuntimeError("exec")
 
     monkeypatch.setattr(worker_launcher, "run_process_fleet", run_fleet)
@@ -1315,6 +1320,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         str(resolved.entry_point),
     ]
     assert len(executed["commands"]) == 16
+    assert executed["launch_interval_seconds"] == 0.5
     assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",

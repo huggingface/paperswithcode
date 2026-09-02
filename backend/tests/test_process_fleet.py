@@ -83,3 +83,38 @@ def test_process_fleet_exits_cleanly_after_systemd_stop(monkeypatch) -> None:
 
     assert result == 0
     assert [child.returncode for child in children] == [-signal.SIGTERM] * 2
+
+
+def test_process_fleet_staggers_child_startup(monkeypatch) -> None:
+    launches = []
+    sleeps = []
+
+    class Child:
+        returncode = None
+
+        def poll(self):
+            if len(launches) == 3:
+                self.returncode = 0
+            return self.returncode
+
+        def send_signal(self, _signum):
+            self.returncode = -signal.SIGTERM
+
+    monkeypatch.setattr(
+        process_fleet.subprocess,
+        "Popen",
+        lambda command, *, cwd, env: launches.append((command, cwd, env)) or Child(),
+    )
+    monkeypatch.setattr(process_fleet.signal, "signal", lambda *_args: signal.SIG_DFL)
+    monkeypatch.setattr(process_fleet.time, "sleep", sleeps.append)
+
+    result = process_fleet.run_process_fleet(
+        (("node", "a"), ("node", "b"), ("node", "c")),
+        ({"WORKER": "a"}, {"WORKER": "b"}, {"WORKER": "c"}),
+        cwd=Path("/release"),
+        launch_interval_seconds=0.5,
+    )
+
+    assert result == 1
+    assert len(launches) == 3
+    assert sleeps == [0.5, 0.5]

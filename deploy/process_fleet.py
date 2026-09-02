@@ -14,9 +14,12 @@ def run_process_fleet(
     environments: Sequence[Mapping[str, str]],
     *,
     cwd: Path,
+    launch_interval_seconds: float = 0,
 ) -> int:
     if len(commands) != len(environments) or not commands:
         raise ValueError("process fleet commands and environments must align")
+    if launch_interval_seconds < 0:
+        raise ValueError("process fleet launch interval cannot be negative")
     children: list[subprocess.Popen] = []
     stopping = False
     unexpected_exit = False
@@ -36,7 +39,15 @@ def run_process_fleet(
         for signum in (signal.SIGTERM, signal.SIGINT)
     }
     try:
-        for command, environment in zip(commands, environments, strict=True):
+        for index, (command, environment) in enumerate(
+            zip(commands, environments, strict=True)
+        ):
+            if stopping:
+                break
+            if any(child.poll() is not None for child in children):
+                unexpected_exit = True
+                signal_children(signal.SIGTERM)
+                break
             children.append(
                 subprocess.Popen(
                     list(command),
@@ -44,6 +55,8 @@ def run_process_fleet(
                     env=dict(environment),
                 )
             )
+            if index + 1 < len(commands) and launch_interval_seconds:
+                time.sleep(launch_interval_seconds)
         while True:
             completed = [child for child in children if child.poll() is not None]
             if len(completed) == len(children):
