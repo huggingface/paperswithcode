@@ -420,6 +420,9 @@ class ExecutorServer:
             "session_id",
             "turn_id",
             "worker_generation",
+            "turn_worker_id",
+            "turn_worker_generation",
+            "turn_lease_generation",
         }
         if (
             not isinstance(value, dict)
@@ -660,6 +663,11 @@ class ExecutorServer:
                             "capability": bootstrap["capability"],
                             "session_id": execution.identity["session_id"],
                             "turn_id": execution.identity["turn_id"],
+                            "turn_worker_id": bootstrap["turn_worker_id"],
+                            "turn_worker_generation": bootstrap[
+                                "turn_worker_generation"
+                            ],
+                            "turn_lease_generation": bootstrap["turn_lease_generation"],
                         }
                     )
                     if (

@@ -47,8 +47,10 @@ IDENTITY = {
 class _Broker:
     def __init__(self) -> None:
         self.active = False
+        self.requests: list[dict[str, object]] = []
 
     def __call__(self, payload: dict[str, object]) -> dict[str, object]:
+        self.requests.append(payload)
         if payload["operation"] == "install":
             assert not self.active
             self.active = True
@@ -73,6 +75,9 @@ def _operation(
         "session_id": request["session_id"],
         "turn_id": request["turn_id"],
         "worker_generation": worker_generation,
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
     }
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
@@ -97,6 +102,9 @@ def _open_operation(
         "session_id": request["session_id"],
         "turn_id": request["turn_id"],
         "worker_generation": "worker-1",
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
     }
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.connect(str(socket_path))
@@ -232,6 +240,15 @@ def test_duplicate_exec_reattaches_without_repeating_side_effect(
         == "one\ntwo\n"
     )
     assert duplicate[-1]["status"] == "completed"
+    assert broker.requests[0] == {
+        "operation": "install",
+        "capability": "synthetic-capability",
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
+    }
     assert not broker.active
     server.shutdown()
     thread.join(timeout=2)

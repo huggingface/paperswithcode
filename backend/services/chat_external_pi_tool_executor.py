@@ -206,6 +206,7 @@ class ExternalPiToolWorkspaceExecutor:
         _tool_call_id: str,
         operation_id: str,
     ) -> ExecutorContext:
+        turn_claim = self._durable_turn_claim()
         context = ExecutorContext(
             sandbox=workspace.sandbox,
             workspace_id=str(self.admission.session_id),
@@ -219,6 +220,9 @@ class ExternalPiToolWorkspaceExecutor:
             tool_call_id=operation_id,
             worker_generation=workspace.worker_generation,
             capability=self.capability.token,
+            turn_worker_id=turn_claim.worker_id,
+            turn_worker_generation=str(turn_claim.worker_generation),
+            turn_lease_generation=str(turn_claim.lease_generation),
         )
         await self.executor.ensure_workspace(context)
         self.active_context = context

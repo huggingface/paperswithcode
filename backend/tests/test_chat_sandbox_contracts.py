@@ -306,6 +306,31 @@ def test_broker_capability_rotation_rejects_stale_and_cross_turn_clear(monkeypat
     assert state.current()["capability"] == "new"
 
 
+def test_broker_gateway_headers_include_external_turn_fence(monkeypatch):
+    broker = _import_broker(monkeypatch)
+    state = broker.BrokerState({})
+    state.install(
+        {
+            "capability": "capability",
+            "session_id": "session",
+            "turn_id": "turn",
+            "turn_worker_id": "production-green-00",
+            "turn_worker_generation": "4",
+            "turn_lease_generation": "9",
+        }
+    )
+
+    assert broker._gateway_headers(active=state.current()) == {
+        "Authorization": "Bearer capability",
+        "X-PWC-Session": "session",
+        "X-PWC-Turn": "turn",
+        "X-PWC-Turn-Worker-ID": "production-green-00",
+        "X-PWC-Turn-Worker-Generation": "4",
+        "X-PWC-Turn-Lease-Generation": "9",
+        "Content-Type": "application/json",
+    }
+
+
 def test_broker_clear_waits_for_capability_requests(monkeypatch):
     broker = _import_broker(monkeypatch)
     state = broker.BrokerState(

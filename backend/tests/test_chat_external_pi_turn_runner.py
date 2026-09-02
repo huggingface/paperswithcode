@@ -155,12 +155,17 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
     turn_id = uuid.uuid4()
     session_id = uuid.uuid4()
     owner = SimpleNamespace(
-        admission=SimpleNamespace(turn_id=turn_id, session_id=session_id),
+        admission=SimpleNamespace(
+            turn_id=turn_id,
+            session_id=session_id,
+            durable_claim=TurnLeaseClaim(turn_id, "production-green-00", 4, 9),
+        ),
         capability=SimpleNamespace(token="capability"),
         executor=Executor(),
         record_evidence=lambda **values: events.append(values) or True,
         active_context=None,
     )
+    owner._durable_turn_claim = lambda: owner.admission.durable_claim
     workspace = SimpleNamespace(
         sandbox=object(),
         workspace_generation=1,
@@ -178,6 +183,9 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
 
     assert events == ["workspace_ack"]
     assert contexts[0].tool_call_id == "operation-a"
+    assert contexts[0].turn_worker_id == "production-green-00"
+    assert contexts[0].turn_worker_generation == "4"
+    assert contexts[0].turn_lease_generation == "9"
 
 
 def test_executor_start_evidence_follows_successful_executor_operation():
