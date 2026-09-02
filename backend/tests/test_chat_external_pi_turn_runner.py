@@ -1471,6 +1471,25 @@ def test_external_run_frame_omits_absent_paper_descriptor():
     assert "paper_descriptor" not in runner._run_frame()
 
 
+@pytest.mark.parametrize(
+    ("worker_enabled", "host_enabled", "expected"),
+    [
+        (False, False, False),
+        (False, True, False),
+        (True, False, False),
+        (True, True, True),
+    ],
+)
+def test_external_run_frame_carries_excalidraw_capability(
+    worker_enabled, host_enabled, expected
+):
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.settings.chat_excalidraw_enabled = worker_enabled
+    runner.settings.chat_mcp_apps_host_enabled = host_enabled
+
+    assert runner._run_frame()["excalidraw_enabled"] is expected
+
+
 def test_external_new_turn_frame_carries_prebound_pi_session():
     runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
     agent_session_id = uuid.uuid4()

@@ -42,6 +42,7 @@ test("accepts a server-prebound agent session for a new external turn", () => {
     agent_session_id: agentSessionId,
     resume: null,
     web_search_enabled: false,
+    excalidraw_enabled: true,
     reasoning_effort: "low",
     fetchable_urls: [],
     hf_username: "qualification",
@@ -51,6 +52,7 @@ test("accepts a server-prebound agent session for a new external turn", () => {
   }, true);
 
   assert.equal(run.agent_session_id, agentSessionId);
+  assert.equal(run.excalidraw_enabled, true);
 });
 
 test("rejects a server-prebound agent session on a resumed turn", () => {

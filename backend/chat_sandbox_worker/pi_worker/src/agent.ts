@@ -103,31 +103,36 @@ export class PiWorker {
   private mcpReadiness: McpReadinessSnapshot | undefined;
   private activeProfile: string | undefined;
   private failurePhase: TurnFailurePhase = "initialize";
-  private readonly policy = new PolicyController({
-    maximumCalls: Number(process.env.PWC_CHAT_MAX_TOOL_CALLS ?? 12),
-    maximumRounds: Number(process.env.PWC_CHAT_MAX_TURNS ?? 8) - 2,
-    maximumDirectSearches: Number(process.env.PWC_CHAT_MAX_DIRECT_SEARCH_CALLS ?? 4),
-    maximumWebSearches: Number(process.env.PWC_CHAT_MAX_WEB_SEARCH_CALLS ?? 3),
-    maximumResultBytes: Number(process.env.PWC_CHAT_TOOL_RESULT_MAX_BYTES ?? 24576),
-    maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
-    bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
-    excalidrawEnabled: excalidrawEnabled(),
-    posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
-    posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
-    posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
-    posterlyMaximumTurnOutputBytes: Number(process.env.PWC_CHAT_POSTERLY_TURN_TOOL_OUTPUT_MAX_BYTES ?? 1048576),
-    posterlyTimeoutSeconds: Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600),
-    paperMaximumCalls: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_CALLS ?? 30),
-    paperMaximumRounds: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_ROUNDS ?? 12),
-    paperMaximumDirectSearches: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_DIRECT_SEARCH_CALLS ?? 8),
-    paperTimeoutSeconds: Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600),
-  });
+  private readonly policy: PolicyController;
+  private readonly excalidrawAvailable: boolean;
 
   constructor(
     private readonly emit: (requestId: string, event: PwCEvent) => void,
     private readonly gateway?: GatewayContext,
     private readonly remoteTools?: RemoteToolBridge,
-  ) {}
+    features: { excalidrawAvailable?: boolean } = {},
+  ) {
+    this.excalidrawAvailable = features.excalidrawAvailable ?? excalidrawEnabled();
+    this.policy = new PolicyController({
+      maximumCalls: Number(process.env.PWC_CHAT_MAX_TOOL_CALLS ?? 12),
+      maximumRounds: Number(process.env.PWC_CHAT_MAX_TURNS ?? 8) - 2,
+      maximumDirectSearches: Number(process.env.PWC_CHAT_MAX_DIRECT_SEARCH_CALLS ?? 4),
+      maximumWebSearches: Number(process.env.PWC_CHAT_MAX_WEB_SEARCH_CALLS ?? 3),
+      maximumResultBytes: Number(process.env.PWC_CHAT_TOOL_RESULT_MAX_BYTES ?? 24576),
+      maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
+      bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
+      excalidrawEnabled: this.excalidrawAvailable,
+      posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
+      posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
+      posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
+      posterlyMaximumTurnOutputBytes: Number(process.env.PWC_CHAT_POSTERLY_TURN_TOOL_OUTPUT_MAX_BYTES ?? 1048576),
+      posterlyTimeoutSeconds: Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600),
+      paperMaximumCalls: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_CALLS ?? 30),
+      paperMaximumRounds: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_ROUNDS ?? 12),
+      paperMaximumDirectSearches: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_DIRECT_SEARCH_CALLS ?? 8),
+      paperTimeoutSeconds: Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600),
+    });
+  }
 
   initialize(): Promise<void> {
     this.initialization ??= this.initializeImmutableProfile();
@@ -410,7 +415,7 @@ export class PiWorker {
             : this.noWebMcpExtension!,
           hidden: true,
         },
-        ...(excalidrawEnabled() ? [{
+        ...(this.excalidrawAvailable ? [{
           name: "pwc-excalidraw",
           factory: createNativeExcalidrawExtension(),
           hidden: true,
@@ -430,7 +435,7 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(excalidrawEnabled() ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      tools: ["read", "bash", "search_web", ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,
@@ -439,13 +444,13 @@ export class PiWorker {
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
     this.mcpReadiness = assessExcalidrawReadiness({
-      enabled: excalidrawEnabled(),
+      enabled: this.excalidrawAvailable,
       connectionMode: "lazy",
       activeTools: created.session.getActiveToolNames(),
       createViewDefinition: created.session.getToolDefinition("create_view") as
         { parameters?: unknown } | undefined,
     });
-    if (excalidrawEnabled() && !this.mcpReadiness.ready) {
+    if (this.excalidrawAvailable && !this.mcpReadiness.ready) {
       const withoutExcalidraw = () =>
         created.session.getActiveToolNames().filter((name) => !isExcalidrawModelTool(name));
       created.session.setActiveToolsByName(withoutExcalidraw());

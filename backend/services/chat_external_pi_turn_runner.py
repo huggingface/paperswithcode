@@ -530,6 +530,10 @@ class ExternalPiChatTurnRunner:
                 else None
             ),
             "web_search_enabled": self.admission.web_search_enabled,
+            "excalidraw_enabled": (
+                self.settings.chat_excalidraw_enabled
+                and self.settings.chat_mcp_apps_host_enabled
+            ),
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
             "paper_artifacts_enabled": self.admission.paper_artifacts_enabled,

@@ -64,6 +64,7 @@ const server = createExternalWorkerServer({
       turnClaim: run.turnClaim,
     },
     new RemoteToolBridge(channel),
+    { excalidrawAvailable: run.excalidraw_enabled },
   ),
 });
 
