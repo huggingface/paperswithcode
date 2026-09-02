@@ -848,7 +848,7 @@ def _wait_slot(
     manifest: dict,
     runtime: Path,
     *,
-    accepting: bool = True,
+    accepting: bool | None = True,
 ) -> dict:
     deadline = time.monotonic() + 60
     last = None
@@ -864,7 +864,9 @@ def _wait_slot(
             and last.get("release_id") == manifest["release_id"]
             and last.get("runtime_id") == runtime.name
             and last.get("slot") == slot
-            and bool(last.get("accepting_chat_turns")) is accepting
+            and (
+                accepting is None or bool(last.get("accepting_chat_turns")) is accepting
+            )
         ):
             health = _unix_json(environment, slot, "/health", check=False)
             if health and health.get("release_id") == manifest["release_id"]:
@@ -1099,6 +1101,8 @@ def _prepare_slot(environment: str, slot: str, release: Path, runtime: Path) -> 
         run(["systemctl", "start", _slot_unit(environment, slot, "socket")])
         run(["systemctl", "start", _slot_unit(environment, slot)])
         manifest = validate_manifest(release, environment)
+        _wait_slot(environment, slot, manifest, runtime, accepting=None)
+        _unix_json(environment, slot, "/internal/undrain", method="POST")
         status_value = _wait_slot(environment, slot, manifest, runtime)
         _smoke_slot_candidate(environment, slot, release, runtime, manifest)
         return status_value

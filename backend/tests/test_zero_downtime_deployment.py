@@ -166,7 +166,7 @@ def test_multiworker_lifecycle_excludes_stale_and_other_release_records(
         assert current.status().active_chat_streams == 0
 
 
-def test_multiworker_lifecycle_clears_drain_after_all_workers_exit(
+def test_multiworker_lifecycle_preserves_drain_after_all_workers_exit(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setenv("PWC_ENVIRONMENT", "production")
@@ -195,8 +195,8 @@ def test_multiworker_lifecycle_clears_drain_after_all_workers_exit(
         process_is_alive=is_alive,
     )
 
-    assert restarted.status().accepting_chat_turns
-    assert restarted.status().drain_started_at is None
+    assert not restarted.status().accepting_chat_turns
+    assert restarted.status().drain_started_at is not None
 
 
 def test_multiworker_lifecycle_tolerates_concurrent_state_unlink(
@@ -228,6 +228,71 @@ def test_multiworker_lifecycle_tolerates_concurrent_state_unlink(
     status = lifecycle.status()
     assert status.active_http_requests == 0
     assert status.accepting_chat_turns
+
+
+def test_prepare_slot_explicitly_undrains_only_after_exact_identity(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    environment_root = tmp_path / "environments"
+    monkeypatch.setattr(deploy_cli, "ENVIRONMENTS_ROOT", environment_root)
+    release = tmp_path / "release"
+    release.mkdir()
+    runtime = tmp_path / "runtime-1"
+    runtime.mkdir()
+    manifest = {"release_id": "release-1"}
+    events: list[tuple[str, object]] = []
+
+    monkeypatch.setattr(
+        deploy_cli,
+        "_unix_json",
+        lambda _environment, _slot, path, **kwargs: events.append(
+            (path, kwargs.get("method", "GET"))
+        )
+        or None,
+    )
+    monkeypatch.setattr(
+        deploy_cli.subprocess,
+        "run",
+        lambda command, **_kwargs: events.append(("subprocess", tuple(command))),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "run",
+        lambda command, **_kwargs: events.append(("run", tuple(command))),
+    )
+    monkeypatch.setattr(
+        deploy_cli, "validate_manifest", lambda *_args, **_kwargs: manifest
+    )
+
+    def wait_slot(_environment, _slot, _manifest, _runtime, *, accepting=True):
+        events.append(("wait", accepting))
+        return {
+            "release_id": "release-1",
+            "runtime_id": "runtime-1",
+            "slot": "green",
+            "accepting_chat_turns": accepting is not False,
+        }
+
+    monkeypatch.setattr(deploy_cli, "_wait_slot", wait_slot)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_smoke_slot_candidate",
+        lambda *_args: events.append(("smoke", "candidate")),
+    )
+
+    result = deploy_cli._prepare_slot("staging", "green", release, runtime)
+
+    assert result["accepting_chat_turns"] is True
+    assert [
+        (name, value)
+        for name, value in events
+        if name in {"wait", "/internal/undrain", "smoke"}
+    ] == [
+        ("wait", None),
+        ("/internal/undrain", "POST"),
+        ("wait", True),
+        ("smoke", "candidate"),
+    ]
 
 
 def test_only_active_slot_owns_environment_background_work(

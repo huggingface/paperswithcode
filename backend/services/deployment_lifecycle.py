@@ -117,13 +117,6 @@ class DeploymentLifecycle:
             if self._state_directory is not None
             else None
         )
-        if self._state_directory is not None:
-            with self._lock:
-                *_, live_workers = self._shared_counters_locked()
-                if live_workers == 0:
-                    assert self._drain_path is not None
-                    self._drain_path.unlink(missing_ok=True)
-                self._publish_locked()
 
     def _shared_state_is_deployed(self) -> bool:
         return (
@@ -168,6 +161,13 @@ class DeploymentLifecycle:
     def _publish_locked(self) -> None:
         if self._worker_path is None:
             return
+        if not (
+            self._active_http_requests
+            or self._active_chat_streams
+            or self._active_gateway_streams
+        ):
+            self._worker_path.unlink(missing_ok=True)
+            return
         self._write_json(
             self._worker_path,
             {
@@ -181,10 +181,9 @@ class DeploymentLifecycle:
             },
         )
 
-    def _shared_counters_locked(self) -> tuple[int, int, int, int]:
+    def _shared_counters_locked(self) -> tuple[int, int, int]:
         assert self._state_directory is not None
         totals = [0, 0, 0]
-        live_workers = 0
         counter_names = (
             "active_http_requests",
             "active_chat_streams",
@@ -214,10 +213,9 @@ class DeploymentLifecycle:
             if not self._process_is_alive(process_id, start_token):
                 path.unlink(missing_ok=True)
                 continue
-            live_workers += 1
             for index, counter in enumerate(counters):
                 totals[index] += counter
-        return totals[0], totals[1], totals[2], live_workers
+        return totals[0], totals[1], totals[2]
 
     def _shared_drain_started_at_locked(self) -> str | None:
         if self._drain_path is None:
@@ -314,7 +312,7 @@ class DeploymentLifecycle:
 
     def _status_locked(self) -> DeploymentStatus:
         if self._state_directory is not None:
-            http, chat, gateway, _live_workers = self._shared_counters_locked()
+            http, chat, gateway = self._shared_counters_locked()
             drain_started_at = self._shared_drain_started_at_locked()
             accepting_chat_turns = drain_started_at is None
         else:
