@@ -975,6 +975,11 @@ def _recover_interrupted_activation(environment: str) -> None:
             candidate_release_name, str
         ):
             raise DeployError("activation journal cannot identify its candidate")
+        if _active_slot(environment) == candidate_slot:
+            raise DeployError(
+                "activation journal candidate slot is already active; "
+                "refusing abandoned-candidate cleanup"
+            )
         candidate_release = RELEASES / candidate_release_name
         candidate_manifest = validate_manifest(candidate_release, environment)
         pointers = read_pointers(ENVIRONMENTS_ROOT / environment)

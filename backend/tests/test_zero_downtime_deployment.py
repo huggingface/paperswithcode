@@ -1791,6 +1791,34 @@ def test_interrupted_candidate_recovery_does_not_abandon_unproven_cleanup(
     assert (root / "previous").resolve() == older
 
 
+def test_interrupted_candidate_recovery_never_stops_the_active_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    root, _old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    (root / "active").unlink()
+    (root / "active").symlink_to(root / "slots" / "green")
+    monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": "candidate-prepared",
+            "candidate_slot": "green",
+            "candidate_release": candidate.name,
+        },
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda *_args, **_kwargs: pytest.fail("active slot must not be stopped"),
+    )
+
+    with pytest.raises(
+        deploy_cli.DeployError, match="candidate slot is already active"
+    ):
+        deploy_cli._recover_interrupted_activation("staging")
+
+
 def test_interrupted_candidate_recovery_trusts_only_validated_release_pointers(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1836,7 +1864,10 @@ def test_interrupted_candidate_recovery_trusts_validated_pointers_in_production(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     staging_root, old, candidate, older = _activation_fixture(tmp_path, monkeypatch)
-    staging_root.rename(staging_root.parent / "production")
+    production_root = staging_root.parent / "production"
+    staging_root.rename(production_root)
+    (production_root / "active").unlink()
+    (production_root / "active").symlink_to(production_root / "slots" / "blue")
     monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
     monkeypatch.setattr(
         deploy_cli,
