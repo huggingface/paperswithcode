@@ -473,7 +473,7 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement():
         assert aggregate.unknown_cost_calls == 1
 
 
-def test_qualification_turns_have_a_fixed_provider_request_ceiling():
+def test_qualification_provider_limit_covers_two_tools_and_final_answer():
     from backend.chat_gateway_app import (
         QUALIFICATION_PROVIDER_REQUESTS,
         QUALIFICATION_PROVIDER_TURN_TOKENS,
@@ -491,7 +491,7 @@ def test_qualification_turns_have_a_fixed_provider_request_ceiling():
         QUALIFICATION_PROVIDER_REQUESTS,
         QUALIFICATION_PROVIDER_TURN_TOKENS,
     )
-    assert limits[0] == 2
+    assert limits[0] == 3
 
 
 def test_production_provider_limits_never_query_staging_qualification_tables():
@@ -550,7 +550,7 @@ def test_ordinary_openai_global_concurrency_remains_configured_four():
 def test_qualification_openai_rate_allows_exact_fixed_workload_per_scope():
     scope_id = uuid.uuid4()
     now = datetime(2026, 8, 31, tzinfo=UTC)
-    database = _ConcurrencyDB((47, 47))
+    database = _ConcurrencyDB((63, 63))
 
     ChatOpenAIBudgetService(database, _settings())._enforce_rate_limits(
         "owner", scope_id, now
@@ -561,11 +561,11 @@ def test_qualification_openai_rate_allows_exact_fixed_workload_per_scope():
     )
     with pytest.raises(OpenAILimitExceeded, match="user_rate"):
         ChatOpenAIBudgetService(
-            _ConcurrencyDB((48, 0)), _settings()
+            _ConcurrencyDB((64, 0)), _settings()
         )._enforce_rate_limits("owner", scope_id, now)
     with pytest.raises(OpenAILimitExceeded, match="global_rate"):
         ChatOpenAIBudgetService(
-            _ConcurrencyDB((47, 48)), _settings()
+            _ConcurrencyDB((63, 64)), _settings()
         )._enforce_rate_limits("owner", scope_id, now)
 
 
