@@ -6202,6 +6202,24 @@ def test_cron_jobs_declare_bounded_execution_contracts():
         assert spec.health_job
 
 
+def test_cron_python_uses_active_release_immutable_runtime(tmp_path: Path, monkeypatch):
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "uv.lock").write_text("locked dependencies\n")
+    runtimes = tmp_path / "runtimes"
+    validated = []
+    monkeypatch.setattr(
+        cron_launcher,
+        "runtime_manifest",
+        lambda runtime: validated.append(runtime),
+    )
+
+    python = cron_launcher.cron_python(current, runtimes)
+
+    assert python == runtimes / cron_launcher.runtime_id(current) / "bin" / "python"
+    assert validated == [python.parent.parent]
+
+
 @pytest.mark.parametrize(
     ("features", "expected"),
     [

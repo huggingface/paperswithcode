@@ -13,8 +13,13 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from deploy.runtime import runtime_id, runtime_manifest
+except ModuleNotFoundError:
+    from runtime import runtime_id, runtime_manifest  # type: ignore[no-redef]
+
 CURRENT = Path("/srv/paperswithcode/environments/production/current")
-VENV = Path("/srv/paperswithcode/.venv")
+RUNTIMES = Path("/srv/paperswithcode/runtimes")
 LOG_DIR = Path("/var/lib/paperswithcode/production/cron-logs")
 RESTRICTED_TRENDING_LOG_DIR = Path(
     "/var/lib/paperswithcode/production/trending-cron-logs"
@@ -455,6 +460,13 @@ def apply_release_features(env: dict[str, str], manifest: dict) -> None:
     env["PWC_CODEX_JOBS_ENABLED"] = "true" if add_evals or enrich_paper else "false"
 
 
+def cron_python(current: Path = CURRENT, runtimes: Path = RUNTIMES) -> Path:
+    """Resolve and validate the immutable runtime recorded by the active release."""
+    runtime = runtimes / runtime_id(current)
+    runtime_manifest(runtime)
+    return runtime / "bin" / "python"
+
+
 def main() -> int:
     manifest = json.loads((CURRENT / "release.json").read_text())
     if len(sys.argv) == 2 and sys.argv[1] == "status":
@@ -533,7 +545,7 @@ def main() -> int:
         "process_curation_thumbnails",
     }:
         env["PWC_THUMBNAIL_MUTATIONS_ENABLED"] = "true"
-    argv = [str(VENV / "bin" / "python"), *command, *extra]
+    argv = [str(cron_python()), *command, *extra]
     lock_dir = Path(
         env.get("PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks")
     )
