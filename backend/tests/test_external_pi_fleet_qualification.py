@@ -1853,6 +1853,28 @@ def test_durable_locust_measurement_requires_content_free_typed_outcomes():
     assert secret not in str(exc.value)
 
 
+def test_durable_locust_measurement_accepts_typed_refusal_without_milestones():
+    pytest.importorskip("locust")
+    adapter = importlib.import_module("backend.loadtests.external_pi_fleet_locustfile")
+
+    observation = adapter.build_durable_observation(
+        workload="admission_stream",
+        outcome="refused",
+        ttft_ms=125,
+        completion_ms=125,
+        reconnects=0,
+        reconnect_successes=0,
+        model_starts=0,
+        duplicate_turns=0,
+        terminal_cause="refused",
+        failure_code="chat_overload",
+    )
+
+    assert observation.outcome == "refused"
+    assert observation.admission_ms is None
+    assert observation.reconnect_ready_ms is None
+
+
 def test_durable_locust_observation_counts_duplicate_operation_identity():
     pytest.importorskip("locust")
     adapter = importlib.import_module("backend.loadtests.external_pi_fleet_locustfile")
