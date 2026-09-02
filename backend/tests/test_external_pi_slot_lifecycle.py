@@ -755,6 +755,58 @@ def test_partial_sixteen_replica_status_retains_previous_drain_scope(
     assert all(spec.maximum_sessions == 2 for spec in selected)
 
 
+def test_authenticated_endpoints_recover_current_topology_without_status_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    token = "t" * 32
+    current_specs = lifecycle.replica_specs("staging", "green", token)
+    specs_by_port = {spec.port: spec for spec in current_specs}
+    requests: list[urllib.request.Request] = []
+
+    class Response:
+        def __init__(self, spec):
+            self.spec = spec
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size=-1):
+            return json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "validated-previous-release",
+                    "worker_id": self.spec.worker_id,
+                    "state": "ready",
+                    "maximum_sessions": self.spec.maximum_sessions,
+                }
+            ).encode()
+
+    def open_status(request, **_kwargs):
+        requests.append(request)
+        port = int(urllib.parse.urlparse(request.full_url).port)
+        spec = specs_by_port[port]
+        assert request.get_header("Authorization") == f"Bearer {spec.token}"
+        return Response(spec)
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_status)
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        token,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+        allow_endpoint_recovery=True,
+    )
+
+    assert selected == current_specs
+    assert len(requests) == len(current_specs)
+
+
 def test_validated_orphan_release_retains_current_drain_topology(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

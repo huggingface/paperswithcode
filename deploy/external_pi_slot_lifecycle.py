@@ -325,6 +325,7 @@ def _draining_replica_specs(
     release_id: str,
     *,
     validated_release_ids: frozenset[str] = frozenset(),
+    allow_endpoint_recovery: bool = False,
 ) -> tuple[ExternalPiReplicaSpec, ...]:
     current = replica_specs(environment, slot, base_token)
     previous = replica_specs_for_topology(
@@ -334,11 +335,7 @@ def _draining_replica_specs(
         replica_count=PREVIOUS_REPLICA_COUNT,
         maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS,
     )
-    current_statuses = _read_replica_statuses(environment, slot, current)
     trusted_release_ids = validated_release_ids | {release_id}
-    cohort_release_id = (
-        current_statuses[0].get("release_id") if current_statuses else None
-    )
 
     def current_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
         return (
@@ -348,18 +345,32 @@ def _draining_replica_specs(
             and status.get("maximum_sessions") == current[0].maximum_sessions
         )
 
-    current_topology_is_proven = (
-        isinstance(cohort_release_id, str)
-        and cohort_release_id in trusted_release_ids
-        and all(
-            status.get("release_id") == cohort_release_id for status in current_statuses
+    def current_topology_is_proven(statuses: tuple[dict, ...]) -> bool:
+        cohort_release_id = statuses[0].get("release_id") if statuses else None
+        return bool(
+            isinstance(cohort_release_id, str)
+            and cohort_release_id in trusted_release_ids
+            and all(
+                status.get("release_id") == cohort_release_id for status in statuses
+            )
+            and all(
+                current_status_is_proven(status, spec)
+                for status, spec in zip(statuses, current, strict=True)
+            )
         )
-        and all(
-            current_status_is_proven(status, spec)
-            for status, spec in zip(current_statuses, current, strict=True)
-        )
-    )
-    return current if current_topology_is_proven else previous
+
+    durable_statuses = _read_replica_statuses(environment, slot, current)
+    if current_topology_is_proven(durable_statuses):
+        return current
+    if (
+        allow_endpoint_recovery
+        and not any(durable_statuses)
+        and not _read_status(environment, slot)
+    ):
+        endpoint_statuses = _read_authenticated_endpoint_statuses(current)
+        if current_topology_is_proven(endpoint_statuses):
+            return current
+    return previous
 
 
 def _read_status(environment: str, slot: str) -> dict:
@@ -390,6 +401,30 @@ def _read_replica_statuses(
         except (FileNotFoundError, json.JSONDecodeError):
             value = {}
         values.append(value if isinstance(value, dict) else {})
+    return tuple(values)
+
+
+def _read_authenticated_endpoint_statuses(
+    specs: tuple[ExternalPiReplicaSpec, ...],
+) -> tuple[dict, ...]:
+    values = []
+    for spec in specs:
+        request = urllib.request.Request(
+            f"http://127.0.0.1:{spec.port}/v1/status",
+            headers={"Authorization": f"Bearer {spec.token}"},
+            method="GET",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
+                if len(payload) > MAXIMUM_WORKER_STATUS_BYTES:
+                    return ()
+                value = json.loads(payload)
+        except (OSError, ValueError, urllib.error.URLError):
+            return ()
+        if not isinstance(value, dict):
+            return ()
+        values.append(value)
     return tuple(values)
 
 
@@ -1145,13 +1180,25 @@ def stop_slot(
         _cleanup_retired_replica_statuses(environment, slot, draining_specs)
         return
     try:
+        orphan_specs = draining_specs
+        if not any(previous) and not any(value):
+            orphan_specs = _draining_replica_specs(
+                environment,
+                slot,
+                _protected_environment_values(environment).get(
+                    "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", ""
+                ),
+                release_id,
+                validated_release_ids=validated_orphan_release_ids,
+                allow_endpoint_recovery=True,
+            )
         _stop_proven_orphaned_worker_if_active(
             environment,
             slot,
             worker_active_proven=True,
             expected_release_id=release_id,
             validated_orphan_release_ids=validated_orphan_release_ids,
-            draining_specs=draining_specs,
+            draining_specs=orphan_specs,
         )
     except ExternalPiSlotError as error:
         raise ExternalPiSlotError(
