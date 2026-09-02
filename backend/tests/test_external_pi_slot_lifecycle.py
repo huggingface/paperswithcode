@@ -755,6 +755,72 @@ def test_partial_sixteen_replica_status_retains_previous_drain_scope(
     assert all(spec.maximum_sessions == 2 for spec in selected)
 
 
+def test_validated_orphan_release_retains_current_drain_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for spec in current_specs:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "validated-previous-release",
+                    "worker_id": spec.worker_id,
+                    "state": "draining",
+                    "maximum_sessions": spec.maximum_sessions,
+                }
+            )
+        )
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        "x" * 32,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+    )
+
+    assert selected == current_specs
+
+
+def test_mixed_trusted_release_cohort_falls_back_to_previous_drain_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for index, spec in enumerate(current_specs):
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": (
+                        "candidate-release"
+                        if index < len(current_specs) // 2
+                        else "validated-previous-release"
+                    ),
+                    "worker_id": spec.worker_id,
+                    "state": "draining",
+                    "maximum_sessions": spec.maximum_sessions,
+                }
+            )
+        )
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        "x" * 32,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+    )
+
+    assert len(selected) == lifecycle.PREVIOUS_REPLICA_COUNT
+    assert all(
+        spec.maximum_sessions == lifecycle.PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+        for spec in selected
+    )
+
+
 def test_start_checks_every_selected_previous_replica_before_replacement(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

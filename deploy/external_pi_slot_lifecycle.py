@@ -319,7 +319,12 @@ def _status_paths(environment: str, slot: str) -> tuple[Path, ...]:
 
 
 def _draining_replica_specs(
-    environment: str, slot: str, base_token: str, release_id: str
+    environment: str,
+    slot: str,
+    base_token: str,
+    release_id: str,
+    *,
+    validated_release_ids: frozenset[str] = frozenset(),
 ) -> tuple[ExternalPiReplicaSpec, ...]:
     current = replica_specs(environment, slot, base_token)
     previous = replica_specs_for_topology(
@@ -330,19 +335,29 @@ def _draining_replica_specs(
         maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS,
     )
     current_statuses = _read_replica_statuses(environment, slot, current)
+    trusted_release_ids = validated_release_ids | {release_id}
+    cohort_release_id = (
+        current_statuses[0].get("release_id") if current_statuses else None
+    )
 
     def current_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
         return (
-            status.get("release_id") == release_id
-            and status.get("worker_id") == spec.worker_id
+            status.get("worker_id") == spec.worker_id
             and status.get("protocol") == CONTRACT_VERSION
             and type(status.get("maximum_sessions")) is int
             and status.get("maximum_sessions") == current[0].maximum_sessions
         )
 
-    current_topology_is_proven = all(
-        current_status_is_proven(status, spec)
-        for status, spec in zip(current_statuses, current, strict=True)
+    current_topology_is_proven = (
+        isinstance(cohort_release_id, str)
+        and cohort_release_id in trusted_release_ids
+        and all(
+            status.get("release_id") == cohort_release_id for status in current_statuses
+        )
+        and all(
+            current_status_is_proven(status, spec)
+            for status, spec in zip(current_statuses, current, strict=True)
+        )
     )
     return current if current_topology_is_proven else previous
 
@@ -1087,7 +1102,13 @@ def stop_slot(
     validated_orphan_release_ids: frozenset[str] = frozenset(),
 ) -> None:
     timeout_seconds = drain_stop_timeout_seconds(environment)
-    draining_specs = _draining_replica_specs(environment, slot, "x" * 32, release_id)
+    draining_specs = _draining_replica_specs(
+        environment,
+        slot,
+        "x" * 32,
+        release_id,
+        validated_release_ids=validated_orphan_release_ids,
+    )
     previous = _read_replica_statuses(environment, slot, draining_specs)
     legacy = not any(previous)
     if legacy:
