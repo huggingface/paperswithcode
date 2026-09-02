@@ -552,7 +552,7 @@ def _expired_database_worker_is_proven(
         and isinstance(counters, dict)
         and set(counters) == set(OPERATION_COUNTER_NAMES)
         and all(
-            type(counters[name]) is int and counters[name] == 0
+            type(counters[name]) is int and counters[name] >= 0
             for name in OPERATION_COUNTER_NAMES
         )
         and database_status.get("worker_id") == endpoint_status.get("worker_id")

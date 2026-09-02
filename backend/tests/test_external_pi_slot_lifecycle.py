@@ -1971,6 +1971,43 @@ def test_expired_database_lease_proves_zero_use_bound_worker_is_expired():
     )
 
 
+def test_expired_database_lease_proves_used_idle_worker_is_expired():
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "release_id": "old-release",
+        "state": "ready",
+        "active_sessions": 0,
+        "maximum_sessions": 4,
+        "worker_generation": 5,
+        "operation_counters": {
+            "shadow_requests": 3,
+            "model_calls": 3,
+            "tool_calls": 2,
+            "provider_calls": 3,
+            "modal_calls": 2,
+            "billing_events": 3,
+        },
+    }
+    database_status = {
+        "worker_id": "production-blue-00",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 5,
+        "state": "ready",
+        "maximum_sessions": 4,
+        "active_sessions": 0,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+
+    assert lifecycle._expired_database_worker_is_proven(
+        endpoint,
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
 def test_stop_slot_cleans_exact_unclaimed_request_free_worker(
     monkeypatch: pytest.MonkeyPatch,
 ):
