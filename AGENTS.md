@@ -60,6 +60,9 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   hotfixes must reach `main` through a merged GitHub pull request. The publishing
   task fetches the merged `origin main`, reruns proportionate validation, and
   deploys that exact commit with `pwc-deploy`.
+- Before merging any pull request, wait for Cursor Bugbot to finish its review
+  and resolve every Bugbot comment. Do not merge while its review is still in
+  progress or any Bugbot comment remains unresolved.
 - Never force-push. If local and remote `main` have diverged, stop and resolve the
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
