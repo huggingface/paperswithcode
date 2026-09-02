@@ -619,7 +619,7 @@ def test_external_pi_runner_cancels_and_aborts_turn_on_execution_lost():
     assert executor.exec_calls == 1
     assert len(executor.cancelled_contexts) == 1
     assert executor.cancelled_contexts[0].execution_id == "operation-1"
-    assert executor.cancelled_contexts[0].tool_call_id == "tool-1"
+    assert executor.cancelled_contexts[0].tool_call_id == "operation-1"
     assert cancellation_order == ["executor", "pi"]
     assert len(workspace_manager.released) == 1
     assert workspace_manager.invalidated == []

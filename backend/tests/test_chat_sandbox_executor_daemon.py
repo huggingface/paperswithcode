@@ -299,6 +299,55 @@ def test_read_is_bounded_and_descriptor_contained(tmp_path: Path) -> None:
     thread.join(timeout=2)
 
 
+def test_read_allows_only_exact_configured_readonly_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    guides = tmp_path / "guides"
+    guides.mkdir()
+    guide = guides / "PWC_CLI_SKILL.md"
+    guide.write_text("# PWC CLI\n")
+    sibling = guides / "private.txt"
+    sibling.write_text("private\n")
+    link = guides / "linked.md"
+    link.symlink_to(guide)
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        readonly_paths=frozenset({guide, link}),
+        worker_generation="worker-1",
+        command_preexec=None,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+    base = {
+        "protocol": PROTOCOL,
+        "type": "read_file",
+        "request_id": "request-guide",
+        **IDENTITY,
+        "offset": 0,
+        "max_bytes": 1024,
+    }
+
+    allowed = _operation(server.socket_path, {**base, "path": str(guide)})
+    denied = _operation(
+        server.socket_path,
+        {**base, "request_id": "request-private", "path": str(sibling)},
+    )
+    symlink = _operation(
+        server.socket_path,
+        {**base, "request_id": "request-link", "path": str(link)},
+    )
+
+    assert allowed[1]["type"] == "read_result"
+    assert allowed[1]["data_base64"] == "IyBQV0MgQ0xJCg=="
+    assert denied[-1]["error"] == "invalid_workspace_path"
+    assert symlink[-1]["error"] == "invalid_workspace_path"
+    server.shutdown()
+    thread.join(timeout=2)
+
+
 def test_cancel_terminates_the_process_group_before_side_effect(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
