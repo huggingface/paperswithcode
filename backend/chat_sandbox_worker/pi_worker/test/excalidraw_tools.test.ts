@@ -120,4 +120,12 @@ test("read_me rejects oversized or malformed MCP responses", async () => {
     loadExcalidrawReadMe(async () => malformed),
     /invalid/u,
   );
+  const toolError = new Response(
+    'data: {"jsonrpc":"2.0","id":1,"result":{"isError":true,"content":[{"type":"text","text":"upstream failed"}]}}\n\n',
+    { status: 200, headers: { "content-type": "text/event-stream" } },
+  );
+  await assert.rejects(
+    loadExcalidrawReadMe(async () => toolError),
+    /invalid/u,
+  );
 });

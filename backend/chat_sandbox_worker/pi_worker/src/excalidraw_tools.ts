@@ -80,6 +80,9 @@ function parseReadMeResponse(body: string, contentType: string): string {
   if (!result || typeof result !== "object" || Array.isArray(result)) {
     throw new Error("Excalidraw read_me response is invalid");
   }
+  if ((result as Record<string, unknown>).isError === true) {
+    throw new Error("Excalidraw read_me response is invalid");
+  }
   const content = (result as Record<string, unknown>).content;
   if (!Array.isArray(content) || content.length < 1 || content.length > 8) {
     throw new Error("Excalidraw read_me response is invalid");
