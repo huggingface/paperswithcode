@@ -43,7 +43,7 @@ BASE_IMAGE = (
     "sha256:d50fb7611f86d04a3b0471b46d7557818d88983fc3136726336b2a4c657aa30b"
 )
 # Immutable image emitted by publish_image.py for the selected worker contract.
-MODAL_IMAGE_ID = "im-IWCAATfR60EZ3FrTGENgEQ"
+MODAL_IMAGE_ID = "im-V7lT1ZvCp34fxx8OPUwpzH"
 # Production uses a distinct immutable image because Modal image IDs are scoped
 # to their environment. It must be published by the restricted production
 # service identity.
