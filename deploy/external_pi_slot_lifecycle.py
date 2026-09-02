@@ -760,11 +760,26 @@ def _stop_proven_orphaned_worker_if_active(
             raise ExternalPiSlotError("external Pi active worker did not stop")
         return
 
-    specs = (
-        replica_specs(environment, slot, base_token)
-        if draining_specs is None
-        else draining_specs
-    )
+    if draining_specs is None:
+        specs = replica_specs(environment, slot, base_token)
+    else:
+        maximum_sessions = draining_specs[0].maximum_sessions
+        specs = replica_specs_for_topology(
+            environment,
+            slot,
+            base_token,
+            replica_count=len(draining_specs),
+            maximum_sessions=maximum_sessions,
+        )
+        selected_identity = tuple(
+            (spec.worker_id, spec.port, spec.maximum_sessions)
+            for spec in draining_specs
+        )
+        authenticated_identity = tuple(
+            (spec.worker_id, spec.port, spec.maximum_sessions) for spec in specs
+        )
+        if selected_identity != authenticated_identity:
+            raise ExternalPiSlotError("external Pi drain topology is invalid")
     for spec in specs:
         request = urllib.request.Request(
             f"http://127.0.0.1:{spec.port}/v1/status",

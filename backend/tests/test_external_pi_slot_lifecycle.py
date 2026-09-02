@@ -768,6 +768,9 @@ def test_start_checks_every_selected_previous_replica_before_replacement(
         lambda: {"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32},
     )
     specs = lifecycle.replica_specs_for_topology(
+        "staging", "blue", "x" * 32, replica_count=16, maximum_sessions=2
+    )
+    authenticated_specs = lifecycle.replica_specs_for_topology(
         "staging", "blue", "t" * 32, replica_count=16, maximum_sessions=2
     )
     for spec in specs[:8]:
@@ -783,6 +786,7 @@ def test_start_checks_every_selected_previous_replica_before_replacement(
             )
         )
     specs_by_port = {spec.port: spec for spec in specs}
+    authenticated_specs_by_port = {spec.port: spec for spec in authenticated_specs}
     calls = 0
 
     class Response:
@@ -817,6 +821,9 @@ def test_start_checks_every_selected_previous_replica_before_replacement(
         if calls == 1:
             raise urllib.error.URLError("no legacy worker")
         port = int(urllib.parse.urlparse(request.full_url).port)
+        assert request.get_header("Authorization") == (
+            f"Bearer {authenticated_specs_by_port[port].token}"
+        )
         return Response(specs_by_port[port])
 
     commands: list[list[str]] = []
