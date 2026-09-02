@@ -166,6 +166,70 @@ def test_multiworker_lifecycle_excludes_stale_and_other_release_records(
         assert current.status().active_chat_streams == 0
 
 
+def test_multiworker_lifecycle_clears_drain_after_all_workers_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PWC_ENVIRONMENT", "production")
+    monkeypatch.setenv("PWC_DEPLOYMENT_SLOT", "blue")
+    monkeypatch.setenv("PWC_RELEASE_ID", "release-1")
+    monkeypatch.setenv("PWC_RUNTIME_ID", "runtime-1")
+    live = {(1001, "start-1")}
+
+    def is_alive(pid: int, started: str) -> bool:
+        return (pid, started) in live
+
+    original = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1001,
+        process_start_token="start-1",
+        process_is_alive=is_alive,
+    )
+    assert not original.drain().accepting_chat_turns
+
+    live.remove((1001, "start-1"))
+    live.add((1002, "start-2"))
+    restarted = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1002,
+        process_start_token="start-2",
+        process_is_alive=is_alive,
+    )
+
+    assert restarted.status().accepting_chat_turns
+    assert restarted.status().drain_started_at is None
+
+
+def test_multiworker_lifecycle_tolerates_concurrent_state_unlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("PWC_ENVIRONMENT", "staging")
+    monkeypatch.setenv("PWC_DEPLOYMENT_SLOT", "green")
+    monkeypatch.setenv("PWC_RELEASE_ID", "release-1")
+    monkeypatch.setenv("PWC_RUNTIME_ID", "runtime-1")
+    lifecycle = DeploymentLifecycle(
+        state_root=tmp_path,
+        process_id=1001,
+        process_start_token="start-1",
+        process_is_alive=lambda _pid, _started: True,
+    )
+    lifecycle.drain()
+    worker_path = lifecycle._worker_path
+    drain_path = lifecycle._drain_path
+    assert worker_path is not None
+    assert drain_path is not None
+    original_read = lifecycle._read_json
+
+    def unlink_before_read(path: Path):
+        path.unlink(missing_ok=True)
+        return original_read(path)
+
+    monkeypatch.setattr(lifecycle, "_read_json", unlink_before_read)
+
+    status = lifecycle.status()
+    assert status.active_http_requests == 0
+    assert status.accepting_chat_turns
+
+
 def test_only_active_slot_owns_environment_background_work(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
