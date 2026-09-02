@@ -33,6 +33,7 @@ MIN_PROJECTED_MEM_AVAILABLE_BYTES = 1536 * 1024**2
 MAX_REPORT_COUNTER = 1_000_000
 MAX_REPORT_DURATION_MS = 60_000
 MAX_DURABLE_DURATION_MS = 600_000
+P95_TTFT_TARGET_MS = 2_000
 MAX_REPORT_BYTES = 2**63 - 1
 FleetShapeName = Literal["2x32", "3x32", "4x16", "5x32", "8x16", "16x8"]
 DurableWorkload = Literal["no_tool", "read", "bash", "admission_stream"]
@@ -84,6 +85,7 @@ class DurableQualificationProfile:
 class DurableTurnObservation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+    workload: DurableWorkload
     outcome: Literal["completed", "refused", "failed"]
     ttft_ms: int | None = Field(default=None, ge=0, le=MAX_DURABLE_DURATION_MS)
     completion_ms: int | None = Field(default=None, ge=0, le=MAX_DURABLE_DURATION_MS)
@@ -240,6 +242,7 @@ class DurableProfileReport(BaseModel):
     ttft_observations: int = Field(ge=0, le=EXPECTED_USERS)
     completion_observations: int = Field(ge=0, le=EXPECTED_USERS)
     p95_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    p95_ttft_ms_by_workload: dict[DurableWorkload, int] = Field(max_length=4)
     p99_completion_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
     peak_memory_bytes: int = Field(ge=0, le=MAX_REPORT_BYTES)
     minimum_host_mem_available_bytes: int = Field(ge=0, le=MAX_REPORT_BYTES)
@@ -274,6 +277,12 @@ class DurableProfileReport(BaseModel):
         )
         if self.modal_estimated_cost_microusd != expected_cost:
             raise ValueError("durable profile Modal cost evidence is inconsistent")
+        expected_workloads = set(resolve_durable_profile(self.profile).workloads)
+        if set(self.p95_ttft_ms_by_workload) != expected_workloads or any(
+            type(value) is not int or value < 0 or value > MAX_DURABLE_DURATION_MS
+            for value in self.p95_ttft_ms_by_workload.values()
+        ):
+            raise ValueError("durable workload TTFT evidence is inconsistent")
         return self
 
     @computed_field
@@ -296,7 +305,11 @@ class DurableProfileReport(BaseModel):
             and self.reconnects == self.reconnect_successes
             and self.ttft_observations == self.expected_users
             and self.completion_observations == self.expected_users
-            and self.p95_ttft_ms <= 10_000
+            and self.p95_ttft_ms < P95_TTFT_TARGET_MS
+            and all(
+                value < P95_TTFT_TARGET_MS
+                for value in self.p95_ttft_ms_by_workload.values()
+            )
             and self.p99_completion_ms <= 60_000
             and self.minimum_host_mem_available_bytes
             >= MIN_PROJECTED_MEM_AVAILABLE_BYTES
@@ -505,6 +518,17 @@ def aggregate_durable_profile(
             "durable qualification requires exact profile observations"
         )
     ttft = tuple(item.ttft_ms for item in observations if item.ttft_ms is not None)
+    expected_workloads = set(profile.workloads)
+    if Counter(item.workload for item in observations) != Counter(profile.workloads):
+        raise FleetRunRefused("durable qualification workload evidence is inconsistent")
+    ttft_by_workload = {
+        workload: tuple(
+            item.ttft_ms
+            for item in observations
+            if item.workload == workload and item.ttft_ms is not None
+        )
+        for workload in expected_workloads
+    }
     completion = tuple(
         item.completion_ms for item in observations if item.completion_ms is not None
     )
@@ -577,6 +601,10 @@ def aggregate_durable_profile(
         ttft_observations=len(ttft),
         completion_observations=len(completion),
         p95_ttft_ms=_nearest_rank(ttft, 0.95),
+        p95_ttft_ms_by_workload={
+            workload: _nearest_rank(values, 0.95)
+            for workload, values in sorted(ttft_by_workload.items())
+        },
         p99_completion_ms=_nearest_rank(completion, 0.99),
         peak_memory_bytes=peak_memory_bytes,
         minimum_host_mem_available_bytes=minimum_host_mem_available_bytes,

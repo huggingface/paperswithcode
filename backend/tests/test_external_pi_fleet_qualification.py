@@ -190,6 +190,7 @@ def test_durable_profile_report_records_required_content_free_measurements():
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=100 + index,
             completion_ms=1_000 + index,
@@ -219,6 +220,11 @@ def test_durable_profile_report_records_required_content_free_measurements():
     assert report.passed is True
     assert report.refusals == report.queued_states == report.typed_failures == 0
     assert report.p95_ttft_ms == 130
+    assert report.p95_ttft_ms_by_workload == {
+        "bash": 131,
+        "no_tool": 115,
+        "read": 123,
+    }
     assert report.p99_completion_ms == 1_031
     assert report.ttft_observations == report.completion_observations == 32
     assert report.reconnects == report.reconnect_successes == 1
@@ -236,13 +242,14 @@ def test_live_report_requires_durable_executor_start_and_duplicate_evidence():
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=100,
             completion_ms=1_000,
             model_starts=1,
             terminal_cause="completed",
         )
-        for _ in profile.workloads
+        for workload in profile.workloads
     )
     base = {
         "expected_users": 32,
@@ -281,9 +288,41 @@ def test_live_report_requires_durable_executor_start_and_duplicate_evidence():
     assert aggregate({**base, "duplicate_executor_starts": 1}).passed is False
 
 
+def test_durable_profile_requires_sub_two_second_p95_for_every_workload():
+    profile = resolve_durable_profile("32-functional-turns")
+    observations = tuple(
+        DurableTurnObservation(
+            workload=workload,
+            outcome="completed",
+            ttft_ms=2_000 if index == 31 else 100,
+            completion_ms=1_000,
+            model_starts=1,
+            terminal_cause="completed",
+        )
+        for index, workload in enumerate(profile.workloads)
+    )
+
+    report = aggregate_durable_profile(
+        profile=profile,
+        observations=observations,
+        peak_memory_bytes=1024**3,
+        minimum_host_mem_available_bytes=2 * 1024**3,
+        peak_cpu_percent=20.0,
+        peak_active_backend_turns=32,
+        peak_active_external_workers=4,
+        peak_active_sandboxes=1,
+        modal_lifecycle=_FUNCTIONAL_MODAL,
+        modal_rate=_MODAL_RATE,
+    )
+
+    assert report.p95_ttft_ms_by_workload["bash"] == 2_000
+    assert report.passed is False
+
+
 def test_durable_profile_report_fails_refusal_queue_duplicate_or_lost_terminal():
     profile = resolve_durable_profile("100-immediate-admission")
     base = DurableTurnObservation(
+        workload="admission_stream",
         outcome="completed",
         ttft_ms=100,
         completion_ms=1_000,
@@ -320,6 +359,7 @@ def test_durable_profile_report_fails_refusal_queue_duplicate_or_lost_terminal()
 def test_durable_profile_retains_slow_completion_as_failing_evidence():
     profile = resolve_durable_profile("32-functional-turns")
     slow = DurableTurnObservation(
+        workload="no_tool",
         outcome="completed",
         ttft_ms=100,
         completion_ms=60_001,
@@ -330,7 +370,11 @@ def test_durable_profile_retains_slow_completion_as_failing_evidence():
 
     report = aggregate_durable_profile(
         profile=profile,
-        observations=(slow,) + (normal,) * 31,
+        observations=(slow,)
+        + tuple(
+            normal.model_copy(update={"workload": workload})
+            for workload in profile.workloads[1:]
+        ),
         peak_memory_bytes=1024**3,
         minimum_host_mem_available_bytes=2 * 1024**3,
         peak_cpu_percent=20.0,
@@ -349,13 +393,14 @@ def test_durable_report_is_atomic_mode_0600_and_contains_no_payloads(tmp_path: P
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=100,
             completion_ms=1_000,
             model_starts=1,
             terminal_cause="completed",
         )
-        for _ in profile.workloads
+        for workload in profile.workloads
     )
     profile_report = aggregate_durable_profile(
         profile=profile,
@@ -492,6 +537,7 @@ class _DurableOperator:
         self._fail("run")
         observations = tuple(
             DurableTurnObservation(
+                workload=workload,
                 outcome="completed",
                 ttft_ms=100,
                 completion_ms=1_000,
@@ -500,7 +546,7 @@ class _DurableOperator:
                 duplicate_operation_start_count=0,
                 terminal_cause="completed",
             )
-            for _ in profile.workloads
+            for workload in profile.workloads
         )
         return aggregate_durable_profile(
             profile=profile,
@@ -914,13 +960,14 @@ def test_durable_report_rejects_status_reason_profile_and_cleanup_mismatches():
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=100,
             completion_ms=1_000,
             model_starts=1,
             terminal_cause="completed",
         )
-        for _ in profile.workloads
+        for workload in profile.workloads
     )
     profile_report = aggregate_durable_profile(
         profile=profile,
@@ -1676,6 +1723,7 @@ def test_durable_locust_measurement_requires_content_free_typed_outcomes():
     adapter = importlib.import_module("backend.loadtests.external_pi_fleet_locustfile")
 
     observation = adapter.build_durable_observation(
+        workload="bash",
         outcome="completed",
         ttft_ms=125,
         completion_ms=2_500,
@@ -1697,6 +1745,7 @@ def test_durable_locust_measurement_requires_content_free_typed_outcomes():
     secret = "TOP_SECRET_PROMPT"
     with pytest.raises(FleetRunRefused) as exc:
         adapter.build_durable_observation(
+            workload="bash",
             outcome="completed",
             ttft_ms=125,
             completion_ms=2_500,
@@ -1713,6 +1762,7 @@ def test_durable_locust_measurement_requires_content_free_typed_outcomes():
         )
     assert secret not in str(exc.value)
     invalid = {
+        "workload": "bash",
         "outcome": "completed",
         "ttft_ms": 125,
         "completion_ms": 2_500,
@@ -1736,6 +1786,7 @@ def test_durable_locust_observation_counts_duplicate_operation_identity():
     adapter = importlib.import_module("backend.loadtests.external_pi_fleet_locustfile")
 
     observation = adapter.build_durable_observation(
+        workload="bash",
         outcome="completed",
         ttft_ms=100,
         completion_ms=1_000,

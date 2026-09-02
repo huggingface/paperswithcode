@@ -292,6 +292,57 @@ def test_read_workload_requires_the_pi_read_tool_for_a_known_executor_file():
     )
 
 
+def test_tool_call_start_is_the_first_semantic_ttft_event():
+    from backend.loadtests.durable_chat_transport import (
+        DurableChatTransportConfig,
+        HttpSSEDurableChatTransport,
+    )
+
+    session_id = "00000000-0000-0000-0000-000000000021"
+    request_id = "00000000-0000-0000-0000-000000000022"
+    session = _Session(
+        (
+            _Response(
+                200,
+                (
+                    _frame(
+                        1,
+                        "stream_start",
+                        {
+                            "request_id": request_id,
+                            "session_id": session_id,
+                            "provider_execution": True,
+                        },
+                    ),
+                ),
+            ),
+            _Response(
+                200,
+                (
+                    _frame(
+                        2,
+                        "tool_call_start",
+                        {"id": "read-1", "name": "Read", "content_index": 0},
+                    ),
+                    _frame(3, "done", {"finish_reason": "success", "followups": []}),
+                ),
+            ),
+        )
+    )
+    transport = HttpSSEDurableChatTransport(
+        DurableChatTransportConfig(
+            base_url="https://staging.paperswithcode.co",
+            synthetic_cookies=("signed-cookie",),
+            initial_model="gpt-5.6-luna@openai",
+        ),
+        session_factory=lambda: session,
+    )
+
+    evidence = transport.open_durable_stream(_spec(0, "read"))
+
+    assert evidence["ttft_ms"] is not None
+
+
 def test_real_transport_preserves_typed_immediate_429_without_queueing():
     from backend.loadtests.durable_chat_transport import (
         DurableChatTransportConfig,
@@ -470,13 +521,14 @@ def test_modal_lifecycle_delta_and_protected_rate_are_window_bound_not_chat_late
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=10,
             completion_ms=999,
             model_starts=1,
             terminal_cause="completed",
         )
-        for _ in profile.workloads
+        for workload in profile.workloads
     )
 
     report = aggregate_durable_profile(

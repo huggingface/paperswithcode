@@ -253,7 +253,7 @@ class HttpSSEDurableChatTransport:
         started = time.perf_counter()
         first = self._open(session, body, after_sequence=None, workload=spec.workload)
         if first.status_code != 200:
-            return self._refusal(first, started)
+            return self._refusal(first, started, workload=spec.workload)
 
         session_id: str | None = None
         request_id: str | None = None
@@ -290,7 +290,13 @@ class HttpSSEDurableChatTransport:
                 cursor = self._advance(cursor, event)
                 saw_resumed_event = True
                 if (
-                    event.event in {"answer_delta", "reasoning_delta", "tool_call"}
+                    event.event
+                    in {
+                        "answer_delta",
+                        "reasoning_delta",
+                        "tool_call",
+                        "tool_call_start",
+                    }
                     and ttft_ms is None
                 ):
                     ttft_ms = self._elapsed_ms(started)
@@ -318,6 +324,7 @@ class HttpSSEDurableChatTransport:
             raise FleetRunRefused("durable stream terminal is missing")
         completion_ms = self._elapsed_ms(started)
         return {
+            "workload": spec.workload,
             "outcome": terminal_cause,
             "ttft_ms": ttft_ms,
             "completion_ms": completion_ms,
@@ -400,7 +407,9 @@ class HttpSSEDurableChatTransport:
         return max(0, round((time.perf_counter() - started) * 1_000))
 
     @classmethod
-    def _refusal(cls, response, started: float) -> Mapping[str, object]:
+    def _refusal(
+        cls, response, started: float, *, workload: str
+    ) -> Mapping[str, object]:
         with response:
             try:
                 payload = response.json()
@@ -412,6 +421,7 @@ class HttpSSEDurableChatTransport:
             raise FleetRunRefused("durable chat refusal is untyped")
         elapsed = cls._elapsed_ms(started)
         return {
+            "workload": workload,
             "outcome": "refused",
             "ttft_ms": elapsed,
             "completion_ms": elapsed,

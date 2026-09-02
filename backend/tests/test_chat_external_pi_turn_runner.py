@@ -404,11 +404,13 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
     socket = FakeSocket(
         [
             '{"type":"worker_ready","worker_sequence":1}',
+            '{"type":"tool_call_start","id":"tool-1","name":"Read",'
+            '"content_index":0,"worker_sequence":2}',
             '{"type":"tool_request","operation_id":"operation-1","tool_call_id":"tool-1",'
-            '"operation":"read","path":"/opt/pwc/PWC_CLI_SKILL.md","offset":0,"max_bytes":1024,"worker_sequence":2}',
-            '{"type":"workspace_ready","worker_sequence":3}',
-            '{"type":"done","finish_reason":"success","followups":[],"worker_sequence":4}',
-            '{"type":"worker_done","status":"complete","worker_sequence":5}',
+            '"operation":"read","path":"/opt/pwc/PWC_CLI_SKILL.md","offset":0,"max_bytes":1024,"worker_sequence":3}',
+            '{"type":"workspace_ready","worker_sequence":4}',
+            '{"type":"done","finish_reason":"success","followups":[],"worker_sequence":5}',
+            '{"type":"worker_done","status":"complete","worker_sequence":6}',
         ]
     )
     turn_id = uuid.uuid4()
@@ -454,13 +456,21 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
     )
 
     async def exercise():
-        events = [event async for event in runner.events()]
+        stream = runner.events()
+        first = await anext(stream)
+        acquired_before_first_event = list(workspace_manager.acquired)
+        events = [first, *[event async for event in stream]]
         await runner.close()
-        return events
+        return events, acquired_before_first_event
 
-    events = asyncio.run(exercise())
+    events, acquired_before_first_event = asyncio.run(exercise())
 
-    assert [event["type"] for event in events] == ["workspace_ready", "done"]
+    assert [event["type"] for event in events] == [
+        "tool_call_start",
+        "workspace_ready",
+        "done",
+    ]
+    assert acquired_before_first_event == []
     assert provider.created == []
     assert provider.terminated == []
     assert workspace_manager.acquired == [

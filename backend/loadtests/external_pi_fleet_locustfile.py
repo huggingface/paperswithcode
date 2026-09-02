@@ -124,6 +124,7 @@ def build_durable_user_specs(profile_name: str) -> tuple[DurableUserSpec, ...]:
 def build_durable_observation(**evidence) -> DurableTurnObservation:
     """Normalize stream evidence without reflecting rejected values."""
     allowed = {
+        "workload",
         "outcome",
         "ttft_ms",
         "completion_ms",
