@@ -977,23 +977,18 @@ def _recover_interrupted_activation(environment: str) -> None:
             raise DeployError("activation journal cannot identify its candidate")
         candidate_release = RELEASES / candidate_release_name
         candidate_manifest = validate_manifest(candidate_release, environment)
-        if environment == "staging":
-            pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
-            validated_orphan_release_ids = frozenset(
-                validate_manifest(release, environment)["release_id"]
-                for release in (pointers.current, pointers.previous)
-                if release is not None
-            )
-            stop_slot_if_enabled(
-                environment,
-                candidate_slot,
-                candidate_manifest["release_id"],
-                validated_orphan_release_ids=validated_orphan_release_ids,
-            )
-        else:
-            stop_slot_if_enabled(
-                environment, candidate_slot, candidate_manifest["release_id"]
-            )
+        pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+        validated_orphan_release_ids = frozenset(
+            validate_manifest(release, environment)["release_id"]
+            for release in (pointers.current, pointers.previous)
+            if release is not None
+        )
+        stop_slot_if_enabled(
+            environment,
+            candidate_slot,
+            candidate_manifest["release_id"],
+            validated_orphan_release_ids=validated_orphan_release_ids,
+        )
         _write_journal(
             environment,
             "candidate-abandoned",

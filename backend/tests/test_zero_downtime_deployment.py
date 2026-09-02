@@ -1832,10 +1832,11 @@ def test_interrupted_candidate_recovery_trusts_only_validated_release_pointers(
     assert phases == ["candidate-abandoned"]
 
 
-def test_interrupted_candidate_recovery_does_not_inspect_pointers_in_production(
+def test_interrupted_candidate_recovery_trusts_validated_pointers_in_production(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
-    _root, _old, candidate, _older = _activation_fixture(tmp_path, monkeypatch)
+    staging_root, old, candidate, older = _activation_fixture(tmp_path, monkeypatch)
+    staging_root.rename(staging_root.parent / "production")
     monkeypatch.setattr(deploy_cli, "RELEASES", tmp_path)
     monkeypatch.setattr(
         deploy_cli,
@@ -1846,20 +1847,21 @@ def test_interrupted_candidate_recovery_does_not_inspect_pointers_in_production(
             "candidate_release": candidate.name,
         },
     )
-    monkeypatch.setattr(
-        deploy_cli,
-        "read_pointers",
-        lambda _root: pytest.fail("production inspected release pointers"),
-    )
-    calls: list[tuple[str, str, str]] = []
-    monkeypatch.setattr(
-        deploy_cli,
-        "stop_slot_if_enabled",
-        lambda environment, slot, release_id: calls.append(
-            (environment, slot, release_id)
-        ),
-    )
+    calls: list[tuple[str, str, str, frozenset[str]]] = []
+
+    def stop(
+        environment: str,
+        slot: str,
+        release_id: str,
+        *,
+        validated_orphan_release_ids: frozenset[str],
+    ) -> None:
+        calls.append((environment, slot, release_id, validated_orphan_release_ids))
+
+    monkeypatch.setattr(deploy_cli, "stop_slot_if_enabled", stop)
 
     deploy_cli._recover_interrupted_activation("production")
 
-    assert calls == [("production", "green", "candidate")]
+    assert calls == [
+        ("production", "green", "candidate", frozenset({old.name, older.name}))
+    ]
