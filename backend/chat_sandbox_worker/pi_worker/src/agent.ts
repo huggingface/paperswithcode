@@ -244,6 +244,23 @@ export class PiWorker {
       return { manager, initialCount: restored.snapshot.entry_count, created: false };
     }
     if (run.agent_session_id) {
+      const bound = await createOrBind(run.agent_session_id, this.gateway);
+      if (bound.agent_session_id !== run.agent_session_id) {
+        throw new Error("Pi prebound session identity mismatch");
+      }
+      if (bound.entry_count > 0) {
+        const restored = await restoreFile(run.agent_session_id, sessionDirectory, this.gateway);
+        const manager = SessionManager.open(restored.file, sessionDirectory, harnessWorkspace);
+        if (
+          manager.getSessionId() !== run.agent_session_id
+          || manager.getLeafId() !== restored.snapshot.current_leaf_id
+        ) {
+          throw new Error("Pi prebound retry restore identity mismatch");
+        }
+        this.manager = manager;
+        this.boundAgentSession = run.agent_session_id;
+        return { manager, initialCount: restored.snapshot.entry_count, created: false };
+      }
       const manager = SessionManager.create(
         harnessWorkspace,
         sessionDirectory,
