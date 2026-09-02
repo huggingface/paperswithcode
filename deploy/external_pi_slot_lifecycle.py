@@ -1200,7 +1200,7 @@ def stop_slot(
             validated_orphan_release_ids=validated_orphan_release_ids,
             draining_specs=orphan_specs,
         )
-    except ExternalPiSlotError as error:
+    except (ExternalPiSlotError, ValueError) as error:
         raise ExternalPiSlotError(
             "external Pi worker did not prove graceful drain"
         ) from error

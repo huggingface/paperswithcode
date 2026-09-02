@@ -1365,6 +1365,23 @@ def test_stop_without_status_proof_accepts_exact_inactive_worker_state(
     ]
 
 
+def test_missing_orphan_token_preserves_lifecycle_error_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "_protected_environment_values", lambda _env: {})
+
+    def run(command, **_kwargs):
+        if command[1] == "show":
+            return SimpleNamespace(returncode=0, stdout="active\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    with pytest.raises(lifecycle.ExternalPiSlotError, match="prove graceful drain"):
+        lifecycle.stop_slot("staging", "green", "new-candidate")
+
+
 def test_disabled_switch_is_a_complete_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
