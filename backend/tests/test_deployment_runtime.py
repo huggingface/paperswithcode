@@ -729,9 +729,9 @@ def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
     slot_launcher.configure_external_pi_slot("staging", slot)
 
     endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
-    assert len(endpoints) == 16
+    assert len(endpoints) == 8
     assert [item["worker_id"] for item in endpoints] == [
-        f"staging-{slot}-{index:02d}" for index in range(16)
+        f"staging-{slot}-{index:02d}" for index in range(8)
     ]
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
@@ -739,7 +739,7 @@ def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "2"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_slot_launcher_binds_isolated_external_pi_worker(
@@ -766,14 +766,6 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
         "http://127.0.0.1:8847",
         "http://127.0.0.1:8848",
         "http://127.0.0.1:8849",
-        "http://127.0.0.1:8870",
-        "http://127.0.0.1:8871",
-        "http://127.0.0.1:8872",
-        "http://127.0.0.1:8873",
-        "http://127.0.0.1:8874",
-        "http://127.0.0.1:8875",
-        "http://127.0.0.1:8876",
-        "http://127.0.0.1:8877",
     ]
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
@@ -781,7 +773,7 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "2"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):

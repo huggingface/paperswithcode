@@ -1846,6 +1846,7 @@ def test_executable_durable_locust_runner_releases_exact_simultaneous_profile(
                 else ((f"op-{spec.ordinal:04d}-1",) if spec.workload == "read" else ())
             )
             return {
+                "workload": spec.workload,
                 "outcome": "completed",
                 "ttft_ms": 100,
                 "completion_ms": 1_000,

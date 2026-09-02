@@ -18,12 +18,17 @@ from pathlib import Path
 
 try:
     from deploy.external_pi_runtime import external_pi_runtime_manifest
-    from deploy.external_pi_slot_topology import ExternalPiReplicaSpec, replica_specs
+    from deploy.external_pi_slot_topology import (
+        ExternalPiReplicaSpec,
+        replica_specs,
+        replica_specs_for_topology,
+    )
 except ModuleNotFoundError:
     from external_pi_runtime import external_pi_runtime_manifest  # type: ignore[no-redef]
     from external_pi_slot_topology import (  # type: ignore[no-redef]
         ExternalPiReplicaSpec,
         replica_specs,
+        replica_specs_for_topology,
     )
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
@@ -47,8 +52,8 @@ ENVIRONMENT_SLOT_PORTS = {
     "production": {"blue": 8776, "green": 8777},
 }
 MAXIMUM_SESSIONS = 32
-PREVIOUS_REPLICA_COUNT = 8
-PREVIOUS_REPLICA_MAXIMUM_SESSIONS = 4
+PREVIOUS_REPLICA_COUNT = 16
+PREVIOUS_REPLICA_MAXIMUM_SESSIONS = 2
 CONTRACT_VERSION = "external-pi-v1"
 DRAIN_SECONDS_MINIMUM = 5
 DRAIN_SECONDS_MAXIMUM = 300
@@ -317,57 +322,29 @@ def _draining_replica_specs(
     environment: str, slot: str, base_token: str, release_id: str
 ) -> tuple[ExternalPiReplicaSpec, ...]:
     current = replica_specs(environment, slot, base_token)
-    paths = tuple(
-        _environment_status_path(environment, spec.worker_id) for spec in current
+    previous = replica_specs_for_topology(
+        environment,
+        slot,
+        base_token,
+        replica_count=PREVIOUS_REPLICA_COUNT,
+        maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS,
     )
-    previous_paths = paths[:PREVIOUS_REPLICA_COUNT]
-    added_paths = paths[PREVIOUS_REPLICA_COUNT:]
-    previous_statuses = _read_replica_statuses(
-        environment, slot, current[:PREVIOUS_REPLICA_COUNT]
-    )
+    current_statuses = _read_replica_statuses(environment, slot, current)
 
-    def previous_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
-        identity_matches = (
+    def current_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
+        return (
             status.get("release_id") == release_id
             and status.get("worker_id") == spec.worker_id
-        )
-        current_contract = (
-            status.get("protocol") == CONTRACT_VERSION
+            and status.get("protocol") == CONTRACT_VERSION
             and type(status.get("maximum_sessions")) is int
-            and status.get("maximum_sessions") == PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+            and status.get("maximum_sessions") == current[0].maximum_sessions
         )
-        legacy_supervisor_contract = (
-            "protocol" not in status
-            and "maximum_sessions" not in status
-            and status.get("authenticated") is True
-            and status.get("registered") is True
-            and type(status.get("generation")) is int
-            and status["generation"] > 0
-            and type(status.get("heartbeats")) is int
-            and status["heartbeats"] >= 1
-            and (
-                (status.get("state") == "ready" and status.get("drained") is False)
-                or (status.get("state") == "offline" and status.get("drained") is True)
-            )
-        )
-        return identity_matches and (current_contract or legacy_supervisor_contract)
 
-    previous_topology_is_proven = all(
-        previous_status_is_proven(status, spec)
-        for status, spec in zip(
-            previous_statuses, current[:PREVIOUS_REPLICA_COUNT], strict=True
-        )
+    current_topology_is_proven = all(
+        current_status_is_proven(status, spec)
+        for status, spec in zip(current_statuses, current, strict=True)
     )
-    if (
-        all(path.is_file() for path in previous_paths)
-        and not any(path.exists() for path in added_paths)
-        and previous_topology_is_proven
-    ):
-        return tuple(
-            replace(spec, maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS)
-            for spec in current[:PREVIOUS_REPLICA_COUNT]
-        )
-    return current
+    return current if current_topology_is_proven else previous
 
 
 def _read_status(environment: str, slot: str) -> dict:
@@ -783,14 +760,10 @@ def _stop_proven_orphaned_worker_if_active(
             raise ExternalPiSlotError("external Pi active worker did not stop")
         return
 
-    current_specs = replica_specs(environment, slot, base_token)
     specs = (
-        current_specs
+        replica_specs(environment, slot, base_token)
         if draining_specs is None
-        else tuple(
-            replace(current, maximum_sessions=selected.maximum_sessions)
-            for current, selected in zip(current_specs, draining_specs, strict=False)
-        )
+        else draining_specs
     )
     for spec in specs:
         request = urllib.request.Request(
@@ -829,11 +802,39 @@ def _stop_proven_orphaned_worker_if_active(
 
 
 def start_slot(environment: str, slot: str) -> None:
-    _status_path(environment, slot).unlink(missing_ok=True)
-    for path in _status_paths(environment, slot):
-        path.unlink(missing_ok=True)
     sync_worker_environment(environment)
-    _stop_proven_orphaned_worker_if_active(environment, slot)
+    worker_is_active = not _worker_is_inactive(environment, slot)
+    if worker_is_active:
+        base_token = _protected_environment_values(environment).get(
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", ""
+        )
+        if len(base_token) < 32:
+            raise ExternalPiSlotError("external Pi worker token is unavailable")
+        primary_status = _read_primary_status(environment, slot)
+        release_id = primary_status.get("release_id")
+        expected_release_id = release_id if isinstance(release_id, str) else None
+        draining_specs = _draining_replica_specs(
+            environment,
+            slot,
+            base_token,
+            expected_release_id or "",
+        )
+        _stop_proven_orphaned_worker_if_active(
+            environment,
+            slot,
+            worker_active_proven=True,
+            expected_release_id=expected_release_id,
+            draining_specs=draining_specs,
+        )
+    _status_path(environment, slot).unlink(missing_ok=True)
+    for spec in replica_specs_for_topology(
+        environment,
+        slot,
+        "x" * 32,
+        replica_count=PREVIOUS_REPLICA_COUNT,
+        maximum_sessions=PREVIOUS_REPLICA_MAXIMUM_SESSIONS,
+    ):
+        _environment_status_path(environment, spec.worker_id).unlink(missing_ok=True)
     subprocess.run(["systemctl", "start", _worker_unit(environment, slot)], check=True)
     try:
         subprocess.run(
@@ -1102,8 +1103,10 @@ def stop_slot(
         subprocess.run(
             ["systemctl", "stop", _worker_unit(environment, slot)], check=True
         )
+        _cleanup_retired_replica_statuses(environment, slot, draining_specs)
         return
     if _worker_is_inactive(environment, slot):
+        _cleanup_retired_replica_statuses(environment, slot, draining_specs)
         return
     try:
         _stop_proven_orphaned_worker_if_active(
@@ -1118,6 +1121,22 @@ def stop_slot(
         raise ExternalPiSlotError(
             "external Pi worker did not prove graceful drain"
         ) from error
+    _cleanup_retired_replica_statuses(environment, slot, draining_specs)
+
+
+def _cleanup_retired_replica_statuses(
+    environment: str,
+    slot: str,
+    draining_specs: tuple[ExternalPiReplicaSpec, ...],
+) -> None:
+    current_worker_ids = {
+        spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
+    }
+    for spec in draining_specs:
+        if spec.worker_id not in current_worker_ids:
+            _environment_status_path(environment, spec.worker_id).unlink(
+                missing_ok=True
+            )
 
 
 def prepare_candidate(environment: str, slot: str, release_id: str) -> int:

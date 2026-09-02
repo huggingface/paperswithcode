@@ -1,4 +1,4 @@
-"""Fixed sixteen-replica topology for release-managed external Pi workers."""
+"""Fixed eight-replica topology for release-managed external Pi workers."""
 
 from __future__ import annotations
 
@@ -7,8 +7,8 @@ import hmac
 import json
 from dataclasses import dataclass
 
-REPLICA_COUNT = 16
-REPLICA_MAXIMUM_SESSIONS = 2
+REPLICA_COUNT = 8
+REPLICA_MAXIMUM_SESSIONS = 4
 
 _SLOT_PORTS = {
     "staging": {
@@ -121,22 +121,46 @@ def _replica_token(base_token: str, worker_id: str) -> str:
 def replica_specs(
     environment: str, slot: str, base_token: str
 ) -> tuple[ExternalPiReplicaSpec, ...]:
+    return replica_specs_for_topology(
+        environment,
+        slot,
+        base_token,
+        replica_count=REPLICA_COUNT,
+        maximum_sessions=REPLICA_MAXIMUM_SESSIONS,
+    )
+
+
+def replica_specs_for_topology(
+    environment: str,
+    slot: str,
+    base_token: str,
+    *,
+    replica_count: int,
+    maximum_sessions: int,
+) -> tuple[ExternalPiReplicaSpec, ...]:
     try:
         ports = _SLOT_PORTS[environment][slot]
     except KeyError as error:
         raise ValueError(
             "external Pi deployment environment or slot is invalid"
         ) from error
+    if (
+        type(replica_count) is not int
+        or type(maximum_sessions) is not int
+        or not 1 <= replica_count <= len(ports)
+        or replica_count * maximum_sessions != 32
+    ):
+        raise ValueError("external Pi deployment topology capacity is invalid")
     return tuple(
         ExternalPiReplicaSpec(
-            instance=replica_instance(slot, index),
+            instance=f"{slot}-{index:02d}",
             endpoint_id=f"{environment}-{slot}-{index:02d}",
             worker_id=f"{environment}-{slot}-{index:02d}",
             port=port,
-            maximum_sessions=REPLICA_MAXIMUM_SESSIONS,
+            maximum_sessions=maximum_sessions,
             token=_replica_token(base_token, f"{environment}-{slot}-{index:02d}"),
         )
-        for index, port in enumerate(ports)
+        for index, port in enumerate(ports[:replica_count])
     )
 
 
@@ -160,4 +184,5 @@ __all__ = (
     "external_pi_endpoints",
     "replica_instance",
     "replica_specs",
+    "replica_specs_for_topology",
 )
