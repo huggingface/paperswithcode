@@ -492,6 +492,7 @@ def test_qualification_provider_limit_covers_two_tools_and_final_answer():
         QUALIFICATION_PROVIDER_TURN_TOKENS,
     )
     assert limits[0] == 3
+    assert limits[1] == 3 * (MAX_REQUEST_BYTES // 4 + 8_000)
 
 
 def test_production_provider_limits_never_query_staging_qualification_tables():
