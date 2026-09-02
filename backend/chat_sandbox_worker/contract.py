@@ -47,7 +47,7 @@ MODAL_IMAGE_ID = "im-IWCAATfR60EZ3FrTGENgEQ"
 # Production uses a distinct immutable image because Modal image IDs are scoped
 # to their environment. It must be published by the restricted production
 # service identity.
-PRODUCTION_MODAL_IMAGE_ID = "im-gWZg59lNVcpcjCSYeE6psd"
+PRODUCTION_MODAL_IMAGE_ID = "im-W71zgTGkrRObP9Ix1MajBp"
 DEFAULT_BACKEND = "modal_cli"
 NEW_CHAT_MODAL_PERCENTAGE = 100
 POSTERLY_SOURCE_COMMIT = "b9f42e5578a49a27525a68f85376bb3bb25af86f"
