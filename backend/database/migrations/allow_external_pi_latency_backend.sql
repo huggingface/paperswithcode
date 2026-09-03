@@ -12,6 +12,12 @@ END $$;
 -- Recording them as 'modal_cli' made finalize() bill the requested sandbox
 -- shape for the whole turn and feed that phantom figure to the Modal spend
 -- circuits. Allow the fleet to be recorded as its own execution backend.
+-- add_chat_turn_latency.sql declared this as an inline column CHECK, so
+-- PostgreSQL auto-named it chat_turn_latency_execution_backend_check. The ORM
+-- model uses chat_turn_latency_backend_check. Drop whichever exists; leaving the
+-- auto-named two-value constraint in place would keep rejecting 'external_pi'.
+ALTER TABLE chat_turn_latency
+    DROP CONSTRAINT IF EXISTS chat_turn_latency_execution_backend_check;
 ALTER TABLE chat_turn_latency
     DROP CONSTRAINT IF EXISTS chat_turn_latency_backend_check;
 

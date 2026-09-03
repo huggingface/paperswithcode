@@ -633,5 +633,13 @@ def test_external_pi_backend_migration_is_environment_scoped():
     ).read_text()
 
     assert "current_schema() NOT IN ('staging', 'public')" in migration
-    assert "chat_turn_latency_backend_check" in migration
+    # The deployed constraint is the auto-named inline CHECK from
+    # add_chat_turn_latency.sql, not the ORM's explicit name. Dropping only the
+    # ORM name is a silent no-op that leaves the two-value check enforced.
+    assert (
+        "DROP CONSTRAINT IF EXISTS chat_turn_latency_execution_backend_check"
+        in migration
+    )
+    assert "DROP CONSTRAINT IF EXISTS chat_turn_latency_backend_check" in migration
+    assert "ADD CONSTRAINT chat_turn_latency_backend_check" in migration
     assert "'external_pi'" in migration
