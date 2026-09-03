@@ -262,6 +262,51 @@ def test_candidate_requires_authenticated_durable_lifecycle_evidence(
         )
 
 
+def test_qualification_budget_covers_the_supervisor_startup_and_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A supervisor may use its whole startup timeout to register and then a
+    # further heartbeat interval before the first heartbeat is recorded. The
+    # previous fixed 65s ceiling was below that 70s worst case, so a loaded
+    # host failed qualification with registered=True and heartbeats=0.
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "60",
+            "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": "10",
+        },
+    )
+    budget = lifecycle.protected_qualification_timeout_seconds("staging")
+
+    assert budget > 60 + 10
+    assert budget == 60 + 2 * 10 + lifecycle.QUALIFICATION_MARGIN_SECONDS
+
+
+def test_qualification_budget_rejects_out_of_bounds_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "not-a-number",
+        },
+    )
+    with pytest.raises(ValueError, match="must be numeric"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
+
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "900",
+        },
+    )
+    with pytest.raises(ValueError, match="protected bounds"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
+
+
 def test_qualification_proves_drain_and_restart_generation(
     monkeypatch: pytest.MonkeyPatch,
 ):
