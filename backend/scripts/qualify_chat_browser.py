@@ -496,10 +496,6 @@ def main() -> int:
         != settings.chat_effective_pi_prewarm_model
     ):
         raise SystemExit("selected model must match the staging Pi prewarm profile")
-    if args.reasoning_effort != settings.chat_pi_prewarm_reasoning_effort:
-        raise SystemExit(
-            "selected reasoning effort must match the staging Pi prewarm profile"
-        )
     token = _encode_legacy_session(
         {
             "sub": args.admin_subject,

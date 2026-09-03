@@ -411,7 +411,7 @@ def test_persistent_assignment_rejects_generation_token_and_session_mismatch(
         )
 
 
-def test_prewarmed_pi_assignment_rejects_harness_model_and_reasoning_mismatch(
+def test_prewarmed_pi_assignment_rejects_harness_and_model_mismatch_only(
     monkeypatch,
 ):
     monkeypatch.setenv("PWC_CHAT_GATEWAY_URL", "https://gateway.example.test")
@@ -460,13 +460,16 @@ def test_prewarmed_pi_assignment_rejects_harness_model_and_reasoning_mismatch(
             assigned_session_id=None,
             assigned_agent_harness=None,
         )
-    with pytest.raises(RuntimeError, match="incompatible reasoning"):
-        control_daemon._validate_assignment(
+    # The prewarmed provider handle is keyed on model and protocol only. Pi
+    # applies the thinking level per turn, so a blank prewarmed at "low"
+    # serves "high" and "max" without a cold start.
+    for effort in ("high", "max"):
+        assert control_daemon._validate_assignment(
             launch,
-            {**run, "reasoning_effort": "high"},
+            {**run, "reasoning_effort": effort},
             assigned_session_id=None,
             assigned_agent_harness=None,
-        )
+        ) == (session_id, "pi")
 
 
 def test_persistent_health_probe_requires_idle_children_and_empty_broker(
@@ -3367,7 +3370,9 @@ def test_prompt_and_manifest_share_six_round_contract():
         "user asks\nfor a visual explanation or visualization."
     )
     assert visual_instruction in prompt
-    assert "Use Read only in `/workspace`" in prompt
+    assert "use Read only in\n`/workspace`" in prompt
+    assert "already included\nverbatim later in this system prompt" in prompt
+    assert "Never read, `cat`,\nor otherwise open `/opt/pwc/PWC_CLI_SKILL.md`" in prompt
     assert "HF access is anonymous-only" in prompt
     assert "fix the JSON and call `create_view` once more" in prompt
     assert prompt.index("## Tool usage") < prompt.index(visual_instruction)

@@ -25,7 +25,7 @@ CONFIRMATION = "QUALIFY_STAGING_CHAT_LATENCY"
 PROMPT = "Reply with one concise acknowledgement."
 
 
-async def _wait_for_blank(release, *, model: str, reasoning_effort: str) -> None:
+async def _wait_for_blank(release, *, model: str) -> None:
     deadline = time.monotonic() + 45
     while time.monotonic() < deadline:
         with db_manager.session_local() as db:
@@ -40,7 +40,6 @@ async def _wait_for_blank(release, *, model: str, reasoning_effort: str) -> None
                         ChatSandboxPool.worker_contract_version
                         == release.chat_worker_contract_version,
                         ChatSandboxPool.model_profile == model,
-                        ChatSandboxPool.reasoning_profile == reasoning_effort,
                     )
                 )
                 or 0
@@ -96,7 +95,7 @@ async def qualify(
     run_id = uuid.uuid4().hex[:12]
     request_ids: list[str] = []
     for index in range(sessions):
-        await _wait_for_blank(release, model=model, reasoning_effort=reasoning_effort)
+        await _wait_for_blank(release, model=model)
         subject = f"latency-gate-{run_id}-{index}"
         auth = _encode_legacy_session({"sub": subject, "username": subject})
         billing = encrypt_token(environment.hf_token, subject, environment)
