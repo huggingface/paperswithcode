@@ -210,3 +210,92 @@ def test_supervisor_reports_an_incomplete_drain_without_marking_offline():
         )
 
     repository.mark_offline.assert_not_called()
+
+
+def test_supervisor_reclaims_an_idle_drained_worker_after_restart():
+    # A drained worker never returns to "ready" on its own, so refusing to
+    # register one turned a single supervisor restart into a permanent crash
+    # loop that systemd could not escape.
+    client = Mock(
+        status=AsyncMock(return_value=_status(state="draining", worker_generation=3)),
+        bind_claim=AsyncMock(return_value=_status(state="ready", worker_generation=4)),
+    )
+    repository = Mock()
+    claim = ExternalWorkerClaim(
+        "worker-1",
+        uuid.UUID("10000000-0000-4000-8000-000000000001"),
+        4,
+        "release-a",
+        "external-pi-v1",
+    )
+    repository.register.return_value = claim
+    supervisor = ChatExternalPiSupervisor(
+        client=client,
+        repository=repository,
+        expected_release_id="release-a",
+        expected_contract_version="external-pi-v1",
+        expected_maximum_sessions=8,
+    )
+
+    registered = asyncio.run(
+        supervisor.register(Mock(), now=datetime(2026, 8, 26, 12, tzinfo=UTC))
+    )
+
+    assert registered == claim
+    client.bind_claim.assert_awaited_once_with(4)
+
+
+def test_supervisor_refuses_a_drained_worker_that_still_owns_sessions():
+    client = Mock(
+        status=AsyncMock(
+            return_value=_status(
+                state="draining", active_sessions=1, worker_generation=3
+            )
+        ),
+        bind_claim=AsyncMock(),
+    )
+    repository = Mock()
+    supervisor = ChatExternalPiSupervisor(
+        client=client,
+        repository=repository,
+        expected_release_id="release-a",
+        expected_contract_version="external-pi-v1",
+        expected_maximum_sessions=8,
+    )
+
+    with pytest.raises(ExternalPiWorkerMismatch, match="identity or compatibility"):
+        asyncio.run(
+            supervisor.register(Mock(), now=datetime(2026, 8, 26, 12, tzinfo=UTC))
+        )
+
+    repository.register.assert_not_called()
+    client.bind_claim.assert_not_awaited()
+
+
+def test_supervisor_requires_the_reclaimed_worker_to_report_ready():
+    client = Mock(
+        status=AsyncMock(return_value=_status(state="draining", worker_generation=3)),
+        bind_claim=AsyncMock(
+            return_value=_status(state="draining", worker_generation=4)
+        ),
+    )
+    repository = Mock()
+    repository.register.return_value = ExternalWorkerClaim(
+        "worker-1",
+        uuid.UUID("10000000-0000-4000-8000-000000000001"),
+        4,
+        "release-a",
+        "external-pi-v1",
+    )
+    supervisor = ChatExternalPiSupervisor(
+        client=client,
+        repository=repository,
+        expected_release_id="release-a",
+        expected_contract_version="external-pi-v1",
+        expected_maximum_sessions=8,
+    )
+
+    with pytest.raises(ExternalPiWorkerMismatch, match="identity or compatibility"):
+        asyncio.run(
+            supervisor.register(Mock(), now=datetime(2026, 8, 26, 12, tzinfo=UTC))
+        )
