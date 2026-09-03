@@ -499,6 +499,32 @@ def drain_stop_timeout_seconds(environment: str) -> float:
     )
 
 
+QUALIFICATION_MARGIN_SECONDS = 20
+
+
+def protected_qualification_timeout_seconds(environment: str) -> float:
+    """Bound candidate qualification by the supervisor's own startup budget.
+
+    A supervisor may spend its entire startup timeout registering and then a
+    further heartbeat interval before it records the first heartbeat that
+    qualification requires. A fixed ceiling below that sum can never pass on a
+    loaded host, so derive the deadline from the same protected configuration.
+    """
+    values = _protected_environment_values(environment)
+    raw_startup = values.get("PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS", "60")
+    raw_heartbeat = values.get("PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS", "10")
+    try:
+        startup_seconds = int(raw_startup)
+        heartbeat_seconds = float(raw_heartbeat)
+    except ValueError as error:
+        raise ValueError("external Pi startup configuration must be numeric") from error
+    if not 5 <= startup_seconds <= 300:
+        raise ValueError("external Pi startup seconds are outside protected bounds")
+    if not 1 <= heartbeat_seconds <= 30:
+        raise ValueError("external Pi heartbeat seconds are outside protected bounds")
+    return startup_seconds + 2 * heartbeat_seconds + QUALIFICATION_MARGIN_SECONDS
+
+
 def protected_lease_seconds(environment: str) -> int:
     raw = _protected_environment_values(environment).get(
         "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS", "30"
@@ -917,8 +943,10 @@ def qualify_candidate(
     slot: str,
     release_id: str,
     *,
-    timeout_seconds: float = 65,
+    timeout_seconds: float | None = None,
 ) -> int:
+    if timeout_seconds is None:
+        timeout_seconds = protected_qualification_timeout_seconds(environment)
     deadline = time.monotonic() + timeout_seconds
     last: tuple[dict, ...] = ()
     worker_ids = tuple(
