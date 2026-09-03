@@ -15,6 +15,7 @@ from backend.services.chat_capability_service import (
     IssuedCapability,
 )
 from backend.services.chat_external_pi_turn_runner import ExternalPiChatTurnRunner
+from backend.services.chat_latency_service import ChatLatencyService
 from backend.services.chat_durable_lifecycle_observer import (
     durable_lifecycle_observer,
 )
@@ -261,6 +262,10 @@ def create_chat_turn_runner(
             scopes.add("paper")
         if uses_external_pi:
             scopes.add("external_turn")
+            # Admission recorded the Modal sandbox shape because routing is only
+            # resolved here. Correct it before the turn is billed for compute it
+            # never uses.
+            ChatLatencyService(db).mark_external_pi(request_id)
         capability = ChatCapabilityService(db).issue(
             chat_session_id=admission.session_id,
             turn_id=admission.turn_id,

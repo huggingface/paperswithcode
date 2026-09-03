@@ -3966,7 +3966,7 @@ class ChatTurnLatency(Base):
             name="chat_turn_latency_traffic_class_check",
         ),
         CheckConstraint(
-            "execution_backend IN ('local_mcp','modal_cli')",
+            "execution_backend IN ('local_mcp','modal_cli','external_pi')",
             name="chat_turn_latency_backend_check",
         ),
         CheckConstraint(
