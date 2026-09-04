@@ -1582,7 +1582,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         str(resolved.entry_point),
     ]
     assert len(executed["commands"]) == 8
-    assert executed["launch_interval_seconds"] == 0.5
+    assert executed["launch_interval_seconds"] == 5.0
     assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",

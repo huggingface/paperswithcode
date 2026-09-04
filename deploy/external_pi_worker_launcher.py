@@ -22,7 +22,11 @@ except ModuleNotFoundError:
     from process_fleet import run_process_fleet  # type: ignore[no-redef]
 
 
-WORKER_LAUNCH_INTERVAL_SECONDS = 0.5
+# Pi's dependency graph briefly consumes substantially more memory while Node
+# initializes it than after the worker settles.  Keep candidate fleets within
+# the host's blue/green memory envelope by allowing each replica to finish its
+# startup peak before launching the next one.
+WORKER_LAUNCH_INTERVAL_SECONDS = 5.0
 
 
 def main() -> None:
