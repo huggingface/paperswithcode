@@ -1976,6 +1976,7 @@ def reap(args: argparse.Namespace) -> int:
             args.environment,
             draining,
             validate_manifest(draining_release, args.environment)["release_id"],
+            allow_orphaned_turn_reap=True,
         )
         pointers = read_pointers(ENVIRONMENTS_ROOT / args.environment)
         _write_journal(

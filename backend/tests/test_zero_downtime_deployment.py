@@ -1062,8 +1062,13 @@ def _reap_fixture(
     monkeypatch.setattr(
         deploy_cli,
         "stop_slot_if_enabled",
-        lambda environment, slot, release_id: events.append(
-            ("external", environment, f"{slot}:{release_id}")
+        lambda environment, slot, release_id, **kwargs: events.append(
+            (
+                "external",
+                environment,
+                f"{slot}:{release_id}",
+                kwargs.get("allow_orphaned_turn_reap"),
+            )
         ),
     )
     monkeypatch.setattr(
@@ -1087,7 +1092,7 @@ def test_reap_stops_drained_backend_before_its_external_worker(
     assert deploy_cli.reap(SimpleNamespace(environment="staging")) == 0
     assert events == [
         ("backend", "staging", "green"),
-        ("external", "staging", "green:previous"),
+        ("external", "staging", "green:previous", True),
     ]
 
 
@@ -1097,7 +1102,7 @@ def test_reap_finishes_external_cleanup_when_backend_is_already_stopped(
     events = _reap_fixture(tmp_path, monkeypatch, backend_running=False)
 
     assert deploy_cli.reap(SimpleNamespace(environment="staging")) == 0
-    assert events == [("external", "staging", "green:previous")]
+    assert events == [("external", "staging", "green:previous", True)]
 
 
 def test_initial_slot_bridge_qualifies_shadow_before_activation(

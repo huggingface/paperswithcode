@@ -77,6 +77,7 @@ OPERATION_COUNTER_NAMES = (
     "billing_events",
 )
 LEASE_EXPIRY_CLOCK_SKEW_SECONDS = 5
+ORPHANED_TURN_PROBE_SECONDS = 5
 
 _SUPERVISOR_PROTECTED_KEYS = (
     "PWC_DB_HOST",
@@ -662,6 +663,69 @@ def _expired_database_worker_is_proven(
     )
 
 
+def _orphaned_draining_turns_are_proven(
+    first_status: object,
+    second_status: object,
+    database_status: object,
+    *,
+    trusted_release_ids: frozenset[str],
+) -> bool:
+    """Prove a retired worker's non-terminal turn registry is unreachable."""
+    if not (
+        isinstance(first_status, dict)
+        and isinstance(second_status, dict)
+        and isinstance(database_status, dict)
+        and first_status == second_status
+    ):
+        return False
+    counters = first_status.get("operation_counters")
+    active_sessions = first_status.get("active_sessions")
+    generation = first_status.get("worker_generation")
+    release_id = first_status.get("release_id")
+    maximum_sessions = first_status.get("maximum_sessions")
+    worker_id = first_status.get("worker_id")
+    instance_id = first_status.get("instance_id")
+    endpoint_identity_matches = (
+        first_status.get("protocol") == CONTRACT_VERSION
+        and release_id in trusted_release_ids
+        and first_status.get("state") == "draining"
+        and type(generation) is int
+        and generation > 0
+        and isinstance(instance_id, str)
+        and bool(instance_id)
+    )
+    endpoint_activity_is_stable = (
+        type(active_sessions) is int
+        and type(maximum_sessions) is int
+        and 0 < active_sessions <= maximum_sessions
+        and isinstance(counters, dict)
+        and set(counters) == set(OPERATION_COUNTER_NAMES)
+        and all(
+            type(counters[name]) is int and counters[name] >= 0 for name in counters
+        )
+    )
+    database_identity_matches = (
+        database_status.get("worker_id") == worker_id
+        and database_status.get("instance_id") == instance_id
+        and database_status.get("release_id") == release_id
+        and database_status.get("contract_version") == CONTRACT_VERSION
+        and database_status.get("generation") == generation
+        and database_status.get("maximum_sessions") == maximum_sessions
+        and database_status.get("active_sessions") == active_sessions
+    )
+    database_owner_is_expired = (
+        database_status.get("state") == "draining"
+        and database_status.get("lease_expired") is True
+        and database_status.get("reservation_free") is True
+    )
+    return bool(
+        endpoint_identity_matches
+        and endpoint_activity_is_stable
+        and database_identity_matches
+        and database_owner_is_expired
+    )
+
+
 def _read_database_worker_statuses(environment: str, slot: str) -> dict[str, dict]:
     if environment not in ENVIRONMENT_SLOT_PORTS or slot not in {"blue", "green"}:
         raise ValueError("external Pi deployment slot is invalid")
@@ -670,6 +734,7 @@ def _read_database_worker_statuses(environment: str, slot: str) -> dict[str, dic
     query = f"""
 SELECT json_build_object(
     'worker_id', w.worker_id,
+    'instance_id', w.instance_id,
     'release_id', w.release_id,
     'contract_version', w.contract_version,
     'generation', w.generation,
@@ -764,6 +829,7 @@ def _stop_proven_orphaned_worker_if_active(
     expected_release_id: str | None = None,
     validated_orphan_release_ids: frozenset[str] = frozenset(),
     draining_specs: tuple[ExternalPiReplicaSpec, ...] | None = None,
+    allow_orphaned_turn_reap: bool = False,
 ) -> None:
     if not worker_active_proven and _worker_is_inactive(environment, slot):
         return
@@ -889,6 +955,7 @@ def _stop_proven_orphaned_worker_if_active(
         )
         if selected_identity != authenticated_identity:
             raise ExternalPiSlotError("external Pi drain topology is invalid")
+    orphan_candidates: list[tuple[ExternalPiReplicaSpec, dict]] = []
     for spec in specs:
         try:
             status = _worker_status(spec)
@@ -901,12 +968,58 @@ def _stop_proven_orphaned_worker_if_active(
             durable_status = json.loads(status_path.read_text(encoding="utf-8"))
         except (FileNotFoundError, json.JSONDecodeError):
             durable_status = {}
-        if not safe_status(
+        if safe_status(
             status,
             spec.worker_id,
             spec.maximum_sessions,
             durable_status,
             status_path,
+        ):
+            continue
+        if (
+            allow_orphaned_turn_reap
+            and _backend_slot_is_inactive(environment, slot)
+            and isinstance(status, dict)
+            and status.get("state") == "draining"
+            and type(status.get("active_sessions")) is int
+            and status["active_sessions"] > 0
+        ):
+            orphan_candidates.append((spec, status))
+            continue
+        raise ExternalPiSlotError(
+            "external Pi active worker is not proven safe to restart"
+        )
+    if orphan_candidates:
+        time.sleep(ORPHANED_TURN_PROBE_SECONDS)
+        second_statuses: dict[str, dict] = {}
+        for spec, first_status in orphan_candidates:
+            try:
+                second_statuses[spec.worker_id] = _worker_status(spec)
+            except (OSError, ValueError, urllib.error.URLError) as error:
+                raise ExternalPiSlotError(
+                    "external Pi active worker status is unavailable"
+                ) from error
+        if not (
+            _supervisor_is_inactive(environment, slot)
+            and _backend_slot_is_inactive(environment, slot)
+        ):
+            raise ExternalPiSlotError(
+                "external Pi active worker is not proven safe to restart"
+            )
+        database_statuses = _read_database_worker_statuses(environment, slot)
+        for spec, first_status in orphan_candidates:
+            if not _orphaned_draining_turns_are_proven(
+                first_status,
+                second_statuses[spec.worker_id],
+                database_statuses.get(spec.worker_id, {}),
+                trusted_release_ids=trusted_release_ids,
+            ):
+                raise ExternalPiSlotError(
+                    "external Pi active worker is not proven safe to restart"
+                )
+        if not (
+            _supervisor_is_inactive(environment, slot)
+            and _backend_slot_is_inactive(environment, slot)
         ):
             raise ExternalPiSlotError(
                 "external Pi active worker is not proven safe to restart"
@@ -1181,12 +1294,20 @@ def _supervisor_is_inactive(environment: str, slot: str) -> bool:
     return _unit_is_inactive(_supervisor_unit(environment, slot))
 
 
+def _backend_slot_is_inactive(environment: str, slot: str) -> bool:
+    prefix = f"paperswithcode-{environment}-backend@{slot}"
+    return _unit_is_inactive(f"{prefix}.service") and _unit_is_inactive(
+        f"{prefix}.socket"
+    )
+
+
 def stop_slot(
     environment: str,
     slot: str,
     release_id: str,
     *,
     validated_orphan_release_ids: frozenset[str] = frozenset(),
+    allow_orphaned_turn_reap: bool = False,
 ) -> None:
     timeout_seconds = drain_stop_timeout_seconds(environment)
     draining_specs = _draining_replica_specs(
@@ -1251,6 +1372,7 @@ def stop_slot(
             expected_release_id=release_id,
             validated_orphan_release_ids=validated_orphan_release_ids,
             draining_specs=orphan_specs,
+            allow_orphaned_turn_reap=allow_orphaned_turn_reap,
         )
     except (ExternalPiSlotError, ValueError) as error:
         raise ExternalPiSlotError(
@@ -1333,6 +1455,7 @@ def stop_slot_if_enabled(
     release_id: str,
     *,
     validated_orphan_release_ids: frozenset[str] = frozenset(),
+    allow_orphaned_turn_reap: bool = False,
 ) -> bool:
     if not lifecycle_enabled(environment):
         return False
@@ -1341,5 +1464,6 @@ def stop_slot_if_enabled(
         slot,
         release_id,
         validated_orphan_release_ids=validated_orphan_release_ids,
+        allow_orphaned_turn_reap=allow_orphaned_turn_reap,
     )
     return True

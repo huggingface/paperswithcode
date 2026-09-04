@@ -2105,6 +2105,7 @@ def test_expired_database_lease_proves_used_idle_worker_is_expired():
     }
     database_status = {
         "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
         "release_id": "old-release",
         "contract_version": "external-pi-v1",
         "generation": 5,
@@ -2120,6 +2121,253 @@ def test_expired_database_lease_proves_used_idle_worker_is_expired():
         database_status,
         trusted_release_ids=frozenset({"old-release"}),
     )
+
+
+def test_expired_database_lease_proves_stable_draining_turns_are_orphaned():
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": "draining",
+        "active_sessions": 3,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {
+            "shadow_requests": 0,
+            "model_calls": 381,
+            "tool_calls": 0,
+            "provider_calls": 0,
+            "modal_calls": 0,
+            "billing_events": 0,
+        },
+    }
+    database_status = {
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 7,
+        "state": "draining",
+        "maximum_sessions": 4,
+        "active_sessions": 3,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+
+    assert lifecycle._orphaned_draining_turns_are_proven(
+        endpoint,
+        endpoint.copy(),
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "unsafe_value"),
+    (
+        ("first", "state", "ready"),
+        ("second", "active_sessions", 2),
+        ("second", "operation_counters", {"model_calls": 382}),
+        ("database", "lease_expired", False),
+        ("database", "reservation_free", False),
+        ("database", "active_sessions", 2),
+        ("database", "instance_id", "00000000-0000-0000-0000-000000000002"),
+    ),
+)
+def test_orphaned_draining_turn_proof_rejects_live_or_changing_work(
+    target: str,
+    field: str,
+    unsafe_value: object,
+):
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": "draining",
+        "active_sessions": 3,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {
+            "shadow_requests": 0,
+            "model_calls": 381,
+            "tool_calls": 0,
+            "provider_calls": 0,
+            "modal_calls": 0,
+            "billing_events": 0,
+        },
+    }
+    first = endpoint.copy()
+    second = endpoint.copy()
+    database_status = {
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 7,
+        "state": "draining",
+        "maximum_sessions": 4,
+        "active_sessions": 3,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+    selected = {"first": first, "second": second, "database": database_status}
+    selected[target][field] = unsafe_value
+
+    assert not lifecycle._orphaned_draining_turns_are_proven(
+        first,
+        second,
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
+@pytest.mark.parametrize("backend_inactive", (True, False))
+def test_only_an_inactive_backend_allows_orphaned_draining_turns_to_stop(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_inactive: bool,
+):
+    worker_active = True
+
+    def worker_is_inactive(*_args):
+        return not worker_active
+
+    monkeypatch.setattr(lifecycle, "_worker_is_inactive", worker_is_inactive)
+    monkeypatch.setattr(lifecycle, "_supervisor_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(
+        lifecycle, "_backend_slot_is_inactive", lambda *_args: backend_inactive
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32,
+            "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+        },
+    )
+    specs = lifecycle.replica_specs("production", "blue", "t" * 32)
+    statuses = {
+        spec.worker_id: {
+            "protocol": "external-pi-v1",
+            "worker_id": spec.worker_id,
+            "instance_id": f"00000000-0000-0000-0000-{index:012d}",
+            "release_id": "old-release",
+            "state": "draining",
+            "active_sessions": 3 if index == 0 else 0,
+            "maximum_sessions": 4,
+            "worker_generation": 7,
+            "operation_counters": {
+                "shadow_requests": 0,
+                "model_calls": 381 if index == 0 else 0,
+                "tool_calls": 0,
+                "provider_calls": 0,
+                "modal_calls": 0,
+                "billing_events": 0,
+            },
+        }
+        for index, spec in enumerate(specs)
+    }
+    database_statuses = {
+        spec.worker_id: {
+            "worker_id": spec.worker_id,
+            "instance_id": statuses[spec.worker_id]["instance_id"],
+            "release_id": "old-release",
+            "contract_version": "external-pi-v1",
+            "generation": 7,
+            "state": "draining",
+            "maximum_sessions": 4,
+            "active_sessions": statuses[spec.worker_id]["active_sessions"],
+            "lease_expired": True,
+            "reservation_free": True,
+        }
+        for spec in specs
+    }
+    commands: list[list[str]] = []
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        lifecycle, "_worker_status", lambda spec: statuses[spec.worker_id].copy()
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_read_database_worker_statuses",
+        lambda *_args: database_statuses,
+    )
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+
+    def run(command, **_kwargs):
+        nonlocal worker_active
+        commands.append(command)
+        if command[:2] == ["systemctl", "stop"]:
+            worker_active = False
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    def invocation():
+        lifecycle._stop_proven_orphaned_worker_if_active(
+            "production",
+            "blue",
+            worker_active_proven=True,
+            expected_release_id="old-release",
+            draining_specs=specs,
+            allow_orphaned_turn_reap=True,
+        )
+
+    if backend_inactive:
+        invocation()
+        assert commands == [
+            [
+                "systemctl",
+                "stop",
+                "paperswithcode-production-external-pi-worker@blue.service",
+            ]
+        ]
+    else:
+        with pytest.raises(
+            lifecycle.ExternalPiSlotError, match="not proven safe to restart"
+        ):
+            invocation()
+        assert commands == []
+    assert sleeps == ([5] if backend_inactive else [])
+
+
+def test_orphaned_draining_turns_are_reap_only(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(lifecycle, "_worker_is_inactive", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_supervisor_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(lifecycle, "_backend_slot_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32,
+            "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+        },
+    )
+    specs = lifecycle.replica_specs("production", "blue", "t" * 32)
+    status = {
+        "protocol": "external-pi-v1",
+        "worker_id": specs[0].worker_id,
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": "draining",
+        "active_sessions": 1,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {name: 0 for name in lifecycle.OPERATION_COUNTER_NAMES},
+    }
+    monkeypatch.setattr(lifecycle, "_worker_status", lambda _spec: status)
+
+    with pytest.raises(
+        lifecycle.ExternalPiSlotError, match="not proven safe to restart"
+    ):
+        lifecycle._stop_proven_orphaned_worker_if_active(
+            "production",
+            "blue",
+            worker_active_proven=True,
+            expected_release_id="old-release",
+            draining_specs=specs,
+        )
 
 
 def test_stop_slot_cleans_exact_unclaimed_request_free_worker(
