@@ -35,6 +35,21 @@ test("enforces tool, path, search, timeout, and output bounds", () => {
   assert.match(noWrite.authorize("x", "write", {}) ?? "", /not available/iu);
 });
 
+test("rejects reads of CLI skills that are already embedded in the system prompt", () => {
+  for (const path of [
+    "/opt/pwc/PWC_CLI_SKILL.md",
+    "/opt/pwc/S2_CLI_SKILL.md",
+    "/opt/pwc/HF_CLI_SKILL.md",
+  ]) {
+    const value = policy();
+    value.reset(false, "prompt with embedded CLI skills");
+    assert.match(
+      value.authorize(`read-${path}`, "read", { path }) ?? "",
+      /already included verbatim in your system prompt/iu,
+    );
+  }
+});
+
 test("counts s2 search against the shared catalog search limit", () => {
   const value = policy();
   value.reset(false);

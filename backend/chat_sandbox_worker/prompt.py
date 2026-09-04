@@ -325,18 +325,13 @@ def render(
             else ""
         ),
     )
-    # Pi exposes the complete CLI references as allowlisted Read targets. Do
-    # not duplicate those large, static appendices in every provider request:
-    # under a full concurrent fleet, repeatedly parsing them delays dispatch.
-    # The legacy harness still receives the historical self-contained prompt.
-    if agent_harness != "pi":
-        prompt += (
-            f"\n\n{TASK_CATALOG_START}\n{catalog_text.rstrip()}\n{TASK_CATALOG_END}"
-            f"\n\n{method_catalog_text}"
-            f"\n\n# pwc CLI skill\n\n{guide_text}"
-            f"\n\n# s2 CLI skill\n\n{s2_guide_text}"
-            f"\n\n# restricted hf CLI skill\n\n{hf_guide_text}"
-        )
+    prompt += (
+        f"\n\n{TASK_CATALOG_START}\n{catalog_text.rstrip()}\n{TASK_CATALOG_END}"
+        f"\n\n{method_catalog_text}"
+        f"\n\n# pwc CLI skill\n\n{guide_text}"
+        f"\n\n# s2 CLI skill\n\n{s2_guide_text}"
+        f"\n\n# restricted hf CLI skill\n\n{hf_guide_text}"
+    )
     return (
         prompt
         + (

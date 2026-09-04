@@ -230,11 +230,11 @@ class ChatSandboxPoolRepository:
                 if pi_prewarm
                 else "generic"
             ),
-            # The prewarmed state is the provider handle, which is keyed on
-            # model and protocol only. Pi applies the thinking level per turn
-            # when it creates the agent session, so a blank serves every
-            # reasoning effort for its model.
-            reasoning_profile="any" if pi_prewarm else "generic",
+            reasoning_profile=(
+                self.settings.chat_pi_prewarm_reasoning_effort
+                if pi_prewarm
+                else "generic"
+            ),
             prompt_digest=(
                 self.settings.chat_system_prompt_sha256 if pi_prewarm else "generic"
             ),

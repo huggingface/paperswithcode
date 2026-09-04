@@ -491,6 +491,8 @@ class ChatSandboxTurnCoordinator:
             and (
                 request.agent_harness != "pi"
                 or request.model != self.settings.chat_effective_pi_prewarm_model
+                or request.reasoning_effort
+                != self.settings.chat_pi_prewarm_reasoning_effort
             )
         )
         return await self.acquisition.acquire(

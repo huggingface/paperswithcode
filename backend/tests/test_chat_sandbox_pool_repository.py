@@ -170,8 +170,7 @@ def test_pi_prewarm_compatibility_is_exact_and_generic_pool_remains_rollback_saf
     assert prewarmed.agent_harness == "pi"
     assert prewarmed.agent_harness_version == "pi-v2"
     assert prewarmed.model_profile == "deepseek/profile"
-    # Reasoning effort is applied per turn, so one blank serves every effort.
-    assert prewarmed.reasoning_profile == "any"
+    assert prewarmed.reasoning_profile == "low"
     assert prewarmed.prompt_digest == "a" * 64
     assert prewarmed.provider_adapter_contract == "adapter-v2"
 

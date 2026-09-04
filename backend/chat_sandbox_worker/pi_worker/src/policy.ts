@@ -12,10 +12,12 @@ const ANSWER_NOW =
   "Execution limit reached. Do not call more tools. Answer now from the evidence already gathered.";
 const SEARCH = /(?:^|[;&|()\n]\s*)(?:pwc|s2)\s+search(?:\s|$)/iu;
 const ANSI = /(?:\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~])/gu;
-const GUIDES = new Set([
+const INLINED_CLI_GUIDES = new Set([
   "/opt/pwc/PWC_CLI_SKILL.md",
   "/opt/pwc/HF_CLI_SKILL.md",
   "/opt/pwc/S2_CLI_SKILL.md",
+]);
+const READABLE_GUIDES = new Set([
   "/opt/posterly/SKILL.md",
   "/opt/pwc/POSTERLY_PUBLISH.md",
   "/opt/pwc/PAPER_AUTHORING.md",
@@ -169,7 +171,13 @@ export class PolicyController {
     if (name === "read") {
       const requested = typeof input.path === "string" ? input.path : "";
       const resolved = path.resolve("/workspace", requested);
-      if (!inside(resolved, "/workspace") && !GUIDES.has(resolved)) {
+      if (INLINED_CLI_GUIDES.has(resolved)) {
+        return this.deny(
+          id,
+          "The pwc, s2, and restricted hf CLI skills are already included verbatim in your system prompt. Read that text instead and run the CLI directly.",
+        );
+      }
+      if (!inside(resolved, "/workspace") && !READABLE_GUIDES.has(resolved)) {
         return this.deny(id, "Read may only access /workspace or the approved CLI guides.");
       }
     }
