@@ -373,6 +373,39 @@ def _draining_replica_specs(
     return previous
 
 
+WORKER_BIND_GRACE_SECONDS = 30
+WORKER_BIND_POLL_SECONDS = 0.5
+
+
+def _worker_status(spec: ExternalPiReplicaSpec) -> dict:
+    """Read one worker's status, tolerating the window before it binds.
+
+    The worker unit is Type=simple, so systemd reports it active as soon as it
+    execs while the Node process is still loading the Pi runtime and has not
+    bound its port. A single attempt turns that normal startup window into a
+    refused connection that fails the whole deployment, so retry connection
+    errors until the worker binds. A malformed or oversized payload is a real
+    fault and is never retried.
+    """
+    request = urllib.request.Request(
+        f"http://127.0.0.1:{spec.port}/v1/status",
+        headers={"Authorization": f"Bearer {spec.token}"},
+        method="GET",
+    )
+    deadline = time.monotonic() + WORKER_BIND_GRACE_SECONDS
+    while True:
+        try:
+            with urllib.request.urlopen(request, timeout=5) as response:
+                payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
+                if len(payload) > MAXIMUM_WORKER_STATUS_BYTES:
+                    raise ValueError("external Pi worker status is too large")
+                return json.loads(payload)
+        except (OSError, urllib.error.URLError):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(WORKER_BIND_POLL_SECONDS)
+
+
 def _read_status(environment: str, slot: str) -> dict:
     path = _status_path(environment, slot)
     try:
@@ -497,6 +530,32 @@ def drain_stop_timeout_seconds(environment: str) -> float:
         + NODE_TERMINATION_OVERHEAD_SECONDS
         + SYSTEMCTL_COMPLETION_OVERHEAD_SECONDS
     )
+
+
+QUALIFICATION_MARGIN_SECONDS = 20
+
+
+def protected_qualification_timeout_seconds(environment: str) -> float:
+    """Bound candidate qualification by the supervisor's own startup budget.
+
+    A supervisor may spend its entire startup timeout registering and then a
+    further heartbeat interval before it records the first heartbeat that
+    qualification requires. A fixed ceiling below that sum can never pass on a
+    loaded host, so derive the deadline from the same protected configuration.
+    """
+    values = _protected_environment_values(environment)
+    raw_startup = values.get("PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS", "60")
+    raw_heartbeat = values.get("PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS", "10")
+    try:
+        startup_seconds = int(raw_startup)
+        heartbeat_seconds = float(raw_heartbeat)
+    except ValueError as error:
+        raise ValueError("external Pi startup configuration must be numeric") from error
+    if not 5 <= startup_seconds <= 300:
+        raise ValueError("external Pi startup seconds are outside protected bounds")
+    if not 1 <= heartbeat_seconds <= 30:
+        raise ValueError("external Pi heartbeat seconds are outside protected bounds")
+    return startup_seconds + 2 * heartbeat_seconds + QUALIFICATION_MARGIN_SECONDS
 
 
 def protected_lease_seconds(environment: str) -> int:
@@ -831,17 +890,8 @@ def _stop_proven_orphaned_worker_if_active(
         if selected_identity != authenticated_identity:
             raise ExternalPiSlotError("external Pi drain topology is invalid")
     for spec in specs:
-        request = urllib.request.Request(
-            f"http://127.0.0.1:{spec.port}/v1/status",
-            headers={"Authorization": f"Bearer {spec.token}"},
-            method="GET",
-        )
         try:
-            with urllib.request.urlopen(request, timeout=5) as response:
-                payload = response.read(MAXIMUM_WORKER_STATUS_BYTES + 1)
-                if len(payload) > MAXIMUM_WORKER_STATUS_BYTES:
-                    raise ValueError("external Pi worker status is too large")
-                status = json.loads(payload)
+            status = _worker_status(spec)
         except (OSError, ValueError, urllib.error.URLError) as error:
             raise ExternalPiSlotError(
                 "external Pi active worker status is unavailable"
@@ -917,8 +967,10 @@ def qualify_candidate(
     slot: str,
     release_id: str,
     *,
-    timeout_seconds: float = 65,
+    timeout_seconds: float | None = None,
 ) -> int:
+    if timeout_seconds is None:
+        timeout_seconds = protected_qualification_timeout_seconds(environment)
     deadline = time.monotonic() + timeout_seconds
     last: tuple[dict, ...] = ()
     worker_ids = tuple(

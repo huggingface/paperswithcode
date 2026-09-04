@@ -571,3 +571,75 @@ def test_qualification_metadata_migration_is_environment_scoped_and_least_privil
     assert "FROM pwc_staging;" in migration
     assert "qualification_run_id" in migration
     assert "qualification_scenario" in migration
+
+
+def test_external_pi_turns_are_not_billed_for_an_unused_sandbox(db):
+    # Routing to the external fleet is resolved after admission, so the row
+    # starts out carrying the Modal sandbox shape. Left uncorrected, finalize
+    # bills the requested CPU and memory for the whole turn even though no
+    # sandbox was ever created, and that figure feeds the Modal spend circuits.
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    row = _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+
+    assert float(row.sandbox_cpu_request) == 0.125
+    assert service.mark_external_pi(str(request_id))
+    db.refresh(row)
+
+    assert row.execution_backend == "external_pi"
+    assert row.sandbox_cpu_request is None
+    assert row.sandbox_memory_request_mib is None
+
+    assert service.finalize(str(request_id), "complete", 30_000)
+    db.refresh(row)
+    assert row.estimated_active_cost_usd is None
+
+
+def test_marking_external_pi_is_idempotent_and_leaves_modal_turns_billed(db):
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+
+    assert service.mark_external_pi(str(request_id))
+    # A second call must not re-mark a row that is already external.
+    assert not service.mark_external_pi(str(request_id))
+
+    other_request = uuid.uuid4()
+    other = _admit(db, session_id=session_id, request_id=other_request)
+    assert service.record_phase(
+        str(other_request),
+        "pool_lookup_completed",
+        12,
+        acquisition_outcome="pool_hit",
+    )
+    assert service.finalize(str(other_request), "complete", 30_000)
+    db.refresh(other)
+
+    assert other.execution_backend == "modal_cli"
+    assert float(other.estimated_active_cost_usd) > 0
+
+    with pytest.raises(ValueError, match="request_id must be a UUID"):
+        service.mark_external_pi("not-a-uuid")
+
+
+def test_external_pi_backend_migration_is_environment_scoped():
+    migration = (
+        Path(__file__).parents[1]
+        / "database"
+        / "migrations"
+        / "allow_external_pi_latency_backend.sql"
+    ).read_text()
+
+    assert "current_schema() NOT IN ('staging', 'public')" in migration
+    # The deployed constraint is the auto-named inline CHECK from
+    # add_chat_turn_latency.sql, not the ORM's explicit name. Dropping only the
+    # ORM name is a silent no-op that leaves the two-value check enforced.
+    assert (
+        "DROP CONSTRAINT IF EXISTS chat_turn_latency_execution_backend_check"
+        in migration
+    )
+    assert "DROP CONSTRAINT IF EXISTS chat_turn_latency_backend_check" in migration
+    assert "ADD CONSTRAINT chat_turn_latency_backend_check" in migration
+    assert "'external_pi'" in migration

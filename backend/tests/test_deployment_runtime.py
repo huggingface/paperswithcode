@@ -2447,7 +2447,7 @@ def test_chat_descriptor_is_extracted_from_selected_source():
     assert dormant["system_prompt_sha256"] == descriptor["system_prompt_sha256"]
     production = _chat_descriptor_from_source(source, "production", chat_enabled=True)
     assert production["modal_image_version"] == PRODUCTION_MODAL_IMAGE_ID
-    assert production["worker_contract_version"] == "102"
+    assert production["worker_contract_version"] == "104"
     assert production["enabled"] is True
     assert production["database_contract_version"] == 2
     assert production["default_agent_harness"] == "pi"

@@ -262,6 +262,51 @@ def test_candidate_requires_authenticated_durable_lifecycle_evidence(
         )
 
 
+def test_qualification_budget_covers_the_supervisor_startup_and_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A supervisor may use its whole startup timeout to register and then a
+    # further heartbeat interval before the first heartbeat is recorded. The
+    # previous fixed 65s ceiling was below that 70s worst case, so a loaded
+    # host failed qualification with registered=True and heartbeats=0.
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "60",
+            "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": "10",
+        },
+    )
+    budget = lifecycle.protected_qualification_timeout_seconds("staging")
+
+    assert budget > 60 + 10
+    assert budget == 60 + 2 * 10 + lifecycle.QUALIFICATION_MARGIN_SECONDS
+
+
+def test_qualification_budget_rejects_out_of_bounds_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "not-a-number",
+        },
+    )
+    with pytest.raises(ValueError, match="must be numeric"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
+
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "900",
+        },
+    )
+    with pytest.raises(ValueError, match="protected bounds"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
+
+
 def test_qualification_proves_drain_and_restart_generation(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -2401,3 +2446,84 @@ def test_deployment_status_reports_shadow_unit_and_durable_evidence(
             "state": "ready",
         },
     }
+
+
+def test_worker_status_tolerates_the_window_before_the_worker_binds(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # systemd reports the Type=simple worker unit active as soon as it execs,
+    # while the Node process is still loading the Pi runtime and has not bound
+    # its port. A single attempt turned that into a refused connection that
+    # failed the whole deployment.
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    attempts = {"n": 0}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _size):
+            return json.dumps({"worker_id": spec.worker_id, "state": "ready"}).encode()
+
+    def urlopen(_request, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise ConnectionRefusedError(111, "Connection refused")
+        return _Response()
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    assert lifecycle._worker_status(spec)["worker_id"] == spec.worker_id
+    assert attempts["n"] == 3
+
+
+def test_worker_status_gives_up_after_the_bind_grace_expires(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    clock = {"now": 0.0}
+
+    def urlopen(_request, timeout=None):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        lifecycle.time,
+        "sleep",
+        lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+
+    with pytest.raises(ConnectionRefusedError):
+        lifecycle._worker_status(spec)
+
+
+def test_worker_status_never_retries_a_malformed_payload(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    attempts = {"n": 0}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _size):
+            return b"x" * (lifecycle.MAXIMUM_WORKER_STATUS_BYTES + 1)
+
+    def urlopen(_request, timeout=None):
+        attempts["n"] += 1
+        return _Response()
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+
+    with pytest.raises(ValueError, match="too large"):
+        lifecycle._worker_status(spec)
+    assert attempts["n"] == 1

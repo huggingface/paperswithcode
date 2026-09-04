@@ -471,7 +471,7 @@ class Settings(BaseSettings):
     chat_openrouter_user_tracking_secret: str = Field(
         default="", description="HMAC secret for opaque OpenRouter user tracking"
     )
-    chat_openrouter_pricing_verified_at: str = Field(default="2026-08-04")
+    chat_openrouter_pricing_verified_at: str = Field(default="2026-09-04")
     chat_openrouter_pricing_max_age_days: int = Field(default=30, ge=1, le=90)
     chat_openrouter_reconciliation_stale_minutes: int = Field(
         default=15, ge=1, le=24 * 60
