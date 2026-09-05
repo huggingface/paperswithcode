@@ -7,13 +7,14 @@ from datetime import UTC, datetime, timedelta
 from math import isfinite
 from typing import Any
 
-from sqlalchemy import and_, delete, func, or_, select, update
+from sqlalchemy import and_, delete, exists, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.models.database import (
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_sandbox_provider import (
@@ -21,6 +22,7 @@ from backend.services.chat_sandbox_provider import (
     sanitized_failure_class,
     sanitized_failure_stage,
 )
+from backend.services.chat_turn_lifecycle import NONTERMINAL_STATES
 
 RETENTION_DAYS = 30
 MAX_DURATION_MS = 3_600_000
@@ -442,6 +444,12 @@ class ChatLatencyService:
                 )
                 .where(
                     ChatTurnLatency.terminal_status == "running",
+                    ~exists(
+                        select(ChatTurnJob.turn_id).where(
+                            ChatTurnJob.turn_id == ChatTurnLatency.turn_id,
+                            ChatTurnJob.state.in_(NONTERMINAL_STATES),
+                        )
+                    ),
                     or_(
                         ChatSession.active_turn_expires_at <= current,
                         and_(

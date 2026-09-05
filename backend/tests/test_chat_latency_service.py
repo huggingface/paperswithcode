@@ -15,6 +15,7 @@ from backend.models.database import (
     Base,
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_latency_service import ChatLatencyService
@@ -45,6 +46,7 @@ def db():
         tables=[
             ChatSession.__table__,
             ChatMessageRecord.__table__,
+            ChatTurnJob.__table__,
             ChatTurnLatency.__table__,
         ],
     )
@@ -341,6 +343,58 @@ def test_reconcile_stale_turns_repairs_expired_projection_and_latency(db):
     assert message.error_code == "lease_expired"
     assert session.active_turn_id is None
     assert session.active_turn_expires_at is None
+
+
+@pytest.mark.parametrize("durable_lease_delta", (-30, 30))
+def test_reconcile_stale_turns_defers_nonterminal_durable_projection(
+    db, durable_lease_delta
+):
+    now = datetime(2026, 7, 31, 12, tzinfo=UTC)
+    session_id = _session(db)
+    turn_id = uuid.uuid4()
+    latency = _admit(db, session_id=session_id, turn_id=turn_id)
+    message = _user_message(db, session_id=session_id, turn_id=turn_id)
+    session = db.get(ChatSession, session_id)
+    session.active_turn_id = turn_id
+    session.active_turn_expires_at = now - timedelta(seconds=1)
+    latency.admitted_at = now - timedelta(minutes=4)
+    db.add(
+        ChatTurnJob(
+            turn_id=turn_id,
+            chat_session_id=session_id,
+            hf_user_id="owner-1",
+            request_id=str(latency.request_id),
+            revision=1,
+            dispatch_class="interactive",
+            dispatch_route="external-pi",
+            state="running",
+            worker_id="worker-1",
+            worker_generation=1,
+            lease_generation=1,
+            app_release_id="release-test",
+            worker_contract_version="worker-v2",
+            admitted_at=now - timedelta(minutes=4),
+            dispatched_at=now - timedelta(minutes=4),
+            started_at=now - timedelta(minutes=4),
+            heartbeat_at=now,
+            lease_expires_at=now + timedelta(seconds=durable_lease_delta),
+        )
+    )
+    db.flush()
+
+    reconciled = ChatLatencyService(db).reconcile_stale_turns(now=now)
+    db.refresh(latency)
+    db.refresh(message)
+    db.refresh(session)
+
+    assert reconciled == {"complete": 0, "error": 0, "interrupted": 0}
+    assert latency.terminal_status == "running"
+    assert message.status == "generating"
+    assert message.error_code is None
+    assert session.active_turn_id == turn_id
+    assert session.active_turn_expires_at.replace(tzinfo=UTC) == now - timedelta(
+        seconds=1
+    )
 
 
 @pytest.mark.parametrize(
