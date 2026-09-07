@@ -154,16 +154,17 @@ class ChatTurnAdmissionCoordinator:
                 or job.chat_session_id != candidate.chat_session_id
                 or job.hf_user_id != candidate.hf_user_id
             ):
-                raise ExpiryProjectionMismatch(
-                    "Expired durable turn projection mismatches"
+                self._report_projection_mismatch(
+                    affected_owner=candidate.hf_user_id, requesting_owner=hf_user_id
                 )
+                continue
             if not self.repository.is_expired_claim(job, now=now):
                 if (
                     job.state in ("completed", "failed", "interrupted")
                     and session.active_turn_id == job.turn_id
                 ):
-                    raise ExpiryProjectionMismatch(
-                        "Terminal durable turn projection remains active"
+                    self._report_projection_mismatch(
+                        affected_owner=job.hf_user_id, requesting_owner=hf_user_id
                     )
                 continue
             message = self.db.execute(
@@ -176,15 +177,30 @@ class ChatTurnAdmissionCoordinator:
                 .with_for_update()
                 .execution_options(populate_existing=True)
             ).scalar_one_or_none()
+            # Older telemetry cleanup could interrupt the conversation without
+            # closing its durable job. Repair only that exact, expired state.
+            already_interrupted = (
+                session.active_turn_id is None
+                and session.active_turn_expires_at is None
+                and message is not None
+                and message.status == "interrupted"
+                and message.error_code == "lease_expired"
+            )
             if (
                 session.hf_user_id != job.hf_user_id
-                or session.active_turn_id != job.turn_id
                 or message is None
-                or message.status not in ("generating", PREPARING_STATUS)
-            ):
-                raise ExpiryProjectionMismatch(
-                    "Expired durable turn projection mismatches"
+                or (
+                    not already_interrupted
+                    and (
+                        session.active_turn_id != job.turn_id
+                        or message.status not in ("generating", PREPARING_STATUS)
+                    )
                 )
+            ):
+                self._report_projection_mismatch(
+                    affected_owner=job.hf_user_id, requesting_owner=hf_user_id
+                )
+                continue
             self.repository.interrupt_exact_expired(
                 self.db, turn_id=job.turn_id, now=now
             )
@@ -196,6 +212,15 @@ class ChatTurnAdmissionCoordinator:
             session.active_turn_expires_at = None
             reconciled_count += 1
         return reconciled_count
+
+    def _report_projection_mismatch(
+        self, *, affected_owner: str, requesting_owner: str
+    ) -> None:
+        self.observe("typed_failure", "projection_mismatch", 1)
+        # A foreign expired record must not poison admission for other accounts.
+        # Keep ambiguous state untouched and fail closed for its own account.
+        if affected_owner == requesting_owner:
+            raise ExpiryProjectionMismatch("Expired durable turn projection mismatches")
 
     def admit(
         self,

@@ -509,7 +509,7 @@ def test_admission_reconciles_globally_expired_claim_before_capacity_count():
             return next(self.results)
 
     class Repository:
-        def lock_admission_authority(self, _db, *, hf_user_id):
+        def lock_user_admission_authority(self, _db, *, hf_user_id):
             assert hf_user_id == "new-owner"
             ordering.append("locks")
 
@@ -864,6 +864,9 @@ def test_account_busy_preflight_reconciles_expired_projection_then_retries(
             if self.calls == 1:
                 raise AccountBusy("existing expired turn")
             return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
+
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
 
     monkeypatch.setattr(
         chat_session_module, "ChatTurnAdmissionCoordinator", Coordinator

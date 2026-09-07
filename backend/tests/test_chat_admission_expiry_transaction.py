@@ -21,6 +21,8 @@ from backend.services.chat_turn_admission_coordinator import (
     ChatTurnAdmissionCoordinator,
 )
 from backend.services.chat_turn_job_repository import ChatTurnJobRepository
+from backend.services.chat_turn_job_repository import ExpiryProjectionMismatch
+from backend.services.chat_operational_alert_service import runtime_failure_counts
 
 
 @compiles(JSONB, "sqlite")
@@ -135,6 +137,105 @@ def _router_transaction(db: Session, action):
             db.rollback()
         return error
     raise AssertionError("Expected retry-required admission failure")
+
+
+@pytest.mark.parametrize("request_owner", ["owner-1", "other-owner"])
+def test_admission_repairs_already_interrupted_expired_job(db, request_owner):
+    session_id, turn_id = _seed_expired_turn(db, request_id="old-request")
+    session = db.get(ChatSession, session_id)
+    session.active_turn_id = None
+    session.active_turn_expires_at = None
+    message = db.query(ChatMessageRecord).filter_by(turn_id=turn_id).one()
+    message.status = "interrupted"
+    message.error_code = "lease_expired"
+    db.commit()
+    coordinator = ChatTurnAdmissionCoordinator(
+        db,
+        _settings(),
+        repository=ChatTurnJobRepository(advisory_locker=lambda *_args: None),
+        observe=lambda *_args: None,
+    )
+
+    result = coordinator.preflight(
+        hf_user_id=request_owner,
+        request_id="new-request",
+        requested_session_id=None,
+    )
+    db.commit()
+    assert result.reconciled_expired_count == 1
+    assert db.get(ChatTurnJob, turn_id).state == "interrupted"
+    assert db.get(ChatTurnJob, turn_id).failure_code == "lease_expired"
+    assert session.active_turn_id is None
+    assert message.status == "interrupted"
+    assert (
+        coordinator.preflight(
+            hf_user_id=request_owner,
+            request_id="another-request",
+            requested_session_id=None,
+        ).reconciled_expired_count
+        == 0
+    )
+
+
+@pytest.mark.parametrize("request_owner", ["owner-1", "other-owner"])
+def test_unexpected_projection_mismatch_only_blocks_affected_owner(
+    db, request_owner, caplog
+):
+    session_id, turn_id = _seed_expired_turn(db, request_id="old-request")
+    session = db.get(ChatSession, session_id)
+    replacement_turn = uuid.uuid4()
+    session.active_turn_id = replacement_turn
+    db.commit()
+    coordinator = ChatTurnAdmissionCoordinator(
+        db,
+        _settings(),
+        repository=ChatTurnJobRepository(advisory_locker=lambda *_args: None),
+    )
+
+    with caplog.at_level("INFO"):
+        if request_owner == "owner-1":
+            with pytest.raises(ExpiryProjectionMismatch):
+                coordinator.preflight(
+                    hf_user_id=request_owner,
+                    request_id="new-request",
+                    requested_session_id=None,
+                )
+        else:
+            coordinator.preflight(
+                hf_user_id=request_owner,
+                request_id="new-request",
+                requested_session_id=None,
+            )
+    assert "event=typed_failure code=projection_mismatch" in caplog.text
+    assert runtime_failure_counts(caplog.messages) == {"projection_mismatch": 1}
+    assert session.active_turn_id == replacement_turn
+    assert db.get(ChatTurnJob, turn_id).state == "running"
+
+
+@pytest.mark.parametrize("error_code", [None, "cancelled"])
+def test_admission_does_not_relabel_other_interruptions_as_expiry(db, error_code):
+    session_id, turn_id = _seed_expired_turn(db, request_id="old-request")
+    session = db.get(ChatSession, session_id)
+    session.active_turn_id = None
+    session.active_turn_expires_at = None
+    message = db.query(ChatMessageRecord).filter_by(turn_id=turn_id).one()
+    message.status = "interrupted"
+    message.error_code = error_code
+    db.commit()
+    coordinator = ChatTurnAdmissionCoordinator(
+        db,
+        _settings(),
+        repository=ChatTurnJobRepository(advisory_locker=lambda *_args: None),
+        observe=lambda *_args: None,
+    )
+    with pytest.raises(ExpiryProjectionMismatch):
+        coordinator.preflight(
+            hf_user_id="owner-1",
+            request_id="new-request",
+            requested_session_id=None,
+        )
+    assert db.get(ChatTurnJob, turn_id).state == "running"
+    assert message.error_code == error_code
 
 
 def test_expired_request_replay_commits_reconciliation(monkeypatch, db):

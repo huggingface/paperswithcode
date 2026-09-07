@@ -15,6 +15,7 @@ from backend.models.database import (
     Base,
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_latency_service import ChatLatencyService
@@ -46,6 +47,7 @@ def db():
             ChatSession.__table__,
             ChatMessageRecord.__table__,
             ChatTurnLatency.__table__,
+            ChatTurnJob.__table__,
         ],
     )
     with Session(engine) as session:
@@ -405,6 +407,84 @@ def test_reconcile_stale_turns_leaves_an_unexpired_active_turn_running(db):
 
     assert reconciled == {"complete": 0, "error": 0, "interrupted": 0}
     assert row.terminal_status == "running"
+
+
+@pytest.mark.parametrize("lease_seconds", [-1, 60])
+def test_telemetry_cleanup_leaves_durable_expiry_to_admission(db, lease_seconds):
+    from backend.services.chat_turn_admission_coordinator import (
+        ChatTurnAdmissionCoordinator,
+    )
+    from backend.services.chat_turn_job_repository import ChatTurnJobRepository
+
+    now = datetime.now(UTC)
+    session_id = _session(db)
+    row = _admit(db, session_id=session_id)
+    message = _user_message(db, session_id=session_id, turn_id=row.turn_id)
+    session = db.get(ChatSession, session_id)
+    session.active_turn_id = row.turn_id
+    session.active_turn_expires_at = now - timedelta(seconds=30)
+    job = ChatTurnJob(
+        turn_id=row.turn_id,
+        chat_session_id=session_id,
+        hf_user_id="owner-1",
+        request_id=str(row.request_id),
+        revision=1,
+        dispatch_class="interactive",
+        dispatch_route="legacy-claude",
+        state="running",
+        worker_id="worker-a",
+        worker_generation=1,
+        lease_generation=1,
+        app_release_id="test",
+        worker_contract_version="test",
+        admitted_at=now - timedelta(minutes=2),
+        lease_expires_at=now + timedelta(seconds=lease_seconds),
+    )
+    db.add(job)
+    db.expire_on_commit = False
+    db.commit()
+
+    assert ChatLatencyService(db).reconcile_stale_turns(now=now) == {
+        "complete": 0,
+        "error": 0,
+        "interrupted": 0,
+    }
+    assert message.status == "generating"
+    assert session.active_turn_id == row.turn_id
+    assert job.state == "running"
+
+    coordinator = ChatTurnAdmissionCoordinator(
+        db,
+        SimpleNamespace(chat_max_concurrency=32),
+        repository=ChatTurnJobRepository(advisory_locker=lambda *_args: None),
+        observe=lambda *_args: None,
+    )
+    coordinator.preflight(
+        hf_user_id="other-owner",
+        request_id="new-request",
+        requested_session_id=None,
+        now=now,
+    )
+    db.flush()
+    assert job.state == ("interrupted" if lease_seconds < 0 else "running")
+    assert message.status == ("interrupted" if lease_seconds < 0 else "generating")
+
+    if lease_seconds < 0:
+        # Both projections roll back together if the admitting transaction fails.
+        db.rollback()
+        assert db.get(ChatTurnJob, row.turn_id).state == "running"
+        assert db.get(ChatMessageRecord, message.id).status == "generating"
+        coordinator.preflight(
+            hf_user_id="other-owner",
+            request_id="retry-request",
+            requested_session_id=None,
+            now=now,
+        )
+        db.commit()
+        assert ChatLatencyService(db).reconcile_stale_turns(
+            now=now + timedelta(minutes=1)
+        ) == {"complete": 0, "error": 0, "interrupted": 1}
+        assert row.terminal_status == "interrupted"
 
 
 def test_gateway_can_record_by_turn_and_derive_admission_delta(db):

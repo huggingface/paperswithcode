@@ -14,6 +14,7 @@ from backend.config import Settings
 from backend.models.database import (
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_sandbox_provider import (
@@ -21,6 +22,7 @@ from backend.services.chat_sandbox_provider import (
     sanitized_failure_class,
     sanitized_failure_stage,
 )
+from backend.services.chat_turn_lifecycle import NONTERMINAL_STATES
 
 RETENTION_DAYS = 30
 MAX_DURATION_MS = 3_600_000
@@ -442,6 +444,15 @@ class ChatLatencyService:
                 )
                 .where(
                     ChatTurnLatency.terminal_status == "running",
+                    # Durable lifecycle owns expiry and must update the job and
+                    # conversation atomically using the worker's current lease.
+                    # The session lease can expire while that worker is healthy.
+                    ~select(ChatTurnJob.turn_id)
+                    .where(
+                        ChatTurnJob.turn_id == ChatTurnLatency.turn_id,
+                        ChatTurnJob.state.in_(NONTERMINAL_STATES),
+                    )
+                    .exists(),
                     or_(
                         ChatSession.active_turn_expires_at <= current,
                         and_(
