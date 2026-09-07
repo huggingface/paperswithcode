@@ -57,6 +57,7 @@ from backend.services.chat_turn_job_repository import (
     TurnLeaseClaim,
     TurnNotClaimable,
 )
+from backend.services.chat_turn_lifecycle import CLAIMED_STATES
 from backend.services.latex_paper_service import LatexPaperService
 
 if TYPE_CHECKING:
@@ -621,6 +622,10 @@ class ChatSessionService:
             or job.hf_user_id != session.hf_user_id
         ):
             raise self._durable_control_error()
+        if job.state in CLAIMED_STATES and not repository.is_expired_claim(
+            job, now=now
+        ):
+            raise self._durable_admission_error(AccountBusy("The worker lease is live"))
         try:
             ChatLocalTurnLeaseService(
                 self.db, self.settings, repository=repository

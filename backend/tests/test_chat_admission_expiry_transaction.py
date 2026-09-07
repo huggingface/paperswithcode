@@ -238,6 +238,49 @@ def test_admission_does_not_relabel_other_interruptions_as_expiry(db, error_code
     assert message.error_code == error_code
 
 
+def test_same_session_retry_respects_live_durable_lease(monkeypatch, db):
+    _install_sqlite_coordinator(monkeypatch)
+    session_id, turn_id = _seed_expired_turn(db, request_id="old-request")
+    now = datetime.now(UTC)
+    session = db.get(ChatSession, session_id)
+    session.active_turn_expires_at = now - timedelta(seconds=30)
+    job = db.get(ChatTurnJob, turn_id)
+    job.lease_expires_at = now + timedelta(minutes=1)
+    db.commit()
+    service = ChatSessionService(db, _settings())
+    owned = service._owned
+
+    def owned_with_utc(*args, **kwargs):
+        result = owned(*args, **kwargs)
+        # SQLite drops timezone information; PostgreSQL retains it.
+        result.active_turn_expires_at = result.active_turn_expires_at.replace(
+            tzinfo=UTC
+        )
+        return result
+
+    monkeypatch.setattr(service, "_owned", owned_with_utc)
+
+    error = _router_transaction(
+        db,
+        lambda: service.begin_turn(
+            ChatOwner("owner-1", "owner"),
+            session_id=session_id,
+            client_message_id="new-request",
+            text="retry",
+            reasoning_effort="low",
+        ),
+    )
+
+    assert error.code == "account_busy"
+    assert error.status_code == 429
+    assert db.get(ChatTurnJob, turn_id).state == "running"
+    assert db.get(ChatSession, session_id).active_turn_id == turn_id
+    assert (
+        db.query(ChatMessageRecord).filter_by(turn_id=turn_id).one().status
+        == "generating"
+    )
+
+
 def test_expired_request_replay_commits_reconciliation(monkeypatch, db):
     _install_sqlite_coordinator(monkeypatch)
     session_id, turn_id = _seed_expired_turn(db, request_id="expired-request")

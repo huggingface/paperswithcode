@@ -763,13 +763,16 @@ def test_live_durable_claim_fails_closed_before_legacy_expiry(monkeypatch):
         def interrupt_exact_expired(self, *_args, **_kwargs):
             raise StaleTurnClaim("still live")
 
+        def is_expired_claim(self, *_args, **_kwargs):
+            return False
+
     service = ChatSessionService(SimpleNamespace(), settings)
     monkeypatch.setattr(service, "_turn_job_repository", lambda: Repository())
 
     with pytest.raises(ChatServiceError) as exc_info:
         service._apply_expired_active_turn(session, message)
 
-    assert exc_info.value.code == "durable_control_conflict"
+    assert exc_info.value.code == "account_busy"
     assert session.active_turn_id == turn_id
     assert session.active_turn_expires_at is expiry
     assert message.status == "generating"
@@ -802,6 +805,9 @@ def test_replay_expiry_reconciles_exact_durable_job(monkeypatch):
         def interrupt_exact_expired(self, _db, **kwargs):
             calls.append(kwargs["turn_id"])
             return job
+
+        def is_expired_claim(self, *_args, **_kwargs):
+            return True
 
     service = ChatSessionService(SimpleNamespace(), settings)
     monkeypatch.setattr(service, "_turn_job_repository", lambda: Repository())
