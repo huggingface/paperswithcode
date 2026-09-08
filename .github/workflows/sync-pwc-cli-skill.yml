@@ -20,7 +20,7 @@ jobs:
       UPSTREAM_PATH: standalone_cli/SKILL.md
       DESTINATION: backend/chat_sandbox_worker/PWC_CLI_SKILL.md
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: main
 

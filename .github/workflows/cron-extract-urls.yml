@@ -71,7 +71,7 @@ jobs:
           python -m json.tool candidates.json > /dev/null
 
       - name: Upload candidate artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: url-candidates
           path: candidates.json
@@ -86,9 +86,9 @@ jobs:
       MODAL_TOKEN_SECRET: ${{ secrets.MODAL_TOKEN_SECRET }}
       URL_EXTRACTION_MODAL_SECRET: url-extraction-deepseek-v4-flash-deepinfra
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
         with:
           enable-cache: true
 
@@ -96,7 +96,7 @@ jobs:
         run: uv sync --frozen
 
       - name: Download candidate artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: url-candidates
 
@@ -111,7 +111,7 @@ jobs:
 
       - name: Upload result artifact
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: url-results
           path: results.json
@@ -125,7 +125,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Download result artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: url-results
 
@@ -181,7 +181,7 @@ jobs:
 
       - name: Upload persist debug artifacts
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: url-persist-debug
           path: |
