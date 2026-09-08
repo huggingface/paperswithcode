@@ -32,6 +32,10 @@ _CONVERSION_SUFFIXES = (
 
 
 def _run(command: list[str]) -> str:
+    # Older immutable runtimes have console-script shebangs pointing at their
+    # removed build directory. Use the current interpreter for its own HF CLI.
+    if command[0] == str(Path(sys.executable).with_name("hf")):
+        command = [sys.executable, *command]
     result = subprocess.run(
         command,
         check=True,

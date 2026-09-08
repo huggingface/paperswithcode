@@ -1622,3 +1622,20 @@ def test_worker_startup_failure_writes_failed_checkpoint(tmp_path, monkeypatch):
     assert progress["processed_papers"] == 0
     assert progress["fatal_error"] == "vLLM startup failed"
     assert progress["cleanup_state"] == "not_started"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\n\n", "\r\n"])
+def test_canonical_markdown_accepts_upstream_header_spacing(newline):
+    body = "Adaptive Expert Routing for Robust Object Detection. " * 8
+    WORKER.validate_canonical_markdown(
+        "Adaptive Expert Routing for Robust Object Detection",
+        "Title: Detector\n\nMarkdown Content:" + newline + body,
+    )
+
+
+def test_canonical_markdown_header_spacing_does_not_bypass_semantics():
+    with pytest.raises(ValueError, match="semantic_markdown_mismatch"):
+        WORKER.validate_canonical_markdown(
+            "Adaptive Expert Routing for Robust Object Detection",
+            "Title: Detector\n\nMarkdown Content:\n" + "An unrelated image. " * 20,
+        )

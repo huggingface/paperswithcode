@@ -473,10 +473,10 @@ def validate_canonical_markdown(title: str, markdown: str) -> None:
     encoded = markdown.encode("utf-8")
     if len(encoded) < 120 or len(encoded) > 64 * 1024 * 1024:
         raise ValueError("invalid_markdown_size")
-    marker = "Markdown Content:\n\n"
-    _header, separator, body = markdown.partition(marker)
-    if not separator:
+    marker = re.search(r"^Markdown Content:\r?\n", markdown, flags=re.MULTILINE)
+    if marker is None:
         raise ValueError("semantic_markdown_mismatch")
+    body = markdown[marker.end() :].lstrip("\r\n")
     validate_markdown_semantics(title, body)
 
 

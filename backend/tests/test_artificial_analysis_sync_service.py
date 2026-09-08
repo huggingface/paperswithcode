@@ -378,3 +378,35 @@ def test_sync_adopts_existing_row_and_is_idempotent(monkeypatch):
     assert intelligence_row.is_open is True
     assert intelligence_row.source_url == source_url
     assert {row.task_id for row in session.query(PaperTask).all()} == {5, 14}
+
+
+def test_reviewed_model_can_have_no_agentic_score(monkeypatch):
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {"reviewed-model": aa.PaperIdentity(arxiv_id="2608.00001")},
+    )
+    monkeypatch.setattr(
+        aa,
+        "INDEXES",
+        tuple(
+            replace(index, min_expected_models=1, max_expected_models=10)
+            for index in aa.INDEXES
+        ),
+    )
+
+    class Client:
+        def get(self, *args, **kwargs):
+            return _Response(
+                {
+                    "intelligence_index_version": "4.1",
+                    "pagination": {"has_more": False, "total_pages": 1},
+                    "data": [
+                        _api_row("reviewed-model", agentic=None),
+                        _api_row("other-model"),
+                    ],
+                }
+            )
+
+    result = aa.fetch_artificial_analysis_leaderboard(api_key="secret", client=Client())
+    assert result.entries[0].scores == {"intelligence": 42.5}

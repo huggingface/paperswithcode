@@ -405,18 +405,17 @@ def fetch_artificial_analysis_leaderboard(
     slugs = [entry.slug for entry in all_entries]
     if len(slugs) != len(set(slugs)):
         raise ValueError("Artificial Analysis response contains duplicate model slugs")
+    missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(slugs))
+    if missing:
+        raise ValueError(
+            "Artificial Analysis is missing reviewed models: " + ",".join(missing)
+        )
     for index in INDEXES:
         scored = [entry.slug for entry in all_entries if index.key in entry.scores]
         if not index.min_expected_models <= len(scored) <= index.max_expected_models:
             raise ValueError(
                 f"Artificial Analysis {index.label} returned {len(scored)} scored "
                 f"models; expected {index.min_expected_models}-{index.max_expected_models}"
-            )
-        missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(scored))
-        if missing:
-            raise ValueError(
-                f"Artificial Analysis {index.label} is missing reviewed models: "
-                f"{','.join(missing)}"
             )
     return ArtificialAnalysisLeaderboard(version or "unknown", all_entries)
 

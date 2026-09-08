@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import subprocess
+
 import asyncio
 import socket
 import urllib.error
@@ -415,6 +417,8 @@ def test_immutable_runtime_build_reuse_and_failed_cleanup(tmp_path: Path):
         target = Path(env["UV_PROJECT_ENVIRONMENT"])
         (target / "bin").mkdir()
         (target / "bin" / "python").symlink_to("/usr/bin/python3")
+        (target / "bin" / "hf").write_text(f"#!{target}/bin/python\nprint(42)\n")
+        (target / "bin" / "hf").chmod(0o755)
         (target / "lib").mkdir()
         (target / "lib" / "module.py").write_text("value = 1\n")
 
@@ -425,6 +429,10 @@ def test_immutable_runtime_build_reuse_and_failed_cleanup(tmp_path: Path):
         release, runtimes, runner=build, version_runner=version
     )
     assert created
+    result = subprocess.run(
+        [str(first / "bin" / "hf")], check=True, capture_output=True, text=True
+    )
+    assert result.stdout.strip() == "42"
     assert runtime_manifest(first)["lock_sha256"] == first.name
     assert first.stat().st_mode & 0o222 == 0
     assert (first / "runtime.json").stat().st_mode & 0o222 == 0
