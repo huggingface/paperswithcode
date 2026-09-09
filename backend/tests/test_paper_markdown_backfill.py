@@ -1639,3 +1639,130 @@ def test_canonical_markdown_header_spacing_does_not_bypass_semantics():
             "Adaptive Expert Routing for Robust Object Detection",
             "Title: Detector\n\nMarkdown Content:\n" + "An unrelated image. " * 20,
         )
+
+
+def test_upstream_copy_rejects_caption_and_unavailable_objects():
+    job = _scheduler(execute=True, confirm=True)
+    job.settings.paper_markdown_upstream_bucket_id = "upstream/papers"
+    job.api = Mock()
+    entries = _candidates(3)
+    paths = [item["output_key"] for item in entries]
+    job._existing_paths = Mock(
+        return_value={
+            path: SimpleNamespace(xet_hash=f"hash-{index}")
+            for index, path in enumerate(paths)
+        }
+    )
+    job._semantic_records = Mock(
+        return_value={
+            paths[0]: "valid",
+            paths[1]: "invalid",
+            paths[2]: "unavailable",
+        }
+    )
+    remaining, copied = job._copy_upstream(entries)
+    assert remaining == entries[1:]
+    assert copied == 1
+    assert job.api.batch_bucket_files.call_args.kwargs["copy"] == [
+        ("bucket", "upstream/papers", "hash-0", paths[0])
+    ]
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "changed", "valid_original", "invalid_replacement"]
+)
+def test_repair_upload_backs_up_original_before_validated_replacement(
+    tmp_path, monkeypatch, failure
+):
+    import hashlib
+
+    key = "2607/2607.00000.md"
+    original = b"figure caption only"
+    replacement = (
+        "Title: Paper zero\n\nMarkdown Content:\n\n"
+        + "Paper zero explains the proposed method. " * 5
+    ).encode()
+    if failure == "valid_original":
+        original = replacement
+    entry = {
+        "output_key": key,
+        "title": "Paper zero",
+        "replace_invalid_sha256": hashlib.sha256(original).hexdigest(),
+    }
+    remote = {key: original if failure != "changed" else b"concurrently changed"}
+    events = []
+    store = WORKER.BucketContentStore("test/bucket", "secret", tmp_path)
+    store.repairs = {key: entry}
+    WORKER.atomic_write(
+        tmp_path / key,
+        b"bad replacement" if failure == "invalid_replacement" else replacement + b"\n",
+    )
+    monkeypatch.setattr(store, "existing", lambda keys: set(keys) & remote.keys())
+    monkeypatch.setattr(store, "read", lambda path: remote[path])
+
+    def bridge(_token, request):
+        for source, destination in request["files"]:
+            events.append(destination)
+            remote[destination] = Path(source).read_bytes()
+        return {}
+
+    monkeypatch.setattr(WORKER, "run_bucket_bridge", bridge)
+    if failure:
+        with pytest.raises(ValueError):
+            store.upload([key])
+        assert events == []
+    else:
+        store.upload([key])
+        backup = f"_jobs/repair-originals/{entry['replace_invalid_sha256']}/{key}"
+        assert events == [backup, key]
+        assert remote[backup] == original
+        assert remote[key] == replacement + b"\n"
+
+
+def test_failed_repair_keeps_existing_canonical_object(tmp_path, monkeypatch):
+    import hashlib
+
+    entry = _candidates(1)[0]
+    original = b"only a figure caption"
+    entry["replace_invalid_sha256"] = hashlib.sha256(original).hexdigest()
+    output = tmp_path / entry["output_key"]
+    WORKER.atomic_write(output, original)
+    monkeypatch.setitem(
+        sys.modules,
+        "pypdf",
+        SimpleNamespace(PdfReader=lambda *a, **k: SimpleNamespace(pages=[1])),
+    )
+    monkeypatch.setattr(WORKER, "download_pdf_for_entry", lambda entry: (b"pdf", "v1"))
+    monkeypatch.setattr(WORKER, "run_chandra", lambda *a: ("irrelevant caption", {}))
+    with pytest.raises(ValueError, match="semantic_markdown_mismatch"):
+        WORKER.process(entry, tmp_path, tmp_path / "run")
+    assert output.read_bytes() == original
+
+
+def test_repair_selection_is_bounded_and_pins_original(tmp_path, monkeypatch):
+    import hashlib
+
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(3)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.repair_invalid_limit = 1
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(
+        return_value={item["output_key"]: object() for item in papers}
+    )
+    job._copy_upstream = Mock()
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(
+        return_value={item["output_key"]: "invalid" for item in papers}
+    )
+    job.filesystem = Mock()
+    original = b"figure caption only"
+    job.filesystem.open.side_effect = lambda *a, **k: BytesIO(original)
+    job._launch = Mock(return_value=[])
+    job.run()
+    job._copy_upstream.assert_not_called()
+    candidates = job._launch.call_args.args[0]
+    assert len(candidates) == 1
+    assert (
+        candidates[0]["replace_invalid_sha256"] == hashlib.sha256(original).hexdigest()
+    )

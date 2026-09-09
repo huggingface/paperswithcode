@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
@@ -626,7 +626,7 @@ def build_job_findings(
         operator_url,
         run_url,
     )
-    return (
+    findings = (
         scheduler,
         exit_finding,
         log_finding,
@@ -635,6 +635,20 @@ def build_job_findings(
         throughput_finding,
         semantic_finding,
     )
+    execution = job.get("execution_health") or {}
+    if execution.get("applicable") is False and execution.get("status") == "healthy":
+        return tuple(
+            finding
+            if finding.contract in {"scheduler_execution", "lock_ownership_age"}
+            else replace(
+                finding,
+                state=FindingState.HEALTHY,
+                summary="output is not applicable while the schedule is disabled",
+                evidence={"applicable": False},
+            )
+            for finding in findings
+        )
+    return findings
 
 
 class AutonomousCronProbe:

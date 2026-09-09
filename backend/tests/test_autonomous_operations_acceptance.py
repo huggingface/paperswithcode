@@ -277,8 +277,8 @@ def test_rollout_units_are_packaged_but_not_implicitly_enabled():
     root = Path(__file__).resolve().parents[2]
     for timer in (
         root / "deploy/autonomous/submission-review.timer",
-        root / "deploy/autonomous/cron-health.timer",
-        root / "deploy/autonomous/cron-audit.timer",
+        root / "deploy/autonomous/autonomous-cron-health.timer",
+        root / "deploy/autonomous/autonomous-cron-audit.timer",
     ):
         text = timer.read_text(encoding="utf-8")
         assert "WantedBy=timers.target" in text

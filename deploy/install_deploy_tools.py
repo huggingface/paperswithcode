@@ -384,10 +384,10 @@ def main() -> int:
             "autonomous/submission-review.service",
             "autonomous/submission-review.timer",
             "autonomous/submission-review-alert.service",
-            "autonomous/cron-health.service",
-            "autonomous/cron-health.timer",
-            "autonomous/cron-audit.service",
-            "autonomous/cron-audit.timer",
+            "autonomous/autonomous-cron-health.service",
+            "autonomous/autonomous-cron-health.timer",
+            "autonomous/autonomous-cron-audit.service",
+            "autonomous/autonomous-cron-audit.timer",
         ):
             source = (
                 INSTALL_ROOT / unit

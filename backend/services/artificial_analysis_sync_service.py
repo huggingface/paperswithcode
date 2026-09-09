@@ -547,7 +547,15 @@ class ArtificialAnalysisSyncService:
             for entry in leaderboard.entries
             if entry.slug in discovery.papers and index.key in entry.scores
         ]
-        if not set(MODEL_PAPER_IDENTITIES).issubset({entry.slug for entry in selected}):
+        reviewed = set(MODEL_PAPER_IDENTITIES)
+        scored_reviewed = {
+            entry.slug
+            for entry in leaderboard.entries
+            if entry.slug in reviewed and index.key in entry.scores
+        }
+        if not reviewed.issubset(
+            {entry.slug for entry in leaderboard.entries}
+        ) or not scored_reviewed.issubset({entry.slug for entry in selected}):
             raise ValueError(
                 f"Refusing to synchronize an incomplete reviewed model set for "
                 f"{index.label}"

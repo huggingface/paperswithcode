@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+
+import pytest
 from datetime import UTC, datetime
 from pathlib import Path
 from types import SimpleNamespace
@@ -631,3 +633,71 @@ def test_repairable_trending_jobs_use_isolated_runtime_evidence_paths():
         assert job.lock_file == (
             f"/var/lib/paperswithcode/production/trending-cron-locks/{job_name}.lock"
         )
+
+
+@pytest.mark.parametrize("job_id", ["autonomous_cron_health", "autonomous_cron_audit"])
+def test_disabled_cron_operator_has_no_missing_output_findings(job_id):
+    job = get_cron_job(job_id)
+    evaluated = evaluate_job_health(
+        job,
+        {"status": "unknown", "work_metrics": {}},
+        db_metrics={"operator_enabled": False},
+        lock_state={"exists": False, "held": False, "stale": False},
+        systemd_status={"available": True, "enabled": False, "timer_active": False},
+        process_running=False,
+        now=NOW,
+    )
+    assert evaluated["status"] == "healthy"
+    assert evaluated["execution_health"]["applicable"] is False
+    assert "submission" not in evaluated["execution_health"]["reason"]
+    assert all(
+        f.state is FindingState.HEALTHY for f in build_job_findings(job, evaluated, NOW)
+    )
+
+
+@pytest.mark.parametrize("operator_enabled", [True, None])
+def test_inactive_cron_timer_is_not_implicitly_disabled(operator_enabled):
+    job = get_cron_job("autonomous_cron_health")
+    evaluated = evaluate_job_health(
+        job,
+        {"status": "unknown", "work_metrics": {}},
+        db_metrics={"operator_enabled": operator_enabled},
+        lock_state={"exists": False, "held": False, "stale": False},
+        systemd_status={"available": True, "enabled": False, "timer_active": False},
+        process_running=False,
+        now=NOW,
+    )
+    assert evaluated["execution_health"]["status"] == "broken"
+
+
+def test_autonomous_cron_units_install_under_registered_names():
+    from deploy.install_host_layout import SYSTEMD_UNITS
+
+    root = Path(__file__).resolve().parents[2]
+    installer = (root / "deploy/install_deploy_tools.py").read_text()
+    for job_id in ("autonomous_cron_health", "autonomous_cron_audit"):
+        job = get_cron_job(job_id)
+        for unit in (job.systemd_timer, job.systemd_service):
+            source = f"autonomous/{unit}"
+            assert source in SYSTEMD_UNITS
+            assert source in installer
+            assert (root / "deploy" / source).is_file()
+        assert (
+            f"Unit={job.systemd_service}"
+            in (root / "deploy/autonomous" / job.systemd_timer).read_text()
+        )
+
+
+@pytest.mark.parametrize("active", ["enabled", "timer_active", "service_active"])
+def test_disabled_cron_operator_rejects_active_runtime(active):
+    job = get_cron_job("autonomous_cron_health")
+    evaluated = evaluate_job_health(
+        job,
+        {"status": "unknown", "work_metrics": {}},
+        db_metrics={"operator_enabled": False},
+        lock_state={"exists": False, "held": False, "stale": False},
+        systemd_status={"available": True, active: True},
+        process_running=False,
+        now=NOW,
+    )
+    assert evaluated["execution_health"]["status"] == "broken"
