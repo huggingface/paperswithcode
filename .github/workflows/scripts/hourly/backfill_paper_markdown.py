@@ -41,6 +41,7 @@ COVERAGE_HISTORY_NAME = "paper_markdown_coverage.jsonl"
 DISPATCH_SCHEMA_VERSION = 1
 MOUNT_PROBE_MAX_AGE = timedelta(hours=2)
 MOUNT_RETRY_DELAY = timedelta(minutes=10)
+LIVE_REPAIR_LIMIT = 20
 PROBE_SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -964,7 +965,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
         status_paths = [
             f"_jobs/status/{entry_paper_key(item)}.json" for item in remaining
         ]
-        if getattr(self, "repair_invalid_limit", 0):
+        automatic_repairs = not self.full and not self.retry_only
+        if getattr(self, "repair_invalid_limit", 0) or automatic_repairs:
             status_paths.extend(
                 f"_jobs/status/{entry_paper_key(item)}.json"
                 for item in recent_papers
@@ -981,9 +983,13 @@ class PaperMarkdownBackfillJob(CronJobBase):
             disposition = dispositions.get(status_path)
             if disposition is None or disposition == "retryable_due":
                 candidates.append({**item, "retry": disposition == "retryable_due"})
+        missing_candidate_count = len(candidates)
         repair_limit = getattr(self, "repair_invalid_limit", 0)
+        if automatic_repairs and not candidates and not repair_limit:
+            repair_limit = LIVE_REPAIR_LIMIT
         if repair_limit:
-            # A repair invocation handles only its explicitly bounded repair cohort.
+            # Live runs repair a bounded cohort after eligible missing work drains.
+            # Explicit repair runs always handle only their requested cohort.
             candidates = []
             for item in recent_papers:
                 key = str(item["output_key"])
@@ -1007,7 +1013,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     candidates.append(
                         {
                             **item,
-                            "retry": False,
+                            "retry": disposition == "retryable_due",
                             "replace_invalid_sha256": hashlib.sha256(
                                 original
                             ).hexdigest(),
@@ -1017,7 +1023,10 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     break
         if self.retry_only:
             candidates = [item for item in candidates if item["retry"]]
-        failed_or_completed = max(0, len(remaining) - len(candidates))
+        failed_or_completed = max(0, len(remaining) - missing_candidate_count)
+        repair_candidates = sum(
+            bool(item.get("replace_invalid_sha256")) for item in candidates
+        )
         copied_from_upstream = upstream_available if self.should_execute else 0
         canonical_after_upstream = len(canonical) + copied_from_upstream
         usable_markdown = max(
@@ -1032,6 +1041,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             "eligible_papers": len(papers),
             "canonical_markdown_count": canonical_after_upstream,
             "usable_markdown_count": usable_markdown,
+            "repair_candidates": repair_candidates,
             "semantic_invalid_existing": semantic_invalid_existing,
             "semantic_evidence_unavailable": semantic_evidence_unavailable,
             "copied_from_upstream_count": copied_from_upstream,
@@ -1087,6 +1097,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             "canonical_markdown": len(canonical),
             "canonical_markdown_after_upstream": canonical_after_upstream,
             "usable_markdown": usable_markdown,
+            "repair_candidates": repair_candidates,
             "semantic_invalid_existing": semantic_invalid_existing,
             "semantic_evidence_unavailable": semantic_evidence_unavailable,
             "semantic_validation_failures": semantic_validation_failures,

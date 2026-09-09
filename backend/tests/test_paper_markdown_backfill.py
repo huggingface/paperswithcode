@@ -839,6 +839,7 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
             "eligible_papers": 2,
             "canonical_markdown_count": 1,
             "usable_markdown_count": 1,
+            "repair_candidates": 0,
             "semantic_invalid_existing": 0,
             "semantic_evidence_unavailable": 0,
             "copied_from_upstream_count": 0,
@@ -1766,3 +1767,77 @@ def test_repair_selection_is_bounded_and_pins_original(tmp_path, monkeypatch):
     assert (
         candidates[0]["replace_invalid_sha256"] == hashlib.sha256(original).hexdigest()
     )
+
+
+@pytest.mark.parametrize(
+    ("full", "retry_only", "missing_status", "expected_repairs", "expected_missing"),
+    [
+        (False, False, None, 0, 1),
+        (False, False, "permanent", 20, 0),
+        (False, False, "deferred", 20, 0),
+        (True, False, "permanent", 0, 0),
+        (False, True, "permanent", 0, 0),
+    ],
+)
+def test_live_repair_fallback_prioritizes_missing_work_and_respects_mode(
+    tmp_path,
+    monkeypatch,
+    full,
+    retry_only,
+    missing_status,
+    expected_repairs,
+    expected_missing,
+):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(24)
+    job = _scheduler(execute=False, confirm=False, full=full)
+    job.retry_only = retry_only
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(
+        return_value={item["output_key"]: object() for item in papers[1:]}
+    )
+    job._copy_upstream = Mock(return_value=([papers[0]], 0))
+    statuses = {}
+    if missing_status:
+        statuses[f"_jobs/status/{papers[0]['arxiv_id']}.json"] = {
+            "status": "failed",
+            "schema_version": 2,
+            "retryable": missing_status == "deferred",
+            "next_retry_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        }
+    # Exhausted repairs must not be silently resubmitted by the fallback.
+    statuses[f"_jobs/status/{papers[1]['arxiv_id']}.json"] = {
+        "status": "failed",
+        "schema_version": 2,
+        "attempt_count": 3,
+    }
+    job._status_records = Mock(return_value=statuses)
+    job._semantic_records = Mock(
+        return_value={item["output_key"]: "invalid" for item in papers[1:]}
+    )
+    job.filesystem = Mock()
+    job.filesystem.open.side_effect = lambda *a, **k: BytesIO(b"caption only")
+    job._launch = Mock(return_value=[])
+    job.run()
+    candidates = job._launch.call_args.args[0]
+    assert (
+        sum(bool(item.get("replace_invalid_sha256")) for item in candidates)
+        == expected_repairs
+    )
+    assert (
+        sum(not item.get("replace_invalid_sha256") for item in candidates)
+        == expected_missing
+    )
+    assert papers[1]["arxiv_id"] not in [item["arxiv_id"] for item in candidates]
+
+
+def test_repair_dispatch_waits_for_existing_remote_worker():
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job._remote_jobs = Mock(
+        return_value=[SimpleNamespace(id="existing", stage="RUNNING")]
+    )
+    job._active_jobs = Mock(side_effect=lambda jobs: jobs)
+    entry = {**_candidates(1)[0], "replace_invalid_sha256": "original-hash"}
+    job._budget_decision = Mock()
+    assert job._launch([entry]) == []
+    job._budget_decision.assert_not_called()
