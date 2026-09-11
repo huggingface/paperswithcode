@@ -68,6 +68,11 @@ from `validation_evidence`; empty validation evidence for new inserts or no chan
 does not satisfy source coverage. Existing-row edits still require the evidence
 specified above.
 
+For evidence referring to a supplied source document, copy its `kind` verbatim
+into `source_kind`: a GitHub README is `github_readme`, and a project page is
+`project_page`. Do not label either as `paper_source` merely because it supports
+the paper. Keep the source URL and its kind paired as supplied in the manifest.
+
 Scheduled `add-evals` accepts at most one result for each exact
 `(task_id, dataset_id, best_metric)` leaderboard. Select the benchmark-wise best
 eligible result from a model introduced by the paper, exactly as required by
@@ -82,6 +87,11 @@ blocked by the same configuration in one entry, include primary-paper evidence
 and the catalog searches performed, and exclude comparator rows. Always submit
 `"benchmark_gaps": []` after a completed search when no gap qualifies. These
 observations never create tasks, datasets, metrics, or leaderboards.
+
+Within each gap, every `blocked_evaluations.metrics` key and `best_metric` must
+exactly match a name in that gap's `protocol.metrics`. Represent ID/OOD or other
+evaluation splits in `split`; do not append split suffixes to metric names unless
+those exact names are defined by the protocol. Check this consistency before apply.
 
 For `enrich-paper`, preserve the existing task/method/link lists from context,
 append only high-confidence additions, and submit an `enrich` payload with the
