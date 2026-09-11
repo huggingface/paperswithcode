@@ -1231,6 +1231,16 @@ class AutonomousOperationsRepository:
         db.flush()
         return row
 
+    def get_chat_provider_state(
+        self,
+        db: Session,
+        *,
+        environment: str,
+    ) -> ChatProviderRuntimeState | None:
+        if environment not in {"staging", "production"}:
+            raise ValueError("Chat provider environment is invalid")
+        return db.get(ChatProviderRuntimeState, environment)
+
     def set_chat_provider_state(
         self,
         db: Session,

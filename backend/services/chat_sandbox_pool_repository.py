@@ -11,7 +11,7 @@ from datetime import UTC, date, datetime, timedelta
 from enum import StrEnum
 from typing import Mapping, Protocol
 
-from sqlalchemy import delete, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -120,6 +120,7 @@ class PoolTerminationClaim:
     sandbox_id: str | None
     token_hash: str
     failure_code: str | None
+    accounting_settled: bool = False
 
 
 class PoolTerminationFinishOutcome(StrEnum):
@@ -621,19 +622,24 @@ class ChatSandboxPoolRepository:
         now: datetime,
         stale_draining_before: datetime,
         capacity_locked: bool = False,
+        allow_settled_claimed: bool = False,
     ) -> PoolTerminationClaim | None:
         if not capacity_locked and not self.capacity_locker(db):
             return None
+        claimable_state = ChatSandboxPool.state.in_(
+            ["starting", "blank_ready", "draining"]
+        )
+        if allow_settled_claimed:
+            claimable_state = or_(
+                claimable_state,
+                self._settled_claimed_condition(),
+            )
         row = db.execute(
             select(ChatSandboxPool)
-            .where(ChatSandboxPool.id == pool_id)
+            .where(ChatSandboxPool.id == pool_id, claimable_state)
             .with_for_update()
         ).scalar_one_or_none()
-        if (
-            row is None
-            or row.state not in {"starting", "blank_ready", "draining"}
-            or row.health_check_token_hash is not None
-        ):
+        if row is None or row.health_check_token_hash is not None:
             return None
         if (
             expected_sandbox_id is not None
@@ -644,6 +650,7 @@ class ChatSandboxPoolRepository:
             stale_draining_before
         ):
             return None
+        accounting_settled = row.claimed_at is not None
         effective_failure = self._termination_failure(row.failure_code, failure_code)
         token_hash = self._token_hash(self.token_factory())
         row.state = "draining"
@@ -655,6 +662,34 @@ class ChatSandboxPoolRepository:
             sandbox_id=row.modal_sandbox_id,
             token_hash=token_hash,
             failure_code=effective_failure,
+            accounting_settled=accounting_settled,
+        )
+
+    @staticmethod
+    def _settled_claimed_condition():
+        active_lease = (
+            select(ChatSandboxLease.chat_session_id)
+            .where(
+                ChatSandboxLease.modal_sandbox_id == ChatSandboxPool.modal_sandbox_id,
+                ChatSandboxLease.state.in_(
+                    ["starting", "ready", "busy", "idle", "terminating"]
+                ),
+            )
+            .exists()
+        )
+        open_interval = (
+            select(ChatSandboxComputeInterval.id)
+            .where(
+                ChatSandboxComputeInterval.modal_sandbox_id
+                == ChatSandboxPool.modal_sandbox_id,
+                ChatSandboxComputeInterval.terminal_at.is_(None),
+            )
+            .exists()
+        )
+        return and_(
+            ChatSandboxPool.state == "claimed",
+            ~active_lease,
+            ~open_interval,
         )
 
     def finish_termination(
@@ -682,7 +717,8 @@ class ChatSandboxPoolRepository:
         failure_code = claim.failure_code
         if claim.sandbox_id is not None and not confirmed:
             failure_code = "termination_uncertain"
-        self.finalize_cost(row, now)
+        if not claim.accounting_settled:
+            self.finalize_cost(row, now)
         row.state = "failed" if failure_code else "terminated"
         row.failure_code = failure_code
         row.terminated_at = now
@@ -712,7 +748,12 @@ class ChatSandboxPoolRepository:
             db.execute(
                 select(ChatSandboxPool)
                 .where(
-                    ChatSandboxPool.state.in_(["starting", "blank_ready", "draining"])
+                    or_(
+                        ChatSandboxPool.state.in_(
+                            ["starting", "blank_ready", "draining"]
+                        ),
+                        self._settled_claimed_condition(),
+                    )
                 )
                 .order_by(ChatSandboxPool.updated_at, ChatSandboxPool.id)
                 .limit(scan_limit)
@@ -753,6 +794,7 @@ class ChatSandboxPoolRepository:
             )
             should_drain = (
                 row.state == "draining"
+                or row.state == "claimed"
                 or not enabled
                 or incompatible
                 or self._as_utc(row.expires_at) <= self._as_utc(rotation_before)
@@ -774,6 +816,7 @@ class ChatSandboxPoolRepository:
                     now=now,
                     stale_draining_before=stale_draining_before,
                     capacity_locked=True,
+                    allow_settled_claimed=True,
                 )
                 if claim is not None:
                     claims.append(claim)

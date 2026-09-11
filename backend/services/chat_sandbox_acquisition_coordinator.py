@@ -321,6 +321,7 @@ class ChatSandboxAcquisitionCoordinator:
             started=started,
             pool_lookup_ms=pool_lookup_ms,
             live_cap_resolver=live_cap_resolver,
+            launch_mode=launch_mode,
         )
         if isinstance(selected, LeaseReused):
             return selected
@@ -343,6 +344,7 @@ class ChatSandboxAcquisitionCoordinator:
         started: float,
         pool_lookup_ms: int | None,
         live_cap_resolver: LiveCapResolver | None,
+        launch_mode: SandboxLaunchMode,
     ) -> StartSelected | LeaseReused:
         restarted = False
         while True:
@@ -358,6 +360,7 @@ class ChatSandboxAcquisitionCoordinator:
                     chat_session_id,
                     acquisition,
                     deadline=deadline,
+                    launch_mode=launch_mode,
                 )
                 if sandbox is None:
                     restarted = restarted or cohort == "restarted"
@@ -459,6 +462,7 @@ class ChatSandboxAcquisitionCoordinator:
         acquisition: ReuseLease,
         *,
         deadline: float,
+        launch_mode: SandboxLaunchMode,
     ) -> tuple[object | None, str | None]:
         await self.lease_maintenance.enforce_warm_cap()
         persistent = bool(
@@ -479,6 +483,7 @@ class ChatSandboxAcquisitionCoordinator:
                 sandbox,
                 persistent=persistent,
                 worker_generation=acquisition.worker_generation,
+                launch_mode=launch_mode,
             ):
                 return sandbox, (
                     "control_reconnected" if persistent else "rediscovered"
@@ -560,16 +565,18 @@ class ChatSandboxAcquisitionCoordinator:
 
         sandbox = None
         try:
-            with self.session_factory() as evidence_db:
-                qualification_profile = evidence_db.scalar(
-                    select(ChatTurnLatency.qualification_profile)
-                    .where(
-                        ChatTurnLatency.chat_session_id == chat_session_id,
-                        ChatTurnLatency.terminal_status == "running",
+            qualification_profile = None
+            if self.settings.environment == "staging":
+                with self.session_factory() as evidence_db:
+                    qualification_profile = evidence_db.scalar(
+                        select(ChatTurnLatency.qualification_profile)
+                        .where(
+                            ChatTurnLatency.chat_session_id == chat_session_id,
+                            ChatTurnLatency.terminal_status == "running",
+                        )
+                        .order_by(ChatTurnLatency.admitted_at.desc())
+                        .limit(1)
                     )
-                    .order_by(ChatTurnLatency.started_at.desc())
-                    .limit(1)
-                )
             async with asyncio.timeout(self.ready_timeout_seconds):
                 sandbox = await self.provider.create(
                     name=f"chat-{chat_session_id}",

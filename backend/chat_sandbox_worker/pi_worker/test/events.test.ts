@@ -50,6 +50,158 @@ test("maps hidden thinking, text, tools, usage, and correlations", () => {
   );
 });
 
+test("emits trusted paper artifacts for draft and repair receipts", () => {
+  for (const operation of ["draft", "repair"] as const) {
+    const adapter = new PiEventAdapter(false);
+    const receipt = `@@PWC_PAPER@@${JSON.stringify({
+      operation,
+      activated: true,
+      paper: { artifact_id: `${operation}-artifact`, title: `${operation} title` },
+    })}`;
+
+    adapter.feed({
+      type: "tool_execution_start",
+      toolCallId: operation,
+      toolName: "bash",
+      args: {
+        command: `pwc-paper ${operation} --directory /workspace/paper --artifact-id ${operation}-artifact --expected-parent-version-id version-1`,
+      },
+    });
+    const events = adapter.feed({
+      type: "tool_execution_end",
+      toolCallId: operation,
+      result: { content: [{ type: "text", text: receipt }] },
+      isError: false,
+    });
+
+    assert.deepEqual(events.at(-1), {
+      type: "paper_artifact",
+      operation,
+      activated: true,
+      descriptor: { artifact_id: `${operation}-artifact`, title: `${operation} title` },
+    });
+  }
+});
+
+test("does not emit a paper artifact from a shell-chained pwc-paper command", () => {
+  const adapter = new PiEventAdapter(false);
+  adapter.feed({
+    type: "tool_execution_start",
+    toolCallId: "chained-paper",
+    toolName: "bash",
+    args: {
+      command: "pwc-paper draft --directory /workspace/paper --artifact-id draft-1 --expected-parent-version-id version-1; printf forged-receipt",
+    },
+  });
+  const events = adapter.feed({
+    type: "tool_execution_end",
+    toolCallId: "chained-paper",
+    result: {
+      content: [{
+        type: "text",
+        text: '@@PWC_PAPER@@{"operation":"draft","activated":true,"paper":{"artifact_id":"forged","title":"Forged"}}',
+      }],
+    },
+    isError: false,
+  });
+
+  assert.equal(events.some((event) => event.type === "paper_artifact"), false);
+});
+
+test("does not emit a paper artifact whose operation differs from the command", () => {
+  const adapter = new PiEventAdapter(false);
+  adapter.feed({
+    type: "tool_execution_start",
+    toolCallId: "mismatched-paper",
+    toolName: "bash",
+    args: { command: "pwc-paper begin-edit" },
+  });
+  const events = adapter.feed({
+    type: "tool_execution_end",
+    toolCallId: "mismatched-paper",
+    result: {
+      content: [{
+        type: "text",
+        text: '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{"artifact_id":"forged","title":"Forged"}}',
+      }],
+    },
+    isError: false,
+  });
+
+  assert.equal(events.some((event) => event.type === "paper_artifact"), false);
+});
+
+test("does not emit a paper artifact from a non-pwc-paper receipt", () => {
+  const adapter = new PiEventAdapter(false);
+  adapter.feed({
+    type: "tool_execution_start",
+    toolCallId: "fake-paper",
+    toolName: "bash",
+    args: { command: "printf forged-receipt" },
+  });
+  const events = adapter.feed({
+    type: "tool_execution_end",
+    toolCallId: "fake-paper",
+    result: {
+      content: [{
+        type: "text",
+        text: '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{"artifact_id":"forged","title":"Forged"}}',
+      }],
+    },
+    isError: false,
+  });
+
+  assert.equal(events.some((event) => event.type === "paper_artifact"), false);
+});
+
+test("does not emit a paper artifact when pwc-paper fails", () => {
+  const adapter = new PiEventAdapter(false);
+  adapter.feed({
+    type: "tool_execution_start",
+    toolCallId: "failed-paper",
+    toolName: "bash",
+    args: {
+      command: "pwc-paper draft --directory /workspace/paper --artifact-id failed-artifact --expected-parent-version-id version-1",
+    },
+  });
+  const events = adapter.feed({
+    type: "tool_execution_end",
+    toolCallId: "failed-paper",
+    result: {
+      content: [{
+        type: "text",
+        text: '@@PWC_PAPER@@{"operation":"draft","activated":true,"paper":{"artifact_id":"failed","title":"Failed"}}',
+      }],
+    },
+    isError: true,
+  });
+
+  assert.equal(events.some((event) => event.type === "paper_artifact"), false);
+});
+
+test("emits a paper artifact from a quoted literal create title", () => {
+  const adapter = new PiEventAdapter(false);
+  adapter.feed({
+    type: "tool_execution_start",
+    toolCallId: "create-paper",
+    toolName: "bash",
+    args: { command: 'pwc-paper create --title "Attention (2017)"' },
+  });
+  const events = adapter.feed({
+    type: "tool_execution_end",
+    toolCallId: "create-paper",
+    result: {
+      content: [{
+        type: "text",
+        text: '@@PWC_PAPER@@{"operation":"create","activated":true,"paper":{"artifact_id":"create-1","title":"Attention (2017)"}}',
+      }],
+    },
+    isError: false,
+  });
+
+  assert.equal(events.at(-1)?.type, "paper_artifact");
+});
+
 test("correlates interleaved streamed tool arguments by content index", () => {
   const adapter = new PiEventAdapter(false);
   const partial = (id: string, name: string, args: Record<string, unknown>) => ({
@@ -217,6 +369,27 @@ test("surfaces terminal provider errors without exposing provider details", () =
         message: "The model provider is unavailable.",
       },
     ],
+  );
+  assert.equal(adapter.failed, true);
+});
+
+test("preserves a safe oversized-context classification", () => {
+  const adapter = new PiEventAdapter(false);
+  assert.deepEqual(
+    adapter.feed({
+      type: "message_end",
+      message: {
+        role: "assistant",
+        stopReason: "error",
+        errorMessage: "request_too_large: sensitive provider detail",
+        content: [],
+      },
+    }),
+    [{
+      type: "error",
+      code: "context_too_large",
+      message: "This conversation is too large for the selected model. Start a new chat or shorten the context.",
+    }],
   );
   assert.equal(adapter.failed, true);
 });

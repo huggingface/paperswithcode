@@ -18,8 +18,8 @@ from backend.models.api import (
     OrganizationSyncRequest,
     OrganizationSyncResult,
     Organizations,
-    Papers,
 )
+from backend.models.papers import Papers
 from backend.services.organization_service import OrganizationService
 from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.organization_sync_service import OrganizationSyncService

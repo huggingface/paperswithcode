@@ -3,7 +3,7 @@ from typing import Annotated
 
 from fastapi import HTTPException, Query
 
-from backend.models.api import PaperDateRange
+from backend.models.papers import PaperDateRange
 
 
 def get_paper_date_range(

@@ -45,6 +45,7 @@ describe("toUiMessages", () => {
     ["provider_rate_limit", /temporarily rate-limited/],
     ["provider_timeout", /timed out/],
     ["provider_unavailable", /provider failed/],
+    ["context_too_large", /too large/],
   ])("keeps %s visibly distinct after reload", (errorCode, message) => {
     const detail: ChatSessionDetail = {
       id: "session-errors",

@@ -16,7 +16,7 @@
     {
       "id": 3,
       "prompt": "Similarly add Spoken Language Understanding as a task in Audio. Here's a diagram we can use for the hero image: [user would attach an image]. Recommend ASR-adjacent benchmarks afterward.",
-      "expected_output": "Follows similarly-add flow from conversation context, saves user image to data/entity_image_seeds/tasks/spoken-language-understanding.png, imports via import_entity_image.py, applies migration, keyword backfill, returns production URL plus ASR/SLU benchmark recommendations (SLURP, Fluent Speech Commands, etc.).",
+      "expected_output": "Follows similarly-add flow from conversation context, saves user image to /tmp/paperswithcode_entity_image_seeds/tasks/spoken-language-understanding.png, imports via import_entity_image.py, applies migration, keyword backfill, returns production URL plus ASR/SLU benchmark recommendations (SLURP, Fluent Speech Commands, etc.).",
       "files": []
     }
   ]

@@ -7,7 +7,7 @@ description: Add or update AI/ML task taxonomy rows in the paperswithcode repo d
 
 This skill adds curated rows to the `tasks` table so task pages, paper tagging, and benchmark leaderboards render correctly. Prefer small idempotent migrations plus applying the same change to the live database.
 
-> **Image storage:** seed PNG → `data/entity_image_seeds/tasks/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/tasks/<slug>/image`. Do **not** put task heroes in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
+> **Image storage:** seed PNG → `/tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/tasks/<slug>/image`. Do **not** put task heroes in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
 
 When the user says **"similarly add X"** (often with just a name and area), run the full workflow below without re-asking — same area, parent, keywords, thumbnail, keyword backfill, and deploy steps as the prior task in the conversation unless they specify otherwise.
 
@@ -20,7 +20,7 @@ For a typical new top-level task:
 1. Confirm the task does not already exist (`slug`, `name`, `keywords`).
 2. Pick the right **area** and optional **parent** (subtask vs top-level).
 3. Write metadata + migration SQL (or `ensure_task` Python script).
-4. Add hero image: save seed PNG under `data/entity_image_seeds/tasks/<slug>.png`, then import into SQL (see Thumbnail).
+4. Add hero image: save seed PNG under `/tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png`, then import into SQL (see Thumbnail).
 5. Apply migration to the live DB.
 6. Run keyword backfill so existing papers get tagged (see Keyword linking).
 7. Verify API + report production URL.
@@ -85,21 +85,21 @@ Task hero images are DB-backed. Save a seed PNG, import it, then verify the API 
 **If the user provides an image**, copy it to:
 
 ```text
-data/entity_image_seeds/tasks/<slug>.png
+/tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png
 ```
 
 **Otherwise**, find a suitable diagram:
 
 1. Check whether a related task, survey paper, or benchmark homepage has a clear task illustration.
 2. For arXiv-backed domains, download `https://arxiv.org/pdf/<arxiv_id>.pdf` and extract a figure with PyMuPDF (`fitz`) — same approach as `add-method`: locate figure captions, crop the main task diagram (not tables-only), render at 3× zoom.
-3. Save to `data/entity_image_seeds/tasks/<slug>.png`.
+3. Save to `/tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png`.
 4. Set `image_credit` to the source.
 
 After the task row exists, import the PNG into SQL:
 
 ```bash
 uv run --env-file backend/keys.env python backend/database/import_entity_image.py \
-    tasks <slug> data/entity_image_seeds/tasks/<slug>.png
+    tasks <slug> /tmp/paperswithcode_entity_image_seeds/tasks/<slug>.png
 ```
 
 Prefer self-hosted DB images for new tasks. External hotlinks are acceptable only when licensing/hosting makes local copy impractical and the user agrees.

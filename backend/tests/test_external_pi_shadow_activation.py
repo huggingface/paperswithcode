@@ -24,6 +24,7 @@ from deploy.external_pi_shadow_activation import (
     deactivate_external_pi_slots,
     refresh_command,
     run_temporary_shadow_qualification,
+    temporary_worker_token_file,
 )
 
 
@@ -116,6 +117,38 @@ def _report(
             }
         )
     )
+
+
+def test_temporary_replica_token_file_is_private_and_removed(tmp_path: Path):
+    token = "derived-token-" + "x" * 32
+
+    with temporary_worker_token_file(token, tmp_path) as path:
+        assert path.read_text() == f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={token}\n"
+        assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+    assert path.exists() is False
+
+
+def test_temporary_qualification_uses_explicit_replica_identity(tmp_path: Path):
+    observed = []
+    generations = iter((4, 6))
+
+    evidence = run_temporary_shadow_qualification(
+        environment="staging",
+        slot="blue",
+        release_id="release-a",
+        report_path=tmp_path / "report.json",
+        worker_id="staging-blue-00",
+        start=lambda *_args: None,
+        authenticated=lambda *_args: next(generations),
+        expire_and_restart=lambda *_args: 5,
+        stale_probe=lambda worker_id, *_args: observed.append(worker_id) or True,
+        qualify=lambda value, _path: observed.append(value.worker_id),
+        stop=lambda *_args: None,
+    )
+
+    assert evidence.worker_id == "staging-blue-00"
+    assert observed == ["staging-blue-00", "staging-blue-00"]
 
 
 def test_guard_enables_only_shadow_lifecycle_and_preserves_token(tmp_path: Path):

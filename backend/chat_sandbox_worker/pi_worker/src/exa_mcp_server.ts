@@ -16,12 +16,8 @@ export async function searchWeb(query: string, signal?: AbortSignal): Promise<Re
     turnClaim: {
       turnId: process.env.PWC_EXTERNAL_GATEWAY_TURN ?? "",
       workerId: process.env.PWC_EXTERNAL_GATEWAY_TURN_WORKER_ID ?? "",
-      workerGeneration: Number(
-        process.env.PWC_EXTERNAL_GATEWAY_TURN_WORKER_GENERATION ?? "0",
-      ),
-      leaseGeneration: Number(
-        process.env.PWC_EXTERNAL_GATEWAY_TURN_LEASE_GENERATION ?? "0",
-      ),
+      workerGeneration: process.env.PWC_EXTERNAL_GATEWAY_TURN_WORKER_GENERATION ?? "0",
+      leaseGeneration: process.env.PWC_EXTERNAL_GATEWAY_TURN_LEASE_GENERATION ?? "0",
     },
   } : undefined;
   const response = await fetch(BROKER_SEARCH_URL, {

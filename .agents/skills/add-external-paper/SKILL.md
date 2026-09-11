@@ -465,4 +465,3 @@ End with a concise report:
 - The source has an arXiv paper and the task is to import that paper. Use the normal ArXiv paper indexing flow.
 - The user wants to add a new benchmark/leaderboard/dataset. Use `add-benchmark`.
 - The user wants to add benchmark scores/evaluation rows for a model or paper. Use `add-evals` after the paper row exists.
-- The user wants the arXiv evaluation extraction pipeline. Use `extract-evals-paper`.

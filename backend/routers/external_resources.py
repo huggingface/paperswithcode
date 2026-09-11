@@ -18,7 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.services.external_resource_service import (
     ExternalResourceError,
     ExternalResourceInput,

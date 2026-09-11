@@ -375,4 +375,4 @@ const LatexTitle = ({ title, className = '', highlight }: { title: string; class
 );
 
 export default LatexTitle;
-export { LatexText, LatexTitle };
+export { LatexText };

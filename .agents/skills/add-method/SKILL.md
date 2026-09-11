@@ -7,7 +7,7 @@ description: Add or update AI/ML method taxonomy rows in the paperswithcode repo
 
 This skill adds curated rows to the `methods` table so method pages, paper pages, and "Introduced" banners render correctly. Prefer small idempotent migrations plus applying the same change to the live database.
 
-> **Image storage:** seed PNG → `data/entity_image_seeds/methods/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/methods/<slug>/image`. Do **not** put method figures in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
+> **Image storage:** seed PNG → `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png` → `import_entity_image.py` → SQL bytes served at `/api/v1/methods/<slug>/image`. Do **not** put method figures in `frontend/public/` (that folder is for browser assets only: favicons, `og-image.png`, logos).
 
 When the user says **"similarly add X"** (often with just a name and source arXiv id), run the full workflow below without re-asking — same area, citation linking, thumbnail, and deploy steps as the prior method in the conversation unless they specify otherwise.
 
@@ -20,7 +20,7 @@ For a typical new method with a source paper:
 1. Confirm the method does not already exist (`slug`, `name`, `keywords`).
 2. Confirm the source `papers` row exists (import first if needed).
 3. Write metadata + migration SQL.
-4. Add hero image: save seed PNG under `data/entity_image_seeds/methods/<slug>.png`, then import into SQL (see Thumbnail).
+4. Add hero image: save seed PNG under `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png`, then import into SQL (see Thumbnail).
 5. Apply migration to the live DB.
 6. Link **all local papers that cite the source paper** (see Citation linking).
 7. Verify API + report production URL.
@@ -72,7 +72,7 @@ Method figures are DB-backed. Save a seed PNG, import it, then verify the API im
 **If the user provides an image**, copy it to:
 
 ```text
-data/entity_image_seeds/methods/<slug>.png
+/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png
 ```
 
 **Otherwise**, extract a figure from the source PDF:
@@ -80,14 +80,14 @@ data/entity_image_seeds/methods/<slug>.png
 1. Download `https://arxiv.org/pdf/<arxiv_id>.pdf`.
 2. Use PyMuPDF (`fitz`) to find figure captions (`Figure 1`, `Figure 2`, …) and large drawing bounding boxes per page.
 3. Render the best architecture diagram (not a table-only or caption-only crop) at 3× zoom with `page.get_pixmap(matrix=fitz.Matrix(3, 3), clip=clip_rect)`.
-4. Save to `data/entity_image_seeds/methods/<slug>.png`.
+4. Save to `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png`.
 5. Visually sanity-check the crop — exclude caption text below the figure when possible.
 
 After the method row exists, import the PNG into SQL:
 
 ```bash
 uv run --env-file backend/keys.env python backend/database/import_entity_image.py \
-    methods <slug> data/entity_image_seeds/methods/<slug>.png
+    methods <slug> /tmp/paperswithcode_entity_image_seeds/methods/<slug>.png
 ```
 
 Prefer the main architecture diagram (encoder block, lattice, joint network) over alignment heatmaps unless the user asks otherwise.

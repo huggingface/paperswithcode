@@ -12,6 +12,7 @@ from backend.chat_sandbox_worker.contract import (
     CONTROL_PORT,
     MODAL_APP_NAME,
 )
+from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_SOCKET
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_PROTOCOL
 from backend.config import Settings
 from backend.services import chat_sandbox_provider, chat_sandbox_service
@@ -130,6 +131,21 @@ def test_create_nonpersistent_sandbox_preserves_provider_isolation_contract(
 
 def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatch):
     captured: dict[str, object] = {}
+    probes: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+    class Sandbox:
+        object_id = "sb-executor"
+
+        def __init__(self):
+            self.exec = _AsyncCall(self._exec)
+
+        async def _exec(self, *command, **options):
+            probes.append((command, options))
+
+            async def wait():
+                return None
+
+            return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
 
     async def lookup(*_args, **_options):
         return object()
@@ -140,7 +156,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
     async def create(*command, **options):
         captured["command"] = command
         captured["options"] = options
-        return SimpleNamespace(object_id="sb-executor")
+        return Sandbox()
 
     monkeypatch.setattr(chat_sandbox_provider.modal.App, "lookup", _AsyncCall(lookup))
     monkeypatch.setattr(
@@ -159,7 +175,10 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
     result = asyncio.run(
         provider.create(
             name="chat-executor-test",
-            tags={"service": "pwc-chat"},
+            tags={
+                "service": "pwc-chat",
+                "qualification_profile": "32-functional-turns",
+            },
             worker_generation="generation-a",
             launch_mode=SandboxLaunchMode.EXECUTOR,
         )
@@ -178,6 +197,20 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
     assert "OPENROUTER_API_KEY" not in options["env"]
     assert "HF_TOKEN" not in options["env"]
     assert options["inbound_cidr_allowlist"] == []
+    assert probes == [
+        (
+            ("test", "-S", "/run/pwc-chat-executor/executor.sock"),
+            {"timeout": 5},
+        ),
+        (
+            (
+                "sh",
+                "-c",
+                "printf durable-ready > /workspace/durable-ready.txt",
+            ),
+            {"timeout": 5},
+        ),
+    ]
 
 
 def test_executor_launch_mode_requires_its_independent_kill_switch():
@@ -550,6 +583,32 @@ def test_health_checks_running_sandbox_and_expected_worker_probe(
     assert calls == [expected_command, "wait"]
 
 
+def test_health_uses_executor_socket_probe_for_executor_sandbox():
+    calls: list[tuple[object, ...] | str] = []
+
+    async def execute(*command, **options):
+        calls.append(command)
+        assert options == {"timeout": 5}
+
+        async def wait():
+            calls.append("wait")
+
+        return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
+
+    sandbox = SimpleNamespace(exec=_AsyncCall(execute))
+    provider = ModalSandboxProviderAdapter(_settings())
+
+    assert asyncio.run(
+        provider.health(
+            sandbox,
+            persistent=True,
+            worker_generation="generation-a",
+            launch_mode=SandboxLaunchMode.EXECUTOR,
+        )
+    )
+    assert calls == [("test", "-S", str(EXECUTOR_SOCKET)), "wait"]
+
+
 def test_health_reports_failed_worker_probe():
     async def execute(*_command, **_options):
         async def wait():
@@ -681,11 +740,11 @@ def test_open_executor_relay_uses_bounded_binary_process():
                 "backend.chat_sandbox_worker.executor_relay",
             ),
             {
-                "stdin": StreamType.PIPE,
                 "stdout": StreamType.PIPE,
                 "stderr": StreamType.DEVNULL,
                 "timeout": 31,
                 "workdir": "/workspace",
+                "env": {"PYTHONPATH": "/opt/pwc"},
                 "text": False,
             },
         )

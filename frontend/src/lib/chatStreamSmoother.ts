@@ -1,6 +1,6 @@
 import type { ChatEvent } from "@/lib/chat";
 
-export const CHAT_STREAM_DEFAULTS = {
+const CHAT_STREAM_DEFAULTS = {
   minDelayMs: 5,
   maxDelayMs: 80,
   minRateCharsPerMs: 0.3,

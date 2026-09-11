@@ -15,7 +15,7 @@ export interface Framework {
   introducing_paper_arxiv_id?: string | null;
 }
 
-export interface FrameworkCategory {
+interface FrameworkCategory {
   slug: string;
   name: string;
   description?: string | null;
@@ -24,7 +24,7 @@ export interface FrameworkCategory {
   frameworks: Framework[];
 }
 
-export interface FrameworkDomain {
+interface FrameworkDomain {
   slug: string;
   name: string;
   description: string;

@@ -4,20 +4,26 @@ import base64
 import gzip
 import hashlib
 import json
+import os
+import sys
 import urllib.error
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, date, datetime
 from io import BytesIO
 from pathlib import Path
+from threading import Event
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 from jsonschema import Draft202012Validator
 from sqlalchemy import create_engine
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
+from backend.scripts import enqueue_hf_daily_paper_curation as curation_cli
 from backend.models.database import (
     AutonomousOperatorState,
     AutonomousRun,
@@ -26,6 +32,7 @@ from backend.models.database import (
     Dataset,
     Metric,
     Paper,
+    PaperCurationJob,
     PaperCurationSchedulerState,
     PaperCurationWorkflow,
     Task,
@@ -37,7 +44,9 @@ from backend.services.autonomous_operations_repository import (
     Operator,
 )
 from backend.services.codex_add_evals_service import (
+    CanaryDispatchFailed,
     CodexPaperJobService,
+    curation_dispatch_lock,
     _is_callback_validation_rejection,
 )
 from backend.services.codex_curation_callback_service import (
@@ -495,9 +504,10 @@ def test_canary_gate_excludes_durable_deferred_overflow():
     ]
 
 
-def test_scheduled_job_retry_uses_the_shared_durable_queue():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_scheduled_job_retry_uses_the_shared_durable_queue(trigger):
     job_id = uuid.uuid4()
-    row = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    row = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     serialized = {
         "id": str(uuid.uuid4()),
         "retry_of_id": str(job_id),
@@ -882,11 +892,12 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
     }
 
 
-def test_queued_operator_retry_is_prioritized_without_duplication():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_queued_operator_retry_is_prioritized_without_duplication(trigger):
     job_id = uuid.uuid4()
     row = SimpleNamespace(
         id=job_id,
-        trigger="hf-daily-cron",
+        trigger=trigger,
         status="queued",
         priority=100,
     )
@@ -938,9 +949,172 @@ def test_queued_operator_retry_is_prioritized_without_duplication():
     assert jobs.dispatched is True
 
 
-def test_repeating_operator_retry_returns_active_child_attempt():
+def test_canary_dispatch_launches_only_selected_job_while_normal_dispatch_is_paused():
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    other = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-trending-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Database:
+        def get(self, model, key):
+            if model is PaperCurationSchedulerState:
+                return scheduler
+            if key == selected.id:
+                return selected
+            return None
+
+    class Jobs:
+        launched = []
+
+        def dispatch_canary(self, _db, _settings, row):
+            self.launched.append(row)
+            row.status = "running"
+            return row
+
+        def serialize(self, row, _settings):
+            return SimpleNamespace(
+                model_dump=lambda **_kwargs: {
+                    "id": str(row.id),
+                    "status": row.status,
+                }
+            )
+
+    jobs = Jobs()
+    result = HFDailyCurationService(
+        Database(), SimpleNamespace(), job_service=jobs
+    ).dispatch_canary_job(selected.id)
+
+    assert result == {"id": str(selected.id), "status": "running"}
+    assert jobs.launched == [selected]
+    assert other.status == "queued"
+    assert scheduler.dispatch_enabled is False
+    assert scheduler.paused_at is not None
+
+
+def test_daily_curation_cli_dispatches_one_explicit_canary_job(monkeypatch, capsys):
     job_id = uuid.uuid4()
-    failed = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    calls = []
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, db, settings):
+            calls.append((db, settings))
+
+        def dispatch_canary_job(self, selected_job_id):
+            calls.append(selected_job_id)
+            return {"id": str(selected_job_id), "status": "running"}
+
+    settings = object()
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", lambda: settings)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["enqueue_hf_daily_paper_curation", "--canary-job", str(job_id)],
+    )
+
+    assert curation_cli.main() == 0
+    assert calls[1] == job_id
+    assert json.loads(capsys.readouterr().out) == {
+        "id": str(job_id),
+        "status": "running",
+    }
+
+
+def test_daily_curation_cli_exits_nonzero_when_canary_does_not_launch(
+    monkeypatch, capsys
+):
+    job_id = uuid.uuid4()
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, _db, _settings):
+            pass
+
+        def dispatch_canary_job(self, _selected_job_id):
+            raise CanaryDispatchFailed("Canary job did not launch")
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", object)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["enqueue_hf_daily_paper_curation", "--canary-job", str(job_id)],
+    )
+
+    assert curation_cli.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "error": "Canary job did not launch",
+        "job_id": str(job_id),
+        "launched": False,
+    }
+
+
+@pytest.mark.parametrize(
+    ("trigger", "status", "dispatch_enabled", "paused_at", "message"),
+    (
+        ("admin", "queued", False, datetime.now(UTC), "Only scheduled"),
+        (
+            "hf-daily-cron",
+            "running",
+            False,
+            datetime.now(UTC),
+            "requires a queued",
+        ),
+        (
+            "hf-trending-cron",
+            "queued",
+            True,
+            None,
+            "normal dispatch to be paused",
+        ),
+    ),
+)
+def test_canary_dispatch_rejects_unsafe_selection_or_scheduler_state(
+    trigger, status, dispatch_enabled, paused_at, message
+):
+    row = SimpleNamespace(id=uuid.uuid4(), trigger=trigger, status=status)
+    scheduler = SimpleNamespace(
+        dispatch_enabled=dispatch_enabled,
+        paused_at=paused_at,
+    )
+
+    class Database:
+        def get(self, model, _key):
+            return scheduler if model is PaperCurationSchedulerState else row
+
+    class Jobs:
+        def dispatch_canary(self, *_args):
+            raise AssertionError("unsafe canary must not reach the dispatcher")
+
+    with pytest.raises(ValueError, match=message):
+        HFDailyCurationService(
+            Database(), SimpleNamespace(), job_service=Jobs()
+        ).dispatch_canary_job(row.id)
+
+
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_repeating_operator_retry_returns_active_child_attempt(trigger):
+    job_id = uuid.uuid4()
+    failed = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     active = SimpleNamespace(id=uuid.uuid4(), status="running", priority=100)
 
     class Query:
@@ -1424,6 +1598,225 @@ def test_dispatch_does_not_append_registry_tag_to_verified_space(monkeypatch):
     assert launched["image"] == "hf.co/spaces/example/curator-0123456789ab"
     assert row.status == "running"
     assert row.hf_job_id == "hf-job"
+
+
+def test_one_shot_dispatch_calls_only_the_selected_scheduled_row(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    other = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-trending-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def query(self, model):
+            assert model is PaperCurationJob
+            return Query()
+
+        def get(self, model, key):
+            assert (model, key) == (PaperCurationSchedulerState, 1)
+            return scheduler
+
+    launched = []
+    service = CodexPaperJobService()
+
+    def launch(_db, _settings, row):
+        launched.append(row)
+        row.status = "running"
+        row.hf_job_id = "hf-canary-job"
+
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        launch,
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    service.dispatch_canary(Database(), settings, selected)
+
+    assert launched == [selected]
+    assert other.status == "queued"
+    assert scheduler.dispatch_enabled is False
+    assert scheduler.paused_at is not None
+
+
+def test_one_shot_dispatch_refuses_to_exceed_scheduled_capacity(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    active = SimpleNamespace(trigger="hf-trending-cron", status="running")
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return [active]
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def get(self, _model, _key):
+            return scheduler
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        lambda *_args: pytest.fail("capacity denial must not launch a job"),
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=1,
+    )
+
+    with pytest.raises(RuntimeError, match="scheduled curation capacity"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_one_shot_dispatch_reports_a_non_launched_row_as_failure(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+        hf_job_id=None,
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="operator",
+        first_enabled_at=None,
+    )
+
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def all(self):
+            return []
+
+    class Database:
+        def query(self, _model):
+            return Query()
+
+        def get(self, model, _key):
+            return scheduler if model is PaperCurationSchedulerState else selected
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(service, "_dispatch_row", lambda *_args: None)
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    with pytest.raises(RuntimeError, match="did not launch"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_one_shot_dispatch_cannot_bypass_an_automatic_safety_pause(monkeypatch):
+    selected = SimpleNamespace(
+        id=uuid.uuid4(),
+        trigger="hf-daily-cron",
+        status="queued",
+    )
+    scheduler = SimpleNamespace(
+        dispatch_enabled=False,
+        paused_at=datetime.now(UTC),
+        pause_condition="daily_token_guardrail",
+        first_enabled_at=datetime.now(UTC),
+    )
+
+    class Database:
+        def get(self, _model, _key):
+            return scheduler
+
+    service = CodexPaperJobService()
+    monkeypatch.setattr(
+        service,
+        "_dispatch_row",
+        lambda *_args: pytest.fail("automatic safety pauses must not be bypassed"),
+    )
+    settings = SimpleNamespace(
+        codex_jobs_enabled=True,
+        codex_curation_scheduler_enabled=True,
+        codex_jobs_max_active=4,
+        codex_jobs_max_scheduled_active=3,
+    )
+
+    with pytest.raises(RuntimeError, match="operator pause"):
+        service.dispatch_canary(Database(), settings, selected)
+
+
+def test_postgres_curation_dispatch_lock_serializes_concurrent_sessions():
+    database_url = os.getenv("PWC_AUTONOMOUS_TEST_DATABASE_URL")
+    if not database_url:
+        pytest.skip("PWC_AUTONOMOUS_TEST_DATABASE_URL is not configured")
+    if not (make_url(database_url).database or "").startswith("autonomous_ops_test_"):
+        pytest.fail("Curation concurrency test requires a disposable database")
+    engine = create_engine(database_url, pool_size=2)
+    first_acquired = Event()
+    release_first = Event()
+    second_acquired = Event()
+
+    def hold_first_lock():
+        with Session(engine) as db:
+            with curation_dispatch_lock(db):
+                first_acquired.set()
+                assert release_first.wait(timeout=5)
+
+    def acquire_second_lock():
+        assert first_acquired.wait(timeout=5)
+        with Session(engine) as db:
+            with curation_dispatch_lock(db):
+                second_acquired.set()
+
+    try:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            first = pool.submit(hold_first_lock)
+            second = pool.submit(acquire_second_lock)
+            assert first_acquired.wait(timeout=5)
+            assert second_acquired.wait(timeout=0.2) is False
+            release_first.set()
+            first.result(timeout=5)
+            second.result(timeout=5)
+        assert second_acquired.is_set()
+    finally:
+        engine.dispose()
 
 
 def test_scheduled_dispatch_fails_closed_before_remote_launch_when_curation_is_disabled(
@@ -1942,3 +2335,28 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
         manifest["objects"]
     )
     assert not (tmp_path / "curation-traces" / f"{row.id}.json").exists()
+
+
+def test_daily_curation_cli_reports_retry_workflow_conflict(monkeypatch, capsys):
+    job_id = uuid.uuid4()
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, _db, _settings):
+            pass
+
+        def retry_scheduled_job(self, _job_id):
+            raise curation_cli.CurationRetryConflict("Paper has active workflow newer")
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", object)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(sys, "argv", ["curation", "--retry-job", str(job_id)])
+    assert curation_cli.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "error": "Paper has active workflow newer",
+        "job_id": str(job_id),
+        "retry_conflict": True,
+    }

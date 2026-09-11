@@ -539,7 +539,6 @@ End by giving the user a concise report:
 ## When NOT to use this skill
 
 - The user wants to add a brand-new benchmark to the database, link it to a task, or set leaderboard metrics. Use `add-benchmark` for that.
-- The user wants to extract evaluation tables from an arXiv paper through the cached extraction pipeline (parse.py / Step 1–7), rather than ingesting a handful of rows from a known source. Use `extract-evals-paper` for that automated pipeline; this skill is for the manual / source-driven path.
 - The user only wants the model card / README / paper summarized, with no intent to populate evaluation rows. Hand off to general tooling instead.
 
 ## Quick reference

@@ -67,8 +67,6 @@ const readStoredDraft = (): ChatDraft | null => {
   return emptyDraft(raw);
 };
 
-export { ChatCapacityDialog };
-
 type RouteSessionState = {
   id: string;
   status: "loading" | "loaded" | "error";

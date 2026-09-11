@@ -5,8 +5,11 @@ import os
 import pwd
 import signal
 import subprocess
+import urllib.error
+import urllib.parse
 import urllib.request
 from argparse import Namespace
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -16,12 +19,19 @@ import deploy.cli as deploy_cli
 import deploy.external_pi_slot_launcher as launcher
 import deploy.external_pi_slot_lifecycle as lifecycle
 import deploy.external_pi_worker_launcher as worker_launcher
+import deploy.install_host_layout as install_host_layout
 from backend.config import Settings
 from backend.services.chat_external_worker_capacity import external_worker_endpoints
 from backend.services.runtime_validation import validate_external_pi_migration_policy
 
 
-def _release(root: Path, slot: str, runtime_id: str = "a" * 64) -> Path:
+def _release(
+    root: Path,
+    slot: str,
+    runtime_id: str = "a" * 64,
+    *,
+    environment: str = "staging",
+) -> Path:
     release = root / "releases" / f"release-{slot}"
     release.mkdir(parents=True)
     (release / "release.json").write_text(
@@ -36,7 +46,7 @@ def _release(root: Path, slot: str, runtime_id: str = "a" * 64) -> Path:
             }
         )
     )
-    slot_root = root / "environments" / "staging" / "slots" / slot
+    slot_root = root / "environments" / environment / "slots" / slot
     slot_root.mkdir(parents=True)
     (slot_root / "release").symlink_to(release)
     runtime = root / "runtimes/external-pi" / runtime_id
@@ -49,10 +59,21 @@ def _release(root: Path, slot: str, runtime_id: str = "a" * 64) -> Path:
     return release
 
 
-def test_slot_runtime_is_staging_only_and_uses_recorded_immutable_runtime(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize(
+    ("environment", "port", "worker_id"),
+    (
+        ("staging", 8766, "staging-blue"),
+        ("production", 8776, "production-blue"),
+    ),
+)
+def test_slot_runtime_is_environment_isolated_and_uses_recorded_immutable_runtime(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    environment: str,
+    port: int,
+    worker_id: str,
 ):
-    _release(tmp_path, "blue")
+    _release(tmp_path, "blue", environment=environment)
     monkeypatch.setattr(lifecycle, "APP_ROOT", tmp_path)
     monkeypatch.setattr(
         lifecycle,
@@ -63,15 +84,22 @@ def test_slot_runtime_is_staging_only_and_uses_recorded_immutable_runtime(
         },
     )
 
-    resolved = lifecycle.resolve_external_pi_slot("staging", "blue")
+    resolved = lifecycle.resolve_external_pi_slot(environment, "blue")
 
-    assert resolved.port == 8766
-    assert resolved.worker_id == "staging-blue"
+    assert resolved.port == port
+    assert resolved.worker_id == worker_id
     assert resolved.release_id == "release-blue"
     assert resolved.runtime.name == "a" * 64
     assert resolved.node == resolved.runtime / "node/bin/node"
-    with pytest.raises(ValueError, match="staging-only"):
-        lifecycle.resolve_external_pi_slot("production", "blue")
+    expected_status = (
+        lifecycle.STATUS_ROOT / "staging-blue.json"
+        if environment == "staging"
+        else lifecycle.PRODUCTION_STATUS_ROOT.with_name(
+            f"{lifecycle.PRODUCTION_STATUS_ROOT.name}-blue"
+        )
+        / "status.json"
+    )
+    assert resolved.status_path == expected_status
 
 
 def test_wrong_or_unrecorded_runtime_is_rejected(
@@ -90,8 +118,8 @@ def test_wrong_or_unrecorded_runtime_is_rejected(
 def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
     resolved = lifecycle.ExternalPiSlot(
         slot="green",
-        port=8767,
-        worker_id="staging-green",
+        port=8820,
+        worker_id="staging-green-00",
         release=tmp_path / "release",
         release_id="release-green",
         runtime=tmp_path / "runtime",
@@ -112,22 +140,27 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_OPENAI_API_KEY": "must-not-leak",
         "MODAL_TOKEN_ID": "must-not-leak",
         "PWC_CHAT_SANDBOX_EXECUTOR_TOKEN": "must-not-leak",
+        "PWC_EXTERNAL_PI_STATE_ROOT": "/run/paperswithcode/external-pi-green",
         "PATH": "/usr/bin",
     }
 
     node = lifecycle.node_environment(resolved, protected, instance_id="i" * 36)
     supervisor = lifecycle.supervisor_environment(resolved, protected)
+    derived_token = lifecycle.replica_specs("staging", "green", "t" * 32)[0].token
 
     assert node == {
         "PWC_EXTERNAL_PI_HOST": "127.0.0.1",
-        "PWC_EXTERNAL_PI_PORT": "8767",
-        "PWC_EXTERNAL_PI_TOKEN": "t" * 32,
-        "PWC_EXTERNAL_PI_MAX_SESSIONS": "32",
-        "PWC_EXTERNAL_PI_WORKER_ID": "staging-green",
+        "PWC_EXTERNAL_PI_PORT": "8820",
+        "PWC_EXTERNAL_PI_TOKEN": derived_token,
+        "PWC_EXTERNAL_PI_MAX_SESSIONS": "4",
+        "PWC_EXTERNAL_PI_WORKER_ID": "staging-green-00",
         "PWC_EXTERNAL_PI_INSTANCE_ID": "i" * 36,
         "PWC_EXTERNAL_PI_RELEASE_ID": "release-green",
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
+        "PWC_EXTERNAL_PI_STATE_ROOT": (
+            "/run/paperswithcode/external-pi-green/staging-green-00"
+        ),
     }
     assert set(supervisor) == {
         "PWC_ENVIRONMENT",
@@ -152,16 +185,16 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_STATUS_PATH",
         "PWC_EXTERNAL_PI_WORKER_ID",
     }
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8767"
-    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8820"
+    assert supervisor["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
     assert "PWC_HF_TOKEN" not in supervisor
 
 
-@pytest.mark.parametrize(("slot", "port"), (("blue", 8766), ("green", 8767)))
+@pytest.mark.parametrize(("slot", "port"), (("blue", 8820), ("green", 8824)))
 def test_supervisor_child_settings_resolve_complete_slot_worker_topology(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, slot: str, port: int
 ):
-    worker_id = f"staging-{slot}"
+    worker_id = f"staging-{slot}-00"
     resolved = lifecycle.ExternalPiSlot(
         slot=slot,
         port=port,
@@ -194,36 +227,84 @@ def test_supervisor_child_settings_resolve_complete_slot_worker_topology(
     assert endpoint.endpoint_id == "legacy"
     assert endpoint.worker_id == worker_id
     assert endpoint.base_url == f"http://127.0.0.1:{port}"
-    assert endpoint.token == "t" * 32
+    assert endpoint.token == lifecycle.replica_specs("staging", slot, "t" * 32)[0].token
 
 
 def test_candidate_requires_authenticated_durable_lifecycle_evidence(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
     monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
-    status = tmp_path / "staging-blue.json"
-    status.write_text(
-        json.dumps(
-            {
-                "release_id": "release-blue",
-                "worker_id": "staging-blue",
-                "state": "ready",
-                "authenticated": True,
-                "registered": True,
-                "generation": 3,
-                "heartbeats": 1,
-            }
+    statuses = []
+    for spec in lifecycle.replica_specs("staging", "blue", "x" * 32):
+        status = tmp_path / f"{spec.worker_id}.json"
+        status.write_text(
+            json.dumps(
+                {
+                    "release_id": "release-blue",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "authenticated": True,
+                    "registered": True,
+                    "generation": 3,
+                    "heartbeats": 1,
+                }
+            )
         )
-    )
+        statuses.append(status)
 
     assert lifecycle.qualify_candidate("staging", "blue", "release-blue") == 3
-    value = json.loads(status.read_text())
+    value = json.loads(statuses[0].read_text())
     value["authenticated"] = False
-    status.write_text(json.dumps(value))
+    statuses[0].write_text(json.dumps(value))
     with pytest.raises(lifecycle.ExternalPiSlotError, match="qualification"):
         lifecycle.qualify_candidate(
             "staging", "blue", "release-blue", timeout_seconds=0.01
         )
+
+
+def test_qualification_budget_covers_the_supervisor_startup_and_heartbeat(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # A supervisor may use its whole startup timeout to register and then a
+    # further heartbeat interval before the first heartbeat is recorded. The
+    # previous fixed 65s ceiling was below that 70s worst case, so a loaded
+    # host failed qualification with registered=True and heartbeats=0.
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "60",
+            "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": "10",
+        },
+    )
+    budget = lifecycle.protected_qualification_timeout_seconds("staging")
+
+    assert budget > 60 + 10
+    assert budget == 60 + 2 * 10 + lifecycle.QUALIFICATION_MARGIN_SECONDS
+
+
+def test_qualification_budget_rejects_out_of_bounds_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "not-a-number",
+        },
+    )
+    with pytest.raises(ValueError, match="must be numeric"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
+
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda environment: {
+            "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "900",
+        },
+    )
+    with pytest.raises(ValueError, match="protected bounds"):
+        lifecycle.protected_qualification_timeout_seconds("staging")
 
 
 def test_qualification_proves_drain_and_restart_generation(
@@ -277,7 +358,9 @@ def test_lease_expiry_restart_ignores_stale_status_until_generation_advances(
     commands = []
     sleeps = []
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
-    monkeypatch.setattr(lifecycle, "_read_status", lambda *_args: next(statuses))
+    monkeypatch.setattr(
+        lifecycle, "_read_primary_status", lambda *_args: next(statuses)
+    )
     monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
     monkeypatch.setattr(lifecycle.time, "sleep", lambda seconds: sleeps.append(seconds))
     monkeypatch.setattr(
@@ -361,7 +444,7 @@ def test_lease_expiry_interruption_recovers_claim_before_propagating(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: {
             "release_id": "release-blue",
             "worker_id": "staging-blue",
@@ -410,7 +493,7 @@ def test_lease_expiry_restart_failure_recovers_before_propagating(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: {
             "release_id": "release-blue",
             "worker_id": "staging-blue",
@@ -479,7 +562,7 @@ def test_lease_expiry_status_failure_expires_fresh_recovery_lease_before_stop(
     monkeypatch.setattr(lifecycle, "protected_lease_seconds", lambda _env: 30)
     monkeypatch.setattr(
         lifecycle,
-        "_read_status",
+        "_read_primary_status",
         lambda *_args: (_ for _ in ()).throw(OSError("status write missing")),
     )
     monkeypatch.setattr(lifecycle.time, "monotonic", lambda: 0.0)
@@ -597,6 +680,332 @@ def test_maximum_configured_drain_can_finish_and_releases_durable_ownership(
             "paperswithcode-staging-external-pi-worker@green.service",
         ],
     ]
+
+
+def test_eight_replica_tooling_drains_previous_sixteen_replica_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "drain_stop_timeout_seconds", lambda _env: 10)
+    old_specs = lifecycle.replica_specs_for_topology(
+        "staging",
+        "green",
+        "x" * 32,
+        replica_count=16,
+        maximum_sessions=2,
+    )
+    for spec in old_specs:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "old-release",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "drained": False,
+                    "authenticated": True,
+                    "registered": True,
+                    "generation": 1,
+                    "heartbeats": 1,
+                    "maximum_sessions": 2,
+                }
+            )
+        )
+    commands: list[list[str]] = []
+
+    def stop(command, **_kwargs):
+        commands.append(command)
+        if command[1] == "show":
+            state = "inactive" if "external-pi@" in command[-1] else "active"
+            return SimpleNamespace(returncode=0, stdout=f"{state}\n")
+        if "external-pi@" in command[-1]:
+            for spec in old_specs:
+                (tmp_path / f"{spec.worker_id}.json").write_text(
+                    json.dumps(
+                        {
+                            "protocol": lifecycle.CONTRACT_VERSION,
+                            "release_id": "old-release",
+                            "worker_id": spec.worker_id,
+                            "state": "offline",
+                            "drained": True,
+                            "authenticated": True,
+                            "registered": True,
+                            "generation": 1,
+                            "heartbeats": 2,
+                            "maximum_sessions": 2,
+                        }
+                    )
+                )
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", stop)
+
+    lifecycle.stop_slot("staging", "green", "old-release")
+
+    assert commands == [
+        ["systemctl", "stop", "paperswithcode-staging-external-pi@green.service"],
+        [
+            "systemctl",
+            "stop",
+            "paperswithcode-staging-external-pi-worker@green.service",
+        ],
+    ]
+    assert all(
+        (tmp_path / f"{spec.worker_id}.json").is_file() for spec in old_specs[:8]
+    )
+    assert all(
+        not (tmp_path / f"{spec.worker_id}.json").exists() for spec in old_specs[8:]
+    )
+
+
+def test_supervisor_status_attests_contract_and_capacity():
+    from backend.scripts.run_external_pi_slot import _initial_status
+
+    status = _initial_status(
+        SimpleNamespace(
+            release_id="release-a",
+            chat_external_pi_worker_contract_version="external-pi-v1",
+            chat_external_pi_worker_max_sessions=4,
+        ),
+        "staging-blue-07",
+    )
+
+    assert status["protocol"] == "external-pi-v1"
+    assert status["maximum_sessions"] == 4
+
+
+def test_partial_sixteen_replica_status_retains_previous_drain_scope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for spec in current_specs[:8]:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "current-release",
+                    "worker_id": spec.worker_id,
+                    "state": "offline",
+                    "drained": True,
+                    "maximum_sessions": 2,
+                }
+            )
+        )
+    selected = lifecycle._draining_replica_specs(
+        "staging", "green", "x" * 32, "current-release"
+    )
+
+    assert len(selected) == 16
+    assert all(spec.maximum_sessions == 2 for spec in selected)
+
+
+def test_authenticated_endpoints_recover_current_topology_without_status_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    token = "t" * 32
+    current_specs = lifecycle.replica_specs("staging", "green", token)
+    specs_by_port = {spec.port: spec for spec in current_specs}
+    requests: list[urllib.request.Request] = []
+
+    class Response:
+        def __init__(self, spec):
+            self.spec = spec
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size=-1):
+            return json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "validated-previous-release",
+                    "worker_id": self.spec.worker_id,
+                    "state": "ready",
+                    "maximum_sessions": self.spec.maximum_sessions,
+                }
+            ).encode()
+
+    def open_status(request, **_kwargs):
+        requests.append(request)
+        port = int(urllib.parse.urlparse(request.full_url).port)
+        spec = specs_by_port[port]
+        assert request.get_header("Authorization") == f"Bearer {spec.token}"
+        return Response(spec)
+
+    monkeypatch.setattr(urllib.request, "urlopen", open_status)
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        token,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+        allow_endpoint_recovery=True,
+    )
+
+    assert selected == current_specs
+    assert len(requests) == len(current_specs)
+
+
+def test_validated_orphan_release_retains_current_drain_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for spec in current_specs:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "validated-previous-release",
+                    "worker_id": spec.worker_id,
+                    "state": "draining",
+                    "maximum_sessions": spec.maximum_sessions,
+                }
+            )
+        )
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        "x" * 32,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+    )
+
+    assert selected == current_specs
+
+
+def test_mixed_trusted_release_cohort_falls_back_to_previous_drain_topology(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    current_specs = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for index, spec in enumerate(current_specs):
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": (
+                        "candidate-release"
+                        if index < len(current_specs) // 2
+                        else "validated-previous-release"
+                    ),
+                    "worker_id": spec.worker_id,
+                    "state": "draining",
+                    "maximum_sessions": spec.maximum_sessions,
+                }
+            )
+        )
+
+    selected = lifecycle._draining_replica_specs(
+        "staging",
+        "green",
+        "x" * 32,
+        "candidate-release",
+        validated_release_ids=frozenset({"validated-previous-release"}),
+    )
+
+    assert len(selected) == lifecycle.PREVIOUS_REPLICA_COUNT
+    assert all(
+        spec.maximum_sessions == lifecycle.PREVIOUS_REPLICA_MAXIMUM_SESSIONS
+        for spec in selected
+    )
+
+
+def test_start_checks_every_selected_previous_replica_before_replacement(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "_worker_is_inactive", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_supervisor_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(lifecycle, "sync_worker_environment", lambda *_args: None)
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_staging_values",
+        lambda: {"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32},
+    )
+    specs = lifecycle.replica_specs_for_topology(
+        "staging", "blue", "x" * 32, replica_count=16, maximum_sessions=2
+    )
+    authenticated_specs = lifecycle.replica_specs_for_topology(
+        "staging", "blue", "t" * 32, replica_count=16, maximum_sessions=2
+    )
+    for spec in specs[:8]:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "old-release",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "maximum_sessions": 2,
+                }
+            )
+        )
+    specs_by_port = {spec.port: spec for spec in specs}
+    authenticated_specs_by_port = {spec.port: spec for spec in authenticated_specs}
+    calls = 0
+
+    class Response:
+        def __init__(self, spec):
+            self.spec = spec
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def read(self, _size=-1):
+            return json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "worker_id": self.spec.worker_id,
+                    "release_id": "old-release",
+                    "state": "ready",
+                    "active_sessions": 1 if self.spec == specs[8] else 0,
+                    "maximum_sessions": 2,
+                    "worker_generation": None,
+                    "operation_counters": {
+                        name: 0 for name in lifecycle.OPERATION_COUNTER_NAMES
+                    },
+                }
+            ).encode()
+
+    def open_status(request, **_kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise urllib.error.URLError("no legacy worker")
+        port = int(urllib.parse.urlparse(request.full_url).port)
+        assert request.get_header("Authorization") == (
+            f"Bearer {authenticated_specs_by_port[port].token}"
+        )
+        return Response(specs_by_port[port])
+
+    commands: list[list[str]] = []
+    monkeypatch.setattr(urllib.request, "urlopen", open_status)
+    monkeypatch.setattr(
+        lifecycle.subprocess,
+        "run",
+        lambda command, **_kwargs: commands.append(command)
+        or subprocess.CompletedProcess(command, 0),
+    )
+
+    with pytest.raises(
+        lifecycle.ExternalPiSlotError, match="not proven safe to restart"
+    ):
+        lifecycle.start_slot("staging", "blue")
+
+    assert calls == 10
+    assert not any(command[:2] == ["systemctl", "stop"] for command in commands)
+    assert all((tmp_path / f"{spec.worker_id}.json").is_file() for spec in specs[:8])
 
 
 def test_stop_without_durable_drain_evidence_leaves_worker_running(
@@ -1001,6 +1410,23 @@ def test_stop_without_status_proof_accepts_exact_inactive_worker_state(
     ]
 
 
+def test_missing_orphan_token_preserves_lifecycle_error_contract(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(lifecycle, "_protected_environment_values", lambda _env: {})
+
+    def run(command, **_kwargs):
+        if command[1] == "show":
+            return SimpleNamespace(returncode=0, stdout="active\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    with pytest.raises(lifecycle.ExternalPiSlotError, match="prove graceful drain"):
+        lifecycle.stop_slot("staging", "green", "new-candidate")
+
+
 def test_disabled_switch_is_a_complete_noop(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -1045,35 +1471,55 @@ def test_launcher_execs_release_python_with_only_scrubbed_settings(
             {"release_id": "release-blue"},
         ),
     )
-    monkeypatch.setattr(launcher, "resolve_external_pi_slot", lambda *_args: resolved)
+    fleet = tuple(
+        replace(
+            resolved,
+            port=spec.port,
+            worker_id=spec.worker_id,
+            status_path=tmp_path / f"{spec.worker_id}.json",
+        )
+        for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
+    )
+    monkeypatch.setattr(launcher, "resolve_external_pi_replicas", lambda *_args: fleet)
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
+    monkeypatch.setenv(
+        "PWC_EXTERNAL_PI_STATE_ROOT", "/run/paperswithcode/external-pi-blue"
+    )
     monkeypatch.setenv("PWC_HF_TOKEN", "must-not-leak")
     monkeypatch.setenv("OPENAI_API_KEY", "must-not-leak")
-    monkeypatch.setattr(launcher.os, "chdir", lambda path: None)
     executed: dict = {}
 
-    def execve(executable, arguments, environment):
-        executed.update(
-            executable=executable, arguments=arguments, environment=environment
-        )
+    def run_fleet(commands, environments, *, cwd):
+        executed.update(commands=commands, environments=environments, cwd=cwd)
         raise RuntimeError("exec")
 
-    monkeypatch.setattr(launcher.os, "execve", execve)
+    monkeypatch.setattr(launcher, "run_process_fleet", run_fleet)
     monkeypatch.setattr(launcher.sys, "argv", ["launcher", "staging", "blue"])
 
     with pytest.raises(RuntimeError, match="exec"):
         launcher.main()
 
-    assert executed["executable"] == str(python)
-    assert executed["arguments"] == [
-        str(python),
-        "-m",
-        "backend.scripts.run_external_pi_slot",
+    assert (
+        executed["commands"]
+        == [
+            [
+                str(python),
+                "-m",
+                "backend.scripts.run_external_pi_slot",
+            ]
+        ]
+        * 8
+    )
+    assert [
+        value["PWC_EXTERNAL_PI_WORKER_ID"] for value in executed["environments"]
+    ] == [
+        spec.worker_id for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
     ]
-    assert executed["environment"]["PWC_EXTERNAL_PI_WORKER_ID"] == "staging-blue"
-    assert "PWC_EXTERNAL_PI_PORT" not in executed["environment"]
-    assert "PWC_HF_TOKEN" not in executed["environment"]
-    assert "OPENAI_API_KEY" not in executed["environment"]
+    assert all(
+        "PWC_EXTERNAL_PI_PORT" not in value for value in executed["environments"]
+    )
+    assert all("PWC_HF_TOKEN" not in value for value in executed["environments"])
+    assert all("OPENAI_API_KEY" not in value for value in executed["environments"])
 
 
 def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
@@ -1091,22 +1537,37 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         prompt=tmp_path / "runtime/assets/pi-system-prompt.txt",
         status_path=tmp_path / "status.json",
     )
+    fleet = tuple(
+        replace(
+            resolved,
+            port=spec.port,
+            worker_id=spec.worker_id,
+            status_path=tmp_path / f"{spec.worker_id}.json",
+        )
+        for spec in lifecycle.replica_specs("staging", "blue", "t" * 32)
+    )
     monkeypatch.setattr(
-        worker_launcher, "resolve_external_pi_slot", lambda *_args: resolved
+        worker_launcher, "resolve_external_pi_replicas", lambda *_args: fleet
     )
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 32)
+    monkeypatch.setenv(
+        "PWC_EXTERNAL_PI_STATE_ROOT", "/run/paperswithcode/external-pi-blue"
+    )
     monkeypatch.setenv("PWC_DB_PASSWORD", "must-not-leak")
     monkeypatch.setenv("PWC_OPENAI_API_KEY", "must-not-leak")
-    monkeypatch.setattr(worker_launcher.os, "chdir", lambda _path: None)
+    monkeypatch.setattr(worker_launcher.Path, "mkdir", lambda *_args, **_kwargs: None)
     executed: dict = {}
 
-    def execve(executable, arguments, environment):
+    def run_fleet(commands, environments, *, cwd, launch_interval_seconds=0):
         executed.update(
-            executable=executable, arguments=arguments, environment=environment
+            commands=commands,
+            environments=environments,
+            cwd=cwd,
+            launch_interval_seconds=launch_interval_seconds,
         )
         raise RuntimeError("exec")
 
-    monkeypatch.setattr(worker_launcher.os, "execve", execve)
+    monkeypatch.setattr(worker_launcher, "run_process_fleet", run_fleet)
     monkeypatch.setattr(
         worker_launcher.sys, "argv", ["worker-launcher", "staging", "blue"]
     )
@@ -1114,14 +1575,15 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
     with pytest.raises(RuntimeError, match="exec"):
         worker_launcher.main()
 
-    assert executed["executable"] == str(resolved.node)
-    assert executed["arguments"] == [
+    assert executed["commands"][0] == [
         str(resolved.node),
         "--import",
         str(resolved.runtime / "app/node_modules/tsx/dist/loader.mjs"),
         str(resolved.entry_point),
     ]
-    assert set(executed["environment"]) == {
+    assert len(executed["commands"]) == 8
+    assert executed["launch_interval_seconds"] == 5.0
+    assert set(executed["environments"][0]) == {
         "PWC_EXTERNAL_PI_HOST",
         "PWC_EXTERNAL_PI_PORT",
         "PWC_EXTERNAL_PI_TOKEN",
@@ -1131,8 +1593,9 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         "PWC_EXTERNAL_PI_RELEASE_ID",
         "PWC_EXTERNAL_PI_PROMPT_PATH",
         "PWC_EXTERNAL_PI_TOOL_NAMES",
+        "PWC_EXTERNAL_PI_STATE_ROOT",
     }
-    assert "PWC_DB_PASSWORD" not in executed["environment"]
+    assert all("PWC_DB_PASSWORD" not in value for value in executed["environments"])
 
 
 @pytest.mark.parametrize(
@@ -1445,7 +1908,7 @@ def test_lifecycle_bounds_active_worker_status_body(monkeypatch: pytest.MonkeyPa
     with pytest.raises(lifecycle.ExternalPiSlotError, match="status is unavailable"):
         lifecycle._stop_proven_orphaned_worker_if_active("staging", "blue")
 
-    assert read_sizes == [65_537]
+    assert read_sizes == [65_537, 65_537]
 
 
 def _install_active_worker_status(
@@ -1528,6 +1991,388 @@ def _unclaimed_worker_status() -> dict:
             "registered_tool_count": 0,
         },
     }
+
+
+def test_stale_failed_supervisor_proves_zero_use_bound_worker_is_expired(tmp_path):
+    status_path = tmp_path / "staging-blue-00.json"
+    status_path.write_text("{}")
+    os.utime(status_path, (0, 0))
+    counters = {
+        "shadow_requests": 0,
+        "model_calls": 0,
+        "tool_calls": 0,
+        "provider_calls": 0,
+        "modal_calls": 0,
+        "billing_events": 0,
+    }
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "state": "ready",
+        "active_sessions": 0,
+        "maximum_sessions": 2,
+        "worker_generation": 5,
+        "operation_counters": counters,
+    }
+    durable = {
+        "protocol": "external-pi-v1",
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "state": "failed",
+        "maximum_sessions": 2,
+        "generation": 5,
+    }
+
+    assert lifecycle._stale_bound_worker_is_proven(
+        endpoint,
+        durable,
+        status_path=status_path,
+        trusted_release_ids=frozenset({"release-blue"}),
+        lease_seconds=30,
+        now=100,
+    )
+    assert not lifecycle._stale_bound_worker_is_proven(
+        endpoint,
+        durable,
+        status_path=status_path,
+        trusted_release_ids=frozenset({"release-blue"}),
+        lease_seconds=30,
+        now=20,
+    )
+
+
+def test_expired_database_lease_proves_zero_use_bound_worker_is_expired():
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "state": "ready",
+        "active_sessions": 0,
+        "maximum_sessions": 2,
+        "worker_generation": 5,
+        "operation_counters": {
+            "shadow_requests": 0,
+            "model_calls": 0,
+            "tool_calls": 0,
+            "provider_calls": 0,
+            "modal_calls": 0,
+            "billing_events": 0,
+        },
+    }
+    database_status = {
+        "worker_id": "staging-blue-00",
+        "release_id": "release-blue",
+        "contract_version": "external-pi-v1",
+        "generation": 5,
+        "state": "ready",
+        "maximum_sessions": 2,
+        "active_sessions": 0,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+
+    assert lifecycle._expired_database_worker_is_proven(
+        endpoint,
+        database_status,
+        trusted_release_ids=frozenset({"release-blue"}),
+    )
+    database_status["lease_expired"] = False
+    assert not lifecycle._expired_database_worker_is_proven(
+        endpoint,
+        database_status,
+        trusted_release_ids=frozenset({"release-blue"}),
+    )
+
+
+def test_expired_database_lease_proves_used_idle_worker_is_expired():
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "release_id": "old-release",
+        "state": "ready",
+        "active_sessions": 0,
+        "maximum_sessions": 4,
+        "worker_generation": 5,
+        "operation_counters": {
+            "shadow_requests": 3,
+            "model_calls": 3,
+            "tool_calls": 2,
+            "provider_calls": 3,
+            "modal_calls": 2,
+            "billing_events": 3,
+        },
+    }
+    database_status = {
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 5,
+        "state": "ready",
+        "maximum_sessions": 4,
+        "active_sessions": 0,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+
+    assert lifecycle._expired_database_worker_is_proven(
+        endpoint,
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
+@pytest.mark.parametrize("state", ("draining", "ready"))
+def test_expired_database_lease_proves_stable_draining_turns_are_orphaned(state):
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": state,
+        "active_sessions": 3,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {
+            "shadow_requests": 0,
+            "model_calls": 381,
+            "tool_calls": 0,
+            "provider_calls": 0,
+            "modal_calls": 0,
+            "billing_events": 0,
+        },
+    }
+    database_status = {
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 7,
+        "state": state,
+        "maximum_sessions": 4,
+        "active_sessions": 3,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+
+    assert lifecycle._orphaned_draining_turns_are_proven(
+        endpoint,
+        endpoint.copy(),
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
+@pytest.mark.parametrize(
+    ("target", "field", "unsafe_value"),
+    (
+        ("first", "state", "offline"),
+        ("second", "active_sessions", 2),
+        ("second", "operation_counters", {"model_calls": 382}),
+        ("database", "lease_expired", False),
+        ("database", "reservation_free", False),
+        ("database", "active_sessions", 2),
+        ("database", "instance_id", "00000000-0000-0000-0000-000000000002"),
+    ),
+)
+@pytest.mark.parametrize("state", ("draining", "ready"))
+def test_orphaned_draining_turn_proof_rejects_live_or_changing_work(
+    target: str,
+    field: str,
+    unsafe_value: object,
+    state: str,
+):
+    endpoint = {
+        "protocol": "external-pi-v1",
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": state,
+        "active_sessions": 3,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {
+            "shadow_requests": 0,
+            "model_calls": 381,
+            "tool_calls": 0,
+            "provider_calls": 0,
+            "modal_calls": 0,
+            "billing_events": 0,
+        },
+    }
+    first = endpoint.copy()
+    second = endpoint.copy()
+    database_status = {
+        "worker_id": "production-blue-00",
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "contract_version": "external-pi-v1",
+        "generation": 7,
+        "state": state,
+        "maximum_sessions": 4,
+        "active_sessions": 3,
+        "lease_expired": True,
+        "reservation_free": True,
+    }
+    selected = {"first": first, "second": second, "database": database_status}
+    selected[target][field] = unsafe_value
+
+    assert not lifecycle._orphaned_draining_turns_are_proven(
+        first,
+        second,
+        database_status,
+        trusted_release_ids=frozenset({"old-release"}),
+    )
+
+
+@pytest.mark.parametrize("backend_inactive", (True, False))
+@pytest.mark.parametrize("state", ("draining", "ready"))
+def test_only_an_inactive_backend_allows_orphaned_draining_turns_to_stop(
+    monkeypatch: pytest.MonkeyPatch,
+    backend_inactive: bool,
+    state: str,
+):
+    worker_active = True
+
+    def worker_is_inactive(*_args):
+        return not worker_active
+
+    monkeypatch.setattr(lifecycle, "_worker_is_inactive", worker_is_inactive)
+    monkeypatch.setattr(lifecycle, "_supervisor_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(
+        lifecycle, "_backend_slot_is_inactive", lambda *_args: backend_inactive
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32,
+            "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+        },
+    )
+    specs = lifecycle.replica_specs("production", "blue", "t" * 32)
+    statuses = {
+        spec.worker_id: {
+            "protocol": "external-pi-v1",
+            "worker_id": spec.worker_id,
+            "instance_id": f"00000000-0000-0000-0000-{index:012d}",
+            "release_id": "old-release",
+            "state": state,
+            "active_sessions": 3 if index == 0 else 0,
+            "maximum_sessions": 4,
+            "worker_generation": 7,
+            "operation_counters": {
+                "shadow_requests": 0,
+                "model_calls": 381 if index == 0 else 0,
+                "tool_calls": 0,
+                "provider_calls": 0,
+                "modal_calls": 0,
+                "billing_events": 0,
+            },
+        }
+        for index, spec in enumerate(specs)
+    }
+    database_statuses = {
+        spec.worker_id: {
+            "worker_id": spec.worker_id,
+            "instance_id": statuses[spec.worker_id]["instance_id"],
+            "release_id": "old-release",
+            "contract_version": "external-pi-v1",
+            "generation": 7,
+            "state": state,
+            "maximum_sessions": 4,
+            "active_sessions": statuses[spec.worker_id]["active_sessions"],
+            "lease_expired": True,
+            "reservation_free": True,
+        }
+        for spec in specs
+    }
+    commands: list[list[str]] = []
+    sleeps: list[float] = []
+    monkeypatch.setattr(
+        lifecycle, "_worker_status", lambda spec: statuses[spec.worker_id].copy()
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "_read_database_worker_statuses",
+        lambda *_args: database_statuses,
+    )
+    monkeypatch.setattr(lifecycle.time, "sleep", sleeps.append)
+
+    def run(command, **_kwargs):
+        nonlocal worker_active
+        commands.append(command)
+        if command[:2] == ["systemctl", "stop"]:
+            worker_active = False
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    def invocation():
+        lifecycle._stop_proven_orphaned_worker_if_active(
+            "production",
+            "blue",
+            worker_active_proven=True,
+            expected_release_id="old-release",
+            draining_specs=specs,
+            allow_orphaned_turn_reap=True,
+        )
+
+    if backend_inactive:
+        invocation()
+        assert commands == [
+            [
+                "systemctl",
+                "stop",
+                "paperswithcode-production-external-pi-worker@blue.service",
+            ]
+        ]
+    else:
+        with pytest.raises(
+            lifecycle.ExternalPiSlotError, match="not proven safe to restart"
+        ):
+            invocation()
+        assert commands == []
+    assert sleeps == ([5] if backend_inactive else [])
+
+
+def test_orphaned_draining_turns_are_reap_only(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(lifecycle, "_worker_is_inactive", lambda *_args: False)
+    monkeypatch.setattr(lifecycle, "_supervisor_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(lifecycle, "_backend_slot_is_inactive", lambda *_args: True)
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "t" * 32,
+            "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+        },
+    )
+    specs = lifecycle.replica_specs("production", "blue", "t" * 32)
+    status = {
+        "protocol": "external-pi-v1",
+        "worker_id": specs[0].worker_id,
+        "instance_id": "00000000-0000-0000-0000-000000000001",
+        "release_id": "old-release",
+        "state": "draining",
+        "active_sessions": 1,
+        "maximum_sessions": 4,
+        "worker_generation": 7,
+        "operation_counters": {name: 0 for name in lifecycle.OPERATION_COUNTER_NAMES},
+    }
+    monkeypatch.setattr(lifecycle, "_worker_status", lambda _spec: status)
+
+    with pytest.raises(
+        lifecycle.ExternalPiSlotError, match="not proven safe to restart"
+    ):
+        lifecycle._stop_proven_orphaned_worker_if_active(
+            "production",
+            "blue",
+            worker_active_proven=True,
+            expected_release_id="old-release",
+            draining_specs=specs,
+        )
 
 
 def test_stop_slot_cleans_exact_unclaimed_request_free_worker(
@@ -1767,15 +2612,20 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
     assert "external_pi_slot_launcher.py staging %i" in supervisor
     assert "User=pwc-external-pi" in worker
     assert "EnvironmentFile=/etc/paperswithcode/external-pi-worker.env" in worker
+    assert (
+        "BindReadOnlyPaths=/etc/paperswithcode/external-pi-hosts:/etc/hosts" in worker
+    )
+    assert "RuntimeDirectory=paperswithcode/external-pi-%i" in worker
+    assert "PWC_EXTERNAL_PI_STATE_ROOT=/run/paperswithcode/external-pi-%i" in worker
     assert "external_pi_worker_launcher.py staging %i" in worker
     assert "staging.env" not in worker
     assert "ProtectProc=invisible" in worker
-    assert "CPUQuota=100%" in worker
-    assert "MemoryMax=805306368" in worker
-    assert "TasksMax=128" in worker
-    assert "CPUQuota=50%" in supervisor
-    assert "MemoryMax=536870912" in supervisor
-    assert "TasksMax=64" in supervisor
+    assert "CPUQuota=400%" in worker
+    assert "MemoryMax=6442450944" in worker
+    assert "TasksMax=512" in worker
+    assert "CPUQuota=200%" in supervisor
+    assert "MemoryMax=2147483648" in supervisor
+    assert "TasksMax=256" in supervisor
     timeout_line = next(
         line for line in supervisor.splitlines() if line.startswith("TimeoutStopSec=")
     )
@@ -1783,6 +2633,22 @@ def test_systemd_templates_split_worker_and_supervisor_credentials():
         int(timeout_line.partition("=")[2])
         > lifecycle.MAXIMUM_DRAIN_STOP_TIMEOUT_SECONDS
     )
+
+
+def test_external_pi_hosts_bypasses_the_public_cdn_only_for_the_worker(
+    tmp_path: Path,
+):
+    hosts = tmp_path / "external-pi-hosts"
+
+    install_host_layout.install_external_pi_hosts(hosts)
+
+    assert hosts.read_text() == (
+        "127.0.0.1 localhost chat-gateway-staging.paperswithcode.co "
+        "chat-gateway.paperswithcode.co\n"
+        "::1 localhost ip6-localhost ip6-loopback "
+        "chat-gateway-staging.paperswithcode.co chat-gateway.paperswithcode.co\n"
+    )
+    assert hosts.stat().st_mode & 0o777 == 0o644
 
 
 def test_deployment_status_reports_shadow_unit_and_durable_evidence(
@@ -1833,3 +2699,84 @@ def test_deployment_status_reports_shadow_unit_and_durable_evidence(
             "state": "ready",
         },
     }
+
+
+def test_worker_status_tolerates_the_window_before_the_worker_binds(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # systemd reports the Type=simple worker unit active as soon as it execs,
+    # while the Node process is still loading the Pi runtime and has not bound
+    # its port. A single attempt turned that into a refused connection that
+    # failed the whole deployment.
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    attempts = {"n": 0}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _size):
+            return json.dumps({"worker_id": spec.worker_id, "state": "ready"}).encode()
+
+    def urlopen(_request, timeout=None):
+        attempts["n"] += 1
+        if attempts["n"] < 3:
+            raise ConnectionRefusedError(111, "Connection refused")
+        return _Response()
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(lifecycle.time, "sleep", lambda _seconds: None)
+
+    assert lifecycle._worker_status(spec)["worker_id"] == spec.worker_id
+    assert attempts["n"] == 3
+
+
+def test_worker_status_gives_up_after_the_bind_grace_expires(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    clock = {"now": 0.0}
+
+    def urlopen(_request, timeout=None):
+        raise ConnectionRefusedError(111, "Connection refused")
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+    monkeypatch.setattr(lifecycle.time, "monotonic", lambda: clock["now"])
+    monkeypatch.setattr(
+        lifecycle.time,
+        "sleep",
+        lambda seconds: clock.__setitem__("now", clock["now"] + seconds),
+    )
+
+    with pytest.raises(ConnectionRefusedError):
+        lifecycle._worker_status(spec)
+
+
+def test_worker_status_never_retries_a_malformed_payload(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    spec = lifecycle.replica_specs("staging", "blue", "x" * 32)[0]
+    attempts = {"n": 0}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            return False
+
+        def read(self, _size):
+            return b"x" * (lifecycle.MAXIMUM_WORKER_STATUS_BYTES + 1)
+
+    def urlopen(_request, timeout=None):
+        attempts["n"] += 1
+        return _Response()
+
+    monkeypatch.setattr(lifecycle.urllib.request, "urlopen", urlopen)
+
+    with pytest.raises(ValueError, match="too large"):
+        lifecycle._worker_status(spec)
+    assert attempts["n"] == 1

@@ -54,20 +54,27 @@ export class RemoteToolBridge {
       timeout_ms: timeoutMs,
     });
     for (const output of result.outputs ?? []) onData(Buffer.from(output.data, "utf8"));
+    if (!result.ok) {
+      throw new Error(`remote execution failed:${result.error ?? result.terminal?.error ?? "unknown"}`);
+    }
     if (!result.terminal) throw new Error("invalid remote execution result");
-    if (!result.ok || result.terminal.status === "failed") {
-      throw new Error(`remote execution failed:${result.error ?? result.terminal.error ?? "unknown"}`);
+    if (result.terminal.status === "failed") {
+      throw new Error(`remote execution failed:${result.terminal.error ?? result.error ?? "unknown"}`);
     }
     return { exitCode: result.terminal.exit_code };
   }
 
   async read(toolCallId: string, path: string): Promise<Buffer> {
+    const workspacePrefix = "/workspace/";
+    const remotePath = path.startsWith(workspacePrefix)
+      ? path.slice(workspacePrefix.length)
+      : path;
     const result = await this.exchange({
       type: "tool_request",
       operation_id: randomUUID(),
       tool_call_id: toolCallId,
       operation: "read",
-      path,
+      path: remotePath,
       offset: 0,
       max_bytes: MAX_REMOTE_READ_BYTES,
     });
@@ -109,9 +116,19 @@ export function createRemoteToolsExtension(bridge: RemoteToolBridge): ExtensionF
     pi.registerTool({
       ...localRead,
       async execute(id, params, signal, onUpdate) {
+        let prefetched: { path: string; data: Buffer } | undefined;
         const operations: ReadOperations = {
-          readFile: (path) => bridge.read(id, path),
-          access: (path) => bridge.read(id, path).then(() => undefined),
+          readFile: (path) => {
+            if (prefetched?.path === path) {
+              const data = prefetched.data;
+              prefetched = undefined;
+              return Promise.resolve(data);
+            }
+            return bridge.read(id, path);
+          },
+          access: (path) => bridge.read(id, path).then((data) => {
+            prefetched = { path, data };
+          }),
           detectImageMimeType: async () => null,
         };
         return createReadTool("/workspace", { operations }).execute(

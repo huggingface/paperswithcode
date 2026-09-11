@@ -13,12 +13,12 @@ from backend.models.api import (
     Task,
     Tasks,
     TaskPage,
-    Papers,
     KeywordUpdate,
     TaskCreateRequest,
     TrendingBenchmarks,
     TrendingTasks,
 )
+from backend.models.papers import Papers
 from backend.services.benchmark_trend_service import BenchmarkTrendService
 from backend.services.task_service import TaskService
 from backend.database.connection import get_database_session

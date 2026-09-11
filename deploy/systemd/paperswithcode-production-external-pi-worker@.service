@@ -1,0 +1,31 @@
+[Unit]
+Description=Papers With Code production external Pi Node worker (%i)
+After=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pwc-external-pi
+Group=pwc-external-pi
+WorkingDirectory=/srv/paperswithcode/environments/production/slots/%i/release
+EnvironmentFile=/etc/paperswithcode/external-pi-worker-production.env
+Environment=PWC_EXTERNAL_PI_STATE_ROOT=/run/paperswithcode/external-pi-production-%i
+RuntimeDirectory=paperswithcode/external-pi-production-%i
+RuntimeDirectoryMode=0700
+ExecStart=/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/external_pi_worker_launcher.py production %i
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectProc=invisible
+ProcSubset=pid
+ReadOnlyPaths=/srv/paperswithcode
+BindReadOnlyPaths=/etc/paperswithcode/external-pi-hosts:/etc/hosts
+CPUQuota=400%
+MemoryMax=4294967296
+TasksMax=512

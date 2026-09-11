@@ -50,7 +50,7 @@ function taxonomySubmission(
   const payloads = {
     new_task: { name: `Suggestion ${id}` },
     new_method: { name: `Suggestion ${id}`, source_url: "https://example.com/method" },
-    new_benchmark: { name: `Suggestion ${id}`, description: "Description", task_ids: [1] },
+    new_benchmark: { benchmark: `Suggestion ${id}`, task: "Suggested task", description: "Description" },
     new_metric: {
       name: `Suggestion ${id}`,
       description: "Description",

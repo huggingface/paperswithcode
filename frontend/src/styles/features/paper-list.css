@@ -824,15 +824,11 @@ a.paper-resource.is-link:focus-visible {
   cursor: not-allowed;
   opacity: 0.45;
 }
-@media (max-width: 640px) {
-  .paper-date-filter { justify-content: flex-start; }
-  .paper-date-popover {
-    width: calc(100vw - 20px);
-    padding: 20px 14px;
-  }
-  .paper-date-calendars { display: block; }
-  .paper-date-calendar-secondary { display: none; }
-  .paper-date-navigation { display: block; }
-  .paper-date-navigation-group-secondary { display: none; }
-  .paper-date-day { width: 36px; height: 36px; }
+.paper-date-filter-single-calendar { justify-content: flex-start; }
+.paper-date-popover-single-calendar {
+  width: calc(100vw - 20px);
+  padding: 20px 14px;
 }
+.paper-date-popover-single-calendar .paper-date-calendars { display: block; }
+.paper-date-popover-single-calendar .paper-date-navigation { display: block; }
+.paper-date-popover-single-calendar .paper-date-day { width: 36px; height: 36px; }

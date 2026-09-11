@@ -38,6 +38,7 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/METHOD_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
+    "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
     "backend/chat_sandbox_worker/prompt.py",
     "backend/services/__init__.py",
@@ -372,6 +373,8 @@ def main() -> int:
             "paperswithcode-staging-backend@.socket",
             "paperswithcode-staging-external-pi@.service",
             "paperswithcode-staging-external-pi-worker@.service",
+            "paperswithcode-production-external-pi@.service",
+            "paperswithcode-production-external-pi-worker@.service",
             "paperswithcode-production-backend@.service",
             "paperswithcode-production-backend@.socket",
             "pwc-curation-thumbnails.service",
@@ -381,10 +384,10 @@ def main() -> int:
             "autonomous/submission-review.service",
             "autonomous/submission-review.timer",
             "autonomous/submission-review-alert.service",
-            "autonomous/cron-health.service",
-            "autonomous/cron-health.timer",
-            "autonomous/cron-audit.service",
-            "autonomous/cron-audit.timer",
+            "autonomous/autonomous-cron-health.service",
+            "autonomous/autonomous-cron-health.timer",
+            "autonomous/autonomous-cron-audit.service",
+            "autonomous/autonomous-cron-audit.timer",
         ):
             source = (
                 INSTALL_ROOT / unit

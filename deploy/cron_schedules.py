@@ -44,6 +44,11 @@ class TimerSpec:
 
 
 TIMERS: tuple[TimerSpec, ...] = (
+    TimerSpec(
+        job="run_chat_synthetic_probe",
+        on_calendar=("*-*-* *:*:00",),
+        description="Evaluate due and triggered production synthetic chat probes",
+    ),
     # Trending pipeline: stars (:00) -> task trending (:15) -> paper trending
     # (:45, also consumes HF artifacts from :30).  Hot trending runs its own
     # 15-minute lane.
@@ -143,6 +148,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync Open ASR leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_open_tts",
+        on_calendar=("*-*-* *:18:00",),
+        description="Sync Open TTS leaderboards hourly",
+    ),
+    TimerSpec(
         job="sync_mmteb_retrieval",
         on_calendar=("*-*-* *:22:00",),
         description="Sync MMTEB v2 retrieval leaderboard hourly",
@@ -195,7 +205,7 @@ TIMERS: tuple[TimerSpec, ...] = (
         args=(
             "--resume",
             "--limit",
-            "10000",
+            "250000",
             "--max-runtime-seconds",
             "3300",
         ),
@@ -225,11 +235,12 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Mirror thumbnails to VPS disk daily",
         after=("pwc-cron-preload-thumbnails-recent",),
     ),
-    # Six-hourly backfill.
+    # Follow the hourly paper import so trend coverage does not stay stale.
     TimerSpec(
         job="backfill_method_references",
-        on_calendar=("*-*-* 00/6:15:00",),
-        description="Backfill method reference evidence every six hours",
+        on_calendar=("*-*-* *:15:00",),
+        description="Backfill method reference evidence hourly",
+        after=("pwc-cron-import-hf-daily-papers",),
         args=(
             "--provider",
             "openalex",

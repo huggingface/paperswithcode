@@ -692,6 +692,35 @@ def test_descriptorless_production_releases_do_not_disable_staging_cleanup(
     assert deploy_cli.protected_external_pi_runtime_ids() == {"a" * 64}
 
 
+def test_cleanup_protects_packaged_production_external_pi_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    environments = tmp_path / "environments"
+    recorded = {
+        "staging": "a" * 64,
+        "production": "b" * 64,
+    }
+    for environment, runtime_id in recorded.items():
+        release = release_fixture(tmp_path, f"{environment}-active")
+        manifest_path = release / "release.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        manifest["external_pi_runtime"] = {
+            "identity_schema": 1,
+            "runtime_id": runtime_id,
+            "contract": "external-pi-v1",
+        }
+        manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+        root = environments / environment
+        (root / "slots/blue").mkdir(parents=True)
+        (root / "slots/green").mkdir()
+        atomic_symlink(release, root / "current")
+        atomic_symlink(release, root / "slots/blue/release")
+    monkeypatch.setattr(deploy_cli, "ENVIRONMENTS", ("production", "staging"))
+    monkeypatch.setattr(deploy_cli, "ENVIRONMENTS_ROOT", environments)
+
+    assert deploy_cli.protected_external_pi_runtime_ids() == set(recorded.values())
+
+
 def test_packaged_descriptor_reuses_historical_runtime_after_schema_change(
     tmp_path: Path,
     pinned_node_archive: Path,

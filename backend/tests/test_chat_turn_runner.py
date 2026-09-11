@@ -177,7 +177,18 @@ def test_reconstructed_admission_uses_persisted_qualification_and_reservation(
         def __init__(self, **kwargs):
             self.kwargs = kwargs
 
+    marked: list[str] = []
+
+    class Latency:
+        def __init__(self, _db):
+            pass
+
+        def mark_external_pi(self, request_id):
+            marked.append(request_id)
+            return True
+
     monkeypatch.setattr(runner_module.db_manager, "_session_local", session_local)
+    monkeypatch.setattr(runner_module, "ChatLatencyService", Latency)
     monkeypatch.setattr(
         runner_module, "ChatDurableQualificationEvidenceService", Evidence
     )
@@ -191,10 +202,13 @@ def test_reconstructed_admission_uses_persisted_qualification_and_reservation(
         owner=ChatOwner("owner", "owner"),
         admission=admission,
         prompt="content-free",
-        request_id="reconstructed-request",
+        request_id=str(uuid.uuid4()),
         resume_id=None,
         store=object(),
     )
 
     assert isinstance(runner, ReconstructedExternalRunner)
     assert issued_scopes == [{"model", "catalog", "session_store", "external_turn"}]
+    # The turn must be recorded against the external fleet so it is not billed
+    # for a Modal sandbox it never allocates.
+    assert marked == [runner.kwargs["request_id"]]

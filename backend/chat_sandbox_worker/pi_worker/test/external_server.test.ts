@@ -26,6 +26,7 @@ function externalRunFrame(): Record<string, unknown> {
     model: "test-model",
     resume: null,
     web_search_enabled: false,
+    excalidraw_enabled: true,
     reader_mode: false,
     poster_mode: false,
     paper_artifacts_enabled: false,
@@ -98,6 +99,7 @@ test("external shadow HTTP service authenticates and exposes no run endpoint", a
 test("external worker streams one authenticated Pi turn without a local shell", async () => {
   const token = "s".repeat(32);
   const observed: Record<string, unknown>[] = [];
+  let disposals = 0;
   const server = createExternalWorkerServer({
     token,
     maximumConcurrent: 8,
@@ -119,6 +121,7 @@ test("external worker streams one authenticated Pi turn without a local shell", 
         emit(run.request_id, { type: "worker_done", status: "complete" });
       },
       async cancel() {},
+      async dispose() { disposals += 1; },
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -171,6 +174,7 @@ test("external worker streams one authenticated Pi turn without a local shell", 
       model: "test-model",
       resume: null,
       web_search_enabled: false,
+      excalidraw_enabled: true,
       reader_mode: false,
       poster_mode: false,
       paper_artifacts_enabled: false,
@@ -196,6 +200,19 @@ test("external worker streams one authenticated Pi turn without a local shell", 
       workerGeneration: 4,
       leaseGeneration: 9,
     });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(disposals, 0);
+    const terminal = messages.find((message) => message.type === "worker_done");
+    assert(terminal);
+    socket.send(JSON.stringify({
+      v: 1,
+      type: "ack_terminal",
+      request_id: "request-1",
+      turnClaim: durableTurnClaim,
+      sequence: terminal.worker_sequence,
+    }));
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(disposals, 1);
   } finally {
     socket.close();
     server.close();
@@ -231,6 +248,7 @@ test("external worker reattaches a pending tool request without restarting or ca
         emit(run.request_id, { type: "worker_done", status: "complete" });
       },
       async cancel() { cancels += 1; },
+      async dispose() {},
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -324,6 +342,7 @@ test("retained runs hold capacity across detach and release it on terminal ackno
         emit(run.request_id, { type: "worker_done", status: "complete" });
       },
       async cancel() {},
+      async dispose() {},
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -421,6 +440,7 @@ test("authenticated detached cancellation requires the exact claim and aborts on
         cancels += 1;
         throw new Error("cancel failed");
       },
+      async dispose() {},
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -495,7 +515,9 @@ test("external worker rejects a tool result without an attached retained run", a
     instanceId: "10000000-0000-4000-8000-000000000001",
     releaseId: "release-a",
     profile: { prompt: "system", tool_names: [] },
-    createTurnWorker: () => ({ async run() {}, async cancel() {} }),
+    createTurnWorker: () => ({
+      async run() {}, async cancel() {}, async dispose() {},
+    }),
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -551,6 +573,7 @@ test("duplicate run start is rejected without counting or disturbing the incumbe
         emit(run.request_id, { type: "worker_done", status: "complete" });
       },
       async cancel() {},
+      async dispose() {},
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -632,6 +655,7 @@ test("worker construction failure releases the provisional run without counting 
           emit(run.request_id, { type: "worker_done", status: "complete" });
         },
         async cancel() {},
+        async dispose() {},
       };
     },
   });
@@ -715,6 +739,7 @@ test("rejected second attach has no authority over the incumbent run", async () 
         emit(run.request_id, { type: "worker_done", status: "complete" });
       },
       async cancel() { cancels += 1; },
+      async dispose() {},
     }),
   });
   server.listen(0, "127.0.0.1");
@@ -828,7 +853,9 @@ test("external worker rejects missing and stale upgrade generations", async () =
     instanceId: "10000000-0000-4000-8000-000000000001",
     releaseId: "release-a",
     profile: { prompt: "system", tool_names: [] },
-    createTurnWorker: () => ({ async run() {}, async cancel() {} }),
+    createTurnWorker: () => ({
+      async run() {}, async cancel() {}, async dispose() {},
+    }),
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
@@ -1019,4 +1046,56 @@ test("external worker capacity remains configurable above the initial eight", ()
     () => createExternalWorkerServer({ ...options, maximumConcurrent: 33 }),
     /concurrency is invalid/,
   );
+});
+
+test("a strictly newer claim reclaims an idle drained worker but not a busy one", async () => {
+  const token = "s".repeat(32);
+  const server = createExternalWorkerServer({
+    token,
+    maximumConcurrent: 8,
+    workerId: "worker-1",
+    instanceId: "10000000-0000-4000-8000-000000000001",
+    releaseId: "release-a",
+    profile: { prompt: "system", tool_names: [] },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const authorization = { Authorization: `Bearer ${token}` };
+  const claimWith = (worker_generation: number) => fetch(`${baseUrl}/v1/claim`, {
+    method: "POST",
+    headers: { ...authorization, "Content-Type": "application/json" },
+    body: JSON.stringify({ worker_generation }),
+  });
+  try {
+    assert.equal((await claimWith(3)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/v1/drain`, {
+      method: "POST",
+      headers: { ...authorization, "X-PWC-Worker-Generation": "3" },
+    })).status, 200);
+
+    // Re-binding the same generation is the stale owner reconnecting; it must
+    // not resurrect the worker.
+    assert.equal((await claimWith(3)).status, 400);
+    const stale = await fetch(`${baseUrl}/v1/status`, { headers: authorization });
+    assert.equal((await stale.json() as { state: string }).state, "draining");
+
+    // A strictly newer supervisor generation reclaims the idle worker.
+    const reclaimed = await claimWith(4);
+    assert.equal(reclaimed.status, 200);
+    const body = await reclaimed.json() as { state: string; worker_generation: number };
+    assert.equal(body.state, "ready");
+    assert.equal(body.worker_generation, 4);
+
+    const shadow = await fetch(`${baseUrl}/v1/shadow`, {
+      method: "POST",
+      headers: authorization,
+    });
+    assert.notEqual(shadow.status, 503);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
 });

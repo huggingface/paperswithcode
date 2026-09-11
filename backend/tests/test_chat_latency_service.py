@@ -15,6 +15,7 @@ from backend.models.database import (
     Base,
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_latency_service import ChatLatencyService
@@ -46,6 +47,7 @@ def db():
             ChatSession.__table__,
             ChatMessageRecord.__table__,
             ChatTurnLatency.__table__,
+            ChatTurnJob.__table__,
         ],
     )
     with Session(engine) as session:
@@ -407,6 +409,84 @@ def test_reconcile_stale_turns_leaves_an_unexpired_active_turn_running(db):
     assert row.terminal_status == "running"
 
 
+@pytest.mark.parametrize("lease_seconds", [-1, 60])
+def test_telemetry_cleanup_leaves_durable_expiry_to_admission(db, lease_seconds):
+    from backend.services.chat_turn_admission_coordinator import (
+        ChatTurnAdmissionCoordinator,
+    )
+    from backend.services.chat_turn_job_repository import ChatTurnJobRepository
+
+    now = datetime.now(UTC)
+    session_id = _session(db)
+    row = _admit(db, session_id=session_id)
+    message = _user_message(db, session_id=session_id, turn_id=row.turn_id)
+    session = db.get(ChatSession, session_id)
+    session.active_turn_id = row.turn_id
+    session.active_turn_expires_at = now - timedelta(seconds=30)
+    job = ChatTurnJob(
+        turn_id=row.turn_id,
+        chat_session_id=session_id,
+        hf_user_id="owner-1",
+        request_id=str(row.request_id),
+        revision=1,
+        dispatch_class="interactive",
+        dispatch_route="legacy-claude",
+        state="running",
+        worker_id="worker-a",
+        worker_generation=1,
+        lease_generation=1,
+        app_release_id="test",
+        worker_contract_version="test",
+        admitted_at=now - timedelta(minutes=2),
+        lease_expires_at=now + timedelta(seconds=lease_seconds),
+    )
+    db.add(job)
+    db.expire_on_commit = False
+    db.commit()
+
+    assert ChatLatencyService(db).reconcile_stale_turns(now=now) == {
+        "complete": 0,
+        "error": 0,
+        "interrupted": 0,
+    }
+    assert message.status == "generating"
+    assert session.active_turn_id == row.turn_id
+    assert job.state == "running"
+
+    coordinator = ChatTurnAdmissionCoordinator(
+        db,
+        SimpleNamespace(chat_max_concurrency=32),
+        repository=ChatTurnJobRepository(advisory_locker=lambda *_args: None),
+        observe=lambda *_args: None,
+    )
+    coordinator.preflight(
+        hf_user_id="other-owner",
+        request_id="new-request",
+        requested_session_id=None,
+        now=now,
+    )
+    db.flush()
+    assert job.state == ("interrupted" if lease_seconds < 0 else "running")
+    assert message.status == ("interrupted" if lease_seconds < 0 else "generating")
+
+    if lease_seconds < 0:
+        # Both projections roll back together if the admitting transaction fails.
+        db.rollback()
+        assert db.get(ChatTurnJob, row.turn_id).state == "running"
+        assert db.get(ChatMessageRecord, message.id).status == "generating"
+        coordinator.preflight(
+            hf_user_id="other-owner",
+            request_id="retry-request",
+            requested_session_id=None,
+            now=now,
+        )
+        db.commit()
+        assert ChatLatencyService(db).reconcile_stale_turns(
+            now=now + timedelta(minutes=1)
+        ) == {"complete": 0, "error": 0, "interrupted": 1}
+        assert row.terminal_status == "interrupted"
+
+
 def test_gateway_can_record_by_turn_and_derive_admission_delta(db):
     session_id = _session(db)
     row = _admit(db, session_id=session_id)
@@ -571,3 +651,75 @@ def test_qualification_metadata_migration_is_environment_scoped_and_least_privil
     assert "FROM pwc_staging;" in migration
     assert "qualification_run_id" in migration
     assert "qualification_scenario" in migration
+
+
+def test_external_pi_turns_are_not_billed_for_an_unused_sandbox(db):
+    # Routing to the external fleet is resolved after admission, so the row
+    # starts out carrying the Modal sandbox shape. Left uncorrected, finalize
+    # bills the requested CPU and memory for the whole turn even though no
+    # sandbox was ever created, and that figure feeds the Modal spend circuits.
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    row = _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+
+    assert float(row.sandbox_cpu_request) == 0.125
+    assert service.mark_external_pi(str(request_id))
+    db.refresh(row)
+
+    assert row.execution_backend == "external_pi"
+    assert row.sandbox_cpu_request is None
+    assert row.sandbox_memory_request_mib is None
+
+    assert service.finalize(str(request_id), "complete", 30_000)
+    db.refresh(row)
+    assert row.estimated_active_cost_usd is None
+
+
+def test_marking_external_pi_is_idempotent_and_leaves_modal_turns_billed(db):
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+
+    assert service.mark_external_pi(str(request_id))
+    # A second call must not re-mark a row that is already external.
+    assert not service.mark_external_pi(str(request_id))
+
+    other_request = uuid.uuid4()
+    other = _admit(db, session_id=session_id, request_id=other_request)
+    assert service.record_phase(
+        str(other_request),
+        "pool_lookup_completed",
+        12,
+        acquisition_outcome="pool_hit",
+    )
+    assert service.finalize(str(other_request), "complete", 30_000)
+    db.refresh(other)
+
+    assert other.execution_backend == "modal_cli"
+    assert float(other.estimated_active_cost_usd) > 0
+
+    with pytest.raises(ValueError, match="request_id must be a UUID"):
+        service.mark_external_pi("not-a-uuid")
+
+
+def test_external_pi_backend_migration_is_environment_scoped():
+    migration = (
+        Path(__file__).parents[1]
+        / "database"
+        / "migrations"
+        / "allow_external_pi_latency_backend.sql"
+    ).read_text()
+
+    assert "current_schema() NOT IN ('staging', 'public')" in migration
+    # The deployed constraint is the auto-named inline CHECK from
+    # add_chat_turn_latency.sql, not the ORM's explicit name. Dropping only the
+    # ORM name is a silent no-op that leaves the two-value check enforced.
+    assert (
+        "DROP CONSTRAINT IF EXISTS chat_turn_latency_execution_backend_check"
+        in migration
+    )
+    assert "DROP CONSTRAINT IF EXISTS chat_turn_latency_backend_check" in migration
+    assert "ADD CONSTRAINT chat_turn_latency_backend_check" in migration
+    assert "'external_pi'" in migration

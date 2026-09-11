@@ -161,6 +161,7 @@ class BucketContentStore:
         self.bucket_id = bucket_id
         self.token = token
         self.content_root = content_root
+        self.repairs: dict[str, dict[str, object]] = {}
 
     def existing(self, keys: list[str]) -> set[str]:
         if not keys:
@@ -217,11 +218,20 @@ class BucketContentStore:
         existing = self.existing(
             [result_key, progress_key, *status_keys, *output_keys, *pdf_keys]
         )
-        preserved_outputs = existing.intersection(output_keys)
+        self.repairs = {
+            str(entry["output_key"]): entry
+            for entry in entries
+            if entry.get("replace_invalid_sha256")
+        }
+        preserved_outputs = existing.intersection(output_keys) - self.repairs.keys()
         for key in preserved_outputs:
             # process() only needs existence to preserve a canonical object.
             atomic_write(self.content_root / key, b"")
         self.download_many(sorted(existing - preserved_outputs))
+        for key, entry in self.repairs.items():
+            if key not in existing:
+                raise ValueError("repair_original_missing")
+            validate_repair_original(entry, (self.content_root / key).read_bytes())
         asset_keys: list[str] = []
         for status_key in status_keys:
             path = self.content_root / status_key
@@ -239,8 +249,22 @@ class BucketContentStore:
         immutable = [key for key in unique if not key.startswith("_jobs/")]
         for key in self.existing(immutable):
             local = (self.content_root / key).read_bytes()
-            if self.read(key) != local:
-                raise ValueError(f"immutable_asset_conflict:{key}")
+            remote = self.read(key)
+            if remote != local:
+                entry = self.repairs.get(key)
+                if entry is None:
+                    raise ValueError(f"immutable_asset_conflict:{key}")
+                validate_repair_original(entry, remote)
+                validate_canonical_markdown(str(entry["title"]), local.decode("utf-8"))
+                backup_key = (
+                    f"_jobs/repair-originals/{entry['replace_invalid_sha256']}/{key}"
+                )
+                atomic_write(self.content_root / backup_key, remote)
+                self.upload([backup_key])
+                if self.read(backup_key) != remote:
+                    raise ValueError("repair_backup_verification_failed")
+                if self.read(key) != remote:
+                    raise ValueError("repair_original_changed")
         additions = [
             (str(self.content_root / key), key)
             for key in unique
@@ -407,7 +431,13 @@ def validate_external_pdf_network_target(value: str) -> str:
     return normalized
 
 
-def download_external_pdf(pdf_url: str) -> bytes:
+def download_external_pdf(
+    pdf_url: str,
+    *,
+    timeout_seconds: float = 180,
+    max_elapsed_seconds: float | None = None,
+) -> bytes:
+    started_at = time.monotonic()
     url = validate_external_pdf_network_target(pdf_url)
 
     def validate_request(request: httpx.Request) -> None:
@@ -415,7 +445,7 @@ def download_external_pdf(pdf_url: str) -> bytes:
 
     with httpx.Client(
         headers={"User-Agent": USER_AGENT},
-        timeout=180,
+        timeout=timeout_seconds,
         follow_redirects=True,
         event_hooks={"request": [validate_request]},
     ) as client:
@@ -431,6 +461,13 @@ def download_external_pdf(pdf_url: str) -> bytes:
 
             data = bytearray()
             for chunk in response.iter_bytes():
+                if (
+                    max_elapsed_seconds is not None
+                    and time.monotonic() - started_at > max_elapsed_seconds
+                ):
+                    raise httpx.TimeoutException(
+                        "external PDF download deadline exceeded"
+                    )
                 if len(data) + len(chunk) > MAX_PDF_BYTES:
                     raise ValueError("invalid_pdf")
                 data.extend(chunk)
@@ -473,11 +510,22 @@ def validate_canonical_markdown(title: str, markdown: str) -> None:
     encoded = markdown.encode("utf-8")
     if len(encoded) < 120 or len(encoded) > 64 * 1024 * 1024:
         raise ValueError("invalid_markdown_size")
-    marker = "Markdown Content:\n\n"
-    _header, separator, body = markdown.partition(marker)
-    if not separator:
+    marker = re.search(r"^Markdown Content:\r?\n", markdown, flags=re.MULTILINE)
+    if marker is None:
         raise ValueError("semantic_markdown_mismatch")
+    body = markdown[marker.end() :].lstrip("\r\n")
     validate_markdown_semantics(title, body)
+
+
+def validate_repair_original(entry: dict[str, object], original: bytes) -> None:
+    """Require the exact invalid object selected by the bounded repair plan."""
+    if hashlib.sha256(original).hexdigest() != entry.get("replace_invalid_sha256"):
+        raise ValueError("repair_original_changed")
+    try:
+        validate_canonical_markdown(str(entry["title"]), original.decode("utf-8"))
+    except ValueError:
+        return
+    raise ValueError("repair_original_is_valid")
 
 
 def download_pdf_for_entry(entry: dict[str, object]) -> tuple[bytes, str]:
@@ -690,7 +738,9 @@ def process(
     paper_key = entry_paper_key(entry)
     version = str(entry["version"])
     output = content_root / str(entry["output_key"])
-    if output.exists():
+    if output.exists() and entry.get("replace_invalid_sha256"):
+        validate_repair_original(entry, output.read_bytes())
+    elif output.exists():
         return {
             "paper_key": paper_key,
             "paper_id": entry.get("paper_id"),

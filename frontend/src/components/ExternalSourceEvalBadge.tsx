@@ -34,7 +34,7 @@ function sourceLabel(sourceUrl?: string | null): string {
   }
 }
 
-export const ExternalSourceEvalBadge: React.FC<Props> = ({ sourceUrl }) => {
+const ExternalSourceEvalBadge: React.FC<Props> = ({ sourceUrl }) => {
   const safeSourceUrl = safeExternalHref(sourceUrl);
   const internalPaperUrl =
     typeof sourceUrl === "string" && sourceUrl.startsWith("/paper/")

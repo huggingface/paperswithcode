@@ -7,8 +7,8 @@ import { papersApi } from "@/lib/api/papers";
 import type { ChatDraft, PaperMentionDraft } from "@/lib/chat";
 import { withDraftText } from "@/lib/paperSelection";
 
-export const MAX_PAPER_MENTIONS = 10;
-export const MAX_DISTINCT_PAPERS = 3;
+const MAX_PAPER_MENTIONS = 10;
+const MAX_DISTINCT_PAPERS = 3;
 
 interface ActiveMention { start: number; end: number; query: string }
 

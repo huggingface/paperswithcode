@@ -197,6 +197,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "monitor_chat_operational_alerts": (
         "backend/tests/test_chat_operational_alerts.py",
     ),
+    "run_chat_synthetic_probe": ("backend/tests/test_chat_synthetic_probe.py",),
 }
 
 

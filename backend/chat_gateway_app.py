@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
+import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from huggingface_hub.errors import HfHubHTTPError
@@ -52,6 +53,7 @@ from backend.services.chat_capability_service import (
     CapabilityError,
     ChatCapabilityService,
 )
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_gateway_service import ChatGatewayService
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
@@ -127,7 +129,6 @@ from backend.services.openrouter_user_budget_service import (
     RequestBounds,
     opaque_owner,
 )
-from backend.utils.exceptions import PaperNotFoundError
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger(__name__)
@@ -136,7 +137,7 @@ MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
 MAX_PROVIDER_TURN_TOKENS = 512_000
 MAX_POSTER_PROVIDER_TURN_TOKENS = 2_000_000
 QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
-QUALIFICATION_PROVIDER_TURN_TOKENS = 2 * (
+QUALIFICATION_PROVIDER_TURN_TOKENS = QUALIFICATION_PROVIDER_REQUESTS * (
     MAX_OPENAI_REQUEST_BYTES // 4 + MAX_PROVIDER_OUTPUT_TOKENS
 )
 
@@ -215,7 +216,7 @@ class ArtifactPrepareRequest(BaseModel):
 
 class PaperCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "begin-edit", "repair-context", "repair"]
+    operation: Literal["create", "begin-edit", "repair-context", "draft", "repair"]
     title: str | None = Field(default=None, max_length=300)
     artifact_id: uuid.UUID | None = None
     expected_parent_version_id: uuid.UUID | None = None
@@ -233,8 +234,16 @@ def _output_tokens_allowed(value: int) -> bool:
     return 1 <= value <= MAX_PROVIDER_OUTPUT_TOKENS
 
 
-def _provider_turn_limits(row: ChatTurnCapability, db: Session) -> tuple[int, int]:
-    qualification_scope_id = _qualification_scope_claim(row, db)
+def _provider_turn_limits(
+    row: ChatTurnCapability,
+    db: Session | None = None,
+    settings: Settings | None = None,
+) -> tuple[int, int]:
+    qualification_scope_id = (
+        _qualification_scope_claim(row, db, settings)
+        if db is not None and settings is not None
+        else None
+    )
     if qualification_scope_id is not None:
         return QUALIFICATION_PROVIDER_REQUESTS, QUALIFICATION_PROVIDER_TURN_TOKENS
     if {"artifact", "paper_grant"} & set(getattr(row, "scopes", ())):
@@ -243,8 +252,10 @@ def _provider_turn_limits(row: ChatTurnCapability, db: Session) -> tuple[int, in
 
 
 def _qualification_scope_claim(
-    row: ChatTurnCapability, db: Session
+    row: ChatTurnCapability, db: Session, settings: Settings
 ) -> uuid.UUID | None:
+    if settings.environment != "staging":
+        return None
     return db.scalar(
         select(ChatQualificationScope.id)
         .join(
@@ -636,6 +647,22 @@ def _safe_openai_request_id(value: str | None) -> str | None:
     return value
 
 
+def _openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | None:
+    if outcome == "completed":
+        return None
+    if cancelled:
+        return "openai_stream_cancelled"
+    if outcome == "incomplete":
+        return "openai_incomplete"
+    return "openai_unavailable"
+
+
+async def _close_openai_stream(upstream: Any, client: Any) -> None:
+    with anyio.CancelScope(shield=True):
+        await upstream.aclose()
+        await client.aclose()
+
+
 def _settle_openai_call(
     settings: Settings,
     call_id: uuid.UUID,
@@ -860,8 +887,8 @@ def catalog(
         result = ChatGatewayService(db, settings).catalog(
             body.operation, body.arguments
         )
-    except PaperNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from None
+    except CatalogNotFoundError as error:
+        raise HTTPException(status_code=404, detail=error.detail) from None
     except (HfHubHTTPError, OSError):
         raise HTTPException(
             status_code=502, detail="Paper Markdown could not be read"
@@ -1197,11 +1224,30 @@ def paper_command(
                     for path, data in files.items()
                 ],
             }
-        else:
+        elif body.operation == "draft":
+            if body.artifact_id is None or body.expected_parent_version_id is None:
+                raise ArtifactError(
+                    "artifact_invalid", "Draft needs the current paper version"
+                )
+            current = service.get_descriptor(owner_id, capability.chat_session_id)
+            if current is None or current.artifact_id != body.artifact_id:
+                raise ArtifactError("paper_missing", "This chat has no paper yet")
+            descriptor = service.save_ai_version(
+                owner_id=owner_id,
+                artifact_id=body.artifact_id,
+                expected_parent_version_id=body.expected_parent_version_id,
+                files={file.path: file.content.encode("utf-8") for file in body.files},
+                model_identity=session.selected_model,
+            )
+            result = {"paper": descriptor.model_dump(mode="json")}
+        elif body.operation == "repair":
             if body.artifact_id is None or body.expected_parent_version_id is None:
                 raise ArtifactError(
                     "artifact_invalid", "Repair needs the failed paper version"
                 )
+            current = service.get_descriptor(owner_id, capability.chat_session_id)
+            if current is None or current.artifact_id != body.artifact_id:
+                raise ArtifactError("paper_missing", "This chat has no paper yet")
             outcome = service.repair_failed_version(
                 owner_id=owner_id,
                 artifact_id=body.artifact_id,
@@ -1214,6 +1260,8 @@ def paper_command(
                 "repaired": outcome.repaired,
                 "exhausted": outcome.exhausted,
             }
+        else:  # Pydantic limits the operation, but keep this boundary explicit.
+            raise ArtifactError("artifact_invalid", "Unknown paper operation")
     except ArtifactError as error:
         db.rollback()
         raise HTTPException(
@@ -1393,38 +1441,59 @@ async def responses(
         turn_id = uuid.UUID(x_pwc_turn)
     except ValueError:
         raise HTTPException(status_code=403, detail="Capability rejected") from None
+    received_at = datetime.now(UTC)
+    _record_gateway_timing(settings, turn_id, received_at=received_at)
     raw = await request.body()
     if not raw or len(raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     try:
         untrusted_payload = json.loads(raw)
     except json.JSONDecodeError:
         raise HTTPException(
             status_code=422, detail="Invalid Responses request"
         ) from None
-    row = _scope(
-        _bearer(authorization),
-        "model",
-        x_pwc_session,
-        x_pwc_turn,
-        db,
-        turn_fence=turn_fence,
-    )
+    try:
+        row = _scope(
+            _bearer(authorization),
+            "model",
+            x_pwc_session,
+            x_pwc_turn,
+            db,
+            turn_fence=turn_fence,
+        )
+    except HTTPException:
+        logger.warning("chat OpenAI gateway rejected phase=capability_scope")
+        raise
     if (
         row.agent_harness != "pi"
         or row.provider_mode != "openai_funded"
         or row.model != settings.chat_openai_luna_route
     ):
+        logger.warning("chat OpenAI gateway rejected phase=capability_profile")
         raise HTTPException(status_code=403, detail="Capability rejected")
-    payload, maximum_tokens = _trusted_openai_payload(untrusted_payload, row, settings)
+    try:
+        payload, maximum_tokens = _trusted_openai_payload(
+            untrusted_payload, row, settings
+        )
+    except HTTPException:
+        logger.warning("chat OpenAI gateway rejected phase=request_contract")
+        raise
     trusted_raw = json.dumps(payload, separators=(",", ":")).encode()
     if len(trusted_raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=trusted_request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     owner_id = _capability_owner(row, db)
     capability_id = row.id
-    qualification_scope_id = _qualification_scope_claim(row, db)
+    qualification_scope_id = _qualification_scope_claim(row, db, settings)
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(trusted_raw) // 4) + maximum_tokens,
@@ -1528,6 +1597,11 @@ async def responses(
         offered_tool_names=inventory["offered_tool_names"],
         offered_tool_digest=inventory["offered_tool_digest"],
     )
+    # A FastAPI yield dependency otherwise retains this connection until the
+    # StreamingResponse finishes. At fleet concurrency that exhausts the pool
+    # while the gateway is merely waiting on OpenAI, blocking sibling calls.
+    # All subsequent accounting uses its own short-lived session.
+    db.close()
     client = httpx.AsyncClient(timeout=180, follow_redirects=False)
     try:
         upstream = await client.send(
@@ -1564,6 +1638,12 @@ async def responses(
                 "message": "Direct OpenAI is unavailable.",
             },
         ) from None
+    _record_gateway_timing(
+        settings,
+        turn_id,
+        phase="upstream_response_headers",
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
 
     request_id = _safe_openai_request_id(
         upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
@@ -1610,6 +1690,7 @@ async def responses(
     async def chunks():
         first_body_byte_ms: int | None = None
         ttft_ms: int | None = None
+        cancelled = False
         try:
             async for chunk in upstream.aiter_bytes():
                 extractor.feed(chunk)
@@ -1626,14 +1707,15 @@ async def responses(
                     ttft_ms = elapsed_ms
                     provider_trace.first_byte(ttft_ms)
                 yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            cancelled = True
+            raise
         finally:
-            await upstream.aclose()
-            await client.aclose()
+            await _close_openai_stream(upstream, client)
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            error_code = (
-                None
-                if extractor.result().outcome == "completed"
-                else "openai_unavailable"
+            error_code = _openai_stream_error_code(
+                extractor.result().outcome,
+                cancelled=cancelled,
             )
             try:
                 trace_usage = _settle_openai_call(
@@ -1659,7 +1741,6 @@ async def responses(
                 tool_call_returned=extractor.saw_tool_call,
             )
 
-    _record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
     return StreamingResponse(
         chunks(),
         status_code=upstream.status_code,
@@ -1754,7 +1835,7 @@ async def messages(
     capability_id = row.id
     funded_call_id: uuid.UUID | None = None
     try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db)
+        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
         ChatCapabilityService(db).meter_provider(
             row,
             request_tokens=max(1, len(raw) // 4) + maximum_tokens,

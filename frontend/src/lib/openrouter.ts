@@ -2,7 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 
 import { chatApi } from "@/lib/api/chat";
 
-export const OPENROUTER_USAGE_QUERY_KEY = ["chat", "openrouter", "usage"] as const;
+const OPENROUTER_USAGE_QUERY_KEY = ["chat", "openrouter", "usage"] as const;
 export const OPENROUTER_CREDENTIAL_QUERY_KEY = ["chat", "openrouter", "credential"] as const;
 
 export function useOpenRouterUsage(enabled = true) {

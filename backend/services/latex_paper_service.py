@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import time
 import uuid
@@ -55,6 +56,8 @@ _MAX_REPAIR_ATTEMPTS = 3
 _REPAIR_POLL_ATTEMPTS = 20
 _REPAIR_POLL_SECONDS = 0.25
 _AUDIT_PROVENANCE_KEY = "_audit_provenance"
+
+logger = logging.getLogger(__name__)
 
 _FIGURE_TYPES = {
     ".png": ("image/png", b"\x89PNG\r\n\x1a\n"),
@@ -1511,9 +1514,12 @@ class LatexPaperService:
         # fresh backend process can submit the same bundle after a Space restart
         # without creating a second logical compile job.
         job_id = str(version.id)
+        submitted_provider_job_id: str | None = None
         try:
             previous = version.compile_diagnostics or {}
             provider_job_id = previous.get("provider_job_id")
+            if isinstance(provider_job_id, str):
+                submitted_provider_job_id = provider_job_id
             resume = getattr(compiler, "resume", None)
             if isinstance(provider_job_id, str) and callable(resume):
                 try:
@@ -1575,6 +1581,11 @@ class LatexPaperService:
             version.compile_diagnostics = {
                 "job_id": job_id,
                 "failure_category": "transport_failure",
+                **(
+                    {"provider_job_id": submitted_provider_job_id}
+                    if submitted_provider_job_id is not None
+                    else {}
+                ),
             }
             return
         except (EnvelopeError, RuntimeError, ValueError):
@@ -1601,8 +1612,8 @@ class LatexPaperService:
         self.reconcile_storage_cleanup(limit=limit)
         if not self.settings.chat_latex_compiler_jobs_enabled:
             return 0
-        versions = self.db.scalars(
-            select(ChatLatexPaperVersion)
+        pending_versions = self.db.execute(
+            select(ChatLatexPaperVersion.id, ChatLatexPaperVersion.artifact_id)
             .where(
                 ChatLatexPaperVersion.storage_state == "ready",
                 ChatLatexPaperVersion.compile_status.in_(("queued", "compiling")),
@@ -1611,7 +1622,25 @@ class LatexPaperService:
             .limit(limit)
         ).all()
         reconciled = 0
-        for version in versions:
+        for version_id, artifact_id in pending_versions:
+            # Acquire the same per-artifact transaction lock used by owner
+            # polls and writes before looking at a candidate again. The initial
+            # query is deliberately only a bounded work list: another worker
+            # may settle, delete, or attach this job before this lock is held.
+            if self._lock_reconcile_artifact(artifact_id) is None:
+                continue
+            version = self.db.scalar(
+                select(ChatLatexPaperVersion)
+                .where(
+                    ChatLatexPaperVersion.id == version_id,
+                    ChatLatexPaperVersion.artifact_id == artifact_id,
+                    ChatLatexPaperVersion.storage_state == "ready",
+                    ChatLatexPaperVersion.compile_status.in_(("queued", "compiling")),
+                )
+                .with_for_update()
+            )
+            if version is None:
+                continue
             manifest = LatexPaperManifest.model_validate(version.source_manifest)
             try:
                 bundle = self._bundle_for_version(version)
@@ -1647,6 +1676,22 @@ class LatexPaperService:
             reconciled += 1
         self.db.flush()
         return reconciled
+
+    def _lock_reconcile_artifact(self, artifact_id: uuid.UUID) -> ChatArtifact | None:
+        """Serialize background recovery with owner polls for one paper."""
+        if self.db.bind is not None and self.db.bind.dialect.name == "postgresql":
+            self.db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:artifact))"),
+                {"artifact": f"chat-latex-paper-write:{artifact_id}"},
+            )
+        return self.db.scalar(
+            select(ChatArtifact)
+            .where(
+                ChatArtifact.id == artifact_id,
+                ChatArtifact.kind == "latex_paper",
+            )
+            .with_for_update()
+        )
 
     def reconcile_storage_cleanup(self, *, limit: int = 20) -> int:
         """Retry private-prefix cleanup left over by a storage outage or crash."""
@@ -1775,6 +1820,7 @@ class LatexPaperService:
         blob_digests = [
             blob.digest for blob in self._figure_blobs_for_version(version).values()
         ]
+        self._cancel_pending_provider_jobs([version])
         self._schedule_storage_prefix_cleanup(version.storage_key)
         self.db.execute(
             delete(ChatLatexPaperFigureReference).where(
@@ -1813,6 +1859,7 @@ class LatexPaperService:
             for version in versions
             for blob in self._figure_blobs_for_version(version).values()
         ]
+        self._cancel_pending_provider_jobs(versions)
         for version in versions:
             self._schedule_storage_prefix_cleanup(version.storage_key)
         artifact.source_head_version_id = None
@@ -1833,6 +1880,43 @@ class LatexPaperService:
         self.db.execute(delete(ChatArtifact).where(ChatArtifact.id == artifact.id))
         self.db.flush()
         self._delete_orphaned_blobs(blob_digests)
+
+    def _cancel_pending_provider_jobs(
+        self, versions: list[ChatLatexPaperVersion]
+    ) -> None:
+        """Best-effort deletion cleanup that never rebuilds source or resubmits."""
+
+        provider_job_ids: list[str] = []
+        for version in versions:
+            if version.compile_status not in {"queued", "compiling"}:
+                continue
+            diagnostics = version.compile_diagnostics or {}
+            provider_job_id = diagnostics.get("provider_job_id")
+            if isinstance(provider_job_id, str) and provider_job_id:
+                provider_job_ids.append(provider_job_id)
+        if not provider_job_ids:
+            return
+        try:
+            compiler = self.compiler or compiler_transport_from_settings(self.settings)
+            cancel_provider_job = getattr(compiler, "cancel_provider_job", None)
+            if not callable(cancel_provider_job):
+                raise RuntimeError("Sandbox provider cancellation is unavailable")
+        except (EnvelopeError, httpx.HTTPError, OSError, RuntimeError, ValueError):
+            logger.warning(
+                "latex_compiler_event "
+                "event=delete_pending_sandbox_cancellation_unavailable"
+            )
+            return
+        for provider_job_id in dict.fromkeys(provider_job_ids):
+            try:
+                cancel_provider_job(provider_job_id)
+            except (EnvelopeError, httpx.HTTPError, OSError, RuntimeError, ValueError):
+                # Deleting the durable paper must not strand its chat merely
+                # because the already-disposable provider VM cannot be reached.
+                logger.warning(
+                    "latex_compiler_event "
+                    "event=delete_pending_sandbox_cancellation_failed"
+                )
 
     def _delete_orphaned_blobs(self, digests: list[str]) -> None:
         for digest in set(digests):

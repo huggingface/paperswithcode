@@ -33,7 +33,7 @@ function initialsFor(user: AuthUser): string {
   return (parts[0][0]! + parts[parts.length - 1][0]!).toUpperCase();
 }
 
-export const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
+const UserMenu: React.FC<UserMenuProps> = ({ user, onLogout }) => {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

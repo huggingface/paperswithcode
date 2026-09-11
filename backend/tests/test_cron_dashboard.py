@@ -77,8 +77,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 38
-    assert summary["scheduled_jobs"] == 37
+    assert summary["total_jobs"] == 42
+    assert summary["scheduled_jobs"] == 41
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
@@ -250,6 +250,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "sync_3d_arena" in job_ids
     assert "sync_tabarena" in job_ids
     assert "sync_open_asr" in job_ids
+    assert "sync_open_tts" in job_ids
     assert "sync_mmteb_overall" in job_ids
     assert "sync_mmteb_retrieval" in job_ids
     assert "sync_mmteb_reranking" in job_ids
@@ -289,7 +290,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "month_start = (SELECT month_start FROM frontier)" in (
         reference_job.db_freshness_query
     )
-    assert reference_job.schedule.startswith("15 */6")
+    assert reference_job.schedule == "15 * * * * (hourly at :15 UTC)"
     assert reference_job.workflow_file == "cron-backfill-method-references.yml"
 
 
@@ -302,6 +303,7 @@ def test_registry_classifies_only_recurring_leaderboard_syncs():
         "sync_3d_arena",
         "sync_tabarena",
         "sync_open_asr",
+        "sync_open_tts",
         "sync_mmteb_overall",
         "sync_mmteb_retrieval",
         "sync_mmteb_reranking",

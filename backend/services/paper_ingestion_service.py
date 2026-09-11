@@ -8,7 +8,7 @@ import time
 
 from sqlalchemy.orm import Session
 
-from backend.models.api import Paper as ApiPaper
+from backend.models.papers import Paper as ApiPaper
 from backend.models.database import Author, Paper, PaperAuthor
 from backend.services.arxiv_service import ArxivService
 from backend.services.author_service import normalize_arxiv_author_name

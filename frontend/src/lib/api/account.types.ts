@@ -11,14 +11,14 @@ export interface BookmarkIdsResponse {
   paper_ids: number[];
 }
 
-export interface SavedTaskGroup {
+interface SavedTaskGroup {
   id: number | null;
   slug: string | null;
   name: string;
   papers: Paper[];
 }
 
-export interface SavedAreaGroup {
+interface SavedAreaGroup {
   id: number | null;
   name: string;
   tasks: SavedTaskGroup[];

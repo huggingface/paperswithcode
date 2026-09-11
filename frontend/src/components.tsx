@@ -1,25 +1,18 @@
 /**
- * Shared visual components for the v2 frontend.
- *
- * The SVG figures and DOM structure are ported verbatim from the original
- * frontend_v2 design prototype (`components.jsx`, ~1190 lines). The data
- * shapes are now backend-typed: `TagChip` takes a slug + label, `PaperCard`
- * takes the `PaperCardProps` shape produced by `lib/transform.ts`, and the
- * `Header` uses react-router `<NavLink>` instead of an App-level state machine.
+ * Shared visual components: tag/method chips, SOTA badges, inline icons,
+ * paper thumbnails, and the PaperCard list item. `TagChip` takes a slug +
+ * label; `PaperCard` takes the `PaperCardProps` shape produced by
+ * `lib/transform.ts`.
  */
 
 import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 
 import LatexTitle, { LatexText } from "@/components/LatexTitle";
-import HfSignInButton from "@/components/HfSignInButton";
-import UserMenu from "@/components/UserMenu";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import type { Method } from "@/lib/api/catalog.types";
 import { papersApi } from "@/lib/api/papers";
-import { isAuthDisabled } from "@/lib/apiUrl";
-import { useAuth } from "@/lib/authContext";
 import type { PaperCardProps } from "@/lib/transform";
 import { displayTaskName, humanizeSlug } from "@/lib/transform";
 import { safeExternalHref } from "@/lib/safeExternalHref";
@@ -326,7 +319,7 @@ export const Icon: React.FC<IconProps> = ({ name, size = 14 }) => {
 // Official multi-color Hugging Face logo. Kept as a standalone component
 // because the shared `Icon` renders single-color `currentColor` paths, while
 // the HF mark needs its brand palette to stay recognizable on the feed cards.
-export const HuggingFaceLogo: React.FC<{ size?: number }> = ({ size = 16 }) => (
+const HuggingFaceLogo: React.FC<{ size?: number }> = ({ size = 16 }) => (
   <svg
     className="hf-logo"
     width={size}
@@ -349,195 +342,6 @@ export const HuggingFaceLogo: React.FC<{ size?: number }> = ({ size = 16 }) => (
 );
 
 // ============================================================================
-// Header — uses react-router NavLink so the active state mirrors the URL
-// ============================================================================
-
-interface HeaderProps {
-  onOpenSearch: () => void;
-}
-
-export const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
-  const [mobileOpen, setMobileOpen] = React.useState(false);
-  const closeMobile = () => setMobileOpen(false);
-  const { user, logout } = useAuth();
-  const location = useLocation();
-  const returnTo = `${location.pathname}${location.search}` || "/";
-  // The Hugging Face Space mirror sets `VITE_DISABLE_AUTH=1` because the
-  // session cookie set by the HF OAuth callback on the API origin can't be
-  // shared cross-origin. Hide every auth-gated affordance there so visitors
-  // aren't presented with dead-ends.
-  const authDisabled = isAuthDisabled();
-  return (
-    <>
-      <header className="app-header">
-        <div className="app-header-inner">
-          <NavLink to="/" className="brand" onClick={closeMobile}>
-            <span className="brand-mark"></span>
-            <span className="brand-name">
-              Papers <em>With Code</em>
-            </span>
-          </NavLink>
-          <nav className="nav">
-            <NavLink to="/" end className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Trending
-            </NavLink>
-            <NavLink to="/tasks" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Browse state-of-the-art
-            </NavLink>
-            <NavLink to="/methods" className={({ isActive }) => `nav-item ${isActive ? "active" : ""}`}>
-              Methods
-            </NavLink>
-          </nav>
-          <div className="header-spacer"></div>
-          <button className="search-trigger" onClick={onOpenSearch}>
-            <Icon name="search" size={13} />
-            <span>Search papers, authors, domains…</span>
-            <kbd>⌘K</kbd>
-          </button>
-          <button
-            className="icon-btn mobile-search-btn"
-            aria-label="Search"
-            onClick={onOpenSearch}
-          >
-            <Icon name="search" size={14} />
-          </button>
-          {!authDisabled && (
-            <NavLink
-              to="/saved"
-              className="icon-btn header-bookmark-btn"
-              aria-label="Saved papers"
-              title="Saved papers"
-            >
-              <Icon name="bookmark" size={13} />
-            </NavLink>
-          )}
-          {authDisabled ? null : user ? (
-            <UserMenu user={user} onLogout={logout} />
-          ) : (
-            <HfSignInButton returnTo={returnTo} />
-          )}
-          <button
-            className="icon-btn mobile-menu-btn"
-            aria-label="Open menu"
-            onClick={() => setMobileOpen((v) => !v)}
-          >
-            <Icon name={mobileOpen ? "close" : "menu"} size={14} />
-          </button>
-        </div>
-      </header>
-      {mobileOpen && (
-        <div className="mobile-nav-drawer" onClick={closeMobile}>
-          <div className="mobile-nav-panel" onClick={(e) => e.stopPropagation()}>
-            <button
-              type="button"
-              className="mobile-nav-link mobile-nav-search"
-              onClick={() => {
-                closeMobile();
-                onOpenSearch();
-              }}
-            >
-              <Icon name="search" size={14} />
-              <span>Search papers, authors, domains…</span>
-            </button>
-            <NavLink to="/" end className="mobile-nav-link" onClick={closeMobile}>
-              Trending
-            </NavLink>
-            <NavLink to="/tasks" className="mobile-nav-link" onClick={closeMobile}>
-              Browse state-of-the-art
-            </NavLink>
-            <NavLink to="/methods" className="mobile-nav-link" onClick={closeMobile}>
-              Methods
-            </NavLink>
-            {!authDisabled && (
-              <NavLink to="/saved" className="mobile-nav-link" onClick={closeMobile}>
-                Saved papers
-              </NavLink>
-            )}
-            {!authDisabled && user?.is_admin && (
-              <NavLink to="/admin-dashboard" className="mobile-nav-link" onClick={closeMobile}>
-                Admin dashboard
-              </NavLink>
-            )}
-          </div>
-        </div>
-      )}
-    </>
-  );
-};
-
-// ============================================================================
-// Domain (task) glyph — abstract line-art icon keyed by slug
-// ============================================================================
-
-interface DomainIconProps {
-  slug: string;
-  size?: number;
-}
-
-export const DomainIcon: React.FC<DomainIconProps> = ({ slug, size = 32 }) => {
-  const props = {
-    stroke: "currentColor",
-    strokeWidth: 1.4,
-    fill: "none",
-    strokeLinecap: "round" as const,
-    strokeLinejoin: "round" as const,
-  };
-  const glyphs: Record<string, React.ReactNode> = {
-    "language-modeling": (
-      <>
-        <path d="M5 7c0-1.1.9-2 2-2h18c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H14l-5 4v-4H7c-1.1 0-2-.9-2-2V7z" {...props} />
-        <line x1="9" y1="11" x2="23" y2="11" {...props} />
-        <line x1="9" y1="15" x2="19" y2="15" {...props} />
-      </>
-    ),
-    "image-classification": (
-      <>
-        <rect x="5" y="6" width="22" height="16" rx="1.5" {...props} />
-        <circle cx="11" cy="12" r="2" {...props} />
-        <path d="M5 19l6-5 5 4 5-3 6 4" {...props} />
-      </>
-    ),
-    "object-detection": (
-      <>
-        <rect x="4" y="5" width="24" height="22" rx="0.5" strokeDasharray="1.5 1" {...props} />
-        <rect x="7" y="9" width="10" height="9" {...props} />
-        <rect x="18" y="14" width="9" height="10" {...props} />
-      </>
-    ),
-    robotics: (
-      <>
-        <rect x="4" y="22" width="12" height="4" rx="0.5" {...props} />
-        <circle cx="10" cy="22" r="1.5" {...props} />
-        <line x1="10" y1="20.5" x2="18" y2="11" {...props} />
-        <circle cx="18" cy="11" r="1.5" {...props} />
-      </>
-    ),
-    "speech-recognition": (
-      <>
-        <line x1="4" y1="16" x2="28" y2="16" {...props} />
-        <line x1="7" y1="13" x2="7" y2="19" {...props} />
-        <line x1="11" y1="9" x2="11" y2="23" {...props} />
-        <line x1="15" y1="11" x2="15" y2="21" {...props} />
-        <line x1="19" y1="7" x2="19" y2="25" {...props} />
-        <line x1="23" y1="13" x2="23" y2="19" {...props} />
-      </>
-    ),
-    "time-series": (
-      <>
-        <line x1="5" y1="26" x2="28" y2="26" {...props} />
-        <line x1="5" y1="6" x2="5" y2="26" {...props} />
-        <path d="M7 22l4-3 3 2 4-7 3 4 4-2 3 1" {...props} />
-      </>
-    ),
-  };
-  return (
-    <svg viewBox="0 0 32 32" width={size} height={size} aria-hidden="true">
-      {glyphs[slug] || <circle cx="16" cy="16" r="6" {...props} />}
-    </svg>
-  );
-};
-
-// ============================================================================
 // Hand-drawn PDF preview (fallback when no real thumbnail exists)
 // ============================================================================
 
@@ -554,7 +358,7 @@ const seedRand = (seed: string): (() => number) => {
   };
 };
 
-export const PdfThumbnail: React.FC<{ paperId: string }> = ({ paperId }) => {
+const PdfThumbnail: React.FC<{ paperId: string }> = ({ paperId }) => {
   const rand = seedRand(paperId);
   const W = 160;
   const H = 220;
@@ -693,10 +497,7 @@ export const PdfThumbnail: React.FC<{ paperId: string }> = ({ paperId }) => {
 
 /**
  * Real paper thumbnail wrapper. Prefers the backend-supplied thumbnail_url;
- * falls back to PdfThumbnail when no image is available.
- *
- * PLAN.md §9 thumbnail bullet: keep PdfThumbnail as a *fallback*, prefer real
- * thumbnails first.
+ * falls back to the hand-drawn PdfThumbnail when no image is available.
  */
 export const PaperPreview: React.FC<{ paperId: string; title: string; thumbnailUrl: string | null; priority?: boolean }> = ({
   paperId,

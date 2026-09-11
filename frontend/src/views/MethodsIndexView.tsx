@@ -12,8 +12,7 @@ import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by trend score desc
- * within each area. v2's METHOD_CATEGORIES bucketing is
- * dropped; backend areas are the single source of grouping truth.
+ * within each area. Backend areas are the single source of grouping truth.
  */
 const MethodsIndexView: React.FC = () => {
   const areasQ = useQuery({

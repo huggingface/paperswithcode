@@ -22,9 +22,17 @@ from backend.services.chat_operational_alert_service import (
     lifecycle_window_alerts,
     post_operational_alert,
     provider_health,
+    provider_runtime_revision,
     provider_transition,
+    reliability_alert_classifications,
     runtime_failure_counts,
 )
+from backend.services.autonomous_cron_probe import FindingState
+from backend.services.chat_reliability_service import (
+    probe_chat_aggregates,
+    release_probe_triggers,
+)
+from backend.services.chat_synthetic_service import run_synthetic_chat
 
 PRODUCTION_JOURNAL_UNITS = (
     "paperswithcode-backend@production",
@@ -34,6 +42,7 @@ PRODUCTION_JOURNAL_UNITS = (
 STATE_VERSION = 1
 HISTORY_LIMIT = 100
 HEALTH_RECORD = "chat-operational-alert-health.json"
+MAX_RELIABILITY_FINDINGS = 32
 
 
 def empty_state() -> dict[str, Any]:
@@ -44,6 +53,15 @@ def empty_state() -> dict[str, Any]:
         "journal_monitor_failed": False,
         "provider_monitor_failed": False,
         "lifecycle_active": [],
+        "reliability_active": [],
+        "reliability_monitor_failed": False,
+        "last_reliability_probe_at": None,
+        "last_synthetic_probe_at": None,
+        "synthetic_active": None,
+        "observed_release_id": None,
+        "observed_provider_digest": None,
+        "observed_provider_runtime_revision": None,
+        "operational_counts": {},
         "events": [],
     }
 
@@ -57,6 +75,15 @@ def load_state(path: Path) -> dict[str, Any]:
     if not isinstance(state.get("events"), list):
         raise TypeError("chat operational alert state has invalid events")
     state.setdefault("lifecycle_active", [])
+    state.setdefault("reliability_active", [])
+    state.setdefault("reliability_monitor_failed", False)
+    state.setdefault("last_reliability_probe_at", None)
+    state.setdefault("last_synthetic_probe_at", None)
+    state.setdefault("synthetic_active", None)
+    state.setdefault("observed_release_id", None)
+    state.setdefault("observed_provider_digest", None)
+    state.setdefault("observed_provider_runtime_revision", None)
+    state.setdefault("operational_counts", {})
     if (
         not isinstance(state["lifecycle_active"], list)
         or len(state["lifecycle_active"]) > len(LIFECYCLE_ALERT_NAMES)
@@ -65,7 +92,200 @@ def load_state(path: Path) -> dict[str, Any]:
         or not set(state["lifecycle_active"]).issubset(LIFECYCLE_ALERT_NAMES)
     ):
         raise TypeError("chat operational alert state has invalid lifecycle state")
+    if (
+        not isinstance(state["reliability_active"], list)
+        or len(state["reliability_active"]) > MAX_RELIABILITY_FINDINGS
+        or not all(
+            isinstance(name, str) and len(name) <= 160
+            for name in state["reliability_active"]
+        )
+        or len(set(state["reliability_active"])) != len(state["reliability_active"])
+    ):
+        raise TypeError("chat operational alert state has invalid reliability state")
+    if not isinstance(state["reliability_monitor_failed"], bool):
+        raise TypeError("chat operational alert state has invalid reliability status")
+    if state["synthetic_active"] is not None and (
+        not isinstance(state["synthetic_active"], str)
+        or len(state["synthetic_active"]) > 160
+        or not state["synthetic_active"].startswith("chat:")
+    ):
+        raise TypeError("chat operational alert state has invalid synthetic state")
+    if not isinstance(state["operational_counts"], dict) or any(
+        not isinstance(key, str)
+        or len(key) > 64
+        or not isinstance(value, int)
+        or value < 0
+        for key, value in state["operational_counts"].items()
+    ):
+        raise TypeError("chat operational alert state has invalid aggregate counts")
+    provider_digest = state["observed_provider_digest"]
+    if provider_digest is not None and (
+        not isinstance(provider_digest, str)
+        or len(provider_digest) != 64
+        or any(character not in "0123456789abcdef" for character in provider_digest)
+    ):
+        raise TypeError("chat operational alert state has invalid provider digest")
+    provider_revision = state["observed_provider_runtime_revision"]
+    if provider_revision is not None and (
+        not isinstance(provider_revision, str) or len(provider_revision) > 320
+    ):
+        raise TypeError("chat operational alert state has invalid provider revision")
     return state
+
+
+def _timestamp(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed.astimezone(UTC)
+
+
+def current_provider_runtime_revision(environment: str) -> str | None:
+    try:
+        with db_manager.session_local() as db:
+            return provider_runtime_revision(db, environment)
+    except SQLAlchemyError:
+        return None
+
+
+def collect_reliability_events(
+    state: dict[str, Any],
+    settings: Settings,
+    now: datetime,
+    operational_counts: dict[str, int],
+    trigger_events: list[dict[str, Any]],
+    *,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """Run the 15-minute aggregate probe, with immediate post-alert checks."""
+
+    previous = _timestamp(state.get("last_reliability_probe_at"))
+    critical_trigger = any(
+        event.get("severity") == "critical" for event in trigger_events
+    )
+    due = previous is None or now - previous >= timedelta(minutes=15)
+    if not (due or force or critical_trigger):
+        return []
+    findings = probe_chat_aggregates(
+        timedelta(minutes=15),
+        settings=settings,
+        now=now,
+        operational_counts=operational_counts,
+    )
+    state["last_reliability_probe_at"] = now.isoformat()
+    source_unknown = any(
+        finding.state == FindingState.UNKNOWN
+        and finding.evidence.get("incident_signature")
+        == "chat:aggregate_source:incomplete"
+        for finding in findings
+    )
+    source_was_unknown = state.get("reliability_monitor_failed") is True
+    active = set(state.get("reliability_active", []))
+    projected = reliability_alert_classifications(findings)
+    current = set(projected)
+    known_contracts = {
+        finding.contract
+        for finding in findings
+        if finding.state != FindingState.UNKNOWN
+    }
+    recovered = {
+        key for key in active - current if key.split("|", 1)[0] in known_contracts
+    }
+    entered = current - active
+    events: list[dict[str, Any]] = []
+    if source_unknown and not source_was_unknown:
+        events.append(
+            new_event(
+                "chat_reliability_monitor_unavailable",
+                now=now,
+                count=sum(
+                    finding.state == FindingState.UNKNOWN
+                    and finding.evidence.get("incident_signature")
+                    == "chat:aggregate_source:incomplete"
+                    for finding in findings
+                ),
+                classifications={"chat:aggregate_source:incomplete": 1},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
+    elif not source_unknown and source_was_unknown:
+        events.append(
+            new_event(
+                "chat_reliability_monitor_recovered",
+                now=now,
+                classifications={"chat:aggregate_source:incomplete": 1},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
+    if entered:
+        events.append(
+            new_event(
+                "chat_reliability_threshold",
+                now=now,
+                count=len(entered),
+                classifications={key: projected[key] for key in sorted(entered)},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
+    if recovered:
+        events.append(
+            new_event(
+                "chat_reliability_threshold_recovered",
+                now=now,
+                count=len(recovered),
+                classifications={key: 1 for key in sorted(recovered)},
+                window_start=now - timedelta(minutes=15),
+            )
+        )
+    state["reliability_active"] = sorted((active - recovered) | current)
+    state["reliability_monitor_failed"] = source_unknown
+    return events
+
+
+async def collect_synthetic_events(
+    state: dict[str, Any],
+    environment: str,
+    now: datetime,
+    *,
+    force: bool = False,
+) -> list[dict[str, Any]]:
+    """Run one paid synthetic turn at most four-hourly, plus forced checks."""
+
+    previous = _timestamp(state.get("last_synthetic_probe_at"))
+    if not force and previous is not None and now - previous < timedelta(hours=4):
+        return []
+    result = await run_synthetic_chat(environment, now=now)
+    state["last_synthetic_probe_at"] = now.isoformat()
+    prior = state.get("synthetic_active")
+    current = (
+        result.incident_signature
+        if result.state in {FindingState.DEGRADED, FindingState.UNKNOWN}
+        else None
+    )
+    events: list[dict[str, Any]] = []
+    if current is not None and current != prior:
+        events.append(
+            new_event(
+                "chat_synthetic_failure",
+                now=now,
+                classifications={current: 1},
+            )
+        )
+    elif current is None and prior is not None:
+        events.append(
+            new_event(
+                "chat_synthetic_recovered",
+                now=now,
+                classifications={prior: 1},
+            )
+        )
+    state["synthetic_active"] = current
+    return events
 
 
 def write_state(path: Path, state: dict[str, Any]) -> None:
@@ -78,10 +298,12 @@ def write_state(path: Path, state: dict[str, Any]) -> None:
     os.replace(temporary, path)
 
 
-def write_health_record(directory: Path, payload: dict[str, Any]) -> None:
+def write_health_record(
+    directory: Path, payload: dict[str, Any], *, filename: str = HEALTH_RECORD
+) -> None:
     """Persist only bounded, content-free output evidence for the dashboard."""
 
-    path = directory / HEALTH_RECORD
+    path = directory / filename
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
     temporary.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
@@ -270,6 +492,7 @@ def collect_events(
                 )
             )
         lifecycle_alerts = lifecycle_window_alerts(lifecycle_messages, settings)
+        state["operational_counts"] = {**failures, **lifecycle_alerts}
         active = set(state["lifecycle_active"])
         current = set(lifecycle_alerts)
         entered = current - active
@@ -369,7 +592,28 @@ def main() -> int:
         "chat-operational-alert-state.json"
     )
     state = load_state(state_path)
-    events, collection_failed = collect_events(state, settings, datetime.now(UTC))
+    now = datetime.now(UTC)
+    force_aggregate, _force_synthetic = release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision=current_provider_runtime_revision(
+            settings.environment
+        ),
+    )
+    events, collection_failed = collect_events(state, settings, now)
+    events.extend(
+        collect_reliability_events(
+            state,
+            settings,
+            now,
+            state.get("operational_counts", {}),
+            events,
+            force=force_aggregate,
+        )
+    )
+    collection_failed = collection_failed or bool(
+        state.get("reliability_monitor_failed")
+    )
     for event in events:
         append_event(state, event)
     # Persist cursor and pending events before any network side effect.

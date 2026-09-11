@@ -21,6 +21,7 @@ from backend.chat_sandbox_worker.contract import (
     MODAL_APP_NAME,
     PROVIDER_OUTPUT_TOKEN_LIMIT,
 )
+from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_SOCKET
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_PROTOCOL
 from backend.chat_sandbox_worker.mcp_app_registry import (
     egress_policy_digest,
@@ -116,6 +117,7 @@ class SandboxProvider(Protocol):
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool: ...
 
     async def terminate(
@@ -361,7 +363,43 @@ class ModalSandboxProviderAdapter:
                 )
             ),
         )
-        if not persistent_enabled or executor_enabled:
+        if executor_enabled:
+            deadline = (
+                time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
+            )
+            while time.monotonic() < deadline:
+                try:
+                    probe = await sandbox.exec.aio(
+                        "test",
+                        "-S",
+                        str(EXECUTOR_SOCKET),
+                        timeout=5,
+                    )
+                    await probe.wait.aio()
+                    if probe.returncode == 0:
+                        if qualification_profile == "32-functional-turns":
+                            seed = await sandbox.exec.aio(
+                                "sh",
+                                "-c",
+                                "printf durable-ready > /workspace/durable-ready.txt",
+                                timeout=5,
+                            )
+                            await seed.wait.aio()
+                            if seed.returncode != 0:
+                                break
+                        return sandbox
+                except Exception:
+                    pass
+                if await self.poll(sandbox) is not None:
+                    break
+                await asyncio.sleep(0.05)
+            await sandbox.terminate.aio(
+                wait=self.settings.chat_sandbox_spend_enforcement_enabled
+            )
+            raise SandboxError(
+                "sandbox_worker_not_ready", "Sandbox executor readiness timed out"
+            )
+        if not persistent_enabled:
             return sandbox
         deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
         while time.monotonic() < deadline:
@@ -396,8 +434,11 @@ class ModalSandboxProviderAdapter:
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool:
-        if persistent:
+        if launch_mode is SandboxLaunchMode.EXECUTOR:
+            command = ("test", "-S", str(EXECUTOR_SOCKET))
+        elif persistent:
             if not worker_generation:
                 raise ValueError("Persistent sandbox health requires a generation")
             command = (
@@ -473,11 +514,11 @@ class ModalSandboxProviderAdapter:
             "python",
             "-m",
             "backend.chat_sandbox_worker.executor_relay",
-            stdin=StreamType.PIPE,
             stdout=StreamType.PIPE,
             stderr=StreamType.DEVNULL,
             timeout=timeout_seconds,
             workdir="/workspace",
+            env={"PYTHONPATH": "/opt/pwc"},
             text=False,
         )
 

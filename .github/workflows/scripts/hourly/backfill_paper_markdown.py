@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -12,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pymupdf
 from huggingface_hub import HfApi, HfFileSystem, Volume
 from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import select
@@ -20,6 +22,8 @@ from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.models.database import Paper
 from backend.scripts.generate_missing_paper_markdown import (
+    download_external_pdf,
+    status_record,
     validate_canonical_markdown,
 )
 from backend.services.paper_markdown_budget_service import (
@@ -40,6 +44,9 @@ COVERAGE_HISTORY_NAME = "paper_markdown_coverage.jsonl"
 DISPATCH_SCHEMA_VERSION = 1
 MOUNT_PROBE_MAX_AGE = timedelta(hours=2)
 MOUNT_RETRY_DELAY = timedelta(minutes=10)
+LIVE_REPAIR_LIMIT = 20
+EXTERNAL_PDF_ARCHIVE_LIMIT = 64
+EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS = 30
 PROBE_SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -176,6 +183,7 @@ def status_disposition(
     # the corrected worker records that it tried the fallback chain.
     if (
         state == "failed"
+        and status.get("source") != "external"
         and status.get("error_class") == "arxiv_http_404"
         and status.get("version_fallback_attempted") is not True
     ):
@@ -221,6 +229,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         recover_mount_failures: bool = False,
         paid_canary: bool = False,
         retry_only: bool = False,
+        repair_invalid_limit: int = 0,
     ):
         super().__init__("paper_markdown_backfill")
         self.settings = get_settings()
@@ -233,6 +242,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         self.recover_mount_failures = recover_mount_failures
         self.paid_canary = paid_canary
         self.retry_only = retry_only
+        self.repair_invalid_limit = repair_invalid_limit
         self.budget_projected_usd: float | None = None
         self.budget_ceiling_usd: float | None = None
         self.budget_desired_jobs = 0
@@ -276,13 +286,15 @@ class PaperMarkdownBackfillJob(CronJobBase):
         self,
         papers: list[dict[str, object]],
         canonical: dict[str, object],
+        *,
+        bucket: str | None = None,
     ) -> dict[str, str]:
         """Inspect only the bounded recent canonical cohort."""
         selected = [item for item in papers if str(item["output_key"]) in canonical]
 
         def inspect(item: dict[str, object]) -> tuple[str, str]:
             key = str(item["output_key"])
-            path = f"hf://buckets/{self.settings.paper_markdown_hf_bucket_id}/{key}"
+            path = f"hf://buckets/{bucket or self.settings.paper_markdown_hf_bucket_id}/{key}"
             try:
                 with self.filesystem.open(path, "rb", block_size=0) as handle:
                     raw = handle.read(64 * 1024 * 1024 + 1)
@@ -338,11 +350,14 @@ class PaperMarkdownBackfillJob(CronJobBase):
         upstream = self._existing_paths(
             self.settings.paper_markdown_upstream_bucket_id, paths
         )
+        validation = self._semantic_records(
+            missing, upstream, bucket=self.settings.paper_markdown_upstream_bucket_id
+        )
         copy_items: list[tuple[str, str, str, str]] = []
         copied_paths: set[str] = set()
         for path, entry in upstream.items():
             xet_hash = getattr(entry, "xet_hash", None)
-            if not xet_hash:
+            if not xet_hash or validation.get(path) != "valid":
                 continue
             copy_items.append(
                 (
@@ -770,6 +785,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
     ) -> list[dict[str, str]]:
         remote_jobs = self._remote_jobs()
         active = self._active_jobs(remote_jobs)
+        if active and any(item.get("replace_invalid_sha256") for item in candidates):
+            self.logger.warning(
+                "Markdown repair waits for all active workers to finish"
+            )
+            return []
         concurrency = self.profile.concurrency
         if self.max_jobs is not None:
             concurrency = min(concurrency, self.max_jobs)
@@ -785,7 +805,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if self.batch_size < 1 or self.batch_size > maximum:
                 raise ValueError(f"batch size must be between 1 and {maximum}")
             batch_size = self.batch_size
-        desired_plans = chunks(candidates, batch_size)[:available_slots]
+        candidate_plans = chunks(candidates, batch_size)
+        desired_plans = candidate_plans[:available_slots]
         budget = self._budget_decision(len(desired_plans), remote_jobs)
         affordable = int(budget["affordable_jobs"])
         plans = desired_plans[:affordable]
@@ -820,11 +841,21 @@ class PaperMarkdownBackfillJob(CronJobBase):
             return []
 
         launched: list[dict[str, str]] = []
+        remaining_external_downloads = EXTERNAL_PDF_ARCHIVE_LIMIT
         run_id = (
             f"{'backfill' if self.full else 'live'}-"
             f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
         )
-        for shard_number, entries in enumerate(plans):
+        for shard_number, entries in enumerate(candidate_plans):
+            if len(launched) >= affordable:
+                break
+            if self.should_execute:
+                entries, attempted = self._archive_external_pdfs(
+                    entries, max_downloads=remaining_external_downloads
+                )
+                remaining_external_downloads -= attempted
+                if not entries:
+                    continue
             shard_id = f"{shard_number:05d}"
             manifest_key = f"_jobs/manifests/{run_id}/{shard_id}.jsonl"
             manifest = (
@@ -896,6 +927,80 @@ class PaperMarkdownBackfillJob(CronJobBase):
         )
         return launched
 
+    def _archive_external_pdfs(
+        self, entries: list[dict[str, object]], *, max_downloads: int
+    ) -> tuple[list[dict[str, object]], int]:
+        external = [
+            entry
+            for entry in entries
+            if entry.get("source") == "external" and entry.get("pdf_key")
+        ]
+        existing = self._existing_paths(
+            self.settings.paper_markdown_hf_bucket_id,
+            [str(entry["pdf_key"]) for entry in external],
+        )
+        missing = [entry for entry in external if str(entry["pdf_key"]) not in existing]
+        selected = missing[:max_downloads]
+        deferred = {entry_paper_key(entry) for entry in missing[max_downloads:]}
+
+        def archive(entry: dict[str, object]) -> str | None:
+            pdf_key = str(entry["pdf_key"])
+            try:
+                pdf = download_external_pdf(
+                    str(entry["pdf_url"]),
+                    timeout_seconds=EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS,
+                    max_elapsed_seconds=EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS,
+                )
+                with pymupdf.open(stream=pdf, filetype="pdf") as document:
+                    if document.page_count < 1:
+                        raise ValueError("invalid_pdf")
+            except Exception as error:  # noqa: BLE001 - isolate failures per paper
+                paper_key = entry_paper_key(entry)
+                status_key = f"_jobs/status/{paper_key}.json"
+                failure = status_record(
+                    {
+                        "paper_key": paper_key,
+                        "paper_id": entry.get("paper_id"),
+                        "source": "external",
+                        "arxiv_id": None,
+                        "status": "failed",
+                        "error": str(error)[:1000],
+                        "requested_version": entry["version"],
+                        "version_fallback_attempted": False,
+                    },
+                    prior=self._bucket_json(status_key),
+                    error=error,
+                )
+                self._write_bucket_json(status_key, failure)
+                self.logger.warning(
+                    "external PDF archival failed for %s: %s", paper_key, error
+                )
+                return paper_key
+            try:
+                self.api.batch_bucket_files(
+                    self.settings.paper_markdown_hf_bucket_id,
+                    add=[(pdf, pdf_key)],
+                    token=self.settings.hf_token or None,
+                )
+            except Exception as error:  # noqa: BLE001 - isolate failures per paper
+                self.logger.warning(
+                    "external PDF upload failed for %s: %s",
+                    entry_paper_key(entry),
+                    error,
+                )
+                return entry_paper_key(entry)
+            return None
+
+        failed: set[str] = set()
+        if selected:
+            with ThreadPoolExecutor(max_workers=min(8, len(selected))) as executor:
+                failed.update(key for key in executor.map(archive, selected) if key)
+        excluded = failed | deferred
+        return (
+            [entry for entry in entries if entry_paper_key(entry) not in excluded],
+            len(selected),
+        )
+
     def run(self) -> None:
         if self.should_execute and not self.settings.hf_token:
             raise ValueError("PWC_HF_TOKEN is required")
@@ -921,7 +1026,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
             self.settings.paper_markdown_hf_bucket_id, paths
         )
         missing = [item for item in papers if str(item["output_key"]) not in canonical]
-        remaining, upstream_available = self._copy_upstream(missing)
+        remaining, upstream_available = (
+            (missing, 0)
+            if getattr(self, "repair_invalid_limit", 0)
+            else self._copy_upstream(missing)
+        )
         remaining_paths = {str(item["output_key"]) for item in remaining}
         recent_papers = papers if not self.full else self._papers(recent_only=True)
         recent_keys = {str(item["output_key"]) for item in recent_papers}
@@ -947,6 +1056,13 @@ class PaperMarkdownBackfillJob(CronJobBase):
         status_paths = [
             f"_jobs/status/{entry_paper_key(item)}.json" for item in remaining
         ]
+        automatic_repairs = not self.full and not self.retry_only
+        if getattr(self, "repair_invalid_limit", 0) or automatic_repairs:
+            status_paths.extend(
+                f"_jobs/status/{entry_paper_key(item)}.json"
+                for item in recent_papers
+                if semantic_records.get(str(item["output_key"])) == "invalid"
+            )
         status_records = self._status_records(status_paths)
         dispositions = {
             path: status_disposition(payload)
@@ -958,9 +1074,50 @@ class PaperMarkdownBackfillJob(CronJobBase):
             disposition = dispositions.get(status_path)
             if disposition is None or disposition == "retryable_due":
                 candidates.append({**item, "retry": disposition == "retryable_due"})
+        missing_candidate_count = len(candidates)
+        repair_limit = getattr(self, "repair_invalid_limit", 0)
+        if automatic_repairs and not candidates and not repair_limit:
+            repair_limit = LIVE_REPAIR_LIMIT
+        if repair_limit:
+            # Live runs repair a bounded cohort after eligible missing work drains.
+            # Explicit repair runs always handle only their requested cohort.
+            candidates = []
+            for item in recent_papers:
+                key = str(item["output_key"])
+                if semantic_records.get(key) != "invalid":
+                    continue
+                disposition = dispositions.get(
+                    f"_jobs/status/{entry_paper_key(item)}.json"
+                )
+                if disposition not in {None, "completed", "retryable_due"}:
+                    continue
+                path = f"hf://buckets/{self.settings.paper_markdown_hf_bucket_id}/{key}"
+                with self.filesystem.open(path, "rb", block_size=0) as handle:
+                    original = handle.read(64 * 1024 * 1024 + 1)
+                if len(original) > 64 * 1024 * 1024:
+                    continue
+                try:
+                    validate_canonical_markdown(
+                        str(item["title"]), original.decode("utf-8")
+                    )
+                except ValueError:
+                    candidates.append(
+                        {
+                            **item,
+                            "retry": disposition == "retryable_due",
+                            "replace_invalid_sha256": hashlib.sha256(
+                                original
+                            ).hexdigest(),
+                        }
+                    )
+                if len(candidates) >= repair_limit:
+                    break
         if self.retry_only:
             candidates = [item for item in candidates if item["retry"]]
-        failed_or_completed = len(remaining) - len(candidates)
+        failed_or_completed = max(0, len(remaining) - missing_candidate_count)
+        repair_candidates = sum(
+            bool(item.get("replace_invalid_sha256")) for item in candidates
+        )
         copied_from_upstream = upstream_available if self.should_execute else 0
         canonical_after_upstream = len(canonical) + copied_from_upstream
         usable_markdown = max(
@@ -975,6 +1132,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             "eligible_papers": len(papers),
             "canonical_markdown_count": canonical_after_upstream,
             "usable_markdown_count": usable_markdown,
+            "repair_candidates": repair_candidates,
             "semantic_invalid_existing": semantic_invalid_existing,
             "semantic_evidence_unavailable": semantic_evidence_unavailable,
             "copied_from_upstream_count": copied_from_upstream,
@@ -1030,6 +1188,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             "canonical_markdown": len(canonical),
             "canonical_markdown_after_upstream": canonical_after_upstream,
             "usable_markdown": usable_markdown,
+            "repair_candidates": repair_candidates,
             "semantic_invalid_existing": semantic_invalid_existing,
             "semantic_evidence_unavailable": semantic_evidence_unavailable,
             "semantic_validation_failures": semantic_validation_failures,
@@ -1091,7 +1250,21 @@ def main() -> None:
         action="store_true",
         help="limit a reconciliation/canary to persisted retryable-due papers",
     )
+    parser.add_argument(
+        "--repair-invalid-limit",
+        type=int,
+        default=0,
+        help="Repair at most this many invalid recent objects; preserve originals",
+    )
     args = parser.parse_args()
+    if args.repair_invalid_limit < 0 or args.repair_invalid_limit > 20:
+        parser.error("--repair-invalid-limit must be between 0 and 20")
+    if args.repair_invalid_limit and (
+        args.full or args.retry_only or args.probe_volume or args.recover_mount_failures
+    ):
+        parser.error(
+            "invalid-object repair must run separately from other recovery modes"
+        )
     if args.max_jobs is not None and args.max_jobs < 1:
         parser.error("--max-jobs must be positive")
     if args.probe_volume and args.recover_mount_failures:
@@ -1110,6 +1283,7 @@ def main() -> None:
         recover_mount_failures=args.recover_mount_failures,
         paid_canary=args.paid_canary,
         retry_only=args.retry_only,
+        repair_invalid_limit=args.repair_invalid_limit,
     )
     raise SystemExit(0 if job.execute() else 1)
 

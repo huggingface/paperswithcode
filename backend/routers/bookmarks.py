@@ -13,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import Paper as ApiPaper
+from backend.models.papers import Paper as ApiPaper
 from backend.services.bookmark_service import (
     BookmarkPaperNotFoundError,
     BookmarkService,

@@ -9,6 +9,16 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from backend.services.latex_compiler_service import (
     HuggingFaceSandboxLatexCompilerTransport,
 )
+from latex_compiler_contract import (
+    SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+    SANDBOX_WORKSPACE_LIMIT_BYTES,
+)
+
+
+IMAGE = (
+    "registry.hf.space/nielsr-pwc-latex-compiler-sandbox-netns-v1-staging@sha256:"
+    + "a" * 64
+)
 
 
 def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> None:
@@ -52,7 +62,16 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
 
     def handler(request: httpx.Request) -> httpx.Response:
         if request.url.path == "/health":
-            return httpx.Response(200, json={"status": "ready"})
+            return httpx.Response(
+                200,
+                json={
+                    "status": "ready",
+                    "qualified_image": IMAGE,
+                    "network_isolation": "sandbox-netns-v1",
+                    "workspace_isolation": SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
+                    "workspace_limit_bytes": SANDBOX_WORKSPACE_LIMIT_BYTES,
+                },
+            )
         if request.method == "POST":
             return httpx.Response(202, json={"job_id": job_id, "state": "queued"})
         if request.method == "DELETE":
@@ -60,8 +79,8 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
         return httpx.Response(200, json={"job_id": job_id, "state": "compiling"})
 
     transport = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=IMAGE,
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=create,
@@ -75,15 +94,16 @@ def test_sandbox_transport_uses_a_dedicated_tokenless_job_and_reconnects() -> No
     assert status.provider_job_id == "sandbox-job-id"
     assert created[0][1]["forward_hf_token"] is False
     assert created[0][1]["secrets"] is None
-    assert created[0][1]["namespace"] == "approved-staging"
+    assert created[0][1]["volumes"] is None
+    assert created[0][1]["namespace"] == "nielsr"
     assert created[0][1]["token"] == "sandbox-token"
     assert any(command[0][0] == "python3" for command in sandbox.commands)
     assert transport.cancel(job_id).state.value == "canceled"
     assert sandbox.killed
 
     restarted = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=IMAGE,
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=create,
@@ -120,8 +140,8 @@ def test_sandbox_transport_cleans_up_an_unhealthy_reconnected_job() -> None:
     private_key = Ed25519PrivateKey.generate()
     sandbox = FakeSandbox()
     transport = HuggingFaceSandboxLatexCompilerTransport(
-        image="registry.example.invalid/pwc-latex@sha256:" + "a" * 64,
-        namespace="approved-staging",
+        image=IMAGE,
+        namespace="nielsr",
         token="sandbox-token",
         private_key=private_key,
         sandbox_create=lambda **_: sandbox,

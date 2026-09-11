@@ -1,4 +1,5 @@
 import { serializeExcalidrawElements } from "./mcp_app_registry.js";
+import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_command.js";
 
 export type PwCEvent = Record<string, unknown> & { type: string };
 
@@ -6,6 +7,10 @@ type UnknownRecord = Record<string, unknown>;
 const ARTIFACT_PREFIX = "@@PWC_ARTIFACT@@";
 const PAPER_PREFIX = "@@PWC_PAPER@@";
 const MAX_TOOL_ARGUMENT_BYTES = 64 * 1024;
+
+function isPaperOperation(value: unknown): value is "create" | "begin-edit" | "draft" | "repair" {
+  return value === "create" || value === "begin-edit" || value === "draft" || value === "repair";
+}
 
 function record(value: unknown): UnknownRecord {
   return value !== null && typeof value === "object" && !Array.isArray(value)
@@ -56,7 +61,7 @@ function paperEvents(content: string): PwCEvent[] {
   if (!line || Buffer.byteLength(line) > 16_384) return [];
   try {
     const value = record(JSON.parse(line.slice(PAPER_PREFIX.length)));
-    if (value.operation !== "create" && value.operation !== "begin-edit") return [];
+    if (!isPaperOperation(value.operation)) return [];
     if (typeof value.activated !== "boolean") return [];
     const descriptor = record(value.paper);
     if (typeof descriptor.artifact_id !== "string" || typeof descriptor.title !== "string") return [];
@@ -82,6 +87,7 @@ export class PiEventAdapter {
   private nextPublicContentIndex = 0;
   private readonly providerToolIds = new Map<string, string>();
   private readonly argumentBytes = new Map<string, number>();
+  private readonly paperCommandIds = new Map<string, PaperReceiptOperation>();
 
   constructor(
     private readonly showReasoning: boolean,
@@ -212,6 +218,10 @@ export class PiEventAdapter {
       if (!id) return [];
       const args = record(event.args);
       const name = String(event.toolName ?? "");
+      const paperCommand = name === "bash" && typeof args.command === "string"
+        ? parsePwcPaperCommand(args.command)
+        : undefined;
+      if (paperCommand?.receiptOperation) this.paperCommandIds.set(id, paperCommand.receiptOperation);
       if (name === "create_view") {
         if (this.toolIds.has(id)) return [];
         const elements = excalidrawElements(args);
@@ -253,6 +263,8 @@ export class PiEventAdapter {
       const id = this.providerToolIds.get(providerId) || providerId;
       if (!this.toolIds.has(id) || this.resultIds.has(id)) return [];
       this.resultIds.add(id);
+      const receiptOperation = this.paperCommandIds.get(id);
+      this.paperCommandIds.delete(id);
       const startedAt = this.toolStartedAt.get(id);
       this.toolStartedAt.delete(id);
       const toolName = this.toolNames.get(id);
@@ -285,7 +297,9 @@ export class PiEventAdapter {
           metadata: { output_truncated: publicContentTruncated },
         },
         ...artifactEvents(content),
-        ...paperEvents(content),
+        ...(receiptOperation && !event.isError
+          ? paperEvents(content).filter((paperEvent) => paperEvent.operation === receiptOperation)
+          : []),
       ];
     }
     if (type === "message_end") {
@@ -297,12 +311,16 @@ export class PiEventAdapter {
       this.contentTools.clear();
       if (message.stopReason === "error" || typeof message.errorMessage === "string") {
         this.terminalFailure = true;
+        const contextTooLarge = typeof message.errorMessage === "string"
+          && message.errorMessage.includes("request_too_large");
         return [
           ...this.closeReasoning(),
           {
             type: "error",
-            code: "provider_error",
-            message: "The model provider is unavailable.",
+            code: contextTooLarge ? "context_too_large" : "provider_error",
+            message: contextTooLarge
+              ? "This conversation is too large for the selected model. Start a new chat or shorten the context."
+              : "The model provider is unavailable.",
           },
         ];
       }

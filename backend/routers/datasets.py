@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import (
+from backend.models.evaluations import (
     Dataset,
     DatasetCreateRequest,
     DatasetMetricAddRequest,

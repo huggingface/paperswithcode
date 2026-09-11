@@ -673,7 +673,17 @@ def staging_check(request: Request) -> Response:
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
         )
-    if not can_access_staging(payload.get("sub"), username=payload.get("username")):
+    qualification_owner = payload.get("chat_qualification_owner")
+    qualification_identity = (
+        isinstance(qualification_owner, str)
+        and qualification_owner.startswith("operator:pi-qualification:")
+        and len(qualification_owner) <= 128
+        and payload.get("sub") == qualification_owner
+        and payload.get("username") == qualification_owner
+    )
+    if not qualification_identity and not can_access_staging(
+        payload.get("sub"), username=payload.get("username")
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Staging access required",

@@ -5,6 +5,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  SearchableSelect,
+  type SearchableSelectOption,
+} from "@/components/ui/searchable-select";
+import {
   Dialog,
   DialogContent,
   DialogDescription,
@@ -14,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { useMutation } from "@tanstack/react-query";
 import { submissionsApi } from "@/lib/api/submissions";
+import { catalogApi } from "@/lib/api/catalog";
 import { pendingEditSubmission } from "@/lib/pendingEdits";
 import { useToast } from "@/hooks/use-toast";
 
@@ -79,9 +84,9 @@ export function SuggestTaxonomyDialog({
   const [keywords, setKeywords] = useState("");
   const [parentId, setParentId] = useState("");
   const [areaId, setAreaId] = useState("");
-  const [taskIds, setTaskIds] = useState("");
-  const [metricTaskId, setMetricTaskId] = useState("");
-  const [metricDatasetId, setMetricDatasetId] = useState("");
+  const [benchmarkTask, setBenchmarkTask] = useState("");
+  const [metricTask, setMetricTask] = useState<SearchableSelectOption | null>(null);
+  const [metricBenchmark, setMetricBenchmark] = useState<SearchableSelectOption | null>(null);
   const [metricDirection, setMetricDirection] = useState("higher_is_better");
   const [imageError, setImageError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -105,9 +110,9 @@ export function SuggestTaxonomyDialog({
       setKeywords("");
       setParentId("");
       setAreaId("");
-      setTaskIds("");
-      setMetricTaskId("");
-      setMetricDatasetId("");
+      setBenchmarkTask("");
+      setMetricTask(null);
+      setMetricBenchmark(null);
       setMetricDirection("higher_is_better");
       setImageError("");
     }
@@ -146,6 +151,28 @@ export function SuggestTaxonomyDialog({
     selectImage(event.dataTransfer.files[0]);
   };
 
+  const searchTasks = async (query: string): Promise<SearchableSelectOption[]> => {
+    const response = await catalogApi.listTasks({
+      page_size: 100,
+      ...(query ? { q: query } : {}),
+    });
+    return response.results
+      .map((task) => ({ value: task.id, label: task.name }));
+  };
+
+  const searchBenchmarks = async (query: string): Promise<SearchableSelectOption[]> => {
+    if (!metricTask) return [];
+    const response = await catalogApi.listDatasets({
+      task_id: Number(metricTask.value),
+      page_size: 100,
+      ...(query ? { q: query } : {}),
+    });
+    return response.results.map((benchmark) => ({
+      value: benchmark.id,
+      label: benchmark.name,
+    }));
+  };
+
   const suggestMutation = useMutation({
     mutationFn: async () => {
       const submissionPaperId = paperId ? parseInt(paperId) : null;
@@ -171,20 +198,17 @@ export function SuggestTaxonomyDialog({
           }));
         case "benchmark":
           return submissionsApi.submit(pendingEditSubmission(submissionPaperId, "new_benchmark", {
-            name: name.trim(),
+            benchmark: name.trim(),
+            task: benchmarkTask.trim(),
             description: description.trim(),
-            task_ids: taskIds
-              .split(",")
-              .map((value) => Number(value.trim()))
-              .filter((value) => Number.isInteger(value) && value > 0),
           }));
         case "metric":
           return submissionsApi.submit(pendingEditSubmission(submissionPaperId, "new_metric", {
             name: name.trim(),
             description: description.trim(),
             direction: metricDirection === "lower_is_better" ? "lower_is_better" : "higher_is_better",
-            task_id: Number(metricTaskId),
-            dataset_id: Number(metricDatasetId),
+            task_id: Number(metricTask?.value),
+            dataset_id: Number(metricBenchmark?.value),
           }));
         case "conference":
           return submissionsApi.submit(pendingEditSubmission(submissionPaperId, "new_conference", {
@@ -235,8 +259,8 @@ export function SuggestTaxonomyDialog({
     (kind === "task" ||
       (kind === "method" && Boolean(source.trim())) ||
       (kind === "conference" && Boolean(year) && Boolean(url.trim())) ||
-      (kind === "benchmark" && Boolean(taskIds.trim()) && Boolean(description.trim())) ||
-      (kind === "metric" && Boolean(metricTaskId) && Boolean(metricDatasetId) && Boolean(description.trim())));
+      (kind === "benchmark" && Boolean(benchmarkTask.trim()) && Boolean(description.trim())) ||
+      (kind === "metric" && Boolean(metricTask) && Boolean(metricBenchmark) && Boolean(description.trim())));
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -245,12 +269,12 @@ export function SuggestTaxonomyDialog({
           <DialogTitle>Suggest a new {label}</DialogTitle>
           <DialogDescription>
             Propose a {label} that isn&apos;t in the list yet. An admin will
-            review your suggestion before it&apos;s added.
+            review the suggestion, but approval won&apos;t automatically change the catalog.
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
           <div className="space-y-2">
-            <Label htmlFor="suggest-name">Name</Label>
+            <Label htmlFor="suggest-name">{kind === "benchmark" ? "Benchmark" : "Name"}</Label>
             <Input
               id="suggest-name"
               value={name}
@@ -288,20 +312,61 @@ export function SuggestTaxonomyDialog({
           )}
           {kind === "benchmark" && (
             <div className="space-y-2">
-              <Label htmlFor="suggest-task-ids">Intended task IDs</Label>
-              <Input id="suggest-task-ids" value={taskIds} onChange={(e) => setTaskIds(e.target.value)} placeholder="e.g. 9, 14" />
+              <Label htmlFor="suggest-benchmark-task">Task</Label>
+              <Input
+                id="suggest-benchmark-task"
+                value={benchmarkTask}
+                maxLength={NAME_MAX}
+                placeholder="e.g. Deepfake Detection"
+                onChange={(event) => setBenchmarkTask(event.target.value)}
+              />
             </div>
           )}
           {kind === "metric" && (
             <div className="space-y-3">
               <Label>Intended leaderboard</Label>
-              <select className="w-full rounded-md border bg-background p-2" value={metricDirection} onChange={(e) => setMetricDirection(e.target.value)}>
+              <select aria-label="Metric direction" className="w-full rounded-md border bg-background p-2" value={metricDirection} onChange={(e) => setMetricDirection(e.target.value)}>
                 <option value="higher_is_better">Higher is better</option>
                 <option value="lower_is_better">Lower is better</option>
               </select>
               <div className="grid grid-cols-2 gap-3">
-                <Input type="number" min="1" value={metricTaskId} onChange={(e) => setMetricTaskId(e.target.value)} placeholder="Task ID" />
-                <Input type="number" min="1" value={metricDatasetId} onChange={(e) => setMetricDatasetId(e.target.value)} placeholder="Benchmark ID" />
+                <div className="space-y-2">
+                  <Label>Task</Label>
+                  <SearchableSelect
+                    value={metricTask?.value ?? ""}
+                    onChange={(_value, option) => {
+                      setMetricTask(option);
+                      setMetricBenchmark(null);
+                    }}
+                    selectedOption={metricTask}
+                    placeholder="Select task"
+                    searchPlaceholder="Search tasks..."
+                    emptyMessage="No tasks found."
+                    errorMessage="Could not load tasks. Try again."
+                    queryKey={["suggest-metric-task-search"]}
+                    queryFn={searchTasks}
+                    ariaLabel="Select task"
+                    className="h-10"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Benchmark</Label>
+                  <SearchableSelect
+                    value={metricBenchmark?.value ?? ""}
+                    onChange={(_value, option) => setMetricBenchmark(option)}
+                    selectedOption={metricBenchmark}
+                    placeholder={metricTask ? "Select benchmark" : "Select task first"}
+                    searchPlaceholder="Search benchmarks..."
+                    emptyMessage="No benchmarks found for this task."
+                    errorMessage="Could not load benchmarks. Try again."
+                    disabled={!metricTask}
+                    queryKey={["suggest-metric-benchmark-search", metricTask?.value]}
+                    queryFn={searchBenchmarks}
+                    enabled={Boolean(metricTask)}
+                    ariaLabel="Select benchmark"
+                    className="h-10"
+                  />
+                </div>
               </div>
             </div>
           )}
@@ -451,5 +516,3 @@ export function SuggestTaxonomyDialog({
     </Dialog>
   );
 }
-
-export default SuggestTaxonomyDialog;

@@ -308,6 +308,47 @@ def test_worker_streams_external_pdf_with_a_hard_size_cap(monkeypatch):
     assert read_past_limit is False
 
 
+def test_worker_enforces_external_pdf_elapsed_time_limit(monkeypatch):
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield b"%PDF-valid"
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            return Response()
+
+    monkeypatch.setattr(
+        WORKER, "validate_external_pdf_network_target", lambda value: value
+    )
+    monkeypatch.setattr(WORKER.httpx, "Client", Client)
+    monkeypatch.setattr(WORKER.time, "monotonic", Mock(side_effect=[0, 31]))
+
+    with pytest.raises(httpx.TimeoutException, match="download deadline"):
+        WORKER.download_external_pdf(
+            "https://example.com/report.pdf", max_elapsed_seconds=30
+        )
+
+
 def test_worker_archives_external_pdf_and_publishes_source_aware_markdown(
     tmp_path, monkeypatch
 ):
@@ -720,6 +761,21 @@ def _candidates(count: int):
     ]
 
 
+def _external_candidate():
+    return {
+        "paper_key": "external/109743",
+        "paper_id": "109743",
+        "source": "external",
+        "arxiv_id": None,
+        "version": "v1",
+        "title": "External report",
+        "source_url": "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        "pdf_url": "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        "pdf_key": "external/109743/paper.pdf",
+        "output_key": "external/109743.md",
+    }
+
+
 def test_paid_dispatch_requires_confirmation(monkeypatch):
     job = _scheduler(execute=True, confirm=False, full=False)
     monkeypatch.setattr(
@@ -790,6 +846,245 @@ def test_launch_request_uses_the_shared_profile_and_bucket_api_contract():
     ]
 
 
+def test_external_pdf_is_validated_and_archived_before_remote_launch(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(return_value=b"%PDF-valid")
+    monkeypatch.setattr(MODULE, "download_external_pdf", download, raising=False)
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=2))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+
+    job._launch([_external_candidate()])
+
+    assert job.api.batch_bucket_files.call_args_list[0] == call(
+        "test/paper-markdown",
+        add=[(b"%PDF-valid", "external/109743/paper.pdf")],
+        token="test-token",
+    )
+    MODULE.pymupdf.open.assert_called_once_with(stream=b"%PDF-valid", filetype="pdf")
+    download.assert_called_once_with(
+        "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        timeout_seconds=30,
+        max_elapsed_seconds=30,
+    )
+    assert (
+        job.api.batch_bucket_files.call_args_list[1]
+        .kwargs["add"][0][1]
+        .endswith("/00000.jsonl")
+    )
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_archive_is_reused_without_downloading(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(
+        return_value={"external/109743/paper.pdf": SimpleNamespace(size=123)}
+    )
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(side_effect=AssertionError("archived PDF must be reused"))
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+
+    job._launch([_external_candidate()])
+
+    download.assert_not_called()
+    assert job.api.batch_bucket_files.call_count == 1
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_archival_is_bounded_per_scheduler_run(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(MODULE, "EXTERNAL_PDF_ARCHIVE_LIMIT", 1)
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(return_value=b"%PDF-valid")
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=1))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+    second = {
+        **_external_candidate(),
+        "paper_key": "external/109744",
+        "paper_id": "109744",
+        "pdf_key": "external/109744/paper.pdf",
+        "output_key": "external/109744.md",
+    }
+
+    launched = job._launch([_external_candidate(), second])
+
+    assert len(launched) == 1
+    assert download.call_count == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" in manifest
+    assert b"external/109744" not in manifest
+
+
+def test_external_pdf_is_not_archived_during_dry_run(monkeypatch):
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._existing_paths = Mock()
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(side_effect=AssertionError("dry run must not download PDFs"))
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+
+    launched = job._launch([_external_candidate()])
+
+    assert launched[0]["mode"] == "dry_run"
+    download.assert_not_called()
+    job._existing_paths.assert_not_called()
+    job.api.batch_bucket_files.assert_not_called()
+
+
+@pytest.mark.parametrize("http_status", [None, 404])
+def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch, http_status):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    job._bucket_json = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(
+        MODULE,
+        "download_external_pdf",
+        lambda _url, **_kwargs: b"%PDF-broken",
+        raising=False,
+    )
+    monkeypatch.setattr(
+        MODULE.pymupdf,
+        "open",
+        Mock(side_effect=ValueError("broken PDF structure")),
+    )
+
+    if http_status is not None:
+        response = httpx.Response(
+            http_status, request=httpx.Request("GET", "https://example.com/paper.pdf")
+        )
+        monkeypatch.setattr(
+            MODULE,
+            "download_external_pdf",
+            Mock(
+                side_effect=httpx.HTTPStatusError(
+                    "missing PDF", request=response.request, response=response
+                )
+            ),
+        )
+
+    launched = job._launch([_external_candidate()])
+
+    assert launched == []
+    status_upload = job.api.batch_bucket_files.call_args.kwargs["add"][0]
+    assert status_upload[1] == "_jobs/status/external/109743.json"
+    status = json.loads(status_upload[0])
+    assert status["status"] == "failed"
+    assert status["error"] == (
+        "broken PDF structure" if http_status is None else "missing PDF"
+    )
+    assert status["retryable"] is False
+    assert MODULE.status_disposition(status) == "permanent_failure"
+    job._run_ocr_job.assert_not_called()
+
+
+def test_invalid_external_pdf_does_not_block_other_papers(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.batch_size = 1
+    job.max_jobs = 1
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    job._bucket_json = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(
+        MODULE, "download_external_pdf", Mock(side_effect=ValueError("invalid_pdf"))
+    )
+
+    launched = job._launch([_external_candidate(), _candidates(1)[0]])
+
+    assert len(launched) == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" not in manifest
+    assert b"2607.00000" in manifest
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_upload_failure_does_not_block_other_papers(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.batch_size = 1
+    job.max_jobs = 1
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(MODULE, "download_external_pdf", Mock(return_value=b"%PDF"))
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=1))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+
+    def upload(_bucket, *, add, **_kwargs):
+        if add[0][1].endswith("/paper.pdf"):
+            raise OSError("bucket unavailable")
+
+    job.api.batch_bucket_files.side_effect = upload
+
+    launched = job._launch([_external_candidate(), _candidates(1)[0]])
+
+    assert len(launched) == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" not in manifest
+    assert b"2607.00000" in manifest
+    job._run_ocr_job.assert_called_once()
+
+
 def test_unmetered_hf_dispatch_does_not_require_paid_gate(monkeypatch):
     job = _scheduler(execute=True, confirm=True, full=False)
     job.settings.paper_markdown_cost_policy = "unmetered_hf"
@@ -839,6 +1134,7 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
             "eligible_papers": 2,
             "canonical_markdown_count": 1,
             "usable_markdown_count": 1,
+            "repair_candidates": 0,
             "semantic_invalid_existing": 0,
             "semantic_evidence_unavailable": 0,
             "copied_from_upstream_count": 0,
@@ -1622,3 +1918,221 @@ def test_worker_startup_failure_writes_failed_checkpoint(tmp_path, monkeypatch):
     assert progress["processed_papers"] == 0
     assert progress["fatal_error"] == "vLLM startup failed"
     assert progress["cleanup_state"] == "not_started"
+
+
+@pytest.mark.parametrize("newline", ["\n", "\n\n", "\r\n"])
+def test_canonical_markdown_accepts_upstream_header_spacing(newline):
+    body = "Adaptive Expert Routing for Robust Object Detection. " * 8
+    WORKER.validate_canonical_markdown(
+        "Adaptive Expert Routing for Robust Object Detection",
+        "Title: Detector\n\nMarkdown Content:" + newline + body,
+    )
+
+
+def test_canonical_markdown_header_spacing_does_not_bypass_semantics():
+    with pytest.raises(ValueError, match="semantic_markdown_mismatch"):
+        WORKER.validate_canonical_markdown(
+            "Adaptive Expert Routing for Robust Object Detection",
+            "Title: Detector\n\nMarkdown Content:\n" + "An unrelated image. " * 20,
+        )
+
+
+def test_upstream_copy_rejects_caption_and_unavailable_objects():
+    job = _scheduler(execute=True, confirm=True)
+    job.settings.paper_markdown_upstream_bucket_id = "upstream/papers"
+    job.api = Mock()
+    entries = _candidates(3)
+    paths = [item["output_key"] for item in entries]
+    job._existing_paths = Mock(
+        return_value={
+            path: SimpleNamespace(xet_hash=f"hash-{index}")
+            for index, path in enumerate(paths)
+        }
+    )
+    job._semantic_records = Mock(
+        return_value={
+            paths[0]: "valid",
+            paths[1]: "invalid",
+            paths[2]: "unavailable",
+        }
+    )
+    remaining, copied = job._copy_upstream(entries)
+    assert remaining == entries[1:]
+    assert copied == 1
+    assert job.api.batch_bucket_files.call_args.kwargs["copy"] == [
+        ("bucket", "upstream/papers", "hash-0", paths[0])
+    ]
+
+
+@pytest.mark.parametrize(
+    "failure", [None, "changed", "valid_original", "invalid_replacement"]
+)
+def test_repair_upload_backs_up_original_before_validated_replacement(
+    tmp_path, monkeypatch, failure
+):
+    import hashlib
+
+    key = "2607/2607.00000.md"
+    original = b"figure caption only"
+    replacement = (
+        "Title: Paper zero\n\nMarkdown Content:\n\n"
+        + "Paper zero explains the proposed method. " * 5
+    ).encode()
+    if failure == "valid_original":
+        original = replacement
+    entry = {
+        "output_key": key,
+        "title": "Paper zero",
+        "replace_invalid_sha256": hashlib.sha256(original).hexdigest(),
+    }
+    remote = {key: original if failure != "changed" else b"concurrently changed"}
+    events = []
+    store = WORKER.BucketContentStore("test/bucket", "secret", tmp_path)
+    store.repairs = {key: entry}
+    WORKER.atomic_write(
+        tmp_path / key,
+        b"bad replacement" if failure == "invalid_replacement" else replacement + b"\n",
+    )
+    monkeypatch.setattr(store, "existing", lambda keys: set(keys) & remote.keys())
+    monkeypatch.setattr(store, "read", lambda path: remote[path])
+
+    def bridge(_token, request):
+        for source, destination in request["files"]:
+            events.append(destination)
+            remote[destination] = Path(source).read_bytes()
+        return {}
+
+    monkeypatch.setattr(WORKER, "run_bucket_bridge", bridge)
+    if failure:
+        with pytest.raises(ValueError):
+            store.upload([key])
+        assert events == []
+    else:
+        store.upload([key])
+        backup = f"_jobs/repair-originals/{entry['replace_invalid_sha256']}/{key}"
+        assert events == [backup, key]
+        assert remote[backup] == original
+        assert remote[key] == replacement + b"\n"
+
+
+def test_failed_repair_keeps_existing_canonical_object(tmp_path, monkeypatch):
+    import hashlib
+
+    entry = _candidates(1)[0]
+    original = b"only a figure caption"
+    entry["replace_invalid_sha256"] = hashlib.sha256(original).hexdigest()
+    output = tmp_path / entry["output_key"]
+    WORKER.atomic_write(output, original)
+    monkeypatch.setitem(
+        sys.modules,
+        "pypdf",
+        SimpleNamespace(PdfReader=lambda *a, **k: SimpleNamespace(pages=[1])),
+    )
+    monkeypatch.setattr(WORKER, "download_pdf_for_entry", lambda entry: (b"pdf", "v1"))
+    monkeypatch.setattr(WORKER, "run_chandra", lambda *a: ("irrelevant caption", {}))
+    with pytest.raises(ValueError, match="semantic_markdown_mismatch"):
+        WORKER.process(entry, tmp_path, tmp_path / "run")
+    assert output.read_bytes() == original
+
+
+def test_repair_selection_is_bounded_and_pins_original(tmp_path, monkeypatch):
+    import hashlib
+
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(3)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.repair_invalid_limit = 1
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(
+        return_value={item["output_key"]: object() for item in papers}
+    )
+    job._copy_upstream = Mock()
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(
+        return_value={item["output_key"]: "invalid" for item in papers}
+    )
+    job.filesystem = Mock()
+    original = b"figure caption only"
+    job.filesystem.open.side_effect = lambda *a, **k: BytesIO(original)
+    job._launch = Mock(return_value=[])
+    job.run()
+    job._copy_upstream.assert_not_called()
+    candidates = job._launch.call_args.args[0]
+    assert len(candidates) == 1
+    assert (
+        candidates[0]["replace_invalid_sha256"] == hashlib.sha256(original).hexdigest()
+    )
+
+
+@pytest.mark.parametrize(
+    ("full", "retry_only", "missing_status", "expected_repairs", "expected_missing"),
+    [
+        (False, False, None, 0, 1),
+        (False, False, "permanent", 20, 0),
+        (False, False, "deferred", 20, 0),
+        (True, False, "permanent", 0, 0),
+        (False, True, "permanent", 0, 0),
+    ],
+)
+def test_live_repair_fallback_prioritizes_missing_work_and_respects_mode(
+    tmp_path,
+    monkeypatch,
+    full,
+    retry_only,
+    missing_status,
+    expected_repairs,
+    expected_missing,
+):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(24)
+    job = _scheduler(execute=False, confirm=False, full=full)
+    job.retry_only = retry_only
+    job._papers = Mock(return_value=papers)
+    job._existing_paths = Mock(
+        return_value={item["output_key"]: object() for item in papers[1:]}
+    )
+    job._copy_upstream = Mock(return_value=([papers[0]], 0))
+    statuses = {}
+    if missing_status:
+        statuses[f"_jobs/status/{papers[0]['arxiv_id']}.json"] = {
+            "status": "failed",
+            "schema_version": 2,
+            "retryable": missing_status == "deferred",
+            "next_retry_at": (datetime.now(UTC) + timedelta(hours=1)).isoformat(),
+        }
+    # Exhausted repairs must not be silently resubmitted by the fallback.
+    statuses[f"_jobs/status/{papers[1]['arxiv_id']}.json"] = {
+        "status": "failed",
+        "schema_version": 2,
+        "attempt_count": 3,
+    }
+    job._status_records = Mock(return_value=statuses)
+    job._semantic_records = Mock(
+        return_value={item["output_key"]: "invalid" for item in papers[1:]}
+    )
+    job.filesystem = Mock()
+    job.filesystem.open.side_effect = lambda *a, **k: BytesIO(b"caption only")
+    job._launch = Mock(return_value=[])
+    job.run()
+    candidates = job._launch.call_args.args[0]
+    assert (
+        sum(bool(item.get("replace_invalid_sha256")) for item in candidates)
+        == expected_repairs
+    )
+    assert (
+        sum(not item.get("replace_invalid_sha256") for item in candidates)
+        == expected_missing
+    )
+    assert papers[1]["arxiv_id"] not in [item["arxiv_id"] for item in candidates]
+
+
+def test_repair_dispatch_waits_for_existing_remote_worker():
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job._remote_jobs = Mock(
+        return_value=[SimpleNamespace(id="existing", stage="RUNNING")]
+    )
+    job._active_jobs = Mock(side_effect=lambda jobs: jobs)
+    entry = {**_candidates(1)[0], "replace_invalid_sha256": "original-hash"}
+    job._budget_decision = Mock()
+    assert job._launch([entry]) == []
+    job._budget_decision.assert_not_called()

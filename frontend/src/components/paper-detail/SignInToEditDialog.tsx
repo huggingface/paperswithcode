@@ -7,7 +7,7 @@
  */
 
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { HfSignInButton } from "@/components/HfSignInButton";
+import HfSignInButton from "@/components/HfSignInButton";
 
 interface SignInToEditDialogProps {
   open: boolean;
@@ -47,5 +47,3 @@ export function SignInToEditDialog({
     </Dialog>
   );
 }
-
-export default SignInToEditDialog;

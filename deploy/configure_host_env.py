@@ -51,6 +51,9 @@ CRON_ONLY_KEYS = {
     "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
     "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
     "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
+    "PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME",
+    "PWC_CHAT_SYNTHETIC_SESSION_COOKIE",
+    "PWC_CHAT_LANGFUSE_TRACE_CONTENT_ACCESS_ENABLED",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
 }
@@ -1016,6 +1019,7 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED = {
     "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
     "PWC_CHAT_BLANK_POOL_ENABLED": "false",
     "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
 }
 _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
     "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
@@ -1029,6 +1033,7 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
     "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
     "PWC_CHAT_BLANK_POOL_ENABLED": "true",
     "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
 }
 
 
@@ -1050,15 +1055,20 @@ def staging_durable_external_qualification_values(
             else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
         ),
     }
+
+    def observed_value(key: str, expected: str) -> str:
+        if expected in {"true", "false"}:
+            return _decoded_flag(current, key)
+        if key in current:
+            return decoded_value(current[key]).strip()
+        if key == "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY" and expected == "4":
+            return "4"
+        return ""
+
     drifted = sorted(
         key
         for key, expected in required.items()
-        if (
-            _decoded_flag(current, key)
-            if expected in {"true", "false"}
-            else (decoded_value(current[key]).strip() if key in current else "")
-        )
-        != expected
+        if observed_value(key, expected) != expected
     )
     if drifted:
         raise ValueError(
@@ -1078,6 +1088,81 @@ def staging_durable_external_qualification_values(
     values["PWC_ADMIN_API_TOKEN"] = (
         existing if 32 <= len(existing) <= 8192 else secrets.token_urlsafe(48)
     )
+    return values
+
+
+_PRODUCTION_DURABLE_EXTERNAL_ENABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+    "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "external-pi-v1",
+    "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "32",
+    "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": "10",
+    "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+    "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "60",
+    "PWC_CHAT_EXTERNAL_PI_DRAIN_SECONDS": "60",
+    "PWC_CHAT_EXTERNAL_PI_DRAIN_POLL_SECONDS": "1",
+    "PWC_CHAT_MAX_CONCURRENCY": "32",
+    "PWC_CHAT_USER_MAX_CONCURRENCY": "1",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
+    "PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY": "1",
+    # One worst-case 16-request turn for every admitted chat per 10-minute window.
+    "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": "512",
+    "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "16",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+}
+
+
+def production_durable_external_values(
+    current: dict[str, str], *, enabled: bool
+) -> dict[str, str]:
+    """Atomically enter or leave the approved production 32-turn profile."""
+
+    if not enabled:
+        disabled = {
+            key: "false"
+            for key, value in _PRODUCTION_DURABLE_EXTERNAL_ENABLED.items()
+            if value == "true"
+        }
+        disabled.update(
+            {
+                "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+                "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+                "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "",
+                "PWC_CHAT_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_USER_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
+                "PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": "80",
+                "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+                "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+                "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+            }
+        )
+        return disabled
+    for key in (
+        "PWC_CHAT_PUBLIC_ADMISSION_ENABLED",
+        "PWC_CHAT_SANDBOX_ADMISSION_ENABLED",
+    ):
+        if not _decoded_flag(current, key):
+            raise ValueError("production chat admission must already be enabled")
+    values = dict(_PRODUCTION_DURABLE_EXTERNAL_ENABLED)
+    existing_line = current.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN")
+    existing = decoded_value(existing_line).strip() if existing_line else ""
+    if existing and not 32 <= len(existing) <= 8192:
+        raise ValueError("production external Pi worker token is invalid")
+    values["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] = existing or secrets.token_urlsafe(48)
     return values
 
 
@@ -1584,6 +1669,12 @@ def main() -> int:
     parser.add_argument("--production-chat-seal-only", action="store_true")
     parser.add_argument("--production-chat-install-only", action="store_true")
     parser.add_argument("--production-chat-admission-enable-only", action="store_true")
+    parser.add_argument(
+        "--production-durable-external-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--production-durable-external-disable-only", action="store_true"
+    )
     parser.add_argument("--production-chat-pi-prewarm-enable-only", action="store_true")
     parser.add_argument(
         "--production-chat-pi-prewarm-disable-only", action="store_true"
@@ -1748,6 +1839,52 @@ def main() -> int:
             "pwc-staging",
         )
         print("enabled staging research-scope guardrail; no service was restarted")
+        return 0
+    production_external_modes = (
+        args.production_durable_external_enable_only,
+        args.production_durable_external_disable_only,
+    )
+    if any(production_external_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "production_durable_external_enable_only",
+                "production_durable_external_disable_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(production_external_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("production durable external mode must run alone")
+        enabled = args.production_durable_external_enable_only
+        confirmation = (
+            "ENABLE_PRODUCTION_DURABLE_EXTERNAL"
+            if enabled
+            else "DISABLE_PRODUCTION_DURABLE_EXTERNAL"
+        )
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        current = read_lines(CONFIG_ROOT / "production.env")
+        try:
+            values = production_durable_external_values(current, enabled=enabled)
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "production.env",
+            assign(current, values),
+            "pwc-production",
+        )
+        print(
+            f"{'enabled' if enabled else 'disabled'} production durable external "
+            "32-turn profile; no service was restarted"
+        )
         return 0
     qualification_modes = (
         args.staging_durable_external_qualification_enable_only,
@@ -2827,7 +2964,7 @@ def main() -> int:
             ),
             "UVICORN_HOST": "127.0.0.1",
             "UVICORN_PORT": "8001",
-            "WEB_CONCURRENCY": "1",
+            "WEB_CONCURRENCY": "5",
         },
     )
     staging = without_cron_only_credentials(staging)

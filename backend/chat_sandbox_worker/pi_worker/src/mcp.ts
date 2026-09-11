@@ -12,8 +12,11 @@ export type ExcalidrawTransport =
 
 export type ExcalidrawViewTransport = { command: string; args: string[] };
 
-export function mcpDirectToolsList(excalidraw: ExcalidrawTransport | false): string[] {
-  const tools = ["exa/search_web"];
+export function mcpDirectToolsList(
+  excalidraw: ExcalidrawTransport | false,
+  exa = true,
+): string[] {
+  const tools = exa ? ["exa/search_web"] : [];
   if (!excalidraw) return tools;
   if ("url" in excalidraw) {
     tools.push("excalidraw/read_me", "excalidraw_view/create_view");
@@ -27,12 +30,14 @@ export function createWebMcpExtension(
   command = process.execPath,
   args = [new URL("./exa_mcp_server.js", import.meta.url).pathname],
   options?: {
+    exa?: boolean;
     excalidraw?: ExcalidrawTransport | false;
     excalidrawView?: ExcalidrawViewTransport;
     onStatus?: (snapshot: McpStatusSnapshot) => void;
     exaEnv?: Record<string, string>;
   },
 ): ExtensionFactory {
+  const exa = options?.exa ?? true;
   const excalidraw = options?.excalidraw === false ? false : (options?.excalidraw ?? (excalidrawEnabled() ? { url: EXCALIDRAW_ENDPOINT } : false));
   const localView = options?.excalidrawView ?? {
     command: process.execPath,
@@ -42,7 +47,7 @@ export function createWebMcpExtension(
   const adapter = createMcpAdapter({
     config: {
       mcpServers: {
-        exa: {
+        ...(exa ? { exa: {
           command,
           args,
           ...(options?.exaEnv ? { env: options.exaEnv } : {}),
@@ -52,7 +57,7 @@ export function createWebMcpExtension(
           includeTools: ["search_web"],
           exposeResources: false,
           requestTimeoutMs: 4_000,
-        },
+        } } : {}),
         ...(excalidraw ? {
           excalidraw: {
             // The adapter owns only model-visible calls.  Its built-in viewer
@@ -104,7 +109,7 @@ export function createWebMcpExtension(
   });
   return (pi) => {
     const previous = process.env.MCP_DIRECT_TOOLS;
-    process.env.MCP_DIRECT_TOOLS = mcpDirectToolsList(excalidraw).join(",");
+    process.env.MCP_DIRECT_TOOLS = mcpDirectToolsList(excalidraw, exa).join(",");
     try {
       adapter(pi);
       if (options?.onStatus) {

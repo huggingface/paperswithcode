@@ -30,7 +30,7 @@ from urllib.parse import quote, urlsplit, urlunsplit
 
 from PIL import Image as PILImage
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.services.paper_seo_service import (
     PaperSeoDocument,
     render_bibliographic_meta,

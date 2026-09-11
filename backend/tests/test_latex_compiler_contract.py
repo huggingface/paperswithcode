@@ -22,13 +22,21 @@ from latex_compiler_contract import (
     sign_envelope,
     verify_envelope,
 )
+import latex_compiler_space.app as compiler_app
 from latex_compiler_space.app import (
     BundleError,
     JobManager,
+    LatexCompilerRunner,
+    WORKSPACE_LIMIT_BYTES,
+    _diagnostics,
     _extract_bundle,
     _read_tail,
     create_app,
     network_isolation_command,
+)
+
+TEST_QUALIFIED_IMAGE = (
+    "registry.hf.space/pwc-test-latex-compiler-staging@sha256:" + "a" * 64
 )
 
 
@@ -96,11 +104,15 @@ def test_compiler_reuses_same_job_and_rejects_conflicting_submission() -> None:
             envelope,
             pdf=b"%PDF-test",
             log_tail="",
-            compiler_image="test-image",
+            compiler_image=TEST_QUALIFIED_IMAGE,
             engine_version="pdfTeX test",
         )
 
-    app = create_app(public_key=public_key, compiler=compiler)
+    app = create_app(
+        public_key=public_key,
+        compiler=compiler,
+        qualified_image=TEST_QUALIFIED_IMAGE,
+    )
     submission = _submission(private_key)
     with TestClient(app) as client:
         first = client.post("/v1/jobs", json=submission.model_dump(mode="json"))
@@ -124,7 +136,10 @@ def test_compiler_reuses_same_job_and_rejects_conflicting_submission() -> None:
 
 def test_compiler_rejects_invalid_signature_and_expired_envelope() -> None:
     private_key, public_key = _keys()
-    app = create_app(public_key=public_key)
+    app = create_app(
+        public_key=public_key,
+        qualified_image=TEST_QUALIFIED_IMAGE,
+    )
     with TestClient(app) as client:
         invalid = _submission(private_key).model_copy(
             update={"signature": "not-a-signature"}
@@ -153,11 +168,15 @@ def test_cancellation_has_a_terminal_result() -> None:
             envelope,
             pdf=b"%PDF-test",
             log_tail="",
-            compiler_image="test-image",
+            compiler_image=TEST_QUALIFIED_IMAGE,
             engine_version="pdfTeX test",
         )
 
-    app = create_app(public_key=public_key, compiler=compiler)
+    app = create_app(
+        public_key=public_key,
+        compiler=compiler,
+        qualified_image=TEST_QUALIFIED_IMAGE,
+    )
     submission = _submission(private_key)
     with TestClient(app) as client:
         assert (
@@ -206,11 +225,15 @@ def test_compiler_health_and_metrics_are_content_free_and_bounded() -> None:
             envelope,
             pdf=b"%PDF-test",
             log_tail="",
-            compiler_image="test-image",
+            compiler_image=TEST_QUALIFIED_IMAGE,
             engine_version="pdfTeX test",
         )
 
-    app = create_app(public_key=public_key, compiler=compiler)
+    app = create_app(
+        public_key=public_key,
+        compiler=compiler,
+        qualified_image=TEST_QUALIFIED_IMAGE,
+    )
     submission = _submission(private_key, source=source)
     with TestClient(app) as client:
         assert (
@@ -222,6 +245,7 @@ def test_compiler_health_and_metrics_are_content_free_and_bounded() -> None:
 
     assert health.status_code == 200
     assert health.json()["status"] == "ready"
+    assert health.json()["qualified_image"] == TEST_QUALIFIED_IMAGE
     assert metrics.status_code == 200
     assert metrics.json()["capacity"] == 1
     assert metrics.json()["outcomes"]["succeeded"] == 1
@@ -245,12 +269,12 @@ def test_cancellation_before_runner_start_prevents_compilation() -> None:
             current,
             pdf=b"%PDF-test",
             log_tail="",
-            compiler_image="test-image",
+            compiler_image=TEST_QUALIFIED_IMAGE,
             engine_version="pdfTeX test",
         )
 
     async def exercise() -> None:
-        manager = JobManager(compiler)
+        manager = JobManager(compiler, compiler_image=TEST_QUALIFIED_IMAGE)
         await manager.start()
         await manager.submit(envelope, b"source bundle")
         await manager.cancel(envelope.job_id)
@@ -264,6 +288,15 @@ def test_cancellation_before_runner_start_prevents_compilation() -> None:
     asyncio.run(exercise())
 
 
+def test_compiler_refuses_to_start_without_a_qualified_sandbox_image() -> None:
+    _, public_key = _keys()
+    app = create_app(public_key=public_key, qualified_image="unqualified-image")
+
+    with pytest.raises(RuntimeError, match="qualified compiler image"):
+        with TestClient(app):
+            pass
+
+
 def test_network_isolation_preflight_uses_a_new_network_namespace() -> None:
     command = network_isolation_command()
 
@@ -275,3 +308,76 @@ def test_network_isolation_preflight_uses_a_new_network_namespace() -> None:
         "--pid",
     ]
     assert "--mount-proc" in command
+    assert "--mount" in command
+    propagation = command.index("--propagation")
+    assert command[propagation + 1] == "private"
+
+
+def test_network_isolation_preflight_rejects_all_egress_capable_default_routes(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(compiler_app.subprocess, "run", fake_run)
+
+    compiler_app.verify_network_isolation()
+
+    probe = captured["command"][-1]
+    assert '$2 == "00000000"' in probe
+    assert '$3 != "00000000"' not in probe
+    assert "/proc/net/dev" in probe
+    assert 'interface != "lo"' in probe
+    assert "/proc/net/ipv6_route" in probe
+    assert '"00000000000000000000000000000000"' in probe
+    assert '$2 == "00"' in probe
+    assert '$10 != "lo"' in probe
+
+
+def test_compiler_runner_places_every_compile_in_a_bounded_tmpfs_workspace() -> None:
+    private_key, _ = _keys()
+    envelope = _submission(private_key).envelope
+    runner = LatexCompilerRunner(
+        compiler_image=TEST_QUALIFIED_IMAGE, network_isolation_required=True
+    )
+
+    command = runner._command(
+        envelope,
+        source_root="/private/source",
+        result_root="/private/result",
+    )
+
+    assert command[:5] == [
+        "unshare",
+        "--user",
+        "--map-root-user",
+        "--net",
+        "--pid",
+    ]
+    assert "--mount" in command
+    assert "/app/latex_compiler_space/workspace_runner.py" in command
+    assert "--workspace-limit-bytes" in command
+    assert str(WORKSPACE_LIMIT_BYTES) in command
+    assert command[-1] == envelope.entrypoint
+
+
+def test_compiler_diagnostics_include_a_safe_bundle_relative_tex_filename() -> None:
+    diagnostics = _diagnostics(
+        b"(./sections/intro.tex\n! Undefined control sequence.\nl.7 \\unknown\n"
+    )
+
+    assert diagnostics[0].file == "sections/intro.tex"
+    assert diagnostics[0].line == 7
+    assert diagnostics[0].message == "\\unknown"
+
+
+def test_compiler_diagnostics_do_not_leak_an_unsafe_tex_path() -> None:
+    diagnostics = _diagnostics(
+        b"(/etc/private.tex\n! Undefined control sequence.\nl.7 \\unknown\n"
+    )
+
+    assert diagnostics[0].file is None
+    assert "/etc/private.tex" not in diagnostics[0].model_dump_json()

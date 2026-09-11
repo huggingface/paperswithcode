@@ -103,8 +103,9 @@ thumbnails preserve the source page aspect ratio, so their height is variable
 valid cached thumbnail or `--json` for structured output.
 
 Download, self-host, and attribute a hero image for an existing task, method,
-or conference. The command keeps a seed copy in `data/entity_image_seeds/` and
-stores the image bytes and source credit on the database row:
+or conference. The command keeps a seed copy in
+`/tmp/paperswithcode_entity_image_seeds/` and stores the image bytes and source
+credit on the database row:
 
 ```bash
 uv run --env-file backend/keys.env pwc image add task object-detection \

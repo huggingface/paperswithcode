@@ -55,6 +55,9 @@ class ExecutorContext:
     tool_call_id: str
     worker_generation: str
     capability: str = field(repr=False)
+    turn_worker_id: str
+    turn_worker_generation: str
+    turn_lease_generation: str
 
     @property
     def operation_identity(self) -> dict[str, object]:
@@ -481,6 +484,7 @@ class SandboxExecutorClient:
             write = process.stdin.write
             payload_delivery_attempted = True
             write(payload)
+            process.stdin.write_eof()
             await process.stdin.drain.aio()
 
             async def receive() -> None:
@@ -533,6 +537,12 @@ class SandboxExecutorClient:
             or not context.capability
             or not isinstance(context.worker_generation, str)
             or not context.worker_generation
+            or not isinstance(context.turn_worker_id, str)
+            or not context.turn_worker_id
+            or not isinstance(context.turn_worker_generation, str)
+            or not context.turn_worker_generation
+            or not isinstance(context.turn_lease_generation, str)
+            or not context.turn_lease_generation
         ):
             raise ProtocolError("Invalid executor bootstrap")
         value = {
@@ -543,6 +553,9 @@ class SandboxExecutorClient:
             "session_id": context.session_id,
             "turn_id": context.turn_id,
             "worker_generation": context.worker_generation,
+            "turn_worker_id": context.turn_worker_id,
+            "turn_worker_generation": context.turn_worker_generation,
+            "turn_lease_generation": context.turn_lease_generation,
         }
         try:
             encoded = (

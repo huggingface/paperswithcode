@@ -314,5 +314,5 @@ End with a concise completion report for the task:
 - The user wants to add **one** benchmark → `add-benchmark`. One paper's evals → `add-evals`. Enrich one
   paper → `enrich-paper`. Verify one leaderboard → `verify-evals`. This skill is for whole-task buildout.
 - The task page itself doesn't exist yet → `add-task` first.
-- The user wants the automated arXiv extraction pipeline (parse.py / Step 1–7) rather than legacy-sourced
-  curation → `extract-evals-paper`.
+- The user wants evaluation rows from a specific paper or source rather than whole-task buildout →
+  `add-evals`.

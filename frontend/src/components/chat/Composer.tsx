@@ -96,7 +96,11 @@ const Composer: React.FC<ComposerProps> = ({
   const slashCommandOpen = paperArtifactsEnabled && value.text === "/";
 
   return (
-    <div className="chat-composer">
+    <div
+      className="chat-composer ph-no-capture"
+      data-ph-no-autocapture="true"
+      data-ph-no-capture="true"
+    >
       {value.paperSelection && (
         <PaperSelectionCard
           selection={value.paperSelection}
@@ -115,6 +119,9 @@ const Composer: React.FC<ComposerProps> = ({
       <div className="chat-composer-textarea-wrap">
         <PaperMentionHighlights text={value.text} mentions={value.paperMentions} scrollTop={scrollTop} />
         <textarea
+          className="ph-no-capture"
+          data-ph-no-autocapture="true"
+          data-ph-no-capture="true"
           ref={ref}
           rows={1}
           value={value.text}

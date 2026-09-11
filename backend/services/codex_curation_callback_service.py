@@ -217,7 +217,8 @@ class CodexCurationCallbackService:
     def _resolution_paper_candidates(
         self, candidate: TrendingModelCandidate
     ) -> list[Paper]:
-        return self._resolution_candidates(candidate)[0]
+        candidates, allowed_ids = self._resolution_candidates(candidate)
+        return [paper for paper in candidates if paper.id in allowed_ids]
 
     def _allowed_resolution_paper_ids(
         self, candidate: TrendingModelCandidate
@@ -406,26 +407,7 @@ class CodexCurationCallbackService:
                     for item in exclusions
                 ],
                 "evaluations": [
-                    {
-                        "id": item.id,
-                        "task_id": item.task_id,
-                        "dataset_id": item.dataset_id,
-                        "model_name": item.model_name,
-                        "harness": item.harness,
-                        "best_metric": item.best_metric,
-                        "metrics": item.metrics,
-                        "methodology": item.methodology,
-                        "source_url": item.source_url,
-                        "external_source_url": item.external_source_url,
-                        "uses_additional_data": item.uses_additional_data,
-                        "is_open": item.is_open,
-                        "best_rank": item.best_rank,
-                        "evaluated_on": item.evaluated_on.isoformat()
-                        if item.evaluated_on
-                        else None,
-                        "num_parameters": item.num_parameters,
-                        "hf_model_url": item.hf_model_url,
-                    }
+                    self._evaluation_state(item)
                     for item in getattr(paper, "evaluations", [])
                 ],
             },
@@ -1003,6 +985,14 @@ class CodexCurationCallbackService:
                 raise ValueError(
                     "Resolution jobs accept only model resolution payloads"
                 )
+            if (
+                getattr(row, "trigger", None) == "hf-trending-cron"
+                and body.resolve_model_paper.external_paper is not None
+            ):
+                raise ValueError(
+                    "The trending-model cron cannot create external papers; "
+                    "resolve to an existing paper or arXiv paper, or reject the candidate"
+                )
             return
         if body.resolve_model_paper is not None:
             raise ValueError("Model resolution is allowed only for resolution jobs")
@@ -1201,9 +1191,6 @@ class CodexCurationCallbackService:
                     raise ValueError(
                         "Repository links must be public GitHub repository URLs"
                     )
-            for link in mutation.project_pages or []:
-                if urlsplit(link.url).scheme != "https":
-                    raise ValueError("Project page links must use HTTPS")
             if mutation.repositories is not None:
                 current_urls = {
                     repository.url
@@ -1220,11 +1207,20 @@ class CodexCurationCallbackService:
                     raise ValueError(
                         "Scheduled enrichment cannot remove an existing repository"
                     )
+            removed_pages: set[str] = set()
             if mutation.project_pages is not None:
                 current_pages = {
                     page.url: getattr(page, "source", "unknown")
                     for page in self.db.get(Paper, row.paper_id).project_pages
                 }
+                # Legacy imported HTTP pages may be retained unchanged. New
+                # project links still require HTTPS.
+                for link in mutation.project_pages:
+                    if (
+                        link.url not in current_pages
+                        and urlsplit(link.url).scheme != "https"
+                    ):
+                        raise ValueError("Project page links must use HTTPS")
                 removed_pages = set(current_pages) - {
                     link.url for link in mutation.project_pages
                 }

@@ -36,6 +36,19 @@ test("readiness reports exact allowlisted tools when connected", () => {
   assert.deepEqual(snapshot.providers.excalidraw?.discovered_tools, ["create_view", "read_me"]);
 });
 
+test("lazy native tools are ready without claiming a connection", () => {
+  const snapshot = assessExcalidrawReadiness({
+    enabled: true,
+    connectionMode: "lazy",
+    activeTools: ["create_view", "read_me"],
+    createViewDefinition: { parameters: { type: "object", properties: { elements: { type: "string" } } } },
+  });
+
+  assert.equal(snapshot.ready, true);
+  assert.equal(snapshot.providers.excalidraw?.connected, false);
+  assert.equal(snapshot.providers.excalidraw?.state, "ready");
+});
+
 test("connection failure omits readiness even if names were requested", () => {
   const snapshot = assessExcalidrawReadiness({
     enabled: true,

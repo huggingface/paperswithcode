@@ -42,9 +42,11 @@ from backend.chat_gateway_app import (
     MAX_PROVIDER_OUTPUT_TOKENS,
     MAX_PROVIDER_TURN_TOKENS,
     CatalogRequest,
+    PaperCommandRequest,
     _output_tokens_allowed,
     _provider_turn_limits,
     catalog,
+    paper_command,
 )
 from backend.chat_sandbox_worker import (
     agent,
@@ -84,7 +86,7 @@ from backend.chat_sandbox_worker.sdk_adapter import SDKEventAdapter as WorkerSDK
 from backend.chat_sandbox_worker.tool_policy import ToolBudget, bound_tool_output
 from backend.config import Settings
 from backend.models.chat import DISPLAY_BLOCKS_ADAPTER, sse_event
-from backend.models.database import ChatTurnCapability
+from backend.models.database import ChatSession, ChatTurnCapability
 from backend.scripts import qualify_chat_sandbox, qualify_chat_soak
 from backend.scripts.qualify_chat_sandbox import (
     QualificationRunner,
@@ -98,6 +100,7 @@ from backend.services.chat_capability_service import (
     _digest,
 )
 from backend.services.chat_gateway_service import ChatGatewayService
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_sandbox_service import (
     RunningWorker,
     SandboxSessionManager,
@@ -301,6 +304,31 @@ def test_broker_capability_rotation_rejects_stale_and_cross_turn_clear(monkeypat
         state.current()
     state.install({"capability": "new", "session_id": "session", "turn_id": "turn-2"})
     assert state.current()["capability"] == "new"
+
+
+def test_broker_gateway_headers_include_external_turn_fence(monkeypatch):
+    broker = _import_broker(monkeypatch)
+    state = broker.BrokerState({})
+    state.install(
+        {
+            "capability": "capability",
+            "session_id": "session",
+            "turn_id": "turn",
+            "turn_worker_id": "production-green-00",
+            "turn_worker_generation": "4",
+            "turn_lease_generation": "9",
+        }
+    )
+
+    assert broker._gateway_headers(active=state.current()) == {
+        "Authorization": "Bearer capability",
+        "X-PWC-Session": "session",
+        "X-PWC-Turn": "turn",
+        "X-PWC-Turn-Worker-ID": "production-green-00",
+        "X-PWC-Turn-Worker-Generation": "4",
+        "X-PWC-Turn-Lease-Generation": "9",
+        "Content-Type": "application/json",
+    }
 
 
 def test_broker_clear_waits_for_capability_requests(monkeypatch):
@@ -1727,6 +1755,17 @@ def test_paper_receipt_is_bounded_and_emits_a_typed_event():
     validator.accept(event[0])
 
 
+def test_paper_draft_receipt_is_a_typed_event():
+    event = paper_events_from_output(
+        '@@PWC_PAPER@@{"operation":"draft","activated":false,"paper":{"artifact_id":"paper-1","title":"Draft"}}'
+    )
+
+    assert event is not None
+    validator = WorkerEventValidator()
+    validator.accept(event[0])
+    assert event[0]["operation"] == "draft"
+
+
 def test_worker_keeps_large_tool_evidence_out_of_public_events():
     event = agent._public_tool_result_event(
         {
@@ -1780,6 +1819,130 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
     assert exc_info.value.detail == (
         "Task with ID, slug, or name 'speech recognition' not found"
     )
+
+
+def test_gateway_catalog_maps_typed_not_found_errors(monkeypatch):
+    class DB:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
+    )
+
+    def missing_catalog_entity(*_args, **_kwargs):
+        raise CatalogNotFoundError("Method 'missing' not found")
+
+    monkeypatch.setattr(ChatGatewayService, "catalog", missing_catalog_entity)
+
+    with pytest.raises(HTTPException) as exc_info:
+        catalog(
+            CatalogRequest(operation="method_detail", arguments={"method": "missing"}),
+            authorization="Bearer test",
+            x_pwc_session=str(uuid.uuid4()),
+            x_pwc_turn=str(uuid.uuid4()),
+            turn_fence=None,
+            db=DB(),
+            settings=SimpleNamespace(chat_max_direct_search_calls=4),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Method 'missing' not found"
+
+
+@pytest.mark.parametrize("operation", ["draft", "repair"])
+def test_gateway_paper_mutation_rejects_same_owner_artifact_from_another_chat(
+    monkeypatch, operation: str
+):
+    session_id = uuid.uuid4()
+    other_artifact_id = uuid.uuid4()
+    current_artifact_id = uuid.uuid4()
+    turn_id = uuid.uuid4()
+    parent_id = uuid.uuid4()
+    calls: list[dict] = []
+
+    class Descriptor:
+        def __init__(self, artifact_id: uuid.UUID):
+            self.artifact_id = artifact_id
+
+        def model_dump(self, **_kwargs):
+            return {"artifact_id": str(self.artifact_id)}
+
+    class DB:
+        def get(self, model, identifier):
+            assert model is ChatSession
+            assert identifier == session_id
+            return SimpleNamespace(
+                active_turn_id=turn_id,
+                primary_paper_id=None,
+                selected_model="gpt-5.6-luna@openai",
+            )
+
+        def rollback(self):
+            pass
+
+        def commit(self):
+            pass
+
+    def unexpected_mutation(**kwargs):
+        calls.append(kwargs)
+        if operation == "draft":
+            return Descriptor(other_artifact_id)
+        return SimpleNamespace(
+            descriptor=Descriptor(other_artifact_id), repaired=False, exhausted=False
+        )
+
+    paper_service = SimpleNamespace(
+        get_descriptor=lambda owner_id, requested_session_id: (
+            Descriptor(current_artifact_id)
+            if owner_id == "same-owner" and requested_session_id == session_id
+            else None
+        ),
+        save_ai_version=unexpected_mutation,
+        repair_failed_version=unexpected_mutation,
+    )
+    capability = SimpleNamespace(
+        chat_session_id=session_id,
+        turn_id=turn_id,
+        scopes=["paper"],
+        expires_at=datetime.now(UTC),
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: capability
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._capability_owner",
+        lambda *_args, **_kwargs: "same-owner",
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app.LatexPaperService", lambda *_args: paper_service
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        paper_command(
+            PaperCommandRequest(
+                operation=operation,
+                artifact_id=other_artifact_id,
+                expected_parent_version_id=parent_id,
+            ),
+            authorization="Bearer capability",
+            x_pwc_session=str(session_id),
+            x_pwc_turn=str(turn_id),
+            db=DB(),
+            settings=SimpleNamespace(
+                chat_artifacts_enabled=True,
+                chat_latex_paper_enabled=True,
+                chat_latex_compiler_jobs_enabled=True,
+                chat_latex_paper_timeout_seconds=600,
+            ),
+        )
+
+    assert exc_info.value.status_code == 409
+    assert exc_info.value.detail["code"] == "paper_missing"
+    assert calls == []
 
 
 def test_gateway_paper_read_uses_bounded_diskless_reader(monkeypatch):
@@ -2798,6 +2961,18 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
         "Read and Grep may only access /workspace or the approved CLI guides. "
         "Rerun the source command with output redirected to /workspace, then try again."
     )
+    inlined_skill = budget.authorize(
+        "inlined-skill",
+        "Read",
+        {"file_path": str(guide)},
+        workspace=workspace,
+        guide=guide,
+    )
+    assert not inlined_skill.allowed
+    assert inlined_skill.reason == (
+        "The pwc, s2, and restricted hf CLI skills are already included verbatim in "
+        "your system prompt. Read that text instead and run the CLI directly."
+    )
     assert not budget.tooling_closed
     assert budget.authorize(
         "recovery",
@@ -3204,7 +3379,9 @@ def test_prompt_and_manifest_share_six_round_contract():
         "user asks\nfor a visual explanation or visualization."
     )
     assert visual_instruction in prompt
-    assert "Use Read only in `/workspace`" in prompt
+    assert "use Read only in\n`/workspace`" in prompt
+    assert "already included\nverbatim later in this system prompt" in prompt
+    assert "Never read, `cat`,\nor otherwise open `/opt/pwc/PWC_CLI_SKILL.md`" in prompt
     assert "HF access is anonymous-only" in prompt
     assert "fix the JSON and call `create_view` once more" in prompt
     assert prompt.index("## Tool usage") < prompt.index(visual_instruction)
@@ -3244,10 +3421,24 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert MODAL_APP_NAME == "pwc-chat-sandbox-v1"
     assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID.startswith("im-")
-    assert PRODUCTION_MODAL_IMAGE_ID == "im-gWZg59lNVcpcjCSYeE6psd"
+    assert PRODUCTION_MODAL_IMAGE_ID == "im-t3Yjk8afcT3ajgqzwyvbRi"
     assert int(WORKER_CONTRACT_VERSION) >= 97
     assert CHAT_SANDBOX_REGION == "eu-west"
     assert CONTROL_PORT == 8080
+
+
+def test_pi_prompt_embeds_cli_skills_without_requiring_a_read_tool_call():
+    prompt = render(agent_harness="pi")
+
+    assert "pwc task --name TASK" in prompt
+    assert "pwc benchmark list --task TASK" in prompt
+    assert "/opt/pwc/PWC_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/HF_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/S2_CLI_SKILL.md" in prompt
+    assert "# pwc CLI skill" in prompt
+    assert "name: pwc-cli" in prompt
+    assert "# s2 CLI skill" in prompt
+    assert "# restricted hf CLI skill" in prompt
 
 
 @pytest.mark.parametrize(

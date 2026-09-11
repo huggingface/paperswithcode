@@ -16,8 +16,8 @@ from backend.models.api import (
     ConferenceDeadlines,
     ConferenceTaskSummary,
     Conferences,
-    Papers,
 )
+from backend.models.papers import Papers
 from backend.database.conferences_setup.cvpr2026_best_paper_finalist_order import (
     CVPR_2026_BEST_PAPER_FINALIST_ARXIV_ORDER,
 )

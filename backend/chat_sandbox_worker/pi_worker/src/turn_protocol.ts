@@ -4,6 +4,7 @@ export const MAX_TURN_FRAME_BYTES = 2 * 1024 * 1024 + 256 * 1024;
 
 export interface ExternalRunTurn extends RunTurn {
   turn_id: string;
+  excalidraw_enabled: boolean;
   turnClaim: TurnClaimFrame;
   capability: string;
   gateway_url: string;
@@ -12,8 +13,8 @@ export interface ExternalRunTurn extends RunTurn {
 export interface TurnClaimFrame {
   turnId: string;
   workerId: string;
-  workerGeneration: number;
-  leaseGeneration: number;
+  workerGeneration: number | string;
+  leaseGeneration: number | string;
 }
 
 export interface AttachTurn {
@@ -41,6 +42,12 @@ export interface AcknowledgeTerminal {
 
 export class TurnProtocolError extends Error {}
 
+function validGeneration(value: unknown): value is number | string {
+  if (Number.isSafeInteger(value) && (value as number) >= 1) return true;
+  if (typeof value !== "string" || !/^[1-9][0-9]{0,18}$/u.test(value)) return false;
+  return BigInt(value) <= 9_223_372_036_854_775_807n;
+}
+
 function parseTurnClaim(value: unknown): TurnClaimFrame {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TurnProtocolError("Invalid Pi turn claim");
@@ -52,10 +59,8 @@ function parseTurnClaim(value: unknown): TurnClaimFrame {
     || !claim.turnId
     || typeof claim.workerId !== "string"
     || !claim.workerId
-    || !Number.isSafeInteger(claim.workerGeneration)
-    || (claim.workerGeneration as number) < 1
-    || !Number.isSafeInteger(claim.leaseGeneration)
-    || (claim.leaseGeneration as number) < 1
+    || !validGeneration(claim.workerGeneration)
+    || !validGeneration(claim.leaseGeneration)
   ) {
     throw new TurnProtocolError("Invalid Pi turn claim");
   }
@@ -141,6 +146,8 @@ export function parseAcknowledgeTerminal(
   return { ...frame, turnClaim } as unknown as AcknowledgeTerminal;
 }
 
+export function parseRunTurn(value: unknown, external: true): ExternalRunTurn;
+export function parseRunTurn(value: unknown, external?: false): RunTurn;
 export function parseRunTurn(value: unknown, external = false): RunTurn | ExternalRunTurn {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new TurnProtocolError("Invalid Pi run frame");
@@ -155,10 +162,11 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     required.add("turnClaim");
     required.add("capability");
     required.add("gateway_url");
+    required.add("excalidraw_enabled");
   }
   const optional = new Set([
     "turn_id", "assignment_token", "worker_generation", "reader_mode", "poster_mode",
-    "paper_artifacts_enabled", "paper_descriptor", "provider_protocol",
+    "paper_artifacts_enabled", "paper_descriptor", "provider_protocol", "agent_session_id",
   ]);
   if (Object.keys(frame).some((key) => !required.has(key) && !optional.has(key))) {
     throw new TurnProtocolError("Invalid Pi run frame keys");
@@ -173,7 +181,13 @@ export function parseRunTurn(value: unknown, external = false): RunTurn | Extern
     (frame.provider_protocol !== undefined
       && !new Set(["anthropic-messages", "openai-responses"]).has(String(frame.provider_protocol))) ||
     (frame.resume !== null && typeof frame.resume !== "string") ||
+    (frame.agent_session_id !== undefined && (
+      typeof frame.agent_session_id !== "string"
+      || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(frame.agent_session_id)
+      || frame.resume !== null
+    )) ||
     typeof frame.web_search_enabled !== "boolean" ||
+    (frame.excalidraw_enabled !== undefined && typeof frame.excalidraw_enabled !== "boolean") ||
     (frame.reader_mode !== undefined && typeof frame.reader_mode !== "boolean") ||
     (frame.poster_mode !== undefined && typeof frame.poster_mode !== "boolean") ||
     (frame.paper_artifacts_enabled !== undefined && typeof frame.paper_artifacts_enabled !== "boolean") ||

@@ -294,6 +294,29 @@ def test_parser_rejects_unreviewed_model(monkeypatch):
         parse_frontiercode_leaderboard(_payload())
 
 
+def test_parser_accepts_reviewed_swe_2_release(monkeypatch):
+    monkeypatch.undo()  # Exercise the real reviewed identities, not test models.
+    revision = _payload()["v1_1"]
+    models = list(dict.fromkeys([*fc.MODEL_PAPER_IDENTITIES, "SWE-2"]))
+    for field in ("harness", "efforts", "data"):
+        example = revision[field]["Model 0"]
+        revision[field] = {model: example for model in models}
+    revision["models"] = models
+
+    leaderboard = parse_frontiercode_leaderboard({"v1_1": revision})
+    assert len([entry for entry in leaderboard.entries if entry.model == "SWE-2"]) == 4
+    identity = fc.MODEL_PAPER_IDENTITIES["SWE-2"]
+    assert identity.source_url == "https://cognition.com/blog/swe-2"
+    assert identity.title == "Introducing SWE-2: Pushing the Pareto Frontier"
+    assert identity.date_published == date(2026, 9, 10)
+    assert identity.arxiv_id is None
+    assert identity.is_open is False
+
+    revision["models"].remove("SWE-2")
+    with pytest.raises(ValueError, match="missing=.*SWE-2"):
+        parse_frontiercode_leaderboard({"v1_1": revision})
+
+
 def test_discovery_indexes_missing_external_paper(monkeypatch):
     session = _session()
     identity = fc.external("https://example.com/model", "External Model", "2026-08-01")

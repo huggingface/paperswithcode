@@ -9,7 +9,7 @@ from sqlalchemy import desc, text
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
-from backend.models.api import Paper as ApiPaper
+from backend.models.papers import Paper as ApiPaper
 from backend.models.database import Paper as DBPaper
 from backend.models.database import UserBookmark
 from backend.services.hf_inference_billing_service import decrypt_oauth_credential

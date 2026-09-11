@@ -27,7 +27,7 @@ interface AuthContextValue {
 
 const AuthContext = React.createContext<AuthContextValue | null>(null);
 
-export const AUTH_STALE_EVENT = "pwc:auth-stale";
+const AUTH_STALE_EVENT = "pwc:auth-stale";
 const POSTHOG_SIGNUP_COOKIE = "pwc_posthog_signup";
 
 function consumeSignupMarker(): boolean {

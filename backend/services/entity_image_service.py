@@ -103,7 +103,10 @@ def add_entity_image(
     client: httpx.Client | None = None,
     seed_root: Path = IMAGE_SEED_ROOT,
 ) -> EntityImageResult:
-    """Download an entity image, keep a seed copy, and update its DB row."""
+    """Download an entity image and update its DB row.
+
+    The seed copy uses temporary storage by default.
+    """
     _validate_image_url(image_url)
     if not source.strip():
         raise ValueError("source credit must not be empty")

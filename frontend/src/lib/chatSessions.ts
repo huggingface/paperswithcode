@@ -105,7 +105,7 @@ export interface ChatShareSummary {
   updated_at: string;
 }
 
-export interface PublicChatMessage {
+interface PublicChatMessage {
   id: string;
   role: "user" | "assistant";
   content: string;
@@ -147,9 +147,9 @@ export interface ChatModelChoice {
 }
 
 export const DEFAULT_CHAT_MODEL = "gpt-5.6-luna@openai";
-export const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
-export const GLM_CHAT_MODEL = "zai-org/GLM-5.3-Flash";
-export const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
+const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
+const GLM_CHAT_MODEL = "zai-org/GLM-5.3-Flash";
+const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
 
 export function providerForChatModel(
   models: ChatModelChoice[],
@@ -208,10 +208,6 @@ export const STAGING_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
     provider: "openai",
   },
 ];
-// Compatibility export for staging-focused consumers and tests. Deployed UI
-// code must choose the environment-specific list explicitly.
-export const FALLBACK_CHAT_MODELS = STAGING_FALLBACK_CHAT_MODELS;
-
 export class ChatRequestError extends Error {
   constructor(message: string, public readonly status: number) {
     super(message);
@@ -339,6 +335,7 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
     if (code === "openrouter_byok_credential_invalid") return "Your OpenRouter API key is no longer valid. Reconnect it in Settings, then try again.";
     if (code === "openrouter_byok_billing_error") return "Your OpenRouter key is connected, but OpenRouter rejected billing for the account behind it. A key spending limit is not an account credit balance. Add credits or enable pay-as-you-go in OpenRouter, then try again.";
     if (code === "openrouter_byok_rate_limit") return "Your OpenRouter API key is temporarily rate-limited.";
+    if (code === "context_too_large") return "This conversation is too large for the selected model. Start a new chat or shorten the context.";
     if (["provider_error", "provider_unavailable"].includes(code ?? "")) return "The model provider failed before completing the response. You can edit and retry your question.";
     if (code === "persistence_error") return "The response could not be saved. You can edit and retry your question.";
     if (code === "transcript_mirror_error") return "The conversation could not be saved. Please try again in a new chat.";

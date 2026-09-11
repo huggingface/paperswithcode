@@ -50,16 +50,6 @@ export interface EvaluationParameterCoverage {
 }
 
 
-export interface Metric {
-  id: string;
-  name: string;
-  full_name?: string;
-  direction: 'higher_is_better' | 'lower_is_better';
-  description?: string;
-  created_at: string;
-  updated_at: string;
-}
-
 export interface MetricDirections {
   directions: Record<string, 'higher_is_better' | 'lower_is_better'>;
 }

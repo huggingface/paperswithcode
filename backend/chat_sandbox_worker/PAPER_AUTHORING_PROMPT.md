@@ -12,7 +12,10 @@ For an explicit request, read `/opt/pwc/PAPER_AUTHORING.md` before calling
 for relevant Hub evidence, and preserve unknown facts as visible TODOs. Never
 invent results, references, authors, affiliations, datasets, or implementation
 details. `pwc-paper` is the only paper-writing interface; it creates or opens
-the current private project and reports its bounded descriptor. For a failed
-paper compile, read the guide, check out the failed source with `pwc-paper
-repair-context`, and submit narrow candidates through `pwc-paper repair`.
-Never make more than three attempts.
+the current private project and reports its bounded descriptor. After creating
+a project, produce the first complete `.tex`/`.bib` draft in
+`/workspace/paper` and submit it through `pwc-paper draft`; its receipt is the
+only proof that the draft was published. For a failed paper compile, read the
+guide, check out the failed source with `pwc-paper repair-context`, and submit
+narrow candidates through `pwc-paper repair`. Never make more than three
+attempts.

@@ -22,6 +22,32 @@ class RecordingTransport implements ExternalTurnTransport {
   }
 }
 
+class ClosingTransport implements ExternalTurnTransport {
+  send(): void {
+    throw new Error("WebSocket is not open");
+  }
+}
+
+test("a synchronous close race detaches transport without failing the retained run", () => {
+  const run = new ExternalTurnRegistry().start(
+    "request-1", claim, new ClosingTransport(),
+  );
+
+  assert.doesNotThrow(() => run.append({ type: "answer_delta", text: "buffered" }));
+
+  const replay = new RecordingTransport();
+  assert.deepEqual(run.attach(replay, claim, 0), [{
+    type: "answer_delta",
+    text: "buffered",
+    worker_sequence: 1,
+  }]);
+  assert.deepEqual(replay.frames, [{
+    type: "answer_delta",
+    text: "buffered",
+    worker_sequence: 1,
+  }]);
+});
+
 test("registry replays only unacknowledged frames and fences attach identity", () => {
   const registry = new ExternalTurnRegistry();
   const first = new RecordingTransport();
@@ -201,8 +227,10 @@ test("buffer overflow contains a rejected harness cancellation and still cleans 
 });
 
 test("terminal acknowledgement and grace expiry release retained state", async () => {
+  let disposals = 0;
   const acknowledged = new ExternalTurnRegistry({ terminalGraceMs: 1000 });
   const first = acknowledged.start("request-1", claim, new RecordingTransport());
+  first.setDisposeWorker(async () => { disposals += 1; });
   first.append({ type: "worker_done", status: "complete" });
   assert.equal(acknowledged.size, 1);
   assert.throws(
@@ -210,11 +238,15 @@ test("terminal acknowledgement and grace expiry release retained state", async (
     TurnProtocolError,
   );
   acknowledged.acknowledgeTerminal("request-1", claim, 1);
+  await new Promise((resolve) => setImmediate(resolve));
   assert.equal(acknowledged.size, 0);
+  assert.equal(disposals, 1);
 
   const expired = new ExternalTurnRegistry({ terminalGraceMs: 5 });
-  expired.start("request-1", claim, new RecordingTransport())
-    .append({ type: "worker_done", status: "complete" });
+  const expiring = expired.start("request-1", claim, new RecordingTransport());
+  expiring.setDisposeWorker(async () => { disposals += 1; });
+  expiring.append({ type: "worker_done", status: "complete" });
   await new Promise((resolve) => setTimeout(resolve, 20));
   assert.equal(expired.size, 0);
+  assert.equal(disposals, 2);
 });

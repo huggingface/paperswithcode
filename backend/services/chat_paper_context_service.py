@@ -342,6 +342,7 @@ class ChatPaperContextService:
                     token=self.settings.hf_token or None,
                     max_bytes=MARKDOWN_LIMIT_BYTES,
                 )
+                markdown = markdown.replace("\x00", " ")
                 available = True
             except ValueError as exc:
                 if "was not found" not in str(exc):

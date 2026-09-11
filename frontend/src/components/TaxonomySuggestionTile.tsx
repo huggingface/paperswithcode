@@ -53,5 +53,3 @@ export function TaxonomySuggestionTile({ kind }: TaxonomySuggestionTileProps) {
     </>
   );
 }
-
-export default TaxonomySuggestionTile;

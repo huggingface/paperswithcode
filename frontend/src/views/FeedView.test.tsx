@@ -14,7 +14,7 @@ import {
 } from "@/lib/chatLaunch";
 import { chatApi } from "@/lib/api/chat";
 import { papersApi } from "@/lib/api/papers";
-import { DEFAULT_CHAT_MODEL, FALLBACK_CHAT_MODELS } from "@/lib/chatSessions";
+import { DEFAULT_CHAT_MODEL, STAGING_FALLBACK_CHAT_MODELS } from "@/lib/chatSessions";
 import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
 import { AskAssistant } from "@/views/FeedView";
 
@@ -58,7 +58,7 @@ describe("AskAssistant", () => {
   });
 
   it("offers the four truthful staging model routes", () => {
-    expect(FALLBACK_CHAT_MODELS).toEqual([
+    expect(STAGING_FALLBACK_CHAT_MODELS).toEqual([
       {
         id: "deepseek-ai/DeepSeek-V4-Flash-0731",
         label: "DeepSeek V4 Flash",

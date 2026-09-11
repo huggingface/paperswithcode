@@ -24,6 +24,7 @@ executes them from a checkout. GitHub Actions invokes the installed
 | `5 * * * *` | `.github/workflows/scripts/hourly/sync_3d_arena.py` | Refresh paper-linked Elo results from the living 3D Arena leaderboard. |
 | `55 * * * *` | `.github/workflows/scripts/hourly/sync_tabarena.py` | Refresh paper-linked Elo results from the living TabArena model leaderboard. |
 | `15 * * * *` | `.github/workflows/scripts/hourly/sync_open_asr.py` | Discover unambiguous arXiv-backed models and refresh paper-linked WER and RTFx results from the living Open ASR Leaderboard. |
+| `18 * * * *` | `.github/workflows/scripts/hourly/sync_open_tts.py` | Atomically refresh paper-linked English and all-language-average WER and RTFx results across Seed-TTS and CV3-Eval from the living Open TTS Leaderboard. |
 | `12 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v2` | Refresh paper-linked MMEB-v2 overall scores from the official MMEB Space. |
 | `42 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` | Refresh paper-linked MMEB-v3 overall scores from the official MMEB Space. |
 | `35 * * * *` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` | Index missing reviewed model releases and refresh paper-linked Artificial Analysis Intelligence, Agentic, and text-to-speech Quality Elo scores. |
@@ -588,6 +589,19 @@ admin-triggered jobs:
 ```bash
 sudo pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-uuid>
 ```
+
+To launch one explicit queued daily or trending canary while normal dispatch
+remains paused by an explicit operator action, use its durable job UUID. This
+command rechecks the token guardrail and shared capacity, dispatches only the
+selected row, and never resumes the scheduler:
+
+```bash
+sudo pwc-cron enqueue_hf_daily_paper_curation --canary-job <job-uuid>
+```
+
+For a terminal daily job, first use `--retry-job` and then pass the returned
+queued retry UUID to `--canary-job`. Admin jobs and non-queued rows are rejected.
+The command exits nonzero if the remote job does not reach the running state.
 
 Replay a saved proposal through the currently deployed callback validators
 without applying writes. The command reports current policy validity and

@@ -83,7 +83,7 @@ const BenchmarkDetailView: React.FC = () => {
   const leaderboardCardRef = useRef<HTMLDivElement | null>(null);
 
   // Fetching the dataset with `include_paper=true` collapses the previous
-  // dataset → paper waterfall into a single round trip.  See PLAN.md §5.
+  // dataset → paper waterfall into a single round trip.
   const datasetQ = useQuery({
     queryKey: [
       "dataset",

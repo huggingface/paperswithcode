@@ -1,8 +1,8 @@
 import type { ChatDraft, PaperMentionDraft, PaperSelectionDraft, PaperSelectionWire } from "@/lib/chat";
 
-export const PAPER_SELECTION_MAX_CHARS = 8_000;
-export const PAPER_SELECTION_MAX_BYTES = 16_384;
-export const PAPER_SELECTION_MAX_PAGE = 10_000;
+const PAPER_SELECTION_MAX_CHARS = 8_000;
+const PAPER_SELECTION_MAX_BYTES = 16_384;
+const PAPER_SELECTION_MAX_PAGE = 10_000;
 
 export const PDF_SELECTION_ERRORS = {
   crossPage: "Select text within one PDF page.",

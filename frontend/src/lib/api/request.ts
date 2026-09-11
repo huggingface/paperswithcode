@@ -2,7 +2,7 @@ import { withStaleAuthNotification } from "../apiAuth";
 import { ApiTransport, type ApiRequest } from "../apiTransport";
 import { getApiOrigin } from "../apiUrl";
 
-export const apiTransport = new ApiTransport(`${getApiOrigin()}/api/v1`);
+const apiTransport = new ApiTransport(`${getApiOrigin()}/api/v1`);
 
 export const apiFetch = (endpoint: string, options?: RequestInit): Promise<Response> =>
   apiTransport.fetch(endpoint, options);

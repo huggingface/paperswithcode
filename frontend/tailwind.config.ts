@@ -5,10 +5,10 @@ import tailwindcssTypography from "@tailwindcss/typography";
 // Tailwind is layered for the *new* surfaces only (admin dialogs, toasts, mobile
 // hamburger sheet, loading/error/empty states). The v2 visual system is owned by
 // the hand-rolled `src/styles.css` (~1700 lines, with --ink/--bg/--accent CSS
-// variables). PLAN.md §10.
+// variables).
 export default {
   darkMode: ["class"],
-  content: ["./pages/**/*.{ts,tsx}", "./components/**/*.{ts,tsx}", "./app/**/*.{ts,tsx}", "./src/**/*.{ts,tsx}"],
+  content: ["./index.html", "./src/**/*.{ts,tsx}"],
   prefix: "",
   theme: {
     container: {
