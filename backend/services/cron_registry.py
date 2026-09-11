@@ -1337,7 +1337,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         id="backfill_method_references",
         display_name="Backfill Method References",
         category="backfill",
-        schedule="15 */6 * * * (every 6 hours)",
+        schedule="15 * * * * (hourly at :15 UTC)",
         script_path="backfill/backfill_method_references.py",
         log_name="backfill_method_references",
         process_patterns=("backfill_method_references",),
@@ -1619,7 +1619,7 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "mirror_thumbnails_to_disk": ((SchedulePolicy.daily(5, 0),), 60),
     "link_methods_by_references": ((SchedulePolicy.weekly(6, 4, 0),), 180),
     "backfill_method_keywords": ((SchedulePolicy.daily(1, 10),), 60),
-    "backfill_method_references": ((SchedulePolicy.fixed(360, offset_minutes=15),), 60),
+    "backfill_method_references": ((SchedulePolicy.fixed(60, offset_minutes=15),), 60),
     "link_papers_by_task_keywords": ((SchedulePolicy.weekly(6, 5, 0),), 180),
 }
 

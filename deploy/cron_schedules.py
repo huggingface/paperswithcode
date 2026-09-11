@@ -235,11 +235,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Mirror thumbnails to VPS disk daily",
         after=("pwc-cron-preload-thumbnails-recent",),
     ),
-    # Six-hourly backfill.
+    # Follow the hourly paper import so trend coverage does not stay stale.
     TimerSpec(
         job="backfill_method_references",
-        on_calendar=("*-*-* 00/6:15:00",),
-        description="Backfill method reference evidence every six hours",
+        on_calendar=("*-*-* *:15:00",),
+        description="Backfill method reference evidence hourly",
         args=(
             "--provider",
             "openalex",

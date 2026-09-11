@@ -1,5 +1,5 @@
 [Unit]
-Description=Backfill method reference evidence every six hours
+Description=Backfill method reference evidence hourly
 After=network-online.target postgresql@16-main.service
 Wants=network-online.target
 

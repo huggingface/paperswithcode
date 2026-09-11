@@ -290,7 +290,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "month_start = (SELECT month_start FROM frontier)" in (
         reference_job.db_freshness_query
     )
-    assert reference_job.schedule.startswith("15 */6")
+    assert reference_job.schedule == "15 * * * * (hourly at :15 UTC)"
     assert reference_job.workflow_file == "cron-backfill-method-references.yml"
 
 
