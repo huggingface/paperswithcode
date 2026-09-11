@@ -197,7 +197,11 @@ def _recover_capacity_failure(endpoint_url: str, token: str) -> bool:
         if (endpoint.url or "").rstrip("/") + "/embed" != endpoint_url.rstrip("/"):
             continue
         error = endpoint.raw.get("status", {}).get("errorMessage", "")
-        if endpoint.status != "failed" or "out of availability" not in error:
+        allocation_failed = (
+            "out of availability" in error
+            or error == "Scheduling failure: unable to schedule"
+        )
+        if endpoint.status != "failed" or not allocation_failed:
             return False
         endpoint.resume().wait(timeout=120, refresh_every=10)
         return True

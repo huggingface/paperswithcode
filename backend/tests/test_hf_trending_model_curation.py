@@ -1672,6 +1672,14 @@ def test_resolution_scope_excludes_publisher_only_sibling():
     service = CodexCurationCallbackService(db)
 
     assert service._allowed_resolution_paper_ids(candidate) == {exact.id}
+    service.job_service = SimpleNamespace(
+        serialize=lambda *_args: SimpleNamespace(model_dump=lambda **_kwargs: {})
+    )
+    context = service.context(
+        SimpleNamespace(kind="resolve-model-paper", candidate_id=candidate.id),
+        get_settings(),
+    )
+    assert [paper["id"] for paper in context["paper_candidates"]] == [exact.id]
 
 
 def test_trending_eval_ownership_rejects_sibling_model_name():

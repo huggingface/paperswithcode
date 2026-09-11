@@ -504,9 +504,10 @@ def test_canary_gate_excludes_durable_deferred_overflow():
     ]
 
 
-def test_scheduled_job_retry_uses_the_shared_durable_queue():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_scheduled_job_retry_uses_the_shared_durable_queue(trigger):
     job_id = uuid.uuid4()
-    row = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    row = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     serialized = {
         "id": str(uuid.uuid4()),
         "retry_of_id": str(job_id),
@@ -891,11 +892,12 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
     }
 
 
-def test_queued_operator_retry_is_prioritized_without_duplication():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_queued_operator_retry_is_prioritized_without_duplication(trigger):
     job_id = uuid.uuid4()
     row = SimpleNamespace(
         id=job_id,
-        trigger="hf-daily-cron",
+        trigger=trigger,
         status="queued",
         priority=100,
     )
@@ -1109,9 +1111,10 @@ def test_canary_dispatch_rejects_unsafe_selection_or_scheduler_state(
         ).dispatch_canary_job(row.id)
 
 
-def test_repeating_operator_retry_returns_active_child_attempt():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_repeating_operator_retry_returns_active_child_attempt(trigger):
     job_id = uuid.uuid4()
-    failed = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    failed = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     active = SimpleNamespace(id=uuid.uuid4(), status="running", priority=100)
 
     class Query:

@@ -194,7 +194,16 @@ def test_upsert_discards_source_that_changed_during_inference():
     assert len(statements) == 1
 
 
-def test_encode_documents_recovers_failed_capacity_allocation(monkeypatch):
+@pytest.mark.parametrize(
+    "provider_error",
+    [
+        "Hardware aws-us-east-1-nvidia-l4-x1 is out of availability. Please try again later.",
+        "Scheduling failure: unable to schedule",
+    ],
+)
+def test_encode_documents_recovers_failed_capacity_allocation(
+    monkeypatch, provider_error
+):
     from types import SimpleNamespace
     from backend.services import incremental_paper_embeddings as module
 
@@ -203,11 +212,7 @@ def test_encode_documents_recovers_failed_capacity_allocation(monkeypatch):
     class Endpoint:
         url = "https://endpoint.example"
         status = "failed"
-        raw = {
-            "status": {
-                "errorMessage": "Hardware aws-us-east-1-nvidia-l4-x1 is out of availability. Please try again later."
-            }
-        }
+        raw = {"status": {"errorMessage": provider_error}}
 
         def resume(self):
             recovered.append(self.url)

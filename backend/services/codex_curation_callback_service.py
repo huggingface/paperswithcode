@@ -217,7 +217,8 @@ class CodexCurationCallbackService:
     def _resolution_paper_candidates(
         self, candidate: TrendingModelCandidate
     ) -> list[Paper]:
-        return self._resolution_candidates(candidate)[0]
+        candidates, allowed_ids = self._resolution_candidates(candidate)
+        return [paper for paper in candidates if paper.id in allowed_ids]
 
     def _allowed_resolution_paper_ids(
         self, candidate: TrendingModelCandidate
