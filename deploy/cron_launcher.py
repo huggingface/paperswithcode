@@ -248,6 +248,12 @@ COMMANDS: dict[str, Job] = {
         timeout="30m",
         idempotency="replace managed Open ASR evaluation rows from validated live data",
     ),
+    "sync_open_tts": job(
+        "-m",
+        "scripts.hourly.sync_open_tts",
+        timeout="30m",
+        idempotency="replace managed Open TTS evaluation rows from validated live data",
+    ),
     "sync_mmteb_overall": job(
         "-m",
         "scripts.hourly.sync_mmteb",

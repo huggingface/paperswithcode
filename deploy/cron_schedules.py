@@ -148,6 +148,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync Open ASR leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_open_tts",
+        on_calendar=("*-*-* *:18:00",),
+        description="Sync Open TTS leaderboard hourly",
+    ),
+    TimerSpec(
         job="sync_mmteb_retrieval",
         on_calendar=("*-*-* *:22:00",),
         description="Sync MMTEB v2 retrieval leaderboard hourly",

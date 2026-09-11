@@ -6300,6 +6300,7 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_3d_arena"]["timeout"] == "30m"
     assert status["jobs"]["sync_tabarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_open_asr"]["timeout"] == "30m"
+    assert status["jobs"]["sync_open_tts"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_overall"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_retrieval"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_reranking"]["timeout"] == "30m"

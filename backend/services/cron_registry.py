@@ -551,6 +551,38 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_open_tts",
+        display_name="Sync Open TTS Leaderboard",
+        category="hourly",
+        schedule="18 * * * * (hourly)",
+        script_path="hourly/sync_open_tts.py",
+        log_name="sync_open_tts",
+        process_patterns=("scripts.hourly.sync_open_tts",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/sync_open_tts.lock",
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'open-tts-leaderboard'
+              AND e.best_metric = 'WER'
+              AND e.external_source_url =
+                  'https://huggingface.co/spaces/hf-audio/open_tts_leaderboard'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Open TTS live sync.%'
+        """,
+        workflow_file="cron-sync-open-tts.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_mmteb_overall",
         display_name="Sync MMTEB v2 Overall",
         category="hourly",
@@ -1544,6 +1576,7 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "sync_3d_arena": ((SchedulePolicy.fixed(60, offset_minutes=5),), 20),
     "sync_tabarena": ((SchedulePolicy.fixed(60, offset_minutes=55),), 20),
     "sync_open_asr": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
+    "sync_open_tts": ((SchedulePolicy.fixed(60, offset_minutes=18),), 20),
     "sync_mmteb_overall": ((SchedulePolicy.fixed(60, offset_minutes=7),), 20),
     "sync_mmteb_retrieval": ((SchedulePolicy.fixed(60, offset_minutes=22),), 20),
     "sync_mmteb_reranking": ((SchedulePolicy.fixed(60, offset_minutes=37),), 20),

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Open TTS leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:18:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-open-tts.service
+
+[Install]
+WantedBy=timers.target
