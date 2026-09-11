@@ -54,9 +54,12 @@ export class RemoteToolBridge {
       timeout_ms: timeoutMs,
     });
     for (const output of result.outputs ?? []) onData(Buffer.from(output.data, "utf8"));
+    if (!result.ok) {
+      throw new Error(`remote execution failed:${result.error ?? result.terminal?.error ?? "unknown"}`);
+    }
     if (!result.terminal) throw new Error("invalid remote execution result");
-    if (!result.ok || result.terminal.status === "failed") {
-      throw new Error(`remote execution failed:${result.error ?? result.terminal.error ?? "unknown"}`);
+    if (result.terminal.status === "failed") {
+      throw new Error(`remote execution failed:${result.terminal.error ?? result.error ?? "unknown"}`);
     }
     return { exitCode: result.terminal.exit_code };
   }

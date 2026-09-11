@@ -12,6 +12,7 @@ from backend.chat_sandbox_worker.contract import (
     CONTROL_PORT,
     MODAL_APP_NAME,
 )
+from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_SOCKET
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_PROTOCOL
 from backend.config import Settings
 from backend.services import chat_sandbox_provider, chat_sandbox_service
@@ -580,6 +581,32 @@ def test_health_checks_running_sandbox_and_expected_worker_probe(
         is True
     )
     assert calls == [expected_command, "wait"]
+
+
+def test_health_uses_executor_socket_probe_for_executor_sandbox():
+    calls: list[tuple[object, ...] | str] = []
+
+    async def execute(*command, **options):
+        calls.append(command)
+        assert options == {"timeout": 5}
+
+        async def wait():
+            calls.append("wait")
+
+        return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
+
+    sandbox = SimpleNamespace(exec=_AsyncCall(execute))
+    provider = ModalSandboxProviderAdapter(_settings())
+
+    assert asyncio.run(
+        provider.health(
+            sandbox,
+            persistent=True,
+            worker_generation="generation-a",
+            launch_mode=SandboxLaunchMode.EXECUTOR,
+        )
+    )
+    assert calls == [("test", "-S", str(EXECUTOR_SOCKET)), "wait"]
 
 
 def test_health_reports_failed_worker_probe():

@@ -427,9 +427,10 @@ A passing current gate requires the exact 32 observations; every user
 immediately admitted and durably terminal; one model start per turn; at most
 one executor start per operation identity; no queued state, refusal, typed
 failure, duplicate start, stale mutation, or lost terminal; reconnect successes
-equal reconnect attempts; p95 TTFT at most 10,000 ms; p99 completion at most
-60,000 ms; minimum host `MemAvailable` at least 1.5 GiB; and peak CPU below 80%.
-Reports also retain bounded peak RAM, Modal create/reuse/eviction,
+equal reconnect attempts; overall and per-workload p95 TTFT below 2,000 ms; p99
+completion at most 60,000 ms; minimum host `MemAvailable` at least 1.5 GiB; and
+peak CPU below 80%. Reports retain separate `no_tool`, `read`, and `bash` TTFT
+evidence alongside bounded peak RAM, Modal create/reuse/eviction,
 terminal-cause, and typed-failure counts. Protected qualification headers bind
 each admitted turn to an exact run/profile cohort. After profile teardown, the
 admin-only, content-free `/api/v1/chat/admin/qualification-evidence` endpoint

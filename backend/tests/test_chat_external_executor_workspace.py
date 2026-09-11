@@ -294,6 +294,30 @@ def test_first_bash_creates_executor_and_later_turn_reuses_exact_workspace():
         assert lease.workspace_snapshot_id is None
 
 
+def test_executor_workspace_reuse_uses_executor_launch_mode_health():
+    manager, _sessions, session_id, provider = setup_manager()
+    original_health = provider.health
+
+    async def mode_aware_health(sandbox, **options):
+        if options.get("launch_mode") is not SandboxLaunchMode.EXECUTOR:
+            return False
+        return await original_health(sandbox, **options)
+
+    provider.health = mode_aware_health
+
+    async def exercise():
+        first = await manager.acquire(session_id=session_id, turn_claim=TURN_CLAIM)
+        assert await manager.release(first)
+        second = await manager.acquire(session_id=session_id, turn_claim=TURN_CLAIM)
+        assert await manager.release(second)
+        return first, second
+
+    first, second = asyncio.run(exercise())
+
+    assert second.sandbox_id == first.sandbox_id
+    assert len(provider.create_options) == 1
+
+
 def test_concurrent_acquisition_waits_for_existing_busy_workspace():
     manager, _sessions, session_id, provider = setup_manager()
 

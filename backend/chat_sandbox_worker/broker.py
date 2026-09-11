@@ -60,6 +60,9 @@ HF_OPERATIONS = frozenset(
 )
 HF_MAX_RESPONSE_BYTES = 300 * 1024
 ARTIFACT_MAX_UPLOAD_BYTES = 32 * 1024 * 1024
+TURN_FENCE_KEYS = frozenset(
+    {"turn_worker_id", "turn_worker_generation", "turn_lease_generation"}
+)
 
 
 def _load_config() -> dict:
@@ -90,15 +93,20 @@ class BrokerState:
         self._inflight = 0
         self._last_activity = monotonic()
         if "capability" in initial:
-            self._active = {
-                key: str(initial[key])
-                for key in ("capability", "session_id", "turn_id")
-            }
+            keys = ("capability", "session_id", "turn_id") + tuple(
+                key for key in TURN_FENCE_KEYS if key in initial
+            )
+            self._active = {key: str(initial[key]) for key in keys}
 
     def install(self, payload: dict) -> None:
         required = {"capability", "session_id", "turn_id"}
-        if set(payload) != required or not all(
+        keys = set(payload)
+        if (keys != required and keys != required | TURN_FENCE_KEYS) or not all(
             isinstance(payload[key], str) and payload[key] for key in required
+        ):
+            raise RuntimeError("Invalid broker capability")
+        if TURN_FENCE_KEYS <= keys and not all(
+            isinstance(payload[key], str) and payload[key] for key in TURN_FENCE_KEYS
         ):
             raise RuntimeError("Invalid broker capability")
         with self._lock:
@@ -256,12 +264,21 @@ def _gateway_headers(
     *, active: dict[str, str] | None = None, content_type: str = "application/json"
 ) -> dict[str, str]:
     active = active or STATE.current()
-    return {
+    headers = {
         "Authorization": f"Bearer {active['capability']}",
         "X-PWC-Session": active["session_id"],
         "X-PWC-Turn": active["turn_id"],
         "Content-Type": content_type,
     }
+    if TURN_FENCE_KEYS <= active.keys():
+        headers.update(
+            {
+                "X-PWC-Turn-Worker-ID": active["turn_worker_id"],
+                "X-PWC-Turn-Worker-Generation": active["turn_worker_generation"],
+                "X-PWC-Turn-Lease-Generation": active["turn_lease_generation"],
+            }
+        )
+    return headers
 
 
 class Handler(BaseHTTPRequestHandler):

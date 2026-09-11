@@ -35,6 +35,10 @@ _READ_SCOPE_REASON = (
     "Read and Grep may only access /workspace or the approved CLI guides. "
     "Rerun the source command with output redirected to /workspace, then try again."
 )
+_INLINED_SKILL_REASON = (
+    "The pwc, s2, and restricted hf CLI skills are already included verbatim in "
+    "your system prompt. Read that text instead and run the CLI directly."
+)
 
 
 def _prefix(payload: bytes, maximum: int) -> bytes:
@@ -214,17 +218,20 @@ class ToolBudget:
         if name in {"Read", "Grep"}:
             path = args.get("file_path") or args.get("path")
             if isinstance(path, str):
-                candidate = Path(path)
+                candidate = Path(path).resolve(strict=False)
+                # These three skills are rendered into the system prompt, so a
+                # read is a wasted tool round rather than a scope violation.
+                if candidate in {
+                    guide.resolve(strict=False),
+                    hf_guide.resolve(strict=False),
+                    s2_guide.resolve(strict=False),
+                }:
+                    self.denied_calls += 1
+                    return Decision(False, _INLINED_SKILL_REASON)
                 if not (
-                    _inside(candidate, workspace)
-                    or candidate.resolve(strict=False)
-                    in {
-                        guide.resolve(strict=False),
-                        hf_guide.resolve(strict=False),
-                        s2_guide.resolve(strict=False),
-                        posterly_publish_guide.resolve(strict=False),
-                    }
-                    or _inside(candidate, posterly_root)
+                    _inside(Path(path), workspace)
+                    or candidate == posterly_publish_guide.resolve(strict=False)
+                    or _inside(Path(path), posterly_root)
                 ):
                     self.denied_calls += 1
                     return Decision(False, _READ_SCOPE_REASON)

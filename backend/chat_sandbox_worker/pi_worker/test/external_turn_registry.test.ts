@@ -22,6 +22,32 @@ class RecordingTransport implements ExternalTurnTransport {
   }
 }
 
+class ClosingTransport implements ExternalTurnTransport {
+  send(): void {
+    throw new Error("WebSocket is not open");
+  }
+}
+
+test("a synchronous close race detaches transport without failing the retained run", () => {
+  const run = new ExternalTurnRegistry().start(
+    "request-1", claim, new ClosingTransport(),
+  );
+
+  assert.doesNotThrow(() => run.append({ type: "answer_delta", text: "buffered" }));
+
+  const replay = new RecordingTransport();
+  assert.deepEqual(run.attach(replay, claim, 0), [{
+    type: "answer_delta",
+    text: "buffered",
+    worker_sequence: 1,
+  }]);
+  assert.deepEqual(replay.frames, [{
+    type: "answer_delta",
+    text: "buffered",
+    worker_sequence: 1,
+  }]);
+});
+
 test("registry replays only unacknowledged frames and fences attach identity", () => {
   const registry = new ExternalTurnRegistry();
   const first = new RecordingTransport();

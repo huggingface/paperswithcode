@@ -1,6 +1,7 @@
 """Contract, paper-indexing, and idempotency tests for Artificial Analysis."""
 
 import asyncio
+import pytest
 from dataclasses import replace
 from datetime import UTC, date, datetime
 from types import SimpleNamespace
@@ -378,3 +379,97 @@ def test_sync_adopts_existing_row_and_is_idempotent(monkeypatch):
     assert intelligence_row.is_open is True
     assert intelligence_row.source_url == source_url
     assert {row.task_id for row in session.query(PaperTask).all()} == {5, 14}
+
+
+def test_reviewed_model_can_have_no_agentic_score(monkeypatch):
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {"reviewed-model": aa.PaperIdentity(arxiv_id="2608.00001")},
+    )
+    monkeypatch.setattr(
+        aa,
+        "INDEXES",
+        tuple(
+            replace(index, min_expected_models=1, max_expected_models=10)
+            for index in aa.INDEXES
+        ),
+    )
+
+    class Client:
+        def get(self, *args, **kwargs):
+            return _Response(
+                {
+                    "intelligence_index_version": "4.1",
+                    "pagination": {"has_more": False, "total_pages": 1},
+                    "data": [
+                        _api_row("reviewed-model", agentic=None),
+                        _api_row("other-model"),
+                    ],
+                }
+            )
+
+    result = aa.fetch_artificial_analysis_leaderboard(api_key="secret", client=Client())
+    assert result.entries[0].scores == {"intelligence": 42.5}
+
+
+def test_sync_reviewed_model_without_optional_agentic_score(monkeypatch):
+    session = _session()
+    paper = Paper(
+        id=7,
+        title="Reviewed Model",
+        arxiv_id="2608.00001",
+        source="arxiv",
+        version="v1",
+        is_latest_version=True,
+    )
+    session.add(paper)
+    session.commit()
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {"reviewed-model": aa.PaperIdentity(arxiv_id="2608.00001")},
+    )
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "reviewed-model",
+                "Reviewed Model",
+                {"intelligence": 42.5},
+                date(2026, 8, 1),
+            )
+        ],
+    )
+    result = aa.ArtificialAnalysisSyncService(session).sync(
+        leaderboard,
+        discovery=aa.ArtificialAnalysisDiscovery(papers={"reviewed-model": 7}),
+    )
+    assert result.indexes["intelligence"].created == 1
+    assert result.indexes["agentic"].selected == 0
+    assert session.query(Evaluation).one().metrics == {aa.METRIC_NAME: 42.5}
+
+
+def test_sync_rejects_scored_reviewed_model_without_discovered_paper(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {"reviewed-model": aa.PaperIdentity(arxiv_id="2608.00001")},
+    )
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "reviewed-model",
+                "Reviewed Model",
+                {"intelligence": 42.5},
+                date(2026, 8, 1),
+            )
+        ],
+    )
+    with pytest.raises(ValueError, match="incomplete reviewed model set"):
+        aa.ArtificialAnalysisSyncService(session).sync(
+            leaderboard, discovery=aa.ArtificialAnalysisDiscovery(papers={})
+        )
+    assert session.query(Evaluation).count() == 0

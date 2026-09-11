@@ -497,9 +497,11 @@ def test_baseline_and_provider_state_store_only_content_free_fields(db):
         reason_code="qualified_fallback",
         now=NOW,
     )
+    observed = repository.get_chat_provider_state(db, environment="staging")
 
     assert baseline.sha == "1" * 40
     assert provider.active_provider == "huggingface"
+    assert observed is provider
     assert not hasattr(baseline, "content")
     assert set(provider.__table__.columns.keys()) == {
         "environment",

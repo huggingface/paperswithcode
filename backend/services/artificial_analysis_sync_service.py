@@ -405,18 +405,17 @@ def fetch_artificial_analysis_leaderboard(
     slugs = [entry.slug for entry in all_entries]
     if len(slugs) != len(set(slugs)):
         raise ValueError("Artificial Analysis response contains duplicate model slugs")
+    missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(slugs))
+    if missing:
+        raise ValueError(
+            "Artificial Analysis is missing reviewed models: " + ",".join(missing)
+        )
     for index in INDEXES:
         scored = [entry.slug for entry in all_entries if index.key in entry.scores]
         if not index.min_expected_models <= len(scored) <= index.max_expected_models:
             raise ValueError(
                 f"Artificial Analysis {index.label} returned {len(scored)} scored "
                 f"models; expected {index.min_expected_models}-{index.max_expected_models}"
-            )
-        missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(scored))
-        if missing:
-            raise ValueError(
-                f"Artificial Analysis {index.label} is missing reviewed models: "
-                f"{','.join(missing)}"
             )
     return ArtificialAnalysisLeaderboard(version or "unknown", all_entries)
 
@@ -548,7 +547,15 @@ class ArtificialAnalysisSyncService:
             for entry in leaderboard.entries
             if entry.slug in discovery.papers and index.key in entry.scores
         ]
-        if not set(MODEL_PAPER_IDENTITIES).issubset({entry.slug for entry in selected}):
+        reviewed = set(MODEL_PAPER_IDENTITIES)
+        scored_reviewed = {
+            entry.slug
+            for entry in leaderboard.entries
+            if entry.slug in reviewed and index.key in entry.scores
+        }
+        if not reviewed.issubset(
+            {entry.slug for entry in leaderboard.entries}
+        ) or not scored_reviewed.issubset({entry.slug for entry in selected}):
             raise ValueError(
                 f"Refusing to synchronize an incomplete reviewed model set for "
                 f"{index.label}"

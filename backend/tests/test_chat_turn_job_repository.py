@@ -285,6 +285,35 @@ def test_preflight_rejects_identity_contention_and_exact_capacity_without_writes
     assert db.query(ChatTurnJob).count() == before
 
 
+def test_external_capacity_preflight_defers_only_the_global_capacity_lock(db):
+    lock_order = []
+    repository = ChatTurnJobRepository(
+        advisory_locker=lambda _db, key: lock_order.append(key)
+    )
+    occupied = _session(db, owner="occupied-owner")
+    candidate = _session(db, owner="candidate-owner")
+    _admit(repository, db, occupied, request_id="occupied-request", capacity=1)
+    lock_order.clear()
+
+    preflight = repository.preflight_admission(
+        db,
+        hf_user_id=candidate.hf_user_id,
+        request_id="candidate-request",
+        chat_session_id=candidate.id,
+        emergency_capacity=1,
+        defer_global_capacity=True,
+    )
+
+    assert preflight.global_capacity_authorized is False
+    assert lock_order == ["chat-user:candidate-owner"]
+    with pytest.raises(ChatOverload):
+        repository.authorize_global_capacity(db, preflight)
+    assert lock_order == [
+        "chat-user:candidate-owner",
+        "chat-global-active-turns",
+    ]
+
+
 @pytest.mark.parametrize(
     ("field", "different"),
     [

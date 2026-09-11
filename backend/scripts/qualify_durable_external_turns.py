@@ -343,9 +343,11 @@ def run_durable_qualification(
                 raise QualificationRefused("cleanup_failed")
             if primary_error is not None:
                 raise primary_error
-            if report.profile != profile.name or not report.passed:
+            if report.profile != profile.name:
                 raise QualificationRefused("durable_profile_failed")
             reports.append(report)
+            if not report.passed:
+                raise QualificationRefused("durable_profile_failed")
         else:
             status = "completed"
             reason = None

@@ -110,6 +110,7 @@ class CronJobDefinition:
         Literal[
             "paper_markdown_monitor",
             "chat_monitor",
+            "chat_synthetic",
             "submission_review",
             "autonomous_cron",
         ]
@@ -546,6 +547,42 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                   'Managed by the Papers with Code Open ASR live sync.%'
         """,
         workflow_file="cron-sync-open-asr.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
+        id="sync_open_tts",
+        display_name="Sync Open TTS Leaderboards",
+        category="hourly",
+        schedule="18 * * * * (hourly)",
+        script_path="hourly/sync_open_tts.py",
+        log_name="sync_open_tts",
+        process_patterns=("scripts.hourly.sync_open_tts",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/sync_open_tts.lock",
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations,
+                   count(DISTINCT d.slug) AS matched_benchmarks
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug IN (
+                'open-tts-leaderboard',
+                'open-tts-leaderboard-all-languages'
+            )
+              AND e.best_metric = 'WER'
+              AND e.external_source_url =
+                  'https://huggingface.co/spaces/hf-audio/open_tts_leaderboard'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Open TTS live sync.%'
+        """,
+        workflow_file="cron-sync-open-tts.yml",
         workflow_jobs=("run",),
         dashboard_group="leaderboard_sync",
     ),
@@ -1462,6 +1499,27 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         work_metrics_provider="chat_monitor",
     ),
     CronJobDefinition(
+        id="run_chat_synthetic_probe",
+        display_name="Chat Synthetic Reliability Probe",
+        category="systemd",
+        schedule="every minute with an internal four-hour gate (systemd)",
+        script_path="backend/scripts/run_chat_synthetic_probe.py",
+        log_name="run_chat_synthetic_probe",
+        process_patterns=("run_chat_synthetic_probe",),
+        lock_file=None,
+        expected_runtime_minutes=6,
+        stale_after_minutes=10,
+        critical=False,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-cron-run-chat-synthetic-probe.timer",
+        systemd_service="pwc-cron-run-chat-synthetic-probe.service",
+        output_evaluator="chat_alert_monitor",
+        work_metrics_provider="chat_synthetic",
+    ),
+    CronJobDefinition(
         id="process_curation_thumbnails",
         display_name="Curation Thumbnail Queue",
         category="systemd",
@@ -1522,6 +1580,7 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "sync_3d_arena": ((SchedulePolicy.fixed(60, offset_minutes=5),), 20),
     "sync_tabarena": ((SchedulePolicy.fixed(60, offset_minutes=55),), 20),
     "sync_open_asr": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
+    "sync_open_tts": ((SchedulePolicy.fixed(60, offset_minutes=18),), 20),
     "sync_mmteb_overall": ((SchedulePolicy.fixed(60, offset_minutes=7),), 20),
     "sync_mmteb_retrieval": ((SchedulePolicy.fixed(60, offset_minutes=22),), 20),
     "sync_mmteb_reranking": ((SchedulePolicy.fixed(60, offset_minutes=37),), 20),

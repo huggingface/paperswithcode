@@ -192,3 +192,96 @@ def test_upsert_discards_source_that_changed_during_inference():
     )
     assert (embedded, stale) == (0, 1)
     assert len(statements) == 1
+
+
+def test_encode_documents_recovers_failed_capacity_allocation(monkeypatch):
+    from types import SimpleNamespace
+    from backend.services import incremental_paper_embeddings as module
+
+    recovered = []
+
+    class Endpoint:
+        url = "https://endpoint.example"
+        status = "failed"
+        raw = {
+            "status": {
+                "errorMessage": "Hardware aws-us-east-1-nvidia-l4-x1 is out of availability. Please try again later."
+            }
+        }
+
+        def resume(self):
+            recovered.append(self.url)
+            return self
+
+        def wait(self, **kwargs):
+            self.status = "running"
+            return self
+
+    endpoint = Endpoint()
+    monkeypatch.setattr(
+        module,
+        "HfApi",
+        lambda **kwargs: SimpleNamespace(
+            list_inference_endpoints=lambda **kwargs: [endpoint]
+        ),
+        raising=False,
+    )
+
+    def handler(request):
+        if not recovered:
+            return httpx.Response(
+                400,
+                json={
+                    "error": "Bad Request: Your endpoint is in error, check its status on endpoints.huggingface.co"
+                },
+            )
+        return httpx.Response(200, json=[[1.0, 0.0]])
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        assert encode_documents(
+            client,
+            endpoint_url=endpoint.url + "/embed",
+            token="secret",
+            texts=["document"],
+            dimensions=2,
+        ) == [[1.0, 0.0]]
+    assert recovered == [endpoint.url]
+
+
+def test_encode_documents_does_not_recover_bad_input():
+    def handler(request):
+        return httpx.Response(400, json={"error": "input exceeds maximum token length"})
+
+    with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+        with pytest.raises(httpx.HTTPStatusError):
+            encode_documents(
+                client,
+                endpoint_url="https://endpoint.example/embed",
+                token="secret",
+                texts=["document"],
+                dimensions=2,
+            )
+
+
+def test_capacity_recovery_never_resumes_an_unrelated_endpoint(monkeypatch):
+    from types import SimpleNamespace
+    from backend.services import incremental_paper_embeddings as module
+
+    class Endpoint:
+        url = "https://another-endpoint.example"
+        status = "failed"
+        raw = {"status": {"errorMessage": "Hardware is out of availability"}}
+
+        def resume(self):
+            raise AssertionError("unrelated endpoint must not be resumed")
+
+    monkeypatch.setattr(
+        module,
+        "HfApi",
+        lambda **kwargs: SimpleNamespace(
+            list_inference_endpoints=lambda **kwargs: [Endpoint()]
+        ),
+    )
+    assert not module._recover_capacity_failure(
+        "https://endpoint.example/embed", "secret"
+    )

@@ -1,4 +1,5 @@
 import asyncio
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 import json
 import threading
@@ -154,12 +155,17 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
     turn_id = uuid.uuid4()
     session_id = uuid.uuid4()
     owner = SimpleNamespace(
-        admission=SimpleNamespace(turn_id=turn_id, session_id=session_id),
+        admission=SimpleNamespace(
+            turn_id=turn_id,
+            session_id=session_id,
+            durable_claim=TurnLeaseClaim(turn_id, "production-green-00", 4, 9),
+        ),
         capability=SimpleNamespace(token="capability"),
         executor=Executor(),
         record_evidence=lambda **values: events.append(values) or True,
         active_context=None,
     )
+    owner._durable_turn_claim = lambda: owner.admission.durable_claim
     workspace = SimpleNamespace(
         sandbox=object(),
         workspace_generation=1,
@@ -177,6 +183,9 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
 
     assert events == ["workspace_ack"]
     assert contexts[0].tool_call_id == "operation-a"
+    assert contexts[0].turn_worker_id == "production-green-00"
+    assert contexts[0].turn_worker_generation == "4"
+    assert contexts[0].turn_lease_generation == "9"
 
 
 def test_executor_start_evidence_follows_successful_executor_operation():
@@ -403,11 +412,13 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
     socket = FakeSocket(
         [
             '{"type":"worker_ready","worker_sequence":1}',
+            '{"type":"tool_call_start","id":"tool-1","name":"Read",'
+            '"content_index":0,"worker_sequence":2}',
             '{"type":"tool_request","operation_id":"operation-1","tool_call_id":"tool-1",'
-            '"operation":"read","path":"/opt/pwc/PWC_CLI_SKILL.md","offset":0,"max_bytes":1024,"worker_sequence":2}',
-            '{"type":"workspace_ready","worker_sequence":3}',
-            '{"type":"done","finish_reason":"success","followups":[],"worker_sequence":4}',
-            '{"type":"worker_done","status":"complete","worker_sequence":5}',
+            '"operation":"read","path":"/opt/pwc/PWC_CLI_SKILL.md","offset":0,"max_bytes":1024,"worker_sequence":3}',
+            '{"type":"workspace_ready","worker_sequence":4}',
+            '{"type":"done","finish_reason":"success","followups":[],"worker_sequence":5}',
+            '{"type":"worker_done","status":"complete","worker_sequence":6}',
         ]
     )
     turn_id = uuid.uuid4()
@@ -453,13 +464,21 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
     )
 
     async def exercise():
-        events = [event async for event in runner.events()]
+        stream = runner.events()
+        first = await anext(stream)
+        acquired_before_first_event = list(workspace_manager.acquired)
+        events = [first, *[event async for event in stream]]
         await runner.close()
-        return events
+        return events, acquired_before_first_event
 
-    events = asyncio.run(exercise())
+    events, acquired_before_first_event = asyncio.run(exercise())
 
-    assert [event["type"] for event in events] == ["workspace_ready", "done"]
+    assert [event["type"] for event in events] == [
+        "tool_call_start",
+        "workspace_ready",
+        "done",
+    ]
+    assert acquired_before_first_event == []
     assert provider.created == []
     assert provider.terminated == []
     assert workspace_manager.acquired == [
@@ -608,7 +627,7 @@ def test_external_pi_runner_cancels_and_aborts_turn_on_execution_lost():
     assert executor.exec_calls == 1
     assert len(executor.cancelled_contexts) == 1
     assert executor.cancelled_contexts[0].execution_id == "operation-1"
-    assert executor.cancelled_contexts[0].tool_call_id == "tool-1"
+    assert executor.cancelled_contexts[0].tool_call_id == "operation-1"
     assert cancellation_order == ["executor", "pi"]
     assert len(workspace_manager.released) == 1
     assert workspace_manager.invalidated == []
@@ -1173,6 +1192,162 @@ def test_external_pi_runner_uses_the_exact_durable_reserved_endpoint():
     assert [event["event_type"] for event in stale_events] == ["stale_fence"]
 
 
+def test_external_pi_runner_keeps_reserved_endpoint_database_checks_off_event_loop():
+    settings = get_settings().model_copy(
+        deep=True,
+        update={
+            "environment": "staging",
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "green",
+                    "worker_id": "external-pi-green",
+                    "base_url": "http://127.0.0.1:18102",
+                    "token": "g" * 32,
+                }
+            ],
+        },
+    )
+    turn_id = uuid.uuid4()
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="test",
+        model_route=settings.chat_deepseek_v4_flash_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        reasoning_effort="low",
+        durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
+    )
+    endpoint = ExternalWorkerEndpoint(
+        endpoint_id="green",
+        worker_id="external-pi-green",
+        base_url="http://127.0.0.1:18102",
+        token="g" * 32,
+    )
+    claim = ExternalWorkerClaim(
+        endpoint.worker_id, uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+    database_threads = []
+
+    class Capacity:
+        def require_turn(self, _db, *, turn_id, endpoints, now):
+            database_threads.append(threading.get_ident())
+            return ExternalWorkerReservation("request-1", turn_id, endpoint, claim, 8)
+
+    class Repository(FakeWorkerRepository):
+        def require_live_claim(self, db, *, claim, now):
+            database_threads.append(threading.get_ident())
+            super().require_live_claim(db, claim=claim, now=now)
+
+    runner = ExternalPiChatTurnRunner(
+        settings=settings,
+        admission=admission,
+        prompt="answer",
+        request_id="request-1",
+        resume_id=None,
+        capability=IssuedCapability(
+            token="opaque-capability",
+            capability_id=None,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        ),
+        hf_username="qualification",
+        worker_repository=Repository(claim),
+        worker_capacity_repository=Capacity(),
+        worker_status_resolver=lambda: _async_value(worker_status(claim)),
+        session_factory=SessionContext,
+    )
+
+    async def select():
+        event_loop_thread = threading.get_ident()
+        selected = await runner._select_worker_claim()
+        return event_loop_thread, selected
+
+    event_loop_thread, selected = asyncio.run(select())
+
+    assert selected == claim
+    assert len(database_threads) == 2
+    assert all(thread != event_loop_thread for thread in database_threads)
+
+
+def test_external_pi_runner_uses_admission_reservation_without_requerying():
+    settings = get_settings().model_copy(
+        deep=True,
+        update={
+            "environment": "staging",
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "green",
+                    "worker_id": "external-pi-green",
+                    "base_url": "http://127.0.0.1:18102",
+                    "token": "g" * 32,
+                }
+            ],
+        },
+    )
+    turn_id = uuid.uuid4()
+    endpoint = ExternalWorkerEndpoint(
+        endpoint_id="green",
+        worker_id="external-pi-green",
+        base_url="http://127.0.0.1:18102",
+        token="g" * 32,
+    )
+    claim = ExternalWorkerClaim(
+        endpoint.worker_id, uuid.uuid4(), 7, "release-a", "external-pi-v1"
+    )
+    reservation = ExternalWorkerReservation(
+        "client-message-1", turn_id, endpoint, claim, 2
+    )
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="test",
+        model_route=settings.chat_deepseek_v4_flash_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        reasoning_effort="low",
+        durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
+        external_worker_reservation=reservation,
+    )
+    socket = FakeSocket(
+        ['{"type":"worker_done","status":"complete","worker_sequence":1}']
+    )
+    connection = {}
+
+    def connect(url, **kwargs):
+        connection.update(url=url, kwargs=kwargs)
+        return SocketContext(socket)
+
+    runner = ExternalPiChatTurnRunner(
+        settings=settings,
+        admission=admission,
+        prompt="answer",
+        request_id="request-1",
+        resume_id=None,
+        capability=IssuedCapability(
+            token="opaque-capability",
+            capability_id=None,
+            expires_at=datetime.now(UTC) + timedelta(minutes=1),
+        ),
+        hf_username="qualification",
+        websocket_connector=connect,
+        worker_status_resolver=lambda: pytest.fail("status was reloaded"),
+        session_factory=lambda: pytest.fail("reservation was reloaded"),
+    )
+
+    assert asyncio.run(_collect(runner)) == []
+    assert connection["url"] == "ws://127.0.0.1:18102/v1/turn"
+    assert connection["kwargs"]["additional_headers"] == {
+        "Authorization": f"Bearer {'g' * 32}",
+        "X-PWC-Worker-Generation": "7",
+    }
+
+
 def test_external_pi_runner_rejects_worker_becoming_full_before_connect():
     class FullWorkerRepository(FakeWorkerRepository):
         def require_ready_claim(self, db, *, claim, now):
@@ -1302,6 +1477,39 @@ def test_external_run_frame_omits_absent_paper_descriptor():
 
     assert runner.admission.paper_descriptor is None
     assert "paper_descriptor" not in runner._run_frame()
+
+
+@pytest.mark.parametrize(
+    ("worker_enabled", "host_enabled", "expected"),
+    [
+        (False, False, False),
+        (False, True, False),
+        (True, False, False),
+        (True, True, True),
+    ],
+)
+def test_external_run_frame_carries_excalidraw_capability(
+    worker_enabled, host_enabled, expected
+):
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    runner.settings.chat_excalidraw_enabled = worker_enabled
+    runner.settings.chat_mcp_apps_host_enabled = host_enabled
+
+    assert runner._run_frame()["excalidraw_enabled"] is expected
+
+
+def test_external_new_turn_frame_carries_prebound_pi_session():
+    runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+    agent_session_id = uuid.uuid4()
+    runner.admission = replace(
+        runner.admission,
+        sdk_session_id=agent_session_id,
+        is_first_turn=True,
+    )
+    runner.resume_id = agent_session_id
+
+    assert runner._run_frame()["agent_session_id"] == str(agent_session_id)
+    assert runner._run_frame()["resume"] is None
 
 
 def test_external_run_frame_preserves_exact_durable_turn_fence_as_strings():

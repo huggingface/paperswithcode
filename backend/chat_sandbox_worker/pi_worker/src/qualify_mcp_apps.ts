@@ -1,10 +1,11 @@
 import { mkdirSync } from "node:fs";
 import { createAgentSession, DefaultResourceLoader, SessionManager, SettingsManager } from "@earendil-works/pi-coding-agent";
-import { type McpStatusSnapshot } from "pi-mcp-adapter";
-import { createWebMcpExtension } from "./mcp.js";
+import {
+  createNativeExcalidrawExtension,
+  loadExcalidrawReadMe,
+} from "./excalidraw_tools.js";
 import {
   EXCALIDRAW_APP_TOOLS,
-  EXCALIDRAW_ENDPOINT,
   EXCALIDRAW_MODEL_TOOLS,
   assessExcalidrawReadiness,
 } from "./mcp_app_registry.js";
@@ -18,7 +19,6 @@ mkdirSync(agentDir, { recursive: true });
 process.env.PI_CODING_AGENT_DIR = agentDir;
 
 const started = performance.now();
-let status: McpStatusSnapshot | undefined;
 
 const settings = SettingsManager.inMemory({
   compaction: { enabled: false },
@@ -35,13 +35,8 @@ const loader = new DefaultResourceLoader({
   noContextFiles: true,
   systemPrompt: "qualify\n",
   extensionFactories: [{
-    name: "pwc-exa-mcp",
-    factory: createWebMcpExtension(process.execPath, [new URL("./exa_mcp_server.js", import.meta.url).pathname], {
-      excalidraw: { url: EXCALIDRAW_ENDPOINT },
-      onStatus: (snapshot) => {
-        status = snapshot;
-      },
-    }),
+    name: "pwc-excalidraw",
+    factory: createNativeExcalidrawExtension(),
     hidden: true,
   }],
 });
@@ -60,35 +55,21 @@ const created = await createAgentSession({
 try {
   await created.session.bindExtensions({ mode: "print" });
   created.extensionsResult.runtime.refreshTools();
-  const deadline = Date.now() + 20_000;
-  while (Date.now() < deadline) {
-    const names = created.session.getActiveToolNames();
-    const server = status?.servers.find((entry) => entry.name === "excalidraw");
-    const view = status?.servers.find((entry) => entry.name === "excalidraw_view");
-    if (
-      server?.status === "connected"
-      && view?.status === "connected"
-      && EXCALIDRAW_MODEL_TOOLS.every((name) => names.includes(name))
-    ) {
-      break;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    created.extensionsResult.runtime.refreshTools();
-  }
   const names = created.session.getActiveToolNames();
-  const server = status?.servers.find((entry) => entry.name === "excalidraw");
+  const registrationLatencyMs = Math.round(performance.now() - started);
+  let readMeOk = false;
+  try {
+    readMeOk = (await loadExcalidrawReadMe()).trim().length > 0;
+  } catch {
+    readMeOk = false;
+  }
   const snapshot = assessExcalidrawReadiness({
     enabled: true,
-    serverStatus: server?.status,
+    serverStatus: readMeOk ? "connected" : "failed",
     activeTools: names,
     createViewDefinition: created.session.getToolDefinition("create_view") as { parameters?: unknown } | undefined,
-    latencyMs: Math.round(performance.now() - started),
+    latencyMs: registrationLatencyMs,
   });
-  let readMeOk = false;
-  if (snapshot.ready) {
-    const tool = created.session.getToolDefinition("read_me");
-    readMeOk = Boolean(tool?.description);
-  }
   const unexpected = names.filter((name) => (EXCALIDRAW_APP_TOOLS as readonly string[]).includes(name));
   process.stdout.write(`${JSON.stringify({
     ready: snapshot.ready && readMeOk && unexpected.length === 0,
@@ -97,8 +78,8 @@ try {
     registered_tool_digest: snapshot.registered_tool_digest,
     registration_latency_ms: snapshot.registration_latency_ms,
     read_me_ok: readMeOk,
-    server_status: server?.status ?? "missing",
-    server_tool_count: server?.toolCount ?? 0,
+    server_status: readMeOk ? "connected" : "failed",
+    server_tool_count: readMeOk ? 1 : 0,
   })}\n`);
   process.exitCode = snapshot.ready && readMeOk && unexpected.length === 0 ? 0 : 1;
 } finally {

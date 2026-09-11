@@ -348,6 +348,16 @@ def test_chat_alert_timer_uses_only_the_allowlisted_cron_interface():
     assert "WantedBy=timers.target" in timer
 
 
+def test_chat_synthetic_timer_uses_the_bounded_allowlisted_job():
+    systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd" / "cron"
+    service = (systemd / "pwc-cron-run-chat-synthetic-probe.service").read_text()
+    timer = (systemd / "pwc-cron-run-chat-synthetic-probe.timer").read_text()
+
+    assert "pwc-cron-throttled run_chat_synthetic_probe" in service
+    assert "OnCalendar=*-*-* *:*:00" in timer
+    assert "Persistent=true" in timer
+
+
 def test_production_sha_resolves_from_bare_main_ref(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):
@@ -702,32 +712,34 @@ def test_staging_launcher_disables_only_posterly_artifact_generation(
         assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
 
 
-@pytest.mark.parametrize(
-    ("slot", "worker_id", "url"),
-    (
-        ("blue", "staging-blue", "http://127.0.0.1:8766"),
-        ("green", "staging-green", "http://127.0.0.1:8767"),
-    ),
-)
-def test_staging_slot_launcher_binds_external_pi_loopback_identity(
-    monkeypatch: pytest.MonkeyPatch, slot: str, worker_id: str, url: str
+@pytest.mark.parametrize("slot", ("blue", "green"))
+def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
+    monkeypatch: pytest.MonkeyPatch, slot: str
 ):
     for key in (
         "PWC_CHAT_EXTERNAL_PI_WORKER_ID",
         "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
         "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
 
     slot_launcher.configure_external_pi_slot("staging", slot)
 
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == worker_id
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == url
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert len(endpoints) == 8
+    assert [item["worker_id"] for item in endpoints] == [
+        f"staging-{slot}-{index:02d}" for index in range(8)
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_slot_launcher_binds_isolated_external_pi_worker(
@@ -738,16 +750,30 @@ def test_production_slot_launcher_binds_isolated_external_pi_worker(
         "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
         "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
     slot_launcher.configure_external_pi_slot("production", "blue")
 
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == "production-blue"
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == "http://127.0.0.1:8776"
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert [item["base_url"] for item in endpoints] == [
+        "http://127.0.0.1:8830",
+        "http://127.0.0.1:8831",
+        "http://127.0.0.1:8832",
+        "http://127.0.0.1:8833",
+        "http://127.0.0.1:8846",
+        "http://127.0.0.1:8847",
+        "http://127.0.0.1:8848",
+        "http://127.0.0.1:8849",
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):
@@ -2421,7 +2447,7 @@ def test_chat_descriptor_is_extracted_from_selected_source():
     assert dormant["system_prompt_sha256"] == descriptor["system_prompt_sha256"]
     production = _chat_descriptor_from_source(source, "production", chat_enabled=True)
     assert production["modal_image_version"] == PRODUCTION_MODAL_IMAGE_ID
-    assert production["worker_contract_version"] == "102"
+    assert production["worker_contract_version"] == "104"
     assert production["enabled"] is True
     assert production["database_contract_version"] == 2
     assert production["default_agent_harness"] == "pi"
@@ -2639,6 +2665,33 @@ def test_production_chat_activation_requires_enabled_operational_monitor(
     (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=false\n")
     require_production_chat_monitor("production")
     assert observed == []
+
+
+def test_production_chat_activation_requires_enabled_synthetic_probe_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(deploy_cli, "CONFIG_ROOT", tmp_path)
+    (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=true\n")
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return SimpleNamespace(returncode=0 if len(observed) == 1 else 1)
+
+    monkeypatch.setattr(deploy_cli.subprocess, "run", fake_run)
+
+    with pytest.raises(deploy_cli.DeployError, match="synthetic chat probe"):
+        require_production_chat_monitor("production")
+
+    assert observed == [
+        ["systemctl", "is-enabled", "--quiet", "pwc-chat-alert-monitor.timer"],
+        [
+            "systemctl",
+            "is-enabled",
+            "--quiet",
+            "pwc-cron-run-chat-synthetic-probe.timer",
+        ],
+    ]
 
 
 def test_production_chat_activation_requires_protected_environment_switch(
@@ -6134,6 +6187,8 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
 def test_cron_jobs_declare_bounded_execution_contracts():
     assert cron_launcher.COMMANDS
+    assert cron_launcher.COMMANDS["monitor_chat_operational_alerts"].timeout == "1m"
+    assert cron_launcher.COMMANDS["run_chat_synthetic_probe"].timeout == "6m"
     read_only_jobs = {
         "alert_submission_review_failure",
         "export_enrichment_dashboard",
@@ -6141,10 +6196,28 @@ def test_cron_jobs_declare_bounded_execution_contracts():
     }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command
-        assert spec.timeout in {"1m", "30m", "45m", "50m", "2h", "6h"}
+        assert spec.timeout in {"1m", "6m", "30m", "45m", "50m", "2h", "6h"}
         assert spec.mutates_shared_data is (name not in read_only_jobs)
         assert spec.idempotency
         assert spec.health_job
+
+
+def test_cron_python_uses_active_release_immutable_runtime(tmp_path: Path, monkeypatch):
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "uv.lock").write_text("locked dependencies\n")
+    runtimes = tmp_path / "runtimes"
+    validated = []
+    monkeypatch.setattr(
+        cron_launcher,
+        "runtime_manifest",
+        lambda runtime: validated.append(runtime),
+    )
+
+    python = cron_launcher.cron_python(current, runtimes)
+
+    assert python == runtimes / cron_launcher.runtime_id(current) / "bin" / "python"
+    assert validated == [python.parent.parent]
 
 
 @pytest.mark.parametrize(
@@ -6227,6 +6300,7 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_3d_arena"]["timeout"] == "30m"
     assert status["jobs"]["sync_tabarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_open_asr"]["timeout"] == "30m"
+    assert status["jobs"]["sync_open_tts"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_overall"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_retrieval"]["timeout"] == "30m"
     assert status["jobs"]["sync_mmteb_reranking"]["timeout"] == "30m"

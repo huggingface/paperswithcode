@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { randomUUID } from "node:crypto";
 import { mkdir } from "node:fs/promises";
 import path from "node:path";
 import {
@@ -9,11 +9,10 @@ import {
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
-import { type McpStatusSnapshot } from "pi-mcp-adapter";
+import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
 import { createWebMcpExtension } from "./mcp.js";
 import {
   EXCALIDRAW_MODEL_TOOLS,
-  EXCALIDRAW_READINESS_TIMEOUT_MS,
   assessExcalidrawReadiness,
   excalidrawEnabled,
   isExcalidrawModelTool,
@@ -24,7 +23,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
-import { fetchLiveTaskCatalog, loadPromptAsset, renderPrompt } from "./prompt.js";
+import { loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
 import { shouldResetSession } from "./session.js";
@@ -36,6 +35,7 @@ export interface RunTurn {
   model: string;
   provider_protocol?: ProviderProtocol;
   resume: string | null;
+  agent_session_id?: string;
   web_search_enabled: boolean;
   reader_mode: boolean;
   poster_mode: boolean;
@@ -99,35 +99,40 @@ export class PiWorker {
   private prewarmedProtocol: ProviderProtocol | undefined;
   private policyExtension: ReturnType<typeof pwcExtension> | undefined;
   private webMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
-  private mcpStatus: McpStatusSnapshot | undefined;
+  private noWebMcpExtension: ReturnType<typeof createWebMcpExtension> | undefined;
   private mcpReadiness: McpReadinessSnapshot | undefined;
   private activeProfile: string | undefined;
   private failurePhase: TurnFailurePhase = "initialize";
-  private readonly policy = new PolicyController({
-    maximumCalls: Number(process.env.PWC_CHAT_MAX_TOOL_CALLS ?? 12),
-    maximumRounds: Number(process.env.PWC_CHAT_MAX_TURNS ?? 8) - 2,
-    maximumDirectSearches: Number(process.env.PWC_CHAT_MAX_DIRECT_SEARCH_CALLS ?? 4),
-    maximumWebSearches: Number(process.env.PWC_CHAT_MAX_WEB_SEARCH_CALLS ?? 3),
-    maximumResultBytes: Number(process.env.PWC_CHAT_TOOL_RESULT_MAX_BYTES ?? 24576),
-    maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
-    bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
-    excalidrawEnabled: excalidrawEnabled(),
-    posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
-    posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
-    posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
-    posterlyMaximumTurnOutputBytes: Number(process.env.PWC_CHAT_POSTERLY_TURN_TOOL_OUTPUT_MAX_BYTES ?? 1048576),
-    posterlyTimeoutSeconds: Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600),
-    paperMaximumCalls: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_CALLS ?? 30),
-    paperMaximumRounds: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_ROUNDS ?? 12),
-    paperMaximumDirectSearches: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_DIRECT_SEARCH_CALLS ?? 8),
-    paperTimeoutSeconds: Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600),
-  });
+  private readonly policy: PolicyController;
+  private readonly excalidrawAvailable: boolean;
 
   constructor(
     private readonly emit: (requestId: string, event: PwCEvent) => void,
     private readonly gateway?: GatewayContext,
     private readonly remoteTools?: RemoteToolBridge,
-  ) {}
+    features: { excalidrawAvailable?: boolean } = {},
+  ) {
+    this.excalidrawAvailable = features.excalidrawAvailable ?? excalidrawEnabled();
+    this.policy = new PolicyController({
+      maximumCalls: Number(process.env.PWC_CHAT_MAX_TOOL_CALLS ?? 12),
+      maximumRounds: Number(process.env.PWC_CHAT_MAX_TURNS ?? 8) - 2,
+      maximumDirectSearches: Number(process.env.PWC_CHAT_MAX_DIRECT_SEARCH_CALLS ?? 4),
+      maximumWebSearches: Number(process.env.PWC_CHAT_MAX_WEB_SEARCH_CALLS ?? 3),
+      maximumResultBytes: Number(process.env.PWC_CHAT_TOOL_RESULT_MAX_BYTES ?? 24576),
+      maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
+      bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
+      excalidrawEnabled: this.excalidrawAvailable,
+      posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
+      posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
+      posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
+      posterlyMaximumTurnOutputBytes: Number(process.env.PWC_CHAT_POSTERLY_TURN_TOOL_OUTPUT_MAX_BYTES ?? 1048576),
+      posterlyTimeoutSeconds: Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600),
+      paperMaximumCalls: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_CALLS ?? 30),
+      paperMaximumRounds: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_TOOL_ROUNDS ?? 12),
+      paperMaximumDirectSearches: Number(process.env.PWC_CHAT_LATEX_PAPER_MAX_DIRECT_SEARCH_CALLS ?? 8),
+      paperTimeoutSeconds: Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600),
+    });
+  }
 
   initialize(): Promise<void> {
     this.initialization ??= this.initializeImmutableProfile();
@@ -152,9 +157,7 @@ export class PiWorker {
       process.execPath,
       [new URL("./exa_mcp_server.js", import.meta.url).pathname],
       {
-        onStatus: (snapshot) => {
-          this.mcpStatus = snapshot;
-        },
+        excalidraw: false,
         ...(this.gateway ? { exaEnv: {
           PWC_EXTERNAL_GATEWAY_URL: this.gateway.url,
           PWC_EXTERNAL_GATEWAY_CAPABILITY: this.gateway.capability,
@@ -168,6 +171,14 @@ export class PiWorker {
             this.gateway.turnClaim.leaseGeneration,
           ),
         } } : {}),
+      },
+    );
+    this.noWebMcpExtension = createWebMcpExtension(
+      process.execPath,
+      [new URL("./exa_mcp_server.js", import.meta.url).pathname],
+      {
+        exa: false,
+        excalidraw: false,
       },
     );
     if (process.env.PWC_CHAT_PI_PREWARM_ENABLED !== "true") return;
@@ -231,6 +242,33 @@ export class PiWorker {
       this.boundAgentSession = run.resume;
       return { manager, initialCount: restored.snapshot.entry_count, created: false };
     }
+    if (run.agent_session_id) {
+      const bound = await createOrBind(run.agent_session_id, this.gateway);
+      if (bound.agent_session_id !== run.agent_session_id) {
+        throw new Error("Pi prebound session identity mismatch");
+      }
+      if (bound.entry_count > 0) {
+        const restored = await restoreFile(run.agent_session_id, sessionDirectory, this.gateway);
+        const manager = SessionManager.open(restored.file, sessionDirectory, harnessWorkspace);
+        if (
+          manager.getSessionId() !== run.agent_session_id
+          || manager.getLeafId() !== restored.snapshot.current_leaf_id
+        ) {
+          throw new Error("Pi prebound retry restore identity mismatch");
+        }
+        this.manager = manager;
+        this.boundAgentSession = run.agent_session_id;
+        return { manager, initialCount: restored.snapshot.entry_count, created: false };
+      }
+      const manager = SessionManager.create(
+        harnessWorkspace,
+        sessionDirectory,
+        { id: run.agent_session_id },
+      );
+      this.manager = manager;
+      this.boundAgentSession = run.agent_session_id;
+      return { manager, initialCount: 0, created: true };
+    }
     const id = randomUUID();
     const manager = SessionManager.create(harnessWorkspace, sessionDirectory, { id });
     const bound = await createOrBind(id, this.gateway);
@@ -277,15 +315,26 @@ export class PiWorker {
     await this.initialize();
     const phaseStarted = performance.now();
     this.failurePhase = "session_bind_restore";
-    const state = await this.sessionManager(run);
+    const statePromise = this.sessionManager(run);
+    const protocol = run.provider_protocol ?? "anthropic-messages";
+    const coldProviderPromise = !this.session
+      && !(this.prewarmedModel === run.model
+        && this.prewarmedProtocol === protocol
+        && this.prewarmedProvider)
+      ? createProvider(run.model, protocol, this.gateway).then(
+        (provider) => ({ provider }),
+        (error: unknown) => ({ error }),
+      )
+      : undefined;
+    let state: Awaited<typeof statePromise>;
+    try {
+      state = await statePromise;
+    } catch (error) {
+      await coldProviderPromise;
+      throw error;
+    }
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     this.failurePhase = "prompt_render";
-    let taskCatalog: string | undefined;
-    try {
-      taskCatalog = await fetchLiveTaskCatalog();
-    } catch (error) {
-      process.stderr.write(`Live task catalog unavailable; using baked fallback: ${error instanceof Error ? error.message : "unknown error"}\n`);
-    }
     const prompt = await renderPrompt({
       model: run.model,
       hfUsername: run.hf_username,
@@ -294,9 +343,13 @@ export class PiWorker {
       posterlyEnabled: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
-      ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
     });
+    const coldProviderResult = await coldProviderPromise;
+    if (coldProviderResult && "error" in coldProviderResult) {
+      throw coldProviderResult.error;
+    }
+    const coldProvider = coldProviderResult?.provider;
     this.policy.reset(run.web_search_enabled, prompt, run.poster_mode);
     const profile = JSON.stringify({
       model: run.model,
@@ -307,10 +360,9 @@ export class PiWorker {
       posterMode: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       hfUsername: run.hf_username,
-      taskCatalogDigest: taskCatalog === undefined
-        ? "baked-fallback"
-        : createHash("sha256").update(taskCatalog).digest("hex"),
+      promptProfile: "compact-pi-v1",
     });
+    let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
       this.failurePhase = "transcript_initialize";
       // The remote count includes the session header; getEntries() contains
@@ -326,7 +378,7 @@ export class PiWorker {
         const header = state.manager.getHeader();
         if (!header) throw new Error("Pi native session header is missing");
         this.mirror.append(header as unknown as Record<string, unknown>);
-        await this.mirror.flush();
+        if (!run.agent_session_id) mirrorInitialization = this.mirror.flush();
       }
     }
     if (this.session && this.activeProfile === profile) {
@@ -335,12 +387,11 @@ export class PiWorker {
     }
     await this.disposeSession();
     this.failurePhase = "agent_session";
-    const protocol = run.provider_protocol ?? "anthropic-messages";
     const provider = this.prewarmedModel === run.model
       && this.prewarmedProtocol === protocol
       && this.prewarmedProvider
       ? this.prewarmedProvider
-      : await createProvider(run.model, protocol, this.gateway);
+      : coldProvider ?? await createProvider(run.model, protocol, this.gateway);
     const settings = SettingsManager.inMemory({
       compaction: { enabled: true },
       retry: { enabled: false },
@@ -357,7 +408,18 @@ export class PiWorker {
       systemPrompt: prompt,
       extensionFactories: [
         { name: "pwc-policy", factory: this.policyExtension!, hidden: true },
-        { name: "pwc-exa-mcp", factory: this.webMcpExtension!, hidden: true },
+        {
+          name: "pwc-mcp",
+          factory: run.web_search_enabled
+            ? this.webMcpExtension!
+            : this.noWebMcpExtension!,
+          hidden: true,
+        },
+        ...(this.excalidrawAvailable ? [{
+          name: "pwc-excalidraw",
+          factory: createNativeExcalidrawExtension(),
+          hidden: true,
+        }] : []),
         ...(this.remoteTools ? [{
           name: "pwc-remote-tools",
           factory: createRemoteToolsExtension(this.remoteTools),
@@ -365,7 +427,7 @@ export class PiWorker {
         }] : []),
       ],
     });
-    await loader.reload();
+    await Promise.all([loader.reload(), mirrorInitialization]);
     this.emit(run.request_id, { type: "_latency", phase: "resource_loading", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     const created = await createAgentSession({
       cwd: harnessWorkspace,
@@ -373,7 +435,7 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(excalidrawEnabled() ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      tools: ["read", "bash", "search_web", ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,
@@ -381,10 +443,14 @@ export class PiWorker {
     });
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
-    this.mcpReadiness = await this.settleMcpReadiness(created.session, () => {
-      created.extensionsResult.runtime.refreshTools();
+    this.mcpReadiness = assessExcalidrawReadiness({
+      enabled: this.excalidrawAvailable,
+      connectionMode: "lazy",
+      activeTools: created.session.getActiveToolNames(),
+      createViewDefinition: created.session.getToolDefinition("create_view") as
+        { parameters?: unknown } | undefined,
     });
-    if (excalidrawEnabled() && !this.mcpReadiness.ready) {
+    if (this.excalidrawAvailable && !this.mcpReadiness.ready) {
       const withoutExcalidraw = () =>
         created.session.getActiveToolNames().filter((name) => !isExcalidrawModelTool(name));
       created.session.setActiveToolsByName(withoutExcalidraw());
@@ -401,38 +467,6 @@ export class PiWorker {
     this.session = created.session;
     this.activeProfile = profile;
     this.emit(run.request_id, { type: "_latency", phase: "agent_session_ready", elapsed_ms: Math.round(performance.now() - phaseStarted) });
-  }
-
-  private async settleMcpReadiness(session: AgentSession, refreshTools: () => void): Promise<McpReadinessSnapshot> {
-    const started = performance.now();
-    const timeoutMs = EXCALIDRAW_READINESS_TIMEOUT_MS;
-    const snapshotOf = (timedOut = false): McpReadinessSnapshot => {
-      const server = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw");
-      const view = this.mcpStatus?.servers?.find((entry) => entry.name === "excalidraw_view");
-      const viewPending = view !== undefined && view.status !== "connected" && view.status !== "failed";
-      return assessExcalidrawReadiness({
-        enabled: excalidrawEnabled(),
-        serverStatus: viewPending ? "not-connected" : server?.status,
-        activeTools: session.getActiveToolNames(),
-        createViewDefinition: session.getToolDefinition("create_view") as { parameters?: unknown } | undefined,
-        latencyMs: Math.round(performance.now() - started),
-        timedOut,
-      });
-    };
-    const stillSettling = (snapshot: McpReadinessSnapshot) =>
-      snapshot.failure_class === "configured_not_connected" || snapshot.failure_class === "connected_missing_tools";
-    if (!excalidrawEnabled()) return snapshotOf();
-    const deadline = started + timeoutMs;
-    let current = snapshotOf();
-    while (!current.ready && stillSettling(current) && performance.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-      refreshTools();
-      current = snapshotOf();
-    }
-    if (!current.ready && current.failure_class === "configured_not_connected" && performance.now() >= deadline) {
-      return snapshotOf(true);
-    }
-    return current;
   }
 
   private mirrorNativeEntries(): void {

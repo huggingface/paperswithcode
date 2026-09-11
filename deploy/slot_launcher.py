@@ -8,17 +8,21 @@ import sys
 from pathlib import Path
 
 try:
+    from deploy.external_pi_slot_topology import (
+        REPLICA_MAXIMUM_SESSIONS,
+        external_pi_endpoints,
+    )
     from deploy.release import ENVIRONMENTS, validate_manifest
     from deploy.runtime import runtime_id, runtime_manifest
 except ModuleNotFoundError:
+    from external_pi_slot_topology import (  # type: ignore[no-redef]
+        REPLICA_MAXIMUM_SESSIONS,
+        external_pi_endpoints,
+    )
     from release import ENVIRONMENTS, validate_manifest  # type: ignore[no-redef]
     from runtime import runtime_id, runtime_manifest  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
-EXTERNAL_PI_SLOT_PORTS = {
-    "staging": {"blue": 8766, "green": 8767},
-    "production": {"blue": 8776, "green": 8777},
-}
 
 
 def resolve_slot(environment: str, slot: str) -> tuple[Path, Path, dict]:
@@ -124,17 +128,17 @@ def configure_release(manifest: dict, release: Path, environment: str) -> None:
 
 
 def configure_external_pi_slot(environment: str, slot: str) -> None:
-    """Bind a deployed backend slot to its environment-isolated worker."""
-    try:
-        port = EXTERNAL_PI_SLOT_PORTS[environment][slot]
-    except KeyError as error:
-        raise ValueError("invalid deployment environment or slot") from error
+    """Bind a deployed backend slot to eight environment-isolated workers."""
+    base_token = os.environ.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
+    endpoints = external_pi_endpoints(environment, slot, base_token)
     os.environ.update(
         {
-            "PWC_CHAT_EXTERNAL_PI_WORKER_ID": f"{environment}-{slot}",
-            "PWC_CHAT_EXTERNAL_PI_WORKER_URL": f"http://127.0.0.1:{port}",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_ID": "",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_URL": "",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS": endpoints,
             "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "external-pi-v1",
-            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "32",
+            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(REPLICA_MAXIMUM_SESSIONS),
         }
     )
 

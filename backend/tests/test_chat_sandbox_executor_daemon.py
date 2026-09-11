@@ -47,8 +47,10 @@ IDENTITY = {
 class _Broker:
     def __init__(self) -> None:
         self.active = False
+        self.requests: list[dict[str, object]] = []
 
     def __call__(self, payload: dict[str, object]) -> dict[str, object]:
+        self.requests.append(payload)
         if payload["operation"] == "install":
             assert not self.active
             self.active = True
@@ -73,6 +75,9 @@ def _operation(
         "session_id": request["session_id"],
         "turn_id": request["turn_id"],
         "worker_generation": worker_generation,
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
     }
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
@@ -97,6 +102,9 @@ def _open_operation(
         "session_id": request["session_id"],
         "turn_id": request["turn_id"],
         "worker_generation": "worker-1",
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
     }
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.connect(str(socket_path))
@@ -232,6 +240,15 @@ def test_duplicate_exec_reattaches_without_repeating_side_effect(
         == "one\ntwo\n"
     )
     assert duplicate[-1]["status"] == "completed"
+    assert broker.requests[0] == {
+        "operation": "install",
+        "capability": "synthetic-capability",
+        "session_id": "session-1",
+        "turn_id": "turn-1",
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
+    }
     assert not broker.active
     server.shutdown()
     thread.join(timeout=2)
@@ -294,6 +311,55 @@ def test_read_is_bounded_and_descriptor_contained(tmp_path: Path) -> None:
     assert split_multibyte[1]["eof"] is False
     assert nul[1]["data_base64"] == "AA=="
     assert traversal[-1]["error"] == "invalid_workspace_path"
+    assert symlink[-1]["error"] == "invalid_workspace_path"
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+def test_read_allows_only_exact_configured_readonly_file(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    guides = tmp_path / "guides"
+    guides.mkdir()
+    guide = guides / "PWC_CLI_SKILL.md"
+    guide.write_text("# PWC CLI\n")
+    sibling = guides / "private.txt"
+    sibling.write_text("private\n")
+    link = guides / "linked.md"
+    link.symlink_to(guide)
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        readonly_paths=frozenset({guide, link}),
+        worker_generation="worker-1",
+        command_preexec=None,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+    base = {
+        "protocol": PROTOCOL,
+        "type": "read_file",
+        "request_id": "request-guide",
+        **IDENTITY,
+        "offset": 0,
+        "max_bytes": 1024,
+    }
+
+    allowed = _operation(server.socket_path, {**base, "path": str(guide)})
+    denied = _operation(
+        server.socket_path,
+        {**base, "request_id": "request-private", "path": str(sibling)},
+    )
+    symlink = _operation(
+        server.socket_path,
+        {**base, "request_id": "request-link", "path": str(link)},
+    )
+
+    assert allowed[1]["type"] == "read_result"
+    assert allowed[1]["data_base64"] == "IyBQV0MgQ0xJCg=="
+    assert denied[-1]["error"] == "invalid_workspace_path"
     assert symlink[-1]["error"] == "invalid_workspace_path"
     server.shutdown()
     thread.join(timeout=2)

@@ -166,9 +166,13 @@ export class ExternalTurnRun {
   private send(frame: SequencedTurnFrame): void {
     const transport = this.transport;
     if (!transport) return;
-    transport.send(JSON.stringify(frame), (error) => {
-      if (error) this.detach(transport);
-    });
+    try {
+      transport.send(JSON.stringify(frame), (error) => {
+        if (error) this.detach(transport);
+      });
+    } catch {
+      this.detach(transport);
+    }
   }
 
   private sequenceFrame(frame: PwCEvent | RemoteToolRequest): SequencedTurnFrame {

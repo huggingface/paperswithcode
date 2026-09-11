@@ -460,7 +460,8 @@
 .chat-answer strong { font-weight: 600; }
 .chat-error {
   display: flex;
-  align-items: center;
+  flex-wrap: wrap;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   border: 1px solid var(--negative-border);
@@ -469,6 +470,11 @@
   border-radius: 10px;
   padding: 12px 16px;
   font-size: 13.5px;
+  overflow-wrap: anywhere;
+}
+.chat-error > span:first-child {
+  flex: 1 1 280px;
+  min-width: 0;
 }
 .chat-finish-note {
   font-family: var(--serif);
@@ -574,6 +580,7 @@
 .chat-error a,
 .chat-error button {
   flex: none;
+  max-width: 100%;
   color: var(--accent-text);
   font-weight: 600;
   text-decoration: none;
@@ -584,6 +591,8 @@
   background: transparent;
   cursor: pointer;
   font: inherit;
+  text-align: left;
+  white-space: normal;
 }
 .chat-error button:disabled {
   cursor: wait;
@@ -591,9 +600,11 @@
 }
 .chat-error-actions {
   display: flex;
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   flex-wrap: wrap;
-  justify-content: flex-end;
+  justify-content: flex-start;
   gap: 8px 16px;
 }
 .chat-error a:hover,

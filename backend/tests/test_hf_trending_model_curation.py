@@ -1875,3 +1875,17 @@ def test_trending_source_coverage_accepts_equivalent_repository_urls():
             ]
         ),
     )
+
+
+def test_hf_runner_survives_relocated_virtualenv(tmp_path, monkeypatch):
+    from backend.services.hf_trending_model_discovery_service import _run
+    import sys
+
+    python = tmp_path / "bin" / "python"
+    python.parent.mkdir()
+    python.symlink_to(sys.executable)
+    hf = python.with_name("hf")
+    hf.write_text("#!/deleted-build-directory/bin/python\nprint('[]')\n")
+    hf.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(python))
+    assert _run([str(hf), "models", "list"]).strip() == "[]"

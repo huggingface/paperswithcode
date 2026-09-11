@@ -51,6 +51,9 @@ CRON_ONLY_KEYS = {
     "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
     "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
     "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
+    "PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME",
+    "PWC_CHAT_SYNTHETIC_SESSION_COOKIE",
+    "PWC_CHAT_LANGFUSE_TRACE_CONTENT_ACCESS_ENABLED",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
 }
@@ -2961,7 +2964,7 @@ def main() -> int:
             ),
             "UVICORN_HOST": "127.0.0.1",
             "UVICORN_PORT": "8001",
-            "WEB_CONCURRENCY": "1",
+            "WEB_CONCURRENCY": "5",
         },
     )
     staging = without_cron_only_credentials(staging)

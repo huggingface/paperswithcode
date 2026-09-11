@@ -148,6 +148,7 @@ def test_context_projection_preserves_the_worker_payload():
         tasks=[task],
         methods=[method],
         project_pages=[page],
+        evaluations=[_stored_evaluation()],
     )
 
     class Database:
@@ -216,7 +217,7 @@ def test_context_projection_preserves_the_worker_payload():
         "hf_datasets": [],
         "hf_spaces": [],
         "method_exclusions": [],
-        "evaluations": [],
+        "evaluations": [vars(_stored_evaluation())],
     }
 
 
@@ -665,6 +666,30 @@ def test_callback_apply_failures_do_not_pause_scheduled_dispatch(error):
     assert _requires_scheduled_dispatch_pause(error) is False
 
 
+def test_scheduled_enrichment_can_leave_project_pages_unchanged():
+    class Database:
+        def get(self, _model, _key):
+            return SimpleNamespace(id=42)
+
+        def query(self, _model):
+            return _ListQuery([])
+
+    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+        SimpleNamespace(
+            kind="enrich-paper",
+            paper_id=42,
+            trigger="hf-daily-cron",
+            trace_status="disabled",
+            url_candidates={"complete": True},
+        ),
+        ApplyMutationRequest(
+            enrich=EnrichPaperMutation(task_ids=[], method_ids=[], urls_extracted=True)
+        ),
+    )
+
+    assert result["removed_hf_api_project_pages"] == []
+
+
 def test_scheduled_enrichment_allows_evidenced_hf_project_page_removal():
     from backend.models.database import Paper
 
@@ -1078,3 +1103,51 @@ def test_callback_auth_errors_and_disabled_precedence_are_stable():
     assert invalid.json() == {"detail": "Invalid job bearer token"}
     assert hidden.status_code == 404
     assert hidden.json() == {"detail": "Not found"}
+
+
+@pytest.mark.parametrize(
+    "url, accepted",
+    [
+        ("http://example.com/project", True),
+        ("http://new.example/project", False),
+        ("https://new.example/project", True),
+    ],
+)
+def test_scheduled_enrichment_only_allows_existing_http_project_pages(url, accepted):
+    class Database:
+        def get(self, _model, _key):
+            return SimpleNamespace(
+                project_pages=[
+                    SimpleNamespace(url="http://example.com/project", source="hf_api")
+                ]
+            )
+
+        def query(self, _model):
+            return _ListQuery([])
+
+    service = _service(Database(), SimpleNamespace())
+    row = SimpleNamespace(
+        kind="enrich-paper",
+        paper_id=42,
+        trigger="hf-daily-cron",
+        trace_status="disabled",
+        url_candidates={"complete": True},
+    )
+    body = ApplyMutationRequest(
+        enrich=EnrichPaperMutation(
+            task_ids=[],
+            method_ids=[],
+            urls_extracted=True,
+            project_pages=[{"url": "http://example.com/project"}, {"url": url}],
+        )
+    )
+    if accepted:
+        assert (
+            service._validate_scheduled_policy(row, body)[
+                "removed_hf_api_project_pages"
+            ]
+            == []
+        )
+    else:
+        with pytest.raises(ValueError, match="Project page links must use HTTPS"):
+            service._validate_scheduled_policy(row, body)

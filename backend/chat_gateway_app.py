@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
+import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from huggingface_hub.errors import HfHubHTTPError
@@ -52,6 +53,7 @@ from backend.services.chat_capability_service import (
     CapabilityError,
     ChatCapabilityService,
 )
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_gateway_service import ChatGatewayService
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
@@ -127,7 +129,6 @@ from backend.services.openrouter_user_budget_service import (
     RequestBounds,
     opaque_owner,
 )
-from backend.utils.exceptions import PaperNotFoundError
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger(__name__)
@@ -136,7 +137,7 @@ MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
 MAX_PROVIDER_TURN_TOKENS = 512_000
 MAX_POSTER_PROVIDER_TURN_TOKENS = 2_000_000
 QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
-QUALIFICATION_PROVIDER_TURN_TOKENS = 2 * (
+QUALIFICATION_PROVIDER_TURN_TOKENS = QUALIFICATION_PROVIDER_REQUESTS * (
     MAX_OPENAI_REQUEST_BYTES // 4 + MAX_PROVIDER_OUTPUT_TOKENS
 )
 
@@ -646,6 +647,22 @@ def _safe_openai_request_id(value: str | None) -> str | None:
     return value
 
 
+def _openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | None:
+    if outcome == "completed":
+        return None
+    if cancelled:
+        return "openai_stream_cancelled"
+    if outcome == "incomplete":
+        return "openai_incomplete"
+    return "openai_unavailable"
+
+
+async def _close_openai_stream(upstream: Any, client: Any) -> None:
+    with anyio.CancelScope(shield=True):
+        await upstream.aclose()
+        await client.aclose()
+
+
 def _settle_openai_call(
     settings: Settings,
     call_id: uuid.UUID,
@@ -870,8 +887,8 @@ def catalog(
         result = ChatGatewayService(db, settings).catalog(
             body.operation, body.arguments
         )
-    except PaperNotFoundError as error:
-        raise HTTPException(status_code=404, detail=str(error)) from None
+    except CatalogNotFoundError as error:
+        raise HTTPException(status_code=404, detail=error.detail) from None
     except (HfHubHTTPError, OSError):
         raise HTTPException(
             status_code=502, detail="Paper Markdown could not be read"
@@ -1424,9 +1441,15 @@ async def responses(
         turn_id = uuid.UUID(x_pwc_turn)
     except ValueError:
         raise HTTPException(status_code=403, detail="Capability rejected") from None
+    received_at = datetime.now(UTC)
+    _record_gateway_timing(settings, turn_id, received_at=received_at)
     raw = await request.body()
     if not raw or len(raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     try:
         untrusted_payload = json.loads(raw)
     except json.JSONDecodeError:
@@ -1461,7 +1484,11 @@ async def responses(
         raise
     trusted_raw = json.dumps(payload, separators=(",", ":")).encode()
     if len(trusted_raw) > MAX_OPENAI_REQUEST_BYTES:
-        raise HTTPException(status_code=413, detail="Model request is too large")
+        logger.warning("chat OpenAI gateway rejected phase=trusted_request_size")
+        raise HTTPException(
+            status_code=413,
+            detail="request_too_large: Model request is too large",
+        )
     owner_id = _capability_owner(row, db)
     capability_id = row.id
     qualification_scope_id = _qualification_scope_claim(row, db, settings)
@@ -1570,6 +1597,11 @@ async def responses(
         offered_tool_names=inventory["offered_tool_names"],
         offered_tool_digest=inventory["offered_tool_digest"],
     )
+    # A FastAPI yield dependency otherwise retains this connection until the
+    # StreamingResponse finishes. At fleet concurrency that exhausts the pool
+    # while the gateway is merely waiting on OpenAI, blocking sibling calls.
+    # All subsequent accounting uses its own short-lived session.
+    db.close()
     client = httpx.AsyncClient(timeout=180, follow_redirects=False)
     try:
         upstream = await client.send(
@@ -1606,6 +1638,12 @@ async def responses(
                 "message": "Direct OpenAI is unavailable.",
             },
         ) from None
+    _record_gateway_timing(
+        settings,
+        turn_id,
+        phase="upstream_response_headers",
+        elapsed_ms=round((time.perf_counter() - started) * 1000),
+    )
 
     request_id = _safe_openai_request_id(
         upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
@@ -1652,6 +1690,7 @@ async def responses(
     async def chunks():
         first_body_byte_ms: int | None = None
         ttft_ms: int | None = None
+        cancelled = False
         try:
             async for chunk in upstream.aiter_bytes():
                 extractor.feed(chunk)
@@ -1668,14 +1707,15 @@ async def responses(
                     ttft_ms = elapsed_ms
                     provider_trace.first_byte(ttft_ms)
                 yield chunk
+        except (asyncio.CancelledError, GeneratorExit):
+            cancelled = True
+            raise
         finally:
-            await upstream.aclose()
-            await client.aclose()
+            await _close_openai_stream(upstream, client)
             elapsed_ms = round((time.perf_counter() - started) * 1000)
-            error_code = (
-                None
-                if extractor.result().outcome == "completed"
-                else "openai_unavailable"
+            error_code = _openai_stream_error_code(
+                extractor.result().outcome,
+                cancelled=cancelled,
             )
             try:
                 trace_usage = _settle_openai_call(
@@ -1701,7 +1741,6 @@ async def responses(
                 tool_call_returned=extractor.saw_tool_call,
             )
 
-    _record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
     return StreamingResponse(
         chunks(),
         status_code=upstream.status_code,

@@ -2,17 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   EMPTY_EGRESS_POLICY_DIGEST,
-  EXCALIDRAW_READINESS_TIMEOUT_MS,
   INVALID_EXCALIDRAW_ELEMENTS,
   assessExcalidrawReadiness,
   egressPolicyDigest,
   enabledWorkerMcpProviders,
   serializeExcalidrawElements,
 } from "../src/mcp_app_registry.js";
-
-test("optional Excalidraw readiness cannot consume the TTFT budget", () => {
-  assert.equal(EXCALIDRAW_READINESS_TIMEOUT_MS, 2_000);
-});
 
 test("disabled Excalidraw keeps an empty provider digest", () => {
   process.env.PWC_CHAT_EXCALIDRAW_ENABLED = "false";
@@ -39,6 +34,19 @@ test("readiness reports exact allowlisted tools when connected", () => {
   assert.equal(snapshot.ready, true);
   assert.equal(snapshot.failure_class, null);
   assert.deepEqual(snapshot.providers.excalidraw?.discovered_tools, ["create_view", "read_me"]);
+});
+
+test("lazy native tools are ready without claiming a connection", () => {
+  const snapshot = assessExcalidrawReadiness({
+    enabled: true,
+    connectionMode: "lazy",
+    activeTools: ["create_view", "read_me"],
+    createViewDefinition: { parameters: { type: "object", properties: { elements: { type: "string" } } } },
+  });
+
+  assert.equal(snapshot.ready, true);
+  assert.equal(snapshot.providers.excalidraw?.connected, false);
+  assert.equal(snapshot.providers.excalidraw?.state, "ready");
 });
 
 test("connection failure omits readiness even if names were requested", () => {

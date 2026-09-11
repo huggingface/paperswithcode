@@ -100,6 +100,7 @@ from backend.services.chat_capability_service import (
     _digest,
 )
 from backend.services.chat_gateway_service import ChatGatewayService
+from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_sandbox_service import (
     RunningWorker,
     SandboxSessionManager,
@@ -303,6 +304,31 @@ def test_broker_capability_rotation_rejects_stale_and_cross_turn_clear(monkeypat
         state.current()
     state.install({"capability": "new", "session_id": "session", "turn_id": "turn-2"})
     assert state.current()["capability"] == "new"
+
+
+def test_broker_gateway_headers_include_external_turn_fence(monkeypatch):
+    broker = _import_broker(monkeypatch)
+    state = broker.BrokerState({})
+    state.install(
+        {
+            "capability": "capability",
+            "session_id": "session",
+            "turn_id": "turn",
+            "turn_worker_id": "production-green-00",
+            "turn_worker_generation": "4",
+            "turn_lease_generation": "9",
+        }
+    )
+
+    assert broker._gateway_headers(active=state.current()) == {
+        "Authorization": "Bearer capability",
+        "X-PWC-Session": "session",
+        "X-PWC-Turn": "turn",
+        "X-PWC-Turn-Worker-ID": "production-green-00",
+        "X-PWC-Turn-Worker-Generation": "4",
+        "X-PWC-Turn-Lease-Generation": "9",
+        "Content-Type": "application/json",
+    }
 
 
 def test_broker_clear_waits_for_capability_requests(monkeypatch):
@@ -1795,6 +1821,38 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
     )
 
 
+def test_gateway_catalog_maps_typed_not_found_errors(monkeypatch):
+    class DB:
+        def commit(self):
+            pass
+
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
+    )
+
+    def missing_catalog_entity(*_args, **_kwargs):
+        raise CatalogNotFoundError("Method 'missing' not found")
+
+    monkeypatch.setattr(ChatGatewayService, "catalog", missing_catalog_entity)
+
+    with pytest.raises(HTTPException) as exc_info:
+        catalog(
+            CatalogRequest(operation="method_detail", arguments={"method": "missing"}),
+            authorization="Bearer test",
+            x_pwc_session=str(uuid.uuid4()),
+            x_pwc_turn=str(uuid.uuid4()),
+            turn_fence=None,
+            db=DB(),
+            settings=SimpleNamespace(chat_max_direct_search_calls=4),
+        )
+
+    assert exc_info.value.status_code == 404
+    assert exc_info.value.detail == "Method 'missing' not found"
+
+
 @pytest.mark.parametrize("operation", ["draft", "repair"])
 def test_gateway_paper_mutation_rejects_same_owner_artifact_from_another_chat(
     monkeypatch, operation: str
@@ -2903,6 +2961,18 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
         "Read and Grep may only access /workspace or the approved CLI guides. "
         "Rerun the source command with output redirected to /workspace, then try again."
     )
+    inlined_skill = budget.authorize(
+        "inlined-skill",
+        "Read",
+        {"file_path": str(guide)},
+        workspace=workspace,
+        guide=guide,
+    )
+    assert not inlined_skill.allowed
+    assert inlined_skill.reason == (
+        "The pwc, s2, and restricted hf CLI skills are already included verbatim in "
+        "your system prompt. Read that text instead and run the CLI directly."
+    )
     assert not budget.tooling_closed
     assert budget.authorize(
         "recovery",
@@ -3309,7 +3379,9 @@ def test_prompt_and_manifest_share_six_round_contract():
         "user asks\nfor a visual explanation or visualization."
     )
     assert visual_instruction in prompt
-    assert "Use Read only in `/workspace`" in prompt
+    assert "use Read only in\n`/workspace`" in prompt
+    assert "already included\nverbatim later in this system prompt" in prompt
+    assert "Never read, `cat`,\nor otherwise open `/opt/pwc/PWC_CLI_SKILL.md`" in prompt
     assert "HF access is anonymous-only" in prompt
     assert "fix the JSON and call `create_view` once more" in prompt
     assert prompt.index("## Tool usage") < prompt.index(visual_instruction)
@@ -3349,10 +3421,24 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert MODAL_APP_NAME == "pwc-chat-sandbox-v1"
     assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID.startswith("im-")
-    assert PRODUCTION_MODAL_IMAGE_ID == "im-gWZg59lNVcpcjCSYeE6psd"
+    assert PRODUCTION_MODAL_IMAGE_ID == "im-t3Yjk8afcT3ajgqzwyvbRi"
     assert int(WORKER_CONTRACT_VERSION) >= 97
     assert CHAT_SANDBOX_REGION == "eu-west"
     assert CONTROL_PORT == 8080
+
+
+def test_pi_prompt_embeds_cli_skills_without_requiring_a_read_tool_call():
+    prompt = render(agent_harness="pi")
+
+    assert "pwc task --name TASK" in prompt
+    assert "pwc benchmark list --task TASK" in prompt
+    assert "/opt/pwc/PWC_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/HF_CLI_SKILL.md" in prompt
+    assert "/opt/pwc/S2_CLI_SKILL.md" in prompt
+    assert "# pwc CLI skill" in prompt
+    assert "name: pwc-cli" in prompt
+    assert "# s2 CLI skill" in prompt
+    assert "# restricted hf CLI skill" in prompt
 
 
 @pytest.mark.parametrize(

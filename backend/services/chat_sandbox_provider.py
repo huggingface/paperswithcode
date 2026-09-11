@@ -117,6 +117,7 @@ class SandboxProvider(Protocol):
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool: ...
 
     async def terminate(
@@ -433,8 +434,11 @@ class ModalSandboxProviderAdapter:
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool:
-        if persistent:
+        if launch_mode is SandboxLaunchMode.EXECUTOR:
+            command = ("test", "-S", str(EXECUTOR_SOCKET))
+        elif persistent:
             if not worker_generation:
                 raise ValueError("Persistent sandbox health requires a generation")
             command = (

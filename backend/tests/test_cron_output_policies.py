@@ -22,6 +22,7 @@ def test_registry_owns_specialized_dashboard_evidence_sources():
     assert jobs["monitor_chat_operational_alerts"].work_metrics_provider == (
         "chat_monitor"
     )
+    assert jobs["run_chat_synthetic_probe"].work_metrics_provider == ("chat_synthetic")
     assert jobs["review_submissions"].work_metrics_provider == "submission_review"
     assert jobs["mirror_thumbnails_to_disk"].db_metrics_provider == ("thumbnail_cache")
     assert jobs["calculate_paper_trending_scores"].dependency_job_id == (

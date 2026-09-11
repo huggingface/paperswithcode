@@ -543,7 +543,7 @@ html { scroll-behavior: smooth; }
 @media (max-width: 880px) {
   .nav,
 .search-trigger,
-.header-feedback-link { display: none; }
+.app-header .header-feedback-link { display: none; }
   .mobile-menu-btn,
 .mobile-search-btn { display: inline-flex; }
 }

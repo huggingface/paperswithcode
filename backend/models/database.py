@@ -992,7 +992,11 @@ class PaperCurationJob(Base):
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("paper_curation_workflows.id", ondelete="CASCADE"),
+        ForeignKey(
+            "paper_curation_workflows.id",
+            name="fk_paper_curation_jobs_parent_workflow",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
     trigger: Mapped[str] = mapped_column(
@@ -1183,10 +1187,20 @@ class PaperCurationWorkflow(Base):
         String(24), nullable=False, default="unreviewed"
     )
     enrich_satisfied_by_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey(
+            "paper_curation_jobs.id",
+            name="fk_paper_curation_workflows_enrich_satisfied_by_job",
+        ),
+        nullable=True,
     )
     evals_satisfied_by_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey(
+            "paper_curation_jobs.id",
+            name="fk_paper_curation_workflows_evals_satisfied_by_job",
+        ),
+        nullable=True,
     )
     dependency_override: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
@@ -3952,7 +3966,7 @@ class ChatTurnLatency(Base):
             name="chat_turn_latency_traffic_class_check",
         ),
         CheckConstraint(
-            "execution_backend IN ('local_mcp','modal_cli')",
+            "execution_backend IN ('local_mcp','modal_cli','external_pi')",
             name="chat_turn_latency_backend_check",
         ),
         CheckConstraint(

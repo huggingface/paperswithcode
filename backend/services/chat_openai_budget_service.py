@@ -25,9 +25,11 @@ from backend.services.durable_external_qualification_contract import (
 from backend.services.chat_openai_usage_extractor import ExtractedOpenAIUsage
 from backend.services.openrouter_user_budget_service import usd_to_microusd, utc_month
 
-# Keep the conservative bytes-as-token ceiling below the provider's long-context
-# price boundary. Long-context pricing needs a separately pinned rate card.
-MAX_REQUEST_BYTES = 256 * 1024
+# Match the sandbox broker's request envelope. Billing reservations are bounded
+# separately by the model's advertised context window; serialized JSON bytes are
+# not a token count and can safely be larger without reserving long-context rates.
+MAX_REQUEST_BYTES = 512 * 1024
+MAX_BILLABLE_INPUT_TOKENS = 48_000
 
 
 class OpenAIBudgetError(RuntimeError):
@@ -96,7 +98,8 @@ def safe_maximum_microusd(
         _rate(settings, "chat_openai_input_microusd_per_million_tokens"),
         _rate(settings, "chat_openai_cache_write_microusd_per_million_tokens"),
     )
-    return _priced_microusd(bounds.request_bytes, input_rate) + _priced_microusd(
+    maximum_input_tokens = min(bounds.request_bytes, MAX_BILLABLE_INPUT_TOKENS)
+    return _priced_microusd(maximum_input_tokens, input_rate) + _priced_microusd(
         bounds.maximum_output_tokens,
         _rate(settings, "chat_openai_output_microusd_per_million_tokens"),
     )

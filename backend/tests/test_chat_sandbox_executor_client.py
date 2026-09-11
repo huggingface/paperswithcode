@@ -299,6 +299,9 @@ def _context() -> ExecutorContext:
         sandbox=object(),
         worker_generation="worker-a",
         capability="synthetic-capability",
+        turn_worker_id="production-green-00",
+        turn_worker_generation="4",
+        turn_lease_generation="9",
         **IDENTITY,
     )
 
@@ -347,6 +350,9 @@ def test_exec_sends_fenced_bootstrap_and_returns_validated_output():
         "session_id": "session-a",
         "turn_id": "turn-a",
         "worker_generation": "worker-a",
+        "turn_worker_id": "production-green-00",
+        "turn_worker_generation": "4",
+        "turn_lease_generation": "9",
     }
     assert decode_request(request_line) == {
         "protocol": PROTOCOL,
