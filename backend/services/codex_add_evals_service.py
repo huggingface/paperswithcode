@@ -1181,6 +1181,14 @@ class CodexPaperJobService:
     ) -> CodexPaperJob:
         if row.status not in TERMINAL_STATUSES:
             return self.serialize(row, settings)
+        if row.parent_workflow_id is not None:
+            workflow = db.get(PaperCurationWorkflow, row.parent_workflow_id)
+            if workflow is not None:
+                workflow.status = "running"
+                workflow.error = None
+                workflow.finished_at = None
+                # Check workflow ownership before enqueue can commit a new job.
+                db.flush()
         if row.kind == "resolve-model-paper":
             candidate = db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
@@ -1212,13 +1220,6 @@ class CodexPaperJobService:
                 retry_of_id=row.id,
                 dispatch=False,
             )
-        if row.parent_workflow_id is not None:
-            workflow = db.get(PaperCurationWorkflow, row.parent_workflow_id)
-            if workflow is not None:
-                workflow.status = "running"
-                workflow.error = None
-                workflow.finished_at = None
-                db.commit()
         self.dispatch_next(db, settings)
         refreshed = db.get(PaperCurationJob, retried.id)
         return self.serialize(refreshed, settings)

@@ -11,7 +11,10 @@ from datetime import date
 from backend.config import get_settings
 from backend.database.connection import get_database_session
 from backend.services.codex_add_evals_service import CanaryDispatchFailed
-from backend.services.hf_daily_curation_service import HFDailyCurationService
+from backend.services.hf_daily_curation_service import (
+    CurationRetryConflict,
+    HFDailyCurationService,
+)
 
 
 def main() -> int:
@@ -45,7 +48,14 @@ def main() -> int:
                     "launched": False,
                 }
         elif args.retry_job:
-            result = service.retry_scheduled_job(args.retry_job)
+            try:
+                result = service.retry_scheduled_job(args.retry_job)
+            except CurationRetryConflict as error:
+                result = {
+                    "error": str(error),
+                    "job_id": str(args.retry_job),
+                    "retry_conflict": True,
+                }
         elif args.validate_job:
             result = service.validator_replay(args.validate_job)
         elif args.enable_dispatch:
@@ -63,7 +73,11 @@ def main() -> int:
         print(f"HF_DAILY_CURATION_SUMMARY {summary}", file=sys.stderr)
         print(summary)
         return (
-            1 if result.get("valid") is False or result.get("launched") is False else 0
+            1
+            if result.get("valid") is False
+            or result.get("launched") is False
+            or result.get("retry_conflict") is True
+            else 0
         )
     finally:
         try:

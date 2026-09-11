@@ -7,9 +7,10 @@ from types import SimpleNamespace
 import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
-from sqlalchemy import BigInteger, create_engine
+from sqlalchemy import BigInteger, create_engine, text
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
 from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
@@ -1897,3 +1898,135 @@ def test_hf_runner_survives_relocated_virtualenv(tmp_path, monkeypatch):
     hf.chmod(0o755)
     monkeypatch.setattr(sys, "executable", str(python))
     assert _run([str(hf), "models", "list"]).strip() == "[]"
+
+
+def test_scheduled_resolution_retry_reuses_active_candidate_job():
+    from backend.services.hf_daily_curation_service import HFDailyCurationService
+
+    db = _resolution_session()
+    candidate = TrendingModelCandidate(
+        repo_id="org/retry", author="org", status="queued"
+    )
+    db.add(candidate)
+    db.flush()
+    failed = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="resolve-model-paper",
+        candidate_id=candidate.id,
+        requested_by="cron",
+        trigger="hf-trending-cron",
+        status="failed",
+    )
+    active = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="resolve-model-paper",
+        candidate_id=candidate.id,
+        requested_by="cron",
+        trigger="hf-trending-cron",
+        status="queued",
+        priority=25,
+    )
+    db.add_all([failed, active])
+    db.commit()
+    jobs = SimpleNamespace(
+        dispatch_next=lambda *_args: None,
+        serialize=lambda row, _settings: SimpleNamespace(
+            model_dump=lambda **_kwargs: {"id": str(row.id)}
+        ),
+    )
+    result = HFDailyCurationService(
+        db, get_settings(), job_service=jobs
+    ).retry_scheduled_job(failed.id)
+    assert result["id"] == str(active.id)
+    assert db.query(PaperCurationJob).count() == 2
+    assert active.retry_of_id is None
+    assert active.priority == 25
+
+
+@pytest.mark.parametrize("has_orphan_retry", [False, True])
+@pytest.mark.parametrize("direct_retry", [False, True])
+def test_scheduled_retry_rejects_superseded_workflow_before_writes(
+    has_orphan_retry, direct_retry
+):
+    from backend.services.hf_daily_curation_service import HFDailyCurationService
+
+    db = _resolution_session()
+    PaperCurationWorkflow.__table__.create(db.get_bind())
+    db.execute(text("DROP INDEX uq_active_scheduled_paper_curation_stage"))
+    db.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_active_scheduled_paper_curation_stage ON paper_curation_jobs(paper_id, kind, policy_version) WHERE trigger <> 'admin' AND status IN ('queued', 'dispatching', 'running')"
+        )
+    )
+    db.execute(text("DROP INDEX uq_active_paper_curation_workflow"))
+    db.execute(
+        text(
+            "CREATE UNIQUE INDEX uq_active_paper_curation_workflow ON paper_curation_workflows(paper_id) WHERE status IN ('queued', 'running', 'deferred')"
+        )
+    )
+    paper = Paper(
+        title="Retry report",
+        source="external",
+        source_url="https://example.com/retry",
+        version="v1",
+        is_latest_version=True,
+    )
+    db.add(paper)
+    db.flush()
+    old = PaperCurationWorkflow(
+        id=uuid.uuid4(),
+        paper_id=paper.id,
+        cohort_date=datetime.now(UTC).date(),
+        policy_version="hf-trending-v1",
+        status="partial",
+    )
+    current = PaperCurationWorkflow(
+        id=uuid.uuid4(),
+        paper_id=paper.id,
+        cohort_date=datetime.now(UTC).date(),
+        policy_version="hf-trending-v1",
+        status="queued",
+    )
+    db.add_all([old, current])
+    db.flush()
+    failed = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="add-evals",
+        paper_id=paper.id,
+        parent_workflow_id=old.id,
+        requested_by="cron",
+        trigger="hf-trending-cron",
+        status="failed",
+    )
+    db.add(failed)
+    db.flush()
+    if has_orphan_retry:
+        db.add(
+            PaperCurationJob(
+                id=uuid.uuid4(),
+                kind="add-evals",
+                paper_id=paper.id,
+                parent_workflow_id=old.id,
+                requested_by="cron",
+                trigger="hf-trending-cron",
+                status="queued",
+                retry_of_id=failed.id,
+            )
+        )
+    db.commit()
+    count = db.query(PaperCurationJob).count()
+    if direct_retry:
+        # Even if ownership changes after the operator precheck, the DB invariant
+        # fails before enqueue's commit can leave behind an orphan job.
+        with pytest.raises(IntegrityError, match="UNIQUE constraint failed"):
+            CodexPaperJobService().retry(db, failed, get_settings(), priority=50)
+        db.rollback()
+    else:
+        service = HFDailyCurationService(
+            db, get_settings(), job_service=SimpleNamespace()
+        )
+        with pytest.raises(ValueError, match=f"active workflow {current.id}"):
+            service.retry_scheduled_job(failed.id)
+    assert db.query(PaperCurationJob).count() == count
+    assert db.get(PaperCurationWorkflow, old.id).status == "partial"
+    assert not db.dirty

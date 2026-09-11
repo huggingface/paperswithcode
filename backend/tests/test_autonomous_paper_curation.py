@@ -2335,3 +2335,28 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
         manifest["objects"]
     )
     assert not (tmp_path / "curation-traces" / f"{row.id}.json").exists()
+
+
+def test_daily_curation_cli_reports_retry_workflow_conflict(monkeypatch, capsys):
+    job_id = uuid.uuid4()
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, _db, _settings):
+            pass
+
+        def retry_scheduled_job(self, _job_id):
+            raise curation_cli.CurationRetryConflict("Paper has active workflow newer")
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", object)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(sys, "argv", ["curation", "--retry-job", str(job_id)])
+    assert curation_cli.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "error": "Paper has active workflow newer",
+        "job_id": str(job_id),
+        "retry_conflict": True,
+    }
