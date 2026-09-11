@@ -173,6 +173,43 @@ describe("useChat reload recovery", () => {
       blocks: [{ kind: "answer", text: "Recovered answer", done: true }],
     });
   });
+
+  it("does not show an error when the turn completes before reconnect", async () => {
+    const canonical = deferred<ChatSessionDetail>();
+    resumeChatMock.mockImplementation(() => (async function* () {
+      yield* stream()();
+      throw new ChatStreamError(
+        "This chat is not generating.",
+        "chat_not_busy",
+        409,
+      );
+    })());
+    getSessionMock.mockReturnValue(canonical.promise);
+    const restored = [{
+      ...uiTurn("user-completed", "Question completed while disconnected")[0],
+      status: "generating",
+    }];
+    const { result } = renderChat();
+
+    act(() => result.current.load(restored, "session-1", true));
+    await flushMicrotasks();
+
+    expect(result.current.busy).toBe(false);
+    expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      streaming: true,
+    });
+    expect(result.current.messages.at(-1)?.error).toBeUndefined();
+
+    canonical.resolve(sessionDetail("session-1", [
+      persistedUser("user-completed", 1, "Question completed while disconnected"),
+      persistedAssistant("assistant-completed", 2, "Persisted completed answer"),
+    ]));
+    await waitFor(() => expect(result.current.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      blocks: [{ kind: "answer", text: "Persisted completed answer", done: true }],
+    }));
+  });
 });
 
 describe("useChat transport recovery", () => {

@@ -124,7 +124,10 @@ def build_durable_user_specs(profile_name: str) -> tuple[DurableUserSpec, ...]:
 def build_durable_observation(**evidence) -> DurableTurnObservation:
     """Normalize stream evidence without reflecting rejected values."""
     allowed = {
+        "workload",
         "outcome",
+        "admission_ms",
+        "reconnect_ready_ms",
         "ttft_ms",
         "completion_ms",
         "reconnects",
@@ -138,8 +141,15 @@ def build_durable_observation(**evidence) -> DurableTurnObservation:
         "failure_code",
     }
     legacy_evidence = {"operation_start_ids", "queued_states", "stale_mutations"}
+    milestone_evidence = {"admission_ms", "reconnect_ready_ms"}
     fields = set(evidence)
-    if fields != allowed and fields != allowed - legacy_evidence:
+    accepted_fields = {
+        frozenset(allowed),
+        frozenset(allowed - legacy_evidence),
+        frozenset(allowed - milestone_evidence),
+        frozenset(allowed - legacy_evidence - milestone_evidence),
+    }
+    if frozenset(fields) not in accepted_fields:
         raise FleetRunRefused("durable observation fields are invalid")
     operation_ids = evidence.pop("operation_start_ids", ())
     if (

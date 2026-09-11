@@ -1027,6 +1027,14 @@ class ChatQualificationTeardownResponse(BaseModel):
     source: Literal["exact_scope_canonical_eviction"]
 
 
+class ChatQualificationServerLatencyP95(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    provider_gateway_received_ms: int = Field(ge=0, le=600_000)
+    provider_ttft_ms: int = Field(ge=0, le=600_000)
+    first_semantic_event_ms: int = Field(ge=0, le=600_000)
+
+
 class ChatQualificationEvidenceResponse(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
 
@@ -1044,6 +1052,9 @@ class ChatQualificationEvidenceResponse(BaseModel):
     billed_duration_ms: int = Field(ge=0, le=2**63 - 1)
     window_started_at_ms: int = Field(ge=1, le=2**63 - 1)
     window_ended_at_ms: int = Field(ge=1, le=2**63 - 1)
+    p95_server_latency_ms_by_workload: dict[
+        Literal["no_tool", "read", "bash"], ChatQualificationServerLatencyP95
+    ] = Field(max_length=3)
     source: Literal["durable_qualification_records"]
 
 

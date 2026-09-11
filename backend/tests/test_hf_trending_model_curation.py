@@ -1672,6 +1672,14 @@ def test_resolution_scope_excludes_publisher_only_sibling():
     service = CodexCurationCallbackService(db)
 
     assert service._allowed_resolution_paper_ids(candidate) == {exact.id}
+    service.job_service = SimpleNamespace(
+        serialize=lambda *_args: SimpleNamespace(model_dump=lambda **_kwargs: {})
+    )
+    context = service.context(
+        SimpleNamespace(kind="resolve-model-paper", candidate_id=candidate.id),
+        get_settings(),
+    )
+    assert [paper["id"] for paper in context["paper_candidates"]] == [exact.id]
 
 
 def test_trending_eval_ownership_rejects_sibling_model_name():
@@ -1875,3 +1883,17 @@ def test_trending_source_coverage_accepts_equivalent_repository_urls():
             ]
         ),
     )
+
+
+def test_hf_runner_survives_relocated_virtualenv(tmp_path, monkeypatch):
+    from backend.services.hf_trending_model_discovery_service import _run
+    import sys
+
+    python = tmp_path / "bin" / "python"
+    python.parent.mkdir()
+    python.symlink_to(sys.executable)
+    hf = python.with_name("hf")
+    hf.write_text("#!/deleted-build-directory/bin/python\nprint('[]')\n")
+    hf.chmod(0o755)
+    monkeypatch.setattr(sys, "executable", str(python))
+    assert _run([str(hf), "models", "list"]).strip() == "[]"

@@ -337,9 +337,89 @@ def test_bind_active_staging_worker_uses_verified_slot(tmp_path):
 
     bound = bind_active_staging_worker(settings, app_root=tmp_path)
 
-    assert bound.chat_external_pi_worker_id == "staging-green"
-    assert bound.chat_external_pi_worker_url == "http://127.0.0.1:8767"
-    assert configured_worker_ids(bound) == ("staging-green",)
+    assert bound.chat_external_pi_worker_id == ""
+    assert bound.chat_external_pi_worker_url == ""
+    assert bound.chat_external_pi_worker_token == ""
+    assert configured_worker_ids(bound) == tuple(
+        f"staging-green-{index:02d}" for index in range(8)
+    )
+    assert len(bound.chat_external_pi_worker_endpoints) == 8
+    assert bound.chat_external_pi_worker_max_sessions == 4
+
+
+def test_system_prerequisites_aggregate_all_configured_workers(monkeypatch):
+    from backend.database import connection
+    from backend.services import durable_external_qualification_system as system
+    from backend.services import runtime_validation
+
+    worker_ids = tuple(f"staging-blue-{index:02d}" for index in range(8))
+    workers = tuple(
+        SimpleNamespace(
+            worker_id=worker_id,
+            environment="staging",
+            release_id="0123456789ab-staging",
+            state="ready",
+            contract_version="external-pi-v1",
+            maximum_sessions=4,
+            active_sessions=index % 2,
+        )
+        for index, worker_id in enumerate(worker_ids)
+    )
+
+    class FakeSession:
+        def execute(self, _statement):
+            return SimpleNamespace(one=lambda: ("pwc_staging", "staging"))
+
+        def scalars(self, _statement):
+            return workers
+
+    class SessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        connection,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: SessionContext()),
+    )
+    for name in (
+        "validate_chat_schema",
+        "validate_external_worker_reservation_schema",
+        "validate_qualification_evidence_schema",
+    ):
+        monkeypatch.setattr(runtime_validation, name, lambda *_args: None)
+    settings = SimpleNamespace(
+        chat_external_pi_worker_endpoints=tuple(
+            SimpleNamespace(worker_id=worker_id) for worker_id in worker_ids
+        ),
+        chat_pi_runtime_enabled=True,
+        chat_external_pi_supervisor_enabled=True,
+        chat_external_pi_ready_registry_enabled=True,
+        chat_durable_turn_dispatch_enabled=True,
+        chat_turn_event_journal_schema_enabled=True,
+        chat_sandbox_executor_enabled=True,
+        chat_remote_workspace_tools_enabled=True,
+        chat_remote_bash_enabled=True,
+        chat_remote_read_enabled=True,
+        chat_lazy_workspace_enabled=True,
+        chat_new_session_pi_percentage=100,
+        chat_external_pi_worker_contract_version="external-pi-v1",
+        chat_external_pi_runtime_contract_version="durable-external-pi-v1",
+    )
+
+    evidence = system._system_prerequisites(settings, "0123456789ab-staging")
+
+    assert evidence.worker_id == ",".join(worker_ids)
+    assert evidence.worker_environment == "staging"
+    assert evidence.worker_release_id == "0123456789ab-staging"
+    assert evidence.worker_state == "ready"
+    assert evidence.maximum_sessions == 32
+    assert evidence.active_sessions == 4
+    assert evidence.runtime_ready is True
+    assert evidence.migrations_ready is True
 
 
 def test_system_resource_sampler_uses_active_slot_backend_unit(tmp_path, monkeypatch):
@@ -365,6 +445,63 @@ def test_system_resource_sampler_uses_active_slot_backend_unit(tmp_path, monkeyp
         "paperswithcode-staging-backend@blue.service",
         "paperswithcode-staging-external-pi-worker@blue.service",
     ]
+
+
+def test_system_resource_scope_counts_accept_exact_eight_worker_topology(monkeypatch):
+    import uuid
+
+    from backend.database import connection
+    from backend.services import durable_external_qualification_system as system
+
+    class FakeSession:
+        def execute(self, _statement, _parameters):
+            return SimpleNamespace(scalar_one=lambda: 0)
+
+    class SessionContext:
+        def __enter__(self):
+            return FakeSession()
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        connection,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: SessionContext()),
+    )
+    control = SimpleNamespace(
+        qualification_scope_id=uuid.uuid4(),
+        release_id="0123456789ab-staging",
+        settings=SimpleNamespace(
+            chat_external_pi_worker_endpoints=tuple(
+                SimpleNamespace(worker_id=f"staging-blue-{index:02d}")
+                for index in range(8)
+            )
+        ),
+    )
+
+    assert system._SystemResourceEvidence(control)._scope_counts() == (0, 0, 0)
+
+
+@pytest.mark.parametrize("worker_count", (0, 7, 9, 16))
+def test_system_resource_scope_counts_reject_non_current_topology(worker_count):
+    import uuid
+
+    from backend.services import durable_external_qualification_system as system
+
+    control = SimpleNamespace(
+        qualification_scope_id=uuid.uuid4(),
+        release_id="0123456789ab-staging",
+        settings=SimpleNamespace(
+            chat_external_pi_worker_endpoints=tuple(
+                SimpleNamespace(worker_id=f"staging-blue-{index:02d}")
+                for index in range(worker_count)
+            )
+        ),
+    )
+
+    with pytest.raises(system.QualificationRefused, match="staging_prerequisite"):
+        system._SystemResourceEvidence(control)._scope_counts()
 
 
 @pytest.mark.parametrize("mode", (0o600, 0o644, 0o660))
@@ -523,6 +660,7 @@ def test_system_control_plane_independently_resolves_exact_release_and_flags(tmp
         {"worker_state": "draining"},
         {"worker_contract_version": "old"},
         {"maximum_sessions": 31},
+        {"maximum_sessions": 33},
         {"active_sessions": 1},
         {"configured_worker_id": "some-other-worker"},
     ),

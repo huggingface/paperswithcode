@@ -346,6 +346,19 @@ class ExternalPiChatTurnRunner:
             endpoints = external_worker_endpoints(self.settings)
         except ValueError:
             endpoints = ()
+        admission_reservation = self.admission.external_worker_reservation
+        if admission_reservation is not None:
+            if (
+                admission_reservation.turn_id != self.admission.turn_id
+                or admission_reservation.endpoint not in endpoints
+                or admission_reservation.worker_claim.worker_id
+                != admission_reservation.endpoint.worker_id
+            ):
+                raise StaleWorkerClaim(
+                    "External worker admission reservation mismatches"
+                )
+            self.external_worker_endpoint = admission_reservation.endpoint
+            return admission_reservation.worker_claim
         if endpoints:
             capacity = (
                 self.worker_capacity_repository
@@ -353,13 +366,9 @@ class ExternalPiChatTurnRunner:
                     environment=self.settings.environment
                 )
             )
-            with self.session_factory() as db:
-                reservation = capacity.require_turn(
-                    db,
-                    turn_id=self.admission.turn_id,
-                    endpoints=endpoints,
-                    now=self.now(),
-                )
+            reservation = await asyncio.to_thread(
+                self._require_reserved_worker, capacity, endpoints
+            )
             self.worker_capacity_repository = capacity
             self.external_worker_endpoint = reservation.endpoint
             status = await self._endpoint_status()
@@ -376,10 +385,9 @@ class ExternalPiChatTurnRunner:
                 or status.maximum_sessions != reservation.maximum_sessions
             ):
                 raise StaleWorkerClaim("External worker endpoint identity mismatches")
-            with self.session_factory() as db:
-                self.worker_repository.require_live_claim(
-                    db, claim=reservation.worker_claim, now=self.now()
-                )
+            await asyncio.to_thread(
+                self._require_live_worker_claim, reservation.worker_claim
+            )
             return reservation.worker_claim
         status = await self._endpoint_status()
         if status.active_sessions >= status.maximum_sessions:
@@ -397,19 +405,7 @@ class ExternalPiChatTurnRunner:
             release_id=status.release_id,
             contract_version=status.protocol,
         )
-        with self.session_factory() as db:
-            selected_at = self.now()
-            claim = self.worker_repository.select_ready_claim(
-                db,
-                claim=endpoint_claim,
-                now=selected_at,
-            )
-            self.worker_repository.require_ready_claim(
-                db,
-                claim=claim,
-                now=self.now(),
-            )
-            return claim
+        return await asyncio.to_thread(self._select_ready_worker_claim, endpoint_claim)
 
     async def _require_same_external_worker_claim(
         self, claim: ExternalWorkerClaim
@@ -424,12 +420,44 @@ class ExternalPiChatTurnRunner:
         )
         if endpoint_claim != claim or status.state not in {"ready", "draining"}:
             raise StaleWorkerClaim("External worker claim was fenced")
+        await asyncio.to_thread(self._require_live_worker_claim, claim)
+
+    def _require_reserved_worker(
+        self,
+        capacity: ChatExternalWorkerCapacityRepository | Any,
+        endpoints: tuple[ExternalWorkerEndpoint, ...],
+    ):
+        with self.session_factory() as db:
+            return capacity.require_turn(
+                db,
+                turn_id=self.admission.turn_id,
+                endpoints=endpoints,
+                now=self.now(),
+            )
+
+    def _require_live_worker_claim(self, claim: ExternalWorkerClaim) -> None:
         with self.session_factory() as db:
             self.worker_repository.require_live_claim(
                 db,
                 claim=claim,
                 now=self.now(),
             )
+
+    def _select_ready_worker_claim(
+        self, endpoint_claim: ExternalWorkerClaim
+    ) -> ExternalWorkerClaim:
+        with self.session_factory() as db:
+            claim = self.worker_repository.select_ready_claim(
+                db,
+                claim=endpoint_claim,
+                now=self.now(),
+            )
+            self.worker_repository.require_ready_claim(
+                db,
+                claim=claim,
+                now=self.now(),
+            )
+            return claim
 
     @staticmethod
     def _worker_lost_event() -> dict[str, object]:
@@ -473,6 +501,13 @@ class ExternalPiChatTurnRunner:
         }
 
     def _run_frame(self) -> dict[str, object]:
+        prebound_agent_session_id = (
+            self.admission.sdk_session_id
+            if self.admission.is_first_turn
+            and not self.admission.is_replacement
+            and self.resume_id in {None, self.admission.sdk_session_id}
+            else None
+        )
         frame = {
             "v": 1,
             "type": "run_turn",
@@ -487,8 +522,18 @@ class ExternalPiChatTurnRunner:
             "provider_protocol": self.settings.chat_route_protocols[
                 self.admission.model_route
             ],
-            "resume": str(self.resume_id) if self.resume_id else None,
+            "resume": (
+                None
+                if prebound_agent_session_id is not None
+                else str(self.resume_id)
+                if self.resume_id
+                else None
+            ),
             "web_search_enabled": self.admission.web_search_enabled,
+            "excalidraw_enabled": (
+                self.settings.chat_excalidraw_enabled
+                and self.settings.chat_mcp_apps_host_enabled
+            ),
             "reader_mode": self.admission.reader_mode,
             "poster_mode": self.admission.poster_mode,
             "paper_artifacts_enabled": self.admission.paper_artifacts_enabled,
@@ -501,6 +546,8 @@ class ExternalPiChatTurnRunner:
         }
         if self.admission.paper_descriptor is not None:
             frame["paper_descriptor"] = self.admission.paper_descriptor
+        if prebound_agent_session_id is not None:
+            frame["agent_session_id"] = str(prebound_agent_session_id)
         return frame
 
     @staticmethod

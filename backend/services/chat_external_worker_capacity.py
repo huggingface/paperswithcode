@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -201,55 +202,72 @@ class ChatExternalWorkerCapacityRepository:
                 ChatExternalWorkerReservation.expires_at <= now,
             )
         )
-        query = (
-            select(ChatExternalWorker)
+        reserved_count = (
+            select(func.count())
+            .select_from(ChatExternalWorkerReservation)
             .where(
-                ChatExternalWorker.environment == self.environment,
-                ChatExternalWorker.worker_id.in_(endpoint_by_worker),
-                ChatExternalWorker.contract_version == contract_version,
-                ChatExternalWorker.state == "ready",
-                ChatExternalWorker.lease_expires_at > now,
+                ChatExternalWorkerReservation.worker_id == ChatExternalWorker.worker_id,
+                ChatExternalWorkerReservation.instance_id
+                == ChatExternalWorker.instance_id,
+                ChatExternalWorkerReservation.worker_generation
+                == ChatExternalWorker.generation,
+                ChatExternalWorkerReservation.expires_at > now,
             )
-            .order_by(ChatExternalWorker.worker_id)
-            .with_for_update()
+            .correlate(ChatExternalWorker)
+            .scalar_subquery()
+        )
+        capacity_filters = (
+            ChatExternalWorker.environment == self.environment,
+            ChatExternalWorker.worker_id.in_(endpoint_by_worker),
+            ChatExternalWorker.contract_version == contract_version,
+            ChatExternalWorker.state == "ready",
+            ChatExternalWorker.lease_expires_at > now,
+            ChatExternalWorker.active_sessions < ChatExternalWorker.maximum_sessions,
+            reserved_count < ChatExternalWorker.maximum_sessions,
+        )
+        candidate_query = (
+            select(ChatExternalWorker)
+            .where(*capacity_filters)
+            .order_by(reserved_count, ChatExternalWorker.worker_id)
+            .limit(1)
+            .with_for_update(skip_locked=True)
             .execution_options(populate_existing=True)
         )
-        workers = tuple(db.scalars(query))
-        for worker in workers:
-            reserved = (
-                db.scalar(
-                    select(func.count())
-                    .select_from(ChatExternalWorkerReservation)
-                    .where(
-                        ChatExternalWorkerReservation.worker_id == worker.worker_id,
-                        ChatExternalWorkerReservation.instance_id == worker.instance_id,
-                        ChatExternalWorkerReservation.worker_generation
-                        == worker.generation,
-                        ChatExternalWorkerReservation.expires_at > now,
-                    )
+        availability_query = (
+            select(ChatExternalWorker.worker_id).where(*capacity_filters).limit(1)
+        )
+        lock_deadline = time.monotonic() + 2
+        worker = None
+        while worker is None:
+            worker = db.scalars(candidate_query).first()
+            if worker is not None:
+                break
+            if db.scalar(availability_query) is None:
+                raise ExternalWorkerCapacityUnavailable(
+                    "External worker capacity is full"
                 )
-                or 0
-            )
-            if max(reserved, worker.active_sessions) >= worker.maximum_sessions:
-                continue
-            endpoint = endpoint_by_worker[worker.worker_id]
-            row = ChatExternalWorkerReservation(
-                request_id=request_id,
-                turn_id=None,
-                endpoint_id=endpoint.endpoint_id,
-                worker_id=worker.worker_id,
-                instance_id=worker.instance_id,
-                worker_generation=worker.generation,
-                release_id=worker.release_id,
-                contract_version=worker.contract_version,
-                maximum_sessions=worker.maximum_sessions,
-                reserved_at=now,
-                expires_at=now + timedelta(seconds=self.unbound_ttl_seconds),
-            )
-            db.add(row)
-            db.flush()
-            return self._reservation(row, endpoint)
-        raise ExternalWorkerCapacityUnavailable("External worker capacity is full")
+            if time.monotonic() >= lock_deadline:
+                raise ExternalWorkerCapacityUnavailable(
+                    "External worker capacity is temporarily contended"
+                )
+            time.sleep(0.01)
+        endpoint = endpoint_by_worker[worker.worker_id]
+        row = ChatExternalWorkerReservation(
+            request_id=request_id,
+            turn_id=None,
+            endpoint_id=endpoint.endpoint_id,
+            worker_id=worker.worker_id,
+            instance_id=worker.instance_id,
+            worker_generation=worker.generation,
+            release_id=worker.release_id,
+            contract_version=worker.contract_version,
+            maximum_sessions=worker.maximum_sessions,
+            reserved_at=now,
+            expires_at=now + timedelta(seconds=self.unbound_ttl_seconds),
+        )
+        db.add(row)
+        db.flush()
+        return self._reservation(row, endpoint)
 
     def bind_turn(
         self,

@@ -29,8 +29,8 @@ The goal is to split up those tasks in the future.
 - `reinforcement-learning` — Reinforcement Learning
 - `language-modeling` — Language Modeling
 - `reasoning` — Reasoning
-- `math` — Mathematics
 - `agents` — Agents
+- `math` — Mathematics
 - `world-models` — World Models
 - `embedding-models` — Embedding models
 - `robotics` — Robotics

@@ -86,6 +86,35 @@ def external(
 # currently present on FrontierCode 1.1. New upstream models must be reviewed
 # before the sync will publish them.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "Claude Fable 5.1": external(
+        "https://www.anthropic.com/claude-fable-and-mythos-5-1",
+        "Introducing Claude Fable 5.1 and Claude Mythos 5.1",
+        "2026-09-01",
+    ),
+    "DeepSeek V4 Pro 0813": PaperIdentity(arxiv_id="2606.19348", is_open=True),
+    "GLM 5.3": external(
+        "https://z.ai/blog/glm-5.3",
+        "GLM-5.3: Frontier Coding with Emergent Cyber Capabilities",
+        "2026-08-14",
+        is_open=True,
+    ),
+    "GLM 5.3 Flash": external(
+        "https://z.ai/blog/glm-5.3-flash",
+        "GLM-5.3-Flash: Frontier Intelligence, Flash Cost",
+        "2026-08-26",
+        is_open=True,
+    ),
+    "GPT-6 Astra": external(
+        "https://openai.com/index/gpt-6-astra/",
+        "GPT-6 Astra: A new generation of intelligence",
+        "2026-09-03",
+    ),
+    "Gemini 3.8 Flash": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+        "Introducing Gemini 3.8 Flash and 3.8 Flash Cyber",
+        "2026-09-02",
+    ),
+    "Nemotron 3 Ultra": PaperIdentity(arxiv_id="2606.15007", is_open=True),
     "Claude Fable 5": external(
         "https://www.anthropic.com/news/claude-fable-5-mythos-5",
         "Claude Fable 5 and Claude Mythos 5",
@@ -126,6 +155,16 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "https://openai.com/index/gpt-5-6/",
         "GPT-5.6: Frontier intelligence that scales with your ambition",
         "2026-07-09",
+    ),
+    "SWE-2": external(
+        "https://cognition.com/blog/swe-2",
+        "Introducing SWE-2: Pushing the Pareto Frontier",
+        "2026-09-10",
+        abstract=(
+            "Cognition's SWE-2 coding model is post-trained from Kimi K3, "
+            "using reinforcement learning across reasoning-effort levels "
+            "to improve coding capability and cost, and is available in Devin."
+        ),
     ),
     "SWE-1.7": external(
         "https://cognition.com/blog/swe-1-7",

@@ -31,6 +31,7 @@ from backend.services.durable_external_qualification import (
     StagingQualificationPrerequisites,
     WholeWindowResourceSampler,
 )
+from deploy.external_pi_slot_topology import REPLICA_COUNT
 
 
 class SystemDurableQualificationControlPlane:
@@ -157,6 +158,11 @@ class SystemDurableQualificationControlPlane:
             raise QualificationRefused("binding_profile_order_required")
         evidence = self._prerequisites()
         configured_workers = configured_worker_ids(self.settings)
+        evidence_workers = (
+            tuple(worker_id for worker_id in evidence.worker_id.split(",") if worker_id)
+            if isinstance(evidence, StagingQualificationPrerequisites)
+            else ()
+        )
         if not isinstance(evidence, StagingQualificationPrerequisites):
             raise QualificationRefused("staging_prerequisite_missing")
         if (
@@ -164,11 +170,11 @@ class SystemDurableQualificationControlPlane:
             or not evidence.runtime_ready
             or evidence.worker_environment != "staging"
             or evidence.worker_id != evidence.configured_worker_id
-            or configured_workers != (evidence.worker_id,)
+            or configured_workers != evidence_workers
             or evidence.worker_release_id != self.release_id
             or evidence.worker_state != "ready"
             or evidence.worker_contract_version != "external-pi-v1"
-            or evidence.maximum_sessions < 32
+            or evidence.maximum_sessions != 32
             or evidence.active_sessions != 0
             or getattr(self.settings, "chat_new_session_pi_percentage", None) != 100
             or not all(
@@ -339,13 +345,20 @@ def bind_active_staging_worker(
         or len(token) < 32
     ):
         raise QualificationRefused("active_staging_worker_required")
-    port = {"blue": 8766, "green": 8767}[slot]
+    from deploy.external_pi_slot_topology import (
+        REPLICA_MAXIMUM_SESSIONS,
+        external_pi_endpoints,
+    )
+
+    endpoints = json.loads(external_pi_endpoints("staging", slot, token))
     return settings.model_copy(
         update={
-            "chat_external_pi_worker_id": f"staging-{slot}",
-            "chat_external_pi_worker_url": f"http://127.0.0.1:{port}",
+            "chat_external_pi_worker_id": "",
+            "chat_external_pi_worker_url": "",
+            "chat_external_pi_worker_token": "",
+            "chat_external_pi_worker_endpoints": endpoints,
             "chat_external_pi_worker_contract_version": "external-pi-v1",
-            "chat_external_pi_worker_max_sessions": 32,
+            "chat_external_pi_worker_max_sessions": REPLICA_MAXIMUM_SESSIONS,
         }
     )
 
@@ -412,7 +425,7 @@ class _SystemResourceEvidence:
         if scope_id is None:
             raise QualificationRefused("qualification_scope_invalid")
         worker_ids = configured_worker_ids(self.control_plane.settings)
-        if len(worker_ids) != 1:
+        if len(worker_ids) != REPLICA_COUNT:
             raise QualificationRefused("staging_prerequisite_missing")
         from sqlalchemy import text
 
@@ -426,7 +439,7 @@ class _SystemResourceEvidence:
                     JOIN chat_turn_latency AS latency
                       ON latency.turn_id = reservation.turn_id
                     WHERE latency.qualification_scope_id = :scope_id
-                      AND reservation.worker_id = :worker_id
+                      AND reservation.worker_id = ANY(CAST(:worker_ids AS text[]))
                       AND reservation.release_id = :release_id
                       AND reservation.expires_at > now()
                 """
@@ -442,7 +455,7 @@ class _SystemResourceEvidence:
                     text(turn_count_sql),
                     {
                         "scope_id": scope_id,
-                        "worker_id": worker_ids[0],
+                        "worker_ids": list(worker_ids),
                         "release_id": self.control_plane.release_id,
                     },
                 ).scalar_one()
@@ -456,7 +469,7 @@ class _SystemResourceEvidence:
                         JOIN chat_turn_latency AS latency
                           ON latency.turn_id = reservation.turn_id
                         WHERE latency.qualification_scope_id = :scope_id
-                          AND reservation.worker_id = :worker_id
+                          AND reservation.worker_id = ANY(CAST(:worker_ids AS text[]))
                           AND reservation.release_id = :release_id
                           AND reservation.expires_at > now()
                           AND (
@@ -467,7 +480,7 @@ class _SystemResourceEvidence:
                     ),
                     {
                         "scope_id": scope_id,
-                        "worker_id": worker_ids[0],
+                        "worker_ids": list(worker_ids),
                         "release_id": self.control_plane.release_id,
                         "include_terminal_reservations": include_terminal_reservations,
                     },
@@ -528,9 +541,8 @@ def _system_prerequisites(settings: object, release_id: str):
     )
 
     configured_workers = configured_worker_ids(settings)
-    worker_id = configured_workers[0] if len(configured_workers) == 1 else ""
+    worker_id = ",".join(configured_workers)
     migrations_ready = False
-    worker = None
     with db_manager.session_local() as db:
         identity = db.execute(text("SELECT current_user, current_schema()")).one()
         if tuple(identity) != ("pwc_staging", "staging"):
@@ -542,13 +554,15 @@ def _system_prerequisites(settings: object, release_id: str):
             migrations_ready = True
         except RuntimeError:
             migrations_ready = False
-        worker = db.execute(
-            select(ChatExternalWorker).where(
-                ChatExternalWorker.worker_id == worker_id,
-                ChatExternalWorker.environment == "staging",
-                ChatExternalWorker.lease_expires_at > datetime.now(UTC),
+        workers = tuple(
+            db.scalars(
+                select(ChatExternalWorker).where(
+                    ChatExternalWorker.worker_id.in_(configured_workers),
+                    ChatExternalWorker.environment == "staging",
+                    ChatExternalWorker.lease_expires_at > datetime.now(UTC),
+                )
             )
-        ).scalar_one_or_none()
+        )
     runtime_ready = all(
         getattr(settings, name, False)
         for name in (
@@ -570,7 +584,7 @@ def _system_prerequisites(settings: object, release_id: str):
         and getattr(settings, "chat_external_pi_runtime_contract_version", "")
         == "durable-external-pi-v1"
     )
-    if worker is None:
+    if not configured_workers or len(workers) != len(configured_workers):
         return StagingQualificationPrerequisites(
             migrations_ready=migrations_ready,
             runtime_ready=runtime_ready,
@@ -583,17 +597,27 @@ def _system_prerequisites(settings: object, release_id: str):
             maximum_sessions=0,
             active_sessions=0,
         )
+    worker_by_id = {worker.worker_id: worker for worker in workers}
+    ordered_workers = tuple(worker_by_id[value] for value in configured_workers)
+    shared_release = {worker.release_id for worker in ordered_workers}
+    shared_environment = {worker.environment for worker in ordered_workers}
+    shared_state = {worker.state for worker in ordered_workers}
+    shared_contract = {worker.contract_version for worker in ordered_workers}
     return StagingQualificationPrerequisites(
         migrations_ready=migrations_ready,
         runtime_ready=runtime_ready,
-        worker_environment=worker.environment,
-        worker_id=worker.worker_id,
+        worker_environment=(
+            shared_environment.pop() if len(shared_environment) == 1 else ""
+        ),
+        worker_id=worker_id,
         configured_worker_id=worker_id,
-        worker_release_id=worker.release_id,
-        worker_state=worker.state,
-        worker_contract_version=worker.contract_version,
-        maximum_sessions=worker.maximum_sessions,
-        active_sessions=worker.active_sessions,
+        worker_release_id=shared_release.pop() if len(shared_release) == 1 else "",
+        worker_state=shared_state.pop() if len(shared_state) == 1 else "",
+        worker_contract_version=(
+            shared_contract.pop() if len(shared_contract) == 1 else ""
+        ),
+        maximum_sessions=sum(worker.maximum_sessions for worker in ordered_workers),
+        active_sessions=sum(worker.active_sessions for worker in ordered_workers),
     )
 
 

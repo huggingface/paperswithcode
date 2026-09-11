@@ -68,6 +68,24 @@ test("remote tool bridge fails closed on an uncorrelated result", async () => {
   );
 });
 
+test("remote Bash preserves a failed sandbox launch result", async () => {
+  const bridge = new RemoteToolBridge({
+    async request(frame) {
+      return {
+        type: "tool_result",
+        operation_id: frame.operation_id,
+        ok: false,
+        error: "sandbox_start_failed",
+      };
+    },
+  });
+
+  await assert.rejects(
+    bridge.exec("tool-1", "pwc paper list", 30_000, () => undefined),
+    /remote execution failed:sandbox_start_failed/u,
+  );
+});
+
 test("remote Read preflight and read use one sandbox operation", async () => {
   const requests: RemoteToolRequest[] = [];
   const bridge = new RemoteToolBridge({

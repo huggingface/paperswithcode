@@ -526,10 +526,19 @@ def test_only_external_pi_runner_capabilities_receive_external_turn_scope(
         observed_scopes.append(kwargs["scopes"])
         return IssuedCapability("token", None, datetime.now(UTC) + timedelta(minutes=1))
 
+    marked: list[str] = []
+
+    def mark_external_pi(_self, request_id):
+        marked.append(request_id)
+        return True
+
     monkeypatch.setattr(
         turn_runner, "db_manager", SimpleNamespace(session_local=session)
     )
     monkeypatch.setattr(ChatCapabilityService, "issue", issue)
+    monkeypatch.setattr(
+        turn_runner.ChatLatencyService, "mark_external_pi", mark_external_pi
+    )
     monkeypatch.setattr(
         turn_runner,
         "ExternalPiChatTurnRunner",
@@ -546,7 +555,7 @@ def test_only_external_pi_runner_capabilities_receive_external_turn_scope(
         owner=owner,
         admission=admission,
         prompt="answer",
-        request_id="request-1",
+        request_id=str(uuid.uuid4()),
         resume_id=None,
         store=SimpleNamespace(),
     )

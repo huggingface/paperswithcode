@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sys
 from contextlib import nullcontext
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
@@ -18,6 +19,10 @@ from backend.services.chat_operational_alert_service import (
     provider_health,
     provider_transition,
     runtime_failure_counts,
+)
+from backend.services.chat_reliability_service import (
+    ChatAggregateSnapshot,
+    classify_chat_aggregates,
 )
 
 
@@ -254,6 +259,186 @@ def test_monitor_pages_once_on_window_breach_and_recovers_once(monkeypatch):
         "chat_lifecycle_threshold_recovered"
     ]
     assert events[0]["classifications"] == {"executor_lost_rate": 1}
+
+
+def test_reliability_probe_runs_every_fifteen_minutes_and_after_alerts(monkeypatch):
+    now = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    state = monitor.empty_state()
+    calls = []
+    monkeypatch.setattr(
+        monitor,
+        "probe_chat_aggregates",
+        lambda window, **kwargs: calls.append((window, kwargs)) or (),
+    )
+
+    assert monitor.collect_reliability_events(state, Settings(), now, {}, []) == []
+    assert len(calls) == 1
+    assert calls[0][0] == timedelta(minutes=15)
+
+    assert (
+        monitor.collect_reliability_events(
+            state, Settings(), now + timedelta(minutes=14), {}, []
+        )
+        == []
+    )
+    assert len(calls) == 1
+
+    alert = monitor.new_event("chat_runtime_critical", now=now + timedelta(minutes=14))
+    assert (
+        monitor.collect_reliability_events(
+            state, Settings(), now + timedelta(minutes=14), {}, [alert]
+        )
+        == []
+    )
+    assert len(calls) == 2
+
+
+def test_reliability_probe_persists_unknown_source_until_recovery(monkeypatch):
+    now = datetime(2026, 8, 31, 12, tzinfo=UTC)
+    state = monitor.empty_state()
+    incomplete = classify_chat_aggregates(
+        ChatAggregateSnapshot(
+            total_requests=0,
+            successful_requests=0,
+            provider_errors=0,
+            auth_errors=0,
+            billing_errors=0,
+            ttft_ms=(),
+            completion_ms=(),
+            stream_interruptions=0,
+            persistence_failures=0,
+            capacity_failures=0,
+            collection_complete=False,
+            window_start=now - timedelta(minutes=15),
+            window_end=now,
+        )
+    )
+    healthy = tuple(
+        SimpleNamespace(
+            state=monitor.FindingState.HEALTHY,
+            contract=finding.contract,
+            evidence=finding.evidence,
+        )
+        for finding in incomplete
+    )
+    findings = incomplete
+    monkeypatch.setattr(
+        monitor, "probe_chat_aggregates", lambda *_args, **_kwargs: findings
+    )
+
+    events = monitor.collect_reliability_events(state, Settings(), now, {}, [])
+
+    assert [event["signal"] for event in events] == [
+        "chat_reliability_monitor_unavailable"
+    ]
+    assert state.get("reliability_monitor_failed") is True
+
+    findings = healthy
+    events = monitor.collect_reliability_events(
+        state, Settings(), now + timedelta(minutes=15), {}, []
+    )
+
+    assert [event["signal"] for event in events] == [
+        "chat_reliability_monitor_recovered"
+    ]
+    assert state.get("reliability_monitor_failed") is False
+
+
+def test_release_change_forces_extra_reliability_and_synthetic_checks():
+    state = monitor.empty_state()
+    settings = Settings(release_id="new-release")
+
+    aggregate, synthetic = monitor.release_probe_triggers(state, settings)
+
+    assert aggregate is True
+    assert synthetic is True
+    assert state["observed_release_id"] == "new-release"
+
+    assert monitor.release_probe_triggers(state, settings) == (False, False)
+
+    changed_provider = Settings(
+        release_id="new-release",
+        chat_glm_5_3_flash_route="zai-org/GLM-5.3-Flash:alternate",
+    )
+    assert monitor.release_probe_triggers(state, changed_provider) == (True, True)
+
+
+def test_runtime_provider_revision_forces_checks_without_static_settings_change():
+    state = monitor.empty_state()
+    settings = Settings(release_id="same-release")
+
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:3:openai",
+    ) == (True, True)
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:3:openai",
+    ) == (False, False)
+    assert monitor.release_probe_triggers(
+        state,
+        settings,
+        provider_runtime_revision="production:4:huggingface",
+    ) == (True, True)
+
+
+def test_runtime_provider_revision_db_failure_does_not_stop_monitor(monkeypatch):
+    class FailingSession:
+        def __enter__(self):
+            raise monitor.SQLAlchemyError("database unavailable")
+
+        def __exit__(self, *_args):
+            return False
+
+    monkeypatch.setattr(
+        type(monitor.db_manager),
+        "session_local",
+        property(lambda _self: FailingSession),
+    )
+
+    assert monitor.current_provider_runtime_revision("production") is None
+
+
+def test_minute_monitor_never_runs_the_paid_synthetic_probe(monkeypatch, tmp_path):
+    settings = Settings(
+        environment="production",
+        chat_enabled=True,
+        chat_operational_alerts_enabled=True,
+        cron_log_dir=str(tmp_path),
+    )
+    state = monitor.empty_state()
+    monkeypatch.setattr(monitor, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitor, "load_state", lambda _path: state)
+    monkeypatch.setattr(monitor, "current_provider_runtime_revision", lambda _env: None)
+    monkeypatch.setattr(
+        monitor,
+        "release_probe_triggers",
+        lambda _state, _settings, **_kwargs: (False, False),
+    )
+    monkeypatch.setattr(
+        monitor, "collect_events", lambda _state, _settings, _now: ([], False)
+    )
+    monkeypatch.setattr(
+        monitor,
+        "collect_reliability_events",
+        lambda *_args, **_kwargs: [],
+    )
+
+    async def forbidden_synthetic(*_args, **_kwargs):
+        raise AssertionError("paid synthetic work belongs to its bounded job")
+
+    async def no_delivery(_state, _settings):
+        return 0
+
+    monkeypatch.setattr(monitor, "collect_synthetic_events", forbidden_synthetic)
+    monkeypatch.setattr(monitor, "deliver_pending", no_delivery)
+    monkeypatch.setattr(monitor, "write_state", lambda _path, _state: None)
+    monkeypatch.setattr(monitor, "write_health_record", lambda _path, _result: None)
+    monkeypatch.setattr(sys, "argv", ["monitor_chat_operational_alerts"])
+
+    assert monitor.main() == 0
 
 
 def test_provider_health_counts_only_content_free_aggregates():

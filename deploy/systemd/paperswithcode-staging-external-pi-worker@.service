@@ -27,5 +27,5 @@ ProcSubset=pid
 ReadOnlyPaths=/srv/paperswithcode
 BindReadOnlyPaths=/etc/paperswithcode/external-pi-hosts:/etc/hosts
 CPUQuota=400%
-MemoryMax=4294967296
+MemoryMax=6442450944
 TasksMax=512

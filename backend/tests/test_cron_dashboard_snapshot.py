@@ -172,7 +172,7 @@ def test_full_collection_uses_each_bounded_probe_once(monkeypatch):
     monkeypatch.setattr(
         cron_helpers,
         "get_cron_job_status",
-        lambda _name, _date: {"exists": False, "status": "unknown"},
+        lambda _name, _date, **_kwargs: {"exists": False, "status": "unknown"},
     )
 
     payload = cron_health.build_cron_dashboard(previous_dashboard={"jobs": []})
@@ -395,3 +395,41 @@ def test_workflow_collection_refreshes_overdue_cached_run(monkeypatch):
 
     assert statuses[job.id]["scheduled_run"]["databaseId"] == 18
     assert len(calls) == 2
+
+
+@pytest.mark.parametrize("enabled", [False, True, None])
+def test_operator_enablement_uses_one_bounded_query_for_both_duties(
+    monkeypatch, enabled
+):
+    jobs = [
+        job
+        for job in list_cron_jobs()
+        if job.output_evaluator == "autonomous_cron_operator"
+    ]
+    queries = []
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            pass
+
+        def execute(self, query):
+            queries.append(query)
+
+        def fetchone(self):
+            return {"enabled": enabled} if enabled is not None else None
+
+    class Connection:
+        def cursor(self, **_kwargs):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cron_health.psycopg2, "connect", lambda **_kwargs: Connection())
+    result = cron_health.fetch_db_freshness_batch(jobs)
+    assert len(queries) == 1
+    assert "WHERE operator = 'cron_health'" in queries[0]
+    assert result == {job.id: {"operator_enabled": enabled} for job in jobs}

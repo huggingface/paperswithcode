@@ -141,6 +141,30 @@ class ChatPiTranscriptService:
         self.db.flush()
         return row
 
+    def prebind_new_session(
+        self, chat: ChatSession, agent_session_id: uuid.UUID | None = None
+    ) -> ChatPiSession:
+        """Bind a freshly-created external Pi chat inside its admission transaction."""
+        if (
+            getattr(chat, "agent_harness", "claude") != "pi"
+            or chat.sdk_session_id is not None
+        ):
+            raise PiTranscriptError("Pi session cannot be prebound")
+        bound_id = agent_session_id or uuid.uuid4()
+        row = ChatPiSession(
+            agent_session_id=bound_id,
+            chat_session_id=chat.id,
+            current_leaf_id=None,
+            entry_count=0,
+            byte_size=0,
+            format_version=FORMAT_VERSION,
+        )
+        chat.sdk_session_id = bound_id
+        chat.sdk_project_key = None
+        chat.transcript_status = "pending"
+        self.db.add(row)
+        return row
+
     def append_entries(
         self,
         chat_session_id: uuid.UUID,

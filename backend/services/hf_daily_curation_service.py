@@ -229,8 +229,10 @@ class HFDailyCurationService:
         row = self.db.get(PaperCurationJob, job_id)
         if row is None:
             raise LookupError("Curation job not found")
-        if row.trigger != "hf-daily-cron":
-            raise ValueError("Only scheduled HF daily curation jobs may be retried")
+        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+            raise ValueError(
+                "Only scheduled HF daily or trending curation jobs may be retried"
+            )
         active_retry = (
             self.db.query(PaperCurationJob)
             .filter(

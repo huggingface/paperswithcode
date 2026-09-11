@@ -43,6 +43,7 @@ def build_runtime(
     http: httpx.AsyncClient,
     session_factory: Callable[[], AbstractContextManager[Session]],
     wait_for_stop: StopWaiter,
+    release_connections: Callable[[], None] | None = None,
 ) -> ChatExternalPiSupervisorRuntime:
     validate_supervisor_settings(settings)
     supervisor = ChatExternalPiSupervisor(
@@ -68,6 +69,7 @@ def build_runtime(
         heartbeat_interval_seconds=settings.chat_external_pi_heartbeat_seconds,
         startup_timeout_seconds=settings.chat_external_pi_startup_timeout_seconds,
         drain_poll_seconds=settings.chat_external_pi_drain_poll_seconds,
+        release_connections=release_connections,
     )
 
 
@@ -92,6 +94,7 @@ async def run() -> None:
             http=http,
             session_factory=db_manager.session_local,
             wait_for_stop=wait_for_stop,
+            release_connections=db_manager.engine.dispose,
         ).run()
     logger.info(
         "External Pi supervisor stopped registrations=%d heartbeats=%d drained=%s",

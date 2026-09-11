@@ -1,8 +1,10 @@
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
+from sqlalchemy.dialects import postgresql
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -86,6 +88,72 @@ def test_fleet_reservations_admit_one_hundred_across_bounded_workers(db):
         )
         <= 32
     )
+
+
+def test_capacity_candidate_locks_only_one_available_worker_without_waiting(db):
+    endpoints = tuple(_worker(db, ordinal) for ordinal in range(1, 9))
+    db.flush()
+    repository = ChatExternalWorkerCapacityRepository(environment="staging")
+    statements = []
+    scalars = db.scalars
+
+    def capture(statement, *args, **kwargs):
+        statements.append(statement)
+        return scalars(statement, *args, **kwargs)
+
+    db.scalars = capture  # type: ignore[method-assign]
+
+    repository.reserve(
+        db,
+        request_id="parallel-admission",
+        endpoints=endpoints,
+        contract_version="external-pi-v1",
+        now=NOW,
+    )
+
+    candidate = next(
+        statement
+        for statement in statements
+        if "chat_external_workers" in str(statement)
+    )
+    sql = str(candidate.compile(dialect=postgresql.dialect()))
+    assert "FOR UPDATE SKIP LOCKED" in sql
+    assert "LIMIT" in sql
+
+
+def test_capacity_candidate_retries_a_transient_row_lock(db, monkeypatch):
+    endpoint = _worker(db, 1)
+    db.flush()
+    repository = ChatExternalWorkerCapacityRepository(environment="staging")
+    scalars = db.scalars
+    attempts = 0
+    sleeps = []
+
+    def transient_lock(statement, *args, **kwargs):
+        nonlocal attempts
+        if "FOR UPDATE" in str(statement.compile(dialect=postgresql.dialect())):
+            attempts += 1
+            if attempts == 1:
+                return SimpleNamespace(first=lambda: None)
+        return scalars(statement, *args, **kwargs)
+
+    db.scalars = transient_lock  # type: ignore[method-assign]
+    monkeypatch.setattr(
+        "backend.services.chat_external_worker_capacity.time.sleep",
+        lambda seconds: sleeps.append(seconds),
+    )
+
+    reserved = repository.reserve(
+        db,
+        request_id="transient-lock",
+        endpoints=(endpoint,),
+        contract_version="external-pi-v1",
+        now=NOW,
+    )
+
+    assert reserved.endpoint == endpoint
+    assert attempts == 2
+    assert sleeps == [0.01]
 
 
 def test_capacity_refusal_and_idempotent_reattach_do_not_consume_extra_slots(db):

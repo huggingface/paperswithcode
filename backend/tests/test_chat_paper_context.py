@@ -206,6 +206,51 @@ def test_external_paper_context_reads_markdown_by_catalog_id(monkeypatch):
     assert seen["source"] == "external"
 
 
+def test_paper_context_replaces_postgres_forbidden_nul_in_markdown(monkeypatch):
+    service = ChatPaperContextService(
+        SimpleNamespace(), Settings(paper_markdown_hf_bucket_id="owner/content")
+    )
+    paper = SimpleNamespace(
+        id="114097",
+        arxiv_id=None,
+        title="External report",
+        source="external",
+        url_abs="https://example.com/report.pdf",
+        source_url="https://example.com/report.pdf",
+    )
+    row = SimpleNamespace(
+        version="v1", updated_at=SimpleNamespace(isoformat=lambda: "updated")
+    )
+    monkeypatch.setattr(PaperService, "get_linked_hf_artifact_urls", lambda *_args: {})
+    monkeypatch.setattr(
+        "backend.services.chat_paper_context_service._bounded_info",
+        lambda *_args: '{"title":"External report"}',
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_paper_context_service.read_paper_markdown_bounded",
+        lambda *_args, **_kwargs: ("before\x00after", False),
+    )
+
+    prepared = service._load(paper, row)
+
+    assert prepared.markdown == "before after"
+    assert "\x00" not in prepared.markdown
+    assert len(prepared.markdown.encode()) == len("before\x00after".encode())
+    assert prepared.included_bytes == len(prepared.markdown.encode())
+
+    monkeypatch.setattr(service, "prepare_one", lambda _route: prepared)
+    turn = service.prepare_turn(
+        owner_id="owner",
+        display_message="Summarize it",
+        mentions=[],
+        session_id=None,
+        replace_message_id=None,
+        primary_route_id="114097",
+    )
+    assert "\x00" not in turn.effective_prompt
+    assert "before after" in turn.effective_prompt
+
+
 def test_info_serializer_is_deterministic_bounded_and_reports_omissions():
     paper = SimpleNamespace(
         title="T",

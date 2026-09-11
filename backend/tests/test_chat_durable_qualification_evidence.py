@@ -2,12 +2,14 @@ import uuid
 import asyncio
 import os
 import threading
+from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,7 @@ from backend.models.database import (
     ChatQualificationScope,
     ChatExternalWorker,
     ChatExternalWorkerReservation,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
@@ -53,6 +56,7 @@ def engine():
     ChatQualificationEvidenceEvent.__table__.create(value)
     ChatExternalWorker.__table__.create(value)
     ChatExternalWorkerReservation.__table__.create(value)
+    ChatOpenAIProviderCall.__table__.create(value)
     return value
 
 
@@ -77,6 +81,7 @@ def _scope(
 
 def test_active_functional_scope_derives_server_trusted_capacity_context(engine):
     lock_requests = []
+    statements = []
 
     class LockedService(ChatDurableQualificationEvidenceService):
         def require_active_scope(self, scope_id, *, settings, lock=False):
@@ -86,6 +91,13 @@ def test_active_functional_scope_derives_server_trusted_capacity_context(engine)
     with Session(engine) as db:
         db.add(_scope())
         db.commit()
+        execute = db.execute
+
+        def capture(statement, *args, **kwargs):
+            statements.append(statement)
+            return execute(statement, *args, **kwargs)
+
+        db.execute = capture  # type: ignore[method-assign]
 
         context = LockedService(db, now=lambda: START).require_active_context(
             SCOPE_ID,
@@ -104,7 +116,13 @@ def test_active_functional_scope_derives_server_trusted_capacity_context(engine)
         turn_capacity=32,
         executor_live_cap=16,
     )
-    assert lock_requests == [True]
+    assert lock_requests == ["key_share"]
+    scope_query = next(
+        statement
+        for statement in statements
+        if "chat_qualification_scopes" in str(statement)
+    )
+    assert "FOR KEY SHARE" in str(scope_query.compile(dialect=postgresql.dialect()))
 
 
 @pytest.mark.parametrize(
@@ -319,6 +337,34 @@ def _latency(
         qualification_scenario="reliability",
         terminal_status="complete",
         admitted_at=START,
+        provider_gateway_received_ms=100 + index,
+        first_semantic_event_ms=300 + index,
+    )
+
+
+def _provider_call(index: int):
+    return ChatOpenAIProviderCall(
+        id=uuid.UUID(f"e0000000-0000-4000-8000-{index:012x}"),
+        turn_id=_latency(index).turn_id,
+        call_sequence=1,
+        owner_id="qualification-owner",
+        environment="staging",
+        month_start=date(2026, 8, 1),
+        public_model_id="model:test",
+        provider_model="model:test",
+        reasoning_effort="low",
+        service_tier="default",
+        request_bytes=100,
+        provider_latency_ms=400 + index,
+        provider_ttft_ms=200 + index,
+        outcome="completed",
+        state="settled",
+        reserved_microusd=1,
+        actual_microusd=1,
+        reserved_at=START,
+        dispatched_at=START,
+        settled_at=START + timedelta(seconds=1),
+        updated_at=START + timedelta(seconds=1),
     )
 
 
@@ -352,6 +398,7 @@ def _add_valid_functional_evidence(
 ) -> None:
     db.add(_scope())
     db.add_all(_latency(index) for index in range(32))
+    db.add_all(_provider_call(index) for index in range(32))
     db.add_all(
         _interval(index, started_at=START, terminal_at=END) for index in range(16, 32)
     )
@@ -405,6 +452,7 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     with Session(engine) as first, first.begin():
         first.add(_scope())
         first.add_all(_latency(index) for index in range(32))
+        first.add_all(_provider_call(index) for index in range(32))
         first.add(
             _interval(
                 16,
@@ -494,6 +542,37 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     assert evidence.workspace_evictions == 16
     assert evidence.stale_fences == 0
     assert evidence.billed_duration_ms == 940_000
+    assert asdict(evidence)["p95_server_latency_ms_by_workload"] == {
+        "no_tool": {
+            "provider_gateway_received_ms": 115,
+            "provider_ttft_ms": 215,
+            "first_semantic_event_ms": 315,
+        },
+        "read": {
+            "provider_gateway_received_ms": 123,
+            "provider_ttft_ms": 223,
+            "first_semantic_event_ms": 323,
+        },
+        "bash": {
+            "provider_gateway_received_ms": 131,
+            "provider_ttft_ms": 231,
+            "first_semantic_event_ms": 331,
+        },
+    }
+
+
+def test_functional_cohort_refuses_missing_first_provider_timing(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        db.query(ChatOpenAIProviderCall).filter_by(
+            turn_id=_latency(31).turn_id, call_sequence=1
+        ).delete()
+
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable, match="latency evidence"):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
 
 
 def test_collect_locks_scope_before_closing_authorization(engine):
@@ -750,6 +829,50 @@ def test_exact_scope_teardown_is_isolated_and_idempotent(engine):
     assert lock_requests == [(True, True), (True, True)]
     assert first.expected_tool_turns == first.closed_intervals == 16
     assert evictions == 16
+
+
+def test_exact_scope_teardown_cleans_terminal_error_without_passing_evidence(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        failed_turn = db.scalar(
+            select(ChatTurnLatency).where(
+                ChatTurnLatency.qualification_scope_id == SCOPE_ID,
+                ChatTurnLatency.qualification_workload == "bash",
+            )
+        )
+        failed_turn.terminal_status = "error"
+        db.query(ChatQualificationEvidenceEvent).filter_by(
+            event_type="workspace_evicted"
+        ).delete()
+        for interval in db.query(ChatSandboxComputeInterval):
+            interval.terminal_at = None
+
+    class Manager:
+        async def snapshot_and_terminate(self, session_id):
+            with Session(engine) as db, db.begin():
+                interval = db.scalar(
+                    select(ChatSandboxComputeInterval).where(
+                        ChatSandboxComputeInterval.chat_session_id == session_id
+                    )
+                )
+                interval.terminal_at = END
+            return True
+
+    with Session(engine) as db:
+        proof = asyncio.run(
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).teardown_scope(
+                scope_id=SCOPE_ID,
+                settings=_settings(),
+                sandbox_manager=Manager(),
+            )
+        )
+
+    assert proof.targeted_sessions == 16
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
 
 
 @pytest.mark.parametrize("event_type", ("stale_fence", "workspace_evicted"))

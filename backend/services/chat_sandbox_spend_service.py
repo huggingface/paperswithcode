@@ -298,6 +298,49 @@ class ChatSandboxSpendService:
             )
         return len(superseded_rows) + len(rows)
 
+    def reconcile_terminal_sessions(
+        self, session_ids: tuple[uuid.UUID, ...], *, now: datetime
+    ) -> int:
+        """Settle terminal leases only for an explicitly authorized session cohort."""
+        if not session_ids:
+            return 0
+        rows = list(
+            self.db.execute(
+                select(ChatSandboxComputeInterval, ChatSandboxLease)
+                .join(
+                    ChatSandboxLease,
+                    ChatSandboxLease.chat_session_id
+                    == ChatSandboxComputeInterval.chat_session_id,
+                )
+                .where(
+                    ChatSandboxComputeInterval.environment == self.settings.environment,
+                    ChatSandboxComputeInterval.app_release_id
+                    == self.settings.release_id,
+                    ChatSandboxComputeInterval.chat_session_id.in_(session_ids),
+                    ChatSandboxComputeInterval.terminal_at.is_(None),
+                    ChatSandboxComputeInterval.claimed_at.is_not(None),
+                    ChatSandboxLease.state.in_(["terminated", "failed"]),
+                    ChatSandboxLease.modal_sandbox_id.is_(None),
+                    ChatSandboxLease.app_release_id == self.settings.release_id,
+                    ChatSandboxLease.worker_generation
+                    == ChatSandboxComputeInterval.worker_generation,
+                )
+                .with_for_update()
+            ).all()
+        )
+        for interval, lease in rows:
+            terminal_at = max(
+                self._aware(interval.provider_created_at or interval.reserved_at),
+                self._aware(lease.updated_at),
+            )
+            self._settle_reconciled_interval(
+                interval,
+                terminal_at=terminal_at,
+                reason="lease_terminal_reconciled",
+                now=now,
+            )
+        return len(rows)
+
     @staticmethod
     def _settle_reconciled_interval(
         interval: ChatSandboxComputeInterval,

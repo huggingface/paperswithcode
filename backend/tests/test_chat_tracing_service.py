@@ -4,6 +4,8 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
+import pytest
+
 from backend.config import Settings
 from backend.services import chat_tracing_service as tracing
 from backend.services.chat_scope_guardrail_service import ScopeAttempt, ScopeDecision
@@ -42,6 +44,80 @@ class Client:
     def start_observation(self, *, name: str, **fields):
         self.root = Observation(name, **fields)
         return self.root
+
+
+def test_completed_trace_stays_successful_when_stream_generator_closes(monkeypatch):
+    client = Client()
+
+    @contextmanager
+    def attributes(**_values):
+        yield
+
+    monkeypatch.setattr(tracing, "_configured_client", lambda _settings: client)
+    monkeypatch.setattr(tracing, "propagate_attributes", attributes)
+
+    with pytest.raises(GeneratorExit):
+        with tracing.trace_chat_turn(
+            settings=Settings(
+                environment="staging",
+                release_id="release-1",
+                chat_langfuse_enabled=True,
+            ),
+            request_id="request-1",
+            session_id="session-1",
+            user_id="private-user",
+            prompt="Find papers",
+            model="research-model",
+            execution_backend="external_pi",
+            is_replacement=False,
+        ) as trace:
+            trace.finish("Completed answer", "success")
+            raise GeneratorExit
+
+    assert client.root is not None
+    assert client.root.fields["level"] == "DEFAULT"
+    assert client.root.fields["metadata"] == {"terminal_status": "success"}
+
+
+def test_failed_trace_keeps_error_code_when_stream_generator_closes(monkeypatch):
+    client = Client()
+
+    @contextmanager
+    def attributes(**_values):
+        yield
+
+    monkeypatch.setattr(tracing, "_configured_client", lambda _settings: client)
+    monkeypatch.setattr(tracing, "propagate_attributes", attributes)
+
+    with pytest.raises(GeneratorExit):
+        with tracing.trace_chat_turn(
+            settings=Settings(
+                environment="staging",
+                release_id="release-1",
+                chat_langfuse_enabled=True,
+            ),
+            request_id="request-1",
+            session_id="session-1",
+            user_id="private-user",
+            prompt="Find papers",
+            model="research-model",
+            execution_backend="external_pi",
+            is_replacement=False,
+        ) as trace:
+            trace.finish(
+                "Partial answer",
+                "error",
+                terminal_code="provider_error",
+            )
+            raise GeneratorExit
+
+    assert client.root is not None
+    assert client.root.fields["level"] == "ERROR"
+    assert client.root.fields["status_message"] == "provider_error"
+    assert client.root.fields["metadata"] == {
+        "terminal_status": "error",
+        "terminal_code": "provider_error",
+    }
 
 
 def test_scope_guardrail_trace_never_contains_suppressed_main_content(monkeypatch):
@@ -456,3 +532,93 @@ def test_interrupted_trace_is_warning_with_reason():
     assert generation.fields["metadata"] == expected_metadata
     assert root.fields["level"] == "WARNING"
     assert root.fields["metadata"] == expected_metadata
+
+
+def test_successful_empty_assistant_response_is_an_error():
+    root = Observation("root")
+    trace = tracing.ChatTurnTrace(
+        root,
+        prompt="OCR",
+        model="provider/model",
+        execution_backend="external_pi",
+    )
+
+    trace.finish("", "success")
+    trace.close()
+
+    generation = root.children[0]
+    expected_metadata = {
+        "terminal_status": "error",
+        "terminal_code": "empty_assistant_response",
+    }
+    assert generation.fields["level"] == "ERROR"
+    assert generation.fields["status_message"] == "empty_assistant_response"
+    assert generation.fields["metadata"] == expected_metadata
+    assert root.fields["level"] == "ERROR"
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected_level", "expected_status"),
+    [
+        ("", "ERROR", "empty_assistant_response"),
+        ("private paper answer", "DEFAULT", "success"),
+    ],
+)
+def test_content_free_trace_classifies_answer_presence_without_exposing_content(
+    answer, expected_level, expected_status
+):
+    root = Observation("root")
+    trace = tracing.ChatTurnTrace(
+        root,
+        prompt="private paper prompt",
+        model="provider/model",
+        execution_backend="external_pi",
+        content_free=True,
+    )
+
+    trace.finish(answer, "success")
+    trace.close()
+
+    generation = root.children[0]
+    assert generation.fields["level"] == expected_level
+    assert generation.fields["status_message"] == expected_status
+    serialized = repr(root.fields) + repr(generation.fields)
+    assert "private paper prompt" not in serialized
+    assert "private paper answer" not in serialized
+
+
+def test_stopped_trace_is_a_warning():
+    root = Observation("root")
+    trace = tracing.ChatTurnTrace(
+        root,
+        prompt="OCR",
+        model="provider/model",
+        execution_backend="external_pi",
+    )
+
+    trace.finish("", "stopped", interruption_reason="user_cancelled")
+    trace.close()
+
+    assert root.fields["level"] == "WARNING"
+    assert root.fields["metadata"] == {
+        "terminal_status": "stopped",
+        "interruption_reason": "user_cancelled",
+    }
+
+
+def test_cancelled_provider_request_trace_is_a_warning():
+    observation = Observation("provider")
+    trace = tracing.ProviderRequestTrace(
+        observation,
+        started=datetime.now(UTC),
+        metadata={},
+    )
+
+    trace.finish(
+        usage=SimpleNamespace(cost_microusd=None, outcome=None),
+        status_code=200,
+        error_code="openai_stream_cancelled",
+    )
+
+    assert observation.fields["level"] == "WARNING"
+    assert observation.fields["status_message"] == "openai_stream_cancelled"

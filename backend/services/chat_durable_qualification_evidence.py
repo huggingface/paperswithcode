@@ -19,9 +19,11 @@ from backend.database.connection import db_manager
 from backend.models.database import (
     ChatQualificationEvidenceEvent,
     ChatQualificationScope,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
+from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 
 logger = logging.getLogger(__name__)
 QUALIFICATION_PROFILES = {
@@ -94,7 +96,20 @@ class DurableQualificationEvidence:
     billed_duration_ms: int
     window_started_at_ms: int
     window_ended_at_ms: int
+    p95_server_latency_ms_by_workload: dict[str, QualificationServerLatencyP95]
     source: str = "durable_qualification_records"
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationServerLatencyP95:
+    provider_gateway_received_ms: int
+    provider_ttft_ms: int
+    first_semantic_event_ms: int
+
+
+def _nearest_rank(values: list[int], percentile: int) -> int:
+    ordered = sorted(values)
+    return ordered[max(0, (percentile * len(ordered) + 99) // 100 - 1)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -224,7 +239,11 @@ class ChatDurableQualificationEvidenceService:
         )
 
     def require_active_scope(
-        self, scope_id: uuid.UUID, *, settings: Settings, lock: bool = False
+        self,
+        scope_id: uuid.UUID,
+        *,
+        settings: Settings,
+        lock: bool | Literal["key_share"] = False,
     ) -> ChatQualificationScope:
         return self._require_scope(
             scope_id,
@@ -249,13 +268,15 @@ class ChatDurableQualificationEvidenceService:
         scope_id: uuid.UUID,
         *,
         settings: Settings,
-        lock: bool,
+        lock: bool | Literal["key_share"],
         allow_ended: bool,
     ) -> ChatQualificationScope:
         statement = select(ChatQualificationScope).where(
             ChatQualificationScope.id == scope_id
         )
-        if lock:
+        if lock == "key_share":
+            statement = statement.with_for_update(read=True, key_share=True)
+        elif lock:
             statement = statement.with_for_update()
         scope = self.db.execute(statement).scalar_one_or_none()
         now = self.now()
@@ -277,7 +298,7 @@ class ChatDurableQualificationEvidenceService:
         workload: str,
         settings: Settings,
     ) -> QualificationContext:
-        scope = self.require_active_scope(scope_id, settings=settings, lock=True)
+        scope = self.require_active_scope(scope_id, settings=settings, lock="key_share")
         if (
             not settings.chat_durable_turn_dispatch_enabled
             or scope.profile != "32-functional-turns"
@@ -423,6 +444,8 @@ class ChatDurableQualificationEvidenceService:
                 ChatTurnLatency.chat_session_id,
                 ChatTurnLatency.terminal_status,
                 ChatTurnLatency.qualification_workload,
+                ChatTurnLatency.provider_gateway_received_ms,
+                ChatTurnLatency.first_semantic_event_ms,
             ).where(
                 ChatTurnLatency.qualification_scope_id == scope.id,
                 ChatTurnLatency.qualification_run_id == scope.run_id,
@@ -455,6 +478,59 @@ class ChatDurableQualificationEvidenceService:
             raise QualificationEvidenceUnavailable(
                 "qualification workload evidence is incomplete"
             )
+        latency_p95: dict[str, QualificationServerLatencyP95] = {}
+        if scope.profile == "32-functional-turns":
+            first_provider_rows = self.db.execute(
+                select(
+                    ChatOpenAIProviderCall.turn_id,
+                    ChatOpenAIProviderCall.provider_ttft_ms,
+                ).where(
+                    ChatOpenAIProviderCall.turn_id.in_(turn_ids),
+                    ChatOpenAIProviderCall.call_sequence == 1,
+                    ChatOpenAIProviderCall.environment == settings.environment,
+                    ChatOpenAIProviderCall.reserved_at >= started,
+                    ChatOpenAIProviderCall.reserved_at <= ended,
+                )
+            ).all()
+            provider_ttft_by_turn = {
+                row.turn_id: row.provider_ttft_ms for row in first_provider_rows
+            }
+            if (
+                len(first_provider_rows) != expected_users
+                or set(provider_ttft_by_turn) != turn_ids
+            ):
+                raise QualificationEvidenceUnavailable(
+                    "qualification latency evidence is incomplete"
+                )
+            for workload, expected_count in expected_workloads.items():
+                workload_rows = [
+                    row
+                    for row in latency_rows
+                    if row.qualification_workload == workload
+                ]
+                gateway_values = [
+                    row.provider_gateway_received_ms for row in workload_rows
+                ]
+                provider_values = [
+                    provider_ttft_by_turn[row.turn_id] for row in workload_rows
+                ]
+                semantic_values = [row.first_semantic_event_ms for row in workload_rows]
+                if len(workload_rows) != expected_count or any(
+                    not isinstance(value, int) or isinstance(value, bool) or value < 0
+                    for value in (
+                        *gateway_values,
+                        *provider_values,
+                        *semantic_values,
+                    )
+                ):
+                    raise QualificationEvidenceUnavailable(
+                        "qualification latency evidence is incomplete"
+                    )
+                latency_p95[workload] = QualificationServerLatencyP95(
+                    provider_gateway_received_ms=_nearest_rank(gateway_values, 95),
+                    provider_ttft_ms=_nearest_rank(provider_values, 95),
+                    first_semantic_event_ms=_nearest_rank(semantic_values, 95),
+                )
         events = self.db.execute(
             select(
                 ChatQualificationEvidenceEvent.turn_id,
@@ -567,6 +643,7 @@ class ChatDurableQualificationEvidenceService:
             billed_duration_ms=billed_duration_ms,
             window_started_at_ms=round(started.timestamp() * 1_000),
             window_ended_at_ms=round(ended.timestamp() * 1_000),
+            p95_server_latency_ms_by_workload=latency_p95,
         )
 
     async def teardown_scope(
@@ -607,7 +684,11 @@ class ChatDurableQualificationEvidenceService:
             len(rows) != expected_users
             or len({row.chat_session_id for row in rows}) != expected_users
             or Counter(row.qualification_workload for row in rows) != expected_workloads
-            or any(row.terminal_status != "complete" for row in rows)
+            or any(
+                row.terminal_status
+                not in {"complete", "stopped", "error", "interrupted"}
+                for row in rows
+            )
         ):
             raise QualificationEvidenceUnavailable(
                 "qualification teardown cohort is incomplete"
@@ -624,16 +705,26 @@ class ChatDurableQualificationEvidenceService:
                 ) from None
 
         self.db.expire_all()
+        tool_session_ids = tuple(row.chat_session_id for row in tool_rows)
+        open_session_ids = tuple(
+            self.db.scalars(
+                select(ChatSandboxComputeInterval.chat_session_id).where(
+                    ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids),
+                    ChatSandboxComputeInterval.terminal_at.is_(None),
+                )
+            )
+        )
+        if open_session_ids:
+            ChatSandboxSpendService(self.db, settings).reconcile_terminal_sessions(
+                open_session_ids, now=self.now()
+            )
+            self.db.expire_all()
         interval_rows = self.db.execute(
             select(
                 ChatSandboxComputeInterval.chat_session_id,
                 ChatSandboxComputeInterval.terminal_at,
                 ChatSandboxComputeInterval.app_release_id,
-            ).where(
-                ChatSandboxComputeInterval.chat_session_id.in_(
-                    tuple(row.chat_session_id for row in tool_rows)
-                )
-            )
+            ).where(ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids))
         ).all()
         intervals_by_session = Counter(row.chat_session_id for row in interval_rows)
         if (

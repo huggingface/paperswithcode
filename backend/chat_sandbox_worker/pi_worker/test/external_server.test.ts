@@ -26,6 +26,7 @@ function externalRunFrame(): Record<string, unknown> {
     model: "test-model",
     resume: null,
     web_search_enabled: false,
+    excalidraw_enabled: true,
     reader_mode: false,
     poster_mode: false,
     paper_artifacts_enabled: false,
@@ -173,6 +174,7 @@ test("external worker streams one authenticated Pi turn without a local shell", 
       model: "test-model",
       resume: null,
       web_search_enabled: false,
+      excalidraw_enabled: true,
       reader_mode: false,
       poster_mode: false,
       paper_artifacts_enabled: false,
@@ -1044,4 +1046,56 @@ test("external worker capacity remains configurable above the initial eight", ()
     () => createExternalWorkerServer({ ...options, maximumConcurrent: 33 }),
     /concurrency is invalid/,
   );
+});
+
+test("a strictly newer claim reclaims an idle drained worker but not a busy one", async () => {
+  const token = "s".repeat(32);
+  const server = createExternalWorkerServer({
+    token,
+    maximumConcurrent: 8,
+    workerId: "worker-1",
+    instanceId: "10000000-0000-4000-8000-000000000001",
+    releaseId: "release-a",
+    profile: { prompt: "system", tool_names: [] },
+  });
+  server.listen(0, "127.0.0.1");
+  await once(server, "listening");
+  const address = server.address();
+  assert(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const authorization = { Authorization: `Bearer ${token}` };
+  const claimWith = (worker_generation: number) => fetch(`${baseUrl}/v1/claim`, {
+    method: "POST",
+    headers: { ...authorization, "Content-Type": "application/json" },
+    body: JSON.stringify({ worker_generation }),
+  });
+  try {
+    assert.equal((await claimWith(3)).status, 200);
+    assert.equal((await fetch(`${baseUrl}/v1/drain`, {
+      method: "POST",
+      headers: { ...authorization, "X-PWC-Worker-Generation": "3" },
+    })).status, 200);
+
+    // Re-binding the same generation is the stale owner reconnecting; it must
+    // not resurrect the worker.
+    assert.equal((await claimWith(3)).status, 400);
+    const stale = await fetch(`${baseUrl}/v1/status`, { headers: authorization });
+    assert.equal((await stale.json() as { state: string }).state, "draining");
+
+    // A strictly newer supervisor generation reclaims the idle worker.
+    const reclaimed = await claimWith(4);
+    assert.equal(reclaimed.status, 200);
+    const body = await reclaimed.json() as { state: string; worker_generation: number };
+    assert.equal(body.state, "ready");
+    assert.equal(body.worker_generation, 4);
+
+    const shadow = await fetch(`${baseUrl}/v1/shadow`, {
+      method: "POST",
+      headers: authorization,
+    });
+    assert.notEqual(shadow.status, 503);
+  } finally {
+    server.close();
+    await once(server, "close");
+  }
 });

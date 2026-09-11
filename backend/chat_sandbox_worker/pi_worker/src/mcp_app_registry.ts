@@ -123,6 +123,7 @@ function createViewLooksCompatible(definition: { parameters?: unknown } | undefi
 
 export function assessExcalidrawReadiness(options: {
   enabled: boolean;
+  connectionMode?: "remote" | "lazy" | undefined;
   serverStatus?: string | undefined;
   activeTools: readonly string[];
   createViewDefinition?: { parameters?: unknown } | undefined;
@@ -149,14 +150,15 @@ export function assessExcalidrawReadiness(options: {
   const discovered = registered.filter((name) => (EXCALIDRAW_MODEL_TOOLS as readonly string[]).includes(name));
   const appOnlyPresent = registered.some((name) => (EXCALIDRAW_APP_TOOLS as readonly string[]).includes(name));
   const connected = options.serverStatus === "connected";
-const expected = EXCALIDRAW_MODEL_TOOLS;
+  const available = options.connectionMode === "lazy" || connected;
+  const expected = EXCALIDRAW_MODEL_TOOLS;
   const hasExpected = expected.every((name) => registered.includes(name));
   let state: McpProviderReadinessState;
   let failure: McpProviderFailureClass | null = null;
-  if (options.timedOut && !connected) {
+  if (options.timedOut && !available) {
     state = "discovery_timeout";
     failure = "discovery_timeout";
-  } else if (!connected) {
+  } else if (!available) {
     state = "configured_not_connected";
     failure = "configured_not_connected";
   } else if (appOnlyPresent || (hasExpected && !createViewLooksCompatible(options.createViewDefinition))) {

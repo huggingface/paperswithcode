@@ -33,6 +33,7 @@ MIN_PROJECTED_MEM_AVAILABLE_BYTES = 1536 * 1024**2
 MAX_REPORT_COUNTER = 1_000_000
 MAX_REPORT_DURATION_MS = 60_000
 MAX_DURABLE_DURATION_MS = 600_000
+P95_TTFT_TARGET_MS = 2_000
 MAX_REPORT_BYTES = 2**63 - 1
 FleetShapeName = Literal["2x32", "3x32", "4x16", "5x32", "8x16", "16x8"]
 DurableWorkload = Literal["no_tool", "read", "bash", "admission_stream"]
@@ -84,7 +85,12 @@ class DurableQualificationProfile:
 class DurableTurnObservation(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
 
+    workload: DurableWorkload
     outcome: Literal["completed", "refused", "failed"]
+    admission_ms: int | None = Field(default=None, ge=0, le=MAX_DURABLE_DURATION_MS)
+    reconnect_ready_ms: int | None = Field(
+        default=None, ge=0, le=MAX_DURABLE_DURATION_MS
+    )
     ttft_ms: int | None = Field(default=None, ge=0, le=MAX_DURABLE_DURATION_MS)
     completion_ms: int | None = Field(default=None, ge=0, le=MAX_DURABLE_DURATION_MS)
     reconnects: int = Field(default=0, ge=0, le=MAX_REPORT_COUNTER)
@@ -102,6 +108,10 @@ class DurableTurnObservation(BaseModel):
     def validate_reconnects(self) -> DurableTurnObservation:
         if self.reconnect_successes > self.reconnects:
             raise ValueError("durable turn reconnect counts are inconsistent")
+        milestones = (self.admission_ms, self.reconnect_ready_ms, self.ttft_ms)
+        present = tuple(value for value in milestones if value is not None)
+        if present != tuple(sorted(present)):
+            raise ValueError("durable turn latency milestones are inconsistent")
         return self
 
 
@@ -174,6 +184,14 @@ def load_modal_rate_evidence(
         raise FleetRunRefused("protected Modal rate evidence is invalid") from None
 
 
+class DurableServerLatencyP95(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    provider_gateway_received_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    provider_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    first_semantic_event_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+
+
 class DurableQualificationEvidence(BaseModel):
     """Exact cross-process records for one protected qualification cohort."""
 
@@ -193,7 +211,29 @@ class DurableQualificationEvidence(BaseModel):
     billed_duration_ms: int = Field(ge=0, le=MAX_REPORT_BYTES)
     window_started_at_ms: int = Field(ge=1, le=MAX_REPORT_BYTES)
     window_ended_at_ms: int = Field(ge=1, le=MAX_REPORT_BYTES)
+    p95_server_latency_ms_by_workload: dict[
+        DurableWorkload, DurableServerLatencyP95
+    ] = Field(default_factory=dict, max_length=3)
     source: Literal["durable_qualification_records"]
+
+    @model_validator(mode="after")
+    def validate_server_latency(self) -> DurableQualificationEvidence:
+        expected = {"no_tool", "read", "bash"} if self.expected_users == 32 else set()
+        if set(self.p95_server_latency_ms_by_workload) != expected:
+            raise ValueError("durable server latency evidence is incomplete")
+        return self
+
+
+class DurableLatencyAttributionP95(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    client_admission_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    client_reconnect_ready_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    client_post_reconnect_to_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    server_provider_gateway_received_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    provider_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    server_first_semantic_event_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    end_to_end_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
 
 
 def modal_lifecycle_delta(
@@ -240,6 +280,10 @@ class DurableProfileReport(BaseModel):
     ttft_observations: int = Field(ge=0, le=EXPECTED_USERS)
     completion_observations: int = Field(ge=0, le=EXPECTED_USERS)
     p95_ttft_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
+    p95_ttft_ms_by_workload: dict[DurableWorkload, int] = Field(max_length=4)
+    p95_latency_attribution_ms_by_workload: dict[
+        DurableWorkload, DurableLatencyAttributionP95
+    ] = Field(default_factory=dict, max_length=3)
     p99_completion_ms: int = Field(ge=0, le=MAX_DURABLE_DURATION_MS)
     peak_memory_bytes: int = Field(ge=0, le=MAX_REPORT_BYTES)
     minimum_host_mem_available_bytes: int = Field(ge=0, le=MAX_REPORT_BYTES)
@@ -274,6 +318,20 @@ class DurableProfileReport(BaseModel):
         )
         if self.modal_estimated_cost_microusd != expected_cost:
             raise ValueError("durable profile Modal cost evidence is inconsistent")
+        expected_workloads = set(resolve_durable_profile(self.profile).workloads)
+        if set(self.p95_ttft_ms_by_workload) != expected_workloads or any(
+            type(value) is not int or value < 0 or value > MAX_DURABLE_DURATION_MS
+            for value in self.p95_ttft_ms_by_workload.values()
+        ):
+            raise ValueError("durable workload TTFT evidence is inconsistent")
+        expected_attribution = (
+            {"no_tool", "read", "bash"}
+            if self.qualification_evidence_source == "durable_qualification_records"
+            and self.profile == "32-functional-turns"
+            else set()
+        )
+        if set(self.p95_latency_attribution_ms_by_workload) != expected_attribution:
+            raise ValueError("durable latency attribution evidence is inconsistent")
         return self
 
     @computed_field
@@ -296,7 +354,11 @@ class DurableProfileReport(BaseModel):
             and self.reconnects == self.reconnect_successes
             and self.ttft_observations == self.expected_users
             and self.completion_observations == self.expected_users
-            and self.p95_ttft_ms <= 10_000
+            and self.p95_ttft_ms < P95_TTFT_TARGET_MS
+            and all(
+                value < P95_TTFT_TARGET_MS
+                for value in self.p95_ttft_ms_by_workload.values()
+            )
             and self.p99_completion_ms <= 60_000
             and self.minimum_host_mem_available_bytes
             >= MIN_PROJECTED_MEM_AVAILABLE_BYTES
@@ -376,12 +438,17 @@ class DurableQualificationReport(BaseModel):
         names = tuple(item.profile for item in self.profiles)
         expected = ("32-functional-turns",)
         if names != expected[: len(names)] or any(
-            not item.passed or item.modal_rate_release_id != self.release_id
-            for item in self.profiles
+            item.modal_rate_release_id != self.release_id for item in self.profiles
         ):
             raise ValueError("durable report profiles are invalid")
+        failed_profiles = sum(not item.passed for item in self.profiles)
         if self.status == "completed":
-            if self.reason is not None or names != expected or not self.cleanup_passed:
+            if (
+                self.reason is not None
+                or names != expected
+                or failed_profiles
+                or not self.cleanup_passed
+            ):
                 raise ValueError(
                     "completed durable report requires an approved profile sequence and cleanup"
                 )
@@ -397,7 +464,7 @@ class DurableQualificationReport(BaseModel):
                 raise ValueError("failed durable report requires a typed reason")
             failed_profile_limits = {
                 "durable_qualification_failed": 0,
-                "durable_profile_failed": 0,
+                "durable_profile_failed": 1,
                 "cleanup_failed": 1,
                 "staging_isolation_required": 0,
                 "exact_staging_release_required": 0,
@@ -427,6 +494,14 @@ class DurableQualificationReport(BaseModel):
             maximum_profiles = failed_profile_limits.get(self.reason or "")
             if maximum_profiles is None or len(names) > maximum_profiles:
                 raise ValueError("failed durable report reason or profiles are invalid")
+            if (
+                self.reason == "durable_profile_failed"
+                and names
+                and failed_profiles != 1
+            ) or (self.reason != "durable_profile_failed" and failed_profiles):
+                raise ValueError(
+                    "failed durable report profile evidence is inconsistent"
+                )
             if (
                 self.reason == "public_external_admission_flags_are_invalid"
                 and self.flags_restored
@@ -492,6 +567,56 @@ def aggregate_durable_profile(
             "durable qualification requires exact profile observations"
         )
     ttft = tuple(item.ttft_ms for item in observations if item.ttft_ms is not None)
+    expected_workloads = set(profile.workloads)
+    if Counter(item.workload for item in observations) != Counter(profile.workloads):
+        raise FleetRunRefused("durable qualification workload evidence is inconsistent")
+    ttft_by_workload = {
+        workload: tuple(
+            item.ttft_ms
+            for item in observations
+            if item.workload == workload and item.ttft_ms is not None
+        )
+        for workload in expected_workloads
+    }
+    latency_attribution: dict[DurableWorkload, DurableLatencyAttributionP95] = {}
+    if qualification_evidence is not None and profile.name == "32-functional-turns":
+        if any(
+            item.admission_ms is None
+            or item.reconnect_ready_ms is None
+            or item.ttft_ms is None
+            for item in observations
+        ):
+            raise FleetRunRefused("durable client latency evidence is incomplete")
+        for workload in sorted(expected_workloads):
+            workload_rows = tuple(
+                item for item in observations if item.workload == workload
+            )
+            server = qualification_evidence.p95_server_latency_ms_by_workload[workload]
+            latency_attribution[workload] = DurableLatencyAttributionP95(
+                client_admission_ms=_nearest_rank(
+                    tuple(cast(int, item.admission_ms) for item in workload_rows),
+                    0.95,
+                ),
+                client_reconnect_ready_ms=_nearest_rank(
+                    tuple(cast(int, item.reconnect_ready_ms) for item in workload_rows),
+                    0.95,
+                ),
+                client_post_reconnect_to_ttft_ms=_nearest_rank(
+                    tuple(
+                        cast(int, item.ttft_ms) - cast(int, item.reconnect_ready_ms)
+                        for item in workload_rows
+                    ),
+                    0.95,
+                ),
+                server_provider_gateway_received_ms=(
+                    server.provider_gateway_received_ms
+                ),
+                provider_ttft_ms=server.provider_ttft_ms,
+                server_first_semantic_event_ms=server.first_semantic_event_ms,
+                end_to_end_ttft_ms=_nearest_rank(
+                    tuple(cast(int, item.ttft_ms) for item in workload_rows), 0.95
+                ),
+            )
     completion = tuple(
         item.completion_ms for item in observations if item.completion_ms is not None
     )
@@ -564,6 +689,11 @@ def aggregate_durable_profile(
         ttft_observations=len(ttft),
         completion_observations=len(completion),
         p95_ttft_ms=_nearest_rank(ttft, 0.95),
+        p95_ttft_ms_by_workload={
+            workload: _nearest_rank(values, 0.95)
+            for workload, values in sorted(ttft_by_workload.items())
+        },
+        p95_latency_attribution_ms_by_workload=latency_attribution,
         p99_completion_ms=_nearest_rank(completion, 0.99),
         peak_memory_bytes=peak_memory_bytes,
         minimum_host_mem_available_bytes=minimum_host_mem_available_bytes,

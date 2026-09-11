@@ -14,6 +14,7 @@ from backend.config import Settings
 from backend.models.database import (
     ChatMessageRecord,
     ChatSession,
+    ChatTurnJob,
     ChatTurnLatency,
 )
 from backend.services.chat_sandbox_provider import (
@@ -21,6 +22,7 @@ from backend.services.chat_sandbox_provider import (
     sanitized_failure_class,
     sanitized_failure_stage,
 )
+from backend.services.chat_turn_lifecycle import NONTERMINAL_STATES
 
 RETENTION_DAYS = 30
 MAX_DURATION_MS = 3_600_000
@@ -126,7 +128,7 @@ class ChatLatencyService:
         is_new_chat: bool,
         agent_harness: str = "claude",
     ) -> ChatTurnLatency:
-        if execution_backend not in {"local_mcp", "modal_cli"}:
+        if execution_backend not in {"local_mcp", "modal_cli", "external_pi"}:
             raise ValueError("Unsupported chat execution backend")
         if agent_harness not in {"claude", "pi"}:
             raise ValueError("Unsupported chat agent harness")
@@ -170,6 +172,33 @@ class ChatLatencyService:
         self.db.add(row)
         self.db.flush()
         return row
+
+    def mark_external_pi(self, request_id: str) -> bool:
+        """Record that the turn ran on the external Pi fleet, not a sandbox.
+
+        Admission cannot know this: routing also depends on durable
+        qualification evidence resolved later. Until it is corrected the turn
+        carries the Modal sandbox shape, so `finalize` bills it for compute
+        that never ran and feeds that figure to the Modal spend circuits.
+        """
+        try:
+            request_uuid = uuid.UUID(request_id)
+        except ValueError:
+            raise ValueError("request_id must be a UUID") from None
+        result = self.db.execute(
+            update(ChatTurnLatency)
+            .where(
+                ChatTurnLatency.request_id == request_uuid,
+                ChatTurnLatency.execution_backend == "modal_cli",
+            )
+            .values(
+                execution_backend="external_pi",
+                sandbox_cpu_request=None,
+                sandbox_memory_request_mib=None,
+                updated_at=datetime.now(UTC),
+            )
+        )
+        return bool(result.rowcount)
 
     def record_phase(
         self,
@@ -415,6 +444,15 @@ class ChatLatencyService:
                 )
                 .where(
                     ChatTurnLatency.terminal_status == "running",
+                    # Durable lifecycle owns expiry and must update the job and
+                    # conversation atomically using the worker's current lease.
+                    # The session lease can expire while that worker is healthy.
+                    ~select(ChatTurnJob.turn_id)
+                    .where(
+                        ChatTurnJob.turn_id == ChatTurnLatency.turn_id,
+                        ChatTurnJob.state.in_(NONTERMINAL_STATES),
+                    )
+                    .exists(),
                     or_(
                         ChatSession.active_turn_expires_at <= current,
                         and_(

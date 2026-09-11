@@ -1393,6 +1393,132 @@ def test_maintenance_plan_claims_blank_without_provider_as_lost():
     assert persisted.failure_code == "sandbox_lost"
 
 
+def test_maintenance_plan_drains_claimed_pool_row_after_assignment_is_settled():
+    settings = _settings()
+    sessions = _database()
+    now = datetime.now(UTC)
+    row = _pool(settings, state="claimed", sandbox_id="sb-settled-claim")
+    row.claimed_at = now - timedelta(minutes=1)
+    row.blank_billable_seconds = 123
+    row.estimated_blank_cost_usd = 1.25
+    interval = _interval(
+        settings,
+        row.worker_generation,
+        now - timedelta(minutes=2),
+        sandbox_id=row.modal_sandbox_id,
+    )
+    interval.claimed_at = now - timedelta(minutes=1)
+    interval.terminal_at = now - timedelta(seconds=30)
+    with sessions() as db, db.begin():
+        db.add_all([row, interval])
+
+    repository = _repository(
+        settings,
+        tokens=("settled-claim-cleanup", "settled-claim-cleanup-retry"),
+    )
+    with sessions() as db, db.begin():
+        plan = repository.plan_maintenance(
+            db,
+            now=now,
+            enabled=False,
+            budget_blocked=False,
+            starting_expired_before=now - timedelta(minutes=1),
+            rotation_before=now + timedelta(minutes=1),
+            stale_draining_before=now - timedelta(minutes=5),
+            termination_limit=1,
+            scan_limit=10,
+        )
+
+    assert len(plan.termination_claims) == 1
+    assert plan.termination_claims[0].pool_id == row.id
+    assert plan.termination_claims[0].sandbox_id == row.modal_sandbox_id
+    assert plan.termination_claims[0].accounting_settled is True
+    with sessions() as db, db.begin():
+        retry = repository.claim_termination(
+            db,
+            row.id,
+            row.modal_sandbox_id,
+            failure_code=None,
+            now=now + timedelta(minutes=31),
+            stale_draining_before=now + timedelta(minutes=30),
+        )
+    assert isinstance(retry, PoolTerminationClaim)
+    assert retry.accounting_settled is True
+    with sessions() as db, db.begin():
+        outcome = repository.finish_termination(
+            db,
+            retry,
+            confirmed=True,
+            now=now + timedelta(minutes=32),
+        )
+    assert outcome is PoolTerminationFinishOutcome.FINISHED
+    with sessions() as db:
+        persisted = db.get(ChatSandboxPool, row.id)
+    assert persisted.state == "terminated"
+    assert persisted.blank_billable_seconds == 123
+    assert float(persisted.estimated_blank_cost_usd) == 1.25
+
+
+@pytest.mark.parametrize("active_reference", ["lease", "interval"])
+def test_maintenance_plan_preserves_claimed_pool_row_with_active_assignment(
+    active_reference,
+):
+    settings = _settings()
+    sessions = _database()
+    now = datetime.now(UTC)
+    row = _pool(settings, state="claimed", sandbox_id="sb-active-claim")
+    records = [row]
+    if active_reference == "lease":
+        session_id = uuid.uuid4()
+        records.extend(
+            [
+                _session(session_id),
+                ChatSandboxLease(
+                    chat_session_id=session_id,
+                    modal_sandbox_id=row.modal_sandbox_id,
+                    app_release_id=settings.release_id,
+                    image_version=settings.chat_modal_image_version,
+                    worker_contract_version=settings.chat_worker_contract_version,
+                    worker_generation=row.worker_generation,
+                    state="ready",
+                    last_activity_at=now,
+                    workspace_dirty=False,
+                    created_at=now,
+                    updated_at=now,
+                ),
+            ]
+        )
+    else:
+        interval = _interval(
+            settings,
+            row.worker_generation,
+            now - timedelta(minutes=1),
+            sandbox_id=row.modal_sandbox_id,
+        )
+        interval.claimed_at = now
+        records.append(interval)
+    with sessions() as db, db.begin():
+        db.add_all(records)
+
+    repository = _repository(settings, tokens=("must-not-be-used",))
+    with sessions() as db, db.begin():
+        plan = repository.plan_maintenance(
+            db,
+            now=now,
+            enabled=False,
+            budget_blocked=False,
+            starting_expired_before=now - timedelta(minutes=1),
+            rotation_before=now + timedelta(minutes=1),
+            stale_draining_before=now - timedelta(minutes=5),
+            termination_limit=1,
+            scan_limit=10,
+        )
+
+    assert plan.termination_claims == ()
+    with sessions() as db:
+        assert db.get(ChatSandboxPool, row.id).state == "claimed"
+
+
 def test_terminal_cleanup_is_state_safe_and_bounded():
     settings = _settings()
     sessions = _database()

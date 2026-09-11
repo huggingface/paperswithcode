@@ -255,40 +255,28 @@ class DetachedTurnCoordinator:
         source: AsyncIterator[ChatStreamFrame],
         stale_boundary: QualificationStaleFenceBoundary | None = None,
     ) -> DetachedTurnHandle:
-        async with self._start_lock:
-            now = self._clock()
-            ambiguous_claim = self._ambiguous_turns.get(turn.turn_id)
-            if ambiguous_claim is not None:
-                try:
-                    claim_is_live = await self._transaction(
-                        lambda db: self._claim_is_live(
-                            db, claim=ambiguous_claim, now=now
-                        )
-                    )
-                except (SQLAlchemyError, OSError, TimeoutError) as error:
-                    await self._close_source(source)
-                    raise StaleTurnClaim(
-                        "Detached turn outcome remains ambiguous"
-                    ) from error
-                if not claim_is_live:
-                    self._drop_tombstone(turn.turn_id, ambiguous_claim)
+        if turn.turn_id in self._ambiguous_turns:
+            async with self._start_lock:
+                if turn.turn_id in self._ambiguous_turns:
+                    await self._reject_ambiguous_restart(turn.turn_id, source)
+        claim_validated = False
+        try:
+            await self._transaction(
+                lambda db: self._jobs.require_live_claim(
+                    db, claim=turn.claim, now=self._clock()
+                )
+            )
+            claim_validated = True
+        finally:
+            if not claim_validated:
                 await self._close_source(source)
-                raise StaleTurnClaim("Detached turn outcome is ambiguous")
+        async with self._start_lock:
+            if turn.turn_id in self._ambiguous_turns:
+                await self._reject_ambiguous_restart(turn.turn_id, source)
             existing = self._handles.get(turn.turn_id)
             if existing is not None:
                 await self._close_source(source)
                 raise RuntimeError("Detached turn already has a local source")
-            claim_validated = False
-            try:
-                await self._transaction(
-                    lambda db: self._jobs.require_live_claim(
-                        db, claim=turn.claim, now=now
-                    )
-                )
-                claim_validated = True
-            finally:
-                if not claim_validated:
-                    await self._close_source(source)
             self._acquire_producer(turn.turn_id)
             handle = DetachedTurnHandle(
                 turn=turn,
@@ -301,6 +289,24 @@ class DetachedTurnCoordinator:
                 pump = stale_boundary.call(pump)
             handle.source_task = asyncio.create_task(pump)
             return handle
+
+    async def _reject_ambiguous_restart(
+        self, turn_id: uuid.UUID, source: AsyncIterator[ChatStreamFrame]
+    ) -> None:
+        ambiguous_claim = self._ambiguous_turns[turn_id]
+        try:
+            claim_is_live = await self._transaction(
+                lambda db: self._claim_is_live(
+                    db, claim=ambiguous_claim, now=self._clock()
+                )
+            )
+        except (SQLAlchemyError, OSError, TimeoutError) as error:
+            await self._close_source(source)
+            raise StaleTurnClaim("Detached turn outcome remains ambiguous") from error
+        if not claim_is_live:
+            self._drop_tombstone(turn_id, ambiguous_claim)
+        await self._close_source(source)
+        raise StaleTurnClaim("Detached turn outcome is ambiguous")
 
     async def subscribe(
         self, *, turn_id: uuid.UUID, after_sequence: int

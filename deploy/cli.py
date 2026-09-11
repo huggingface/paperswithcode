@@ -348,16 +348,25 @@ def require_production_chat_monitor(environment: str) -> None:
 
     if environment != "production" or not _configured_chat_enabled(environment):
         return
-    enabled = subprocess.run(
-        ["systemctl", "is-enabled", "--quiet", "pwc-chat-alert-monitor.timer"],
-        check=False,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
+    required_timers = (
+        (
+            "pwc-chat-alert-monitor.timer",
+            "enabled production chat requires the operational alert monitor timer",
+        ),
+        (
+            "pwc-cron-run-chat-synthetic-probe.timer",
+            "enabled production chat requires the synthetic chat probe timer",
+        ),
     )
-    if enabled.returncode:
-        raise DeployError(
-            "enabled production chat requires the operational alert monitor timer"
+    for timer, error in required_timers:
+        enabled = subprocess.run(
+            ["systemctl", "is-enabled", "--quiet", timer],
+            check=False,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         )
+        if enabled.returncode:
+            raise DeployError(error)
 
 
 def frontend_feature_environment(
@@ -839,7 +848,7 @@ def _wait_slot(
     manifest: dict,
     runtime: Path,
     *,
-    accepting: bool = True,
+    accepting: bool | None = True,
 ) -> dict:
     deadline = time.monotonic() + 60
     last = None
@@ -855,7 +864,9 @@ def _wait_slot(
             and last.get("release_id") == manifest["release_id"]
             and last.get("runtime_id") == runtime.name
             and last.get("slot") == slot
-            and bool(last.get("accepting_chat_turns")) is accepting
+            and (
+                accepting is None or bool(last.get("accepting_chat_turns")) is accepting
+            )
         ):
             health = _unix_json(environment, slot, "/health", check=False)
             if health and health.get("release_id") == manifest["release_id"]:
@@ -964,25 +975,31 @@ def _recover_interrupted_activation(environment: str) -> None:
             candidate_release_name, str
         ):
             raise DeployError("activation journal cannot identify its candidate")
+        if _active_slot(environment) == candidate_slot:
+            raise DeployError(
+                "activation journal candidate slot is already active; "
+                "refusing abandoned-candidate cleanup"
+            )
         candidate_release = RELEASES / candidate_release_name
         candidate_manifest = validate_manifest(candidate_release, environment)
-        if environment == "staging":
-            pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
-            validated_orphan_release_ids = frozenset(
-                validate_manifest(release, environment)["release_id"]
-                for release in (pointers.current, pointers.previous)
-                if release is not None
-            )
-            stop_slot_if_enabled(
-                environment,
-                candidate_slot,
-                candidate_manifest["release_id"],
-                validated_orphan_release_ids=validated_orphan_release_ids,
-            )
-        else:
-            stop_slot_if_enabled(
-                environment, candidate_slot, candidate_manifest["release_id"]
-            )
+        pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+        validated_orphan_release_ids = frozenset(
+            validate_manifest(release, environment)["release_id"]
+            for release in (pointers.current, pointers.previous)
+            if release is not None
+        )
+        _unix_json(
+            environment, candidate_slot, "/internal/drain", method="POST", check=False
+        )
+        if not _stop_drained_slot(environment, candidate_slot):
+            raise DeployError("abandoned candidate backend has not finished draining")
+        stop_slot_if_enabled(
+            environment,
+            candidate_slot,
+            candidate_manifest["release_id"],
+            validated_orphan_release_ids=validated_orphan_release_ids,
+            allow_orphaned_turn_reap=True,
+        )
         _write_journal(
             environment,
             "candidate-abandoned",
@@ -1090,6 +1107,8 @@ def _prepare_slot(environment: str, slot: str, release: Path, runtime: Path) -> 
         run(["systemctl", "start", _slot_unit(environment, slot, "socket")])
         run(["systemctl", "start", _slot_unit(environment, slot)])
         manifest = validate_manifest(release, environment)
+        _wait_slot(environment, slot, manifest, runtime, accepting=None)
+        _unix_json(environment, slot, "/internal/undrain", method="POST")
         status_value = _wait_slot(environment, slot, manifest, runtime)
         _smoke_slot_candidate(environment, slot, release, runtime, manifest)
         return status_value
@@ -1317,7 +1336,7 @@ def activate_slot(
     preserved_previous = original_previous if refresh_environment else old_release
     candidate_manifest = validate_manifest(release, environment)
     active_manifest = validate_manifest(old_release, environment)
-    external_pi_lifecycle_enabled(environment)
+    external_pi_enabled = external_pi_lifecycle_enabled(environment)
     validate_rolling_compatibility(active_manifest, candidate_manifest)
     _write_journal(
         environment,
@@ -1417,7 +1436,6 @@ def activate_slot(
     try:
         smoke_public(release, environment, candidate_manifest["release_id"])
         _persist_active_slot_socket(environment, inactive)
-        stop_slot_if_enabled(environment, active, active_manifest["release_id"])
     except (
         DeployError,
         ExternalPiSlotError,
@@ -1488,6 +1506,18 @@ def activate_slot(
     reporting_deadline = time.monotonic() + _drain_report_seconds(environment)
     while time.monotonic() < reporting_deadline:
         if _stop_drained_slot(environment, active):
+            if external_pi_enabled:
+                _write_journal(
+                    environment,
+                    "live-with-old-external-pi-draining",
+                    active_slot=inactive,
+                    draining_slot=active,
+                    active_release=release.name,
+                    draining_release=old_release.name,
+                    streams_surviving_cutover=streams_surviving_cutover,
+                    forced_termination_count=0,
+                )
+                return "success-with-draining"
             _write_journal(
                 environment,
                 "settled",
@@ -1605,17 +1635,20 @@ def protected_runtime_ids() -> set[str]:
 def protected_external_pi_runtime_ids() -> set[str]:
     protected: set[str] = set()
     has_legacy_release = False
-    for release in protected_environment_release_paths("staging"):
-        recorded = recorded_external_pi_runtime_id(release)
-        if recorded is not None:
-            protected.add(recorded)
-            continue
-        has_legacy_release = True
-        try:
-            protected.add(external_pi_runtime_id(release))
-        except ValueError:
-            # Older protected releases predate the external Pi package inputs.
-            continue
+    for environment in ("staging", "production"):
+        for release in protected_environment_release_paths(environment):
+            recorded = recorded_external_pi_runtime_id(release)
+            if recorded is not None:
+                protected.add(recorded)
+                continue
+            if environment != "staging":
+                continue
+            has_legacy_release = True
+            try:
+                protected.add(external_pi_runtime_id(release))
+            except ValueError:
+                # Older protected releases predate the external Pi package inputs.
+                continue
     if has_legacy_release:
         protected.add(RETAIN_ALL_RUNTIMES)
     return protected
@@ -1922,10 +1955,9 @@ def reap(args: argparse.Namespace) -> int:
             "/internal/deployment-status",
             check=False,
         )
-        if status_value is None:
-            print(f"{args.environment}/{draining} is already stopped")
-            return 0
-        if not _stop_drained_slot(args.environment, draining):
+        if status_value is not None and not _stop_drained_slot(
+            args.environment, draining
+        ):
             print(
                 json.dumps(
                     {
@@ -1943,6 +1975,15 @@ def reap(args: argparse.Namespace) -> int:
                 )
             )
             return 0
+        draining_release = _slot_release(args.environment, draining)
+        if draining_release is None:
+            raise DeployError("draining slot has no release")
+        stop_slot_if_enabled(
+            args.environment,
+            draining,
+            validate_manifest(draining_release, args.environment)["release_id"],
+            allow_orphaned_turn_reap=True,
+        )
         pointers = read_pointers(ENVIRONMENTS_ROOT / args.environment)
         _write_journal(
             args.environment,

@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +39,7 @@ from backend.services.chat_edit_service import (
     user_message_projection_bytes,
 )
 from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
+from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
 from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_title_service import normalize_title
 from backend.services.chat_turn_admission_coordinator import (
@@ -56,7 +57,24 @@ from backend.services.chat_turn_job_repository import (
     TurnLeaseClaim,
     TurnNotClaimable,
 )
+from backend.services.chat_turn_lifecycle import CLAIMED_STATES
 from backend.services.latex_paper_service import LatexPaperService
+
+if TYPE_CHECKING:
+    from backend.services.chat_external_worker_capacity import (
+        ExternalWorkerReservation,
+    )
+
+
+def _bound_external_worker_reservation(
+    preflight: DurableAdmissionPreflight | None, turn_id: uuid.UUID
+) -> ExternalWorkerReservation | None:
+    reservation = preflight.external_reservation if preflight is not None else None
+    if reservation is None:
+        return None
+    if reservation.turn_id not in {None, turn_id}:
+        raise RuntimeError("External worker reservation turn mismatches")
+    return replace(reservation, turn_id=turn_id)
 
 
 class ChatServiceError(Exception):
@@ -138,6 +156,7 @@ class TurnAdmission:
     paper_descriptor: dict[str, object] | None = None
     fetchable_urls: tuple[str, ...] = ()
     durable_claim: TurnLeaseClaim | None = None
+    external_worker_reservation: ExternalWorkerReservation | None = None
     attach_only: bool = False
     durable_event_sequence: int = 0
 
@@ -603,6 +622,10 @@ class ChatSessionService:
             or job.hf_user_id != session.hf_user_id
         ):
             raise self._durable_control_error()
+        if job.state in CLAIMED_STATES and not repository.is_expired_claim(
+            job, now=now
+        ):
+            raise self._durable_admission_error(AccountBusy("The worker lease is live"))
         try:
             ChatLocalTurnLeaseService(
                 self.db, self.settings, repository=repository
@@ -1600,6 +1623,7 @@ class ChatSessionService:
         plan: _TurnCreationPlan,
         fetchable_urls: tuple[str, ...],
         *,
+        external_worker_reservation: ExternalWorkerReservation | None,
         web_search_enabled: bool,
         reasoning_effort: str,
         poster_mode: bool,
@@ -1666,6 +1690,7 @@ class ChatSessionService:
             paper_artifacts_enabled=paper_artifacts_enabled,
             paper_descriptor=paper_descriptor,
             fetchable_urls=fetchable_urls,
+            external_worker_reservation=external_worker_reservation,
         )
 
     def begin_turn(
@@ -1866,12 +1891,20 @@ class ChatSessionService:
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
                 raise self._durable_admission_error(error) from error
+        elif durable_coordinator is not None and durable_preflight is not None:
+            try:
+                durable_preflight = durable_coordinator.authorize_global_capacity(
+                    durable_preflight, now=now
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
 
         if durable_coordinator is None:
             self._lock_admission_keys(owner)
             capacity = self._load_capacity_snapshot(owner, session)
             self._validate_capacity(capacity)
 
+        created_session = session is None
         # Capacity admission precedes creation so a rejected new-chat request
         # cannot leave behind a session or any message state.
         if session is None:
@@ -1965,6 +1998,13 @@ class ChatSessionService:
             update_web_search_preference=update_web_search_preference,
             now=now,
         )
+        if (
+            created_session
+            and target_harness == "pi"
+            and durable_preflight is not None
+            and durable_preflight.external_reservation is not None
+        ):
+            ChatPiTranscriptService(self.db, self.settings).prebind_new_session(session)
         if durable_coordinator is not None:
             assert durable_preflight is not None
             try:
@@ -1999,6 +2039,11 @@ class ChatSessionService:
             session,
             plan,
             fetchable_urls,
+            external_worker_reservation=(
+                _bound_external_worker_reservation(
+                    durable_preflight, plan.replacement.turn_id
+                )
+            ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
             poster_mode=(

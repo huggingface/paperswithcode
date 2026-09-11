@@ -22,6 +22,7 @@ const excalidrawView = new URL("../src/excalidraw_view_mcp_server.ts", import.me
 
 async function openSession(options: {
   tools: string[];
+  exa?: boolean;
   excalidraw?: { command: string; args: string[] } | { url: string } | false;
 }) {
   const agentDir = await mkdtemp(path.join(tmpdir(), "pwc-pi-mcp-"));
@@ -49,6 +50,7 @@ async function openSession(options: {
           process.execPath,
           ["--import", tsx, exaServer],
           {
+            exa: options.exa ?? true,
             excalidraw: options.excalidraw ?? false,
             ...(waitingForView
               ? { excalidrawView: { command: process.execPath, args: ["--import", tsx, excalidrawView] } }
@@ -101,6 +103,24 @@ test("Pi exposes only the capability-backed Exa MCP search tool", async () => {
       created.session.getToolDefinition("search_web")?.description ?? "",
       /trusted PwC Exa gateway/u,
     );
+  } finally {
+    await created.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+    created.session.dispose();
+    await rm(agentDir, { recursive: true, force: true });
+  }
+});
+
+test("Pi does not start or expose Exa when web search is disabled", async () => {
+  const { agentDir, created, status } = await openSession({
+    tools: ["search_web"],
+    exa: false,
+    excalidraw: false,
+  });
+  try {
+    assert.deepEqual(created.session.getActiveToolNames(), []);
+    assert.deepEqual(created.session.getAllTools().map((tool) => tool.name), []);
+    assert.equal(status?.servers.some((entry) => entry.name === "exa"), false);
+    assert.deepEqual(mcpDirectToolsList(false, false), []);
   } finally {
     await created.session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
     created.session.dispose();

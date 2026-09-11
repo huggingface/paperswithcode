@@ -759,7 +759,7 @@ def validate_chat_provider_policy(
             },
         )
         if settings.chat_openai_direct_enabled:
-            expected_discovery += (direct_choice,)
+            expected_discovery = (direct_choice,) + expected_discovery
     if settings.chat_alternative_model_enabled:
         if settings.environment != "staging":
             raise RuntimeError("alternative chat models are staging-only")
@@ -1228,6 +1228,9 @@ def _is_durable_external_admission_profile(settings: Settings) -> bool:
             not settings.chat_pi_prewarm_enabled,
             settings.chat_max_concurrency == 32,
             settings.chat_user_max_concurrency == 1,
+            settings.chat_openai_global_max_concurrency == 32,
+            settings.chat_openai_user_max_concurrency == 1,
+            settings.chat_openai_global_rate_limit_calls == 512,
             settings.chat_sandbox_total_live_cap == 16,
         )
     )

@@ -13,6 +13,10 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings
 from backend.models.database import ChatMessageRecord
+from backend.services.autonomous_operations_repository import (
+    AutonomousOperationsRepository,
+)
+from backend.services.autonomous_cron_probe import FindingState, HealthFinding
 
 PROVIDER_ERROR_CODES = frozenset(
     {
@@ -82,6 +86,22 @@ LIFECYCLE_ALERT_NAMES = frozenset(
     }
 )
 MAX_LIFECYCLE_VALUE = 16 * 1024 * 1024
+
+
+def reliability_alert_classifications(
+    findings: tuple[HealthFinding, ...] | list[HealthFinding],
+) -> dict[str, int]:
+    """Project degraded findings to bounded, content-free alert keys."""
+
+    classifications: dict[str, int] = {}
+    for finding in findings:
+        if finding.state != FindingState.DEGRADED:
+            continue
+        signature = finding.evidence.get("incident_signature")
+        if not isinstance(signature, str) or not signature.startswith("chat:"):
+            continue
+        classifications[f"{finding.contract}|{signature}"] = 1
+    return classifications
 
 
 @dataclass(frozen=True)
@@ -269,3 +289,22 @@ async def post_operational_alert(
             url, json=operational_alert_payload(event, settings)
         )
         response.raise_for_status()
+
+
+def provider_runtime_revision(db: Session, environment: str) -> str | None:
+    """Return a content-free revision token for the active durable provider route."""
+
+    row = AutonomousOperationsRepository().get_chat_provider_state(
+        db,
+        environment=environment,
+    )
+    if row is None:
+        return None
+    return ":".join(
+        (
+            row.environment,
+            str(row.state_revision),
+            row.manifest_revision,
+            row.active_provider,
+        )
+    )

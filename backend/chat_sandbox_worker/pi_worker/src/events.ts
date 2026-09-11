@@ -311,12 +311,16 @@ export class PiEventAdapter {
       this.contentTools.clear();
       if (message.stopReason === "error" || typeof message.errorMessage === "string") {
         this.terminalFailure = true;
+        const contextTooLarge = typeof message.errorMessage === "string"
+          && message.errorMessage.includes("request_too_large");
         return [
           ...this.closeReasoning(),
           {
             type: "error",
-            code: "provider_error",
-            message: "The model provider is unavailable.",
+            code: contextTooLarge ? "context_too_large" : "provider_error",
+            message: contextTooLarge
+              ? "This conversation is too large for the selected model. Start a new chat or shorten the context."
+              : "The model provider is unavailable.",
           },
         ];
       }
