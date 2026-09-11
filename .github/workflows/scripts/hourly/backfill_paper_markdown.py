@@ -23,6 +23,7 @@ from backend.database.connection import db_manager
 from backend.models.database import Paper
 from backend.scripts.generate_missing_paper_markdown import (
     download_external_pdf,
+    status_record,
     validate_canonical_markdown,
 )
 from backend.services.paper_markdown_budget_service import (
@@ -842,7 +843,9 @@ class PaperMarkdownBackfillJob(CronJobBase):
         )
         for shard_number, entries in enumerate(plans):
             if self.should_execute:
-                self._archive_external_pdfs(entries)
+                entries = self._archive_external_pdfs(entries)
+                if not entries:
+                    continue
             shard_id = f"{shard_number:05d}"
             manifest_key = f"_jobs/manifests/{run_id}/{shard_id}.jsonl"
             manifest = (
@@ -914,7 +917,9 @@ class PaperMarkdownBackfillJob(CronJobBase):
         )
         return launched
 
-    def _archive_external_pdfs(self, entries: list[dict[str, object]]) -> None:
+    def _archive_external_pdfs(
+        self, entries: list[dict[str, object]]
+    ) -> list[dict[str, object]]:
         external = [
             entry
             for entry in entries
@@ -924,19 +929,49 @@ class PaperMarkdownBackfillJob(CronJobBase):
             self.settings.paper_markdown_hf_bucket_id,
             [str(entry["pdf_key"]) for entry in external],
         )
-        for entry in external:
+        missing = [entry for entry in external if str(entry["pdf_key"]) not in existing]
+
+        def archive(entry: dict[str, object]) -> str | None:
             pdf_key = str(entry["pdf_key"])
-            if pdf_key in existing:
-                continue
-            pdf = download_external_pdf(str(entry["pdf_url"]))
-            with pymupdf.open(stream=pdf, filetype="pdf") as document:
-                if document.page_count < 1:
-                    raise ValueError("invalid_pdf")
+            try:
+                pdf = download_external_pdf(str(entry["pdf_url"]))
+                with pymupdf.open(stream=pdf, filetype="pdf") as document:
+                    if document.page_count < 1:
+                        raise ValueError("invalid_pdf")
+            except Exception as error:  # noqa: BLE001 - isolate failures per paper
+                paper_key = entry_paper_key(entry)
+                status_key = f"_jobs/status/{paper_key}.json"
+                failure = status_record(
+                    {
+                        "paper_key": paper_key,
+                        "paper_id": entry.get("paper_id"),
+                        "source": "external",
+                        "arxiv_id": None,
+                        "status": "failed",
+                        "error": str(error)[:1000],
+                        "requested_version": entry["version"],
+                        "version_fallback_attempted": False,
+                    },
+                    prior=self._bucket_json(status_key),
+                    error=error,
+                )
+                self._write_bucket_json(status_key, failure)
+                self.logger.warning(
+                    "external PDF archival failed for %s: %s", paper_key, error
+                )
+                return paper_key
             self.api.batch_bucket_files(
                 self.settings.paper_markdown_hf_bucket_id,
                 add=[(pdf, pdf_key)],
                 token=self.settings.hf_token or None,
             )
+            return None
+
+        failed: set[str] = set()
+        if missing:
+            with ThreadPoolExecutor(max_workers=min(8, len(missing))) as executor:
+                failed.update(key for key in executor.map(archive, missing) if key)
+        return [entry for entry in entries if entry_paper_key(entry) not in failed]
 
     def run(self) -> None:
         if self.should_execute and not self.settings.hf_token:

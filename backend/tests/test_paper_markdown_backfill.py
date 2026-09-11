@@ -893,6 +893,7 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
     job._persist_dispatch = Mock()
     job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
     job._existing_paths = Mock(return_value={})
+    job._bucket_json = Mock(return_value={})
     monkeypatch.setattr(
         job,
         "_budget_decision",
@@ -907,11 +908,42 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
         Mock(side_effect=ValueError("broken PDF structure")),
     )
 
-    with pytest.raises(ValueError, match="broken PDF structure"):
-        job._launch([_external_candidate()])
+    launched = job._launch([_external_candidate()])
 
-    job.api.batch_bucket_files.assert_not_called()
+    assert launched == []
+    status_upload = job.api.batch_bucket_files.call_args.kwargs["add"][0]
+    assert status_upload[1] == "_jobs/status/external/109743.json"
+    status = json.loads(status_upload[0])
+    assert status["status"] == "failed"
+    assert status["error"] == "broken PDF structure"
+    assert status["retryable"] is False
     job._run_ocr_job.assert_not_called()
+
+
+def test_invalid_external_pdf_does_not_block_other_papers(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    job._bucket_json = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(
+        MODULE, "download_external_pdf", Mock(side_effect=ValueError("invalid_pdf"))
+    )
+
+    launched = job._launch([_external_candidate(), _candidates(1)[0]])
+
+    assert len(launched) == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" not in manifest
+    assert b"2607.00000" in manifest
+    job._run_ocr_job.assert_called_once()
 
 
 def test_unmetered_hf_dispatch_does_not_require_paid_gate(monkeypatch):
