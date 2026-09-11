@@ -967,7 +967,8 @@ def test_external_pdf_is_not_archived_during_dry_run(monkeypatch):
     job.api.batch_bucket_files.assert_not_called()
 
 
-def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
+@pytest.mark.parametrize("http_status", [None, 404])
+def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch, http_status):
     job = _scheduler(execute=True, confirm=True, full=False)
     job.settings.paper_markdown_cost_policy = "unmetered_hf"
     job.api = Mock()
@@ -992,6 +993,20 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
         Mock(side_effect=ValueError("broken PDF structure")),
     )
 
+    if http_status is not None:
+        response = httpx.Response(
+            http_status, request=httpx.Request("GET", "https://example.com/paper.pdf")
+        )
+        monkeypatch.setattr(
+            MODULE,
+            "download_external_pdf",
+            Mock(
+                side_effect=httpx.HTTPStatusError(
+                    "missing PDF", request=response.request, response=response
+                )
+            ),
+        )
+
     launched = job._launch([_external_candidate()])
 
     assert launched == []
@@ -999,8 +1014,11 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
     assert status_upload[1] == "_jobs/status/external/109743.json"
     status = json.loads(status_upload[0])
     assert status["status"] == "failed"
-    assert status["error"] == "broken PDF structure"
+    assert status["error"] == (
+        "broken PDF structure" if http_status is None else "missing PDF"
+    )
     assert status["retryable"] is False
+    assert MODULE.status_disposition(status) == "permanent_failure"
     job._run_ocr_job.assert_not_called()
 
 

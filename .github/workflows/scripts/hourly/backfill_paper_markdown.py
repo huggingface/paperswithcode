@@ -183,6 +183,7 @@ def status_disposition(
     # the corrected worker records that it tried the fallback chain.
     if (
         state == "failed"
+        and status.get("source") != "external"
         and status.get("error_class") == "arxiv_http_404"
         and status.get("version_fallback_attempted") is not True
     ):
