@@ -212,3 +212,20 @@ def test_saturated_output_is_drained_after_capture_limit() -> None:
 
     assert result.status == "completed"
     assert len(result.output) == 64 * 1024
+
+
+def test_fixture_subprocess_does_not_inherit_parent_credentials(
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "must-not-enter-operation")
+    broker = Broker()
+    runtime = _runtime(broker)
+
+    result = runtime.execute(
+        "environment",
+        'test -z "${OPENAI_API_KEY:-}" && printf safe',
+    )
+    runtime.close()
+
+    assert result.status == "completed"
+    assert result.output == b"safe"

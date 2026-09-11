@@ -133,6 +133,11 @@ class TurnExecutionRuntime:
         try:
             process = subprocess.Popen(
                 ["/bin/bash", "-lc", command],
+                env={
+                    "HOME": "/tmp",
+                    "LANG": "C.UTF-8",
+                    "PATH": os.environ.get("PATH", "/usr/bin:/bin"),
+                },
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
