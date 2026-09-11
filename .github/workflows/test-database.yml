@@ -35,7 +35,7 @@ jobs:
         env:
           POSTGRES_DB: paperswithcode_hf
           POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
+          POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
@@ -49,7 +49,7 @@ jobs:
       PWC_DB_PORT: 5432
       PWC_DB_NAME: paperswithcode_hf
       PWC_DB_USER: postgres
-      PWC_DB_PASSWORD: postgres
+      PWC_DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
 
     steps:
       - name: Checkout repository
@@ -70,7 +70,7 @@ jobs:
 
       - name: Wait for PostgreSQL
         env:
-          PGPASSWORD: postgres
+          PGPASSWORD: ${{ secrets.DB_PASSWORD }}
         run: |
           until pg_isready -h localhost -p 5432 -U postgres; do
             echo "Waiting for PostgreSQL..."
