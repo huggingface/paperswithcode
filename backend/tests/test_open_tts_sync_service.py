@@ -461,6 +461,63 @@ def test_syncs_english_and_all_language_benchmarks(monkeypatch):
     assert multilingual.best_rank == 1
 
 
+def test_sync_uses_curated_model_name_in_both_benchmarks(monkeypatch):
+    session = _session()
+    model_id = "k2-fsa/OmniVoice"
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {model_id: PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
+    entry = OpenTtsEntry(model_id, model_id, 1, 3.25, 37.52, True)
+
+    OpenTtsSyncService(session).sync_benchmarks(
+        {
+            tts.DATASET_SLUG: [entry],
+            tts.ALL_LANGUAGE_DATASET_SLUG: [entry],
+        },
+        discovery=ArtificialAnalysisDiscovery(papers={model_id: 9}),
+    )
+
+    rows = session.query(Evaluation).order_by(Evaluation.dataset_id).all()
+    assert [row.model_name for row in rows] == ["OmniVoice", "OmniVoice"]
+    assert {row.hf_model_url for row in rows} == {
+        "https://huggingface.co/k2-fsa/OmniVoice"
+    }
+
+
+def test_sync_uses_curated_names_for_every_reviewed_model(monkeypatch):
+    expected_names = {
+        "microsoft/VibeVoice-Realtime-0.5B": "VibeVoice Realtime 0.5B",
+        "fishaudio/s2-pro": "Fish Audio S2 Pro",
+        "k2-fsa/OmniVoice": "OmniVoice",
+        "kyutai/pocket-tts": "Pocket TTS",
+        "FunAudioLLM/Fun-CosyVoice3-0.5B-2512": "CosyVoice 3 0.5B (RL)",
+        "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": "Qwen3-TTS 1.7B (CustomVoice)",
+        "facebook/seamless-m4t-v2-large": "SeamlessM4T v2 Large",
+        "microsoft/speecht5_tts": "SpeechT5",
+        "OpenMOSS-Team/MOSS-TTS": "MOSS-TTS",
+        "Qwen/Qwen3-Omni-30B-A3B-Instruct": "Qwen3-Omni 30B-A3B",
+        "mistralai/Voxtral-4B-TTS-2603": "Voxtral 4B TTS",
+    }
+
+    for model_id, expected_name in expected_names.items():
+        session = _session()
+        monkeypatch.setattr(
+            tts,
+            "MODEL_PAPER_IDENTITIES",
+            {model_id: PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+        )
+        OpenTtsSyncService(session).sync(
+            [OpenTtsEntry(model_id, model_id, 1, 1.0, 1.0, True)],
+            discovery=ArtificialAnalysisDiscovery(papers={model_id: 9}),
+        )
+
+        row = session.query(Evaluation).one()
+        assert row.model_name == expected_name
+        assert row.hf_model_url == f"https://huggingface.co/{model_id}"
+
+
 def test_two_benchmark_sync_rolls_back_if_either_benchmark_is_unconfigured(
     monkeypatch,
 ):

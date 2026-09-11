@@ -67,30 +67,58 @@ _MODEL_LINK_RE = re.compile(
 _TAG_RE = re.compile(r"<[^>]+>")
 
 
+@dataclass(frozen=True)
+class ReviewedModel:
+    paper: PaperIdentity
+    display_name: str
+
+
 # Reviewed against the model cards linked by the default leaderboard on
 # 2026-09-11. Only models with a dedicated arXiv paper are published.
-MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
-    "microsoft/VibeVoice-Realtime-0.5B": PaperIdentity(
-        arxiv_id="2508.19205", is_open=True
+MODEL_CATALOG = {
+    "microsoft/VibeVoice-Realtime-0.5B": ReviewedModel(
+        PaperIdentity(arxiv_id="2508.19205", is_open=True),
+        "VibeVoice Realtime 0.5B",
     ),
-    "fishaudio/s2-pro": PaperIdentity(arxiv_id="2603.08823", is_open=True),
-    "k2-fsa/OmniVoice": PaperIdentity(arxiv_id="2604.00688", is_open=True),
-    "kyutai/pocket-tts": PaperIdentity(arxiv_id="2509.06926", is_open=True),
-    "FunAudioLLM/Fun-CosyVoice3-0.5B-2512": PaperIdentity(
-        arxiv_id="2505.17589", is_open=True
+    "fishaudio/s2-pro": ReviewedModel(
+        PaperIdentity(arxiv_id="2603.08823", is_open=True), "Fish Audio S2 Pro"
     ),
-    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": PaperIdentity(
-        arxiv_id="2601.15621", is_open=True
+    "k2-fsa/OmniVoice": ReviewedModel(
+        PaperIdentity(arxiv_id="2604.00688", is_open=True), "OmniVoice"
     ),
-    "facebook/seamless-m4t-v2-large": PaperIdentity(
-        arxiv_id="2312.05187", is_open=True
+    "kyutai/pocket-tts": ReviewedModel(
+        PaperIdentity(arxiv_id="2509.06926", is_open=True), "Pocket TTS"
     ),
-    "microsoft/speecht5_tts": PaperIdentity(arxiv_id="2110.07205", is_open=True),
-    "OpenMOSS-Team/MOSS-TTS": PaperIdentity(arxiv_id="2603.18090", is_open=True),
-    "Qwen/Qwen3-Omni-30B-A3B-Instruct": PaperIdentity(
-        arxiv_id="2509.17765", is_open=True
+    "FunAudioLLM/Fun-CosyVoice3-0.5B-2512": ReviewedModel(
+        PaperIdentity(arxiv_id="2505.17589", is_open=True),
+        "CosyVoice 3 0.5B (RL)",
     ),
-    "mistralai/Voxtral-4B-TTS-2603": PaperIdentity(arxiv_id="2603.25551", is_open=True),
+    "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": ReviewedModel(
+        PaperIdentity(arxiv_id="2601.15621", is_open=True),
+        "Qwen3-TTS 1.7B (CustomVoice)",
+    ),
+    "facebook/seamless-m4t-v2-large": ReviewedModel(
+        PaperIdentity(arxiv_id="2312.05187", is_open=True),
+        "SeamlessM4T v2 Large",
+    ),
+    "microsoft/speecht5_tts": ReviewedModel(
+        PaperIdentity(arxiv_id="2110.07205", is_open=True), "SpeechT5"
+    ),
+    "OpenMOSS-Team/MOSS-TTS": ReviewedModel(
+        PaperIdentity(arxiv_id="2603.18090", is_open=True), "MOSS-TTS"
+    ),
+    "Qwen/Qwen3-Omni-30B-A3B-Instruct": ReviewedModel(
+        PaperIdentity(arxiv_id="2509.17765", is_open=True), "Qwen3-Omni 30B-A3B"
+    ),
+    "mistralai/Voxtral-4B-TTS-2603": ReviewedModel(
+        PaperIdentity(arxiv_id="2603.25551", is_open=True), "Voxtral 4B TTS"
+    ),
+}
+MODEL_PAPER_IDENTITIES = {
+    model_id: model.paper for model_id, model in MODEL_CATALOG.items()
+}
+MODEL_DISPLAY_NAMES = {
+    model_id: model.display_name for model_id, model in MODEL_CATALOG.items()
 }
 
 
@@ -432,14 +460,13 @@ class OpenTtsSyncService:
                     paper_id=paper_id,
                     task_id=task.id,
                     dataset_id=dataset.id,
-                    model_name=entry.model_name,
                 )
                 self.db.add(row)
                 stats.created += 1
             else:
                 stats.updated += 1
             row.paper_id = paper_id
-            row.model_name = entry.model_name
+            row.model_name = MODEL_DISPLAY_NAMES.get(entry.model_id, entry.model_name)
             row.methodology = (
                 f"{MANAGED_METHODOLOGY_PREFIX} Upstream rank {entry.rank}; "
                 f"{METHODOLOGY_BY_DATASET[dataset_slug]} without voice cloning; "
