@@ -260,7 +260,12 @@ class DatabaseCronJob(CronJobBase):
             # Don't raise the exception - this is optional maintenance
 
 
-def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, Any]:
+def get_cron_job_status(
+    job_name: str,
+    date: Optional[str] = None,
+    *,
+    logs_dir: Optional[Path] = None,
+) -> Dict[str, Any]:
     """
     Get the status of a cron job from its log file.
 
@@ -277,7 +282,7 @@ def get_cron_job_status(job_name: str, date: Optional[str] = None) -> Dict[str, 
     if not date:
         date = datetime.now().strftime("%Y%m%d")
 
-    logs_dir = Path(
+    logs_dir = logs_dir or Path(
         os.environ.get("PWC_CRON_LOG_DIR", Path(__file__).parent.parent / "logs")
     )
     log_file = logs_dir / f"{job_name}_{date}.log"

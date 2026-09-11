@@ -44,6 +44,11 @@ class TimerSpec:
 
 
 TIMERS: tuple[TimerSpec, ...] = (
+    TimerSpec(
+        job="run_chat_synthetic_probe",
+        on_calendar=("*-*-* *:*:00",),
+        description="Evaluate due and triggered production synthetic chat probes",
+    ),
     # Trending pipeline: stars (:00) -> task trending (:15) -> paper trending
     # (:45, also consumes HF artifacts from :30).  Hot trending runs its own
     # 15-minute lane.
@@ -195,7 +200,7 @@ TIMERS: tuple[TimerSpec, ...] = (
         args=(
             "--resume",
             "--limit",
-            "10000",
+            "250000",
             "--max-runtime-seconds",
             "3300",
         ),

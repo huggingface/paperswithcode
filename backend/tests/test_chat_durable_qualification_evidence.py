@@ -2,12 +2,14 @@ import uuid
 import asyncio
 import os
 import threading
+from dataclasses import asdict
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, select
 from sqlalchemy import text
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 
@@ -16,12 +18,16 @@ from backend.config import Settings
 from backend.models.database import (
     ChatQualificationEvidenceEvent,
     ChatQualificationScope,
+    ChatExternalWorker,
+    ChatExternalWorkerReservation,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
 from backend.services.chat_durable_qualification_evidence import (
     ChatDurableQualificationEvidenceService,
     ChatQualificationEvidenceRepository,
+    QualificationContext,
     QualificationEvidenceUnavailable,
     record_qualification_event_safely,
 )
@@ -34,7 +40,11 @@ END = START + timedelta(minutes=1)
 
 
 def _settings() -> Settings:
-    return Settings(environment="staging", release_id="0123456789ab-staging")
+    return Settings(
+        environment="staging",
+        release_id="0123456789ab-staging",
+        chat_durable_turn_dispatch_enabled=True,
+    )
 
 
 @pytest.fixture
@@ -44,6 +54,9 @@ def engine():
     ChatSandboxComputeInterval.__table__.create(value)
     ChatQualificationScope.__table__.create(value)
     ChatQualificationEvidenceEvent.__table__.create(value)
+    ChatExternalWorker.__table__.create(value)
+    ChatExternalWorkerReservation.__table__.create(value)
+    ChatOpenAIProviderCall.__table__.create(value)
     return value
 
 
@@ -64,6 +77,237 @@ def _scope(
         window_started_at=START,
         expires_at=END + timedelta(hours=1),
     )
+
+
+def test_active_functional_scope_derives_server_trusted_capacity_context(engine):
+    lock_requests = []
+    statements = []
+
+    class LockedService(ChatDurableQualificationEvidenceService):
+        def require_active_scope(self, scope_id, *, settings, lock=False):
+            lock_requests.append(lock)
+            return super().require_active_scope(scope_id, settings=settings, lock=lock)
+
+    with Session(engine) as db:
+        db.add(_scope())
+        db.commit()
+        execute = db.execute
+
+        def capture(statement, *args, **kwargs):
+            statements.append(statement)
+            return execute(statement, *args, **kwargs)
+
+        db.execute = capture  # type: ignore[method-assign]
+
+        context = LockedService(db, now=lambda: START).require_active_context(
+            SCOPE_ID,
+            workload="bash",
+            settings=_settings(),
+        )
+
+    assert context == QualificationContext(
+        scope_id=SCOPE_ID,
+        run_id="qualified-f32",
+        profile="32-functional-turns",
+        workload="bash",
+        app_release_id="0123456789ab-staging",
+        window_started_at=START,
+        expires_at=END + timedelta(hours=1),
+        turn_capacity=32,
+        executor_live_cap=16,
+    )
+    assert lock_requests == ["key_share"]
+    scope_query = next(
+        statement
+        for statement in statements
+        if "chat_qualification_scopes" in str(statement)
+    )
+    assert "FOR KEY SHARE" in str(scope_query.compile(dialect=postgresql.dialect()))
+
+
+@pytest.mark.parametrize(
+    ("scope_changes", "settings_changes", "now", "workload"),
+    [
+        ({"profile": "100-immediate-admission"}, {}, START, "no_tool"),
+        ({"window_ended_at": START}, {}, START, "no_tool"),
+        ({"expires_at": START + timedelta(seconds=1)}, {}, END, "no_tool"),
+        ({"app_release_id": "wrong-release"}, {}, START, "no_tool"),
+        ({}, {"environment": "production"}, START, "no_tool"),
+        ({}, {"chat_durable_turn_dispatch_enabled": False}, START, "no_tool"),
+        ({}, {}, START, "unsupported"),
+    ],
+)
+def test_untrusted_or_inactive_scope_cannot_derive_capacity_context(
+    engine, scope_changes, settings_changes, now, workload
+):
+    with Session(engine) as db:
+        scope = _scope()
+        for name, value in scope_changes.items():
+            setattr(scope, name, value)
+        db.add(scope)
+        db.commit()
+        settings = _settings().model_copy(update=settings_changes)
+
+        with pytest.raises(QualificationEvidenceUnavailable):
+            ChatDurableQualificationEvidenceService(
+                db, now=lambda: now
+            ).require_active_context(
+                SCOPE_ID,
+                workload=workload,
+                settings=settings,
+            )
+
+
+def test_executor_live_cap_requires_exact_persisted_functional_turn(engine):
+    unrelated_turn = uuid.uuid4()
+    lock_requests = []
+
+    class LockedService(ChatDurableQualificationEvidenceService):
+        def require_active_scope(self, scope_id, *, settings, lock=False):
+            lock_requests.append((scope_id, lock))
+            return super().require_active_scope(scope_id, settings=settings, lock=lock)
+
+    with Session(engine) as db:
+        db.add(_scope())
+        latency = _latency(24, workload="bash")
+        latency.terminal_status = None
+        db.add(latency)
+        db.commit()
+        service = LockedService(db, now=lambda: START)
+
+        assert (
+            service.executor_live_cap(
+                turn_id=latency.turn_id,
+                chat_session_id=latency.chat_session_id,
+                settings=_settings(),
+            )
+            == 16
+        )
+        assert (
+            service.executor_live_cap(
+                turn_id=unrelated_turn,
+                chat_session_id=latency.chat_session_id,
+                settings=_settings(),
+            )
+            is None
+        )
+
+        scope = db.get(ChatQualificationScope, SCOPE_ID)
+        scope.window_ended_at = START
+        db.flush()
+        assert (
+            service.executor_live_cap(
+                turn_id=latency.turn_id,
+                chat_session_id=latency.chat_session_id,
+                settings=_settings(),
+            )
+            is None
+        )
+
+    assert lock_requests == [(SCOPE_ID, True), (SCOPE_ID, True)]
+
+
+def test_external_pi_authority_locks_reservation_for_capability_transaction(
+    engine, monkeypatch
+):
+    from backend.services.chat_external_worker_capacity import (
+        ChatExternalWorkerCapacityRepository,
+        ExternalWorkerCapacityUnavailable,
+    )
+
+    instance_id = uuid.uuid4()
+    settings = _settings().model_copy(
+        update={
+            "chat_external_pi_worker_id": "",
+            "chat_external_pi_worker_url": "",
+            "chat_external_pi_worker_token": "",
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "qualified",
+                    "worker_id": "worker-qualified",
+                    "base_url": "http://127.0.0.1:8780",
+                    "token": "q" * 32,
+                }
+            ],
+            "chat_external_pi_worker_contract_version": "external-pi-v1",
+        }
+    )
+    latency = _latency(0, workload="no_tool")
+    latency.terminal_status = None
+    lock_requests = []
+    reservation_locks = []
+    require_turn = ChatExternalWorkerCapacityRepository.require_turn
+
+    def recording_require_turn(self, db, *, lock=False, **kwargs):
+        reservation_locks.append(lock)
+        if lock:
+            return require_turn(self, db, lock=True, **kwargs)
+        return require_turn(self, db, **kwargs)
+
+    monkeypatch.setattr(
+        ChatExternalWorkerCapacityRepository, "require_turn", recording_require_turn
+    )
+
+    class LockedService(ChatDurableQualificationEvidenceService):
+        def require_active_scope(self, scope_id, *, settings, lock=False):
+            lock_requests.append((scope_id, lock))
+            return super().require_active_scope(scope_id, settings=settings, lock=lock)
+
+    with Session(engine) as db:
+        db.add_all(
+            (
+                _scope(),
+                latency,
+                ChatExternalWorker(
+                    worker_id="worker-qualified",
+                    instance_id=instance_id,
+                    environment="staging",
+                    release_id=settings.release_id,
+                    contract_version="external-pi-v1",
+                    generation=1,
+                    state="ready",
+                    maximum_sessions=32,
+                    active_sessions=1,
+                    heartbeat_at=START,
+                    lease_expires_at=END + timedelta(minutes=1),
+                    created_at=START,
+                    updated_at=START,
+                ),
+                ChatExternalWorkerReservation(
+                    request_id="qualified-request",
+                    turn_id=latency.turn_id,
+                    endpoint_id="qualified",
+                    worker_id="worker-qualified",
+                    instance_id=instance_id,
+                    worker_generation=1,
+                    release_id=settings.release_id,
+                    contract_version="external-pi-v1",
+                    maximum_sessions=32,
+                    reserved_at=START,
+                    expires_at=END + timedelta(minutes=1),
+                ),
+            )
+        )
+        db.commit()
+        service = LockedService(db, now=lambda: START)
+
+        assert service.external_pi_authorized(
+            turn_id=latency.turn_id,
+            chat_session_id=latency.chat_session_id,
+            settings=settings,
+        )
+
+        db.query(ChatExternalWorkerReservation).delete()
+        db.flush()
+        with pytest.raises(ExternalWorkerCapacityUnavailable, match="missing"):
+            service.external_pi_authorized(
+                turn_id=latency.turn_id,
+                chat_session_id=latency.chat_session_id,
+                settings=settings,
+            )
+
+    assert lock_requests == [(SCOPE_ID, True), (SCOPE_ID, True)]
+    assert reservation_locks == [True, True]
 
 
 def _latency(
@@ -93,6 +337,34 @@ def _latency(
         qualification_scenario="reliability",
         terminal_status="complete",
         admitted_at=START,
+        provider_gateway_received_ms=100 + index,
+        first_semantic_event_ms=300 + index,
+    )
+
+
+def _provider_call(index: int):
+    return ChatOpenAIProviderCall(
+        id=uuid.UUID(f"e0000000-0000-4000-8000-{index:012x}"),
+        turn_id=_latency(index).turn_id,
+        call_sequence=1,
+        owner_id="qualification-owner",
+        environment="staging",
+        month_start=date(2026, 8, 1),
+        public_model_id="model:test",
+        provider_model="model:test",
+        reasoning_effort="low",
+        service_tier="default",
+        request_bytes=100,
+        provider_latency_ms=400 + index,
+        provider_ttft_ms=200 + index,
+        outcome="completed",
+        state="settled",
+        reserved_microusd=1,
+        actual_microusd=1,
+        reserved_at=START,
+        dispatched_at=START,
+        settled_at=START + timedelta(seconds=1),
+        updated_at=START + timedelta(seconds=1),
     )
 
 
@@ -126,6 +398,7 @@ def _add_valid_functional_evidence(
 ) -> None:
     db.add(_scope())
     db.add_all(_latency(index) for index in range(32))
+    db.add_all(_provider_call(index) for index in range(32))
     db.add_all(
         _interval(index, started_at=START, terminal_at=END) for index in range(16, 32)
     )
@@ -179,6 +452,7 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     with Session(engine) as first, first.begin():
         first.add(_scope())
         first.add_all(_latency(index) for index in range(32))
+        first.add_all(_provider_call(index) for index in range(32))
         first.add(
             _interval(
                 16,
@@ -268,6 +542,95 @@ def test_exact_cohort_aggregates_cross_session_writes_and_clips_billed_lifetime(
     assert evidence.workspace_evictions == 16
     assert evidence.stale_fences == 0
     assert evidence.billed_duration_ms == 940_000
+    assert asdict(evidence)["p95_server_latency_ms_by_workload"] == {
+        "no_tool": {
+            "provider_gateway_received_ms": 115,
+            "provider_ttft_ms": 215,
+            "first_semantic_event_ms": 315,
+        },
+        "read": {
+            "provider_gateway_received_ms": 123,
+            "provider_ttft_ms": 223,
+            "first_semantic_event_ms": 323,
+        },
+        "bash": {
+            "provider_gateway_received_ms": 131,
+            "provider_ttft_ms": 231,
+            "first_semantic_event_ms": 331,
+        },
+    }
+
+
+def test_functional_cohort_refuses_missing_first_provider_timing(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        db.query(ChatOpenAIProviderCall).filter_by(
+            turn_id=_latency(31).turn_id, call_sequence=1
+        ).delete()
+
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable, match="latency evidence"):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
+
+
+def test_collect_locks_scope_before_closing_authorization(engine):
+    lock_requests = []
+
+    class LockedService(ChatDurableQualificationEvidenceService):
+        def require_collectable_scope(self, scope_id, *, settings, lock=False):
+            lock_requests.append((scope_id, lock))
+            return super().require_collectable_scope(
+                scope_id, settings=settings, lock=lock
+            )
+
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+    with Session(engine) as db:
+        LockedService(db, now=lambda: END).collect(
+            scope_id=SCOPE_ID, settings=_settings()
+        )
+
+    assert lock_requests == [(SCOPE_ID, True)]
+
+
+def test_collect_replays_exact_teardown_closed_scope_without_moving_window(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        db.get(ChatQualificationScope, SCOPE_ID).window_ended_at = END
+
+    with Session(engine) as db:
+        service = ChatDurableQualificationEvidenceService(
+            db, now=lambda: END + timedelta(minutes=1)
+        )
+        first = service.collect(scope_id=SCOPE_ID, settings=_settings())
+        second = service.collect(scope_id=SCOPE_ID, settings=_settings())
+        persisted_end = db.get(ChatQualificationScope, SCOPE_ID).window_ended_at
+
+    assert first == second
+    assert first.window_ended_at_ms == round(END.timestamp() * 1_000)
+    assert persisted_end.replace(tzinfo=UTC) == END
+
+
+def test_collect_closed_scope_refuses_wrong_release_or_expired_scope(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        scope = db.get(ChatQualificationScope, SCOPE_ID)
+        scope.window_ended_at = END
+
+    with Session(engine) as db:
+        service = ChatDurableQualificationEvidenceService(db, now=lambda: END)
+        with pytest.raises(QualificationEvidenceUnavailable, match="unavailable"):
+            service.collect(
+                scope_id=SCOPE_ID,
+                settings=_settings().model_copy(update={"release_id": "wrong-staging"}),
+            )
+        db.rollback()
+        with pytest.raises(QualificationEvidenceUnavailable, match="unavailable"):
+            ChatDurableQualificationEvidenceService(
+                db, now=lambda: END + timedelta(hours=2)
+            ).collect(scope_id=SCOPE_ID, settings=_settings())
 
 
 def test_admission_profile_requires_exact_100_no_tool_denominator(engine):
@@ -412,18 +775,41 @@ def test_exact_scope_teardown_is_isolated_and_idempotent(engine):
     lock_requests = []
 
     class LockedService(ChatDurableQualificationEvidenceService):
-        def require_active_scope(self, scope_id, *, settings, lock=False):
-            lock_requests.append(lock)
-            return super().require_active_scope(scope_id, settings=settings, lock=lock)
+        def _require_scope(self, scope_id, *, settings, lock, allow_ended):
+            lock_requests.append((lock, allow_ended))
+            return super()._require_scope(
+                scope_id,
+                settings=settings,
+                lock=lock,
+                allow_ended=allow_ended,
+            )
 
+    moments = iter(
+        (
+            START + timedelta(seconds=1),
+            START + timedelta(seconds=2),
+            START + timedelta(seconds=3),
+        )
+    )
     with Session(engine) as db:
-        service = LockedService(db, now=lambda: END)
+        service = LockedService(db, now=lambda: next(moments))
         first = asyncio.run(
             service.teardown_scope(
                 scope_id=SCOPE_ID, settings=_settings(), sandbox_manager=manager
             )
         )
         db.commit()
+    with Session(engine) as db:
+        ended_at = db.get(ChatQualificationScope, SCOPE_ID).window_ended_at.replace(
+            tzinfo=UTC
+        )
+        latest_eviction = max(
+            row.occurred_at.replace(tzinfo=UTC)
+            for row in db.query(ChatQualificationEvidenceEvent).filter_by(
+                event_type="workspace_evicted"
+            )
+        )
+        assert latest_eviction <= ended_at
     with Session(engine) as db:
         service = LockedService(db, now=lambda: END)
         second = asyncio.run(
@@ -440,9 +826,53 @@ def test_exact_scope_teardown_is_isolated_and_idempotent(engine):
     expected_sessions = {_latency(index).chat_session_id for index in range(16, 32)}
     assert set(manager.sessions) == expected_sessions
     assert first == second
-    assert lock_requests == [True, True]
+    assert lock_requests == [(True, True), (True, True)]
     assert first.expected_tool_turns == first.closed_intervals == 16
     assert evictions == 16
+
+
+def test_exact_scope_teardown_cleans_terminal_error_without_passing_evidence(engine):
+    with Session(engine) as db, db.begin():
+        _add_valid_functional_evidence(db)
+        failed_turn = db.scalar(
+            select(ChatTurnLatency).where(
+                ChatTurnLatency.qualification_scope_id == SCOPE_ID,
+                ChatTurnLatency.qualification_workload == "bash",
+            )
+        )
+        failed_turn.terminal_status = "error"
+        db.query(ChatQualificationEvidenceEvent).filter_by(
+            event_type="workspace_evicted"
+        ).delete()
+        for interval in db.query(ChatSandboxComputeInterval):
+            interval.terminal_at = None
+
+    class Manager:
+        async def snapshot_and_terminate(self, session_id):
+            with Session(engine) as db, db.begin():
+                interval = db.scalar(
+                    select(ChatSandboxComputeInterval).where(
+                        ChatSandboxComputeInterval.chat_session_id == session_id
+                    )
+                )
+                interval.terminal_at = END
+            return True
+
+    with Session(engine) as db:
+        proof = asyncio.run(
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).teardown_scope(
+                scope_id=SCOPE_ID,
+                settings=_settings(),
+                sandbox_manager=Manager(),
+            )
+        )
+
+    assert proof.targeted_sessions == 16
+    with Session(engine) as db:
+        with pytest.raises(QualificationEvidenceUnavailable):
+            ChatDurableQualificationEvidenceService(db, now=lambda: END).collect(
+                scope_id=SCOPE_ID, settings=_settings()
+            )
 
 
 @pytest.mark.parametrize("event_type", ("stale_fence", "workspace_evicted"))
@@ -798,7 +1228,7 @@ def test_scope_collision_and_bounded_expiry_cleanup(engine):
         )
 
 
-def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_per_turn():
+def test_postgresql_qualification_locks_serialize_cleanup_and_teardown_races():
     url = os.getenv("PWC_QUALIFICATION_TEST_DATABASE_URL")
     if not url:
         pytest.skip("explicit disposable qualification PostgreSQL URL is required")
@@ -838,6 +1268,28 @@ def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_
                   turn_id UUID NOT NULL, chat_session_id UUID NOT NULL,
                   event_type VARCHAR(32) NOT NULL, operation_digest VARCHAR(64),
                   operation_kind VARCHAR(8), occurred_at TIMESTAMPTZ NOT NULL
+                );
+                CREATE TABLE chat_external_workers (
+                  worker_id VARCHAR(128) PRIMARY KEY, instance_id UUID NOT NULL UNIQUE,
+                  environment VARCHAR(16) NOT NULL, release_id VARCHAR(255) NOT NULL,
+                  contract_version VARCHAR(128) NOT NULL, generation BIGINT NOT NULL,
+                  state VARCHAR(16) NOT NULL, maximum_sessions INTEGER NOT NULL,
+                  active_sessions INTEGER NOT NULL, heartbeat_at TIMESTAMPTZ NOT NULL,
+                  lease_expires_at TIMESTAMPTZ NOT NULL,
+                  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+                  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+                );
+                CREATE TABLE chat_external_worker_reservations (
+                  request_id VARCHAR(200) PRIMARY KEY, turn_id UUID UNIQUE,
+                  endpoint_id VARCHAR(128) NOT NULL, worker_id VARCHAR(128) NOT NULL,
+                  instance_id UUID NOT NULL, worker_generation BIGINT NOT NULL,
+                  release_id VARCHAR(255) NOT NULL,
+                  contract_version VARCHAR(128) NOT NULL,
+                  maximum_sessions INTEGER NOT NULL, reserved_at TIMESTAMPTZ NOT NULL,
+                  expires_at TIMESTAMPTZ NOT NULL
+                );
+                CREATE TABLE issued_external_capabilities (
+                  id UUID PRIMARY KEY, turn_id UUID NOT NULL
                 );
                 CREATE UNIQUE INDEX uq_chat_qualification_evidence_eviction_turn
                   ON chat_qualification_evidence_events (qualification_scope_id, turn_id)
@@ -895,10 +1347,46 @@ def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_
                 for index in range(16, 32)
             ],
         )
+        instance_id = uuid.uuid4()
+        connection.execute(
+            text(
+                "INSERT INTO chat_external_workers "
+                "(worker_id,instance_id,environment,release_id,contract_version,"
+                "generation,state,maximum_sessions,active_sessions,heartbeat_at,"
+                "lease_expires_at) VALUES "
+                "('worker-qualified',:instance_id,'staging',:release,'external-pi-v1',"
+                "1,'ready',32,1,:start,:expiry)"
+            ),
+            {
+                "instance_id": instance_id,
+                "release": _settings().release_id,
+                "start": START,
+                "expiry": END + timedelta(hours=1),
+            },
+        )
+        connection.execute(
+            text(
+                "INSERT INTO chat_external_worker_reservations "
+                "(request_id,turn_id,endpoint_id,worker_id,instance_id,worker_generation,"
+                "release_id,contract_version,maximum_sessions,reserved_at,expires_at) "
+                "VALUES ('qualified-request',:turn_id,'qualified','worker-qualified',"
+                ":instance_id,1,:release,'external-pi-v1',32,:start,:expiry)"
+            ),
+            {
+                "turn_id": _latency(0).turn_id,
+                "instance_id": instance_id,
+                "release": _settings().release_id,
+                "start": START,
+                "expiry": END + timedelta(hours=1),
+            },
+        )
 
     active = 0
     maximum_active = 0
     active_lock = threading.Lock()
+
+    teardown_holds_scope = threading.Event()
+    release_teardown = threading.Event()
 
     class Manager:
         async def snapshot_and_terminate(self, _session_id):
@@ -906,17 +1394,19 @@ def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_
             with active_lock:
                 active += 1
                 maximum_active = max(maximum_active, active)
-            await asyncio.sleep(0.002)
+            if not teardown_holds_scope.is_set():
+                teardown_holds_scope.set()
+                await asyncio.to_thread(release_teardown.wait, 5)
             with active_lock:
                 active -= 1
 
-    attempted = threading.Barrier(2)
     proofs = []
+    capacity_results = []
+    authorization_results = []
 
     def teardown():
         with Session(postgres) as db, db.begin():
             db.execute(text(f"SET search_path TO {schema}"))
-            attempted.wait(timeout=5)
             proofs.append(
                 asyncio.run(
                     ChatDurableQualificationEvidenceService(
@@ -929,10 +1419,173 @@ def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_
                 )
             )
 
+    settings = _settings().model_copy(
+        update={
+            "chat_external_pi_worker_endpoints": [
+                {
+                    "endpoint_id": "qualified",
+                    "worker_id": "worker-qualified",
+                    "base_url": "http://127.0.0.1:8780",
+                    "token": "q" * 32,
+                }
+            ],
+            "chat_external_pi_worker_contract_version": "external-pi-v1",
+        }
+    )
+
+    def resolve_capacity():
+        target = _latency(24)
+        with Session(postgres) as db, db.begin():
+            db.execute(text(f"SET search_path TO {schema}"))
+            capacity_results.append(
+                ChatDurableQualificationEvidenceService(
+                    db, now=lambda: END
+                ).executor_live_cap(
+                    turn_id=target.turn_id,
+                    chat_session_id=target.chat_session_id,
+                    settings=settings,
+                )
+            )
+
+    def reconstruct_authorization():
+        target = _latency(0)
+        with Session(postgres) as db, db.begin():
+            db.execute(text(f"SET search_path TO {schema}"))
+            authorization_results.append(
+                ChatDurableQualificationEvidenceService(
+                    db, now=lambda: END
+                ).external_pi_authorized(
+                    turn_id=target.turn_id,
+                    chat_session_id=target.chat_session_id,
+                    settings=settings,
+                )
+            )
+
+    from backend.services.chat_external_worker_capacity import (
+        ChatExternalWorkerCapacityRepository,
+        ExternalWorkerCapacityUnavailable,
+    )
+
+    authorization_holds_reservation = threading.Event()
+    release_authorization = threading.Event()
+    cleanup_finished = threading.Event()
+
+    def authorize_and_issue():
+        target = _latency(0)
+        with Session(postgres) as db, db.begin():
+            db.execute(text(f"SET search_path TO {schema}"))
+            assert ChatDurableQualificationEvidenceService(
+                db, now=lambda: START
+            ).external_pi_authorized(
+                turn_id=target.turn_id,
+                chat_session_id=target.chat_session_id,
+                settings=settings,
+            )
+            db.execute(
+                text(
+                    "INSERT INTO issued_external_capabilities (id,turn_id) "
+                    "VALUES (:id,:turn_id)"
+                ),
+                {"id": uuid.uuid4(), "turn_id": target.turn_id},
+            )
+            authorization_holds_reservation.set()
+            release_authorization.wait(timeout=5)
+
+    def cleanup_reservation():
+        with Session(postgres) as db, db.begin():
+            db.execute(text(f"SET search_path TO {schema}"))
+            ChatExternalWorkerCapacityRepository.release_turn(
+                db, turn_id=_latency(0).turn_id
+            )
+        cleanup_finished.set()
+
+    authorization_thread = threading.Thread(target=authorize_and_issue)
+    authorization_thread.start()
+    assert authorization_holds_reservation.wait(timeout=5)
+    cleanup_thread = threading.Thread(target=cleanup_reservation)
+    cleanup_thread.start()
+    cleanup_thread.join(timeout=0.1)
+    assert cleanup_thread.is_alive()
+    assert not cleanup_finished.is_set()
+    release_authorization.set()
+    for thread in (authorization_thread, cleanup_thread):
+        thread.join(timeout=10)
+        assert not thread.is_alive()
+
+    with postgres.begin() as connection:
+        connection.execute(text(f"SET search_path TO {schema}"))
+        assert (
+            connection.scalar(text("SELECT count(*) FROM issued_external_capabilities"))
+            == 1
+        )
+        assert (
+            connection.scalar(
+                text("SELECT count(*) FROM chat_external_worker_reservations")
+            )
+            == 0
+        )
+        connection.execute(
+            text(
+                "INSERT INTO chat_external_worker_reservations "
+                "(request_id,turn_id,endpoint_id,worker_id,instance_id,worker_generation,"
+                "release_id,contract_version,maximum_sessions,reserved_at,expires_at) "
+                "VALUES ('cleanup-first',:turn_id,'qualified','worker-qualified',"
+                ":instance_id,1,:release,'external-pi-v1',32,:start,:expiry)"
+            ),
+            {
+                "turn_id": _latency(0).turn_id,
+                "instance_id": instance_id,
+                "release": _settings().release_id,
+                "start": START,
+                "expiry": END + timedelta(hours=1),
+            },
+        )
+
+    cleanup_reservation()
+    cleanup_first_authorized = False
+    with Session(postgres) as db, db.begin():
+        db.execute(text(f"SET search_path TO {schema}"))
+        try:
+            cleanup_first_authorized = ChatDurableQualificationEvidenceService(
+                db, now=lambda: START
+            ).external_pi_authorized(
+                turn_id=_latency(0).turn_id,
+                chat_session_id=_latency(0).chat_session_id,
+                settings=settings,
+            )
+        except ExternalWorkerCapacityUnavailable:
+            pass
+        if cleanup_first_authorized:
+            db.execute(
+                text(
+                    "INSERT INTO issued_external_capabilities (id,turn_id) "
+                    "VALUES (:id,:turn_id)"
+                ),
+                {"id": uuid.uuid4(), "turn_id": _latency(0).turn_id},
+            )
+    assert not cleanup_first_authorized
+    with postgres.begin() as connection:
+        connection.execute(text(f"SET search_path TO {schema}"))
+        assert (
+            connection.scalar(text("SELECT count(*) FROM issued_external_capabilities"))
+            == 1
+        )
+
     threads = [threading.Thread(target=teardown) for _ in range(2)]
     for thread in threads:
         thread.start()
-    for thread in threads:
+    assert teardown_holds_scope.wait(timeout=5)
+    racing = [
+        threading.Thread(target=resolve_capacity),
+        threading.Thread(target=reconstruct_authorization),
+    ]
+    for thread in racing:
+        thread.start()
+    for thread in racing:
+        thread.join(timeout=0.1)
+        assert thread.is_alive()
+    release_teardown.set()
+    for thread in threads + racing:
         thread.join(timeout=10)
         assert not thread.is_alive()
     with postgres.connect() as connection:
@@ -951,3 +1604,5 @@ def test_postgresql_concurrent_teardown_serializes_scope_and_keeps_one_eviction_
     assert proofs[0] == proofs[1]
     assert maximum_active == 1
     assert count == 16
+    assert capacity_results == [None]
+    assert authorization_results == [False]

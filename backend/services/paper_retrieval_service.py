@@ -15,7 +15,7 @@ from sqlalchemy import case, func, or_, select, text
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.api import (
+from backend.models.papers import (
     PaperSearchResults,
     PaperSummary,
     RelatedPaperRecommendation,

@@ -6,6 +6,58 @@ const USER_SENTINEL = "__PWC_HF_USERNAME__";
 const TASK_CATALOG_START = "<!-- PWC_TASK_CATALOG_START -->";
 const TASK_CATALOG_END = "<!-- PWC_TASK_CATALOG_END -->";
 const PAPER_PROMPT_START = "## Private paper authoring (paper-v1)";
+const TASK_CATALOG_CACHE_TTL_MS = 5 * 60 * 1_000;
+
+let taskCatalogCache: {
+  apiUrl: string;
+  value: string;
+  expiresAt: number;
+} | undefined;
+let taskCatalogLoad: {
+  apiUrl: string;
+  promise: Promise<string>;
+} | undefined;
+let taskCatalogRetry: {
+  apiUrl: string;
+  after: number;
+} | undefined;
+
+type TaskCatalogLoader = (apiUrl: string) => Promise<string>;
+
+export function taskCatalogForPrompt(
+  apiUrl = process.env.PWC_API_URL ?? "http://127.0.0.1:8765/api/v1",
+  load: TaskCatalogLoader = loadLiveTaskCatalog,
+): string | undefined {
+  const normalizedApiUrl = apiUrl.replace(/\/$/, "");
+  const cached = taskCatalogCache?.apiUrl === normalizedApiUrl
+    ? taskCatalogCache
+    : undefined;
+  if (cached && cached.expiresAt > Date.now()) return cached.value;
+  if (
+    taskCatalogRetry?.apiUrl === normalizedApiUrl
+    && taskCatalogRetry.after > Date.now()
+  ) return cached?.value;
+  if (taskCatalogLoad?.apiUrl !== normalizedApiUrl) {
+    const promise = load(normalizedApiUrl);
+    taskCatalogLoad = { apiUrl: normalizedApiUrl, promise };
+    void promise.then((value) => {
+      taskCatalogCache = {
+        apiUrl: normalizedApiUrl,
+        value,
+        expiresAt: Date.now() + TASK_CATALOG_CACHE_TTL_MS,
+      };
+      taskCatalogRetry = undefined;
+    }).catch(() => {
+      taskCatalogRetry = {
+        apiUrl: normalizedApiUrl,
+        after: Date.now() + TASK_CATALOG_CACHE_TTL_MS,
+      };
+    }).finally(() => {
+      if (taskCatalogLoad?.promise === promise) taskCatalogLoad = undefined;
+    });
+  }
+  return cached?.value;
+}
 
 export async function renderPrompt(options: {
   model: string;
@@ -59,16 +111,46 @@ export function replaceTaskCatalog(source: string, taskCatalog: string): string 
 }
 
 export async function loadPromptAsset(assetPath?: string): Promise<string> {
-  return readFile(assetPath ?? "/opt/pwc/pi-system-prompt.txt", "utf8");
+  return readFile(
+    assetPath ?? process.env.PWC_EXTERNAL_PI_PROMPT_PATH ?? "/opt/pwc/pi-system-prompt.txt",
+    "utf8",
+  );
 }
 
 export async function fetchLiveTaskCatalog(
   apiUrl = process.env.PWC_API_URL ?? "http://127.0.0.1:8765/api/v1",
 ): Promise<string> {
+  const normalizedApiUrl = apiUrl.replace(/\/$/, "");
+  const now = Date.now();
+  if (
+    taskCatalogCache?.apiUrl === normalizedApiUrl
+    && taskCatalogCache.expiresAt > now
+  ) {
+    return taskCatalogCache.value;
+  }
+  if (taskCatalogLoad?.apiUrl === normalizedApiUrl) {
+    return taskCatalogLoad.promise;
+  }
+  const promise = loadLiveTaskCatalog(normalizedApiUrl);
+  taskCatalogLoad = { apiUrl: normalizedApiUrl, promise };
+  try {
+    const value = await promise;
+    taskCatalogCache = {
+      apiUrl: normalizedApiUrl,
+      value,
+      expiresAt: Date.now() + TASK_CATALOG_CACHE_TTL_MS,
+    };
+    return value;
+  } finally {
+    if (taskCatalogLoad?.promise === promise) taskCatalogLoad = undefined;
+  }
+}
+
+async function loadLiveTaskCatalog(apiUrl: string): Promise<string> {
   const tasks = new Map<string, string>();
   const signal = AbortSignal.timeout(3_000);
   for (let page = 1; page <= 10; page += 1) {
-    const url = new URL(`${apiUrl.replace(/\/$/, "")}/tasks/`);
+    const url = new URL(`${apiUrl}/tasks/`);
     url.searchParams.set("page", String(page));
     url.searchParams.set("page_size", "100");
     url.searchParams.set("ordering", "name");

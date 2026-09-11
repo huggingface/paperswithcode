@@ -21,6 +21,11 @@ from backend.services.autonomous_operations_repository import (
     Operator,
     RunContext,
 )
+from backend.services.autonomous_alert_service import send_budget_threshold_alert
+from backend.services.autonomous_digest_service import (
+    AutonomousBudgetService,
+    BudgetLimits,
+)
 from backend.services.autonomous_submission_service import AutonomousSubmissionService
 from backend.services.autonomous_submission_job_service import (
     AutonomousSubmissionJobError,
@@ -95,6 +100,18 @@ def prepare_review_batch(
                         f"Submission Job {job_id} ended as {status.stage} "
                         f"with {pending} unsigned or missing callbacks"
                     )
+        limits = BudgetLimits.from_environ(dict(os.environ))
+        budget = AutonomousBudgetService(
+            limits=limits,
+            on_exhausted=send_budget_threshold_alert,
+        ).enforce_before_run(
+            db,
+            operator=Operator.SUBMISSIONS,
+            requested_cost_usd=settings.autonomous_submission_run_budget_usd,
+            requested_tokens=limits.per_run_tokens,
+        )
+        if not budget.allowed:
+            raise RuntimeError(f"autonomous submission {budget.reason_code}")
         batch = service.claim_submission_batch(run_id, limit=limit)
         if not batch:
             return 0

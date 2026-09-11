@@ -43,6 +43,16 @@ EXECUTOR_BOOTSTRAP_PREFIX = SUPERVISOR_PREFIX
 EXECUTOR_SOCKET = Path("/run/pwc-chat-executor/executor.sock")
 EXECUTOR_STATE = Path("/var/lib/pwc-chat-executor")
 WORKSPACE_ROOT = Path("/workspace")
+READONLY_PATHS = frozenset(
+    {
+        Path("/opt/pwc/PWC_CLI_SKILL.md"),
+        Path("/opt/pwc/HF_CLI_SKILL.md"),
+        Path("/opt/pwc/S2_CLI_SKILL.md"),
+        Path("/opt/pwc/POSTERLY_PUBLISH.md"),
+        Path("/opt/pwc/PAPER_AUTHORING.md"),
+        Path("/opt/posterly/SKILL.md"),
+    }
+)
 MAX_CAPTURE_BYTES = 256 * 1024
 TERMINATE_GRACE_SECONDS = 0.25
 EXECUTOR_USER = "pwc-chat"
@@ -171,6 +181,7 @@ class ExecutorServer:
         socket_path: Path = EXECUTOR_SOCKET,
         state_path: Path = EXECUTOR_STATE,
         workspace_root: Path = WORKSPACE_ROOT,
+        readonly_paths: frozenset[Path] = READONLY_PATHS,
         worker_generation: str | None = None,
         broker_control: Callable[
             [dict[str, object]], dict[str, object]
@@ -186,6 +197,7 @@ class ExecutorServer:
         self.socket_path = socket_path
         self.state_path = state_path
         self.workspace_root = workspace_root
+        self.readonly_paths = readonly_paths
         self.worker_generation = worker_generation or os.environ.get(
             "PWC_CHAT_WORKER_GENERATION", ""
         )
@@ -408,6 +420,9 @@ class ExecutorServer:
             "session_id",
             "turn_id",
             "worker_generation",
+            "turn_worker_id",
+            "turn_worker_generation",
+            "turn_lease_generation",
         }
         if (
             not isinstance(value, dict)
@@ -648,6 +663,11 @@ class ExecutorServer:
                             "capability": bootstrap["capability"],
                             "session_id": execution.identity["session_id"],
                             "turn_id": execution.identity["turn_id"],
+                            "turn_worker_id": bootstrap["turn_worker_id"],
+                            "turn_worker_generation": bootstrap[
+                                "turn_worker_generation"
+                            ],
+                            "turn_lease_generation": bootstrap["turn_lease_generation"],
                         }
                     )
                     if (
@@ -1018,14 +1038,18 @@ class ExecutorServer:
     def _contained_read(
         self, path: str, offset: int, maximum: int
     ) -> tuple[bytes, bool]:
-        parts = Path(path).parts
-        if (
-            not parts
-            or Path(path).is_absolute()
-            or any(part in {"", ".", ".."} for part in parts)
-        ):
+        requested = Path(path)
+        if requested.is_absolute():
+            if requested not in self.readonly_paths:
+                raise ValueError
+            root = requested.parent
+            parts = (requested.name,)
+        else:
+            root = self.workspace_root
+            parts = requested.parts
+        if not parts or any(part in {"", ".", ".."} for part in parts):
             raise ValueError
-        descriptor = os.open(self.workspace_root, os.O_RDONLY | os.O_DIRECTORY)
+        descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
         try:
             for index, part in enumerate(parts):
                 flags = os.O_RDONLY | os.O_NOFOLLOW

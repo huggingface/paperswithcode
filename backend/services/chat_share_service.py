@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from io import BytesIO
 
 from pydantic import TypeAdapter
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -60,6 +60,16 @@ def _shareable_blocks(row: ChatMessageRecord) -> list[object]:
         for block in (row.display_blocks or [])
         if not _is_private_paper_block(block)
     ]
+
+
+def _has_private_paper_block(rows: list[ChatMessageRecord]) -> bool:
+    """Treat an unexpected persisted paper event as private rather than public."""
+
+    return any(
+        _is_private_paper_block(block)
+        for row in rows
+        for block in (row.display_blocks or [])
+    )
 
 
 def _failure_message(code: str | None) -> str:
@@ -179,6 +189,17 @@ class ChatShareService:
 
     def create_or_refresh(self, owner: ChatOwner, session_id: uuid.UUID) -> ChatShare:
         session = self.sessions._owned(owner, session_id, lock=True)
+        if (
+            getattr(getattr(self.db, "bind", None), "dialect", None) is not None
+            and self.db.bind.dialect.name == "postgresql"
+        ):
+            # Match paper creation's advisory key. A share that starts first
+            # is a pre-paper immutable snapshot; a share that starts after a
+            # paper insert sees the artifact and fails closed.
+            self.db.execute(
+                text("SELECT pg_advisory_xact_lock(hashtext(:session))"),
+                {"session": f"chat-latex-paper:{session.id}"},
+            )
         if session.active_turn_id:
             raise ChatServiceError(
                 "session_busy", 409, "Wait for the response to finish before sharing"
@@ -196,6 +217,23 @@ class ChatShareService:
         if not messages:
             raise ChatServiceError(
                 "empty_chat", 409, "Start the conversation before sharing it"
+            )
+        has_private_paper = self.db.scalar(
+            select(ChatArtifact.id)
+            .where(
+                ChatArtifact.session_id == session.id,
+                ChatArtifact.kind == "latex_paper",
+            )
+            .limit(1)
+        )
+        if has_private_paper is not None or _has_private_paper_block(messages):
+            # Model output in a paper turn can legitimately quote a failed
+            # source or diagnostic. Never try to sanitize it for a public
+            # snapshot: a paper chat is owner-only for its whole lifecycle.
+            raise ChatServiceError(
+                "paper_share_disabled",
+                409,
+                "Chats with private papers cannot be shared",
             )
         share = self.db.execute(
             select(ChatShare).where(ChatShare.chat_session_id == session.id)

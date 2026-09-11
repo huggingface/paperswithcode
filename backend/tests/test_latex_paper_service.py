@@ -6,6 +6,7 @@ import zipfile
 from io import BytesIO
 from pathlib import Path
 
+import httpx
 import pytest
 from sqlalchemy import create_engine, event, func, select
 from sqlalchemy.dialects.postgresql import JSONB
@@ -660,6 +661,164 @@ def test_restart_reconciliation_reattaches_the_saved_sandbox_job(db, settings):
     assert restarted.submitted is None
 
 
+def test_restart_reconciliation_preserves_sandbox_after_initial_status_transport_failure(
+    db, settings
+):
+    class SandboxCompiler(_Compiler):
+        provider_job_id = "opaque-sandbox-job"
+
+        def __init__(self, *, fail_initial_status: bool = False) -> None:
+            super().__init__(CompilerJobState.COMPILING)
+            self.fail_initial_status = fail_initial_status
+            self.resume_calls: list[tuple[str, str]] = []
+
+        def submit(self, *, job_id: str, bundle: bytes, entrypoint: str, limits=None):
+            self.submitted = (job_id, bundle, entrypoint)
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.COMPILING,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def status(self, job_id: str):
+            if self.fail_initial_status:
+                raise httpx.ConnectError(
+                    "compiler transport unavailable",
+                    request=httpx.Request("GET", "https://compiler.invalid/status"),
+                )
+            return CompilerStatus(job_id=job_id, state=CompilerJobState.COMPILING)
+
+        def resume(
+            self, *, job_id: str, provider_job_id: str, bundle: bytes, entrypoint: str
+        ):
+            self.resume_calls.append((job_id, provider_job_id))
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.COMPILING,
+                provider_job_id=provider_job_id,
+            )
+
+    session_id = _session(db)
+    storage = LocalArtifactStorage(Path(settings.chat_artifact_local_dir))
+    original = SandboxCompiler(fail_initial_status=True)
+    service = LatexPaperService(db, settings, storage=storage, compiler=original)
+    descriptor = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=session_id
+    )
+    version = db.get(ChatLatexPaperVersion, descriptor.source_head.version_id)
+    assert version is not None
+    assert version.compile_status == "queued"
+    assert version.compile_diagnostics == {
+        "job_id": str(version.id),
+        "failure_category": "transport_failure",
+        "provider_job_id": "opaque-sandbox-job",
+    }
+
+    restarted = SandboxCompiler()
+    recovery = LatexPaperService(db, settings, storage=storage, compiler=restarted)
+    assert recovery.reconcile_pending_compiles(limit=1) == 1
+
+    assert restarted.resume_calls == [(str(version.id), "opaque-sandbox-job")]
+    assert restarted.submitted is None
+
+
+def test_restart_reconciliation_preserves_sandbox_after_resume_transport_failure(
+    db, settings
+):
+    class SandboxCompiler(_Compiler):
+        provider_job_id = "opaque-sandbox-job"
+
+        def __init__(self, *, fail_resume: bool = False) -> None:
+            super().__init__(CompilerJobState.COMPILING)
+            self.fail_resume = fail_resume
+            self.resume_calls: list[tuple[str, str]] = []
+
+        def submit(self, *, job_id: str, bundle: bytes, entrypoint: str, limits=None):
+            self.submitted = (job_id, bundle, entrypoint)
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.COMPILING,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def resume(
+            self, *, job_id: str, provider_job_id: str, bundle: bytes, entrypoint: str
+        ):
+            self.resume_calls.append((job_id, provider_job_id))
+            if self.fail_resume:
+                raise httpx.ConnectError(
+                    "compiler transport unavailable",
+                    request=httpx.Request("POST", "https://compiler.invalid/resume"),
+                )
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.COMPILING,
+                provider_job_id=provider_job_id,
+            )
+
+    session_id = _session(db)
+    storage = LocalArtifactStorage(Path(settings.chat_artifact_local_dir))
+    original = SandboxCompiler()
+    service = LatexPaperService(db, settings, storage=storage, compiler=original)
+    descriptor = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=session_id
+    )
+    version = db.get(ChatLatexPaperVersion, descriptor.source_head.version_id)
+    assert version is not None
+    assert version.compile_diagnostics["provider_job_id"] == "opaque-sandbox-job"
+
+    transport_failed = SandboxCompiler(fail_resume=True)
+    recovery = LatexPaperService(
+        db, settings, storage=storage, compiler=transport_failed
+    )
+    assert recovery.reconcile_pending_compiles(limit=1) == 1
+    assert version.compile_diagnostics == {
+        "job_id": str(version.id),
+        "failure_category": "transport_failure",
+        "provider_job_id": "opaque-sandbox-job",
+    }
+
+    restarted = SandboxCompiler()
+    recovery = LatexPaperService(db, settings, storage=storage, compiler=restarted)
+    assert recovery.reconcile_pending_compiles(limit=1) == 1
+
+    assert restarted.resume_calls == [(str(version.id), "opaque-sandbox-job")]
+    assert restarted.submitted is None
+
+
+def test_reconciliation_rechecks_pending_version_after_artifact_lock(
+    db, settings, monkeypatch
+):
+    session_id = _session(db)
+    compiler = _Compiler(CompilerJobState.QUEUED)
+    storage = LocalArtifactStorage(Path(settings.chat_artifact_local_dir))
+    service = LatexPaperService(db, settings, storage=storage, compiler=compiler)
+    descriptor = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=session_id
+    )
+    version = db.get(ChatLatexPaperVersion, descriptor.source_head.version_id)
+    assert version is not None
+    assert version.compile_status == "queued"
+
+    def lock_then_complete(artifact_id: uuid.UUID):
+        assert artifact_id == version.artifact_id
+        version.compile_status = "succeeded"
+        version.compiled_pdf_path = f"{version.storage_key}/preview.pdf"
+        db.flush()
+        return db.get(ChatArtifact, artifact_id)
+
+    monkeypatch.setattr(
+        service, "_lock_reconcile_artifact", lock_then_complete, raising=False
+    )
+    monkeypatch.setattr(
+        service,
+        "_compile",
+        lambda *_args: pytest.fail("completed version must not submit a Sandbox"),
+    )
+
+    assert service.reconcile_pending_compiles(limit=1) == 0
+
+
 def test_paper_is_private_general_chat_only_and_unique(db, settings):
     session_id = _session(db)
     service = LatexPaperService(
@@ -1060,6 +1219,159 @@ def test_deleting_unreferenced_versions_and_project_reclaims_only_orphaned_figur
     assert service.reconcile_storage_cleanup(limit=20) > 0
     db.commit()
     assert list(Path(settings.chat_artifact_local_dir).glob("**/blobs/*/content")) == []
+
+
+def test_delete_project_cancels_pending_sandbox_by_provider_handle_without_resubmit(
+    db, settings
+):
+    class ProviderHandleCompiler(_Compiler):
+        provider_job_id = "opaque-sandbox-job"
+
+        def __init__(self) -> None:
+            super().__init__(CompilerJobState.QUEUED)
+            self.submit_calls = 0
+            self.provider_cancellations: list[str] = []
+
+        def submit(self, *, job_id: str, bundle: bytes, entrypoint: str, limits=None):
+            self.submit_calls += 1
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def status(self, job_id: str):
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def cancel_provider_job(self, provider_job_id: str) -> None:
+            self.provider_cancellations.append(provider_job_id)
+
+    compiler = ProviderHandleCompiler()
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    paper = service.create_neutral_scaffold(owner_id="owner-1", session_id=_session(db))
+    assert paper.source_head is not None
+
+    service.delete_project("owner-1", paper.artifact_id)
+
+    assert compiler.provider_cancellations == ["opaque-sandbox-job"]
+    assert compiler.submit_calls == 1
+    assert (
+        db.scalar(
+            select(ChatLatexPaperVersion.id).where(
+                ChatLatexPaperVersion.artifact_id == paper.artifact_id
+            )
+        )
+        is None
+    )
+
+
+def test_delete_version_cancels_a_pending_nonhead_sandbox_by_provider_handle(
+    db, settings
+):
+    class ProviderHandleCompiler(_Compiler):
+        def __init__(self) -> None:
+            super().__init__(CompilerJobState.QUEUED)
+            self.submit_calls = 0
+            self.provider_job_ids: dict[str, str] = {}
+            self.provider_cancellations: list[str] = []
+
+        def submit(self, *, job_id: str, bundle: bytes, entrypoint: str, limits=None):
+            self.submit_calls += 1
+            provider_job_id = f"opaque-sandbox-job-{self.submit_calls}"
+            self.provider_job_ids[job_id] = provider_job_id
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=provider_job_id,
+            )
+
+        def status(self, job_id: str):
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=self.provider_job_ids[job_id],
+            )
+
+        def cancel_provider_job(self, provider_job_id: str) -> None:
+            self.provider_cancellations.append(provider_job_id)
+
+    compiler = ProviderHandleCompiler()
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    first = service.create_neutral_scaffold(owner_id="owner-1", session_id=_session(db))
+    assert first.source_head is not None
+    second = service.save_human_version(
+        owner_id="owner-1",
+        artifact_id=first.artifact_id,
+        expected_parent_version_id=first.source_head.version_id,
+        files={
+            "main.tex": b"\\documentclass{article}\\begin{document}v2\\end{document}"
+        },
+    )
+    assert second.source_head is not None
+
+    service.delete_version("owner-1", first.artifact_id, first.source_head.version_id)
+
+    assert compiler.provider_cancellations == ["opaque-sandbox-job-1"]
+    assert compiler.submit_calls == 2
+    assert db.get(ChatLatexPaperVersion, first.source_head.version_id) is None
+    assert db.get(ChatLatexPaperVersion, second.source_head.version_id) is not None
+
+
+def test_delete_project_preserves_deletion_when_provider_cancellation_fails(
+    db, settings, caplog
+):
+    class FailingProviderHandleCompiler(_Compiler):
+        provider_job_id = "opaque-sandbox-job"
+
+        def submit(self, *, job_id: str, bundle: bytes, entrypoint: str, limits=None):
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def status(self, job_id: str):
+            return CompilerStatus(
+                job_id=job_id,
+                state=CompilerJobState.QUEUED,
+                provider_job_id=self.provider_job_id,
+            )
+
+        def cancel_provider_job(self, provider_job_id: str) -> None:
+            raise RuntimeError("untrusted-provider-detail")
+
+    compiler = FailingProviderHandleCompiler()
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    paper = service.create_neutral_scaffold(owner_id="owner-1", session_id=_session(db))
+    caplog.set_level("WARNING", logger="backend.services.latex_paper_service")
+
+    service.delete_project("owner-1", paper.artifact_id)
+
+    assert (
+        db.scalar(select(ChatArtifact.id).where(ChatArtifact.id == paper.artifact_id))
+        is None
+    )
+    assert "untrusted-provider-detail" not in caplog.text
+    assert "delete_pending_sandbox_cancellation_failed" in caplog.text
 
 
 def test_figure_admission_counts_durable_posterly_storage(db, settings):

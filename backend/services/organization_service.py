@@ -18,8 +18,8 @@ from backend.models.api import (
     OrganizationContributions,
     OrganizationTopPaper,
     Organizations,
-    Papers,
 )
+from backend.models.papers import Papers
 from backend.models.database import Area as DBArea
 from backend.models.database import Organization as DBOrganization
 from backend.models.database import Paper as DBPaper

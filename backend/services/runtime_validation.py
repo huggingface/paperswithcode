@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import grp
 import hashlib
 import json
 import os
 import re
+import stat
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -35,11 +37,33 @@ from backend.services.chat_runtime_contract import (
     require_immutable_image_id,
 )
 from backend.services.chat_external_worker_capacity import external_worker_endpoints
+from latex_compiler_contract import (
+    EnvelopeError,
+    validate_staging_sandbox_compiler_identity,
+)
 
 _ASSET_RE = re.compile(
     r"""(?:src|href)=["'](?P<path>/assets/[^"'?#]+\.(?:js|css))(?:[?#][^"']*)?["']"""
 )
 _RELEASE_ROOT = Path("/srv/paperswithcode/releases")
+_STAGING_LATEX_COMPILER_ARTIFACT_BUCKET = "nielsr/pwc-chat-artifacts-staging"
+_STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
+_STAGING_LATEX_COMPILER_EVIDENCE_GROUP = "pwc-staging"
+STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
+    "/var/lib/paperswithcode/staging-compiler-qualification/"
+    "latex-compiler-qualification.json"
+)
+_STAGING_LATEX_QUALIFICATION_CHECKS = frozenset(
+    {
+        "hostile_input",
+        "cancellation",
+        "health",
+        "metrics",
+        "image_isolation",
+        "reconciliation",
+        "restart",
+    }
+)
 
 
 def _resolved_absolute(name: str, value: str) -> Path:
@@ -149,6 +173,13 @@ _SANDBOX_CAPACITY_POLICY = SandboxCapacityPolicy(
     max_concurrency=2,
     user_max_concurrency=2,
     total_live_cap=3,
+    blank_pool_min=1,
+    blank_pool_max=1,
+)
+_EXTERNAL_PI_CAPACITY_POLICY = SandboxCapacityPolicy(
+    max_concurrency=32,
+    user_max_concurrency=1,
+    total_live_cap=16,
     blank_pool_min=1,
     blank_pool_max=1,
 )
@@ -410,6 +441,128 @@ def validate_environment_policy(settings: Settings) -> None:
             raise RuntimeError("staging chat feature must be enabled")
 
 
+def _validate_private_paper_compiler_settings(settings: Settings) -> str:
+    """Verify the only supported staging compiler transport without logging secrets."""
+    try:
+        image = validate_staging_sandbox_compiler_identity(
+            settings.chat_latex_compiler_hf_sandbox_image,
+            settings.chat_latex_compiler_hf_sandbox_namespace,
+        )
+    except EnvelopeError as error:
+        raise RuntimeError(
+            "private paper runtime requires an immutable Sandbox image"
+        ) from error
+    if not settings.chat_latex_compiler_hf_sandbox_token:
+        raise RuntimeError("private paper runtime requires a Sandbox credential")
+    if not settings.hf_token:
+        raise RuntimeError("private paper runtime requires the staging Hub identity")
+    if (
+        settings.chat_latex_compiler_hf_sandbox_flavor != "cpu-upgrade"
+        or settings.chat_latex_compiler_hf_sandbox_idle_timeout_seconds != 180
+    ):
+        raise RuntimeError("private paper runtime Sandbox limits are invalid")
+    if (
+        settings.chat_latex_compiler_hf_sandbox_egress_policy_attestation
+        != _STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
+    ):
+        raise RuntimeError("private paper runtime Sandbox egress is unattested")
+    try:
+        encoded = settings.chat_latex_compiler_signing_private_key
+        raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
+        Ed25519PrivateKey.from_private_bytes(raw)
+    except ValueError as error:
+        raise RuntimeError("private paper runtime signing key is invalid") from error
+    return image
+
+
+def _validate_private_paper_qualification_evidence(*, image: str) -> None:
+    """Bind paper activation to root-produced, content-free staging evidence."""
+    evidence_path = STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE
+    try:
+        evidence_gid = grp.getgrnam(_STAGING_LATEX_COMPILER_EVIDENCE_GROUP).gr_gid
+        directory_stat = evidence_path.parent.lstat()
+        evidence_stat = evidence_path.lstat()
+        if (
+            not stat.S_ISDIR(directory_stat.st_mode)
+            or stat.S_IMODE(directory_stat.st_mode) != 0o750
+            or directory_stat.st_uid != 0
+            or directory_stat.st_gid != evidence_gid
+            or not stat.S_ISREG(evidence_stat.st_mode)
+            or stat.S_IMODE(evidence_stat.st_mode) != 0o640
+            or evidence_stat.st_uid != 0
+            or evidence_stat.st_gid != evidence_gid
+            or evidence_stat.st_nlink != 1
+            or evidence_stat.st_size > 16_384
+        ):
+            raise ValueError
+        payload = json.loads(evidence_path.read_text(encoding="utf-8"))
+    except (KeyError, OSError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError(
+            "private paper qualification evidence is unavailable"
+        ) from error
+    checks = payload.get("checks") if isinstance(payload, dict) else None
+    if (
+        not isinstance(payload, dict)
+        or set(payload)
+        != {
+            "schema_version",
+            "environment",
+            "compiler_image",
+            "passed",
+            "total",
+            "checks",
+        }
+        or not isinstance(checks, dict)
+        or set(checks) != _STAGING_LATEX_QUALIFICATION_CHECKS
+        or payload.get("schema_version") != 1
+        or payload.get("environment") != "staging"
+        or payload.get("compiler_image") != image
+        or type(payload.get("passed")) is not int
+        or type(payload.get("total")) is not int
+        or payload["passed"] != payload["total"]
+        or payload["total"] < len(_STAGING_LATEX_QUALIFICATION_CHECKS)
+        or any(checks[name] is not True for name in _STAGING_LATEX_QUALIFICATION_CHECKS)
+    ):
+        raise RuntimeError("private paper qualification evidence is incomplete")
+
+
+def validate_private_paper_runtime(settings: Settings) -> None:
+    """Fail closed unless the private per-job paper path has all staging gates."""
+    user_paper_flags = (
+        settings.chat_latex_paper_enabled,
+        settings.chat_latex_compiler_jobs_enabled,
+    )
+    any_private_paper_flag = any(user_paper_flags) or (
+        settings.chat_latex_compiler_qualification_mode
+    )
+    if not any_private_paper_flag:
+        if settings.environment == "staging" and settings.chat_posterly_enabled:
+            raise RuntimeError("staging Posterly must remain disabled")
+        return
+    if settings.environment != "staging":
+        raise RuntimeError("private paper runtime is staging-only")
+    if settings.chat_posterly_enabled:
+        raise RuntimeError("staging Posterly must remain disabled")
+    if any(user_paper_flags) and settings.chat_artifact_shared_preview_enabled:
+        raise RuntimeError("private paper runtime shared previews must remain disabled")
+    if (
+        settings.chat_artifact_storage_backend != "hf_bucket"
+        or settings.chat_artifact_hf_bucket_id
+        != _STAGING_LATEX_COMPILER_ARTIFACT_BUCKET
+    ):
+        raise RuntimeError("private paper runtime requires the private bucket")
+    image = _validate_private_paper_compiler_settings(settings)
+    if settings.chat_latex_compiler_qualification_mode:
+        if any(user_paper_flags):
+            raise RuntimeError(
+                "private paper qualification must keep user features disabled"
+            )
+        return
+    if not all(user_paper_flags):
+        raise RuntimeError("private paper runtime flags must be coherent")
+    _validate_private_paper_qualification_evidence(image=image)
+
+
 def validate_chat_runtime_descriptor(settings: Settings) -> bool:
     """Validate enabled, dormant, or legacy chat state and return armed status."""
 
@@ -495,9 +648,16 @@ def validate_chat_scope_guardrail_configuration(settings: Settings) -> None:
         raise RuntimeError("scope guardrail requires dedicated server credentials")
     if settings.chat_scope_guardrail_hf_token == settings.hf_token:
         raise RuntimeError("scope guardrail must not reuse the main HF credential")
+    private_paper_mode = (
+        settings.chat_latex_paper_enabled
+        or settings.chat_latex_compiler_jobs_enabled
+        or settings.chat_latex_compiler_qualification_mode
+    )
     if settings.environment == "staging" and (
         not settings.chat_artifacts_enabled
-        or not settings.chat_artifact_shared_preview_enabled
+        or (
+            not private_paper_mode and not settings.chat_artifact_shared_preview_enabled
+        )
         or settings.chat_artifact_storage_backend != "hf_bucket"
         or not settings.chat_artifact_hf_bucket_id
     ):
@@ -599,7 +759,7 @@ def validate_chat_provider_policy(
             },
         )
         if settings.chat_openai_direct_enabled:
-            expected_discovery += (direct_choice,)
+            expected_discovery = (direct_choice,) + expected_discovery
     if settings.chat_alternative_model_enabled:
         if settings.environment != "staging":
             raise RuntimeError("alternative chat models are staging-only")
@@ -681,6 +841,23 @@ def validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
     _validate_chat_capacity_and_spend_policy(settings)
 
 
+def _validate_chat_capacity_policy(settings: Settings) -> None:
+    configured = SandboxCapacityPolicy(
+        max_concurrency=settings.chat_max_concurrency,
+        user_max_concurrency=settings.chat_user_max_concurrency,
+        total_live_cap=settings.chat_sandbox_total_live_cap,
+        blank_pool_min=settings.chat_blank_pool_min,
+        blank_pool_max=settings.chat_blank_pool_max,
+    )
+    expected = (
+        _EXTERNAL_PI_CAPACITY_POLICY
+        if settings.chat_external_pi_admission_enabled
+        else _SANDBOX_CAPACITY_POLICY
+    )
+    if configured != expected:
+        raise RuntimeError("chat capacity must be the reviewed runtime profile")
+
+
 def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
     """Validate sandbox spend, capacity, alerting, and provider reserve."""
 
@@ -711,15 +888,7 @@ def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
                 "sandbox spend policy must be $75/$100/$250 with no environment cap"
             )
         raise RuntimeError("team sandbox spend policy is not reviewed")
-    configured_capacity = SandboxCapacityPolicy(
-        max_concurrency=settings.chat_max_concurrency,
-        user_max_concurrency=settings.chat_user_max_concurrency,
-        total_live_cap=settings.chat_sandbox_total_live_cap,
-        blank_pool_min=settings.chat_blank_pool_min,
-        blank_pool_max=settings.chat_blank_pool_max,
-    )
-    if configured_capacity != _SANDBOX_CAPACITY_POLICY:
-        raise RuntimeError("chat capacity must be two active turns plus one warm blank")
+    _validate_chat_capacity_policy(settings)
     expected_modal_environment = f"pwc-chat-{settings.environment}"
     if settings.chat_sandbox_modal_environment != expected_modal_environment:
         raise RuntimeError(
@@ -1006,6 +1175,67 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         ) from error
 
 
+def _is_staging_durable_external_qualification_profile(settings: Settings) -> bool:
+    """Recognize only the exact pool-free staging qualification bridge."""
+
+    return all(
+        (
+            settings.environment == "staging",
+            settings.chat_openai_direct_enabled,
+            not settings.chat_external_pi_admission_enabled,
+            settings.chat_external_pi_supervisor_enabled,
+            settings.chat_external_pi_ready_registry_enabled,
+            settings.chat_external_pi_runtime_contract_version
+            == "durable-external-pi-v1",
+            settings.chat_external_pi_worker_contract_version == "external-pi-v1",
+            settings.chat_durable_turn_dispatch_enabled,
+            settings.chat_turn_event_journal_schema_enabled,
+            settings.chat_sandbox_executor_enabled,
+            settings.chat_sandbox_executor_contract_version == "sandbox-executor-v1",
+            settings.chat_remote_workspace_tools_enabled,
+            settings.chat_remote_bash_enabled,
+            settings.chat_remote_read_enabled,
+            settings.chat_lazy_workspace_enabled,
+            not settings.chat_blank_pool_enabled,
+            not settings.chat_pi_prewarm_enabled,
+            settings.chat_max_concurrency == 2,
+            settings.chat_sandbox_total_live_cap == 3,
+        )
+    )
+
+
+def _is_durable_external_admission_profile(settings: Settings) -> bool:
+    """Recognize the approved pool-free external-harness serving profile."""
+
+    return all(
+        (
+            settings.environment in {"staging", "production"},
+            settings.chat_external_pi_admission_enabled,
+            settings.chat_external_pi_supervisor_enabled,
+            settings.chat_external_pi_ready_registry_enabled,
+            settings.chat_external_pi_runtime_contract_version
+            == "durable-external-pi-v1",
+            settings.chat_external_pi_worker_contract_version == "external-pi-v1",
+            settings.chat_durable_turn_dispatch_enabled,
+            settings.chat_turn_event_journal_schema_enabled,
+            settings.chat_sandbox_executor_enabled,
+            settings.chat_sandbox_executor_contract_version == "sandbox-executor-v1",
+            settings.chat_remote_workspace_tools_enabled,
+            settings.chat_remote_bash_enabled,
+            settings.chat_remote_read_enabled,
+            settings.chat_lazy_workspace_enabled,
+            not settings.chat_blank_pool_enabled,
+            not settings.chat_pi_prewarm_enabled,
+            settings.chat_max_concurrency == 32,
+            settings.chat_user_max_concurrency == 1,
+            settings.chat_openai_global_max_concurrency == 32,
+            settings.chat_openai_user_max_concurrency == 1,
+            settings.chat_openai_global_rate_limit_calls == 512,
+            settings.chat_sandbox_total_live_cap == 16,
+        )
+    )
+
+
 def _validate_chat_resource_policy(settings: Settings) -> None:
     """Validate sandbox resources and warm-pool lifetime."""
 
@@ -1035,14 +1265,22 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
         ):
             raise RuntimeError("blank pool rotation window is invalid")
     if settings.chat_openai_direct_enabled:
+        qualification_profile = _is_staging_durable_external_qualification_profile(
+            settings
+        )
+        external_admission_profile = _is_durable_external_admission_profile(settings)
         if (
-            not settings.chat_pi_prewarm_enabled
-            or not settings.chat_blank_pool_enabled
-            or settings.chat_blank_pool_min != 1
-            or settings.chat_blank_pool_max != 1
-            or settings.chat_effective_pi_prewarm_model
-            != settings.chat_openai_luna_route
-            or settings.chat_pi_prewarm_reasoning_effort != "low"
+            not qualification_profile
+            and not external_admission_profile
+            and (
+                not settings.chat_pi_prewarm_enabled
+                or not settings.chat_blank_pool_enabled
+                or settings.chat_blank_pool_min != 1
+                or settings.chat_blank_pool_max != 1
+                or settings.chat_effective_pi_prewarm_model
+                != settings.chat_openai_luna_route
+                or settings.chat_pi_prewarm_reasoning_effort != "low"
+            )
         ):
             raise RuntimeError(
                 "direct OpenAI chat requires one direct-Luna low-reasoning warm blank"
@@ -1080,27 +1318,11 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
         "admission": settings.chat_external_pi_admission_enabled,
         "supervisor": settings.chat_external_pi_supervisor_enabled,
     }
-    migration_switches = {
-        **worker_switches,
-        "ready_registry": settings.chat_external_pi_ready_registry_enabled,
-        "event_journal_schema": settings.chat_turn_event_journal_schema_enabled,
-        "runtime_contract": bool(settings.chat_external_pi_runtime_contract_version),
-        "remote_tools": settings.chat_remote_workspace_tools_enabled,
-        "safe_cli": settings.chat_safe_cli_fast_path_enabled,
-        "lazy_workspace": settings.chat_lazy_workspace_enabled,
-        "durable_dispatch": settings.chat_durable_turn_dispatch_enabled,
-    }
     executor_switches = {
         "executor": settings.chat_sandbox_executor_enabled,
         "bash": settings.chat_remote_bash_enabled,
         "read": settings.chat_remote_read_enabled,
     }
-    if settings.environment == "production" and any(
-        (*migration_switches.values(), *executor_switches.values())
-    ):
-        raise RuntimeError(
-            "external Pi migration controls are staging-only until production approval"
-        )
     if any(worker_switches.values()):
         try:
             external_worker_endpoints(settings)
@@ -1276,6 +1498,7 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
     validate_runtime_storage(settings)
     validate_codex_jobs_configuration(settings)
     validate_environment_policy(settings)
+    validate_private_paper_runtime(settings)
     validate_external_pi_migration_policy(settings)
     validate_chat_configuration = validate_chat_runtime_descriptor(settings)
     if validate_chat_configuration:

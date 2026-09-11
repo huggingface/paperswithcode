@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import uuid
 from collections.abc import AsyncIterator
 
@@ -23,6 +24,8 @@ from backend.services.chat_session_service import TurnAdmission
 from backend.services.chat_stream_service import ChatStreamOrchestrator
 from backend.services.chat_turn_cancel_control import CancelControlResult
 from backend.services.chat_turn_event_repository import JournalFrame
+
+logger = logging.getLogger(__name__)
 
 
 async def replay_detached_frames(
@@ -101,17 +104,43 @@ class ChatDetachedRuntime:
     async def _persist_terminal(self, claim, state, failure_code) -> None:
         orchestrator = self._orchestrators.get(claim.turn_id)
         if orchestrator is None:
+            await self._release_external_reservation_after_failure(
+                claim.turn_id, stage="missing_terminal_owner"
+            )
             raise RuntimeError("Detached terminal owner is unavailable")
+        primary_failure: BaseException | None = None
         try:
             await orchestrator.persist_detached_terminal(claim, state, failure_code)
+        except BaseException as error:
+            primary_failure = error
+            raise
         finally:
             if self._orchestrators.get(claim.turn_id) is orchestrator:
                 self._orchestrators.pop(claim.turn_id, None)
-        if self.settings.chat_external_pi_admission_enabled:
-            await self._transaction(
-                lambda db: ChatExternalWorkerCapacityRepository.release_turn(
-                    db, turn_id=claim.turn_id
+            if primary_failure is None:
+                await self._release_external_reservation(claim.turn_id)
+            else:
+                await self._release_external_reservation_after_failure(
+                    claim.turn_id, stage="terminal_persistence"
                 )
+
+    async def _release_external_reservation(self, turn_id: uuid.UUID) -> None:
+        await self._transaction(
+            lambda db: ChatExternalWorkerCapacityRepository.release_turn(
+                db, turn_id=turn_id
+            )
+        )
+
+    async def _release_external_reservation_after_failure(
+        self, turn_id: uuid.UUID, *, stage: str
+    ) -> None:
+        try:
+            await self._release_external_reservation(turn_id)
+        except BaseException as cleanup_error:
+            logger.warning(
+                "detached reservation cleanup failed stage=%s error=%s",
+                stage,
+                type(cleanup_error).__name__,
             )
 
     async def cancel(self, request) -> CancelControlResult:
@@ -138,7 +167,16 @@ class ChatDetachedRuntime:
             )
         except BaseException:
             self._orchestrators.pop(admission.turn_id, None)
-            await orchestrator.abandon_detached_start()
+            try:
+                await orchestrator.abandon_detached_start()
+            except BaseException as cleanup_error:
+                logger.warning(
+                    "detached start abandonment failed error=%s",
+                    type(cleanup_error).__name__,
+                )
+            await self._release_external_reservation_after_failure(
+                admission.turn_id, stage="detached_start"
+            )
             raise
 
     async def subscribe(

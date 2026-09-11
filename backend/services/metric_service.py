@@ -9,7 +9,10 @@ from sqlalchemy.orm import Session
 from sqlalchemy import desc, asc, or_
 
 from backend.models.database import Metric as DBMetric
-from backend.models.api import Metric, Metrics
+from backend.models.evaluations import (
+    Metric,
+    Metrics,
+)
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,

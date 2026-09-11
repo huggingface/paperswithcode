@@ -8,7 +8,7 @@ import uuid
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import Callable
+from typing import Callable, Literal
 
 from sqlalchemy import delete, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -19,15 +19,19 @@ from backend.database.connection import db_manager
 from backend.models.database import (
     ChatQualificationEvidenceEvent,
     ChatQualificationScope,
+    ChatOpenAIProviderCall,
     ChatSandboxComputeInterval,
     ChatTurnLatency,
 )
+from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 
 logger = logging.getLogger(__name__)
 QUALIFICATION_PROFILES = {
     "32-functional-turns": 32,
     "100-immediate-admission": 100,
 }
+FUNCTIONAL_QUALIFICATION_TURN_CAPACITY = 32
+FUNCTIONAL_QUALIFICATION_EXECUTOR_LIVE_CAP = 16
 QUALIFICATION_EVENT_TYPES = frozenset(
     {
         "admitted_no_queue",
@@ -62,6 +66,21 @@ class QualificationScope:
 
 
 @dataclass(frozen=True, slots=True)
+class QualificationContext:
+    """Server-derived authority for one protected functional turn."""
+
+    scope_id: uuid.UUID
+    run_id: str
+    profile: Literal["32-functional-turns"]
+    workload: Literal["no_tool", "read", "bash"]
+    app_release_id: str
+    window_started_at: datetime
+    expires_at: datetime
+    turn_capacity: int = FUNCTIONAL_QUALIFICATION_TURN_CAPACITY
+    executor_live_cap: int = FUNCTIONAL_QUALIFICATION_EXECUTOR_LIVE_CAP
+
+
+@dataclass(frozen=True, slots=True)
 class DurableQualificationEvidence:
     expected_users: int
     admitted_turns: int
@@ -77,7 +96,20 @@ class DurableQualificationEvidence:
     billed_duration_ms: int
     window_started_at_ms: int
     window_ended_at_ms: int
+    p95_server_latency_ms_by_workload: dict[str, QualificationServerLatencyP95]
     source: str = "durable_qualification_records"
+
+
+@dataclass(frozen=True, slots=True)
+class QualificationServerLatencyP95:
+    provider_gateway_received_ms: int
+    provider_ttft_ms: int
+    first_semantic_event_ms: int
+
+
+def _nearest_rank(values: list[int], percentile: int) -> int:
+    ordered = sorted(values)
+    return ordered[max(0, (percentile * len(ordered) + 99) // 100 - 1)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -207,12 +239,44 @@ class ChatDurableQualificationEvidenceService:
         )
 
     def require_active_scope(
+        self,
+        scope_id: uuid.UUID,
+        *,
+        settings: Settings,
+        lock: bool | Literal["key_share"] = False,
+    ) -> ChatQualificationScope:
+        return self._require_scope(
+            scope_id,
+            settings=settings,
+            lock=lock,
+            allow_ended=False,
+        )
+
+    def require_collectable_scope(
         self, scope_id: uuid.UUID, *, settings: Settings, lock: bool = False
+    ) -> ChatQualificationScope:
+        """Lock one exact active or teardown-closed scope for bounded evidence."""
+        return self._require_scope(
+            scope_id,
+            settings=settings,
+            lock=lock,
+            allow_ended=True,
+        )
+
+    def _require_scope(
+        self,
+        scope_id: uuid.UUID,
+        *,
+        settings: Settings,
+        lock: bool | Literal["key_share"],
+        allow_ended: bool,
     ) -> ChatQualificationScope:
         statement = select(ChatQualificationScope).where(
             ChatQualificationScope.id == scope_id
         )
-        if lock:
+        if lock == "key_share":
+            statement = statement.with_for_update(read=True, key_share=True)
+        elif lock:
             statement = statement.with_for_update()
         scope = self.db.execute(statement).scalar_one_or_none()
         now = self.now()
@@ -221,11 +285,145 @@ class ChatDurableQualificationEvidenceService:
             or settings.environment != "staging"
             or scope.app_release_id != settings.release_id
             or scope.profile not in QUALIFICATION_PROFILES
-            or scope.window_ended_at is not None
+            or (scope.window_ended_at is not None and not allow_ended)
             or _as_utc(scope.expires_at) <= now
         ):
             raise QualificationEvidenceUnavailable("qualification scope is unavailable")
         return scope
+
+    def require_active_context(
+        self,
+        scope_id: uuid.UUID,
+        *,
+        workload: str,
+        settings: Settings,
+    ) -> QualificationContext:
+        scope = self.require_active_scope(scope_id, settings=settings, lock="key_share")
+        if (
+            not settings.chat_durable_turn_dispatch_enabled
+            or scope.profile != "32-functional-turns"
+            or workload not in {"no_tool", "read", "bash"}
+        ):
+            raise QualificationEvidenceUnavailable(
+                "qualification capacity scope is unavailable"
+            )
+        return QualificationContext(
+            scope_id=scope.id,
+            run_id=scope.run_id,
+            profile="32-functional-turns",
+            workload=workload,
+            app_release_id=scope.app_release_id,
+            window_started_at=_as_utc(scope.window_started_at),
+            expires_at=_as_utc(scope.expires_at),
+        )
+
+    def executor_live_cap(
+        self,
+        *,
+        turn_id: uuid.UUID,
+        chat_session_id: uuid.UUID,
+        settings: Settings,
+    ) -> int | None:
+        """Authorize elevated executor capacity from exact persisted evidence."""
+
+        if not self._active_functional_turn(
+            turn_id=turn_id,
+            chat_session_id=chat_session_id,
+            settings=settings,
+            workloads=("read", "bash"),
+        ):
+            return None
+        return FUNCTIONAL_QUALIFICATION_EXECUTOR_LIVE_CAP
+
+    def external_pi_authorized(
+        self,
+        *,
+        turn_id: uuid.UUID,
+        chat_session_id: uuid.UUID,
+        settings: Settings,
+    ) -> bool:
+        """Lock scope then reservation through external capability issuance."""
+
+        if not self._active_functional_turn(
+            turn_id=turn_id,
+            chat_session_id=chat_session_id,
+            settings=settings,
+            workloads=("no_tool", "read", "bash"),
+            require_pi=True,
+        ):
+            return False
+        from backend.services.chat_external_worker_capacity import (
+            ChatExternalWorkerCapacityRepository,
+            external_worker_endpoints,
+        )
+
+        ChatExternalWorkerCapacityRepository(
+            environment=settings.environment
+        ).require_turn(
+            self.db,
+            turn_id=turn_id,
+            endpoints=external_worker_endpoints(settings),
+            now=self.now(),
+            lock=True,
+        )
+        return True
+
+    def _active_functional_turn(
+        self,
+        *,
+        turn_id: uuid.UUID,
+        chat_session_id: uuid.UUID,
+        settings: Settings,
+        workloads: tuple[str, ...],
+        require_pi: bool = False,
+    ) -> bool:
+        if settings.environment != "staging":
+            return False
+        latency_filters = [
+            ChatTurnLatency.turn_id == turn_id,
+            ChatTurnLatency.chat_session_id == chat_session_id,
+            ChatTurnLatency.qualification_profile == "32-functional-turns",
+            ChatTurnLatency.qualification_workload.in_(workloads),
+            ChatTurnLatency.qualification_scenario == "reliability",
+            ChatTurnLatency.app_release_id == settings.release_id,
+        ]
+        if require_pi:
+            latency_filters.extend(
+                (
+                    ChatTurnLatency.agent_harness == "pi",
+                    ChatTurnLatency.execution_backend == "modal_cli",
+                )
+            )
+        scope_id = self.db.scalar(
+            select(ChatTurnLatency.qualification_scope_id).where(*latency_filters)
+        )
+        if scope_id is None:
+            return False
+        # Lock order is scope -> reservation -> capability for reconstructed Pi
+        # runners, and scope -> capacity -> sandbox lease for executor acquisition.
+        # The caller transaction retains this row lock through the final mutation.
+        try:
+            scope = self.require_active_scope(scope_id, settings=settings, lock=True)
+        except QualificationEvidenceUnavailable:
+            return False
+        if scope.profile != "32-functional-turns":
+            return False
+        latency = self.db.scalar(
+            select(ChatTurnLatency).where(
+                *latency_filters,
+                ChatTurnLatency.qualification_scope_id == scope.id,
+            )
+        )
+        if latency is None:
+            return False
+        now = self.now()
+        if (
+            latency.qualification_run_id != scope.run_id
+            or _as_utc(scope.expires_at) <= now
+            or _as_utc(latency.admitted_at) < _as_utc(scope.window_started_at)
+        ):
+            return False
+        return True
 
     def collect(
         self,
@@ -233,10 +431,11 @@ class ChatDurableQualificationEvidenceService:
         scope_id: uuid.UUID,
         settings: Settings,
     ) -> DurableQualificationEvidence:
-        scope = self.require_active_scope(scope_id, settings=settings)
-        ended = self.now()
-        scope.window_ended_at = ended
-        self.db.flush()
+        scope = self.require_collectable_scope(scope_id, settings=settings, lock=True)
+        ended = _as_utc(scope.window_ended_at) if scope.window_ended_at else self.now()
+        if scope.window_ended_at is None:
+            scope.window_ended_at = ended
+            self.db.flush()
         started = _as_utc(scope.window_started_at)
         expected_users = QUALIFICATION_PROFILES[scope.profile]
         latency_rows = self.db.execute(
@@ -245,6 +444,8 @@ class ChatDurableQualificationEvidenceService:
                 ChatTurnLatency.chat_session_id,
                 ChatTurnLatency.terminal_status,
                 ChatTurnLatency.qualification_workload,
+                ChatTurnLatency.provider_gateway_received_ms,
+                ChatTurnLatency.first_semantic_event_ms,
             ).where(
                 ChatTurnLatency.qualification_scope_id == scope.id,
                 ChatTurnLatency.qualification_run_id == scope.run_id,
@@ -277,6 +478,59 @@ class ChatDurableQualificationEvidenceService:
             raise QualificationEvidenceUnavailable(
                 "qualification workload evidence is incomplete"
             )
+        latency_p95: dict[str, QualificationServerLatencyP95] = {}
+        if scope.profile == "32-functional-turns":
+            first_provider_rows = self.db.execute(
+                select(
+                    ChatOpenAIProviderCall.turn_id,
+                    ChatOpenAIProviderCall.provider_ttft_ms,
+                ).where(
+                    ChatOpenAIProviderCall.turn_id.in_(turn_ids),
+                    ChatOpenAIProviderCall.call_sequence == 1,
+                    ChatOpenAIProviderCall.environment == settings.environment,
+                    ChatOpenAIProviderCall.reserved_at >= started,
+                    ChatOpenAIProviderCall.reserved_at <= ended,
+                )
+            ).all()
+            provider_ttft_by_turn = {
+                row.turn_id: row.provider_ttft_ms for row in first_provider_rows
+            }
+            if (
+                len(first_provider_rows) != expected_users
+                or set(provider_ttft_by_turn) != turn_ids
+            ):
+                raise QualificationEvidenceUnavailable(
+                    "qualification latency evidence is incomplete"
+                )
+            for workload, expected_count in expected_workloads.items():
+                workload_rows = [
+                    row
+                    for row in latency_rows
+                    if row.qualification_workload == workload
+                ]
+                gateway_values = [
+                    row.provider_gateway_received_ms for row in workload_rows
+                ]
+                provider_values = [
+                    provider_ttft_by_turn[row.turn_id] for row in workload_rows
+                ]
+                semantic_values = [row.first_semantic_event_ms for row in workload_rows]
+                if len(workload_rows) != expected_count or any(
+                    not isinstance(value, int) or isinstance(value, bool) or value < 0
+                    for value in (
+                        *gateway_values,
+                        *provider_values,
+                        *semantic_values,
+                    )
+                ):
+                    raise QualificationEvidenceUnavailable(
+                        "qualification latency evidence is incomplete"
+                    )
+                latency_p95[workload] = QualificationServerLatencyP95(
+                    provider_gateway_received_ms=_nearest_rank(gateway_values, 95),
+                    provider_ttft_ms=_nearest_rank(provider_values, 95),
+                    first_semantic_event_ms=_nearest_rank(semantic_values, 95),
+                )
         events = self.db.execute(
             select(
                 ChatQualificationEvidenceEvent.turn_id,
@@ -389,6 +643,7 @@ class ChatDurableQualificationEvidenceService:
             billed_duration_ms=billed_duration_ms,
             window_started_at_ms=round(started.timestamp() * 1_000),
             window_ended_at_ms=round(ended.timestamp() * 1_000),
+            p95_server_latency_ms_by_workload=latency_p95,
         )
 
     async def teardown_scope(
@@ -398,7 +653,13 @@ class ChatDurableQualificationEvidenceService:
         settings: Settings,
         sandbox_manager,
     ) -> QualificationTeardownProof:
-        scope = self.require_active_scope(scope_id, settings=settings, lock=True)
+        scope = self._require_scope(
+            scope_id,
+            settings=settings,
+            lock=True,
+            allow_ended=True,
+        )
+        close_window = scope.window_ended_at is None
         rows = self.db.execute(
             select(
                 ChatTurnLatency.turn_id,
@@ -423,7 +684,11 @@ class ChatDurableQualificationEvidenceService:
             len(rows) != expected_users
             or len({row.chat_session_id for row in rows}) != expected_users
             or Counter(row.qualification_workload for row in rows) != expected_workloads
-            or any(row.terminal_status != "complete" for row in rows)
+            or any(
+                row.terminal_status
+                not in {"complete", "stopped", "error", "interrupted"}
+                for row in rows
+            )
         ):
             raise QualificationEvidenceUnavailable(
                 "qualification teardown cohort is incomplete"
@@ -440,16 +705,26 @@ class ChatDurableQualificationEvidenceService:
                 ) from None
 
         self.db.expire_all()
+        tool_session_ids = tuple(row.chat_session_id for row in tool_rows)
+        open_session_ids = tuple(
+            self.db.scalars(
+                select(ChatSandboxComputeInterval.chat_session_id).where(
+                    ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids),
+                    ChatSandboxComputeInterval.terminal_at.is_(None),
+                )
+            )
+        )
+        if open_session_ids:
+            ChatSandboxSpendService(self.db, settings).reconcile_terminal_sessions(
+                open_session_ids, now=self.now()
+            )
+            self.db.expire_all()
         interval_rows = self.db.execute(
             select(
                 ChatSandboxComputeInterval.chat_session_id,
                 ChatSandboxComputeInterval.terminal_at,
                 ChatSandboxComputeInterval.app_release_id,
-            ).where(
-                ChatSandboxComputeInterval.chat_session_id.in_(
-                    tuple(row.chat_session_id for row in tool_rows)
-                )
-            )
+            ).where(ChatSandboxComputeInterval.chat_session_id.in_(tool_session_ids))
         ).all()
         intervals_by_session = Counter(row.chat_session_id for row in interval_rows)
         if (
@@ -494,6 +769,8 @@ class ChatDurableQualificationEvidenceService:
                         occurred_at=occurred_at,
                     )
                 )
+        if close_window:
+            scope.window_ended_at = self.now()
         self.db.flush()
         expected_tool_turns = len(tool_rows)
         return QualificationTeardownProof(

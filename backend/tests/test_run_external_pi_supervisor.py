@@ -25,13 +25,14 @@ def _settings(**changes):
     return Settings(_env_file=None, **values)
 
 
-def test_supervisor_process_is_explicitly_enabled_and_staging_only():
+def test_supervisor_process_is_explicitly_enabled_for_deployed_environments():
     with pytest.raises(RuntimeError, match="not enabled"):
         validate_supervisor_settings(
             _settings(chat_external_pi_supervisor_enabled=False)
         )
-    with pytest.raises(RuntimeError, match="staging-only"):
-        validate_supervisor_settings(_settings(environment="production"))
+    validate_supervisor_settings(_settings(environment="production"))
+    with pytest.raises(RuntimeError, match="deployed environment"):
+        validate_supervisor_settings(_settings(environment="development"))
 
 
 def test_build_runtime_pins_the_release_contract_and_lifecycle_limits():

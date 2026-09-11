@@ -5,6 +5,7 @@ This module provides SQLAlchemy integration for the FastAPI backend,
 building on top of the existing psycopg2-based database utilities.
 """
 
+import os
 from typing import Generator
 
 from sqlalchemy import create_engine, Engine
@@ -13,6 +14,17 @@ from sqlalchemy.pool import QueuePool
 
 from backend.config import get_settings
 from backend.models.database import Base
+
+
+def database_pool_configuration(settings) -> dict[str, int]:
+    if settings.environment == "staging":
+        worker_count = max(1, int(os.environ.get("WEB_CONCURRENCY", "1")))
+        return {
+            "pool_size": max(1, 32 // worker_count),
+            "max_overflow": 8 // worker_count,
+            "pool_timeout": 5,
+        }
+    return {"pool_size": 5, "max_overflow": 10, "pool_timeout": 5}
 
 
 class DatabaseManager:
@@ -36,19 +48,21 @@ class DatabaseManager:
             # the staging-owned schema.
             if self.settings.environment == "staging":
                 options += " -c default_transaction_read_only=off"
+            pool_configuration = database_pool_configuration(self.settings)
             self._engine = create_engine(
                 self.settings.database_url,
                 connect_args={"options": options},
                 poolclass=QueuePool,
-                # Kept small per-process: the API runs multiple uvicorn workers
-                # in production and shares Postgres with the CRON scripts, so a
-                # smaller per-worker pool avoids exhausting `max_connections`.
-                pool_size=5,
-                max_overflow=10,
+                # Production stays conservative because it shares Postgres with
+                # CRON jobs. Staging is sized for the isolated 32-turn durability
+                # qualification. Divide that aggregate budget across Uvicorn
+                # workers so scaling the web tier cannot multiply connections.
+                pool_size=pool_configuration["pool_size"],
+                max_overflow=pool_configuration["max_overflow"],
                 # Under burst traffic, fail DB checkout quickly so requests
                 # release worker threads instead of sitting behind Cloudflare's
                 # timeout window.
-                pool_timeout=5,
+                pool_timeout=pool_configuration["pool_timeout"],
                 pool_pre_ping=True,
                 pool_recycle=300,
                 echo=self.settings.is_development,  # Log SQL queries in development

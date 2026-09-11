@@ -173,6 +173,7 @@ def validate(production: str, staging: str) -> list[str]:
             "session-store",
             "web-fetch",
             "v1/messages",
+            "v1/responses",
             *(
                 ("artifact-prepare", "artifact-publish")
                 if environment == "staging"

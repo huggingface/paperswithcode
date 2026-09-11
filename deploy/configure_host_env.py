@@ -11,6 +11,7 @@ import hashlib
 import json
 import os
 import pwd
+import re
 import secrets
 import subprocess
 import tomllib
@@ -21,6 +22,7 @@ from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 CONFIG_ROOT = Path("/etc/paperswithcode")
+APP_ROOT = Path("/srv/paperswithcode")
 PRODUCTION_CHAT_SEALED_CONFIG = CONFIG_ROOT / "production-chat-prepared.env"
 STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
 
@@ -40,6 +42,18 @@ STAGING_EXCLUDED_KEYS = {
     "PWC_OPENROUTER_API_KEY",
 }
 CRON_ONLY_KEYS = {
+    "PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_CODEX_API_KEY",
+    "PWC_AUTONOMOUS_CODEX_BROKER_TOKEN",
+    "PWC_AUTONOMOUS_DIGEST_WEBHOOK_URL",
+    "PWC_AUTONOMOUS_CODEX_RESERVATION_VERIFY_KEY",
+    "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
+    "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
+    "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
+    "PWC_CHAT_SYNTHETIC_EXPECTED_USERNAME",
+    "PWC_CHAT_SYNTHETIC_SESSION_COOKIE",
+    "PWC_CHAT_LANGFUSE_TRACE_CONTENT_ACCESS_ENABLED",
     "PWC_GITHUB_TOKEN_HOT",
     "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
 }
@@ -173,6 +187,26 @@ def decoded_value(line: str) -> str:
 def existing_or_random(lines: dict[str, str], key: str) -> str:
     line = lines.get(key)
     return decoded_value(line) if line else secrets.token_urlsafe(48)
+
+
+def trending_cron_values(
+    legacy: dict[str, str],
+    current: dict[str, str],
+    *,
+    password: str,
+) -> dict[str, str]:
+    """Build the persistent minimal environment for isolated scoring jobs."""
+    return {
+        "PWC_DB_HOST": decoded_value(legacy["PWC_DB_HOST"]),
+        "PWC_DB_NAME": decoded_value(legacy["PWC_DB_NAME"]),
+        "PWC_DB_PORT": decoded_value(legacy["PWC_DB_PORT"]),
+        "PWC_TRENDING_DB_PASSWORD": password,
+        **{
+            key: decoded_value(line)
+            for key, line in current.items()
+            if key.startswith("PWC_TRENDING_PIN_")
+        },
+    }
 
 
 def shared_role_values(*sources: dict[str, str]) -> dict[str, str]:
@@ -789,6 +823,11 @@ def cron_passthrough_credentials(
             "PWC_SEMANTIC_SCHOLAR_API_KEY_2",
         }
     }
+    for key in CRON_ONLY_KEYS:
+        if key in legacy:
+            result[key] = legacy[key]
+        elif key in current_cron:
+            result[key] = current_cron[key]
     secondary_key = "PWC_SEMANTIC_SCHOLAR_API_KEY_2"
     if secondary_key not in result and secondary_key in current_cron:
         result[secondary_key] = current_cron[secondary_key]
@@ -808,6 +847,125 @@ def write_env(path: Path, lines: dict[str, str], group: str) -> None:
     os.chown(temporary, 0, grp.getgrnam(group).gr_gid)
     temporary.chmod(0o640)
     os.replace(temporary, path)
+
+
+def validate_active_staging_release(app_root: Path, release_id: str) -> None:
+    """Require one exact active immutable staging release and manifest identity."""
+
+    if re.fullmatch(r"[0-9a-f]{12}-staging", release_id) is None:
+        raise ValueError("active immutable staging release is invalid")
+    current = app_root / "environments" / "staging" / "current"
+    if not current.is_symlink():
+        raise ValueError("active immutable staging release is required")
+    try:
+        release = current.resolve(strict=True)
+        manifest_path = release / "release.json"
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError("active immutable staging release is required") from None
+    sha = manifest.get("git_sha") if isinstance(manifest, dict) else None
+    if (
+        release.parent != app_root / "releases"
+        or release.name != release_id
+        or not isinstance(manifest, dict)
+        or manifest.get("release_id") != release_id
+        or not isinstance(sha, str)
+        or re.fullmatch(r"[0-9a-f]{40}", sha) is None
+        or release_id != f"{sha[:12]}-staging"
+    ):
+        raise ValueError("active immutable staging release is required")
+
+
+def staging_modal_rate_evidence(
+    *, app_root: Path, release_id: str, microusd_per_second: int
+) -> dict[str, str]:
+    """Build explicit release-bound Modal rate evidence with no fallback."""
+
+    validate_active_staging_release(app_root, release_id)
+    if (
+        type(microusd_per_second) is not int
+        or not 1 <= microusd_per_second <= 1_000_000
+    ):
+        raise ValueError("staging Modal rate must be an explicit bounded integer")
+    return {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": str(microusd_per_second),
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": release_id,
+    }
+
+
+def write_staging_modal_rate_evidence(path: Path, values: dict[str, str]) -> None:
+    """Atomically install the fixed root-only Modal rate evidence contract."""
+
+    expected_keys = {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID",
+        "PWC_RELEASE_ID",
+    }
+    if set(values) != expected_keys:
+        raise ValueError("staging Modal rate evidence keys are invalid")
+    payload = json.dumps(values, sort_keys=True, separators=(",", ":")) + "\n"
+    if len(payload.encode("utf-8")) > 4_096:
+        raise ValueError("staging Modal rate evidence is too large")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.parent.chmod(0o711)
+    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
+    descriptor = None
+    try:
+        descriptor = os.open(
+            temporary,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+            0o600,
+        )
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            descriptor = None
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.chown(temporary, 0, 0)
+        temporary.chmod(0o600)
+        os.replace(temporary, path)
+    except BaseException:
+        if descriptor is not None:
+            os.close(descriptor)
+        temporary.unlink(missing_ok=True)
+        raise
+
+
+def remove_staging_modal_rate_evidence(path: Path, expected_release_id: str) -> None:
+    """Remove only the exact protected evidence for the active staging release."""
+
+    try:
+        metadata = path.lstat()
+        values = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise ValueError(
+            "protected staging Modal rate evidence is unavailable"
+        ) from None
+    try:
+        rate = int(values.get("PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND", ""))
+    except (AttributeError, TypeError, ValueError):
+        rate = 0
+    if (
+        not path.is_file()
+        or metadata.st_uid != 0
+        or metadata.st_gid != 0
+        or metadata.st_mode & 0o777 != 0o600
+        or metadata.st_size > 4_096
+        or not isinstance(values, dict)
+        or set(values)
+        != {
+            "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND",
+            "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID",
+            "PWC_RELEASE_ID",
+        }
+        or values.get("PWC_RELEASE_ID") != expected_release_id
+        or values.get("PWC_MODAL_EXECUTOR_RATE_SOURCE_ID") != "modal-staging-price-v1"
+        or not 1 <= rate <= 1_000_000
+        or values.get("PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND") != str(rate)
+    ):
+        raise ValueError("protected staging Modal rate evidence does not match")
+    path.unlink()
 
 
 def staging_chat_capacity_values() -> dict[str, str]:
@@ -847,6 +1005,165 @@ def staging_chat_durable_dispatch_values(*, enabled: bool) -> dict[str, str]:
     """Toggle only the staging durable-turn compatibility bridge."""
 
     return {"PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true" if enabled else "false"}
+
+
+_STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
+}
+_STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "false",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "false",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "false",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "false",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "false",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
+}
+
+
+def staging_durable_external_qualification_values(
+    current: dict[str, str], *, enabled: bool
+) -> dict[str, str]:
+    """Enter or leave the exact staging-only 32-turn qualification profile."""
+
+    required = {
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "false",
+        "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": "true",
+        "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": "true",
+        "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true",
+        "PWC_CHAT_MAX_CONCURRENCY": "2",
+        "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+        **(
+            _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED
+            if enabled
+            else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
+        ),
+    }
+
+    def observed_value(key: str, expected: str) -> str:
+        if expected in {"true", "false"}:
+            return _decoded_flag(current, key)
+        if key in current:
+            return decoded_value(current[key]).strip()
+        if key == "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY" and expected == "4":
+            return "4"
+        return ""
+
+    drifted = sorted(
+        key
+        for key, expected in required.items()
+        if observed_value(key, expected) != expected
+    )
+    if drifted:
+        raise ValueError(
+            "staging durable external qualification baseline has drifted: "
+            + ", ".join(drifted)
+        )
+    values = dict(
+        _STAGING_DURABLE_EXTERNAL_QUALIFICATION_ENABLED
+        if enabled
+        else _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED
+    )
+    if not enabled:
+        values["PWC_ADMIN_API_TOKEN"] = ""
+        return values
+    existing_line = current.get("PWC_ADMIN_API_TOKEN")
+    existing = decoded_value(existing_line).strip() if existing_line else ""
+    values["PWC_ADMIN_API_TOKEN"] = (
+        existing if 32 <= len(existing) <= 8192 else secrets.token_urlsafe(48)
+    )
+    return values
+
+
+_PRODUCTION_DURABLE_EXTERNAL_ENABLED = {
+    "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+    "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+    "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+    "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+    "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+    "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+    "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+    "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": "true",
+    "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "external-pi-v1",
+    "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "32",
+    "PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS": "10",
+    "PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS": "30",
+    "PWC_CHAT_EXTERNAL_PI_STARTUP_TIMEOUT_SECONDS": "60",
+    "PWC_CHAT_EXTERNAL_PI_DRAIN_SECONDS": "60",
+    "PWC_CHAT_EXTERNAL_PI_DRAIN_POLL_SECONDS": "1",
+    "PWC_CHAT_MAX_CONCURRENCY": "32",
+    "PWC_CHAT_USER_MAX_CONCURRENCY": "1",
+    "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
+    "PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY": "1",
+    # One worst-case 16-request turn for every admitted chat per 10-minute window.
+    "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": "512",
+    "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "16",
+    "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+    "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+}
+
+
+def production_durable_external_values(
+    current: dict[str, str], *, enabled: bool
+) -> dict[str, str]:
+    """Atomically enter or leave the approved production 32-turn profile."""
+
+    if not enabled:
+        disabled = {
+            key: "false"
+            for key, value in _PRODUCTION_DURABLE_EXTERNAL_ENABLED.items()
+            if value == "true"
+        }
+        disabled.update(
+            {
+                "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+                "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+                "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "",
+                "PWC_CHAT_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_USER_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
+                "PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY": "2",
+                "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": "80",
+                "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+                "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+                "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+            }
+        )
+        return disabled
+    for key in (
+        "PWC_CHAT_PUBLIC_ADMISSION_ENABLED",
+        "PWC_CHAT_SANDBOX_ADMISSION_ENABLED",
+    ):
+        if not _decoded_flag(current, key):
+            raise ValueError("production chat admission must already be enabled")
+    values = dict(_PRODUCTION_DURABLE_EXTERNAL_ENABLED)
+    existing_line = current.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN")
+    existing = decoded_value(existing_line).strip() if existing_line else ""
+    if existing and not 32 <= len(existing) <= 8192:
+        raise ValueError("production external Pi worker token is invalid")
+    values["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] = existing or secrets.token_urlsafe(48)
+    return values
 
 
 # Must match Settings.chat_deepseek_v4_flash_route when Hugging Face is selected.
@@ -1286,6 +1603,20 @@ def main() -> int:
     parser.add_argument(
         "--staging-chat-durable-dispatch-disable-only", action="store_true"
     )
+    parser.add_argument(
+        "--staging-durable-external-qualification-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-durable-external-qualification-disable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-modal-rate-evidence-install-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-modal-rate-evidence-remove-only", action="store_true"
+    )
+    parser.add_argument("--staging-modal-rate-release-id")
+    parser.add_argument("--staging-modal-rate-microusd-per-second", type=int)
     parser.add_argument("--staging-chat-pi-prewarm-enable-only", action="store_true")
     parser.add_argument("--staging-chat-pi-prewarm-disable-only", action="store_true")
     parser.add_argument("--staging-chat-routing-enable-only", action="store_true")
@@ -1338,6 +1669,12 @@ def main() -> int:
     parser.add_argument("--production-chat-seal-only", action="store_true")
     parser.add_argument("--production-chat-install-only", action="store_true")
     parser.add_argument("--production-chat-admission-enable-only", action="store_true")
+    parser.add_argument(
+        "--production-durable-external-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--production-durable-external-disable-only", action="store_true"
+    )
     parser.add_argument("--production-chat-pi-prewarm-enable-only", action="store_true")
     parser.add_argument(
         "--production-chat-pi-prewarm-disable-only", action="store_true"
@@ -1356,6 +1693,63 @@ def main() -> int:
     if os.geteuid() != 0:
         parser.error("run through sudo")
     legacy = read_lines(args.legacy_env)
+    modal_rate_modes = (
+        args.staging_modal_rate_evidence_install_only,
+        args.staging_modal_rate_evidence_remove_only,
+    )
+    if any(modal_rate_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "staging_modal_rate_evidence_install_only",
+                "staging_modal_rate_evidence_remove_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(modal_rate_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+            or not args.staging_modal_rate_release_id
+        ):
+            parser.error("staging Modal rate evidence mode must run alone")
+        install = args.staging_modal_rate_evidence_install_only
+        confirmation = (
+            "INSTALL_STAGING_MODAL_RATE_EVIDENCE"
+            if install
+            else "REMOVE_STAGING_MODAL_RATE_EVIDENCE"
+        )
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        if install != (args.staging_modal_rate_microusd_per_second is not None):
+            parser.error("install requires one explicit staging Modal rate")
+        try:
+            validate_active_staging_release(
+                APP_ROOT, args.staging_modal_rate_release_id
+            )
+            path = CONFIG_ROOT / "staging-modal-rate-evidence.json"
+            if install:
+                values = staging_modal_rate_evidence(
+                    app_root=APP_ROOT,
+                    release_id=args.staging_modal_rate_release_id,
+                    microusd_per_second=args.staging_modal_rate_microusd_per_second,
+                )
+                write_staging_modal_rate_evidence(path, values)
+            else:
+                remove_staging_modal_rate_evidence(
+                    path, args.staging_modal_rate_release_id
+                )
+        except ValueError as error:
+            parser.error(str(error))
+        print(
+            f"{'installed' if install else 'removed'} protected staging Modal rate "
+            "evidence; no service was restarted"
+        )
+        return 0
     scope_title_modes = (
         args.staging_scope_title_hf_only,
         args.production_scope_title_hf_only,
@@ -1445,6 +1839,105 @@ def main() -> int:
             "pwc-staging",
         )
         print("enabled staging research-scope guardrail; no service was restarted")
+        return 0
+    production_external_modes = (
+        args.production_durable_external_enable_only,
+        args.production_durable_external_disable_only,
+    )
+    if any(production_external_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "production_durable_external_enable_only",
+                "production_durable_external_disable_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(production_external_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("production durable external mode must run alone")
+        enabled = args.production_durable_external_enable_only
+        confirmation = (
+            "ENABLE_PRODUCTION_DURABLE_EXTERNAL"
+            if enabled
+            else "DISABLE_PRODUCTION_DURABLE_EXTERNAL"
+        )
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        current = read_lines(CONFIG_ROOT / "production.env")
+        try:
+            values = production_durable_external_values(current, enabled=enabled)
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "production.env",
+            assign(current, values),
+            "pwc-production",
+        )
+        print(
+            f"{'enabled' if enabled else 'disabled'} production durable external "
+            "32-turn profile; no service was restarted"
+        )
+        return 0
+    qualification_modes = (
+        args.staging_durable_external_qualification_enable_only,
+        args.staging_durable_external_qualification_disable_only,
+    )
+    if any(qualification_modes):
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key
+            not in {
+                "staging_durable_external_qualification_enable_only",
+                "staging_durable_external_qualification_disable_only",
+            }
+            and isinstance(value, bool)
+            and value
+        ]
+        if (
+            sum(qualification_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error(
+                "staging durable external qualification enable/disable must run alone"
+            )
+        enabled = args.staging_durable_external_qualification_enable_only
+        confirmation = (
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+            if enabled
+            else "DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+        )
+        if args.confirm != confirmation:
+            parser.error(
+                "staging durable external qualification --confirm must be "
+                f"{confirmation}"
+            )
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            values = staging_durable_external_qualification_values(
+                current, enabled=enabled
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "staging.env",
+            assign(current, values),
+            "pwc-staging",
+        )
+        print(
+            f"{'enabled' if enabled else 'disabled'} staging durable external "
+            "qualification profile; no service was restarted"
+        )
         return 0
     durable_dispatch_modes = (
         args.staging_chat_durable_dispatch_enable_only,
@@ -2332,10 +2825,14 @@ def main() -> int:
     current_production = read_lines(CONFIG_ROOT / "production.env")
     current_staging = read_lines(CONFIG_ROOT / "staging.env")
     current_cron = read_lines(CONFIG_ROOT / "production-cron.env")
+    current_trending_cron = read_lines(CONFIG_ROOT / "trending-cron.env")
     staging_db_password = existing_or_random(current_staging, "PWC_DB_PASSWORD")
     staging_jwt = existing_or_random(current_staging, "PWC_JWT_SECRET")
     backup_db_password = existing_or_random(
         current_cron, "PWC_POSTGRES_BACKUP_DB_PASSWORD"
+    )
+    trending_db_password = existing_or_random(
+        current_trending_cron, "PWC_TRENDING_DB_PASSWORD"
     )
     production_jwt = decoded_value(legacy["PWC_JWT_SECRET"])
     session_private_key, session_public_key = shared_session_keys(
@@ -2467,7 +2964,7 @@ def main() -> int:
             ),
             "UVICORN_HOST": "127.0.0.1",
             "UVICORN_PORT": "8001",
-            "WEB_CONCURRENCY": "1",
+            "WEB_CONCURRENCY": "5",
         },
     )
     staging = without_cron_only_credentials(staging)
@@ -2494,9 +2991,27 @@ def main() -> int:
         },
     )
 
+    trending_cron = trending_cron_values(
+        legacy,
+        {
+            **{
+                key: line
+                for key, line in current_cron.items()
+                if key.startswith("PWC_TRENDING_PIN_")
+            },
+            **current_trending_cron,
+        },
+        password=trending_db_password,
+    )
+
     write_env(CONFIG_ROOT / "production.env", production, "pwc-production")
     write_env(CONFIG_ROOT / "staging.env", staging, "pwc-staging")
     write_env(CONFIG_ROOT / "production-cron.env", cron, "pwc-cron")
+    write_env(
+        CONFIG_ROOT / "trending-cron.env",
+        trending_cron,
+        "pwc-cron-trending",
+    )
     production_group = grp.getgrnam("pwc-production").gr_name
     cron_user = pwd.getpwnam("pwc-cron").pw_name
     subprocess.run(

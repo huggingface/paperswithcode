@@ -42,6 +42,9 @@ from backend.loadtests.external_pi_fleet_core import (
     ModalRateEvidence,
     DurableQualificationEvidence,
 )
+from backend.services.durable_external_qualification_contract import (
+    DURABLE_QUALIFICATION_RUN_TIMEOUT_SECONDS,
+)
 from backend.loadtests.external_pi_shadow_core import BaselineObservation
 
 
@@ -121,7 +124,10 @@ def build_durable_user_specs(profile_name: str) -> tuple[DurableUserSpec, ...]:
 def build_durable_observation(**evidence) -> DurableTurnObservation:
     """Normalize stream evidence without reflecting rejected values."""
     allowed = {
+        "workload",
         "outcome",
+        "admission_ms",
+        "reconnect_ready_ms",
         "ttft_ms",
         "completion_ms",
         "reconnects",
@@ -135,8 +141,15 @@ def build_durable_observation(**evidence) -> DurableTurnObservation:
         "failure_code",
     }
     legacy_evidence = {"operation_start_ids", "queued_states", "stale_mutations"}
+    milestone_evidence = {"admission_ms", "reconnect_ready_ms"}
     fields = set(evidence)
-    if fields != allowed and fields != allowed - legacy_evidence:
+    accepted_fields = {
+        frozenset(allowed),
+        frozenset(allowed - legacy_evidence),
+        frozenset(allowed - milestone_evidence),
+        frozenset(allowed - legacy_evidence - milestone_evidence),
+    }
+    if frozenset(fields) not in accepted_fields:
         raise FleetRunRefused("durable observation fields are invalid")
     operation_ids = evidence.pop("operation_start_ids", ())
     if (
@@ -326,7 +339,7 @@ def run_local_durable_profile(
     resources: DurableRunResources,
     lifecycle_source: ModalLifecycleEvidenceSource,
     modal_rate: ModalRateEvidence,
-    timeout_seconds: float = 60.0,
+    timeout_seconds: float = DURABLE_QUALIFICATION_RUN_TIMEOUT_SECONDS,
     barrier_timeout_seconds: float = 5.0,
     monotonic: Callable[[], float] = time.monotonic,
 ):
@@ -440,21 +453,32 @@ def run_live_durable_profile(
     transport_config,
     resources: DurableRunResources,
     qualification_scope_id: uuid.UUID,
-    timeout_seconds: float = 60.0,
+    timeout_seconds: float = DURABLE_QUALIFICATION_RUN_TIMEOUT_SECONDS,
     barrier_timeout_seconds: float = 5.0,
 ):
     """Guarded constructor: live evidence can only use the real chat transport."""
     from backend.loadtests.durable_chat_transport import create_live_durable_transport
 
     started_at = datetime.now(UTC)
-    observations = _run_durable_observations(
-        profile_name=profile_name,
-        transport=create_live_durable_transport(
-            transport_config, qualification_scope_id
-        ),
-        timeout_seconds=timeout_seconds,
-        barrier_timeout_seconds=barrier_timeout_seconds,
-    )
+    start_sampling = getattr(resources, "start", None)
+    stop_sampling = getattr(resources, "stop", None)
+    sampling = callable(start_sampling) and callable(stop_sampling)
+    if sampling:
+        start_sampling()
+    try:
+        observations = _run_durable_observations(
+            profile_name=profile_name,
+            transport=create_live_durable_transport(
+                transport_config, qualification_scope_id
+            ),
+            timeout_seconds=timeout_seconds,
+            barrier_timeout_seconds=barrier_timeout_seconds,
+        )
+    finally:
+        if sampling:
+            resources = stop_sampling()
+    if not isinstance(resources, DurableRunResources):
+        raise FleetRunRefused("durable resource evidence is invalid")
     return DurableProfileMeasurement(
         profile_name=profile_name,
         observations=observations,

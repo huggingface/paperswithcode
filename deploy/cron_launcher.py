@@ -6,15 +6,86 @@ from __future__ import annotations
 import fcntl
 import json
 import os
+import pwd
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
+try:
+    from deploy.runtime import runtime_id, runtime_manifest
+except ModuleNotFoundError:
+    from runtime import runtime_id, runtime_manifest  # type: ignore[no-redef]
+
 CURRENT = Path("/srv/paperswithcode/environments/production/current")
-VENV = Path("/srv/paperswithcode/.venv")
+RUNTIMES = Path("/srv/paperswithcode/runtimes")
 LOG_DIR = Path("/var/lib/paperswithcode/production/cron-logs")
+RESTRICTED_TRENDING_LOG_DIR = Path(
+    "/var/lib/paperswithcode/production/trending-cron-logs"
+)
+RESTRICTED_TRENDING_LOCK_DIR = Path(
+    "/var/lib/paperswithcode/production/trending-cron-locks"
+)
+RESTRICTED_TRENDING_JOBS = frozenset(
+    {"calculate_trending_scores", "calculate_paper_trending_scores"}
+)
+RESTRICTED_TRENDING_PASSTHROUGH_KEYS = frozenset(
+    {
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "PWC_DB_HOST",
+        "PWC_DB_NAME",
+        "PWC_DB_PORT",
+        "PWC_TRENDING_PIN_ARXIV_IDS",
+        "PWC_TRENDING_PIN_PAPER_IDS",
+        "TZ",
+    }
+)
+RESTRICTED_TRENDING_ENV_KEYS = RESTRICTED_TRENDING_PASSTHROUGH_KEYS | {
+    "PWC_CRON_LOCK_DIR",
+    "PWC_CRON_LOG_DIR",
+    "PWC_DB_PASSWORD",
+    "PWC_DB_USER",
+    "PWC_ENVIRONMENT",
+    "PWC_RELEASE_ID",
+    "PYTHONPATH",
+}
+
+
+def restricted_trending_environment(
+    source: dict[str, str], *, release_id: str
+) -> dict[str, str]:
+    """Build the complete, credential-minimal environment for patched code."""
+    password = source.get("PWC_TRENDING_DB_PASSWORD", "")
+    if not password:
+        raise RuntimeError("PWC_TRENDING_DB_PASSWORD is required")
+    required = ("PWC_DB_HOST", "PWC_DB_NAME", "PWC_DB_PORT")
+    missing = [key for key in required if not source.get(key)]
+    if missing:
+        raise RuntimeError(
+            "restricted trending database configuration missing: " + ", ".join(missing)
+        )
+    env = {
+        key: value
+        for key in RESTRICTED_TRENDING_PASSTHROUGH_KEYS
+        if (value := source.get(key))
+    }
+    env.update(
+        {
+            "PWC_CRON_LOCK_DIR": source.get(
+                "PWC_CRON_LOCK_DIR", str(RESTRICTED_TRENDING_LOCK_DIR)
+            ),
+            "PWC_CRON_LOG_DIR": str(RESTRICTED_TRENDING_LOG_DIR),
+            "PWC_DB_PASSWORD": password,
+            "PWC_DB_USER": "pwc_cron_trending",
+            "PWC_ENVIRONMENT": "production",
+            "PWC_RELEASE_ID": release_id,
+            "PYTHONPATH": str(CURRENT / ".github" / "workflows"),
+        }
+    )
+    return env
 
 
 @dataclass(frozen=True)
@@ -43,6 +114,26 @@ def job(
 
 
 COMMANDS: dict[str, Job] = {
+    "autonomous_cron_health": job(
+        ".github/workflows/scripts/autonomous_cron_health.py",
+        "--mode",
+        "strict",
+        timeout="6h",
+        idempotency=(
+            "persist one deterministic snapshot and perform at most one fenced "
+            "allowlisted recovery for one declared job"
+        ),
+    ),
+    "autonomous_cron_audit": job(
+        ".github/workflows/scripts/autonomous_cron_health.py",
+        "--mode",
+        "daily",
+        timeout="6h",
+        idempotency=(
+            "persist one daily four-plane audit and perform at most one fenced "
+            "allowlisted recovery for one declared job"
+        ),
+    ),
     "alert_submission_review_failure": job(
         "-m",
         "backend.scripts.alert_autonomous_submission_failure",
@@ -71,6 +162,15 @@ COMMANDS: dict[str, Job] = {
             "operational event through at most one alert route"
         ),
         mutates_shared_data=False,
+    ),
+    "run_chat_synthetic_probe": job(
+        "-m",
+        "backend.scripts.run_chat_synthetic_probe",
+        timeout="6m",
+        idempotency=(
+            "run at most one due or release/alert-triggered content-free synthetic "
+            "production chat and deliver each transition once"
+        ),
     ),
     "update_hot_github_trending": job(
         "-m",
@@ -360,6 +460,13 @@ def apply_release_features(env: dict[str, str], manifest: dict) -> None:
     env["PWC_CODEX_JOBS_ENABLED"] = "true" if add_evals or enrich_paper else "false"
 
 
+def cron_python(current: Path = CURRENT, runtimes: Path = RUNTIMES) -> Path:
+    """Resolve and validate the immutable runtime recorded by the active release."""
+    runtime = runtimes / runtime_id(current)
+    runtime_manifest(runtime)
+    return runtime / "bin" / "python"
+
+
 def main() -> int:
     manifest = json.loads((CURRENT / "release.json").read_text())
     if len(sys.argv) == 2 and sys.argv[1] == "status":
@@ -387,10 +494,19 @@ def main() -> int:
     job = sys.argv[1]
     spec = COMMANDS[job]
     extra = sys.argv[2:]
+    if job in {"autonomous_cron_health", "autonomous_cron_audit"} and extra:
+        print(
+            "autonomous CRON operator does not accept runtime arguments",
+            file=sys.stderr,
+        )
+        return 2
     if any("\n" in arg or "\x00" in arg for arg in extra):
         print("invalid argument", file=sys.stderr)
         return 2
-    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    log_dir = (
+        RESTRICTED_TRENDING_LOG_DIR if job in RESTRICTED_TRENDING_JOBS else LOG_DIR
+    )
+    log_dir.mkdir(parents=True, exist_ok=True)
     record = {
         "at": datetime.now(timezone.utc).isoformat(),
         "job": job,
@@ -402,26 +518,36 @@ def main() -> int:
         "idempotency": spec.idempotency,
         "health_job": spec.health_job,
     }
-    with (LOG_DIR / "launcher.jsonl").open("a", encoding="utf-8") as handle:
+    with (log_dir / "launcher.jsonl").open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(record, sort_keys=True) + "\n")
     command = spec.command
-    env = os.environ.copy()
-    env["PWC_ENVIRONMENT"] = "production"
-    env["PWC_RELEASE_ID"] = manifest["release_id"]
-    env["PWC_CRON_LOG_DIR"] = str(LOG_DIR)
-    env["PYTHONPATH"] = str(CURRENT / ".github" / "workflows")
-    apply_release_features(env, manifest)
+    if job in RESTRICTED_TRENDING_JOBS:
+        if pwd.getpwuid(os.getuid()).pw_name != "pwc-cron-trending":
+            print("restricted trending job requires pwc-cron-trending", file=sys.stderr)
+            return 2
+        try:
+            env = restricted_trending_environment(
+                os.environ.copy(), release_id=manifest["release_id"]
+            )
+        except RuntimeError as exc:
+            print(str(exc), file=sys.stderr)
+            return 2
+    else:
+        env = os.environ.copy()
+        env["PWC_ENVIRONMENT"] = "production"
+        env["PWC_RELEASE_ID"] = manifest["release_id"]
+        env["PWC_CRON_LOG_DIR"] = str(log_dir)
+        env["PYTHONPATH"] = str(CURRENT / ".github" / "workflows")
+        apply_release_features(env, manifest)
     if job in {
         "preload_thumbnails",
         "mirror_thumbnails_to_disk",
         "process_curation_thumbnails",
     }:
         env["PWC_THUMBNAIL_MUTATIONS_ENABLED"] = "true"
-    argv = [str(VENV / "bin" / "python"), *command, *extra]
+    argv = [str(cron_python()), *command, *extra]
     lock_dir = Path(
-        os.environ.get(
-            "PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks"
-        )
+        env.get("PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks")
     )
     lock_dir.mkdir(parents=True, exist_ok=True)
     with (lock_dir / f"{job}.lock").open("w") as lock:

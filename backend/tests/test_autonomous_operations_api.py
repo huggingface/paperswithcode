@@ -150,8 +150,15 @@ def _seed_snapshot(db: Session) -> None:
     db.commit()
 
 
-def test_admin_read_model_is_content_free_and_keeps_monitoring_visible(api):
+def test_admin_read_model_is_content_free_and_keeps_monitoring_visible(
+    api, monkeypatch
+):
     client, db = api
+    monkeypatch.setattr(
+        AutonomousOperationsRepository,
+        "_database_now",
+        staticmethod(lambda _db: NOW),
+    )
     _seed_snapshot(db)
 
     response = client.get("/api/v1/admin/autonomous-operations")
@@ -211,6 +218,133 @@ def test_admin_mutations_require_typed_confirmation_and_audit_actor(api):
     event = db.query(AutonomousControlEvent).one()
     assert event.actor == "admin:admin-subject"
     assert event.event_kind == "manual_mode"
+
+
+def test_acceptance_evidence_endpoint_is_idempotent_and_gates_enablement(api):
+    client, db = api
+    blocked = client.patch(
+        "/api/v1/admin/autonomous-operations/operators/cron_health",
+        json={
+            "enabled": True,
+            "expected_revision": 1,
+            "confirmation": "SET_OPERATOR_STATE",
+        },
+    )
+    assert blocked.status_code == 409
+    assert blocked.json()["detail"]["code"] == "acceptance_incomplete"
+
+    gates = (
+        "shadow_diagnosis",
+        "missed_schedule",
+        "stale_log",
+        "stale_durable_data",
+        "safe_retry",
+        "rejected_schema_change",
+        "source_repair",
+        "failed_production_verification",
+        "rollback",
+    )
+    first_id = None
+    for index, gate in enumerate(gates, start=1):
+        response = client.post(
+            "/api/v1/admin/autonomous-operations/operators/cron_health/acceptance-evidence",
+            json={
+                "gate_code": gate,
+                "evidence_digest": f"{index:064x}",
+                "confirmation": "RECORD_ACCEPTANCE_EVIDENCE",
+            },
+        )
+        assert response.status_code == 200
+        if first_id is None:
+            first_id = response.json()["evidence_id"]
+
+    duplicate = client.post(
+        "/api/v1/admin/autonomous-operations/operators/cron_health/acceptance-evidence",
+        json={
+            "gate_code": gates[0],
+            "evidence_digest": f"{1:064x}",
+            "confirmation": "RECORD_ACCEPTANCE_EVIDENCE",
+        },
+    )
+    assert duplicate.json()["evidence_id"] == first_id
+    assert db.query(AutonomousControlEvent).count() == len(gates)
+
+    enabled = client.patch(
+        "/api/v1/admin/autonomous-operations/operators/cron_health",
+        json={
+            "enabled": True,
+            "expected_revision": 1,
+            "confirmation": "SET_OPERATOR_STATE",
+        },
+    )
+    assert enabled.status_code == 200
+    cron = next(
+        row for row in enabled.json()["operators"] if row["operator"] == "cron_health"
+    )
+    assert cron["enabled"] is True
+
+
+def test_acceptance_evidence_endpoint_rejects_unknown_gate(api):
+    client, _db = api
+
+    response = client.post(
+        "/api/v1/admin/autonomous-operations/operators/cron_health/acceptance-evidence",
+        json={
+            "gate_code": "invented_gate",
+            "evidence_digest": "a" * 64,
+            "confirmation": "RECORD_ACCEPTANCE_EVIDENCE",
+        },
+    )
+
+    assert response.status_code == 422
+    assert response.json()["detail"]["code"] == "invalid_acceptance_gate"
+
+
+def test_acceptance_readiness_is_available_without_recording_new_evidence(api):
+    client, _db = api
+
+    response = client.get(
+        "/api/v1/admin/autonomous-operations/operators/submissions/acceptance-readiness"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "operator": "submissions",
+        "ready": False,
+        "passed_gates": [],
+        "missing_gates": [
+            "callback_idempotency",
+            "external_no_enrichment",
+            "human_only_deferral",
+            "max_batch",
+            "oldest_first",
+        ],
+        "shadow_days": 0,
+        "required_shadow_days": 7,
+    }
+
+
+def test_curation_acceptance_readiness_uses_public_operator_contract(api):
+    client, _db = api
+
+    response = client.get(
+        "/api/v1/admin/autonomous-operations/operators/curation/acceptance-readiness"
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "operator": "curation",
+        "ready": False,
+        "passed_gates": [],
+        "missing_gates": [
+            "callback_idempotency",
+            "capability_isolation",
+            "dispatcher_preflight",
+            "paused_callback_apply",
+        ],
+        "shadow_days": 0,
+        "required_shadow_days": 0,
+    }
 
 
 def test_stale_operator_mutation_returns_conflict_without_overwrite(api):

@@ -2,9 +2,17 @@
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import httpx
 
 from backend.config import Settings, get_settings
+from backend.database.connection import db_manager
+from backend.services.autonomous_alert_service import (
+    AutonomousAlert,
+    AutonomousAlertService,
+)
+from backend.services.autonomous_operations_repository import Operator
 
 
 def build_alert_payload(settings: Settings) -> dict[str, str]:
@@ -37,8 +45,30 @@ def send_failure_alert(settings: Settings) -> str:
 
 
 def main() -> int:
-    delivered = send_failure_alert(get_settings())
-    print(f"autonomous submission failure alert delivered via {delivered}")
+    settings = get_settings()
+    with db_manager.session_local() as db:
+        receipt = AutonomousAlertService(
+            primary_url=settings.autonomous_alert_slack_webhook_url,
+            fallback_url=settings.autonomous_alert_fallback_webhook_url,
+        ).send_autonomous_alert(
+            db,
+            AutonomousAlert(
+                event_kind="operator_failure",
+                operator=Operator.SUBMISSIONS,
+                resource_key="submission_review",
+                environment=settings.environment,
+                release_id=settings.release_id or "unknown",
+                occurred_at=datetime.now(UTC),
+                runbook_url=(
+                    settings.autonomous_alert_runbook_url
+                    or "https://paperswithcode.co/docs/autonomous-operations"
+                ),
+            ),
+        )
+    print(
+        "autonomous submission failure alert delivered via "
+        f"{receipt.delivered_route} receipt={receipt.id}"
+    )
     return 0
 
 

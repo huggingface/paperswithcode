@@ -20,7 +20,7 @@ from backend.models.database import (
     PaperRepository as DBPaperRepository,
     Paper as DBPaper,
 )
-from backend.models.api import (
+from backend.models.papers import (
     Repository,
     Repositories,
     PaperRepository,

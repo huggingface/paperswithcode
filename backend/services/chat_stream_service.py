@@ -109,6 +109,23 @@ from backend.utils.urls import parse_arxiv_url
 
 logger = logging.getLogger(__name__)
 HEARTBEAT_SECONDS = 15.0
+_EXCEPTION_ORIGIN = re.compile(
+    r"^[A-Za-z0-9_.-]{1,128}:[A-Za-z0-9_<>]{1,128}:[1-9][0-9]{0,5}$"
+)
+
+
+def sanitized_exception_origin(error: BaseException) -> str:
+    """Return content-free source metadata for an unexpected provider defect."""
+    traceback = error.__traceback__
+    if traceback is None:
+        return "unknown"
+    while traceback.tb_next is not None:
+        traceback = traceback.tb_next
+    code = traceback.tb_frame.f_code
+    value = (
+        f"{posixpath.basename(code.co_filename)}:{code.co_name}:{traceback.tb_lineno}"
+    )
+    return value if _EXCEPTION_ORIGIN.fullmatch(value) else "unknown"
 
 
 def encode_journal_frame(frame: JournalFrame) -> bytes:
@@ -263,6 +280,19 @@ class _TerminalPersistence:
 @dataclass(frozen=True)
 class _HandledTurnEvent:
     frame: ChatStreamFrame | None = None
+
+
+@dataclass(frozen=True)
+class _LatencyPhase:
+    phase: str
+    elapsed_ms: int
+    acquisition_outcome: str | None = None
+    first_semantic_event_class: str | None = None
+    pool_miss_reason: str | None = None
+    session_reuse_cohort: str | None = None
+    failure_stage: str | None = None
+    failure_class: str | None = None
+    attempt_kind: str | None = None
 
 
 class _ToolTimingFallback:
@@ -789,9 +819,12 @@ def _trusted_paper_artifact(
     admission: TurnAdmission,
     settings: Settings,
 ) -> dict[str, Any] | None:
-    if event.get("operation") not in {"create", "begin-edit"} or not isinstance(
-        event.get("activated"), bool
-    ):
+    if event.get("operation") not in {
+        "create",
+        "begin-edit",
+        "draft",
+        "repair",
+    } or not isinstance(event.get("activated"), bool):
         return None
     try:
         artifact_id = uuid.UUID(str((event.get("descriptor") or {})["artifact_id"]))
@@ -866,6 +899,67 @@ def _public_poster_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any
             ],
         }
     return event
+
+
+_PRIVATE_PAPER_TOOL_NAMES = frozenset(
+    {
+        "Bash",
+        "Read",
+        "Grep",
+        "Glob",
+        "Ls",
+        "Write",
+        "Edit",
+        "WebFetch",
+        "search_web",
+    }
+)
+
+
+def _private_paper_tool_event(kind: str, event: dict[str, Any]) -> dict[str, Any]:
+    """Project paper-authoring tool activity without retaining source text."""
+
+    tool_id = str(event.get("id") or "")
+    tool_name = str(event.get("name") or "private-paper-tool")
+    if tool_name not in _PRIVATE_PAPER_TOOL_NAMES:
+        tool_name = "private-paper-tool"
+    base = {"type": kind, "id": tool_id, "name": tool_name, "redacted": True}
+    if kind == "tool_call":
+        return {**base, "args": {}}
+    if kind == "tool_call_start":
+        raw_content_index = event.get("content_index")
+        content_index = raw_content_index if isinstance(raw_content_index, int) else 0
+        return {**base, "content_index": max(0, content_index)}
+    if kind == "tool_call_arguments_delta":
+        return {
+            **base,
+            "delta": "{}",
+            "partial_args": {},
+            "snapshot": True,
+        }
+    if kind == "tool_call_arguments_done":
+        return {**base, "args": {}}
+    if kind == "tool_result":
+        status = str(event.get("status") or "success")
+        if status not in {"success", "error"}:
+            status = "error"
+        raw_took_ms = event.get("took_ms")
+        took_ms = raw_took_ms if isinstance(raw_took_ms, int) else 0
+        return {
+            **base,
+            "status": status,
+            "took_ms": max(0, took_ms),
+            "content": [
+                {
+                    "type": "text",
+                    "text": "Private paper tool output omitted.",
+                    "truncated": True,
+                }
+            ],
+            "metadata": {"exit_code": None, "output_truncated": True},
+            "results": [],
+        }
+    return base
 
 
 _SECRET_ASSIGNMENT = re.compile(
@@ -1423,6 +1517,8 @@ class ChatStreamOrchestrator:
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
+        self.trace_id_persistence_task: asyncio.Task[None] | None = None
+        self.sdk_session_persistence_task: asyncio.Task[None] | None = None
         self.lease_heartbeat_task: asyncio.Task | None = None
         self.lease_heartbeat_error: Exception | None = None
         self.lifecycle = ChatTurnLifecycle()
@@ -1431,8 +1527,10 @@ class ChatStreamOrchestrator:
         self.mirror_recovery: tuple[str, uuid.UUID] | None = None
         self.edit_activated = False
         self.first_application_delta_recorded = False
+        self.pending_latency_phases: list[_LatencyPhase] = []
         self.interruption_reason: str | None = None
         self.trace: ChatTurnTrace | NullChatTurnTrace = NullChatTurnTrace()
+        self.private_paper_tool_ids: set[str] = set()
         self.tool_timing = _ToolTimingFallback(
             enabled=getattr(admission, "agent_harness", "claude") == "pi"
         )
@@ -1545,6 +1643,17 @@ class ChatStreamOrchestrator:
             interruption_reason=reason.value,
         )
 
+    def _finish_stream_exit_trace(self, reason: InterruptionReason) -> None:
+        if self.lifecycle.terminal is TurnTerminalState.ACTIVE:
+            self.interruption_reason = self.interruption_reason or reason.value
+            self.trace.finish(
+                "".join(self.projection.answer_parts),
+                "interrupted",
+                interruption_reason=self.interruption_reason,
+            )
+            return
+        self.trace.finish("".join(self.projection.answer_parts), self.terminal_label)
+
     async def events(self) -> AsyncIterator[ChatStreamFrame]:
         if self.admission.replay_assistant:
             async for frame in self._events():
@@ -1561,31 +1670,33 @@ class ChatStreamOrchestrator:
             execution_backend=self.admission.execution_backend,
             is_replacement=self.admission.is_replacement,
             reasoning_effort=getattr(self.admission, "reasoning_effort", "high"),
+            content_free=getattr(self.admission, "paper_artifacts_enabled", False),
         ) as trace:
             self.trace = trace
-            _persist_trace_id(
-                self.owner, self.settings, self.admission, self.trace.trace_id
-            )
             try:
                 async for frame in self._events():
+                    if (
+                        frame.event == "workspace_ready"
+                        and self.trace_id_persistence_task is None
+                    ):
+                        self.trace_id_persistence_task = asyncio.create_task(
+                            asyncio.to_thread(
+                                _persist_trace_id,
+                                self.owner,
+                                self.settings,
+                                self.admission,
+                                self.trace.trace_id,
+                            )
+                        )
+                        self.trace_id_persistence_task.add_done_callback(
+                            _log_background_task_result
+                        )
                     yield frame
             except GeneratorExit:
-                self.interruption_reason = self.interruption_reason or "stream_closed"
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    "interrupted",
-                    interruption_reason=self.interruption_reason,
-                )
+                self._finish_stream_exit_trace(InterruptionReason.STREAM_CLOSED)
                 raise
             except asyncio.CancelledError:
-                self.interruption_reason = (
-                    self.interruption_reason or "stream_cancelled"
-                )
-                self.trace.finish(
-                    "".join(self.projection.answer_parts),
-                    "interrupted",
-                    interruption_reason=self.interruption_reason,
-                )
+                self._finish_stream_exit_trace(InterruptionReason.STREAM_CANCELLED)
                 raise
 
     async def _events(self) -> AsyncIterator[ChatStreamFrame]:
@@ -1640,7 +1751,6 @@ class ChatStreamOrchestrator:
                 yield await self._finalize_cancellation(cancel_runner=False)
                 return
 
-            await self._renew_durable_turn()
             if self.settings.chat_durable_turn_dispatch_enabled:
                 await asyncio.to_thread(
                     _start_local_turn, self.settings, self.admission
@@ -1975,13 +2085,6 @@ class ChatStreamOrchestrator:
         except (TurnJobError, SQLAlchemyError, ValueError) as exc:
             self.lease_heartbeat_error = exc
 
-    async def _renew_durable_turn(self) -> None:
-        if not self.settings.chat_durable_turn_dispatch_enabled:
-            return
-        self._assert_durable_lease()
-        await asyncio.to_thread(_heartbeat_local_turn, self.settings, self.admission)
-        self._assert_durable_lease()
-
     def _assert_durable_lease(self) -> None:
         if not self.settings.chat_durable_turn_dispatch_enabled:
             return
@@ -2009,6 +2112,7 @@ class ChatStreamOrchestrator:
         *args: object,
         lifecycle_event: ChatTurnEvent | None = None,
     ) -> Any:
+        await self._await_sdk_session_persistence()
         if not self.terminal_persistence.begin():
             return
         persistence = asyncio.create_task(asyncio.to_thread(function, *args))
@@ -2059,10 +2163,14 @@ class ChatStreamOrchestrator:
         except SandboxError as exc:
             await queue.put({"type": "error", "message": str(exc), "code": exc.code})
         except Exception as exc:
+            assert self.runner is not None
+            with contextlib.suppress(Exception):
+                await self.runner.cancel()
             logger.warning(
-                "chat research producer failed session_id=%s error=%s",
+                "chat research producer failed session_id=%s error=%s origin=%s",
                 self.admission.session_id,
                 type(exc).__name__,
+                sanitized_exception_origin(exc),
             )
             await queue.put(
                 {
@@ -2117,12 +2225,36 @@ class ChatStreamOrchestrator:
         self, event: PersistenceEvent
     ) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        self._bind_sdk_session(payload)
+        if self.sdk_session_persistence_task is not None:
+            await self._await_sdk_session_persistence()
+        self.sdk_session_persistence_task = asyncio.create_task(
+            asyncio.to_thread(self._bind_sdk_session, payload)
+        )
+        self.sdk_session_persistence_task.add_done_callback(_log_background_task_result)
         return _HandledTurnEvent()
+
+    async def _await_sdk_session_persistence(self) -> None:
+        persistence = self.sdk_session_persistence_task
+        if persistence is None:
+            return
+        cancellation: asyncio.CancelledError | None = None
+        try:
+            while True:
+                try:
+                    await asyncio.shield(persistence)
+                    break
+                except asyncio.CancelledError as exc:
+                    cancellation = cancellation or exc
+        finally:
+            if persistence.done():
+                self.sdk_session_persistence_task = None
+        if cancellation is not None:
+            raise cancellation
 
     async def _handle_mirror_failure(
         self, event: MirrorFailureEvent
     ) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         _kind, payload = self._legacy_payload(event)
         if self.settings.chat_durable_turn_dispatch_enabled:
             self.lifecycle = self.lifecycle.transition(event)
@@ -2144,13 +2276,14 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent(frame=frame)
 
     async def _handle_cancellation(self, event: CancellationEvent) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         return _HandledTurnEvent(
             frame=await self._finalize_cancellation(cancel_runner=False)
         )
 
     async def _handle_latency_event(self, event: LatencyEvent) -> _HandledTurnEvent:
         _kind, payload = self._legacy_payload(event)
-        self._record_latency_phase(
+        self._buffer_latency_phase(
             str(payload["phase"]),
             int(payload["elapsed_ms"]),
             acquisition_outcome=payload.get("acquisition_outcome"),
@@ -2270,6 +2403,25 @@ class ChatStreamOrchestrator:
                 )
                 return None
             payload = trusted_paper
+        paper_tool_event = kind in {
+            "tool_call",
+            "tool_call_start",
+            "tool_call_arguments_delta",
+            "tool_call_arguments_done",
+            "tool_result",
+        }
+        tool_id = str(payload.get("id") or "")
+        if (
+            getattr(self.admission, "paper_artifacts_enabled", False)
+            and paper_tool_event
+            and (
+                str(payload.get("name") or "") in _PRIVATE_PAPER_TOOL_NAMES
+                or tool_id in self.private_paper_tool_ids
+            )
+        ):
+            if kind != "tool_result":
+                self.private_paper_tool_ids.add(tool_id)
+            payload = _private_paper_tool_event(kind, payload)
         if getattr(self.admission, "poster_mode", False) and kind in {
             "tool_call",
             "tool_call_start",
@@ -2281,7 +2433,7 @@ class ChatStreamOrchestrator:
 
         elapsed_ms = round((time.perf_counter() - self.started) * 1000)
         if kind == "workspace_ready":
-            self._record_latency_phase("sdk_query_dispatched", elapsed_ms)
+            self._buffer_latency_phase("sdk_query_dispatched", elapsed_ms)
         if not self.first_application_delta_recorded and kind in {
             "reasoning_delta",
             "tool_call",
@@ -2290,7 +2442,7 @@ class ChatStreamOrchestrator:
         }:
             self.first_application_delta_recorded = True
             self.lifecycle_observer("ttft_ms", None, elapsed_ms)
-            self._record_latency_phase(
+            self._buffer_latency_phase(
                 "first_semantic_event",
                 elapsed_ms,
                 first_semantic_event_class={
@@ -2300,13 +2452,14 @@ class ChatStreamOrchestrator:
                     "answer_delta": "answer",
                 }[kind],
             )
-            self._record_latency_phase("first_application_sse_delta", elapsed_ms)
+            self._buffer_latency_phase("first_application_sse_delta", elapsed_ms)
 
         self.projection.apply(kind, payload)
         if kind in {"tool_call", "tool_call_arguments_done"}:
             self.trace.start_tool(payload)
         elif kind == "tool_result":
             self.trace.finish_tool(payload)
+            self.private_paper_tool_ids.discard(tool_id)
         return kind, payload
 
     async def _handle_projection_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
@@ -2317,6 +2470,7 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent(frame=ChatStreamFrame(kind, payload))
 
     async def _handle_failure_event(self, event: FailureEvent) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected
@@ -2400,6 +2554,7 @@ class ChatStreamOrchestrator:
     async def _handle_completion_event(
         self, event: CompletionEvent
     ) -> _HandledTurnEvent:
+        await self._await_sdk_session_persistence()
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected
@@ -2756,6 +2911,9 @@ class ChatStreamOrchestrator:
                 await self.research_task
         if self.title_task and not self.title_task.done():
             self.title_task.add_done_callback(_log_background_task_result)
+        if self.trace_id_persistence_task is not None:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await self.trace_id_persistence_task
         logger.info(
             "chat request complete request_id=%s principal=%s duration_ms=%.1f finish=%s",
             self.request_id,
@@ -2774,13 +2932,7 @@ class ChatStreamOrchestrator:
         total_ms = round((time.perf_counter() - self.started) * 1000)
         self.lifecycle_observer("terminal_latency_ms", None, total_ms)
         try:
-            with db_manager.session_local() as db:
-                ChatLatencyService(db).finalize(
-                    self.request_id,
-                    status,
-                    total_ms,
-                )
-                db.commit()
+            await asyncio.to_thread(self._persist_latency, status, total_ms)
         except Exception as exc:
             logger.warning(
                 "chat latency finalize failed request_id=%s error=%s",
@@ -2789,7 +2941,7 @@ class ChatStreamOrchestrator:
             )
         await self.release_admission()
 
-    def _record_latency_phase(
+    def _buffer_latency_phase(
         self,
         phase: str,
         elapsed_ms: int,
@@ -2802,31 +2954,61 @@ class ChatStreamOrchestrator:
         failure_class: str | None = None,
         attempt_kind: str | None = None,
     ) -> None:
+        self.pending_latency_phases.append(
+            _LatencyPhase(
+                phase=phase,
+                elapsed_ms=elapsed_ms,
+                acquisition_outcome=acquisition_outcome,
+                first_semantic_event_class=first_semantic_event_class,
+                pool_miss_reason=pool_miss_reason,
+                session_reuse_cohort=session_reuse_cohort,
+                failure_stage=failure_stage,
+                failure_class=failure_class,
+                attempt_kind=attempt_kind,
+            )
+        )
+
+    def _persist_latency(self, status: str, total_ms: int) -> None:
         try:
             with db_manager.session_local() as db:
                 latency = ChatLatencyService(db)
-                latency.record_phase(
-                    self.request_id,
-                    phase,
-                    elapsed_ms,
-                    acquisition_outcome=acquisition_outcome,
-                    first_semantic_event_class=first_semantic_event_class,
-                    pool_miss_reason=pool_miss_reason,
-                    session_reuse_cohort=session_reuse_cohort,
-                    failure_stage=failure_stage,
-                    failure_class=failure_class,
-                    attempt_kind=attempt_kind,
-                )
-                if (
-                    acquisition_outcome == "pool_miss"
-                    and pool_miss_reason == "unhealthy_blank"
-                ):
-                    latency.record_pool_assignment_fallback(self.request_id)
+                for phase in self.pending_latency_phases:
+                    try:
+                        latency.record_phase(
+                            self.request_id,
+                            phase.phase,
+                            phase.elapsed_ms,
+                            acquisition_outcome=phase.acquisition_outcome,
+                            first_semantic_event_class=(
+                                phase.first_semantic_event_class
+                            ),
+                            pool_miss_reason=phase.pool_miss_reason,
+                            session_reuse_cohort=phase.session_reuse_cohort,
+                            failure_stage=phase.failure_stage,
+                            failure_class=phase.failure_class,
+                            attempt_kind=phase.attempt_kind,
+                        )
+                    except ValueError as exc:
+                        logger.warning(
+                            "chat latency phase failed request_id=%s phase=%s error=%s",
+                            self.request_id,
+                            phase.phase,
+                            type(exc).__name__,
+                        )
+                        continue
+                    if (
+                        phase.acquisition_outcome == "pool_miss"
+                        and phase.pool_miss_reason == "unhealthy_blank"
+                    ):
+                        latency.record_pool_assignment_fallback(self.request_id)
+                latency.finalize(self.request_id, status, total_ms)
                 db.commit()
         except Exception as exc:
             logger.warning(
-                "chat latency phase failed request_id=%s phase=%s error=%s",
+                "chat latency phase batch failed request_id=%s error=%s",
                 self.request_id,
-                phase,
                 type(exc).__name__,
             )
+            with db_manager.session_local() as db:
+                ChatLatencyService(db).finalize(self.request_id, status, total_ms)
+                db.commit()

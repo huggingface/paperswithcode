@@ -21,6 +21,7 @@ from backend.chat_sandbox_worker.contract import (
     MODAL_APP_NAME,
     PROVIDER_OUTPUT_TOKEN_LIMIT,
 )
+from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_SOCKET
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_PROTOCOL
 from backend.chat_sandbox_worker.mcp_app_registry import (
     egress_policy_digest,
@@ -116,6 +117,7 @@ class SandboxProvider(Protocol):
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool: ...
 
     async def terminate(
@@ -259,6 +261,19 @@ class ModalSandboxProviderAdapter:
         persistent_enabled = bool(
             getattr(self.settings, "chat_persistent_worker_enabled", False)
         )
+        qualification_profile = tags.get("qualification_profile")
+        if qualification_profile == "32-functional-turns":
+            from backend.services.durable_external_qualification_contract import (
+                DURABLE_QUALIFICATION_SANDBOX_LIFETIME_SECONDS,
+            )
+
+            sandbox_lifetime_seconds = DURABLE_QUALIFICATION_SANDBOX_LIFETIME_SECONDS
+        else:
+            sandbox_lifetime_seconds = (
+                self.settings.chat_persistent_sandbox_lifetime_seconds
+                if persistent_enabled
+                else 3600
+            )
         worker_generation = worker_generation or secrets.token_hex(16)
         command = (
             ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
@@ -306,15 +321,15 @@ class ModalSandboxProviderAdapter:
             name=name,
             tags=tags,
             region=CHAT_SANDBOX_REGION,
-            timeout=(
-                self.settings.chat_persistent_sandbox_lifetime_seconds
-                if persistent_enabled
-                else 3600
-            ),
+            timeout=sandbox_lifetime_seconds,
             idle_timeout=(
-                self.settings.chat_persistent_sandbox_lifetime_seconds
-                if persistent_enabled
-                else max(60, self.settings.chat_sandbox_warm_seconds)
+                sandbox_lifetime_seconds
+                if qualification_profile == "32-functional-turns"
+                else (
+                    self.settings.chat_persistent_sandbox_lifetime_seconds
+                    if persistent_enabled
+                    else max(60, self.settings.chat_sandbox_warm_seconds)
+                )
             ),
             workdir="/workspace",
             cpu=(self.settings.chat_sandbox_cpu, cpu_limit),
@@ -348,7 +363,43 @@ class ModalSandboxProviderAdapter:
                 )
             ),
         )
-        if not persistent_enabled or executor_enabled:
+        if executor_enabled:
+            deadline = (
+                time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
+            )
+            while time.monotonic() < deadline:
+                try:
+                    probe = await sandbox.exec.aio(
+                        "test",
+                        "-S",
+                        str(EXECUTOR_SOCKET),
+                        timeout=5,
+                    )
+                    await probe.wait.aio()
+                    if probe.returncode == 0:
+                        if qualification_profile == "32-functional-turns":
+                            seed = await sandbox.exec.aio(
+                                "sh",
+                                "-c",
+                                "printf durable-ready > /workspace/durable-ready.txt",
+                                timeout=5,
+                            )
+                            await seed.wait.aio()
+                            if seed.returncode != 0:
+                                break
+                        return sandbox
+                except Exception:
+                    pass
+                if await self.poll(sandbox) is not None:
+                    break
+                await asyncio.sleep(0.05)
+            await sandbox.terminate.aio(
+                wait=self.settings.chat_sandbox_spend_enforcement_enabled
+            )
+            raise SandboxError(
+                "sandbox_worker_not_ready", "Sandbox executor readiness timed out"
+            )
+        if not persistent_enabled:
             return sandbox
         deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
         while time.monotonic() < deadline:
@@ -383,8 +434,11 @@ class ModalSandboxProviderAdapter:
         *,
         persistent: bool,
         worker_generation: str | None,
+        launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool:
-        if persistent:
+        if launch_mode is SandboxLaunchMode.EXECUTOR:
+            command = ("test", "-S", str(EXECUTOR_SOCKET))
+        elif persistent:
             if not worker_generation:
                 raise ValueError("Persistent sandbox health requires a generation")
             command = (
@@ -460,11 +514,11 @@ class ModalSandboxProviderAdapter:
             "python",
             "-m",
             "backend.chat_sandbox_worker.executor_relay",
-            stdin=StreamType.PIPE,
             stdout=StreamType.PIPE,
             stderr=StreamType.DEVNULL,
             timeout=timeout_seconds,
             workdir="/workspace",
+            env={"PYTHONPATH": "/opt/pwc"},
             text=False,
         )
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Check Papers With Code CRON health every 15 minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=15m
+RandomizedDelaySec=2m
+AccuracySec=1m
+Persistent=true
+Unit=autonomous-cron-health.service
+
+[Install]
+WantedBy=timers.target

@@ -18,6 +18,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
+try:
+    from deploy.external_pi_slot_topology import replica_specs
+except ModuleNotFoundError:
+    from external_pi_slot_topology import replica_specs  # type: ignore[no-redef]
+
 APP_ROOT = Path("/srv/paperswithcode")
 CONFIG_ROOT = Path("/etc/paperswithcode")
 
@@ -178,12 +183,32 @@ def _ensure_token_only_environment(path: Path, token: str) -> None:
     _atomic_write(path, f"{TOKEN_KEY}={token}\n".encode(), 0o640)
 
 
+@contextlib.contextmanager
+def temporary_worker_token_file(token: str, directory: Path):
+    if len(token) < 32 or any(character in token for character in "\r\n\0"):
+        raise ShadowActivationError("external Pi worker token is invalid")
+    descriptor, name = tempfile.mkstemp(
+        prefix=".external-pi-shadow-token-", dir=directory
+    )
+    path = Path(name)
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(f"{TOKEN_KEY}={token}\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        yield path
+    finally:
+        path.unlink(missing_ok=True)
+
+
 def run_temporary_shadow_qualification(
     *,
     environment: str,
     slot: str,
     release_id: str,
     report_path: Path,
+    worker_id: str | None = None,
     start: Callable[[str, str], None] | None = None,
     authenticated: Callable[[str, str, str], int] | None = None,
     qualify: Callable[[QualificationEvidence, Path], None],
@@ -198,6 +223,9 @@ def run_temporary_shadow_qualification(
         raise ShadowActivationError("temporary shadow qualification is staging-only")
     if slot not in {"blue", "green"}:
         raise ShadowActivationError("temporary shadow qualification slot is invalid")
+    resolved_worker_id = worker_id or f"staging-{slot}"
+    if not resolved_worker_id.startswith(f"staging-{slot}"):
+        raise ShadowActivationError("temporary shadow qualification worker is invalid")
     if start is None or authenticated is None or stop is None:
         lifecycle, _runtime = _lifecycle_modules()
         start = start or lifecycle.start_slot
@@ -220,7 +248,7 @@ def run_temporary_shadow_qualification(
             raise ShadowActivationError(
                 "lease-expiry restart did not advance generation"
             )
-        stale_fenced = stale_probe(f"staging-{slot}", initial, restarted)
+        stale_fenced = stale_probe(resolved_worker_id, initial, restarted)
         if stale_fenced is not True:
             raise ShadowActivationError("stale generation was not durably fenced")
         stop(environment, slot, release_id)
@@ -229,7 +257,7 @@ def run_temporary_shadow_qualification(
         if recovery <= restarted:
             raise ShadowActivationError("drain recovery did not advance generation")
         evidence = QualificationEvidence(
-            worker_id=f"staging-{slot}",
+            worker_id=resolved_worker_id,
             initial_generation=initial,
             restarted_generation=restarted,
             recovery_generation=recovery,
@@ -587,7 +615,11 @@ def main() -> int:
         slot = active_slot()
         lifecycle, runtime = _lifecycle_modules()
 
-        resolved = lifecycle.resolve_external_pi_slot("staging", slot)
+        token = _read_env(CONFIG_ROOT / "staging.env").get(TOKEN_KEY, "")
+        resolved = lifecycle.resolve_external_pi_replicas("staging", slot, token)[0]
+        replica = replica_specs("staging", slot, token)[0]
+        if replica.worker_id != resolved.worker_id or replica.port != resolved.port:
+            raise ShadowActivationError("external Pi replica topology is inconsistent")
         release = (APP_ROOT / "environments/staging/current").resolve(strict=True)
         python = APP_ROOT / "runtimes" / runtime.runtime_id(release) / "bin/python"
 
@@ -622,47 +654,49 @@ def main() -> int:
             return True
 
         def command(evidence: QualificationEvidence, destination: Path) -> None:
-            subprocess.run(
-                [
-                    str(python),
-                    "-m",
-                    "backend.scripts.qualify_external_pi_shadow",
-                    "--environment",
-                    "staging",
-                    "--app-root",
-                    str(APP_ROOT),
-                    "--release-dir",
-                    str(release),
-                    "--worker-url",
-                    f"http://127.0.0.1:{resolved.port}",
-                    "--worker-id",
-                    resolved.worker_id,
-                    "--expected-generation",
-                    str(evidence.recovery_generation),
-                    "--initial-generation",
-                    str(evidence.initial_generation),
-                    "--restarted-generation",
-                    str(evidence.restarted_generation),
-                    "--stale-fenced",
-                    "--drain-recovered",
-                    "--qualification-nonce",
-                    evidence.nonce,
-                    "--token-file",
-                    str(CONFIG_ROOT / "external-pi-worker.env"),
-                    "--prompt-file",
-                    str(resolved.prompt),
-                    "--report",
-                    str(destination),
-                ],
-                cwd=release,
-                check=True,
-            )
+            with temporary_worker_token_file(replica.token, CONFIG_ROOT) as token_file:
+                subprocess.run(
+                    [
+                        str(python),
+                        "-m",
+                        "backend.scripts.qualify_external_pi_shadow",
+                        "--environment",
+                        "staging",
+                        "--app-root",
+                        str(APP_ROOT),
+                        "--release-dir",
+                        str(release),
+                        "--worker-url",
+                        f"http://127.0.0.1:{resolved.port}",
+                        "--worker-id",
+                        resolved.worker_id,
+                        "--expected-generation",
+                        str(evidence.recovery_generation),
+                        "--initial-generation",
+                        str(evidence.initial_generation),
+                        "--restarted-generation",
+                        str(evidence.restarted_generation),
+                        "--stale-fenced",
+                        "--drain-recovered",
+                        "--qualification-nonce",
+                        evidence.nonce,
+                        "--token-file",
+                        str(token_file),
+                        "--prompt-file",
+                        str(resolved.prompt),
+                        "--report",
+                        str(destination),
+                    ],
+                    cwd=release,
+                    check=True,
+                )
 
         return run_temporary_shadow_qualification(
             environment="staging",
             slot=slot,
             release_id=release_id,
             report_path=report_path,
+            worker_id=resolved.worker_id,
             qualify=command,
             stale_probe=stale_probe,
             leave_recovery_running=leave_recovery_running,

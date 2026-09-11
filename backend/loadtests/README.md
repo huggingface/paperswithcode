@@ -397,10 +397,11 @@ awk '/^MemTotal:|^MemAvailable:/{print}' /proc/meminfo
 pwc-status staging
 ```
 
-`MemTotal` must identify the approved 8 GiB VPS class (the controller accepts
-the kernel-reported 7–9 GiB range). This is not a demand for 8 GiB free.
-Immediately before **each** profile, projected `MemAvailable` must remain at
-least 1,610,612,736 bytes (1.5 GiB) and observed host CPU must be below 80%.
+`MemTotal` must identify the approved 16 GiB VPS class (the controller accepts
+the kernel-reported 15–17 GiB range). This is not a demand for 16 GiB free.
+Immediately before the standalone `32-functional-turns` profile, projected
+`MemAvailable` must remain at least 1,610,612,736 bytes (1.5 GiB) and observed
+host CPU must be below 80%.
 The CPU guard is fixed at exactly 80%; an adapter-supplied different guard is a
 `cpu_headroom` refusal rather than authority to raise the threshold.
 `resource_refused` with reason `memory_headroom` is valid evidence. Stop there;
@@ -422,13 +423,14 @@ can never produce `completed`. Failed reports use a closed reason set and only
 retain the passing profile prefix the controller could have completed;
 `cleanup_failed` always carries incomplete cleanup proof.
 
-A passing profile requires the exact 32 or 100 observations; every user
+A passing current gate requires the exact 32 observations; every user
 immediately admitted and durably terminal; one model start per turn; at most
 one executor start per operation identity; no queued state, refusal, typed
 failure, duplicate start, stale mutation, or lost terminal; reconnect successes
-equal reconnect attempts; p95 TTFT at most 10,000 ms; p99 completion at most
-60,000 ms; minimum host `MemAvailable` at least 1.5 GiB; and peak CPU below 80%.
-Reports also retain bounded peak RAM, Modal create/reuse/eviction,
+equal reconnect attempts; overall and per-workload p95 TTFT below 2,000 ms; p99
+completion at most 60,000 ms; minimum host `MemAvailable` at least 1.5 GiB; and
+peak CPU below 80%. Reports retain separate `no_tool`, `read`, and `bash` TTFT
+evidence alongside bounded peak RAM, Modal create/reuse/eviction,
 terminal-cause, and typed-failure counts. Protected qualification headers bind
 each admitted turn to an exact run/profile cohort. After profile teardown, the
 admin-only, content-free `/api/v1/chat/admin/qualification-evidence` endpoint
@@ -457,14 +459,16 @@ session identifiers, cookies, capabilities, provider credentials, or worker
 tokens. Cleanup proof requires prior flags restored, exact transient workers
 drained/offline and removed, their status files and listeners absent, zero
 active backend/worker/sandbox counts for the cohort, and every admitted turn in
-a durable terminal state.
+a durable terminal state. The configured active staging external worker is a
+baseline dependency and is not counted as a transient cleanup leak.
 
 Source verification is safe and exact; it does not contact staging:
 
 ```bash
 uv run --env-file backend/keys.env pytest -q \
   backend/tests/test_durable_external_turn_faults.py \
-  backend/tests/test_external_pi_fleet_qualification.py
+  backend/tests/test_external_pi_fleet_qualification.py \
+  backend/tests/test_durable_qualification_cli.py
 uv run --isolated --with locust python -c \
   "import backend.loadtests.external_pi_fleet_locustfile"
 uv run --isolated --with locust --with pytest --with pydantic \

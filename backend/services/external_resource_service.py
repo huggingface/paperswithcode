@@ -34,7 +34,7 @@ from typing import List, Optional
 from sqlalchemy.orm import Session
 
 from backend.database.paper_merge import find_arxiv_paper_for_title
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.models.database import (
     Author as DBAuthor,
     Paper as DBPaper,

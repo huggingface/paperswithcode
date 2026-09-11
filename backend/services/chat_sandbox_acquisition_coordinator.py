@@ -12,9 +12,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Literal, Protocol
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.models.database import ChatTurnLatency
 from backend.chat_sandbox_worker.mcp_app_registry import egress_policy_digest
 from backend.services.chat_sandbox_capacity_repository import (
     CapacityUnavailable,
@@ -62,6 +64,7 @@ type LegacyEnsureReadyResult = tuple[
     int | None,
 ]
 SessionFactory = Callable[[], Session]
+LiveCapResolver = Callable[[Session], int]
 SpendFactory = Callable[[Session], ChatSandboxSpendService]
 UtcClock = Callable[[], datetime]
 FloatClock = Callable[[], float]
@@ -284,6 +287,7 @@ class ChatSandboxAcquisitionCoordinator:
         pool_lookup_ms: int | None = None,
         budget_prechecked: bool = False,
         pool_miss_reason: str | None = None,
+        live_cap_resolver: LiveCapResolver | None = None,
     ) -> SandboxAcquisitionOutcome:
         started = self.perf_counter()
         if not budget_prechecked and self.spend_enforced:
@@ -316,6 +320,8 @@ class ChatSandboxAcquisitionCoordinator:
             deadline=deadline,
             started=started,
             pool_lookup_ms=pool_lookup_ms,
+            live_cap_resolver=live_cap_resolver,
+            launch_mode=launch_mode,
         )
         if isinstance(selected, LeaseReused):
             return selected
@@ -337,11 +343,15 @@ class ChatSandboxAcquisitionCoordinator:
         deadline: float,
         started: float,
         pool_lookup_ms: int | None,
+        live_cap_resolver: LiveCapResolver | None,
+        launch_mode: SandboxLaunchMode,
     ) -> StartSelected | LeaseReused:
         restarted = False
         while True:
             try:
-                acquisition = self._acquire_once(chat_session_id)
+                acquisition = self._acquire_once(
+                    chat_session_id, live_cap_resolver=live_cap_resolver
+                )
             except LeaseDecisionChanged:
                 continue
 
@@ -350,6 +360,7 @@ class ChatSandboxAcquisitionCoordinator:
                     chat_session_id,
                     acquisition,
                     deadline=deadline,
+                    launch_mode=launch_mode,
                 )
                 if sandbox is None:
                     restarted = restarted or cohort == "restarted"
@@ -394,7 +405,12 @@ class ChatSandboxAcquisitionCoordinator:
                 self._raise_capacity()
             raise AssertionError("Unhandled sandbox acquisition outcome")
 
-    def _acquire_once(self, chat_session_id: uuid.UUID):
+    def _acquire_once(
+        self,
+        chat_session_id: uuid.UUID,
+        *,
+        live_cap_resolver: LiveCapResolver | None = None,
+    ):
         creation_token = self.creation_token_factory()
         worker_generation = self.generation_factory()
         now = self.utcnow()
@@ -425,6 +441,9 @@ class ChatSandboxAcquisitionCoordinator:
                     now=now,
                     ready_timeout_seconds=self.ready_timeout_seconds,
                     reserve_interval=reserve_interval,
+                    total_live_cap=(
+                        live_cap_resolver(db) if live_cap_resolver is not None else None
+                    ),
                 )
             except ChatComputeDisabled as error:
                 # Exiting the transaction normally preserves the durable trip.
@@ -443,6 +462,7 @@ class ChatSandboxAcquisitionCoordinator:
         acquisition: ReuseLease,
         *,
         deadline: float,
+        launch_mode: SandboxLaunchMode,
     ) -> tuple[object | None, str | None]:
         await self.lease_maintenance.enforce_warm_cap()
         persistent = bool(
@@ -463,6 +483,7 @@ class ChatSandboxAcquisitionCoordinator:
                 sandbox,
                 persistent=persistent,
                 worker_generation=acquisition.worker_generation,
+                launch_mode=launch_mode,
             ):
                 return sandbox, (
                     "control_reconnected" if persistent else "rediscovered"
@@ -544,6 +565,18 @@ class ChatSandboxAcquisitionCoordinator:
 
         sandbox = None
         try:
+            qualification_profile = None
+            if self.settings.environment == "staging":
+                with self.session_factory() as evidence_db:
+                    qualification_profile = evidence_db.scalar(
+                        select(ChatTurnLatency.qualification_profile)
+                        .where(
+                            ChatTurnLatency.chat_session_id == chat_session_id,
+                            ChatTurnLatency.terminal_status == "running",
+                        )
+                        .order_by(ChatTurnLatency.admitted_at.desc())
+                        .limit(1)
+                    )
             async with asyncio.timeout(self.ready_timeout_seconds):
                 sandbox = await self.provider.create(
                     name=f"chat-{chat_session_id}",
@@ -560,6 +593,11 @@ class ChatSandboxAcquisitionCoordinator:
                         "release": self.settings.release_id,
                         "image": self.settings.chat_modal_image_version,
                         "egress": egress_policy_digest(self.settings),
+                        **(
+                            {"qualification_profile": qualification_profile}
+                            if qualification_profile == "32-functional-turns"
+                            else {}
+                        ),
                     },
                     worker_generation=claim.worker_generation,
                     launch_mode=launch_mode,

@@ -5,11 +5,19 @@ ordinary research chat. The selected model decides whether the user's request
 is an explicit manuscript request.
 
 Run `pwc-paper create --title "..."` only to create the one private project for
-the current chat. It compiles a neutral standard-article draft and prints a
-bounded receipt. If metadata already contains a project, use `pwc-paper
-begin-edit` to inspect its current head before proposing a narrow change. This
-release does not expose arbitrary file writes: never claim a source edit unless
-`pwc-paper` reports a published version.
+the current chat. It compiles a neutral standard-article scaffold and prints a
+bounded receipt. For the first complete draft, research first, create only
+`.tex` and `.bib` files under `/workspace/paper`, then submit the bounded
+candidate with `pwc-paper draft --directory /workspace/paper --artifact-id
+<artifact-id> --expected-parent-version-id <source-head-version-id>`. If
+metadata already contains a project, use `pwc-paper begin-edit` to inspect its
+current head before proposing a narrow change. The backend exposes no arbitrary
+file-write API: never claim a source edit unless `pwc-paper` reports a published
+version.
+
+Run each `pwc-paper` command directly with its documented arguments. Do not
+wrap it in shell syntax, chain it, pipe it, or use shell substitutions; only a
+single direct invocation can produce a trusted receipt.
 
 For an explicit repair request, run `pwc-paper repair-context --directory
 /workspace/paper`, inspect the checked-out source and diagnostics, then make a

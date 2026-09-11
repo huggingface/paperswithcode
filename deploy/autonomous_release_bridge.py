@@ -183,7 +183,7 @@ def changed_paths(before_sha: str, after_sha: str) -> tuple[str, ...]:
         env=environment,
     )
     remote_main = subprocess.run(
-        [GIT, "--git-dir", str(REPOSITORY), "rev-parse", "refs/remotes/origin/main"],
+        [GIT, "--git-dir", str(REPOSITORY), "rev-parse", "refs/heads/main"],
         check=True,
         capture_output=True,
         text=True,

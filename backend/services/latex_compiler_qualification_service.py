@@ -67,6 +67,19 @@ def qualification_cases() -> tuple[QualificationCase, ...]:
             "failed",
         ),
         QualificationCase(
+            "cpu-limit",
+            _zip(
+                {
+                    "main.tex": _document(
+                        "\\newcount\\pwcCounter \\pwcCounter=0 "
+                        "\\loop \\advance\\pwcCounter by 1 "
+                        "\\ifnum\\pwcCounter<1000000000 \\repeat"
+                    )
+                }
+            ),
+            "failed",
+        ),
+        QualificationCase(
             "oversized-output",
             _zip(
                 {

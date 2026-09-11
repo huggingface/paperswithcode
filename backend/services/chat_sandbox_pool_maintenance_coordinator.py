@@ -222,6 +222,7 @@ class ChatSandboxPoolMaintenanceCoordinator:
                 outcome is PoolTerminationFinishOutcome.FINISHED
                 and claim.sandbox_id
                 and self.policy.spend_enforced
+                and not claim.accounting_settled
             ):
                 self.spend_factory(db).terminate(
                     claim.sandbox_id,

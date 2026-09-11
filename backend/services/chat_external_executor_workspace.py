@@ -48,6 +48,7 @@ from backend.services.chat_turn_job_repository import (
 SessionFactory = Callable[[], Session]
 LifecycleObserver = Callable[[str, str | None, int], None]
 QualificationEvidenceRecorder = Callable[..., bool]
+QualificationCapacityResolver = Callable[..., int | None]
 
 
 @dataclass(frozen=True)
@@ -93,6 +94,7 @@ class ChatExternalExecutorWorkspaceManager:
         assignment_token_factory: Callable[[], str] | None = None,
         observe: LifecycleObserver | None = None,
         record_evidence: QualificationEvidenceRecorder | None = None,
+        qualification_capacity: QualificationCapacityResolver | None = None,
     ) -> None:
         if settings.chat_workspace_snapshots_enabled:
             raise ValueError("External executor workspaces require snapshots disabled")
@@ -122,6 +124,36 @@ class ChatExternalExecutorWorkspaceManager:
         )
         self.observe = observe or (lambda _event, _code, _value: None)
         self.record_evidence = record_evidence or (lambda **_kwargs: False)
+        self.qualification_capacity = (
+            qualification_capacity or self._persisted_qualification_capacity
+        )
+
+    def _persisted_qualification_capacity(
+        self,
+        db: Session,
+        *,
+        turn_id: uuid.UUID,
+        chat_session_id: uuid.UUID,
+    ) -> int | None:
+        from backend.services.chat_durable_qualification_evidence import (
+            ChatDurableQualificationEvidenceService,
+        )
+
+        return ChatDurableQualificationEvidenceService(db).executor_live_cap(
+            turn_id=turn_id,
+            chat_session_id=chat_session_id,
+            settings=self.settings,
+        )
+
+    def _executor_live_cap(
+        self, db: Session, session_id: uuid.UUID, turn_claim: TurnLeaseClaim
+    ) -> int:
+        qualified = self.qualification_capacity(
+            db,
+            turn_id=turn_claim.turn_id,
+            chat_session_id=session_id,
+        )
+        return qualified or self.settings.chat_sandbox_total_live_cap
 
     @classmethod
     def from_settings(
@@ -170,6 +202,9 @@ class ChatExternalExecutorWorkspaceManager:
                 session_id,
                 launch_mode=SandboxLaunchMode.EXECUTOR,
                 allow_pool=False,
+                live_cap_resolver=lambda db: self._executor_live_cap(
+                    db, session_id, turn_claim
+                ),
             )
             try:
                 claim = self._claim(session_id, str(outcome.sandbox.object_id))

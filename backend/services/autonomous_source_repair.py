@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import base64
 import json
 import os
 import shutil
@@ -19,6 +20,9 @@ from backend.services.autonomous_operations_repository import (
     Operator,
     RunContext,
 )
+
+
+_SHARED_CRON_REPAIR_SOURCES: frozenset[str] = frozenset()
 
 
 class CandidatePolicyError(PermissionError):
@@ -65,8 +69,19 @@ class RepairTarget:
             or len(set(paths)) != len(paths)
             or any(not _safe_relative_path(value) for value in paths)
             or any(
-                not value.startswith(".github/workflows/scripts/")
-                or not value.endswith((".py", ".sh"))
+                (
+                    not value.startswith(".github/workflows/scripts/")
+                    or not value.endswith((".py", ".sh"))
+                )
+                and (
+                    not value.startswith("backend/scripts/")
+                    or not value.endswith(".py")
+                )
+                and (
+                    not value.startswith("url_extraction_agent/")
+                    or not value.endswith(".py")
+                )
+                and value not in _SHARED_CRON_REPAIR_SOURCES
                 for value in self.source_paths
             )
             or any(not value.startswith("backend/tests/") for value in self.test_paths)
@@ -144,6 +159,7 @@ class AutonomousSourceRepairService:
         check_runner: Callable[[tuple[str, ...], Path], CheckOutcome] | None = None,
         environ: dict[str, str] | None = None,
         git_executable: str = "/usr/bin/git",
+        git_bridge_executable: str | None = None,
     ) -> None:
         if not Path(git_executable).is_absolute():
             raise ValueError("Autonomous Git executable must be absolute")
@@ -165,6 +181,16 @@ class AutonomousSourceRepairService:
             raise ValueError("Server repair targets are required")
         self.environ = dict(os.environ if environ is None else environ)
         self.git_executable = git_executable
+        configured_bridge = git_bridge_executable or self.environ.get(
+            "PWC_AUTONOMOUS_SOURCE_BRIDGE"
+        )
+        if configured_bridge is None and self.source_repository == Path(
+            "/srv/paperswithcode/repository.git"
+        ):
+            configured_bridge = "/usr/local/sbin/pwc-autonomous-source"
+        if configured_bridge is not None and not Path(configured_bridge).is_absolute():
+            raise ValueError("Autonomous source bridge must be absolute")
+        self.git_bridge_executable = configured_bridge
         self.check_runner = check_runner or self._run_check
         self._candidates: dict[uuid.UUID, RepairCandidate] = {}
 
@@ -182,10 +208,15 @@ class AutonomousSourceRepairService:
         try:
             if shutil.disk_usage(self.candidates_root).free < self.min_free_bytes:
                 raise CandidatePolicyError("Insufficient disk for isolated repair")
-            self._git("fetch", "origin", "main", cwd=self.source_repository)
-            base_sha = self._git(
-                "rev-parse", "origin/main", cwd=self.source_repository, capture=True
-            ).stdout.strip()
+            if self.git_bridge_executable:
+                base_sha = self._bridge(
+                    "prepare", candidate_id, context.run_id, capture=True
+                ).stdout.strip()
+            else:
+                self._git("fetch", "origin", "main", cwd=self.source_repository)
+                base_sha = self._git(
+                    "rev-parse", "origin/main", cwd=self.source_repository, capture=True
+                ).stdout.strip()
             candidate = RepairCandidate(
                 candidate_id, context, proposal, lease.lease_id, base_sha, worktree
             )
@@ -207,15 +238,16 @@ class AutonomousSourceRepairService:
                 + "\n",
                 encoding="utf-8",
             )
-            self._git(
-                "worktree",
-                "add",
-                "--detach",
-                str(worktree),
-                base_sha,
-                cwd=self.source_repository,
-            )
-            if self._git("status", "--porcelain", cwd=worktree, capture=True).stdout:
+            if not self.git_bridge_executable:
+                self._git(
+                    "worktree",
+                    "add",
+                    "--detach",
+                    str(worktree),
+                    base_sha,
+                    cwd=self.source_repository,
+                )
+            if self._changed_paths(candidate):
                 raise CandidatePolicyError("Candidate worktree is not clean")
             target = self.repair_targets[proposal.declared_job]
             if any(
@@ -227,13 +259,16 @@ class AutonomousSourceRepairService:
                 )
         except (CandidatePolicyError, OSError, subprocess.CalledProcessError):
             if worktree.exists():
-                self._git(
-                    "worktree",
-                    "remove",
-                    "--force",
-                    str(worktree),
-                    cwd=self.source_repository,
-                )
+                if self.git_bridge_executable:
+                    self._bridge("cleanup", candidate_id, context.run_id)
+                else:
+                    self._git(
+                        "worktree",
+                        "remove",
+                        "--force",
+                        str(worktree),
+                        cwd=self.source_repository,
+                    )
             metadata_path.unlink(missing_ok=True)
             self.repository.release_repair_lease(
                 db, lease_id=lease.lease_id, owner_run_id=context.run_id
@@ -252,6 +287,7 @@ class AutonomousSourceRepairService:
     ) -> ReviewBundle:
         self._require_registered(candidate)
         self._require_lease(db, candidate)
+        self._require_candidate_base(candidate)
         changed = self._changed_paths(candidate)
         if not changed:
             raise CandidatePolicyError("Candidate has no source changes")
@@ -349,6 +385,7 @@ class AutonomousSourceRepairService:
     ) -> str:
         self._require_registered(candidate)
         self._require_lease(db, candidate)
+        self._require_candidate_base(candidate)
         self.repository.assert_mutation_allowed(db, candidate.context)
         changed = self._changed_paths(candidate)
         if (
@@ -358,14 +395,6 @@ class AutonomousSourceRepairService:
             != hashlib.sha256(self._patch_bytes(candidate, changed)).hexdigest()
         ):
             raise CandidatePolicyError("Candidate changed after review")
-        self._git("fetch", "origin", "main", cwd=candidate.worktree)
-        origin_sha = self._git(
-            "rev-parse", "origin/main", cwd=candidate.worktree, capture=True
-        ).stdout.strip()
-        if origin_sha != candidate.base_sha:
-            raise CandidatePolicyError(
-                "origin/main advanced after candidate preparation"
-            )
         self._audit(
             db,
             candidate,
@@ -375,38 +404,58 @@ class AutonomousSourceRepairService:
         )
         self.repository.assert_mutation_allowed(db, candidate.context)
         self._require_lease(db, candidate)
-        self._git("add", "--", *changed, cwd=candidate.worktree)
-        self._git(
-            "-c",
-            "user.name=Papers With Code Autonomy",
-            "-c",
-            "user.email=autonomy@paperswithcode.co",
-            "commit",
-            "-m",
-            f"fix(cron): autonomous repair {candidate.context.run_id}",
-            cwd=candidate.worktree,
-        )
-        parent_sha = self._git(
-            "rev-parse", "HEAD^", cwd=candidate.worktree, capture=True
-        ).stdout.strip()
-        if origin_sha != candidate.base_sha or parent_sha != origin_sha:
-            raise CandidatePolicyError(
-                "origin/main advanced after candidate preparation"
+        if self.git_bridge_executable:
+            published_sha = self._bridge(
+                "publish",
+                candidate.candidate_id,
+                candidate.context.run_id,
+                candidate.proposal.declared_job,
+                bundle.patch_digest,
+                capture=True,
+            ).stdout.strip()
+        else:
+            self._git("fetch", "origin", "main", cwd=candidate.worktree)
+            origin_sha = self._git(
+                "rev-parse", "origin/main", cwd=candidate.worktree, capture=True
+            ).stdout.strip()
+            if origin_sha != candidate.base_sha:
+                raise CandidatePolicyError(
+                    "origin/main advanced after candidate preparation"
+                )
+            self._git("add", "--", *changed, cwd=candidate.worktree)
+            self._git(
+                "-c",
+                "user.name=Papers With Code Autonomy",
+                "-c",
+                "user.email=autonomy@paperswithcode.co",
+                "commit",
+                "-m",
+                f"fix(cron): autonomous repair {candidate.context.run_id}",
+                cwd=candidate.worktree,
             )
-        self._git("push", "origin", "HEAD:main", cwd=candidate.worktree)
-        published_sha = self._git(
-            "rev-parse", "HEAD", cwd=candidate.worktree, capture=True
-        ).stdout.strip()
-        remote_sha = self._git(
-            "ls-remote",
-            "--exit-code",
-            "origin",
-            "refs/heads/main",
-            cwd=candidate.worktree,
-            capture=True,
-        ).stdout.partition("\t")[0]
-        if remote_sha != published_sha:
-            raise CandidatePolicyError("origin/main did not retain the published SHA")
+            parent_sha = self._git(
+                "rev-parse", "HEAD^", cwd=candidate.worktree, capture=True
+            ).stdout.strip()
+            if origin_sha != candidate.base_sha or parent_sha != origin_sha:
+                raise CandidatePolicyError(
+                    "origin/main advanced after candidate preparation"
+                )
+            self._git("push", "origin", "HEAD:main", cwd=candidate.worktree)
+            published_sha = self._git(
+                "rev-parse", "HEAD", cwd=candidate.worktree, capture=True
+            ).stdout.strip()
+            remote_sha = self._git(
+                "ls-remote",
+                "--exit-code",
+                "origin",
+                "refs/heads/main",
+                cwd=candidate.worktree,
+                capture=True,
+            ).stdout.partition("\t")[0]
+            if remote_sha != published_sha:
+                raise CandidatePolicyError(
+                    "origin/main did not retain the published SHA"
+                )
         self._audit(
             db,
             candidate,
@@ -418,13 +467,16 @@ class AutonomousSourceRepairService:
 
     def cleanup_candidate(self, db, candidate: RepairCandidate) -> None:
         self._require_registered(candidate)
-        self._git(
-            "worktree",
-            "remove",
-            "--force",
-            str(candidate.worktree),
-            cwd=self.source_repository,
-        )
+        if self.git_bridge_executable:
+            self._bridge("cleanup", candidate.candidate_id, candidate.context.run_id)
+        else:
+            self._git(
+                "worktree",
+                "remove",
+                "--force",
+                str(candidate.worktree),
+                cwd=self.source_repository,
+            )
         self.repository.release_repair_lease(
             db,
             lease_id=candidate.lease_id,
@@ -464,13 +516,16 @@ class AutonomousSourceRepairService:
             ):
                 continue
             if worktree.exists():
-                self._git(
-                    "worktree",
-                    "remove",
-                    "--force",
-                    str(worktree),
-                    cwd=self.source_repository,
-                )
+                if self.git_bridge_executable:
+                    self._bridge("cleanup-abandoned", candidate_id, context.run_id)
+                else:
+                    self._git(
+                        "worktree",
+                        "remove",
+                        "--force",
+                        str(worktree),
+                        cwd=self.source_repository,
+                    )
             self.repository.release_repair_lease(
                 db, lease_id=lease_id, owner_run_id=context.run_id
             )
@@ -502,6 +557,16 @@ class AutonomousSourceRepairService:
         if not self.repository.owns_repair_lease(db, context=candidate.context):
             raise CandidatePolicyError("Autonomous repair lease is no longer owned")
 
+    def _require_candidate_base(self, candidate: RepairCandidate) -> None:
+        if self.git_bridge_executable:
+            head = self._bridge_inspect(candidate)["head_sha"]
+        else:
+            head = self._git(
+                "rev-parse", "HEAD", cwd=candidate.worktree, capture=True
+            ).stdout.strip()
+        if head != candidate.base_sha:
+            raise CandidatePolicyError("Candidate history changed outside the pipeline")
+
     def _audit(
         self,
         db,
@@ -524,6 +589,8 @@ class AutonomousSourceRepairService:
         db.commit()
 
     def _changed_paths(self, candidate: RepairCandidate) -> tuple[str, ...]:
+        if self.git_bridge_executable:
+            return tuple(self._bridge_inspect(candidate)["changed_paths"])
         tracked = self._git(
             "diff", "--name-only", "HEAD", cwd=candidate.worktree, capture=True
         ).stdout.splitlines()
@@ -542,6 +609,14 @@ class AutonomousSourceRepairService:
     def _patch_bytes(
         self, candidate: RepairCandidate, changed: tuple[str, ...]
     ) -> bytes:
+        if self.git_bridge_executable:
+            inspected = self._bridge_inspect(candidate)
+            if tuple(inspected["changed_paths"]) != changed:
+                raise CandidatePolicyError("Candidate changed during bridge inspection")
+            try:
+                return base64.b64decode(inspected["patch"], validate=True)
+            except (TypeError, ValueError):
+                raise CandidatePolicyError("Source bridge returned an invalid patch")
         patch = self._git(
             "diff", "--binary", "HEAD", cwd=candidate.worktree, capture=True
         ).stdout.encode()
@@ -583,6 +658,45 @@ class AutonomousSourceRepairService:
             capture_output=capture,
             text=True,
         )
+
+    def _bridge(self, *args, capture: bool = False):
+        if self.git_bridge_executable is None:
+            raise CandidatePolicyError("Autonomous source bridge is not configured")
+        return subprocess.run(
+            [self.git_bridge_executable, *(str(value) for value in args)],
+            check=True,
+            capture_output=capture,
+            text=True,
+            timeout=1800,
+            env={"LANG": "C.UTF-8", "PATH": "/usr/bin:/bin"},
+        )
+
+    def _bridge_inspect(self, candidate: RepairCandidate) -> dict:
+        outcome = self._bridge(
+            "inspect",
+            candidate.candidate_id,
+            candidate.context.run_id,
+            capture=True,
+        )
+        try:
+            value = json.loads(outcome.stdout)
+        except json.JSONDecodeError:
+            raise CandidatePolicyError(
+                "Source bridge returned invalid evidence"
+            ) from None
+        if (
+            not isinstance(value, dict)
+            or set(value)
+            != {"base_sha", "changed_paths", "head_sha", "patch", "patch_digest"}
+            or value["base_sha"] != candidate.base_sha
+            or not isinstance(value["changed_paths"], list)
+            or any(not _safe_relative_path(path) for path in value["changed_paths"])
+            or not isinstance(value["head_sha"], str)
+            or not isinstance(value["patch"], str)
+            or not _digest(value["patch_digest"])
+        ):
+            raise CandidatePolicyError("Source bridge returned invalid evidence")
+        return value
 
     def _run_check(self, command: tuple[str, ...], cwd: Path) -> CheckOutcome:
         if (

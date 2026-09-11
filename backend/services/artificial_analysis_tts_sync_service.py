@@ -51,7 +51,7 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "qwen3-tts-vc-realtime": PaperIdentity(arxiv_id="2601.15621"),
     "qwen3-tts-flash": PaperIdentity(arxiv_id="2601.15621"),
     "raon-speechlm": PaperIdentity(arxiv_id="2605.23912"),
-    "st260629": PaperIdentity(arxiv_id="2605.23463"),
+    "step-audio-2.5-tts": PaperIdentity(arxiv_id="2605.23463"),
     "step-audio-editx-mar-2026": PaperIdentity(arxiv_id="2511.03601", is_open=True),
     "styletts-2": PaperIdentity(arxiv_id="2306.07691", is_open=True),
     "vibe-voice-1-5b": PaperIdentity(arxiv_id="2508.19205"),
@@ -60,6 +60,12 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "wavenet": PaperIdentity(arxiv_id="1609.03499"),
     "xtts-v2": PaperIdentity(arxiv_id="2406.04904", is_open=True),
 }
+
+
+# Reviewed 2026-09-09: this upstream model page now returns 404 and is absent
+# from the complete catalog. The original step-audio-2.5-tts model remains live;
+# it is a separate version, so its result must not inherit the retired row.
+RETIRED_MODEL_SLUGS = frozenset({"st260629"})
 
 
 @dataclass(frozen=True)
@@ -76,6 +82,7 @@ class ArtificialAnalysisTtsSyncStats:
     matched: int = 0
     created: int = 0
     updated: int = 0
+    retired: int = 0
     missing_papers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -264,6 +271,13 @@ class ArtificialAnalysisTtsSyncService:
                 if (row.external_source_url or "").startswith(SOURCE_URL_PREFIX)
                 and (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX)
             }
+            for row in rows:
+                slug = (row.external_source_url or "").removeprefix(SOURCE_URL_PREFIX)
+                if slug in RETIRED_MODEL_SLUGS and (row.methodology or "").startswith(
+                    MANAGED_METHODOLOGY_PREFIX
+                ):
+                    self.db.delete(row)
+                    stats.retired += 1
             tagged_paper_ids = {
                 paper_id
                 for (paper_id,) in self.db.query(PaperTask.paper_id)

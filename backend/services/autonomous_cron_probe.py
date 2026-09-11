@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import Counter
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 from typing import Any, Literal
@@ -245,9 +245,15 @@ def _throughput_state(
     data = job.get("db_metrics") or {}
     if definition.evidence_contract.throughput_source == "health_record":
         record_available = bool(
-            work.get("review_record_available") or work.get("monitor_record_available")
+            work.get("review_record_available")
+            or work.get("monitor_record_available")
+            or work.get("operator_record_available")
         )
-        record_status = work.get("review_status") or work.get("monitor_status")
+        record_status = (
+            work.get("review_status")
+            or work.get("monitor_status")
+            or work.get("operator_status")
+        )
         if not record_available:
             return FindingState.UNKNOWN, "throughput health record is unavailable"
         if record_status in {"failed", "degraded"}:
@@ -299,9 +305,15 @@ def _semantic_state(
     if definition.evidence_contract.semantic_source == "health_record":
         work = job.get("work_metrics") or {}
         record_available = bool(
-            work.get("review_record_available") or work.get("monitor_record_available")
+            work.get("review_record_available")
+            or work.get("monitor_record_available")
+            or work.get("operator_record_available")
         )
-        record_status = work.get("review_status") or work.get("monitor_status")
+        record_status = (
+            work.get("review_status")
+            or work.get("monitor_status")
+            or work.get("operator_status")
+        )
         if not record_available:
             return FindingState.UNKNOWN, "semantic health record is unavailable"
         if record_status in {"failed", "degraded"}:
@@ -614,7 +626,7 @@ def build_job_findings(
         operator_url,
         run_url,
     )
-    return (
+    findings = (
         scheduler,
         exit_finding,
         log_finding,
@@ -623,6 +635,20 @@ def build_job_findings(
         throughput_finding,
         semantic_finding,
     )
+    execution = job.get("execution_health") or {}
+    if execution.get("applicable") is False and execution.get("status") == "healthy":
+        return tuple(
+            finding
+            if finding.contract in {"scheduler_execution", "lock_ownership_age"}
+            else replace(
+                finding,
+                state=FindingState.HEALTHY,
+                summary="output is not applicable while the schedule is disabled",
+                evidence={"applicable": False},
+            )
+            for finding in findings
+        )
+    return findings
 
 
 class AutonomousCronProbe:

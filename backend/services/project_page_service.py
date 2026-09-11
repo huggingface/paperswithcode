@@ -17,7 +17,7 @@ from backend.models.database import (
     ProjectPage as DBProjectPage,
     PaperProjectPage as DBPaperProjectPage,
 )
-from backend.models.api import (
+from backend.models.papers import (
     ProjectPage,
     ProjectPages,
     PaperProjectPage,

@@ -17,7 +17,9 @@ _SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class ReleaseVerificationError(RuntimeError):
-    pass
+    def __init__(self, message: str, *, rollback_performed: bool = False) -> None:
+        super().__init__(message)
+        self.rollback_performed = rollback_performed
 
 
 class AutonomousReleaseService:
@@ -76,11 +78,14 @@ class AutonomousReleaseService:
         try:
             self.command_runner(command)
         except (OSError, subprocess.CalledProcessError) as error:
+            rolled_back = False
             if self.deployed_sha(environment) == sha:
                 self.rollback(db, context, environment, sha)
+                rolled_back = True
             self._audit(db, context, "deploy_failed", environment, previous_sha, sha)
             raise ReleaseVerificationError(
-                f"{environment} exact-SHA deployment command failed"
+                f"{environment} exact-SHA deployment command failed",
+                rollback_performed=rolled_back,
             ) from error
         active_sha = self.deployed_sha(environment)
         if active_sha != sha:
@@ -95,7 +100,8 @@ class AutonomousReleaseService:
                     f"{environment} rollback did not restore the previous SHA"
                 )
             raise ReleaseVerificationError(
-                f"{environment} failed exact-SHA release verification"
+                f"{environment} failed exact-SHA release verification",
+                rollback_performed=True,
             )
         self._audit(db, context, "deployment_verified", environment, previous_sha, sha)
 

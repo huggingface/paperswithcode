@@ -1116,7 +1116,7 @@ class TaskService:
         """
         try:
             from backend.models.database import Paper as DBPaper
-            from backend.models.api import Papers
+            from backend.models.papers import Papers
 
             # Get task to verify it exists (try by ID or slug)
             task = None

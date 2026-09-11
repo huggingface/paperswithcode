@@ -261,3 +261,75 @@ def test_sync_adds_one_task_tag_when_model_variants_share_a_paper(monkeypatch):
     assert (stats.created, stats.matched) == (2, 2)
     assert session.query(Evaluation).count() == 2
     assert session.query(PaperTask).count() == 1
+
+
+def _current_reviewed_catalog() -> list[dict]:
+    slugs = (set(tts.MODEL_PAPER_IDENTITIES) - {"st260629"}) | {"step-audio-2.5-tts"}
+    return [
+        *[_model(slug) for slug in sorted(slugs)],
+        *[_model(f"unreviewed-{index}") for index in range(tts.MIN_EXPECTED_MODELS)],
+    ]
+
+
+def test_parse_requires_current_stepaudio_catalog_model():
+    entries = tts.parse_artificial_analysis_tts_leaderboard(
+        _next_html(_current_reviewed_catalog())
+    )
+
+    assert len(entries) == 14
+    assert "st260629" not in {entry.slug for entry in entries}
+    assert "step-audio-2.5-tts" in {entry.slug for entry in entries}
+    assert tts.MODEL_PAPER_IDENTITIES["step-audio-2.5-tts"].arxiv_id == "2605.23463"
+
+
+def test_retired_stepaudio_slug_cannot_replace_current_required_model():
+    models = [
+        model
+        for model in _current_reviewed_catalog()
+        if model["slug"] != "step-audio-2.5-tts"
+    ]
+    models.append(_model("st260629"))
+
+    with pytest.raises(ValueError, match="missing reviewed models.*step-audio-2.5-tts"):
+        tts.parse_artificial_analysis_tts_leaderboard(_next_html(models))
+
+
+@pytest.mark.parametrize("commit", [False, True])
+def test_sync_retires_only_owned_removed_stepaudio_results(monkeypatch, commit):
+    session = _session()
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"step-audio-2.5-tts": aa.PaperIdentity(arxiv_id="2605.23463")},
+    )
+    for name, methodology in (
+        ("Retired managed", tts.MANAGED_METHODOLOGY_PREFIX),
+        ("Manual result", "Manually entered"),
+    ):
+        session.add(
+            Evaluation(
+                paper_id=9,
+                task_id=24,
+                dataset_id=2_300,
+                model_name=name,
+                metrics={tts.METRIC_NAME: 1205.9},
+                best_metric=tts.METRIC_NAME,
+                external_source_url=f"{tts.SOURCE_URL_PREFIX}st260629",
+                methodology=methodology,
+            )
+        )
+    session.commit()
+    stats = tts.ArtificialAnalysisTtsSyncService(session).sync(
+        [
+            tts.ArtificialAnalysisTtsEntry(
+                "step-audio-2.5-tts", "StepAudio 2.5 TTS", 1178.89, False
+            )
+        ],
+        discovery=aa.ArtificialAnalysisDiscovery(papers={"step-audio-2.5-tts": 9}),
+        commit=commit,
+    )
+    names = {row.model_name for row in session.query(Evaluation).all()}
+    assert "Manual result" in names
+    assert ("Retired managed" in names) is not commit
+    assert ("StepAudio 2.5 TTS" in names) is commit
+    assert stats.retired == 1

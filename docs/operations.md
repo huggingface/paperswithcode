@@ -1,5 +1,9 @@
 # Operations & Automation
 
+The global autonomy kill switch, operator controls, alert delivery, budgets,
+acceptance gates, and incident procedures are documented in
+[autonomous operations](autonomous-operations.md).
+
 ## Cron Job Overview
 
 Job implementations live in `.github/workflows/scripts/`, but production never
@@ -560,8 +564,10 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --enable-dispatch
 Scheduled curation has a separate `curation` autonomous operator. Enabling or
 disabling the submission reviewer does not grant or revoke curation writes.
 Before enabling scheduled dispatch, the curation operator must be enabled from
-the admin autonomous-operations control plane; the dispatcher performs the same
-policy check before allocating a remote job and pauses with
+the admin autonomous-operations control plane after recording acceptance
+evidence for `dispatcher_preflight`, `capability_isolation`,
+`callback_idempotency`, and `paused_callback_apply`; the dispatcher performs the
+same policy check before allocating a remote job and pauses with
 `autonomous_policy_denied` if it would be rejected. Pausing scheduled dispatch
 does not disable the curation operator, so callbacks from jobs already in flight
 can finish. Use the global manual-mode control or disable the curation operator
@@ -582,6 +588,19 @@ admin-triggered jobs:
 ```bash
 sudo pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-uuid>
 ```
+
+To launch one explicit queued daily or trending canary while normal dispatch
+remains paused by an explicit operator action, use its durable job UUID. This
+command rechecks the token guardrail and shared capacity, dispatches only the
+selected row, and never resumes the scheduler:
+
+```bash
+sudo pwc-cron enqueue_hf_daily_paper_curation --canary-job <job-uuid>
+```
+
+For a terminal daily job, first use `--retry-job` and then pass the returned
+queued retry UUID to `--canary-job`. Admin jobs and non-queued rows are rejected.
+The command exits nonzero if the remote job does not reach the running state.
 
 Replay a saved proposal through the currently deployed callback validators
 without applying writes. The command reports current policy validity and

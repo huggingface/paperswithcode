@@ -18,6 +18,7 @@ from backend.models.database import (
     ChatSandboxLease,
     ChatSandboxPool,
     ChatSession,
+    ChatTurnLatency,
 )
 from backend.scripts.manage_chat_sandbox_circuit import (
     operator_identity,
@@ -50,6 +51,7 @@ def factory():
         ChatSandboxBudgetState.__table__,
         ChatSandboxComputeInterval.__table__,
         ChatSandboxCircuitEvent.__table__,
+        ChatTurnLatency.__table__,
     ):
         table.create(engine, checkfirst=True)
     return sessionmaker(engine, expire_on_commit=False)
@@ -169,6 +171,64 @@ def test_refresh_reconciles_open_interval_for_terminal_lease():
         assert interval.reconciliation_state == "confirmed"
         assert interval.reserved_microusd == 0
         assert state.estimated_accrued_microusd == 90 * service.cost_per_second()
+
+
+def test_exact_terminal_lease_reconciliation_does_not_touch_other_sessions():
+    sessions = factory()
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+    terminal_at = start + timedelta(seconds=90)
+    targeted_session_id = uuid.uuid4()
+    unrelated_session_id = uuid.uuid4()
+    configured = settings()
+    interval_ids = {}
+    with sessions() as db, db.begin():
+        leases = []
+        for label, session_id in (
+            ("targeted", targeted_session_id),
+            ("unrelated", unrelated_session_id),
+        ):
+            db.add(
+                ChatSession(
+                    id=session_id,
+                    hf_user_id=f"{label}-owner",
+                    hf_username=f"{label}-owner",
+                    selected_model="google/gemma-4-31B-it",
+                    execution_backend="modal_cli",
+                )
+            )
+            service = ChatSandboxSpendService(db, configured)
+            interval_id = service.reserve_interval(
+                origin="blank_pool", worker_generation=label, now=start
+            )
+            interval_ids[label] = interval_id
+            service.provider_created(interval_id, f"sb-{label}", start)
+            service.claim(f"sb-{label}", session_id, start + timedelta(seconds=10))
+            leases.append(
+                ChatSandboxLease(
+                    chat_session_id=session_id,
+                    modal_sandbox_id=None,
+                    app_release_id=configured.release_id,
+                    image_version=configured.chat_modal_image_version,
+                    worker_contract_version=configured.chat_worker_contract_version,
+                    worker_generation=label,
+                    state="failed",
+                    last_activity_at=terminal_at,
+                    updated_at=terminal_at,
+                )
+            )
+        db.add_all(leases)
+
+    with sessions() as db, db.begin():
+        settled = ChatSandboxSpendService(db, configured).reconcile_terminal_sessions(
+            (targeted_session_id,), now=start + timedelta(minutes=2)
+        )
+        targeted = db.get(ChatSandboxComputeInterval, interval_ids["targeted"])
+        unrelated = db.get(ChatSandboxComputeInterval, interval_ids["unrelated"])
+
+    assert settled == 1
+    assert targeted.terminal_at.replace(tzinfo=UTC) == terminal_at
+    assert targeted.terminal_reason == "lease_terminal_reconciled"
+    assert unrelated.terminal_at is None
 
 
 def test_refresh_reconciles_interval_superseded_by_later_session_worker():

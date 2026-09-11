@@ -9,10 +9,18 @@ from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
 from backend.models.api import (
+    AutonomousAcceptanceEvidenceRequest,
+    AutonomousAcceptanceEvidenceResponse,
+    AutonomousAcceptanceReadinessResponse,
     AutonomousBaselineRequest,
     AutonomousManualModeRequest,
     AutonomousOperationsResponse,
     AutonomousOperatorStateRequest,
+)
+from backend.services.autonomous_acceptance_service import (
+    AcceptanceNotReady,
+    AcceptanceReadiness,
+    AutonomousAcceptanceService,
 )
 from backend.services.autonomous_operations_repository import (
     AutonomousOperationsRepository,
@@ -38,6 +46,17 @@ def _conflict(db: Session, error: AutonomousStateConflict) -> None:
         status_code=409,
         detail={"code": "stale_revision", "message": str(error)},
     ) from error
+
+
+def _readiness_payload(readiness: AcceptanceReadiness) -> dict[str, object]:
+    return {
+        "operator": readiness.operator.value,
+        "ready": readiness.ready,
+        "passed_gates": list(readiness.passed_gates),
+        "missing_gates": list(readiness.missing_gates),
+        "shadow_days": readiness.shadow_days,
+        "required_shadow_days": readiness.required_shadow_days,
+    }
 
 
 @router.get("", response_model=AutonomousOperationsResponse)
@@ -80,8 +99,9 @@ def set_operator_state(
     db: Session = Depends(get_database_session),
 ) -> AutonomousOperationsResponse:
     repository = AutonomousOperationsRepository()
+    acceptance = AutonomousAcceptanceService(repository)
     try:
-        repository.set_operator_enabled(
+        acceptance.set_operator_enabled(
             db,
             operator=operator,
             enabled=request.enabled,
@@ -92,9 +112,61 @@ def set_operator_state(
         db.commit()
     except AutonomousStateConflict as error:
         _conflict(db, error)
+    except AcceptanceNotReady as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail={"code": "acceptance_incomplete", "message": str(error)},
+        ) from error
     return AutonomousOperationsResponse.model_validate(
         repository.get_admin_snapshot(db)
     )
+
+
+@router.post(
+    "/operators/{operator}/acceptance-evidence",
+    response_model=AutonomousAcceptanceEvidenceResponse,
+)
+def record_acceptance_evidence(
+    operator: Operator,
+    request: AutonomousAcceptanceEvidenceRequest,
+    admin: dict = Depends(require_admin),
+    db: Session = Depends(get_database_session),
+) -> dict[str, object]:
+    service = AutonomousAcceptanceService()
+    try:
+        evidence_id = service.record_evidence(
+            db,
+            operator=operator,
+            gate_code=request.gate_code,
+            evidence_digest=request.evidence_digest,
+            actor=_actor(admin),
+            occurred_at=datetime.now(UTC),
+        )
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "invalid_acceptance_gate", "message": str(error)},
+        ) from error
+    db.commit()
+    readiness = service.readiness(db, operator)
+    return {
+        "evidence_id": str(evidence_id),
+        **_readiness_payload(readiness),
+    }
+
+
+@router.get(
+    "/operators/{operator}/acceptance-readiness",
+    response_model=AutonomousAcceptanceReadinessResponse,
+)
+def get_acceptance_readiness(
+    operator: Operator,
+    _admin: dict = Depends(require_admin),
+    db: Session = Depends(get_database_session),
+) -> dict[str, object]:
+    return _readiness_payload(AutonomousAcceptanceService().readiness(db, operator))
 
 
 @router.post("/chat-baseline", response_model=AutonomousOperationsResponse)

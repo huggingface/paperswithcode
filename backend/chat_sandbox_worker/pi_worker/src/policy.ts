@@ -6,27 +6,35 @@ import {
   excalidrawElementsTooLarge,
   serializeExcalidrawElements,
 } from "./mcp_app_registry.js";
+import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_command.js";
 
 const ANSWER_NOW =
   "Execution limit reached. Do not call more tools. Answer now from the evidence already gathered.";
 const SEARCH = /(?:^|[;&|()\n]\s*)(?:pwc|s2)\s+search(?:\s|$)/iu;
 const ANSI = /(?:\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~])/gu;
-const GUIDES = new Set([
+const INLINED_CLI_GUIDES = new Set([
   "/opt/pwc/PWC_CLI_SKILL.md",
   "/opt/pwc/HF_CLI_SKILL.md",
   "/opt/pwc/S2_CLI_SKILL.md",
+]);
+const READABLE_GUIDES = new Set([
   "/opt/posterly/SKILL.md",
   "/opt/pwc/POSTERLY_PUBLISH.md",
   "/opt/pwc/PAPER_AUTHORING.md",
 ]);
 const PAPER_PREFIX = "@@PWC_PAPER@@";
 
-function isPaperActivation(value: string): boolean {
+function isPaperOperation(value: unknown): boolean {
+  return value === "create" || value === "begin-edit" || value === "draft" || value === "repair";
+}
+
+function isPaperActivation(value: string, expectedOperation: PaperReceiptOperation): boolean {
   const line = value.split(/\r?\n/u).find((item) => item.startsWith(PAPER_PREFIX));
   if (!line || Buffer.byteLength(line) > 16_384) return false;
   try {
     const receipt = JSON.parse(line.slice(PAPER_PREFIX.length)) as Record<string, unknown>;
-    return (receipt.operation === "create" || receipt.operation === "begin-edit")
+    return receipt.operation === expectedOperation
+      && isPaperOperation(receipt.operation)
       && receipt.activated === true
       && receipt.paper !== null
       && typeof receipt.paper === "object";
@@ -92,7 +100,7 @@ export class PolicyController {
   posterMode = false;
   paperActivated = false;
   private active = new Set<string>();
-  private paperCommandIds = new Set<string>();
+  private paperCommandIds = new Map<string, PaperReceiptOperation>();
 
   constructor(readonly options: PolicyOptions) {}
 
@@ -163,7 +171,13 @@ export class PolicyController {
     if (name === "read") {
       const requested = typeof input.path === "string" ? input.path : "";
       const resolved = path.resolve("/workspace", requested);
-      if (!inside(resolved, "/workspace") && !GUIDES.has(resolved)) {
+      if (INLINED_CLI_GUIDES.has(resolved)) {
+        return this.deny(
+          id,
+          "The pwc, s2, and restricted hf CLI skills are already included verbatim in your system prompt. Read that text instead and run the CLI directly.",
+        );
+      }
+      if (!inside(resolved, "/workspace") && !READABLE_GUIDES.has(resolved)) {
         return this.deny(id, "Read may only access /workspace or the approved CLI guides.");
       }
     }
@@ -174,9 +188,12 @@ export class PolicyController {
         this.posterMode ? (this.options.posterlyTimeoutSeconds ?? 600) : this.paperActivated ? (this.options.paperTimeoutSeconds ?? 600) : this.options.bashTimeoutSeconds,
         typeof input.timeout === "number" ? input.timeout : (this.posterMode ? (this.options.posterlyTimeoutSeconds ?? 600) : this.paperActivated ? (this.options.paperTimeoutSeconds ?? 600) : this.options.bashTimeoutSeconds),
       );
-      if (command.trimStart().startsWith("pwc-paper ")) {
+      const paperCommand = parsePwcPaperCommand(command);
+      if (paperCommand) {
         input.timeout = Math.max(Number(input.timeout), 130);
-        this.paperCommandIds.add(id);
+        if (paperCommand.receiptOperation) {
+          this.paperCommandIds.set(id, paperCommand.receiptOperation);
+        }
       }
       if (SEARCH.test(command)) {
         const maximumSearches = this.paperActivated ? (this.options.paperMaximumDirectSearches ?? 8) : this.options.maximumDirectSearches;
@@ -202,7 +219,11 @@ export class PolicyController {
     return undefined;
   }
 
-  finish(id: string, content: unknown): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
+  finish(
+    id: string,
+    content: unknown,
+    isError = false,
+  ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
     this.active.delete(id);
     const raw = Array.isArray(content)
       ? content
@@ -220,7 +241,9 @@ export class PolicyController {
     const remaining = Math.max(0, maximumTurnOutputBytes - this.outputBytes);
     const bounded = clean(raw, Math.min(remaining, maximumResultBytes));
     this.outputBytes += Buffer.byteLength(bounded.text);
-    if (this.paperCommandIds.delete(id) && isPaperActivation(bounded.text)) {
+    const receiptOperation = this.paperCommandIds.get(id);
+    this.paperCommandIds.delete(id);
+    if (!isError && receiptOperation && isPaperActivation(bounded.text, receiptOperation)) {
       this.paperActivated = true;
     }
     return {
@@ -237,7 +260,7 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
       const reason = policy.authorize(event.toolCallId, event.toolName, event.input as Record<string, unknown>);
       return reason ? { block: true, reason } : undefined;
     });
-    pi.on("tool_result", (event) => policy.finish(event.toolCallId, event.content));
+    pi.on("tool_result", (event) => policy.finish(event.toolCallId, event.content, event.isError));
   };
 }
 

@@ -20,6 +20,7 @@ import {
 interface ExternalTurnWorker {
   run(run: RunTurn): Promise<void>;
   cancel(requestId: string): Promise<void>;
+  dispose(): Promise<void>;
 }
 
 type TurnEmitter = (requestId: string, event: PwCEvent) => void;
@@ -169,7 +170,22 @@ export function createExternalWorkerServer(options: ExternalWorkerServerOptions)
         ) {
           throw new Error("invalid_worker_generation");
         }
-        workerGeneration = value.worker_generation as number;
+        const claimed = value.worker_generation as number;
+        // Draining is otherwise terminal for this process, so a supervisor that
+        // restarts after a drain can never register and systemd retries it
+        // forever. An idle drained worker is scrap that a strictly newer lease
+        // owner may reclaim; the higher generation still fences the old owner.
+        if (state === "draining") {
+          if (
+            activeSessions() > 0
+            || workerGeneration === null
+            || claimed <= workerGeneration
+          ) {
+            throw new Error("invalid_worker_generation");
+          }
+          state = "ready";
+        }
+        workerGeneration = claimed;
         json(response, 200, status());
       } catch {
         json(response, 400, { code: "invalid_worker_claim" });
@@ -340,6 +356,7 @@ export function createExternalWorkerServer(options: ExternalWorkerServerOptions)
         candidate = turns.start(run.request_id, run.turnClaim, socket);
         const worker = options.createTurnWorker!(candidate.emit, run, candidate.channel);
         candidate.setCancelWorker(() => worker.cancel(run.request_id));
+        candidate.setDisposeWorker(() => worker.dispose());
         const running = worker.run(run);
         retained = candidate;
         operationCounters.model_calls += 1;

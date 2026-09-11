@@ -16,6 +16,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 import deploy.cli as deploy_cli
 import deploy.configure_host_env as configure_host_env
+import deploy.configure_db_roles as configure_db_roles
 import deploy.configure_production_chat_application_cap as configure_production_chat_application_cap
 import deploy.configure_production_chat_budget as configure_production_chat_budget
 import deploy.configure_role_allowlists as configure_role_allowlists
@@ -157,7 +158,121 @@ def test_cron_wrapper_grants_journal_access_only_to_chat_monitor():
 
     assert 'if [ "$1" = "monitor_chat_operational_alerts" ]' in wrapper
     assert wrapper.count("SupplementaryGroups=systemd-journal") == 1
-    assert wrapper.count("cron_launcher.py") == 2
+    assert wrapper.count("cron_launcher.py") == 3
+
+
+def test_cron_wrapper_isolates_source_repairable_trending_jobs():
+    wrapper = cron_wrapper()
+    restricted_branch = wrapper.split('case "$1" in', 1)[1].split("esac", 1)[0]
+
+    assert "calculate_trending_scores|calculate_paper_trending_scores)" in wrapper
+    assert "--uid=pwc-cron-trending --gid=pwc-cron-trending" in wrapper
+    assert "EnvironmentFile=/etc/paperswithcode/trending-cron.env" in restricted_branch
+    assert "production.env" not in restricted_branch
+    assert "production-cron.env" not in restricted_branch
+    assert "SupplementaryGroups" not in restricted_branch
+
+
+def test_restricted_trending_environment_drops_broad_credentials():
+    source = {
+        "PATH": "/usr/bin",
+        "LANG": "C.UTF-8",
+        "PWC_DB_HOST": "db",
+        "PWC_DB_PORT": "5432",
+        "PWC_DB_NAME": "paperswithcode",
+        "PWC_DB_USER": "paperswithcode_user",
+        "PWC_DB_PASSWORD": "broad-secret",
+        "PWC_TRENDING_DB_PASSWORD": "restricted-secret",
+        "PWC_TRENDING_PIN_ARXIV_IDS": "2601.00001:72",
+        "PWC_GITHUB_TOKEN": "must-not-leak",
+        "OPENAI_API_KEY": "must-not-leak",
+        "PWC_CHAT_LANGFUSE_SECRET_KEY": "must-not-leak",
+    }
+
+    environment = cron_launcher.restricted_trending_environment(
+        source,
+        release_id="a" * 12 + "-production",
+    )
+
+    assert environment["PWC_DB_USER"] == "pwc_cron_trending"
+    assert environment["PWC_DB_PASSWORD"] == "restricted-secret"
+    assert environment["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.00001:72"
+    assert "PWC_TRENDING_DB_PASSWORD" not in environment
+    assert "PWC_GITHUB_TOKEN" not in environment
+    assert "OPENAI_API_KEY" not in environment
+    assert "PWC_CHAT_LANGFUSE_SECRET_KEY" not in environment
+    assert set(environment) <= cron_launcher.RESTRICTED_TRENDING_ENV_KEYS
+    assert environment["PWC_CRON_LOG_DIR"] == str(
+        cron_launcher.RESTRICTED_TRENDING_LOG_DIR
+    )
+    assert environment["PWC_CRON_LOCK_DIR"] == str(
+        cron_launcher.RESTRICTED_TRENDING_LOCK_DIR
+    )
+
+
+def test_restricted_trending_environment_fails_closed_without_role_password():
+    with pytest.raises(RuntimeError, match="PWC_TRENDING_DB_PASSWORD"):
+        cron_launcher.restricted_trending_environment(
+            {
+                "PWC_DB_HOST": "db",
+                "PWC_DB_PORT": "5432",
+                "PWC_DB_NAME": "paperswithcode",
+            },
+            release_id="a" * 12 + "-production",
+        )
+
+
+def test_trending_database_role_has_only_scoring_capabilities():
+    sql = configure_db_roles.trending_role_sql(
+        database="paperswithcode",
+        password="restricted-secret",
+    )
+
+    assert "NOINHERIT" in sql
+    assert "pg_auth_members" in sql
+    assert "EXECUTE 'REVOKE ' || granted_role" in sql
+    assert "trending role retains a role membership" in sql
+    assert "REVOKE ALL ON ALL TABLES IN SCHEMA public" in sql
+    assert "REVOKE CREATE ON SCHEMA public" in sql
+    assert (
+        "GRANT SELECT ON papers, paper_repositories, repositories, "
+        "repository_star_history, paper_hf_artifacts, hf_artifacts"
+    ) in sql
+    assert (
+        "GRANT UPDATE (trending_score, trending_score_updated_at, updated_at) "
+        "ON repositories"
+    ) in sql
+    assert (
+        "GRANT UPDATE (trending_score, github_trending_component, "
+        "hf_trending_component, trending_score_updated_at, updated_at) ON papers"
+    ) in sql
+    for taxonomy_table in ("tasks", "methods", "datasets", "metrics", "conferences"):
+        assert f"'{taxonomy_table}'" in sql
+    assert "has_table_privilege(" in sql
+    assert "taxonomy_table" in sql
+
+
+def test_trending_environment_rotation_preserves_existing_role_password():
+    current = {
+        "PWC_TRENDING_DB_PASSWORD": "PWC_TRENDING_DB_PASSWORD=stable-secret",
+        "PWC_TRENDING_PIN_ARXIV_IDS": "PWC_TRENDING_PIN_ARXIV_IDS=2601.1:72",
+    }
+    password = configure_host_env.existing_or_random(
+        current, "PWC_TRENDING_DB_PASSWORD"
+    )
+
+    values = configure_host_env.trending_cron_values(
+        {
+            "PWC_DB_HOST": "PWC_DB_HOST=localhost",
+            "PWC_DB_NAME": "PWC_DB_NAME=paperswithcode_hf",
+            "PWC_DB_PORT": "PWC_DB_PORT=5432",
+        },
+        current,
+        password=password,
+    )
+
+    assert values["PWC_TRENDING_DB_PASSWORD"] == "stable-secret"
+    assert values["PWC_TRENDING_PIN_ARXIV_IDS"] == "2601.1:72"
 
 
 @pytest.mark.parametrize(
@@ -231,6 +346,16 @@ def test_chat_alert_timer_uses_only_the_allowlisted_cron_interface():
     assert "backend.scripts" not in service
     assert "OnUnitActiveSec=1m" in timer
     assert "WantedBy=timers.target" in timer
+
+
+def test_chat_synthetic_timer_uses_the_bounded_allowlisted_job():
+    systemd = Path(__file__).resolve().parents[2] / "deploy" / "systemd" / "cron"
+    service = (systemd / "pwc-cron-run-chat-synthetic-probe.service").read_text()
+    timer = (systemd / "pwc-cron-run-chat-synthetic-probe.timer").read_text()
+
+    assert "pwc-cron-throttled run_chat_synthetic_probe" in service
+    assert "OnCalendar=*-*-* *:*:00" in timer
+    assert "Persistent=true" in timer
 
 
 def test_production_sha_resolves_from_bare_main_ref(
@@ -587,49 +712,68 @@ def test_staging_launcher_disables_only_posterly_artifact_generation(
         assert os.environ["PWC_CHAT_POSTERLY_ENABLED"] == "false"
 
 
-@pytest.mark.parametrize(
-    ("slot", "worker_id", "url"),
-    (
-        ("blue", "staging-blue", "http://127.0.0.1:8766"),
-        ("green", "staging-green", "http://127.0.0.1:8767"),
-    ),
-)
-def test_staging_slot_launcher_binds_external_pi_loopback_identity(
-    monkeypatch: pytest.MonkeyPatch, slot: str, worker_id: str, url: str
+@pytest.mark.parametrize("slot", ("blue", "green"))
+def test_staging_slot_launcher_binds_external_pi_loopback_fleet(
+    monkeypatch: pytest.MonkeyPatch, slot: str
 ):
     for key in (
         "PWC_CHAT_EXTERNAL_PI_WORKER_ID",
         "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
         "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
         "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
     ):
         monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
 
     slot_launcher.configure_external_pi_slot("staging", slot)
 
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == worker_id
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == url
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert len(endpoints) == 8
+    assert [item["worker_id"] for item in endpoints] == [
+        f"staging-{slot}-{index:02d}" for index in range(8)
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
     assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
         "external-pi-v1"
     )
-    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
-def test_production_slot_launcher_does_not_bind_external_pi_worker(
+def test_production_slot_launcher_binds_isolated_external_pi_worker(
     monkeypatch: pytest.MonkeyPatch,
 ):
-    preserved = {
-        "PWC_CHAT_EXTERNAL_PI_WORKER_ID": "preserved-id",
-        "PWC_CHAT_EXTERNAL_PI_WORKER_URL": "preserved-url",
-        "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "preserved-contract",
-        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "preserved-capacity",
-    }
-    for key, value in preserved.items():
-        monkeypatch.setenv(key, value)
-
+    for key in (
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ID",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_URL",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
     slot_launcher.configure_external_pi_slot("production", "blue")
 
-    assert {key: os.environ[key] for key in preserved} == preserved
+    endpoints = json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])
+    assert [item["base_url"] for item in endpoints] == [
+        "http://127.0.0.1:8830",
+        "http://127.0.0.1:8831",
+        "http://127.0.0.1:8832",
+        "http://127.0.0.1:8833",
+        "http://127.0.0.1:8846",
+        "http://127.0.0.1:8847",
+        "http://127.0.0.1:8848",
+        "http://127.0.0.1:8849",
+    ]
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ID"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_URL"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == ""
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION"] == (
+        "external-pi-v1"
+    )
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "4"
 
 
 def test_production_chat_accepts_bounded_hf_catalog_policy(tmp_path: Path):
@@ -2303,7 +2447,7 @@ def test_chat_descriptor_is_extracted_from_selected_source():
     assert dormant["system_prompt_sha256"] == descriptor["system_prompt_sha256"]
     production = _chat_descriptor_from_source(source, "production", chat_enabled=True)
     assert production["modal_image_version"] == PRODUCTION_MODAL_IMAGE_ID
-    assert production["worker_contract_version"] == "102"
+    assert production["worker_contract_version"] == "104"
     assert production["enabled"] is True
     assert production["database_contract_version"] == 2
     assert production["default_agent_harness"] == "pi"
@@ -2521,6 +2665,33 @@ def test_production_chat_activation_requires_enabled_operational_monitor(
     (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=false\n")
     require_production_chat_monitor("production")
     assert observed == []
+
+
+def test_production_chat_activation_requires_enabled_synthetic_probe_timer(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(deploy_cli, "CONFIG_ROOT", tmp_path)
+    (tmp_path / "production.env").write_text("PWC_CHAT_ENABLED=true\n")
+    observed = []
+
+    def fake_run(command, **_kwargs):
+        observed.append(command)
+        return SimpleNamespace(returncode=0 if len(observed) == 1 else 1)
+
+    monkeypatch.setattr(deploy_cli.subprocess, "run", fake_run)
+
+    with pytest.raises(deploy_cli.DeployError, match="synthetic chat probe"):
+        require_production_chat_monitor("production")
+
+    assert observed == [
+        ["systemctl", "is-enabled", "--quiet", "pwc-chat-alert-monitor.timer"],
+        [
+            "systemctl",
+            "is-enabled",
+            "--quiet",
+            "pwc-cron-run-chat-synthetic-probe.timer",
+        ],
+    ]
 
 
 def test_production_chat_activation_requires_protected_environment_switch(
@@ -3762,11 +3933,11 @@ def test_qualified_staging_capacity_keeps_one_warm_sandbox():
 
 
 @pytest.mark.parametrize(
-    ("environment", "active_turn_limit"),
-    [("staging", "2"), ("production", "1")],
+    ("environment", "active_turn_limit", "external_worker_limit"),
+    [("staging", "2", "32"), ("production", "1", "8")],
 )
 def test_environment_examples_keep_durable_dispatch_disabled_and_current_safe(
-    environment, active_turn_limit
+    environment, active_turn_limit, external_worker_limit
 ):
     values = {
         key: value
@@ -3779,7 +3950,7 @@ def test_environment_examples_keep_durable_dispatch_disabled_and_current_safe(
 
     assert values["PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED"] == "false"
     assert values["PWC_CHAT_MAX_CONCURRENCY"] == active_turn_limit
-    assert values["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert values["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == external_worker_limit
     assert values["PWC_CHAT_EXTERNAL_PI_HEARTBEAT_SECONDS"] == "10"
     assert values["PWC_CHAT_EXTERNAL_PI_LEASE_SECONDS"] == "30"
 
@@ -3821,6 +3992,497 @@ def test_staging_chat_durable_dispatch_toggle_is_single_key(enabled: bool):
     assert configure_host_env.staging_chat_durable_dispatch_values(enabled=enabled) == {
         "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": "true" if enabled else "false"
     }
+
+
+def test_production_durable_external_values_enable_32_with_isolated_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "p" * 64
+    )
+    values = configure_host_env.production_durable_external_values(
+        {
+            "PWC_CHAT_PUBLIC_ADMISSION_ENABLED": "PWC_CHAT_PUBLIC_ADMISSION_ENABLED=true",
+            "PWC_CHAT_SANDBOX_ADMISSION_ENABLED": "PWC_CHAT_SANDBOX_ADMISSION_ENABLED=true",
+        },
+        enabled=True,
+    )
+
+    assert values["PWC_CHAT_MAX_CONCURRENCY"] == "32"
+    assert values["PWC_CHAT_USER_MAX_CONCURRENCY"] == "1"
+    assert values["PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED"] == "true"
+    assert values["PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED"] == "true"
+    assert values["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "32"
+    assert values["PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN"] == "p" * 64
+    assert values["PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY"] == "32"
+    assert values["PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY"] == "1"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS"] == "512"
+    assert values["PWC_CHAT_REMOTE_BASH_ENABLED"] == "true"
+    assert values["PWC_CHAT_REMOTE_READ_ENABLED"] == "true"
+
+
+def test_production_durable_external_values_preserve_token_on_disable():
+    values = configure_host_env.production_durable_external_values(
+        {
+            "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": (
+                "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=" + "k" * 64
+            )
+        },
+        enabled=False,
+    )
+
+    assert "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN" not in values
+    assert values["PWC_CHAT_MAX_CONCURRENCY"] == "2"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY"] == "4"
+    assert values["PWC_CHAT_OPENAI_USER_MAX_CONCURRENCY"] == "2"
+    assert values["PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS"] == "80"
+    assert values["PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED"] == "false"
+    assert values["PWC_CHAT_BLANK_POOL_ENABLED"] == "true"
+    assert values["PWC_CHAT_PI_PREWARM_ENABLED"] == "true"
+
+
+def _staging_durable_external_qualification_baseline() -> dict[str, str]:
+    return {
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false"
+        ),
+        "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_SHADOW_ENABLED=true"
+        ),
+        "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED": (
+            "PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED=true"
+        ),
+        "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED": (
+            "PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED=true"
+        ),
+        "PWC_CHAT_MAX_CONCURRENCY": "PWC_CHAT_MAX_CONCURRENCY=2",
+        "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": (
+            "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY=4"
+        ),
+        "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": ("PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3"),
+        "PWC_CHAT_BLANK_POOL_ENABLED": "PWC_CHAT_BLANK_POOL_ENABLED=true",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "PWC_CHAT_PI_PREWARM_ENABLED=true",
+    }
+
+
+def test_staging_durable_external_qualification_profile_is_exact_and_reversible():
+    baseline = _staging_durable_external_qualification_baseline()
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+    qualification_admin_token = enabled.pop("PWC_ADMIN_API_TOKEN")
+    assert len(qualification_admin_token) >= 32
+    assert enabled == {
+        "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "true",
+        "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "durable-external-pi-v1",
+        "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "true",
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "true",
+        "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "sandbox-executor-v1",
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "true",
+        "PWC_CHAT_REMOTE_BASH_ENABLED": "true",
+        "PWC_CHAT_REMOTE_READ_ENABLED": "true",
+        "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "true",
+        "PWC_CHAT_BLANK_POOL_ENABLED": "false",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "false",
+        "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
+    }
+
+    active = configure_host_env.assign(baseline, enabled)
+    disabled = configure_host_env.staging_durable_external_qualification_values(
+        active, enabled=False
+    )
+    assert disabled == {
+        "PWC_CHAT_EXTERNAL_PI_READY_REGISTRY_ENABLED": "false",
+        "PWC_CHAT_EXTERNAL_PI_RUNTIME_CONTRACT_VERSION": "",
+        "PWC_CHAT_TURN_EVENT_JOURNAL_SCHEMA_ENABLED": "false",
+        "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED": "false",
+        "PWC_CHAT_SANDBOX_EXECUTOR_CONTRACT_VERSION": "",
+        "PWC_CHAT_REMOTE_WORKSPACE_TOOLS_ENABLED": "false",
+        "PWC_CHAT_REMOTE_BASH_ENABLED": "false",
+        "PWC_CHAT_REMOTE_READ_ENABLED": "false",
+        "PWC_CHAT_LAZY_WORKSPACE_ENABLED": "false",
+        "PWC_CHAT_BLANK_POOL_ENABLED": "true",
+        "PWC_CHAT_PI_PREWARM_ENABLED": "true",
+        "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
+        "PWC_ADMIN_API_TOKEN": "",
+    }
+
+
+def test_staging_durable_external_qualification_accepts_implicit_openai_default():
+    baseline = _staging_durable_external_qualification_baseline()
+    baseline.pop("PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY")
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+
+    assert enabled["PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY"] == "32"
+
+
+def test_staging_durable_external_qualification_installs_scoped_admin_token(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    baseline = _staging_durable_external_qualification_baseline()
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
+
+    enabled = configure_host_env.staging_durable_external_qualification_values(
+        baseline, enabled=True
+    )
+
+    assert enabled["PWC_ADMIN_API_TOKEN"] == "q" * 64
+    active = configure_host_env.assign(baseline, enabled)
+    disabled = configure_host_env.staging_durable_external_qualification_values(
+        active, enabled=False
+    )
+    assert disabled["PWC_ADMIN_API_TOKEN"] == ""
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    (
+        ("PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED", "true"),
+        ("PWC_CHAT_MAX_CONCURRENCY", "32"),
+        ("PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY", "8"),
+        ("PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP", "16"),
+        ("PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED", "false"),
+        ("PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED", "false"),
+        ("PWC_CHAT_REMOTE_BASH_ENABLED", "true"),
+    ),
+)
+def test_staging_durable_external_qualification_refuses_baseline_drift(key, value):
+    baseline = _staging_durable_external_qualification_baseline()
+    baseline[key] = f"{key}={value}"
+
+    with pytest.raises(ValueError, match="qualification baseline"):
+        configure_host_env.staging_durable_external_qualification_values(
+            baseline, enabled=True
+        )
+
+
+@pytest.mark.parametrize("enabled", [True, False])
+def test_staging_durable_external_qualification_mode_is_atomic_and_staging_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    enabled: bool,
+):
+    monkeypatch.setattr(
+        configure_host_env.secrets, "token_urlsafe", lambda _size: "q" * 64
+    )
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    baseline = _staging_durable_external_qualification_baseline()
+    current = (
+        baseline
+        if enabled
+        else configure_host_env.assign(
+            baseline,
+            configure_host_env.staging_durable_external_qualification_values(
+                baseline, enabled=True
+            ),
+        )
+    )
+    staging_path = config_root / "staging.env"
+    staging_path.write_text(
+        "".join(f"{current[key]}\n" for key in sorted(current)), encoding="utf-8"
+    )
+    production_path = config_root / "production.env"
+    production_bytes = b"PRODUCTION=untouched\n"
+    production_path.write_bytes(production_bytes)
+    written = {}
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_env",
+        lambda path, lines, group: written.update(
+            {"path": path, "lines": lines, "group": group}
+        ),
+    )
+    action = "enable" if enabled else "disable"
+    confirmation = (
+        "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+        if enabled
+        else "DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION"
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            f"--staging-durable-external-qualification-{action}-only",
+            "--confirm",
+            confirmation,
+        ],
+    )
+
+    assert configure_host_env.main() == 0
+    assert written["path"] == staging_path
+    assert written["group"] == "pwc-staging"
+    assert production_path.read_bytes() == production_bytes
+    expected = configure_host_env.staging_durable_external_qualification_values(
+        current, enabled=enabled
+    )
+    assert {
+        key: configure_host_env.decoded_value(written["lines"][key]) for key in expected
+    } == expected
+    assert capsys.readouterr().out == (
+        f"{'enabled' if enabled else 'disabled'} staging durable external "
+        "qualification profile; no service was restarted\n"
+    )
+
+
+@pytest.mark.parametrize(
+    "extra_args",
+    (
+        (),
+        ("--confirm", "DEPLOY_PRODUCTION"),
+        (
+            "--staging-chat-capacity-only",
+            "--confirm",
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION",
+        ),
+        (
+            "--staging-durable-external-qualification-disable-only",
+            "--confirm",
+            "ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION",
+        ),
+    ),
+)
+def test_staging_durable_external_qualification_requires_exact_confirmation_and_runs_alone(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    extra_args: tuple[str, ...],
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    staging_path = config_root / "staging.env"
+    staging_path.write_text("KEEP=value\n", encoding="utf-8")
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-durable-external-qualification-enable-only",
+            *extra_args,
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        configure_host_env.main()
+    assert staging_path.read_text(encoding="utf-8") == "KEEP=value\n"
+    assert "staging durable external qualification" in capsys.readouterr().err
+
+
+def _active_staging_release(tmp_path: Path, release_id: str) -> Path:
+    app_root = tmp_path / "app"
+    release = app_root / "releases" / release_id
+    release.mkdir(parents=True)
+    sha = release_id.removesuffix("-staging") + "a" * 28
+    (release / "release.json").write_text(
+        json.dumps({"git_sha": sha, "release_id": release_id}), encoding="utf-8"
+    )
+    environment = app_root / "environments" / "staging"
+    environment.mkdir(parents=True)
+    (environment / "current").symlink_to(release)
+    return app_root
+
+
+def test_staging_modal_rate_evidence_is_exact_release_bound_and_has_no_default(
+    tmp_path: Path,
+):
+    release_id = "a" * 12 + "-staging"
+    app_root = _active_staging_release(tmp_path, release_id)
+
+    assert configure_host_env.staging_modal_rate_evidence(
+        app_root=app_root,
+        release_id=release_id,
+        microusd_per_second=53,
+    ) == {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": "53",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": release_id,
+    }
+    with pytest.raises(TypeError):
+        configure_host_env.staging_modal_rate_evidence(
+            app_root=app_root,
+            release_id=release_id,
+        )
+    with pytest.raises(ValueError, match="active immutable staging release"):
+        configure_host_env.staging_modal_rate_evidence(
+            app_root=app_root,
+            release_id="b" * 12 + "-staging",
+            microusd_per_second=53,
+        )
+
+
+def test_write_staging_modal_rate_evidence_is_atomic_root_only_and_bounded(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    target = tmp_path / "staging-modal-rate-evidence.json"
+    ownership = []
+    monkeypatch.setattr(
+        configure_host_env.os,
+        "chown",
+        lambda path, uid, gid: ownership.append((path, uid, gid)),
+    )
+    values = {
+        "PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND": "53",
+        "PWC_MODAL_EXECUTOR_RATE_SOURCE_ID": "modal-staging-price-v1",
+        "PWC_RELEASE_ID": "a" * 12 + "-staging",
+    }
+
+    configure_host_env.write_staging_modal_rate_evidence(target, values)
+
+    assert json.loads(target.read_text(encoding="utf-8")) == values
+    assert target.stat().st_mode & 0o777 == 0o600
+    temporary = target.with_name(f".{target.name}.new-{os.getpid()}")
+    assert ownership == [(temporary, 0, 0)]
+    assert not temporary.exists()
+    assert target.stat().st_size <= 4096
+
+
+@pytest.mark.parametrize("remove", [False, True])
+def test_staging_modal_rate_mode_is_confirmed_staging_only_and_content_free(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    remove: bool,
+):
+    release_id = "a" * 12 + "-staging"
+    app_root = _active_staging_release(tmp_path, release_id)
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    production = config_root / "production.env"
+    production.write_bytes(b"PRODUCTION=untouched\n")
+    target = config_root / "staging-modal-rate-evidence.json"
+    if remove:
+        target.write_text(
+            json.dumps(
+                configure_host_env.staging_modal_rate_evidence(
+                    app_root=app_root,
+                    release_id=release_id,
+                    microusd_per_second=53,
+                )
+            ),
+            encoding="utf-8",
+        )
+        target.chmod(0o600)
+    written = {}
+    monkeypatch.setattr(configure_host_env, "APP_ROOT", app_root)
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        configure_host_env,
+        "write_staging_modal_rate_evidence",
+        lambda path, values: written.update({"path": path, "values": values}),
+    )
+    monkeypatch.setattr(
+        configure_host_env,
+        "remove_staging_modal_rate_evidence",
+        lambda path, expected_release_id: written.update(
+            {"removed": path, "release_id": expected_release_id}
+        ),
+    )
+    mode = "remove" if remove else "install"
+    confirmation = (
+        "REMOVE_STAGING_MODAL_RATE_EVIDENCE"
+        if remove
+        else "INSTALL_STAGING_MODAL_RATE_EVIDENCE"
+    )
+    arguments = [
+        "configure_host_env.py",
+        "--legacy-env",
+        str(source),
+        f"--staging-modal-rate-evidence-{mode}-only",
+        "--staging-modal-rate-release-id",
+        release_id,
+        "--confirm",
+        confirmation,
+    ]
+    if not remove:
+        arguments.extend(["--staging-modal-rate-microusd-per-second", "53"])
+    monkeypatch.setattr(sys, "argv", arguments)
+
+    assert configure_host_env.main() == 0
+    output = capsys.readouterr().out
+    assert "53" not in output
+    assert release_id not in output
+    assert production.read_bytes() == b"PRODUCTION=untouched\n"
+    if remove:
+        assert written == {"removed": target, "release_id": release_id}
+    else:
+        assert written["path"] == target
+        assert written["values"]["PWC_MODAL_EXECUTOR_RATE_MICROUSD_PER_SECOND"] == "53"
+
+
+def test_staging_modal_rate_mode_rejects_missing_confirmation_without_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    source = tmp_path / "source.env"
+    source.write_text("SOURCE=unused\n", encoding="utf-8")
+    config_root = tmp_path / "config"
+    config_root.mkdir()
+    monkeypatch.setattr(configure_host_env, "CONFIG_ROOT", config_root)
+    monkeypatch.setattr(configure_host_env.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "configure_host_env.py",
+            "--legacy-env",
+            str(source),
+            "--staging-modal-rate-evidence-install-only",
+            "--staging-modal-rate-release-id",
+            "a" * 12 + "-staging",
+            "--staging-modal-rate-microusd-per-second",
+            "53",
+        ],
+    )
+
+    with pytest.raises(SystemExit):
+        configure_host_env.main()
+    assert not (config_root / "staging-modal-rate-evidence.json").exists()
+
+
+def test_deployment_runbook_has_reversible_staging_external_qualification_gate():
+    runbook = Path("docs/deployment.md").read_text(encoding="utf-8")
+
+    assert "--staging-durable-external-qualification-enable-only" in runbook
+    assert "--confirm ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION" in runbook
+    assert "--staging-durable-external-qualification-disable-only" in runbook
+    assert "--confirm DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION" in runbook
+    assert 'pwc-deploy staging "$qualification_sha" --refresh-environment' in runbook
+    assert "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false" in runbook
+    assert "PWC_CHAT_MAX_CONCURRENCY=2" in runbook
+    assert "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3" in runbook
+    assert "maximum_sessions=32" in runbook
+    assert "chat_sandbox_pool" in runbook
+    assert "must return `0`" in runbook
+    assert "`pwc-rollback staging` does not restore" in runbook
+    assert "Production remains unchanged" in runbook
+    assert "--staging-modal-rate-evidence-install-only" in runbook
+    assert "--staging-modal-rate-microusd-per-second 53" in runbook
+    assert "--confirm INSTALL_STAGING_MODAL_RATE_EVIDENCE" in runbook
+    assert "--staging-modal-rate-evidence-remove-only" in runbook
+    assert "--confirm REMOVE_STAGING_MODAL_RATE_EVIDENCE" in runbook
 
 
 def test_staging_chat_pi_prewarm_toggle_is_narrow_and_profiled():
@@ -4788,6 +5450,28 @@ def test_historical_semantic_scholar_key_is_cron_only_and_preserved():
     assert preserved[secondary] == f"{secondary}=old-secondary"
 
 
+def test_autonomous_credentials_are_preserved_only_in_cron_overlay():
+    keys = {
+        "PWC_AUTONOMOUS_ALERT_FALLBACK_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_ALERT_SLACK_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_CODEX_API_KEY",
+        "PWC_AUTONOMOUS_CODEX_BROKER_TOKEN",
+        "PWC_AUTONOMOUS_DIGEST_WEBHOOK_URL",
+        "PWC_AUTONOMOUS_CODEX_RESERVATION_VERIFY_KEY",
+        "PWC_AUTONOMOUS_SUBMISSION_HF_TOKEN",
+        "PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED",
+        "PWC_AUTONOMOUS_SUBMISSION_OPENAI_API_KEY",
+    }
+    current = {key: f"{key}=existing-{index}" for index, key in enumerate(keys)}
+    legacy = {"PWC_GITHUB_TOKEN": "PWC_GITHUB_TOKEN=github"}
+
+    cron = configure_host_env.cron_passthrough_credentials(legacy, current)
+    application = configure_host_env.without_cron_only_credentials(current)
+
+    assert keys <= cron.keys()
+    assert keys.isdisjoint(application)
+
+
 def test_staging_chat_runtime_credentials_are_preserved():
     preserved = configure_host_env.staging_runtime_passthrough(
         {
@@ -5503,6 +6187,8 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
 def test_cron_jobs_declare_bounded_execution_contracts():
     assert cron_launcher.COMMANDS
+    assert cron_launcher.COMMANDS["monitor_chat_operational_alerts"].timeout == "1m"
+    assert cron_launcher.COMMANDS["run_chat_synthetic_probe"].timeout == "6m"
     read_only_jobs = {
         "alert_submission_review_failure",
         "export_enrichment_dashboard",
@@ -5510,10 +6196,28 @@ def test_cron_jobs_declare_bounded_execution_contracts():
     }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command
-        assert spec.timeout in {"1m", "30m", "45m", "50m", "2h", "6h"}
+        assert spec.timeout in {"1m", "6m", "30m", "45m", "50m", "2h", "6h"}
         assert spec.mutates_shared_data is (name not in read_only_jobs)
         assert spec.idempotency
         assert spec.health_job
+
+
+def test_cron_python_uses_active_release_immutable_runtime(tmp_path: Path, monkeypatch):
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "uv.lock").write_text("locked dependencies\n")
+    runtimes = tmp_path / "runtimes"
+    validated = []
+    monkeypatch.setattr(
+        cron_launcher,
+        "runtime_manifest",
+        lambda runtime: validated.append(runtime),
+    )
+
+    python = cron_launcher.cron_python(current, runtimes)
+
+    assert python == runtimes / cron_launcher.runtime_id(current) / "bin" / "python"
+    assert validated == [python.parent.parent]
 
 
 @pytest.mark.parametrize(

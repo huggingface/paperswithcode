@@ -10,7 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
@@ -39,6 +39,8 @@ from backend.services.chat_edit_service import (
     user_message_projection_bytes,
 )
 from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
+from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
+from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_title_service import normalize_title
 from backend.services.chat_turn_admission_coordinator import (
     ChatTurnAdmissionCoordinator,
@@ -55,7 +57,24 @@ from backend.services.chat_turn_job_repository import (
     TurnLeaseClaim,
     TurnNotClaimable,
 )
+from backend.services.chat_turn_lifecycle import CLAIMED_STATES
 from backend.services.latex_paper_service import LatexPaperService
+
+if TYPE_CHECKING:
+    from backend.services.chat_external_worker_capacity import (
+        ExternalWorkerReservation,
+    )
+
+
+def _bound_external_worker_reservation(
+    preflight: DurableAdmissionPreflight | None, turn_id: uuid.UUID
+) -> ExternalWorkerReservation | None:
+    reservation = preflight.external_reservation if preflight is not None else None
+    if reservation is None:
+        return None
+    if reservation.turn_id not in {None, turn_id}:
+        raise RuntimeError("External worker reservation turn mismatches")
+    return replace(reservation, turn_id=turn_id)
 
 
 class ChatServiceError(Exception):
@@ -137,6 +156,7 @@ class TurnAdmission:
     paper_descriptor: dict[str, object] | None = None
     fetchable_urls: tuple[str, ...] = ()
     durable_claim: TurnLeaseClaim | None = None
+    external_worker_reservation: ExternalWorkerReservation | None = None
     attach_only: bool = False
     durable_event_sequence: int = 0
 
@@ -602,6 +622,10 @@ class ChatSessionService:
             or job.hf_user_id != session.hf_user_id
         ):
             raise self._durable_control_error()
+        if job.state in CLAIMED_STATES and not repository.is_expired_claim(
+            job, now=now
+        ):
+            raise self._durable_admission_error(AccountBusy("The worker lease is live"))
         try:
             ChatLocalTurnLeaseService(
                 self.db, self.settings, repository=repository
@@ -1599,6 +1623,7 @@ class ChatSessionService:
         plan: _TurnCreationPlan,
         fetchable_urls: tuple[str, ...],
         *,
+        external_worker_reservation: ExternalWorkerReservation | None,
         web_search_enabled: bool,
         reasoning_effort: str,
         poster_mode: bool,
@@ -1665,6 +1690,7 @@ class ChatSessionService:
             paper_artifacts_enabled=paper_artifacts_enabled,
             paper_descriptor=paper_descriptor,
             fetchable_urls=fetchable_urls,
+            external_worker_reservation=external_worker_reservation,
         )
 
     def begin_turn(
@@ -1686,6 +1712,7 @@ class ChatSessionService:
         web_search_enabled: bool = False,
         reasoning_effort: str | None = None,
         update_web_search_preference: bool = True,
+        qualification: QualificationContext | None = None,
     ) -> TurnAdmission:
         durable_coordinator: ChatTurnAdmissionCoordinator | None = None
         durable_preflight: DurableAdmissionPreflight | None = None
@@ -1698,6 +1725,7 @@ class ChatSessionService:
                     hf_user_id=owner.hf_user_id,
                     request_id=client_message_id,
                     requested_session_id=session_id,
+                    qualification=qualification,
                 )
                 recovered_durable_preflight_expiry = (
                     durable_preflight.reconciled_expired_count > 0
@@ -1718,6 +1746,7 @@ class ChatSessionService:
                         hf_user_id=owner.hf_user_id,
                         request_id=client_message_id,
                         requested_session_id=session_id,
+                        qualification=qualification,
                     )
                 except (TurnJobError, ValueError, SQLAlchemyError) as retry_error:
                     raise self._durable_admission_error(retry_error) from retry_error
@@ -1734,6 +1763,16 @@ class ChatSessionService:
                 None
                 if session_id is None
                 else self._owned(owner, session_id, lock=True)
+            )
+        if (
+            qualification is not None
+            and session is not None
+            and getattr(session, "agent_harness", "claude") != "pi"
+        ):
+            raise ChatServiceError(
+                "qualification_session_harness_mismatch",
+                409,
+                "Qualification sessions must already use the Pi harness",
             )
         effective_reasoning_effort = self._validate_reasoning_effort(
             reasoning_effort
@@ -1832,18 +1871,29 @@ class ChatSessionService:
             if session is not None
             else (
                 "pi"
-                if self.settings.chat_new_session_pi_percentage == 100
+                if qualification is not None
+                or self.settings.chat_new_session_pi_percentage == 100
                 else self.settings.chat_default_agent_harness
             )
         )
         if (
             durable_coordinator is not None
             and durable_preflight is not None
-            and self.settings.chat_external_pi_admission_enabled
+            and (
+                self.settings.chat_external_pi_admission_enabled
+                or qualification is not None
+            )
             and target_harness == "pi"
         ):
             try:
                 durable_preflight = durable_coordinator.reserve_external_capacity(
+                    durable_preflight, now=now
+                )
+            except (TurnJobError, ValueError, SQLAlchemyError) as error:
+                raise self._durable_admission_error(error) from error
+        elif durable_coordinator is not None and durable_preflight is not None:
+            try:
+                durable_preflight = durable_coordinator.authorize_global_capacity(
                     durable_preflight, now=now
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
@@ -1854,6 +1904,7 @@ class ChatSessionService:
             capacity = self._load_capacity_snapshot(owner, session)
             self._validate_capacity(capacity)
 
+        created_session = session is None
         # Capacity admission precedes creation so a rejected new-chat request
         # cannot leave behind a session or any message state.
         if session is None:
@@ -1866,6 +1917,7 @@ class ChatSessionService:
                     if primary_paper_id is not None
                     else {}
                 ),
+                agent_harness_override=("pi" if qualification is not None else None),
             )
 
         stale = self._load_expired_active_message(session, now)
@@ -1946,6 +1998,13 @@ class ChatSessionService:
             update_web_search_preference=update_web_search_preference,
             now=now,
         )
+        if (
+            created_session
+            and target_harness == "pi"
+            and durable_preflight is not None
+            and durable_preflight.external_reservation is not None
+        ):
+            ChatPiTranscriptService(self.db, self.settings).prebind_new_session(session)
         if durable_coordinator is not None:
             assert durable_preflight is not None
             try:
@@ -1980,6 +2039,11 @@ class ChatSessionService:
             session,
             plan,
             fetchable_urls,
+            external_worker_reservation=(
+                _bound_external_worker_reservation(
+                    durable_preflight, plan.replacement.turn_id
+                )
+            ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
             poster_mode=(

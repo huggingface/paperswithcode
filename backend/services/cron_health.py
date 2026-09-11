@@ -254,6 +254,27 @@ def fetch_db_freshness_batch(
     results: dict[str, Dict[str, Any]] = {}
     try:
         with conn.cursor(cursor_factory=RealDictCursor) as cursor:
+            operator_jobs = [
+                job
+                for job in jobs
+                if job.output_evaluator == "autonomous_cron_operator"
+            ]
+            if operator_jobs:
+                try:
+                    cursor.execute(
+                        "SELECT enabled FROM autonomous_operator_state "
+                        "WHERE operator = 'cron_health'"
+                    )
+                    state = cursor.fetchone() or {}
+                    for job in operator_jobs:
+                        results[job.id] = {"operator_enabled": state.get("enabled")}
+                except psycopg2.Error as exc:
+                    for job in operator_jobs:
+                        results[job.id] = {
+                            "operator_state_error": _sanitized_adapter_error(
+                                exc, "operator state"
+                            )
+                        }
             for job in jobs:
                 if not job.db_freshness_query:
                     continue
@@ -310,8 +331,8 @@ def fetch_thumbnail_cache_freshness() -> Dict[str, Any]:
     }
 
 
-def fetch_chat_monitor_output() -> Dict[str, Any]:
-    path = Path(get_settings().cron_log_dir) / "chat-operational-alert-health.json"
+def _fetch_chat_health_output(filename: str) -> Dict[str, Any]:
+    path = Path(get_settings().cron_log_dir) / filename
     try:
         raw = path.read_bytes()
     except (FileNotFoundError, PermissionError, OSError):
@@ -327,11 +348,20 @@ def fetch_chat_monitor_output() -> Dict[str, Any]:
     return {
         "monitor_record_available": True,
         "monitor_status": str(payload.get("status") or "unknown")[:16],
+        "monitor_reason_code": str(payload.get("reason_code") or "")[:64] or None,
         "monitor_completed_at": str(payload.get("completed_at") or "")[:64] or None,
         "undelivered_alert_events": max(0, int(payload.get("pending") or 0)),
         "new_alert_events": max(0, int(payload.get("new_events") or 0)),
         "delivered_alert_events": max(0, int(payload.get("delivered") or 0)),
     }
+
+
+def fetch_chat_monitor_output() -> Dict[str, Any]:
+    return _fetch_chat_health_output("chat-operational-alert-health.json")
+
+
+def fetch_chat_synthetic_output() -> Dict[str, Any]:
+    return _fetch_chat_health_output("chat-synthetic-probe-health.json")
 
 
 def fetch_submission_review_output() -> Dict[str, Any]:
@@ -444,6 +474,37 @@ def fetch_persistent_execution(
             "source": "launcher_and_file_log",
         }
     return None
+
+
+def fetch_autonomous_cron_output() -> Dict[str, Any]:
+    path = Path(get_settings().cron_log_dir) / "autonomous-cron-operator-health.json"
+    try:
+        raw = path.read_bytes()
+    except (FileNotFoundError, PermissionError, OSError):
+        return {"operator_record_available": False}
+    if len(raw) > 16 * 1024:
+        return {"operator_record_available": False}
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return {"operator_record_available": False}
+    if not isinstance(payload, dict):
+        return {"operator_record_available": False}
+    status = str(payload.get("status") or "unknown")[:32]
+    healthy = status in {
+        "healthy",
+        "monitoring_only",
+        "noop",
+        "runtime_recovered",
+        "source_repaired",
+    }
+    return {
+        "operator_record_available": True,
+        "operator_status": "healthy" if healthy else "degraded",
+        "operator_completed_at": str(payload.get("completed_at") or "")[:64] or None,
+        "operator_mode": str(payload.get("mode") or "")[:16] or None,
+        "operator_reason_code": str(payload.get("reason_code") or "")[:128] or None,
+    }
 
 
 def _gh_json(args: list[str], timeout: int = 10) -> tuple[Any, Optional[str]]:
@@ -908,6 +969,11 @@ def _execution_health(
     if job.scheduler == "systemd":
         evidence = systemd_status or {}
         if schedule_enabled is False:
+            duty_name = (
+                "autonomous submission review"
+                if job.id == "review_submissions"
+                else job.display_name
+            )
             if not evidence.get("available"):
                 return {
                     **base,
@@ -918,21 +984,25 @@ def _execution_health(
                         "evidence is unavailable"
                     ),
                 }
-            if evidence.get("enabled") or evidence.get("timer_active"):
+            if (
+                evidence.get("enabled")
+                or evidence.get("timer_active")
+                or evidence.get("service_active")
+                or running
+            ):
                 return {
                     **base,
                     "status": "broken",
                     "applicable": False,
                     "reason": (
-                        "autonomous submission review timer is active while "
-                        "disabled by configuration"
+                        f"{duty_name} timer is active while disabled by configuration"
                     ),
                 }
             return {
                 **base,
                 "status": "healthy",
                 "applicable": False,
-                "reason": "autonomous submission review is disabled by configuration",
+                "reason": f"{duty_name} is disabled by configuration",
             }
         if not evidence.get("available"):
             return {
@@ -1674,6 +1744,11 @@ def _chat_alert_contract(
         ]
     if monitor_status == "dormant":
         return "healthy", ["monitor is dormant because production chat is disabled"]
+    if monitor_status == "paused":
+        reason = work.get("monitor_reason_code")
+        return "healthy", [
+            f"paid synthetic probe is paused by autonomous control ({reason})"
+        ]
     if monitor_status == "healthy":
         return "healthy", [
             "latest content-free operational poll completed successfully"
@@ -1704,6 +1779,26 @@ def _submission_review_contract(
             f"latest content-free submission review completed; claimed={claimed}"
         ]
     return "unknown", reasons + ["submission review output state is unknown"]
+
+
+def _autonomous_cron_contract(
+    _status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    work = context.work
+    if not work.get("operator_record_available"):
+        return "unknown", reasons + ["content-free operator record is unavailable"]
+    age = _minutes_since(work.get("operator_completed_at"), now=context.now)
+    if age is None:
+        return "unknown", reasons + ["operator completion time is unavailable"]
+    if age > 390:
+        return "broken", reasons + ["latest autonomous CRON pass is stale"]
+    if work.get("operator_status") == "healthy":
+        return "healthy", ["latest bounded autonomous CRON pass completed"]
+    return "broken", reasons + [
+        f"autonomous CRON pass reported {work.get('operator_reason_code') or 'failure'}"
+    ]
 
 
 OutputEvaluator = Callable[
@@ -1755,6 +1850,7 @@ OUTPUT_POLICIES = {
     "curation_thumbnails": OutputPolicy(_curation_thumbnail_contract),
     "chat_alert_monitor": OutputPolicy(_chat_alert_contract),
     "submission_review": OutputPolicy(_submission_review_contract),
+    "autonomous_cron_operator": OutputPolicy(_autonomous_cron_contract),
 }
 
 
@@ -2117,6 +2213,10 @@ def evaluate_job_health(
     log_result = log_status.get("status", "unknown")
     work_metrics = dict(log_status.get("work_metrics") or {})
     db_metrics = db_metrics or {}
+    if job.output_evaluator == "autonomous_cron_operator":
+        operator_enabled = db_metrics.get("operator_enabled")
+        if isinstance(operator_enabled, bool):
+            schedule_enabled = operator_enabled
     output_policy = OUTPUT_POLICIES[job.output_evaluator or "generic"]
     log_no_work = log_result == "success_no_work"
     safe_log_error = (
@@ -2379,14 +2479,24 @@ def _chat_monitor_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     return {**metrics, **fetch_chat_monitor_output()}
 
 
+def _chat_synthetic_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_chat_synthetic_output()}
+
+
 def _submission_review_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
     return {**metrics, **fetch_submission_review_output()}
+
+
+def _autonomous_cron_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    return {**metrics, **fetch_autonomous_cron_output()}
 
 
 WORK_METRICS_PROVIDERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
     "paper_markdown_monitor": _paper_markdown_work_metrics,
     "chat_monitor": _chat_monitor_work_metrics,
+    "chat_synthetic": _chat_synthetic_work_metrics,
     "submission_review": _submission_review_work_metrics,
+    "autonomous_cron": _autonomous_cron_work_metrics,
 }
 
 
@@ -2452,13 +2562,14 @@ def build_cron_dashboard(
 
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
         max_days = max(0, min(14, job.stale_after_minutes // (24 * 60) + 1))
-        latest_status = get_cron_job_status(job.log_name, today)
+        log_directory = Path(job.log_directory) if job.log_directory else None
+        latest_status = get_cron_job_status(job.log_name, today, logs_dir=log_directory)
         if latest_status.get("exists") or max_days == 0:
             return latest_status
 
         for days_back in range(1, max_days + 1):
             date = (_utcnow() - timedelta(days=days_back)).strftime("%Y%m%d")
-            candidate = get_cron_job_status(job.log_name, date)
+            candidate = get_cron_job_status(job.log_name, date, logs_dir=log_directory)
             if candidate.get("exists"):
                 return candidate
         return latest_status

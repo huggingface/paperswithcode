@@ -8,7 +8,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.models.database import Evaluation, Paper as DBPaper
 from backend.services.paper_service import PaperService
 from backend.utils.urls import get_paper_route_identifier

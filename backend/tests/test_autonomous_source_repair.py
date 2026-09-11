@@ -470,7 +470,9 @@ def test_cleanup_abandoned_worktree_after_lease_expiry(repository, tmp_path):
         min_free_bytes=1,
     )
 
-    cleaned = restarted.cleanup_abandoned(object(), now=NOW + timedelta(days=1))
+    cleaned = restarted.cleanup_abandoned(
+        object(), now=datetime.now(UTC) + timedelta(days=1)
+    )
 
     assert cleaned == 1
     assert not candidate.worktree.exists()

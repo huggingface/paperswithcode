@@ -8,7 +8,8 @@ from typing import Any, Callable
 
 from sqlalchemy.orm import Session
 
-from backend.models.api import DatasetCreateRequest, TaskCreateRequest
+from backend.models.api import TaskCreateRequest
+from backend.models.evaluations import DatasetCreateRequest
 from backend.models.database import (
     Dataset,
     Evaluation,

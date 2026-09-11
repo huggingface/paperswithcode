@@ -11,6 +11,7 @@ from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
 )
 from backend.services.chat_sandbox_provider import SandboxError, SandboxLaunchMode
+from backend.services.chat_sandbox_capacity_repository import LeaseDecisionChanged
 from backend.services.chat_turn_job_repository import StaleTurnClaim, TurnLeaseClaim
 from backend.tests.test_chat_sandbox_acquisition_coordinator import _coordinator
 from backend.tests.test_chat_sandbox_capacity_acquisition import (
@@ -81,8 +82,18 @@ class ExpiringTurnAt(LiveTurns):
 TURN_CLAIM = TurnLeaseClaim(uuid.uuid4(), "worker", 3, 7)
 
 
-def setup_manager(*, health: ExecutorHealth | None = None, observe=None, record=None):
-    settings = _settings(chat_workspace_snapshots_enabled=False)
+def setup_manager(
+    *,
+    health: ExecutorHealth | None = None,
+    observe=None,
+    record=None,
+    qualification_capacity=None,
+    sandbox_cap=2,
+):
+    settings = _settings(
+        chat_workspace_snapshots_enabled=False,
+        chat_sandbox_total_live_cap=sandbox_cap,
+    )
     sessions = _database()
     session_id = uuid.uuid4()
     with sessions() as db, db.begin():
@@ -100,8 +111,103 @@ def setup_manager(*, health: ExecutorHealth | None = None, observe=None, record=
         turn_repository=LiveTurns(),
         observe=observe,
         record_evidence=record,
+        qualification_capacity=(
+            qualification_capacity
+            if qualification_capacity is not None
+            else (lambda *_args, **_kwargs: None)
+        ),
     )
     return manager, sessions, session_id, provider
+
+
+@pytest.mark.parametrize(
+    ("qualified_cap", "expected_cap"),
+    [(16, 16), (None, 3)],
+)
+def test_workspace_capacity_uses_only_persisted_turn_authorization(
+    qualified_cap, expected_cap
+):
+    manager, _sessions, session_id, _provider = setup_manager(
+        qualification_capacity=lambda *_args, **_kwargs: qualified_cap,
+        sandbox_cap=3,
+    )
+    recorded_caps = []
+    acquire = manager.acquisition.capacity_repository.acquire
+
+    def recording_acquire(*args, **kwargs):
+        recorded_caps.append(kwargs["total_live_cap"])
+        return acquire(*args, **kwargs)
+
+    manager.acquisition.capacity_repository.acquire = recording_acquire
+
+    async def exercise():
+        workspace = await manager.acquire(
+            session_id=session_id,
+            turn_claim=TURN_CLAIM,
+        )
+        assert await manager.release(workspace)
+
+    asyncio.run(exercise())
+
+    assert recorded_caps == [expected_cap]
+
+
+def test_workspace_retry_rechecks_scope_and_revokes_elevated_capacity():
+    capacities = iter((16, None))
+    manager, _sessions, session_id, provider = setup_manager(
+        health=ExecutorHealth("draining", "ok"),
+        qualification_capacity=lambda *_args, **_kwargs: next(capacities),
+        sandbox_cap=3,
+    )
+    provider.created = SimpleNamespace(object_id="sb-created")
+    recorded_caps = []
+    acquire = manager.acquisition.capacity_repository.acquire
+
+    def recording_acquire(*args, **kwargs):
+        recorded_caps.append(kwargs["total_live_cap"])
+        return acquire(*args, **kwargs)
+
+    manager.acquisition.capacity_repository.acquire = recording_acquire
+
+    async def exercise():
+        workspace = await manager.acquire(
+            session_id=session_id,
+            turn_claim=TURN_CLAIM,
+        )
+        assert await manager.release(workspace)
+
+    asyncio.run(exercise())
+
+    assert recorded_caps == [16, 3]
+
+
+def test_workspace_lock_retry_rechecks_scope_before_capacity_decision():
+    capacities = iter((16, None))
+    manager, _sessions, session_id, _provider = setup_manager(
+        qualification_capacity=lambda *_args, **_kwargs: next(capacities),
+        sandbox_cap=3,
+    )
+    recorded_caps = []
+    acquire = manager.acquisition.capacity_repository.acquire
+
+    def retry_once(*args, **kwargs):
+        recorded_caps.append(kwargs["total_live_cap"])
+        if len(recorded_caps) == 1:
+            raise LeaseDecisionChanged
+        return acquire(*args, **kwargs)
+
+    manager.acquisition.capacity_repository.acquire = retry_once
+
+    async def exercise():
+        workspace = await manager.acquire(
+            session_id=session_id,
+            turn_claim=TURN_CLAIM,
+        )
+        assert await manager.release(workspace)
+
+    asyncio.run(exercise())
+
+    assert recorded_caps == [16, 3]
 
 
 def test_workspace_lifecycle_records_exact_turn_and_session_evidence():
@@ -186,6 +292,30 @@ def test_first_bash_creates_executor_and_later_turn_reuses_exact_workspace():
         assert lease.state == "idle"
         assert lease.modal_sandbox_id == first.sandbox_id
         assert lease.workspace_snapshot_id is None
+
+
+def test_executor_workspace_reuse_uses_executor_launch_mode_health():
+    manager, _sessions, session_id, provider = setup_manager()
+    original_health = provider.health
+
+    async def mode_aware_health(sandbox, **options):
+        if options.get("launch_mode") is not SandboxLaunchMode.EXECUTOR:
+            return False
+        return await original_health(sandbox, **options)
+
+    provider.health = mode_aware_health
+
+    async def exercise():
+        first = await manager.acquire(session_id=session_id, turn_claim=TURN_CLAIM)
+        assert await manager.release(first)
+        second = await manager.acquire(session_id=session_id, turn_claim=TURN_CLAIM)
+        assert await manager.release(second)
+        return first, second
+
+    first, second = asyncio.run(exercise())
+
+    assert second.sandbox_id == first.sandbox_id
+    assert len(provider.create_options) == 1
 
 
 def test_concurrent_acquisition_waits_for_existing_busy_workspace():

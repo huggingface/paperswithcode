@@ -24,10 +24,12 @@ from urllib.parse import urlparse
 from sqlalchemy.orm import Session
 
 from backend.models.database import AutonomousRun
+from backend.services.autonomous_alert_service import send_budget_threshold_alert
 from backend.services.autonomous_budget_gateway import (
     AutonomousBudgetGateway,
     GatewayConfigurationError,
 )
+from backend.services.autonomous_digest_service import AutonomousBudgetService
 from backend.services.autonomous_capabilities import (
     CAPABILITY_MANIFESTS,
     CAPABILITY_RESOURCE_KINDS,
@@ -74,6 +76,106 @@ _CHAT_REASON_CODES = frozenset(
         "synthetic_failure",
     }
 )
+
+
+def _validate_cron_evidence_payload(payload: dict[str, object]) -> None:
+    if set(payload) == {"repair_review"}:
+        review = payload["repair_review"]
+        if not isinstance(review, dict) or set(review) != {
+            "base_sha",
+            "candidate_id",
+            "changed_paths",
+            "check_outcomes",
+            "patch",
+            "patch_digest",
+        }:
+            raise ValueError("Invalid autonomous evidence payload")
+        try:
+            uuid.UUID(str(review["candidate_id"]))
+        except (TypeError, ValueError):
+            raise ValueError("Invalid autonomous evidence payload") from None
+        paths = review["changed_paths"]
+        checks = review["check_outcomes"]
+        if (
+            not isinstance(review["base_sha"], str)
+            or re.fullmatch(r"[0-9a-f]{40}", review["base_sha"]) is None
+            or not isinstance(review["patch_digest"], str)
+            or _DIGEST.fullmatch(review["patch_digest"]) is None
+            or not isinstance(review["patch"], str)
+            or not isinstance(paths, list)
+            or not paths
+            or len(paths) > 50
+            or any(
+                not isinstance(path, str)
+                or not path
+                or len(path) > 255
+                or path.startswith("/")
+                or ".." in Path(path).parts
+                for path in paths
+            )
+            or not isinstance(checks, list)
+            or not checks
+            or len(checks) > 50
+            or any(
+                not isinstance(check, dict)
+                or set(check) != {"command", "output_digest"}
+                or not isinstance(check["command"], list)
+                or not isinstance(check["output_digest"], str)
+                or _DIGEST.fullmatch(check["output_digest"]) is None
+                for check in checks
+            )
+        ):
+            raise ValueError("Invalid autonomous evidence payload")
+        return
+    findings = payload.get("findings")
+    required = {
+        "job_name",
+        "plane",
+        "contract",
+        "state",
+        "summary",
+        "evidence",
+        "observed_at",
+        "operator_url",
+        "run_url",
+    }
+    if (
+        set(payload) != {"findings"}
+        or not isinstance(findings, list)
+        or not 1 <= len(findings) <= 100
+    ):
+        raise ValueError("Invalid autonomous evidence payload")
+    for finding in findings:
+        if (
+            not isinstance(finding, dict)
+            or set(finding) != required
+            or _CODE.fullmatch(str(finding["job_name"])) is None
+            or _CODE.fullmatch(str(finding["contract"])) is None
+            or finding["plane"]
+            not in {"scheduler", "process_logs", "durable_data", "semantic_outcome"}
+            or finding["state"] not in {"healthy", "degraded", "unknown"}
+            or not isinstance(finding["summary"], str)
+            or len(finding["summary"]) > 256
+            or not isinstance(finding["evidence"], dict)
+            or not isinstance(finding["observed_at"], str)
+            or len(finding["observed_at"]) > 64
+            or finding["operator_url"] != "/autonomous-operations?operator=cron"
+            or (
+                finding["run_url"] is not None
+                and (
+                    not isinstance(finding["run_url"], str)
+                    or not finding["run_url"].startswith(
+                        "https://github.com/huggingface/paperswithcode/actions/runs/"
+                    )
+                )
+            )
+        ):
+            raise ValueError("Invalid autonomous evidence payload")
+        encoded = json.dumps(finding["evidence"], sort_keys=True)
+        if len(encoded.encode()) > 16_384 or any(
+            prefix in encoded.lower() for prefix in _SECRET_PREFIXES
+        ):
+            raise ValueError("Invalid autonomous evidence payload")
 
 
 @dataclass(frozen=True, slots=True)
@@ -162,6 +264,8 @@ class CodexRequest:
     timeout_seconds: int = 1200
     max_output_bytes: int = 2_000_000
     evidence_payload: dict[str, object] | None = None
+    workspace_path: Path | None = None
+    writable_paths: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         manifest = (
@@ -205,15 +309,19 @@ class CodexRequest:
             raise ValueError("Invalid autonomous Codex output schema") from None
         if len(encoded_schema.encode()) > 250_000:
             raise ValueError("Invalid autonomous Codex output schema")
+        structured_submission = (
+            self.context.operator == Operator.SUBMISSIONS
+            and self.evidence_payload is not None
+        )
         if self.output_schema != codex_result_schema(
-            self.capabilities,
-            structured_submission=self.evidence_payload is not None,
+            self.capabilities, structured_submission=structured_submission
         ):
             raise ValueError("Invalid autonomous Codex output schema")
         if self.evidence_payload is not None:
-            if self.context.operator != Operator.SUBMISSIONS or not isinstance(
-                self.evidence_payload, dict
-            ):
+            if self.context.operator not in {
+                Operator.SUBMISSIONS,
+                Operator.CRON_HEALTH,
+            } or not isinstance(self.evidence_payload, dict):
                 raise ValueError("Invalid autonomous evidence payload")
             try:
                 encoded_evidence = json.dumps(
@@ -223,12 +331,49 @@ class CodexRequest:
                 raise ValueError("Invalid autonomous evidence payload") from None
             if len(encoded_evidence) > 2_000_000:
                 raise ValueError("Invalid autonomous evidence payload")
+            if self.context.operator == Operator.CRON_HEALTH:
+                _validate_cron_evidence_payload(self.evidence_payload)
         if self.context.operator == Operator.CHAT_RELIABILITY and any(
             _CHAT_EVIDENCE_IDENTIFIER.fullmatch(item.identifier) is None
             or item.identifier.partition(":")[0] != item.kind
             for item in self.evidence
         ):
             raise ValueError("Invalid autonomous Codex request")
+        if (self.workspace_path is None) != (not self.writable_paths):
+            raise ValueError("Invalid autonomous repair workspace")
+        if self.workspace_path is not None:
+            root = self.workspace_path.resolve()
+            if (
+                not self.workspace_path.is_absolute()
+                or not root.is_dir()
+                or self.context.operator
+                not in {Operator.CRON_HEALTH, Operator.CHAT_RELIABILITY}
+                or not any(
+                    capability
+                    in {
+                        Capability.REPAIR_DECLARED_CRON_SOURCE,
+                        Capability.REPAIR_CHAT_SOURCE,
+                    }
+                    for capability in self.capabilities
+                )
+                or len(self.writable_paths) > 50
+                or len(set(self.writable_paths)) != len(self.writable_paths)
+            ):
+                raise ValueError("Invalid autonomous repair workspace")
+            for value in self.writable_paths:
+                relative = Path(value)
+                target = (root / relative).resolve()
+                if (
+                    not value
+                    or "\\" in value
+                    or relative.is_absolute()
+                    or ".." in relative.parts
+                    or str(relative) != value
+                    or not target.is_file()
+                    or root not in target.parents
+                    or (root / relative).is_symlink()
+                ):
+                    raise ValueError("Invalid autonomous repair workspace")
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +613,8 @@ class SubprocessCodexExecutor:
         filesystem_isolation: bool,
         sandbox_executable: str,
         shell: bool,
+        workspace_path: Path | None = None,
+        writable_paths: tuple[str, ...] = (),
     ) -> ExecutionOutcome:
         if shell:
             raise ValueError("Autonomous Codex execution cannot use a shell")
@@ -495,6 +642,8 @@ class SubprocessCodexExecutor:
                     actual_command,
                     sandbox_executable=sandbox_executable,
                     temporary_directory=temp,
+                    workspace_path=workspace_path,
+                    writable_paths=writable_paths,
                 )
             started = time.monotonic()
             with events_path.open("wb") as events, prompt_path.open("rb") as prompt:
@@ -547,7 +696,12 @@ class SubprocessCodexExecutor:
 
     @staticmethod
     def _isolated_command(
-        command: list[str], *, sandbox_executable: str, temporary_directory: Path
+        command: list[str],
+        *,
+        sandbox_executable: str,
+        temporary_directory: Path,
+        workspace_path: Path | None = None,
+        writable_paths: tuple[str, ...] = (),
     ) -> list[str]:
         """Expose only runtime files and an empty workspace to model tools."""
         isolated_codex = "/pwc-bin/codex"
@@ -579,8 +733,6 @@ class SubprocessCodexExecutor:
             str(temporary_directory),
             str(temporary_directory),
             "--dir",
-            "/workspace",
-            "--dir",
             "/pwc-bin",
             "--ro-bind",
             command[0],
@@ -597,6 +749,14 @@ class SubprocessCodexExecutor:
         for path in ("/etc/ssl", "/etc/resolv.conf"):
             if Path(path).exists():
                 isolated.extend(("--ro-bind", path, path))
+        if workspace_path is None:
+            isolated.extend(("--dir", "/workspace"))
+        else:
+            root = workspace_path.resolve()
+            isolated.extend(("--ro-bind", str(root), "/workspace"))
+            for relative in writable_paths:
+                source = root / relative
+                isolated.extend(("--bind", str(source), f"/workspace/{relative}"))
         return [*isolated, "--chdir", "/workspace", "--", isolated_codex, *command[1:]]
 
     @staticmethod
@@ -622,6 +782,7 @@ class AutonomousCodexRunner:
         credential_broker: CredentialBroker | None = None,
         now: Callable[[], datetime] | None = None,
         working_directory: Path | None = None,
+        cumulative_budget_service: AutonomousBudgetService | None = None,
     ) -> None:
         self.executor = executor or SubprocessCodexExecutor()
         self.environ = dict(os.environ if environ is None else environ)
@@ -631,6 +792,7 @@ class AutonomousCodexRunner:
             environ=self.environ, now=self.now
         )
         self.working_directory = working_directory or Path("/")
+        self.cumulative_budget_service = cumulative_budget_service
 
     def run(
         self,
@@ -646,6 +808,23 @@ class AutonomousCodexRunner:
             return self._resume(existing, request, db)
         if cancellation_requested():
             return self._finish(request, "cancelled", "cancelled", (), self._zero(), db)
+        intent = self.repository.get_execution_intent(db, run_id=request.context.run_id)
+        if self.cumulative_budget_service is not None and intent is None:
+            budget = self.cumulative_budget_service.enforce_before_run(
+                db,
+                operator=request.context.operator,
+                requested_cost_usd=request.budget_usd,
+                requested_tokens=(self.cumulative_budget_service.limits.per_run_tokens),
+            )
+            if not budget.allowed:
+                return self._finish(
+                    request,
+                    "budget_exhausted",
+                    "budget_exhausted",
+                    (),
+                    self._zero(),
+                    db,
+                )
         try:
             executable = self._executable()
             sandbox_executable = self._sandbox_executable()
@@ -668,7 +847,6 @@ class AutonomousCodexRunner:
             concrete_model=_MODEL_ALIASES[request.model_alias][0],
             reasoning_effort=_MODEL_ALIASES[request.model_alias][1],
         )
-        intent = self.repository.get_execution_intent(db, run_id=request.context.run_id)
         recovering_unclaimed_intent = False
         if intent is not None:
             if (
@@ -938,7 +1116,7 @@ class AutonomousCodexRunner:
             "--color",
             "never",
             "--sandbox",
-            "read-only",
+            "workspace-write" if request.workspace_path is not None else "read-only",
             "--model",
             model,
             "--config",
@@ -950,6 +1128,15 @@ class AutonomousCodexRunner:
             "--cd",
             "/workspace",
         ]
+
+        def budget_exceeded(events: tuple[str, ...]) -> bool:
+            usage, _usage_found = self._usage(events, pricing)
+            return usage.cost_usd > request.budget_usd or (
+                self.cumulative_budget_service is not None
+                and usage.input_tokens + usage.output_tokens
+                > self.cumulative_budget_service.limits.per_run_tokens
+            )
+
         try:
             outcome = self.executor(
                 command=command,
@@ -960,11 +1147,12 @@ class AutonomousCodexRunner:
                 timeout_seconds=request.timeout_seconds,
                 max_output_bytes=request.max_output_bytes,
                 cancellation_requested=cancellation_requested,
-                budget_exceeded=lambda events: self._usage(events, pricing)[0].cost_usd
-                > request.budget_usd,
+                budget_exceeded=budget_exceeded,
                 filesystem_isolation=True,
                 sandbox_executable=sandbox_executable,
                 shell=False,
+                workspace_path=request.workspace_path,
+                writable_paths=request.writable_paths,
             )
         except ExecutionBudgetExceeded as error:
             usage, _ = self._usage(error.events_jsonl, pricing)
@@ -1519,9 +1707,11 @@ def run_codex(
     db: Session,
     cancellation_requested: CancellationCheck | None = None,
 ) -> CodexResult:
-    return AutonomousCodexRunner().run(
-        request, db=db, cancellation_requested=cancellation_requested
-    )
+    return AutonomousCodexRunner(
+        cumulative_budget_service=AutonomousBudgetService(
+            on_exhausted=send_budget_threshold_alert
+        )
+    ).run(request, db=db, cancellation_requested=cancellation_requested)
 
 
 def codex_result_schema(

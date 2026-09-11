@@ -992,7 +992,11 @@ class PaperCurationJob(Base):
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
-        ForeignKey("paper_curation_workflows.id", ondelete="CASCADE"),
+        ForeignKey(
+            "paper_curation_workflows.id",
+            name="fk_paper_curation_jobs_parent_workflow",
+            ondelete="CASCADE",
+        ),
         nullable=True,
     )
     trigger: Mapped[str] = mapped_column(
@@ -1183,10 +1187,20 @@ class PaperCurationWorkflow(Base):
         String(24), nullable=False, default="unreviewed"
     )
     enrich_satisfied_by_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey(
+            "paper_curation_jobs.id",
+            name="fk_paper_curation_workflows_enrich_satisfied_by_job",
+        ),
+        nullable=True,
     )
     evals_satisfied_by_job_id: Mapped[Optional[uuid.UUID]] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("paper_curation_jobs.id"), nullable=True
+        UUID(as_uuid=True),
+        ForeignKey(
+            "paper_curation_jobs.id",
+            name="fk_paper_curation_workflows_evals_satisfied_by_job",
+        ),
+        nullable=True,
     )
     dependency_override: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
@@ -3952,7 +3966,7 @@ class ChatTurnLatency(Base):
             name="chat_turn_latency_traffic_class_check",
         ),
         CheckConstraint(
-            "execution_backend IN ('local_mcp','modal_cli')",
+            "execution_backend IN ('local_mcp','modal_cli','external_pi')",
             name="chat_turn_latency_backend_check",
         ),
         CheckConstraint(
@@ -5237,6 +5251,72 @@ class AutonomousAction(Base):
     )
 
 
+class AutonomousAlertDelivery(Base):
+    """Append-only, content-free autonomous alert delivery receipt."""
+
+    __tablename__ = "autonomous_alert_delivery"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    dedup_key: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    event_kind: Mapped[str] = mapped_column(String(64), nullable=False)
+    severity: Mapped[str] = mapped_column(String(16), nullable=False)
+    operator: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    resource_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment: Mapped[str] = mapped_column(String(16), nullable=False)
+    release_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    primary_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    primary_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    fallback_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    fallback_status_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    delivered_route: Mapped[str] = mapped_column(String(16), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "event_kind IN ('operator_failure','site_impact','lease_timeout',"
+            "'repair_started','review_rejected','deploy_succeeded','rollback',"
+            "'provider_switch','budget_threshold','both_provider_outage',"
+            "'daily_digest')",
+            name="autonomous_alert_delivery_event_kind_check",
+        ),
+        CheckConstraint(
+            "severity IN ('info','high','critical')",
+            name="autonomous_alert_delivery_severity_check",
+        ),
+        CheckConstraint(
+            "operator IS NULL OR operator IN "
+            "('submissions','curation','cron_health','chat_reliability')",
+            name="autonomous_alert_delivery_operator_check",
+        ),
+        CheckConstraint(
+            "environment IN ('staging','production')",
+            name="autonomous_alert_delivery_environment_check",
+        ),
+        CheckConstraint(
+            "primary_state IN ('acknowledged','failed','not_configured','suppressed') "
+            "AND fallback_state IN "
+            "('acknowledged','failed','not_configured','not_needed','suppressed')",
+            name="autonomous_alert_delivery_state_check",
+        ),
+        CheckConstraint(
+            "delivered_route IN ('primary','fallback','none','suppressed')",
+            name="autonomous_alert_delivery_route_check",
+        ),
+        CheckConstraint(
+            "length(dedup_key) = 64 AND length(resource_digest) = 64 "
+            "AND length(release_digest) = 64",
+            name="autonomous_alert_delivery_digest_check",
+        ),
+        CheckConstraint(
+            "(primary_status_code IS NULL OR primary_status_code BETWEEN 100 AND 599) "
+            "AND (fallback_status_code IS NULL OR fallback_status_code BETWEEN 100 AND 599)",
+            name="autonomous_alert_delivery_status_code_check",
+        ),
+        Index("idx_autonomous_alert_delivery_created", "created_at"),
+    )
+
+
 class AutonomousReleaseConsumption(Base):
     """Root-owned, single-use authorization consumed at the release boundary."""
 
@@ -5286,7 +5366,8 @@ class AutonomousControlEvent(Base):
     )
     __table_args__ = (
         CheckConstraint(
-            "event_kind IN ('manual_mode','operator_enabled','chat_baseline')",
+            "event_kind IN ('manual_mode','operator_enabled','chat_baseline',"
+            "'acceptance_evidence')",
             name="autonomous_control_event_kind_check",
         ),
         CheckConstraint(
@@ -5294,6 +5375,14 @@ class AutonomousControlEvent(Base):
             name="autonomous_control_event_digest_check",
         ),
         Index("idx_autonomous_control_event_created", "created_at"),
+        Index(
+            "uq_autonomous_acceptance_evidence",
+            "target",
+            "after_digest",
+            unique=True,
+            postgresql_where=text("event_kind = 'acceptance_evidence'"),
+            sqlite_where=text("event_kind = 'acceptance_evidence'"),
+        ),
     )
 
 
@@ -5434,6 +5523,16 @@ for _table, _operation, _trigger in (
     ),
     (AutonomousAction.__table__, "UPDATE", "autonomous_action_no_update"),
     (AutonomousAction.__table__, "DELETE", "autonomous_action_no_delete"),
+    (
+        AutonomousAlertDelivery.__table__,
+        "UPDATE",
+        "autonomous_alert_delivery_no_update",
+    ),
+    (
+        AutonomousAlertDelivery.__table__,
+        "DELETE",
+        "autonomous_alert_delivery_no_delete",
+    ),
     (AutonomousControlEvent.__table__, "UPDATE", "autonomous_control_no_update"),
     (AutonomousControlEvent.__table__, "DELETE", "autonomous_control_no_delete"),
     (AutonomousIncidentAttempt.__table__, "UPDATE", "autonomous_attempt_no_update"),

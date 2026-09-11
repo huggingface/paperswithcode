@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from typing import Iterable
 
 import httpx
+from huggingface_hub import HfApi
 from sqlalchemy import bindparam, text
 from sqlalchemy.orm import Session
 
@@ -190,6 +191,19 @@ def _validated_vectors(
     return validated
 
 
+def _recover_capacity_failure(endpoint_url: str, token: str) -> bool:
+    """Retry allocation only for the configured endpoint's failed hardware."""
+    for endpoint in HfApi(token=token).list_inference_endpoints(namespace="*"):
+        if (endpoint.url or "").rstrip("/") + "/embed" != endpoint_url.rstrip("/"):
+            continue
+        error = endpoint.raw.get("status", {}).get("errorMessage", "")
+        if endpoint.status != "failed" or "out of availability" not in error:
+            return False
+        endpoint.resume().wait(timeout=120, refresh_every=10)
+        return True
+    return False
+
+
 def encode_documents(
     client: httpx.Client,
     *,
@@ -216,6 +230,14 @@ def encode_documents(
                 "prompt_name": "document",
             },
         )
+        if (
+            attempt == 0
+            and max_attempts > 1
+            and response.status_code == 400
+            and "Your endpoint is in error" in response.text
+            and _recover_capacity_failure(endpoint_url, token)
+        ):
+            continue
         if (
             response.status_code in RETRYABLE_STATUS_CODES
             and attempt + 1 < max_attempts

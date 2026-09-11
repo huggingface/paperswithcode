@@ -95,6 +95,7 @@ class CronJobDefinition:
     workflow_file: Optional[str] = None
     workflow_jobs: Tuple[str, ...] = ()
     workflow_freshness_required: bool = True
+    log_directory: Optional[str] = None
     dashboard_group: str = "operations"
     scheduler: Literal["github_actions", "systemd", "manual"] = "github_actions"
     schedule_policies: Tuple[SchedulePolicy, ...] = ()
@@ -106,7 +107,13 @@ class CronJobDefinition:
     systemd_extra_units: Tuple[Tuple[str, str], ...] = ()
     output_evaluator: Optional[str] = None
     work_metrics_provider: Optional[
-        Literal["paper_markdown_monitor", "chat_monitor", "submission_review"]
+        Literal[
+            "paper_markdown_monitor",
+            "chat_monitor",
+            "chat_synthetic",
+            "submission_review",
+            "autonomous_cron",
+        ]
     ] = None
     db_metrics_provider: Optional[Literal["thumbnail_cache"]] = None
     dependency_job_id: Optional[str] = None
@@ -126,7 +133,11 @@ class CronJobDefinition:
         """Return the seven-plane contract used by deterministic probes."""
 
         evaluator = self.output_evaluator or "generic"
-        health_record = evaluator in {"chat_alert_monitor", "submission_review"}
+        health_record = evaluator in {
+            "autonomous_cron_operator",
+            "chat_alert_monitor",
+            "submission_review",
+        }
         return CronEvidenceContract(
             scheduler=self.scheduler,
             schedule_policies=self.schedule_policies,
@@ -348,8 +359,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="15 * * * * (hourly)",
         script_path="hourly/calculate_trending_scores.py",
         log_name="calculate_trending_scores",
+        log_directory=("/var/lib/paperswithcode/production/trending-cron-logs"),
         process_patterns=("calculate_trending_scores",),
-        lock_file="/var/lib/paperswithcode/production/cron-locks/calculate_trending_scores.lock",
+        lock_file=(
+            "/var/lib/paperswithcode/production/trending-cron-locks/"
+            "calculate_trending_scores.lock"
+        ),
         expected_runtime_minutes=50,
         stale_after_minutes=120,
         critical=True,
@@ -376,8 +391,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         schedule="45 * * * * (hourly)",
         script_path="hourly/calculate_paper_trending_scores.py",
         log_name="calculate_paper_trending_scores",
+        log_directory=("/var/lib/paperswithcode/production/trending-cron-logs"),
         process_patterns=("calculate_paper_trending_scores",),
-        lock_file="/var/lib/paperswithcode/production/cron-locks/calculate_paper_trending_scores.lock",
+        lock_file=(
+            "/var/lib/paperswithcode/production/trending-cron-locks/"
+            "calculate_paper_trending_scores.lock"
+        ),
         expected_runtime_minutes=50,
         stale_after_minutes=120,
         critical=True,
@@ -1350,6 +1369,52 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="autonomous_cron_health",
+        display_name="Autonomous CRON Strict Snapshot",
+        category="systemd",
+        schedule="every 15 minutes with bounded jitter (systemd)",
+        script_path=".github/workflows/scripts/autonomous_cron_health.py",
+        log_name="autonomous_cron_health",
+        process_patterns=("autonomous_cron_health.py --mode strict",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/autonomous_cron_health.lock"
+        ),
+        expected_runtime_minutes=360,
+        stale_after_minutes=390,
+        critical=True,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(15),),
+        schedule_grace_minutes=10,
+        systemd_timer="autonomous-cron-health.timer",
+        systemd_service="autonomous-cron-health.service",
+        output_evaluator="autonomous_cron_operator",
+        work_metrics_provider="autonomous_cron",
+    ),
+    CronJobDefinition(
+        id="autonomous_cron_audit",
+        display_name="Autonomous CRON Daily Audit",
+        category="systemd",
+        schedule="daily at 02:20 UTC with bounded jitter (systemd)",
+        script_path=".github/workflows/scripts/autonomous_cron_health.py",
+        log_name="autonomous_cron_audit",
+        process_patterns=("autonomous_cron_health.py --mode daily",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/autonomous_cron_audit.lock"
+        ),
+        expected_runtime_minutes=360,
+        stale_after_minutes=1800,
+        critical=False,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(2, 20),),
+        schedule_grace_minutes=45,
+        systemd_timer="autonomous-cron-audit.timer",
+        systemd_service="autonomous-cron-audit.service",
+        output_evaluator="autonomous_cron_operator",
+        work_metrics_provider="autonomous_cron",
+    ),
+    CronJobDefinition(
         id="review_submissions",
         display_name="Autonomous Submission Review",
         category="systemd",
@@ -1396,6 +1461,27 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_service="pwc-chat-alert-monitor.service",
         output_evaluator="chat_alert_monitor",
         work_metrics_provider="chat_monitor",
+    ),
+    CronJobDefinition(
+        id="run_chat_synthetic_probe",
+        display_name="Chat Synthetic Reliability Probe",
+        category="systemd",
+        schedule="every minute with an internal four-hour gate (systemd)",
+        script_path="backend/scripts/run_chat_synthetic_probe.py",
+        log_name="run_chat_synthetic_probe",
+        process_patterns=("run_chat_synthetic_probe",),
+        lock_file=None,
+        expected_runtime_minutes=6,
+        stale_after_minutes=10,
+        critical=False,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-cron-run-chat-synthetic-probe.timer",
+        systemd_service="pwc-cron-run-chat-synthetic-probe.service",
+        output_evaluator="chat_alert_monitor",
+        work_metrics_provider="chat_synthetic",
     ),
     CronJobDefinition(
         id="process_curation_thumbnails",

@@ -1,0 +1,30 @@
+[Unit]
+Description=Papers With Code production external Pi durable supervisor (%i)
+After=network-online.target postgresql.service postgresql@16-main.service
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pwc-production
+Group=pwc-production
+WorkingDirectory=/srv/paperswithcode/environments/production/slots/%i/release
+EnvironmentFile=/etc/paperswithcode/production.env
+RuntimeDirectory=paperswithcode/external-pi-status-production-%i
+RuntimeDirectoryMode=0750
+ExecStart=/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/external_pi_slot_launcher.py production %i
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=75
+TimeoutStopSec=330
+KillSignal=SIGTERM
+SyslogIdentifier=paperswithcode-production-external-pi-%i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadOnlyPaths=/srv/paperswithcode
+ReadWritePaths=/var/lib/paperswithcode/production /run/paperswithcode/external-pi
+CPUQuota=200%
+MemoryMax=2147483648
+TasksMax=256

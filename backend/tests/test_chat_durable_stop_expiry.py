@@ -118,7 +118,7 @@ def test_missing_process_local_external_control_interrupts_with_exact_code():
 
     async def missing(_request):
         calls.append("control-missing")
-        return False
+        return CancelControlResult.MISSING
 
     class Manager:
         async def cancel_status(self, *_args):
@@ -509,7 +509,7 @@ def test_admission_reconciles_globally_expired_claim_before_capacity_count():
             return next(self.results)
 
     class Repository:
-        def lock_admission_authority(self, _db, *, hf_user_id):
+        def lock_user_admission_authority(self, _db, *, hf_user_id):
             assert hf_user_id == "new-owner"
             ordering.append("locks")
 
@@ -763,13 +763,16 @@ def test_live_durable_claim_fails_closed_before_legacy_expiry(monkeypatch):
         def interrupt_exact_expired(self, *_args, **_kwargs):
             raise StaleTurnClaim("still live")
 
+        def is_expired_claim(self, *_args, **_kwargs):
+            return False
+
     service = ChatSessionService(SimpleNamespace(), settings)
     monkeypatch.setattr(service, "_turn_job_repository", lambda: Repository())
 
     with pytest.raises(ChatServiceError) as exc_info:
         service._apply_expired_active_turn(session, message)
 
-    assert exc_info.value.code == "durable_control_conflict"
+    assert exc_info.value.code == "account_busy"
     assert session.active_turn_id == turn_id
     assert session.active_turn_expires_at is expiry
     assert message.status == "generating"
@@ -802,6 +805,9 @@ def test_replay_expiry_reconciles_exact_durable_job(monkeypatch):
         def interrupt_exact_expired(self, _db, **kwargs):
             calls.append(kwargs["turn_id"])
             return job
+
+        def is_expired_claim(self, *_args, **_kwargs):
+            return True
 
     service = ChatSessionService(SimpleNamespace(), settings)
     monkeypatch.setattr(service, "_turn_job_repository", lambda: Repository())
@@ -864,6 +870,9 @@ def test_account_busy_preflight_reconciles_expired_projection_then_retries(
             if self.calls == 1:
                 raise AccountBusy("existing expired turn")
             return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
+
+        def authorize_global_capacity(self, preflight, **_kwargs):
+            return preflight
 
     monkeypatch.setattr(
         chat_session_module, "ChatTurnAdmissionCoordinator", Coordinator

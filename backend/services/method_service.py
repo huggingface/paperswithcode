@@ -777,7 +777,7 @@ class MethodService:
         """
         try:
             from backend.models.database import Paper as DBPaper
-            from backend.models.api import Papers
+            from backend.models.papers import Papers
             from sqlalchemy import desc, asc
 
             # Get method to verify it exists - try by ID first, then by slug/name

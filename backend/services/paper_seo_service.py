@@ -10,7 +10,7 @@ from datetime import date
 from typing import Iterable, Optional
 from urllib.parse import urlsplit
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.utils.latex_text import latex_to_plain_text
 
 

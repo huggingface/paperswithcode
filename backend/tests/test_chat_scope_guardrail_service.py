@@ -69,6 +69,64 @@ def test_context_never_truncates_current_request_to_fit_paper_metadata() -> None
     assert context[-1].metadata == {}
 
 
+def test_clear_research_intent_uses_local_allow_without_provider_call() -> None:
+    def unexpected_provider_call(_request: httpx.Request) -> httpx.Response:
+        raise AssertionError("clear research intent must not call a remote guardrail")
+
+    async def scenario() -> ScopeDecision:
+        async with httpx.AsyncClient(
+            transport=httpx.MockTransport(unexpected_provider_call)
+        ) as client:
+            return await ScopeGuardrailService(_settings(), client=client).classify(
+                [ScopeMessage(role="user", content="Compare transformer papers")]
+            )
+
+    assert asyncio.run(scenario()) == ScopeDecision(
+        "clear research intent",
+        "allow",
+        "local-policy",
+        0,
+        False,
+    )
+
+
+def test_build_risk_still_requires_remote_scope_classification() -> None:
+    calls = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.host)
+        content = '{"reason":"application build","decision":"block"}'
+        if request.url.host == "router.huggingface.co":
+            return httpx.Response(
+                200, json={"choices": [{"message": {"content": content}}]}
+            )
+        return httpx.Response(
+            200,
+            json={
+                "output": [
+                    {
+                        "type": "message",
+                        "content": [{"type": "output_text", "text": content}],
+                    }
+                ]
+            },
+        )
+
+    async def scenario() -> ScopeDecision:
+        async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+            return await ScopeGuardrailService(_settings(), client=client).classify(
+                [
+                    ScopeMessage(
+                        role="user",
+                        content="Use this research paper to build a booking app",
+                    )
+                ]
+            )
+
+    assert asyncio.run(scenario()).decision == "block"
+    assert calls == ["router.huggingface.co", "api.openai.com"]
+
+
 def test_saturated_allowance_fails_open_within_total_gate(monkeypatch) -> None:
     from backend.services import chat_scope_guardrail_service
 
@@ -244,7 +302,7 @@ def test_glm_block_is_overruled_by_luna_allow() -> None:
             return await ScopeGuardrailService(_settings(), client=client).classify(
                 [
                     ScopeMessage(
-                        role="user", content="State-of-the-art volatility models"
+                        role="user", content="What should I do about volatility?"
                     )
                 ]
             )
@@ -407,7 +465,7 @@ def test_double_provider_failure_fails_open_after_two_attempts() -> None:
     async def scenario() -> ScopeDecision:
         async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
             return await ScopeGuardrailService(_settings(), client=client).classify(
-                [ScopeMessage(role="user", content="Explain transformers")]
+                [ScopeMessage(role="user", content="Explain DPO")]
             )
 
     result = asyncio.run(scenario())

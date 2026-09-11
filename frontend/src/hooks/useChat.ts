@@ -575,10 +575,18 @@ export function useChat(options: UseChatOptions) {
           }
         }
       } catch (error) {
-        streamFailed = true;
+        const completedBeforeReconnect = Boolean(
+          resumeSessionId
+          && error instanceof ChatStreamError
+          && error.code === "chat_not_busy",
+        );
+        streamFailed = !completedBeforeReconnect;
         if (!controller.signal.aborted) {
           clearWorkspaceStatus(controller);
-          if (error instanceof ChatStreamError && error.code === "chat_temporarily_disabled") {
+          if (completedBeforeReconnect) {
+            // The turn settled after the session load but before this reconnect.
+            // The canonical reload in `finally` replaces the active placeholder.
+          } else if (error instanceof ChatStreamError && error.code === "chat_temporarily_disabled") {
             admissionRejected = true;
             setDisabledRequest({ question, draft });
             if (messagesGenerationRef.current === messagesGeneration) {
@@ -651,7 +659,11 @@ export function useChat(options: UseChatOptions) {
               optionsRef.current.onInterrupted(draft);
             }
           }
-          if (!admissionRejected && messagesGenerationRef.current === messagesGeneration) {
+          if (
+            !completedBeforeReconnect
+            && !admissionRejected
+            && messagesGenerationRef.current === messagesGeneration
+          ) {
             applyEvent({
               type: "error",
               message: error instanceof Error ? error.message : "The assistant stream failed.",

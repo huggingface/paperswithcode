@@ -22,6 +22,8 @@ SYSTEMD_UNITS = (
     "paperswithcode-staging-backend@.socket",
     "paperswithcode-staging-external-pi@.service",
     "paperswithcode-staging-external-pi-worker@.service",
+    "paperswithcode-production-external-pi@.service",
+    "paperswithcode-production-external-pi-worker@.service",
     "paperswithcode-production-backend@.service",
     "paperswithcode-production-backend@.socket",
     "pwc-postgres-backup.service",
@@ -33,6 +35,16 @@ SYSTEMD_UNITS = (
     "autonomous/submission-review.service",
     "autonomous/submission-review.timer",
     "autonomous/submission-review-alert.service",
+    "autonomous/autonomous-cron-health.service",
+    "autonomous/autonomous-cron-health.timer",
+    "autonomous/autonomous-cron-audit.service",
+    "autonomous/autonomous-cron-audit.timer",
+)
+EXTERNAL_PI_HOSTS = (
+    "127.0.0.1 localhost chat-gateway-staging.paperswithcode.co "
+    "chat-gateway.paperswithcode.co\n"
+    "::1 localhost ip6-localhost ip6-loopback "
+    "chat-gateway-staging.paperswithcode.co chat-gateway.paperswithcode.co\n"
 )
 
 
@@ -90,6 +102,14 @@ def install_uv() -> None:
     os.replace(temporary, UV_DESTINATION)
 
 
+def install_external_pi_hosts(path: Path) -> None:
+    """Keep trusted-host gateway calls local without changing host DNS."""
+
+    path.write_text(EXTERNAL_PI_HOSTS, encoding="utf-8")
+    os.chown(path, 0, 0)
+    path.chmod(0o644)
+
+
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("run through sudo")
@@ -98,9 +118,20 @@ def main() -> int:
         "pwc-production",
         "pwc-staging",
         "pwc-cron",
+        "pwc-cron-trending",
         "pwc-external-pi",
     ):
         ensure_user(user)
+    subprocess.run(
+        ["usermod", "--groups", "", "pwc-cron-trending"],
+        check=True,
+    )
+    if any(
+        "pwc-cron-trending" in group.gr_mem
+        for group in grp.getgrall()
+        if group.gr_name != "pwc-cron-trending"
+    ):
+        raise RuntimeError("pwc-cron-trending retains a supplementary group")
     for path in (
         APP_ROOT,
         APP_ROOT / "environments",
@@ -109,15 +140,15 @@ def main() -> int:
     ):
         ensure_dir(path, "root", "root", 0o755)
     ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
-    worker_environment = CONFIG_ROOT / "external-pi-worker.env"
-    if not worker_environment.exists():
-        worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
-    os.chown(
-        worker_environment,
-        0,
-        grp.getgrnam("pwc-external-pi").gr_gid,
-    )
-    worker_environment.chmod(0o640)
+    for worker_environment in (
+        CONFIG_ROOT / "external-pi-worker.env",
+        CONFIG_ROOT / "external-pi-worker-production.env",
+    ):
+        if not worker_environment.exists():
+            worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
+        os.chown(worker_environment, 0, grp.getgrnam("pwc-external-pi").gr_gid)
+        worker_environment.chmod(0o640)
+    install_external_pi_hosts(CONFIG_ROOT / "external-pi-hosts")
     for path in (
         APP_ROOT / "releases",
         APP_ROOT / "runtimes",
@@ -153,6 +184,14 @@ def main() -> int:
             0o750,
         )
     ensure_dir(STATE_ROOT / "shared", "root", "root", 0o755)
+    # Root publishes only content-free compiler qualification evidence here.
+    # The staging service can read it but cannot replace its directory or file.
+    ensure_dir(
+        STATE_ROOT / "staging-compiler-qualification",
+        "root",
+        "pwc-staging",
+        0o750,
+    )
     ensure_dir(
         STATE_ROOT / "shared" / "thumbnails",
         "pwc-cron",
@@ -165,6 +204,11 @@ def main() -> int:
         STATE_ROOT / "production" / "cron-locks",
     ):
         ensure_dir(path, "pwc-cron", "pwc-production", 0o750)
+    for path in (
+        STATE_ROOT / "production" / "trending-cron-logs",
+        STATE_ROOT / "production" / "trending-cron-locks",
+    ):
+        ensure_dir(path, "pwc-cron-trending", "pwc-cron", 0o2770)
     ensure_dir(
         STATE_ROOT / "production" / "backups",
         "pwc-cron",
@@ -181,6 +225,18 @@ def main() -> int:
         STATE_ROOT / "autonomous-candidates",
         "pwc-cron",
         "pwc-cron",
+        0o700,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-source-broker",
+        "root",
+        "root",
+        0o700,
+    )
+    ensure_dir(
+        STATE_ROOT / "autonomous-retry-broker",
+        "root",
+        "root",
         0o700,
     )
     ensure_dir(

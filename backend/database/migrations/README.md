@@ -50,14 +50,21 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_chat_sandbox_spend_cap.sql` | Staging-only append-only full sandbox lifecycle meter, monthly circuit state, and deduplicated operator event ledger |
 | `add_chat_title_budget.sql` | Environment-owned, persistent monthly reservation/reconciliation ledger and alert events for the independent staging and production $25 server-funded title circuits |
 | `add_chat_shares.sql` | Staging-only self-contained public chat capability snapshots and durable assistant finish reasons; run as PostgreSQL superuser with `search_path=staging,public` before activating chat sharing |
-| `add_chat_artifacts.sql` | Staging-only immutable Posterly artifact/version rows and independently materialized public poster capabilities; apply before enabling Posterly flags |
+| `add_chat_artifacts.sql` | Staging-only typed-artifact base rows retained for the private-paper foundation and historical compatibility; apply before `expand_chat_artifact_foundation.sql`. Posterly remains disabled. |
 | `expand_chat_artifact_foundation.sql` (rollback: `rollback_expand_chat_artifact_foundation.sql`) | Additive typed-artifact foundation for disabled private LaTeX papers: allowed kind, paper-only immutable version metadata, and independent source/preview heads; apply after `add_chat_artifacts.sql` before later paper-feature migrations |
 | `allow_chat_latex_paper_restore_digests.sql` | Permit repeated source digests when restoring a historical paper snapshot as a new immutable version; apply after `expand_chat_artifact_foundation.sql` before enabling restore |
 | `add_chat_latex_paper_figure_storage.sql` | Additive content-addressed private PNG/JPEG/PDF figure blobs and immutable version references; apply after `expand_chat_artifact_foundation.sql` before enabling paper figure uploads |
+| `add_chat_latex_repair_provenance.sql` | Add selected-model provenance to successful immutable LaTeX repair versions; apply after `expand_chat_artifact_foundation.sql` before enabling AI repair |
 | `add_chat_openrouter_user_budget.sql` | Staging-owned per-HF-user funded OpenRouter monthly aggregates and provider-call ledger, AES-256-GCM BYOK records, bounded non-secret audit events, and capability revision/error fields; apply with `search_path=staging,public` before enabling any OpenRouter model |
 | `add_chat_direct_openai.sql` | Staging-only direct-OpenAI capability mode plus per-owner funded usage reservations, exact Responses usage settlement, and unknown-cost reconciliation ledger; apply with `search_path=staging,public` before enabling the direct route |
 | `add_paper_curation_jobs.sql` | durable admin-triggered Hugging Face paper-curation Jobs |
 | `add_autonomous_paper_curation.sql` | two-stage HF daily workflows, trace provenance, scheduler state, and benchmark-gap backlog |
+| `add_autonomous_operations.sql` | Fail-closed operator controls, immutable run/action evidence, global repair lease, provider state, attempt budgets, and Codex execution accounting |
+| `add_autonomous_release_broker.sql` | Root-owned single-use exact-SHA deploy/rollback authorization consumption |
+| `add_autonomous_submission_claims.sql` + `add_autonomous_submission_remote_jobs.sql` | Existing-taxonomy submission claims, scoped callbacks, and remote HF Job lifecycle state |
+| `add_autonomous_alert_delivery.sql` | Append-only, content-free, deduplicated urgent/mobile delivery receipts |
+| `add_autonomous_acceptance_evidence.sql` | Append-only rollout gate evidence and idempotency index |
+| `add_curation_autonomous_operator.sql` | Add the disabled curation operator and widen its autonomous ledger and alert-receipt constraints; apply after the autonomous operations and alert-delivery migrations |
 | `add_curation_thumbnail_queue.sql` | transactionally queued, CRON-owned thumbnail work and accepted-submission state for paper-curation Jobs |
 | `add_external_resources_schema.sql` + `run_add_external_resources_schema.py` | external resources |
 | `add_trending_score.sql` + `run_add_trending_score.py` + `update_trending_view_for_ema.sql` | repository (GitHub) trending scores |

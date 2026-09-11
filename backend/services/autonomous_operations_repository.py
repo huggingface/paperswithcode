@@ -505,6 +505,45 @@ class AutonomousOperationsRepository:
         db.flush()
         return self.get_control_state(db)
 
+    def append_acceptance_evidence(
+        self,
+        db: Session,
+        *,
+        target: str,
+        evidence_digest: str,
+        actor: str,
+        occurred_at: datetime,
+    ) -> uuid.UUID:
+        """Append one content-free admin acceptance receipt idempotently."""
+        self._validate_actor(actor)
+        self._validate_code(target, label="Acceptance target", max_length=64)
+        if occurred_at.tzinfo is None or _DIGEST.fullmatch(evidence_digest) is None:
+            raise ValueError("Autonomous acceptance evidence is invalid")
+        self._advisory_lock(db, f"autonomous:acceptance:{target}:{evidence_digest}")
+        existing = db.scalar(
+            select(AutonomousControlEvent).where(
+                AutonomousControlEvent.event_kind == "acceptance_evidence",
+                AutonomousControlEvent.target == target,
+                AutonomousControlEvent.after_digest == evidence_digest,
+            )
+        )
+        if existing is not None:
+            return existing.id
+        evidence_id = uuid.uuid4()
+        db.add(
+            AutonomousControlEvent(
+                id=evidence_id,
+                actor=actor,
+                event_kind="acceptance_evidence",
+                target=target,
+                before_digest="0" * 64,
+                after_digest=evidence_digest,
+                created_at=occurred_at,
+            )
+        )
+        db.flush()
+        return evidence_id
+
     def assert_mutation_allowed(self, db: Session, context: RunContext) -> None:
         if context.dry_run:
             raise DryRunMutation("Dry-run contexts cannot mutate")
@@ -582,6 +621,10 @@ class AutonomousOperationsRepository:
         if not isinstance(run_id, uuid.UUID):
             raise ValueError("Autonomous run ID is invalid")
         self._advisory_lock(db, f"autonomous:run:{run_id}")
+
+    def lock_cumulative_budget(self, db: Session) -> None:
+        """Serialize cumulative budget checks until their intent is committed."""
+        self._advisory_lock(db, "autonomous:cumulative-budget")
 
     def get_budget_reservation(
         self, db: Session, *, run_id: uuid.UUID
@@ -1187,6 +1230,16 @@ class AutonomousOperationsRepository:
         )
         db.flush()
         return row
+
+    def get_chat_provider_state(
+        self,
+        db: Session,
+        *,
+        environment: str,
+    ) -> ChatProviderRuntimeState | None:
+        if environment not in {"staging", "production"}:
+            raise ValueError("Chat provider environment is invalid")
+        return db.get(ChatProviderRuntimeState, environment)
 
     def set_chat_provider_state(
         self,

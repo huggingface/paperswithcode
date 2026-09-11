@@ -504,6 +504,149 @@ print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
 test "$rollback_refreshed_sha" = "$rollback_sha" || exit 1
 ```
 
+### Staging durable external Pi qualification profile
+
+The 32-turn durable external Pi qualification is a staging-only, explicitly
+confirmed configuration profile. It does not enable ordinary external
+admission: public staging remains at two ordinary concurrent turns with the
+three-sandbox safety cap. Resolve the exact active immutable release, enable
+the profile with that release's helper, and refresh that same SHA:
+
+```bash
+qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+case "$qualification_release" in
+  /srv/paperswithcode/releases/????????????-staging) ;;
+  *) echo "qualification release is not immutable staging" >&2; exit 1 ;;
+esac
+qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, re, sys
+manifest = json.load(open(sys.argv[1], encoding="utf-8"))
+sha = manifest.get("git_sha")
+assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
+assert manifest.get("release_id") == f"{sha[:12]}-staging"
+print(sha)
+' "$qualification_release/release.json")" || exit 1
+test "$(basename -- "$qualification_release")" = "${qualification_sha:0:12}-staging" || exit 1
+
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-modal-rate-evidence-install-only \
+  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
+  --staging-modal-rate-microusd-per-second 53 \
+  --confirm INSTALL_STAGING_MODAL_RATE_EVIDENCE || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-durable-external-qualification-enable-only \
+  --confirm ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
+sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
+test "$(readlink -e /srv/paperswithcode/environments/staging/current)" = \
+  "$qualification_release" || exit 1
+```
+
+`53` is the explicitly reviewed current Modal executor rate in microusd per
+second. The helper has no rate default or fallback: re-review and supply the
+rate explicitly for each candidate. It binds the three-key evidence file to
+the exact active staging release and atomically installs it as root-owned mode
+`0600`. It does not invent an attestation timestamp or print the rate, release,
+credentials, or file contents.
+
+Before starting an explicitly authorized qualifier, run `pwc-status` and verify
+the active external worker without exposing its bearer token:
+
+```bash
+pwc-status || exit 1
+sudo grep -E '^(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED|PWC_CHAT_MAX_CONCURRENCY|PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY|PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP|PWC_CHAT_BLANK_POOL_ENABLED|PWC_CHAT_PI_PREWARM_ENABLED)=' \
+  /etc/paperswithcode/staging.env
+sudo /srv/paperswithcode/.venv/bin/python - <<'PY'
+import json
+from pathlib import Path
+
+slot = Path("/srv/paperswithcode/environments/staging/active").resolve().name
+statuses = [
+    json.loads(
+        Path(
+            f"/run/paperswithcode/external-pi/staging-{slot}-{index:02d}.json"
+        ).read_text()
+    )
+    for index in range(8)
+]
+assert all(status["state"] == "ready" for status in statuses)
+assert all(status["authenticated"] is True for status in statuses)
+assert all(status["registered"] is True for status in statuses)
+assert all(status["maximum_sessions"] == 4 for status in statuses)
+assert sum(status["maximum_sessions"] for status in statuses) == 32
+print("eight external workers ready; aggregate maximum_sessions=32")
+PY
+sudo -u postgres psql -d paperswithcode_hf -Atc \
+  "SELECT count(*) FROM staging.chat_sandbox_pool WHERE state IN ('starting','blank_ready','claimed','draining');"
+```
+
+The selected environment values must include
+`PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false`,
+`PWC_CHAT_MAX_CONCURRENCY=2`, `PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3`, and both
+pool/prewarm flags set to `false`. The qualification profile must also set
+`PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY=32`; otherwise the ordinary four-call
+gateway limit serializes the 32-user cohort and invalidates its TTFT result.
+The pool query must return `0`; any other
+value is a stop gate, not authorization to delete rows. The qualifier itself is
+a separate, explicitly authorized operation.
+
+Run the qualifier with Locust in a transient environment outside the immutable
+release. The deployed application runtime intentionally does not contain load-
+testing dependencies:
+
+```bash
+uv_bin="$(command -v uv)" || exit 1
+sudo systemd-run --quiet --wait --pipe --collect \
+  --uid=root --gid=root \
+  --working-directory="$qualification_release" \
+  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
+  --property=PrivateTmp=yes \
+  -- /usr/bin/env \
+  PWC_RELEASE_ID="$(basename -- "$qualification_release")" \
+  UV_PROJECT_ENVIRONMENT=/tmp/pwc-staging-qualifier-project \
+  "$uv_bin" run --frozen --with locust python \
+  -m backend.scripts.qualify_durable_external_turns \
+  --environment staging \
+  --release-id "$(basename -- "$qualification_release")" \
+  --profile 32-functional-turns \
+  --max-spend-usd 10 \
+  --confirm QUALIFY_STAGING_DURABLE_EXTERNAL_TURNS
+```
+
+Restore the paired baseline with the same still-active release and refresh the
+same SHA whether qualification passes or fails:
+
+```bash
+qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
+qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
+import json, sys
+print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
+' "$qualification_release/release.json")" || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-durable-external-qualification-disable-only \
+  --confirm DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
+sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
+sudo /srv/paperswithcode/.venv/bin/python \
+  "$qualification_release/deploy/configure_host_env.py" \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-modal-rate-evidence-remove-only \
+  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
+  --confirm REMOVE_STAGING_MODAL_RATE_EVIDENCE || exit 1
+```
+
+Verify ordinary admission is still false, concurrency/cap remain `2`/`3`, and
+pool/prewarm are restored to `true`. `pwc-rollback staging` does not restore
+protected `/etc` configuration, so release rollback alone is not this profile's
+rollback. Run the separately confirmed exact-release removal even when the
+qualifier fails; it refuses a missing, symlinked, misowned, mispermissioned,
+wrong-source, or wrong-release evidence file. Production remains unchanged and
+has no corresponding activation mode.
+
 Pi prewarming and blank-pool admission are independent protected staging
 controls. Toggle Pi prewarming without changing admission, then refresh the
 exact active release through the immutable deployment path:
@@ -631,18 +774,24 @@ five failures and a 50% failure rate in a five-minute window, then send one
 recovery event after a fully clean five-minute window. Primary failure routes
 the same content-free event to the fallback destination. The timer is safe to
 enable while production chat is disabled because the job reports `dormant`
-without reading chat state or sending alerts.
+without reading chat state or sending alerts. Paid synthetic turns run in the
+separate allowlisted `run_chat_synthetic_probe` job with a six-minute launcher
+timeout. Its minute timer enforces the four-hour due gate and reacts to new
+releases, provider routes, and critical alert timestamps without blocking the
+journal poll.
 
 The committed timer is installed with the deployment tools but is never enabled
 implicitly. Enabling it is a reviewed production preparation mutation:
 
 ```bash
+sudo python deploy/install_deploy_tools.py <exact-main-sha>
 sudo systemctl enable --now pwc-chat-alert-monitor.timer
+sudo systemctl enable --now pwc-cron-run-chat-synthetic-probe.timer
 ```
 
-An enabled production-chat deployment fails closed unless this timer is
-enabled. The timer invokes only the `pwc-cron` allowlist, and only this job's
-transient unit receives read access to the system journal.
+An enabled production-chat deployment fails closed unless both timers are
+enabled. Both timers invoke only the `pwc-cron` allowlist, and only the
+operational monitor's transient unit receives read access to the system journal.
 
 Seal the reviewed production preparation inputs into a root-owned, non-loaded
 overlay. The named mode-`0600` Modal profile is imported in memory, so its token

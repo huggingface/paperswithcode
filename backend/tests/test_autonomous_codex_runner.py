@@ -51,6 +51,7 @@ from backend.services.autonomous_operations_repository import (
     BudgetReservationUnavailable,
 )
 from backend.services.autonomous_prompt_builder import build_codex_envelope
+from backend.services.autonomous_digest_service import BudgetDecision, BudgetLimits
 
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
@@ -88,6 +89,12 @@ def db():
 
 @pytest.fixture(autouse=True)
 def provider_reservation(monkeypatch):
+    monkeypatch.setattr(
+        AutonomousOperationsRepository,
+        "_database_now",
+        staticmethod(lambda _db: NOW),
+    )
+
     def reserve(_broker, value, existing_reservation_id, attestation_context):
         reservation_id = existing_reservation_id or f"run:{value.context.run_id.hex}"
         return VerifiedCredentialReservation(
@@ -294,6 +301,36 @@ def test_budget_exhaustion_discards_proposed_mutations(db):
     assert result.status == "budget_exhausted"
     assert result.proposed_actions == ()
     assert db.get(AutonomousRun, result.run_id).capability_requests == []
+
+
+def test_cumulative_budget_gate_stops_before_credentials_or_executor(db):
+    executor = RecordingExecutor()
+
+    class ExhaustedBudget:
+        limits = BudgetLimits(
+            Decimal("1"), 1000, Decimal("2"), 2000, Decimal("3"), 3000
+        )
+
+        def enforce_before_run(self, _db, **_kwargs):
+            return BudgetDecision(
+                False,
+                "daily_cost_limit",
+                True,
+                Decimal("2"),
+                Decimal("2"),
+                1000,
+                1000,
+            )
+
+    result = AutonomousCodexRunner(
+        executor=executor,
+        environ=runner_env(),
+        now=lambda: NOW,
+        cumulative_budget_service=ExhaustedBudget(),
+    ).run(request(), db=db)
+
+    assert result.status == "budget_exhausted"
+    assert executor.calls == []
 
 
 def test_provider_reservation_is_durable_before_executor_and_content_free(db):
@@ -577,10 +614,20 @@ def test_expired_crash_intent_is_finalized_without_second_model_run(db):
 def test_crash_before_local_claim_reconciles_idempotent_provider_reservation(db):
     value = request()
     releases = []
+
+    class MustNotReserveAgain:
+        limits = BudgetLimits(
+            Decimal("1"), 1000, Decimal("2"), 2000, Decimal("3"), 3000
+        )
+
+        def enforce_before_run(self, _db, **_kwargs):
+            raise AssertionError("durable intent already reserved cumulative budget")
+
     runner = AutonomousCodexRunner(
         executor=RecordingExecutor(error=AssertionError("must not execute")),
         environ=runner_env(),
         now=lambda: NOW,
+        cumulative_budget_service=MustNotReserveAgain(),
     )
     pricing = runner._pricing(value.model_alias)
     runner.repository.record_execution_intent(
@@ -977,6 +1024,46 @@ def test_subprocess_executor_hides_host_workspace_with_bubblewrap(tmp_path):
     assert "repo=False" in outcome.events_jsonl
     assert "proc=False" in outcome.events_jsonl
     assert "must-stay-hidden" not in outcome.events_jsonl
+
+
+def test_source_repair_mounts_only_declared_files_writable(tmp_path):
+    workspace = tmp_path / "candidate"
+    allowed = workspace / "backend" / "job.py"
+    blocked = workspace / "backend" / "other.py"
+    allowed.parent.mkdir(parents=True)
+    allowed.write_text("old\n")
+    blocked.write_text("keep\n")
+    script = tmp_path / "edit.py"
+    script.write_text(
+        "#!/usr/bin/env python3\n"
+        "from pathlib import Path\n"
+        "Path('/workspace/backend/job.py').write_text('new\\n')\n"
+        "try:\n"
+        " Path('/workspace/backend/other.py').write_text('bad\\n')\n"
+        "except OSError:\n"
+        " print('blocked=True')\n",
+        encoding="utf-8",
+    )
+    os.chmod(script, 0o700)
+    outcome = SubprocessCodexExecutor()(
+        command=[str(script)],
+        environment={"PATH": os.environ["PATH"]},
+        cwd=Path("/"),
+        input_text="{}",
+        output_schema={"type": "object"},
+        timeout_seconds=30,
+        max_output_bytes=1000,
+        cancellation_requested=lambda: False,
+        budget_exceeded=lambda _: False,
+        filesystem_isolation=True,
+        sandbox_executable="/usr/bin/bwrap",
+        shell=False,
+        workspace_path=workspace,
+        writable_paths=("backend/job.py",),
+    )
+    assert "blocked=True" in outcome.events_jsonl
+    assert allowed.read_text() == "new\n"
+    assert blocked.read_text() == "keep\n"
 
 
 def test_budget_gateway_caps_each_upstream_call_and_hides_upstream_key():

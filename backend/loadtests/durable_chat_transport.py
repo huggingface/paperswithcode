@@ -15,6 +15,9 @@ from backend.loadtests.external_pi_fleet_core import (
     FleetRunRefused,
     DurableQualificationEvidence,
 )
+from backend.services.durable_external_qualification_contract import (
+    DURABLE_QUALIFICATION_TEARDOWN_TIMEOUT_SECONDS,
+)
 
 _STAGING_ORIGIN = "https://staging.paperswithcode.co"
 _CHAT_STREAM_PATH = "/api/v1/chat/stream"
@@ -53,10 +56,13 @@ _PROMPTS = {
     "no_tool": "Reply with READY only. Do not call tools.",
     "admission_stream": "Reply with READY only. Do not call tools.",
     "read": (
-        "Use the Read tool exactly once to read /opt/pwc/PWC_CLI_SKILL.md. "
+        "Use the Read tool exactly once to read durable-ready.txt. "
         "Do not use Bash or any other tool."
     ),
-    "bash": "Run `printf durable-ready` exactly once, then report only the exit code.",
+    "bash": (
+        "Use the Bash tool exactly once to run `printf durable-ready`, "
+        "then report only the exit code."
+    ),
 }
 
 
@@ -96,6 +102,8 @@ class DurableChatTransportConfig:
     initial_model: str
     qualification_run_id: str = field(default="", repr=False)
     admin_token: str = field(default="", repr=False)
+    max_spend_microusd: int = field(default=10_000_000)
+    provider_spend_ceiling_microusd: int = field(default=0)
     timeout_seconds: float = 90.0
 
     def __post_init__(self) -> None:
@@ -119,6 +127,10 @@ class DurableChatTransportConfig:
             raise FleetRunRefused("durable qualification admin credential is invalid")
         if bool(self.qualification_run_id) != bool(self.admin_token):
             raise FleetRunRefused("durable qualification credentials are incomplete")
+        if self.qualification_run_id and not 1 <= self.max_spend_microusd <= 10_000_000:
+            raise FleetRunRefused("durable qualification spend envelope is invalid")
+        if not 0 <= self.provider_spend_ceiling_microusd <= self.max_spend_microusd:
+            raise FleetRunRefused("durable qualification provider budget is invalid")
         if not 1 <= self.timeout_seconds <= 120:
             raise FleetRunRefused("durable transport timeout is invalid")
 
@@ -181,8 +193,10 @@ class _SSEParser:
             data = json.loads(fields["data"])
         except (UnicodeDecodeError, ValueError, json.JSONDecodeError):
             raise FleetRunRefused("durable SSE event is malformed") from None
-        if sequence < 1 or event not in _EVENTS or not isinstance(data, dict):
+        if sequence < 1 or not isinstance(data, dict):
             raise FleetRunRefused("durable SSE event contract is invalid")
+        if event not in _EVENTS:
+            raise FleetRunRefused(f"durable SSE event is not allowed: {event}")
         if data.get("type") != event:
             raise FleetRunRefused("durable SSE event type is inconsistent")
         return _SSEEvent(sequence, event, data)
@@ -239,12 +253,13 @@ class HttpSSEDurableChatTransport:
         started = time.perf_counter()
         first = self._open(session, body, after_sequence=None, workload=spec.workload)
         if first.status_code != 200:
-            return self._refusal(first, started)
+            return self._refusal(first, started, workload=spec.workload)
 
         session_id: str | None = None
         request_id: str | None = None
         cursor = 0
         model_starts = 0
+        admission_ms: int | None = None
         with first:
             parser = _SSEParser()
             detached = False
@@ -254,9 +269,10 @@ class HttpSSEDurableChatTransport:
                     raise FleetRunRefused("durable stream did not begin with admission")
                 session_id, request_id, starts = self._stream_identity(event)
                 model_starts += starts
+                admission_ms = self._elapsed_ms(started)
                 detached = True
                 break
-            if not detached:
+            if not detached or admission_ms is None:
                 raise FleetRunRefused("durable stream admission evidence is missing")
 
         body["session_id"] = session_id
@@ -265,6 +281,7 @@ class HttpSSEDurableChatTransport:
         )
         if second.status_code != 200:
             raise FleetRunRefused("durable reconnect was refused")
+        reconnect_ready_ms = self._elapsed_ms(started)
         ttft_ms: int | None = None
         terminal_cause: str | None = None
         failure_code: str | None = None
@@ -276,7 +293,13 @@ class HttpSSEDurableChatTransport:
                 cursor = self._advance(cursor, event)
                 saw_resumed_event = True
                 if (
-                    event.event in {"answer_delta", "reasoning_delta", "tool_call"}
+                    event.event
+                    in {
+                        "answer_delta",
+                        "reasoning_delta",
+                        "tool_call",
+                        "tool_call_start",
+                    }
                     and ttft_ms is None
                 ):
                     ttft_ms = self._elapsed_ms(started)
@@ -304,7 +327,10 @@ class HttpSSEDurableChatTransport:
             raise FleetRunRefused("durable stream terminal is missing")
         completion_ms = self._elapsed_ms(started)
         return {
+            "workload": spec.workload,
             "outcome": terminal_cause,
+            "admission_ms": admission_ms,
+            "reconnect_ready_ms": reconnect_ready_ms,
             "ttft_ms": ttft_ms,
             "completion_ms": completion_ms,
             "reconnects": 1,
@@ -353,7 +379,10 @@ class HttpSSEDurableChatTransport:
 
     @staticmethod
     def _events(response, parser: _SSEParser) -> Iterator[_SSEEvent]:
-        for chunk in response.iter_content(chunk_size=4096):
+        # Qualification measures the first semantic SSE event, so it must not
+        # wait for a later event merely to fill urllib3's requested read size.
+        # This path carries only the bounded synthetic staging workload.
+        for chunk in response.iter_content(chunk_size=1):
             for event in parser.feed(chunk):
                 yield event
         parser.close()
@@ -383,7 +412,9 @@ class HttpSSEDurableChatTransport:
         return max(0, round((time.perf_counter() - started) * 1_000))
 
     @classmethod
-    def _refusal(cls, response, started: float) -> Mapping[str, object]:
+    def _refusal(
+        cls, response, started: float, *, workload: str
+    ) -> Mapping[str, object]:
         with response:
             try:
                 payload = response.json()
@@ -395,6 +426,7 @@ class HttpSSEDurableChatTransport:
             raise FleetRunRefused("durable chat refusal is untyped")
         elapsed = cls._elapsed_ms(started)
         return {
+            "workload": workload,
             "outcome": "refused",
             "ttft_ms": elapsed,
             "completion_ms": elapsed,
@@ -512,7 +544,7 @@ class HttpDurableQualificationEvidenceSource:
                     f"{_QUALIFICATION_SCOPE_PATH}/{scope_id}/teardown",
                 ),
                 headers=self._headers() | {"X-Admin-Token": self._config.admin_token},
-                timeout=30.0,
+                timeout=DURABLE_QUALIFICATION_TEARDOWN_TIMEOUT_SECONDS,
                 allow_redirects=False,
             )
             with response:

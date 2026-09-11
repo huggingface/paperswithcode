@@ -103,6 +103,19 @@ def prepare_runtime(
             + "\n",
             encoding="utf-8",
         )
+        # Console scripts embed the build venv path (including shell wrappers
+        # for long shebangs). Point them at the final path before publishing.
+        for script in (temporary / "bin").iterdir():
+            if script.is_symlink() or not script.is_file():
+                continue
+            with script.open("rb") as handle:
+                is_script = handle.read(2) == b"#!"
+            if is_script:
+                script.write_bytes(
+                    script.read_bytes().replace(
+                        os.fsencode(temporary), os.fsencode(target)
+                    )
+                )
         make_tree_readonly(temporary)
         try:
             os.replace(temporary, target)

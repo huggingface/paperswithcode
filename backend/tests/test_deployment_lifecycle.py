@@ -12,3 +12,12 @@ def test_deployment_status_exposes_exact_immutable_git_sha(monkeypatch):
     assert status.environment == "staging"
     assert status.git_sha == sha
     assert status.release_id == f"{sha[:12]}-staging"
+
+
+def test_openai_responses_request_is_counted_as_an_active_gateway_stream():
+    lifecycle = DeploymentLifecycle()
+
+    with lifecycle.request("/api/internal/chat-gateway/v1/responses"):
+        assert lifecycle.status().active_gateway_streams == 1
+
+    assert lifecycle.status().active_gateway_streams == 0

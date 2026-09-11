@@ -11,6 +11,8 @@ import secrets
 import subprocess
 import time
 import uuid
+from collections.abc import Iterator
+from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from statistics import median
@@ -19,7 +21,7 @@ from typing import Literal
 from huggingface_hub import HfApi
 from huggingface_hub.errors import HfHubHTTPError
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -51,6 +53,7 @@ JobStatus = Literal[
 ACTIVE_STATUSES = {"dispatching", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
 CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
+CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
     ".agents/skills/add-evals/SKILL.md",
     ".agents/skills/enrich-paper/SKILL.md",
@@ -61,6 +64,29 @@ CURATOR_BOOTSTRAP_PATHS = (
     "jobs/schemas/curation_proposal.schema.json",
     "jobs/url_preflight.py",
 )
+
+
+class CanaryDispatchFailed(RuntimeError):
+    """The selected canary did not reach the accepted remote-running state."""
+
+
+@contextmanager
+def curation_dispatch_lock(db: Session) -> Iterator[None]:
+    """Serialize every curation capacity decision on PostgreSQL."""
+    get_bind = getattr(db, "get_bind", None)
+    bind = get_bind() if get_bind is not None else None
+    if bind is None or bind.dialect.name != "postgresql":
+        yield
+        return
+    engine = getattr(bind, "engine", bind)
+    with engine.connect() as connection:
+        connection.execute(select(func.pg_advisory_lock(CURATION_DISPATCH_LOCK_ID)))
+        try:
+            yield
+        finally:
+            connection.execute(
+                select(func.pg_advisory_unlock(CURATION_DISPATCH_LOCK_ID))
+            )
 
 
 class CodexPaperJob(BaseModel):
@@ -534,6 +560,10 @@ class CodexPaperJobService:
         """Fill configured shared capacity while reserving one slot for admin work."""
         if not settings.codex_jobs_enabled:
             return
+        with curation_dispatch_lock(db):
+            self._dispatch_next_locked(db, settings)
+
+    def _dispatch_next_locked(self, db: Session, settings: Settings) -> None:
         while True:
             active = (
                 db.query(PaperCurationJob)
@@ -575,6 +605,57 @@ class CodexPaperJobService:
             self._dispatch_row(db, settings, row)
             if row.status == "failed":
                 continue
+
+    def dispatch_canary(
+        self, db: Session, settings: Settings, row: PaperCurationJob
+    ) -> PaperCurationJob:
+        """Dispatch one selected scheduled row without resuming the scheduler."""
+        if not settings.codex_jobs_enabled:
+            raise RuntimeError("Codex Jobs are disabled")
+        if not settings.codex_curation_scheduler_enabled:
+            raise RuntimeError("Scheduled curation is disabled")
+        with curation_dispatch_lock(db):
+            return self._dispatch_canary_locked(db, settings, row)
+
+    def _dispatch_canary_locked(
+        self, db: Session, settings: Settings, row: PaperCurationJob
+    ) -> PaperCurationJob:
+        get_bind = getattr(db, "get_bind", None)
+        bind = get_bind() if get_bind is not None else None
+        if bind is not None and bind.dialect.name == "postgresql":
+            db.refresh(row, with_for_update=True)
+        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+            raise ValueError("Only scheduled curation jobs may be canary-dispatched")
+        if row.status != "queued":
+            raise ValueError("Canary dispatch requires a queued curation job")
+        state = db.get(PaperCurationSchedulerState, 1)
+        if (
+            state is None
+            or state.dispatch_enabled
+            or state.paused_at is None
+            or state.pause_condition != "operator"
+        ):
+            raise RuntimeError("Canary dispatch requires an explicit operator pause")
+        if not self._scheduled_usage_allowed(db, state):
+            raise RuntimeError("Canary dispatch is blocked by the token guardrail")
+        active = (
+            db.query(PaperCurationJob)
+            .filter(PaperCurationJob.status.in_(ACTIVE_STATUSES))
+            .all()
+        )
+        if len(active) >= settings.codex_jobs_max_active:
+            raise RuntimeError("No Codex Job capacity is available")
+        scheduled_active = sum(
+            item.trigger in {"hf-daily-cron", "hf-trending-cron"} for item in active
+        )
+        if scheduled_active >= settings.codex_jobs_max_scheduled_active:
+            raise RuntimeError("No scheduled curation capacity is available")
+        self._dispatch_row(db, settings, row)
+        if row.status != "running" or not row.hf_job_id:
+            raise CanaryDispatchFailed(
+                f"Canary job did not launch (terminal status: {row.status})"
+            )
+        return row
 
     @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:

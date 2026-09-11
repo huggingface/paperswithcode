@@ -6,6 +6,7 @@ import { PostHogProvider } from "@posthog/react";
 import AppErrorBoundary from "./components/AppErrorBoundary";
 import "./index.css";
 import { installChunkReloadRecovery } from "./lib/chunkReload";
+import { posthogPrivacyOptions } from "./lib/posthogPrivacy";
 import "./styles.css";
 import "./styles/features/index.css";
 import "./components/chat/styles/index.css";
@@ -14,10 +15,6 @@ import App from "./App";
 installChunkReloadRecovery();
 
 const posthogToken = import.meta.env.VITE_POSTHOG_PROJECT_TOKEN;
-const posthogOptions = {
-  api_host: import.meta.env.VITE_POSTHOG_HOST,
-  defaults: "2026-05-30",
-} as const;
 
 const app = (
   <ThemeProvider
@@ -37,7 +34,7 @@ const root = createRoot(document.getElementById("root")!);
 root.render(
   <React.StrictMode>
     {posthogToken ? (
-      <PostHogProvider apiKey={posthogToken} options={posthogOptions}>
+      <PostHogProvider apiKey={posthogToken} options={posthogPrivacyOptions}>
         {app}
       </PostHogProvider>
     ) : app}

@@ -32,7 +32,8 @@ class _Harness:
         }
         return projection
 
-    async def capacity_rejected_without_queue(self):
+    async def capacity_rejected_without_queue(self, maximum_sessions):
+        assert maximum_sessions == 4
         return True
 
     async def restart_after_lease_expiry(self):
@@ -52,7 +53,7 @@ def test_qualification_covers_native_trees_concurrency_and_lifecycle_content_fre
     harness = _Harness()
     report = asyncio.run(
         run_qualification(
-            QualificationIdentity("release-a", "worker-a", 6),
+            QualificationIdentity("release-a", "worker-a", 6, 4),
             harness,
             qualification_nonce="n" * 32,
         )
@@ -71,7 +72,7 @@ def test_qualification_covers_native_trees_concurrency_and_lifecycle_content_fre
         "zero_external_work",
     ]
     assert all(case.passed and case.failure_code is None for case in report.cases)
-    assert harness.maximum_active == 8
+    assert harness.maximum_active == 4
     assert len(harness.concurrent_ids) == 8
     assert report.worker_generation == 6
     assert set(report.model_dump()) == {
@@ -101,7 +102,7 @@ def test_qualification_fails_closed_with_typed_code_when_external_work_occurs():
     harness.observed_counters = observed
     report = asyncio.run(
         run_qualification(
-            QualificationIdentity("release-a", "worker-a", 6),
+            QualificationIdentity("release-a", "worker-a", 6, 4),
             harness,
             qualification_nonce="n" * 32,
         )

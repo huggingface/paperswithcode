@@ -38,6 +38,7 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/METHOD_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
+    "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
     "backend/chat_sandbox_worker/prompt.py",
     "backend/services/__init__.py",
@@ -70,10 +71,14 @@ def cron_throttle_wrapper() -> str:
 def cron_wrapper() -> str:
     common = (
         "systemd-run --quiet --wait --pipe --collect "
-        "--uid=pwc-cron --gid=pwc-cron "
         "--working-directory=/srv/paperswithcode/environments/production/current "
+    )
+    production_environment = (
         "--property=EnvironmentFile=/etc/paperswithcode/production.env "
         "--property=EnvironmentFile=/etc/paperswithcode/production-cron.env "
+    )
+    trending_environment = (
+        "--property=EnvironmentFile=/etc/paperswithcode/trending-cron.env "
     )
     launcher = (
         '/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/cron_launcher.py "$@"\n'
@@ -81,9 +86,19 @@ def cron_wrapper() -> str:
     return (
         "#!/bin/sh\n"
         'if [ "$1" = "monitor_chat_operational_alerts" ]; then\n'
-        f"  exec {common}--property=SupplementaryGroups=systemd-journal {launcher}"
+        f"  exec {common}--uid=pwc-cron --gid=pwc-cron "
+        f"{production_environment}"
+        f"--property=SupplementaryGroups=systemd-journal {launcher}"
         "fi\n"
-        f"exec {common}{launcher}"
+        'case "$1" in\n'
+        "  calculate_trending_scores|calculate_paper_trending_scores)\n"
+        f"    exec {common}--uid=pwc-cron-trending --gid=pwc-cron-trending "
+        f"{trending_environment}"
+        f"{launcher}"
+        "    ;;\n"
+        "esac\n"
+        f"exec {common}--uid=pwc-cron --gid=pwc-cron "
+        f"{production_environment}{launcher}"
     )
 
 
@@ -176,6 +191,23 @@ def autonomous_release_wrapper() -> str:
     )
 
 
+def autonomous_source_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        '/usr/local/lib/paperswithcode-deploy/autonomous_source_bridge.py "$@"\n'
+    )
+
+
+def autonomous_cron_retry_wrapper() -> str:
+    return (
+        "#!/bin/sh\n"
+        "exec /usr/bin/sudo -n /usr/bin/python3 "
+        "/usr/local/lib/paperswithcode-deploy/autonomous_cron_retry_bridge.py "
+        '"$@"\n'
+    )
+
+
 def autonomous_sudoers() -> str:
     root = "/usr/local/lib/paperswithcode-deploy"
     return (
@@ -183,6 +215,10 @@ def autonomous_sudoers() -> str:
         f"/usr/bin/python3 {root}/autonomous_check_runner.py *\n"
         "pwc-cron ALL=(root) NOPASSWD: "
         f"/usr/bin/python3 {root}/autonomous_release_bridge.py *\n"
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_source_bridge.py *\n"
+        "pwc-cron ALL=(root) NOPASSWD: "
+        f"/usr/bin/python3 {root}/autonomous_cron_retry_bridge.py *\n"
     )
 
 
@@ -318,6 +354,12 @@ def main() -> int:
         wrapper = BIN_ROOT / "pwc-autonomous-release"
         wrapper.write_text(autonomous_release_wrapper())
         wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-source"
+        wrapper.write_text(autonomous_source_wrapper())
+        wrapper.chmod(0o755)
+        wrapper = BIN_ROOT / "pwc-autonomous-cron-retry"
+        wrapper.write_text(autonomous_cron_retry_wrapper())
+        wrapper.chmod(0o755)
         verify_autonomous_release_broker_schema()
         install_autonomous_sudoers()
         wrapper = BIN_ROOT / "pwc-cron"
@@ -331,6 +373,8 @@ def main() -> int:
             "paperswithcode-staging-backend@.socket",
             "paperswithcode-staging-external-pi@.service",
             "paperswithcode-staging-external-pi-worker@.service",
+            "paperswithcode-production-external-pi@.service",
+            "paperswithcode-production-external-pi-worker@.service",
             "paperswithcode-production-backend@.service",
             "paperswithcode-production-backend@.socket",
             "pwc-curation-thumbnails.service",
@@ -340,6 +384,10 @@ def main() -> int:
             "autonomous/submission-review.service",
             "autonomous/submission-review.timer",
             "autonomous/submission-review-alert.service",
+            "autonomous/autonomous-cron-health.service",
+            "autonomous/autonomous-cron-health.timer",
+            "autonomous/autonomous-cron-audit.service",
+            "autonomous/autonomous-cron-audit.timer",
         ):
             source = (
                 INSTALL_ROOT / unit

@@ -12,7 +12,11 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, or_
 
 from backend.models.database import Author as DBAuthor, Paper as DBPaper, PaperAuthor
-from backend.models.api import Author, Authors, Papers
+from backend.models.papers import (
+    Author,
+    Authors,
+    Papers,
+)
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 
 

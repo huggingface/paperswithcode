@@ -39,6 +39,7 @@ class _Response:
         self.status_code = status_code
         self._chunks = chunks
         self._payload = payload
+        self.iter_content_kwargs = []
 
     def __enter__(self):
         return self
@@ -46,7 +47,8 @@ class _Response:
     def __exit__(self, *_args):
         return False
 
-    def iter_content(self, **_kwargs):
+    def iter_content(self, **kwargs):
+        self.iter_content_kwargs.append(kwargs)
         yield from self._chunks
 
     def json(self):
@@ -89,7 +91,31 @@ def _frame(sequence: int, event: str, payload: dict) -> bytes:
     ).encode()
 
 
-def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_content():
+def test_sse_transport_yields_prompt_event_before_later_response_bytes():
+    from backend.loadtests.durable_chat_transport import _SSEParser
+    from backend.loadtests.durable_chat_transport import HttpSSEDurableChatTransport
+
+    class PromptDeliveryResponse(_Response):
+        def iter_content(self, *, chunk_size):
+            self.iter_content_kwargs.append({"chunk_size": chunk_size})
+            if chunk_size != 1:
+                raise AssertionError("prompt event was buffered behind later bytes")
+            yield _frame(1, "answer_delta", {"text": "first"})
+            raise AssertionError("test consumed bytes after the first prompt event")
+
+    response = PromptDeliveryResponse(200)
+    events = HttpSSEDurableChatTransport._events(response, _SSEParser())
+
+    first = next(events)
+
+    assert first.event == "answer_delta"
+    assert response.iter_content_kwargs == [{"chunk_size": 1}]
+    events.close()
+
+
+def test_real_transport_records_admission_and_reconnect_milestones_without_content(
+    monkeypatch,
+):
     from backend.loadtests.durable_chat_transport import (
         DurableChatTransportConfig,
         HttpSSEDurableChatTransport,
@@ -140,6 +166,8 @@ def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_
         ),
         session_factory=lambda: session,
     )
+    elapsed = iter((120, 185, 640, 900))
+    monkeypatch.setattr(transport, "_elapsed_ms", lambda _started: next(elapsed))
 
     evidence = transport.open_durable_stream(_spec(0, "bash"))
 
@@ -166,6 +194,10 @@ def test_real_transport_posts_chat_stream_and_resumes_same_turn_without_leaking_
     assert session.proxies == {}
     assert evidence["outcome"] == "completed"
     assert evidence["model_starts"] == 1
+    assert evidence["admission_ms"] == 120
+    assert evidence["reconnect_ready_ms"] == 185
+    assert evidence["ttft_ms"] == 640
+    assert evidence["completion_ms"] == 900
     assert "operation_start_ids" not in evidence
     assert evidence["reconnects"] == evidence["reconnect_successes"] == 1
     assert "TOP_SECRET" not in repr(evidence)
@@ -263,9 +295,60 @@ def test_read_workload_requires_the_pi_read_tool_for_a_known_executor_file():
         "message"
     ]
     assert prompt == (
-        "Use the Read tool exactly once to read /opt/pwc/PWC_CLI_SKILL.md. "
+        "Use the Read tool exactly once to read durable-ready.txt. "
         "Do not use Bash or any other tool."
     )
+
+
+def test_tool_call_start_is_the_first_semantic_ttft_event():
+    from backend.loadtests.durable_chat_transport import (
+        DurableChatTransportConfig,
+        HttpSSEDurableChatTransport,
+    )
+
+    session_id = "00000000-0000-0000-0000-000000000021"
+    request_id = "00000000-0000-0000-0000-000000000022"
+    session = _Session(
+        (
+            _Response(
+                200,
+                (
+                    _frame(
+                        1,
+                        "stream_start",
+                        {
+                            "request_id": request_id,
+                            "session_id": session_id,
+                            "provider_execution": True,
+                        },
+                    ),
+                ),
+            ),
+            _Response(
+                200,
+                (
+                    _frame(
+                        2,
+                        "tool_call_start",
+                        {"id": "read-1", "name": "Read", "content_index": 0},
+                    ),
+                    _frame(3, "done", {"finish_reason": "success", "followups": []}),
+                ),
+            ),
+        )
+    )
+    transport = HttpSSEDurableChatTransport(
+        DurableChatTransportConfig(
+            base_url="https://staging.paperswithcode.co",
+            synthetic_cookies=("signed-cookie",),
+            initial_model="gpt-5.6-luna@openai",
+        ),
+        session_factory=lambda: session,
+    )
+
+    evidence = transport.open_durable_stream(_spec(0, "read"))
+
+    assert evidence["ttft_ms"] is not None
 
 
 def test_real_transport_preserves_typed_immediate_429_without_queueing():
@@ -320,6 +403,36 @@ def test_real_transport_rejects_untyped_queue_and_invalid_sse(response):
     with pytest.raises(FleetRunRefused):
         transport.open_durable_stream(_spec(0, "no_tool"))
     assert session.calls.count(("close",)) == 1
+
+
+def test_real_transport_names_an_unexpected_sse_event_without_exposing_data():
+    from backend.loadtests.durable_chat_transport import (
+        DurableChatTransportConfig,
+        HttpSSEDurableChatTransport,
+    )
+
+    session = _Session(
+        (
+            _Response(
+                200,
+                (_frame(1, "warning", {"text": "TOP_SECRET_OUTPUT"}),),
+            ),
+        )
+    )
+    transport = HttpSSEDurableChatTransport(
+        DurableChatTransportConfig(
+            base_url="https://staging.paperswithcode.co",
+            synthetic_cookies=("signed-cookie",),
+            initial_model="gpt-5.6-luna@openai",
+        ),
+        session_factory=lambda: session,
+    )
+
+    with pytest.raises(FleetRunRefused) as exc_info:
+        transport.open_durable_stream(_spec(0, "no_tool"))
+
+    assert str(exc_info.value) == "durable SSE event is not allowed: warning"
+    assert "TOP_SECRET_OUTPUT" not in str(exc_info.value)
 
 
 def test_real_transport_rejects_a_truncated_sse_tail():
@@ -416,13 +529,14 @@ def test_modal_lifecycle_delta_and_protected_rate_are_window_bound_not_chat_late
     profile = resolve_durable_profile("32-functional-turns")
     observations = tuple(
         DurableTurnObservation(
+            workload=workload,
             outcome="completed",
             ttft_ms=10,
             completion_ms=999,
             model_starts=1,
             terminal_cause="completed",
         )
-        for _ in profile.workloads
+        for workload in profile.workloads
     )
 
     report = aggregate_durable_profile(
@@ -498,6 +612,16 @@ def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
             _Response(
                 200,
                 payload={
+                    "expected_tool_turns": 16,
+                    "targeted_sessions": 16,
+                    "closed_intervals": 16,
+                    "eviction_events": 16,
+                    "source": "exact_scope_canonical_eviction",
+                },
+            ),
+            _Response(
+                200,
+                payload={
                     "expected_users": 32,
                     "admitted_turns": 32,
                     "admission_denominator_events": 32,
@@ -512,17 +636,15 @@ def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
                     "billed_duration_ms": 4,
                     "window_started_at_ms": 1,
                     "window_ended_at_ms": 2,
+                    "p95_server_latency_ms_by_workload": {
+                        workload: {
+                            "provider_gateway_received_ms": 100,
+                            "provider_ttft_ms": 200,
+                            "first_semantic_event_ms": 300,
+                        }
+                        for workload in ("no_tool", "read", "bash")
+                    },
                     "source": "durable_qualification_records",
-                },
-            ),
-            _Response(
-                200,
-                payload={
-                    "expected_tool_turns": 16,
-                    "targeted_sessions": 16,
-                    "closed_intervals": 16,
-                    "eviction_events": 16,
-                    "source": "exact_scope_canonical_eviction",
                 },
             ),
             _Response(204),
@@ -540,24 +662,25 @@ def test_http_durable_evidence_source_reads_exact_scoped_content_free_seam():
     )
 
     scope = source.begin_scope("32-functional-turns")
-    snapshot = source.collect(scope["scope_id"])
     proof = source.teardown(scope["scope_id"])
+    snapshot = source.collect(scope["scope_id"])
     source.cleanup(scope["scope_id"])
 
     posts = [call for call in session.calls if call[0] == "post"]
     assert posts[0][1].endswith("/api/v1/chat/admin/qualification-scopes")
     assert posts[0][2]["json"]["run_id"] == "run-f32"
-    assert posts[1][1] == (
-        "https://staging.paperswithcode.co/api/v1/chat/admin/qualification-evidence"
-    )
-    assert posts[1][2]["json"] == {"scope_id": str(scope["scope_id"])}
-    assert posts[1][2]["headers"]["Origin"] == "https://staging.paperswithcode.co"
-    assert posts[2][1].endswith(
+    assert posts[1][1].endswith(
         f"/api/v1/chat/admin/qualification-scopes/{scope['scope_id']}/teardown"
     )
+    assert posts[2][1] == (
+        "https://staging.paperswithcode.co/api/v1/chat/admin/qualification-evidence"
+    )
+    assert posts[2][2]["json"] == {"scope_id": str(scope["scope_id"])}
+    assert posts[2][2]["headers"]["Origin"] == "https://staging.paperswithcode.co"
     assert proof["closed_intervals"] == 16
     assert session.calls.count(("close",)) == 4
     assert snapshot.billed_duration_ms == 4
+    assert snapshot.p95_server_latency_ms_by_workload["no_tool"].provider_ttft_ms == 200
     assert "signed-cookie" not in repr(snapshot)
 
 
