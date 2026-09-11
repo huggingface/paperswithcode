@@ -240,6 +240,7 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="backfill_method_references",
         on_calendar=("*-*-* *:15:00",),
         description="Backfill method reference evidence hourly",
+        after=("pwc-cron-import-hf-daily-papers",),
         args=(
             "--provider",
             "openalex",
