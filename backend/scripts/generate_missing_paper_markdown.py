@@ -431,7 +431,13 @@ def validate_external_pdf_network_target(value: str) -> str:
     return normalized
 
 
-def download_external_pdf(pdf_url: str, *, timeout_seconds: float = 180) -> bytes:
+def download_external_pdf(
+    pdf_url: str,
+    *,
+    timeout_seconds: float = 180,
+    max_elapsed_seconds: float | None = None,
+) -> bytes:
+    started_at = time.monotonic()
     url = validate_external_pdf_network_target(pdf_url)
 
     def validate_request(request: httpx.Request) -> None:
@@ -455,6 +461,13 @@ def download_external_pdf(pdf_url: str, *, timeout_seconds: float = 180) -> byte
 
             data = bytearray()
             for chunk in response.iter_bytes():
+                if (
+                    max_elapsed_seconds is not None
+                    and time.monotonic() - started_at > max_elapsed_seconds
+                ):
+                    raise httpx.TimeoutException(
+                        "external PDF download deadline exceeded"
+                    )
                 if len(data) + len(chunk) > MAX_PDF_BYTES:
                     raise ValueError("invalid_pdf")
                 data.extend(chunk)

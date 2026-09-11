@@ -308,6 +308,47 @@ def test_worker_streams_external_pdf_with_a_hard_size_cap(monkeypatch):
     assert read_past_limit is False
 
 
+def test_worker_enforces_external_pdf_elapsed_time_limit(monkeypatch):
+    class Response:
+        headers = {}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield b"%PDF-valid"
+
+    class Client:
+        def __init__(self, **_kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def stream(self, _method, _url):
+            return Response()
+
+    monkeypatch.setattr(
+        WORKER, "validate_external_pdf_network_target", lambda value: value
+    )
+    monkeypatch.setattr(WORKER.httpx, "Client", Client)
+    monkeypatch.setattr(WORKER.time, "monotonic", Mock(side_effect=[0, 31]))
+
+    with pytest.raises(httpx.TimeoutException, match="download deadline"):
+        WORKER.download_external_pdf(
+            "https://example.com/report.pdf", max_elapsed_seconds=30
+        )
+
+
 def test_worker_archives_external_pdf_and_publishes_source_aware_markdown(
     tmp_path, monkeypatch
 ):
@@ -835,6 +876,7 @@ def test_external_pdf_is_validated_and_archived_before_remote_launch(monkeypatch
     download.assert_called_once_with(
         "https://huggingface.co/acme/report/resolve/main/report.pdf",
         timeout_seconds=30,
+        max_elapsed_seconds=30,
     )
     assert (
         job.api.batch_bucket_files.call_args_list[1]

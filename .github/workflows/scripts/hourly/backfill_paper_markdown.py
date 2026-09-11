@@ -948,6 +948,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 pdf = download_external_pdf(
                     str(entry["pdf_url"]),
                     timeout_seconds=EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS,
+                    max_elapsed_seconds=EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS,
                 )
                 with pymupdf.open(stream=pdf, filetype="pdf") as document:
                     if document.page_count < 1:
