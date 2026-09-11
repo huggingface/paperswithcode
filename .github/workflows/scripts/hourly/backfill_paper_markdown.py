@@ -45,6 +45,8 @@ DISPATCH_SCHEMA_VERSION = 1
 MOUNT_PROBE_MAX_AGE = timedelta(hours=2)
 MOUNT_RETRY_DELAY = timedelta(minutes=10)
 LIVE_REPAIR_LIMIT = 20
+EXTERNAL_PDF_ARCHIVE_LIMIT = 64
+EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS = 30
 PROBE_SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -802,7 +804,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if self.batch_size < 1 or self.batch_size > maximum:
                 raise ValueError(f"batch size must be between 1 and {maximum}")
             batch_size = self.batch_size
-        desired_plans = chunks(candidates, batch_size)[:available_slots]
+        candidate_plans = chunks(candidates, batch_size)
+        desired_plans = candidate_plans[:available_slots]
         budget = self._budget_decision(len(desired_plans), remote_jobs)
         affordable = int(budget["affordable_jobs"])
         plans = desired_plans[:affordable]
@@ -837,13 +840,19 @@ class PaperMarkdownBackfillJob(CronJobBase):
             return []
 
         launched: list[dict[str, str]] = []
+        remaining_external_downloads = EXTERNAL_PDF_ARCHIVE_LIMIT
         run_id = (
             f"{'backfill' if self.full else 'live'}-"
             f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
         )
-        for shard_number, entries in enumerate(plans):
+        for shard_number, entries in enumerate(candidate_plans):
+            if len(launched) >= affordable:
+                break
             if self.should_execute:
-                entries = self._archive_external_pdfs(entries)
+                entries, attempted = self._archive_external_pdfs(
+                    entries, max_downloads=remaining_external_downloads
+                )
+                remaining_external_downloads -= attempted
                 if not entries:
                     continue
             shard_id = f"{shard_number:05d}"
@@ -918,8 +927,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
         return launched
 
     def _archive_external_pdfs(
-        self, entries: list[dict[str, object]]
-    ) -> list[dict[str, object]]:
+        self, entries: list[dict[str, object]], *, max_downloads: int
+    ) -> tuple[list[dict[str, object]], int]:
         external = [
             entry
             for entry in entries
@@ -930,11 +939,16 @@ class PaperMarkdownBackfillJob(CronJobBase):
             [str(entry["pdf_key"]) for entry in external],
         )
         missing = [entry for entry in external if str(entry["pdf_key"]) not in existing]
+        selected = missing[:max_downloads]
+        deferred = {entry_paper_key(entry) for entry in missing[max_downloads:]}
 
         def archive(entry: dict[str, object]) -> str | None:
             pdf_key = str(entry["pdf_key"])
             try:
-                pdf = download_external_pdf(str(entry["pdf_url"]))
+                pdf = download_external_pdf(
+                    str(entry["pdf_url"]),
+                    timeout_seconds=EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS,
+                )
                 with pymupdf.open(stream=pdf, filetype="pdf") as document:
                     if document.page_count < 1:
                         raise ValueError("invalid_pdf")
@@ -960,18 +974,30 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     "external PDF archival failed for %s: %s", paper_key, error
                 )
                 return paper_key
-            self.api.batch_bucket_files(
-                self.settings.paper_markdown_hf_bucket_id,
-                add=[(pdf, pdf_key)],
-                token=self.settings.hf_token or None,
-            )
+            try:
+                self.api.batch_bucket_files(
+                    self.settings.paper_markdown_hf_bucket_id,
+                    add=[(pdf, pdf_key)],
+                    token=self.settings.hf_token or None,
+                )
+            except Exception as error:  # noqa: BLE001 - isolate failures per paper
+                self.logger.warning(
+                    "external PDF upload failed for %s: %s",
+                    entry_paper_key(entry),
+                    error,
+                )
+                return entry_paper_key(entry)
             return None
 
         failed: set[str] = set()
-        if missing:
-            with ThreadPoolExecutor(max_workers=min(8, len(missing))) as executor:
-                failed.update(key for key in executor.map(archive, missing) if key)
-        return [entry for entry in entries if entry_paper_key(entry) not in failed]
+        if selected:
+            with ThreadPoolExecutor(max_workers=min(8, len(selected))) as executor:
+                failed.update(key for key in executor.map(archive, selected) if key)
+        excluded = failed | deferred
+        return (
+            [entry for entry in entries if entry_paper_key(entry) not in excluded],
+            len(selected),
+        )
 
     def run(self) -> None:
         if self.should_execute and not self.settings.hf_token:

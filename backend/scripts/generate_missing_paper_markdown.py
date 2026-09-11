@@ -431,7 +431,7 @@ def validate_external_pdf_network_target(value: str) -> str:
     return normalized
 
 
-def download_external_pdf(pdf_url: str) -> bytes:
+def download_external_pdf(pdf_url: str, *, timeout_seconds: float = 180) -> bytes:
     url = validate_external_pdf_network_target(pdf_url)
 
     def validate_request(request: httpx.Request) -> None:
@@ -439,7 +439,7 @@ def download_external_pdf(pdf_url: str) -> bytes:
 
     with httpx.Client(
         headers={"User-Agent": USER_AGENT},
-        timeout=180,
+        timeout=timeout_seconds,
         follow_redirects=True,
         event_hooks={"request": [validate_request]},
     ) as client:

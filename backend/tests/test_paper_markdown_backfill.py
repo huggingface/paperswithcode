@@ -817,9 +817,8 @@ def test_external_pdf_is_validated_and_archived_before_remote_launch(monkeypatch
         "_budget_decision",
         lambda desired, _jobs: {"affordable_jobs": desired},
     )
-    monkeypatch.setattr(
-        MODULE, "download_external_pdf", lambda _url: b"%PDF-valid", raising=False
-    )
+    download = Mock(return_value=b"%PDF-valid")
+    monkeypatch.setattr(MODULE, "download_external_pdf", download, raising=False)
     document = Mock()
     document.__enter__ = Mock(return_value=SimpleNamespace(page_count=2))
     document.__exit__ = Mock(return_value=None)
@@ -833,6 +832,10 @@ def test_external_pdf_is_validated_and_archived_before_remote_launch(monkeypatch
         token="test-token",
     )
     MODULE.pymupdf.open.assert_called_once_with(stream=b"%PDF-valid", filetype="pdf")
+    download.assert_called_once_with(
+        "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        timeout_seconds=30,
+    )
     assert (
         job.api.batch_bucket_files.call_args_list[1]
         .kwargs["add"][0][1]
@@ -863,6 +866,42 @@ def test_external_pdf_archive_is_reused_without_downloading(monkeypatch):
     download.assert_not_called()
     assert job.api.batch_bucket_files.call_count == 1
     job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_archival_is_bounded_per_scheduler_run(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(MODULE, "EXTERNAL_PDF_ARCHIVE_LIMIT", 1)
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(return_value=b"%PDF-valid")
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=1))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+    second = {
+        **_external_candidate(),
+        "paper_key": "external/109744",
+        "paper_id": "109744",
+        "pdf_key": "external/109744/paper.pdf",
+        "output_key": "external/109744.md",
+    }
+
+    launched = job._launch([_external_candidate(), second])
+
+    assert len(launched) == 1
+    assert download.call_count == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" in manifest
+    assert b"external/109744" not in manifest
 
 
 def test_external_pdf_is_not_archived_during_dry_run(monkeypatch):
@@ -900,7 +939,10 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
         lambda desired, _jobs: {"affordable_jobs": desired},
     )
     monkeypatch.setattr(
-        MODULE, "download_external_pdf", lambda _url: b"%PDF-broken", raising=False
+        MODULE,
+        "download_external_pdf",
+        lambda _url, **_kwargs: b"%PDF-broken",
+        raising=False,
     )
     monkeypatch.setattr(
         MODULE.pymupdf,
@@ -923,6 +965,8 @@ def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
 def test_invalid_external_pdf_does_not_block_other_papers(monkeypatch):
     job = _scheduler(execute=True, confirm=True, full=False)
     job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.batch_size = 1
+    job.max_jobs = 1
     job.api = Mock()
     job._persist_dispatch = Mock()
     job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
@@ -936,6 +980,41 @@ def test_invalid_external_pdf_does_not_block_other_papers(monkeypatch):
     monkeypatch.setattr(
         MODULE, "download_external_pdf", Mock(side_effect=ValueError("invalid_pdf"))
     )
+
+    launched = job._launch([_external_candidate(), _candidates(1)[0]])
+
+    assert len(launched) == 1
+    manifest = job.api.batch_bucket_files.call_args_list[-1].kwargs["add"][0][0]
+    assert b"external/109743" not in manifest
+    assert b"2607.00000" in manifest
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_upload_failure_does_not_block_other_papers(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.batch_size = 1
+    job.max_jobs = 1
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(MODULE, "download_external_pdf", Mock(return_value=b"%PDF"))
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=1))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+
+    def upload(_bucket, *, add, **_kwargs):
+        if add[0][1].endswith("/paper.pdf"):
+            raise OSError("bucket unavailable")
+
+    job.api.batch_bucket_files.side_effect = upload
 
     launched = job._launch([_external_candidate(), _candidates(1)[0]])
 
