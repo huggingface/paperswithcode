@@ -240,8 +240,13 @@ def _session() -> Session:
     return session
 
 
-def test_sync_is_idempotent_and_only_replaces_managed_rows():
+def test_sync_is_idempotent_and_only_replaces_managed_rows(monkeypatch):
     session = _session()
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"org/model-a": PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
     session.add_all(
         [
             Evaluation(
@@ -258,6 +263,17 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows():
                 paper_id=9,
                 task_id=24,
                 dataset_id=2_400,
+                model_name="Unreviewed release",
+                hf_model_url="https://huggingface.co/org/unreviewed",
+                metrics={"WER": 4.0, "RTFx": 4.0},
+                best_metric="WER",
+                external_source_url=SPACE_SOURCE_URL,
+                methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
+            ),
+            Evaluation(
+                paper_id=9,
+                task_id=24,
+                dataset_id=2_400,
                 model_name="Manual result",
                 metrics={"WER": 0.5},
                 best_metric="WER",
@@ -266,7 +282,10 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows():
         ]
     )
     session.commit()
-    entries = [OpenTtsEntry("org/model-a", "Model A (RL)", 1, 1.25, 12.5, True)]
+    entries = [
+        OpenTtsEntry("org/model-a", "Model A (RL)", 1, 1.25, 12.5, True),
+        OpenTtsEntry("org/unreviewed", "Unreviewed release", 2, 2.0, 5.0, True),
+    ]
     discovery = ArtificialAnalysisDiscovery(papers={"org/model-a": 9})
     now = datetime(2026, 9, 11, 12, 0, tzinfo=UTC)
 
@@ -278,14 +297,16 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows():
     )
 
     assert first.to_dict() == {
-        "fetched": 1,
+        "fetched": 2,
         "matched": 1,
         "created": 1,
         "updated": 0,
-        "deleted": 1,
+        "deleted": 2,
+        "excluded_models": ["org/unreviewed"],
         "missing_papers": [],
     }
     assert (second.created, second.updated, second.deleted) == (0, 1, 0)
+    assert second.excluded_models == ["org/unreviewed"]
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
     assert set(rows) == {"Model A (RL)", "Manual result"}
     managed = rows["Model A (RL)"]
@@ -299,8 +320,13 @@ def test_sync_is_idempotent_and_only_replaces_managed_rows():
     assert session.query(PaperTask).one().source == "auto"
 
 
-def test_sync_rolls_back_dry_run():
+def test_sync_rolls_back_dry_run(monkeypatch):
     session = _session()
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"org/model-a": PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
     stats = OpenTtsSyncService(session).sync(
         [OpenTtsEntry("org/model-a", "Model A", 1, 2.0, 3.0, True)],
         discovery=ArtificialAnalysisDiscovery(papers={"org/model-a": 9}),
@@ -326,33 +352,12 @@ def test_discovery_resolves_reviewed_model_to_existing_paper(monkeypatch):
     assert discovery.indexed_papers == []
 
 
-def test_magpie_discovery_uses_official_release_instead_of_supporting_paper(
-    monkeypatch,
-):
-    session = _session()
-    source_url = "https://huggingface.co/nvidia/magpie_tts_multilingual_357m"
-    session.add(
-        Paper(
-            id=10,
-            title="MagpieTTS Multilingual 357M",
-            source="external",
-            source_url=source_url,
-            version="v1",
-            is_latest_version=True,
-        )
+def test_reviewed_model_manifest_contains_only_arxiv_papers():
+    assert tts.MODEL_PAPER_IDENTITIES
+    assert all(
+        identity.arxiv_id and identity.source_url is None
+        for identity in tts.MODEL_PAPER_IDENTITIES.values()
     )
-    session.commit()
-    identity = tts.MODEL_PAPER_IDENTITIES["nvidia/magpie_tts_multilingual_357m"]
-    assert identity.source_url == source_url
-    monkeypatch.setattr(
-        tts,
-        "MODEL_PAPER_IDENTITIES",
-        {"nvidia/magpie_tts_multilingual_357m": identity},
-    )
-
-    discovery = asyncio.run(tts.discover_open_tts_papers(session))
-
-    assert discovery.papers == {"nvidia/magpie_tts_multilingual_357m": 10}
 
 
 def test_benchmark_source_uses_space_creation_date():

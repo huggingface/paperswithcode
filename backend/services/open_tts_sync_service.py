@@ -26,7 +26,6 @@ from backend.services.artificial_analysis_sync_service import (
     ArtificialAnalysisDiscovery,
     ArtificialAnalysisPaperDiscoveryService,
     PaperIdentity,
-    external,
 )
 from backend.services.evaluation_service import EvaluationService
 
@@ -50,23 +49,10 @@ _TAG_RE = re.compile(r"<[^>]+>")
 
 
 # Reviewed against the model cards linked by the default leaderboard on
-# 2026-09-11. A release page is used when a model has no dedicated paper;
-# architecture or evaluation papers are not substituted for model provenance.
+# 2026-09-11. Only models with a dedicated arXiv paper are published.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "microsoft/VibeVoice-Realtime-0.5B": PaperIdentity(
         arxiv_id="2508.19205", is_open=True
-    ),
-    "hexgrad/Kokoro-82M": external(
-        "https://huggingface.co/hexgrad/Kokoro-82M",
-        "Kokoro-82M",
-        "2025-01-27",
-        is_open=True,
-    ),
-    "Supertone/supertonic-3": external(
-        "https://huggingface.co/Supertone/supertonic-3",
-        "Supertonic 3",
-        "2026-05-06",
-        is_open=True,
     ),
     "fishaudio/s2-pro": PaperIdentity(arxiv_id="2603.08823", is_open=True),
     "k2-fsa/OmniVoice": PaperIdentity(arxiv_id="2604.00688", is_open=True),
@@ -74,41 +60,11 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "FunAudioLLM/Fun-CosyVoice3-0.5B-2512": PaperIdentity(
         arxiv_id="2505.17589", is_open=True
     ),
-    "ResembleAI/chatterbox": external(
-        "https://huggingface.co/ResembleAI/chatterbox",
-        "Chatterbox",
-        "2025-04-24",
-        is_open=True,
-    ),
     "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice": PaperIdentity(
         arxiv_id="2601.15621", is_open=True
     ),
-    "BreezeBlue/Breeze-TTS-2": external(
-        "https://huggingface.co/BreezeBlue/Breeze-TTS-2",
-        "Breeze TTS 2",
-        "2026-08-25",
-        is_open=True,
-    ),
-    "nvidia/magpie_tts_multilingual_357m": external(
-        "https://huggingface.co/nvidia/magpie_tts_multilingual_357m",
-        "MagpieTTS Multilingual 357M",
-        "2025-12-11",
-        is_open=True,
-    ),
     "facebook/seamless-m4t-v2-large": PaperIdentity(
         arxiv_id="2312.05187", is_open=True
-    ),
-    "owensong/Inflect-Micro-v2": external(
-        "https://huggingface.co/owensong/Inflect-Micro-v2",
-        "Inflect-Micro-v2: Complete Local Text-to-Waveform TTS Under 10M Parameters",
-        "2026-06-25",
-        is_open=True,
-    ),
-    "bosonai/higgs-tts-2-3b-base": external(
-        "https://huggingface.co/bosonai/higgs-tts-2-3b-base",
-        "Higgs TTS 2: Redefining Expressiveness in Audio Generation",
-        "2025-07-01",
-        is_open=True,
     ),
     "microsoft/speecht5_tts": PaperIdentity(arxiv_id="2110.07205", is_open=True),
     "OpenMOSS-Team/MOSS-TTS": PaperIdentity(arxiv_id="2603.18090", is_open=True),
@@ -116,42 +72,6 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         arxiv_id="2509.17765", is_open=True
     ),
     "mistralai/Voxtral-4B-TTS-2603": PaperIdentity(arxiv_id="2603.25551", is_open=True),
-    "bosonai/higgs-tts-3-4b": external(
-        "https://huggingface.co/bosonai/higgs-tts-3-4b",
-        "Higgs TTS 3: Conversational Speech for Voice AI from Boson AI",
-        "2026-06-04",
-        is_open=True,
-    ),
-    "openbmb/VoxCPM2": external(
-        "https://huggingface.co/openbmb/VoxCPM2",
-        "VoxCPM2: Tokenizer-Free TTS for Multilingual Speech Generation, Creative Voice Design, and True-to-Life Cloning",
-        "2026-04-03",
-        is_open=True,
-    ),
-    "neuphonic/neutts-nano": external(
-        "https://huggingface.co/neuphonic/neutts-nano",
-        "NeuTTS Nano",
-        "2025-11-18",
-        is_open=True,
-    ),
-    "neuphonic/neutts-nano-q8-gguf": external(
-        "https://huggingface.co/neuphonic/neutts-nano",
-        "NeuTTS Nano",
-        "2025-11-18",
-        is_open=True,
-    ),
-    "sesame/csm-1b": external(
-        "https://huggingface.co/sesame/csm-1b",
-        "CSM-1B",
-        "2025-03-06",
-        is_open=True,
-    ),
-    "owensong/Inflect-Nano-v1": external(
-        "https://huggingface.co/owensong/Inflect-Nano-v1",
-        "Inflect-Nano-v1",
-        "2026-06-16",
-        is_open=True,
-    ),
 }
 
 
@@ -172,6 +92,7 @@ class OpenTtsSyncStats:
     created: int = 0
     updated: int = 0
     deleted: int = 0
+    excluded_models: list[str] = field(default_factory=list)
     missing_papers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -399,7 +320,8 @@ class OpenTtsSyncService:
                 for row in managed_rows
                 if (row.hf_model_url or "").startswith(model_url_prefix)
             }
-            upstream_ids = {entry.model_id.casefold() for entry in entries}
+            selected_ids: set[str] = set()
+            reviewed_ids = {model_id.casefold() for model_id in MODEL_PAPER_IDENTITIES}
             tagged_paper_ids = {
                 paper_id
                 for (paper_id,) in self.db.query(PaperTask.paper_id)
@@ -408,10 +330,14 @@ class OpenTtsSyncService:
             }
             for entry in entries:
                 key = entry.model_id.casefold()
+                if key not in reviewed_ids:
+                    stats.excluded_models.append(entry.model_id)
+                    continue
                 paper_id = discovery.papers.get(entry.model_id)
                 if paper_id is None:
                     stats.missing_papers.append(entry.model_id)
                     continue
+                selected_ids.add(key)
                 row = managed_by_id.get(key)
                 if row is None:
                     row = Evaluation(
@@ -450,7 +376,7 @@ class OpenTtsSyncService:
 
             for row in managed_rows:
                 model_id = (row.hf_model_url or "").removeprefix(model_url_prefix)
-                if not model_id or model_id.casefold() not in upstream_ids:
+                if not model_id or model_id.casefold() not in selected_ids:
                     self.db.delete(row)
                     stats.deleted += 1
 
