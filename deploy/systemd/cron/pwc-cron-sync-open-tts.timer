@@ -1,5 +1,5 @@
 [Unit]
-Description=Timer: Sync Open TTS leaderboard hourly
+Description=Timer: Sync Open TTS leaderboards hourly
 
 [Timer]
 OnCalendar=*-*-* *:18:00

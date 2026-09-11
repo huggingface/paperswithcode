@@ -252,7 +252,7 @@ COMMANDS: dict[str, Job] = {
         "-m",
         "scripts.hourly.sync_open_tts",
         timeout="30m",
-        idempotency="replace managed Open TTS evaluation rows from validated live data",
+        idempotency="replace managed Open TTS English and all-language evaluation rows from validated live data",
     ),
     "sync_mmteb_overall": job(
         "-m",

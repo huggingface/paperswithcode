@@ -552,7 +552,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_open_tts",
-        display_name="Sync Open TTS Leaderboard",
+        display_name="Sync Open TTS Leaderboards",
         category="hourly",
         schedule="18 * * * * (hourly)",
         script_path="hourly/sync_open_tts.py",
@@ -568,10 +568,14 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    count(*) FILTER (
                      WHERE e.updated_at > now() - interval '2 hours 30 minutes'
                    ) AS recent_writes,
-                   count(*) AS matched_evaluations
+                   count(*) AS matched_evaluations,
+                   count(DISTINCT d.slug) AS matched_benchmarks
             FROM evaluations e
             JOIN datasets d ON d.id = e.dataset_id
-            WHERE d.slug = 'open-tts-leaderboard'
+            WHERE d.slug IN (
+                'open-tts-leaderboard',
+                'open-tts-leaderboard-all-languages'
+            )
               AND e.best_metric = 'WER'
               AND e.external_source_url =
                   'https://huggingface.co/spaces/hf-audio/open_tts_leaderboard'

@@ -5,7 +5,7 @@ import argparse
 from backend.database.connection import db_manager
 from backend.services.open_tts_sync_service import (
     OpenTtsSyncService,
-    fetch_open_tts_leaderboard,
+    fetch_open_tts_leaderboards,
     run_open_tts_discovery,
 )
 from scripts.utils.cron_helpers import CronJobBase
@@ -17,7 +17,7 @@ class SyncOpenTtsJob(CronJobBase):
         self.dry_run = dry_run
 
     def run(self):
-        entries = fetch_open_tts_leaderboard()
+        leaderboards = fetch_open_tts_leaderboards()
         session = db_manager.session_local()
         try:
             discovery = run_open_tts_discovery(
@@ -25,17 +25,32 @@ class SyncOpenTtsJob(CronJobBase):
                 persist=not self.dry_run,
             )
             self.logger.info("open_tts_discovery %s", discovery.to_dict())
-            stats = OpenTtsSyncService(session).sync(
-                entries,
+            stats_by_dataset = OpenTtsSyncService(session).sync_benchmarks(
+                leaderboards,
                 discovery=discovery,
                 commit=not self.dry_run,
             )
-            self.logger.info("open_tts_sync %s", stats.to_dict())
-            self.logger.info("Papers processed: %s", stats.matched)
-            if stats.missing_papers:
+            for dataset_slug, stats in stats_by_dataset.items():
+                self.logger.info(
+                    "open_tts_sync dataset=%s stats=%s",
+                    dataset_slug,
+                    stats.to_dict(),
+                )
+            self.logger.info(
+                "Papers processed: %s",
+                sum(stats.matched for stats in stats_by_dataset.values()),
+            )
+            missing_papers = sorted(
+                {
+                    model_id
+                    for stats in stats_by_dataset.values()
+                    for model_id in stats.missing_papers
+                }
+            )
+            if missing_papers:
                 self.logger.warning(
                     "open_tts_missing_papers identities=%s",
-                    ",".join(stats.missing_papers),
+                    ",".join(missing_papers),
                 )
         finally:
             session.close()

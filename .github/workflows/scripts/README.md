@@ -24,7 +24,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
-| `cron-sync-open-tts.yml` | `18 * * * *` | `pwc-cron sync_open_tts` | `.github/workflows/scripts/hourly/sync_open_tts.py` |
+| `cron-sync-open-tts.yml` | `18 * * * *` | `pwc-cron sync_open_tts` | `.github/workflows/scripts/hourly/sync_open_tts.py` (English and all-language-average views) |
 | `cron-sync-mmteb-overall.yml` | `7 * * * *` | `pwc-cron sync_mmteb_overall` | `.github/workflows/scripts/hourly/sync_mmteb.py overall` |
 | `cron-sync-mmteb-retrieval.yml` | `22 * * * *` | `pwc-cron sync_mmteb_retrieval` | `.github/workflows/scripts/hourly/sync_mmteb.py retrieval` |
 | `cron-sync-mmteb-reranking.yml` | `37 * * * *` | `pwc-cron sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py reranking` |

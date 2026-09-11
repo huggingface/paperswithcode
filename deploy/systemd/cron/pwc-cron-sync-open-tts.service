@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync Open TTS leaderboard hourly
+Description=Sync Open TTS leaderboards hourly
 After=network-online.target postgresql@16-main.service
 Wants=network-online.target
 

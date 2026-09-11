@@ -1,7 +1,10 @@
 """Contract and idempotency tests for the living Open TTS sync."""
 
 import asyncio
+from contextlib import contextmanager
 from datetime import UTC, datetime
+from pathlib import Path
+from types import SimpleNamespace
 
 from sqlalchemy import BigInteger, create_engine
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
@@ -79,10 +82,12 @@ def _payload(count: int = 15):
     }
 
 
-def _response(payload, *, language=None, datasets=None, clone=False):
+def _response(
+    payload, *, language=None, datasets=None, clone=False, language_choices=None
+):
     selected_language = language or [DEFAULT_LANGUAGE]
     selected_datasets = datasets or DEFAULT_DATASETS
-    language_choices = [
+    language_choices = language_choices or [
         ["🇬🇧 English", "🇬🇧 English"],
         ["🇨🇳 Chinese", "🇨🇳 Chinese"],
     ]
@@ -177,6 +182,56 @@ def test_fetch_rejects_nondefault_or_missing_filter_echoes():
         raise AssertionError("missing filter echoes were accepted")
 
 
+def test_fetches_english_and_every_available_language_view():
+    all_languages = [
+        "🇬🇧 English",
+        "🇨🇳 Chinese",
+        "🇫🇷 French",
+        "🇪🇸 Spanish",
+        "🇩🇪 German",
+        "🇮🇹 Italian",
+        "🇯🇵 Japanese",
+        "🇰🇷 Korean",
+        "🇷🇺 Russian",
+    ]
+    choices = [[language, language] for language in all_languages]
+    multilingual_payload = _payload()
+    for row in multilingual_payload["data"][5:]:
+        row[0] = None
+        row[2] = None
+        row[3] = None
+
+    class FakeClient:
+        def __init__(self, url, *, verbose):
+            assert url == SPACE_APP_URL
+            assert verbose is False
+            self.calls = 0
+
+        def predict(self, version, search, languages, datasets, clone, *, api_name):
+            assert (version, search, datasets, clone, api_name) == (
+                "latest",
+                "",
+                DEFAULT_DATASETS,
+                False,
+                "/partial",
+            )
+            self.calls += 1
+            if self.calls == 1:
+                assert languages == [DEFAULT_LANGUAGE]
+                return _response(_payload(), language_choices=choices)
+            assert languages == all_languages
+            return _response(
+                multilingual_payload,
+                language=all_languages,
+                language_choices=choices,
+            )
+
+    leaderboards = tts.fetch_open_tts_leaderboards(FakeClient)
+
+    assert len(leaderboards[tts.DATASET_SLUG]) == 15
+    assert len(leaderboards[tts.ALL_LANGUAGE_DATASET_SLUG]) == 5
+
+
 def test_parser_rejects_truncated_or_noncontiguous_data():
     payload = _payload(14)
     try:
@@ -194,6 +249,19 @@ def test_parser_rejects_truncated_or_noncontiguous_data():
         assert "contiguous" in str(exc)
     else:
         raise AssertionError("noncontiguous leaderboard was accepted")
+
+
+def test_parser_accepts_complete_ranked_subset_from_multilingual_view():
+    payload = _payload()
+    for row in payload["data"][5:]:
+        row[0] = None
+        row[2] = None
+        row[3] = None
+
+    entries = parse_open_tts_leaderboard(payload, min_ranked_entries=5)
+
+    assert len(entries) == 5
+    assert [entry.rank for entry in entries] == [1, 2, 3, 4, 5]
 
 
 def _session() -> Session:
@@ -216,6 +284,11 @@ def _session() -> Session:
     dataset = Dataset(
         id=2_400, name="Open TTS Leaderboard", slug="open-tts-leaderboard"
     )
+    all_language_dataset = Dataset(
+        id=2_401,
+        name="Open TTS Leaderboard - All Languages Average",
+        slug="open-tts-leaderboard-all-languages",
+    )
     wer = Metric(id=1, name="WER", direction="lower_is_better")
     rtfx = Metric(id=38, name="RTFx", direction="higher_is_better")
     paper = Paper(
@@ -226,13 +299,28 @@ def _session() -> Session:
         version="v1",
         is_latest_version=True,
     )
-    session.add_all([task, dataset, wer, rtfx, paper])
-    session.add(TaskDataset(task_id=task.id, dataset_id=dataset.id))
+    session.add_all([task, dataset, all_language_dataset, wer, rtfx, paper])
+    session.add_all(
+        [
+            TaskDataset(task_id=task.id, dataset_id=dataset.id),
+            TaskDataset(task_id=task.id, dataset_id=all_language_dataset.id),
+        ]
+    )
     session.add_all(
         [
             TaskDatasetMetric(task_id=task.id, dataset_id=dataset.id, metric_id=wer.id),
             TaskDatasetMetric(
                 task_id=task.id, dataset_id=dataset.id, metric_id=rtfx.id
+            ),
+            TaskDatasetMetric(
+                task_id=task.id,
+                dataset_id=all_language_dataset.id,
+                metric_id=wer.id,
+            ),
+            TaskDatasetMetric(
+                task_id=task.id,
+                dataset_id=all_language_dataset.id,
+                metric_id=rtfx.id,
             ),
         ]
     )
@@ -338,6 +426,78 @@ def test_sync_rolls_back_dry_run(monkeypatch):
     assert session.query(PaperTask).count() == 0
 
 
+def test_syncs_english_and_all_language_benchmarks(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"org/model-a": PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
+    leaderboards = {
+        tts.DATASET_SLUG: [OpenTtsEntry("org/model-a", "Model A", 1, 1.25, 12.5, True)],
+        tts.ALL_LANGUAGE_DATASET_SLUG: [
+            OpenTtsEntry("org/model-a", "Model A", 1, 3.5, 10.0, True)
+        ],
+    }
+
+    stats = OpenTtsSyncService(session).sync_benchmarks(
+        leaderboards,
+        discovery=ArtificialAnalysisDiscovery(papers={"org/model-a": 9}),
+        fetched_at=datetime(2026, 9, 11, 12, 0, tzinfo=UTC),
+    )
+
+    assert {slug: value.created for slug, value in stats.items()} == {
+        tts.DATASET_SLUG: 1,
+        tts.ALL_LANGUAGE_DATASET_SLUG: 1,
+    }
+    rows = {
+        session.get(Dataset, row.dataset_id).slug: row
+        for row in session.query(Evaluation).all()
+    }
+    assert rows[tts.DATASET_SLUG].metrics == {"WER": 1.25, "RTFx": 12.5}
+    multilingual = rows[tts.ALL_LANGUAGE_DATASET_SLUG]
+    assert multilingual.metrics == {"WER": 3.5, "RTFx": 10.0}
+    assert "all available languages" in multilingual.methodology
+    assert multilingual.best_rank == 1
+
+
+def test_two_benchmark_sync_rolls_back_if_either_benchmark_is_unconfigured(
+    monkeypatch,
+):
+    session = _session()
+    all_language_dataset = (
+        session.query(Dataset)
+        .filter(Dataset.slug == tts.ALL_LANGUAGE_DATASET_SLUG)
+        .one()
+    )
+    session.query(TaskDatasetMetric).filter(
+        TaskDatasetMetric.dataset_id == all_language_dataset.id
+    ).delete()
+    session.commit()
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"org/model-a": PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
+    entry = OpenTtsEntry("org/model-a", "Model A", 1, 1.25, 12.5, True)
+
+    try:
+        OpenTtsSyncService(session).sync_benchmarks(
+            {
+                tts.DATASET_SLUG: [entry],
+                tts.ALL_LANGUAGE_DATASET_SLUG: [entry],
+            },
+            discovery=ArtificialAnalysisDiscovery(papers={"org/model-a": 9}),
+        )
+    except RuntimeError as exc:
+        assert "metrics are not linked" in str(exc)
+    else:
+        raise AssertionError("sync accepted a missing multilingual benchmark")
+
+    assert session.query(Evaluation).count() == 0
+    assert session.query(PaperTask).count() == 0
+
+
 def test_discovery_resolves_reviewed_model_to_existing_paper(monkeypatch):
     session = _session()
     monkeypatch.setattr(
@@ -362,3 +522,76 @@ def test_reviewed_model_manifest_contains_only_arxiv_papers():
 
 def test_benchmark_source_uses_space_creation_date():
     assert setup.SOURCE_DATE.isoformat() == "2026-09-07"
+
+
+def test_setup_creates_english_and_all_language_benchmarks(monkeypatch):
+    session = _session()
+    session.query(TaskDatasetMetric).delete()
+    session.query(TaskDataset).delete()
+    session.query(Dataset).delete()
+    session.commit()
+
+    @contextmanager
+    def session_local():
+        yield session
+
+    monkeypatch.setattr(
+        setup, "db_manager", SimpleNamespace(session_local=session_local)
+    )
+    monkeypatch.setattr(
+        setup.ExternalResourceService,
+        "add_external_resource",
+        lambda _self, _payload, *, commit: SimpleNamespace(paper=SimpleNamespace(id=9)),
+    )
+
+    setup.main()
+
+    datasets = {dataset.slug: dataset for dataset in session.query(Dataset).all()}
+    assert set(datasets) == {
+        tts.DATASET_SLUG,
+        tts.ALL_LANGUAGE_DATASET_SLUG,
+    }
+    assert all(dataset.introducing_paper_id == 9 for dataset in datasets.values())
+    assert session.query(TaskDataset).count() == 2
+    assert session.query(TaskDatasetMetric).count() == 4
+
+
+def test_cron_syncs_both_open_tts_views(monkeypatch):
+    monkeypatch.syspath_prepend(str(Path(".github/workflows").resolve()))
+    from scripts.hourly import sync_open_tts as job
+
+    session = _session()
+    english = [OpenTtsEntry("org/model-a", "Model A", 1, 1.25, 12.5, True)]
+    leaderboards = {
+        tts.DATASET_SLUG: english,
+        tts.ALL_LANGUAGE_DATASET_SLUG: [
+            OpenTtsEntry("org/model-a", "Model A", 1, 3.5, 10.0, True)
+        ],
+    }
+    monkeypatch.setattr(job, "fetch_open_tts_leaderboards", lambda: leaderboards)
+    monkeypatch.setattr(
+        job,
+        "run_open_tts_discovery",
+        lambda _session, *, persist: ArtificialAnalysisDiscovery(
+            papers={"org/model-a": 9}
+        ),
+    )
+    monkeypatch.setattr(
+        job, "db_manager", SimpleNamespace(session_local=lambda: session)
+    )
+    monkeypatch.setattr(
+        tts,
+        "MODEL_PAPER_IDENTITIES",
+        {"org/model-a": PaperIdentity(arxiv_id="2601.00001", is_open=True)},
+    )
+
+    job.SyncOpenTtsJob().run()
+
+    dataset_slugs = {
+        session.get(Dataset, row.dataset_id).slug
+        for row in session.query(Evaluation).all()
+    }
+    assert dataset_slugs == {
+        tts.DATASET_SLUG,
+        tts.ALL_LANGUAGE_DATASET_SLUG,
+    }
