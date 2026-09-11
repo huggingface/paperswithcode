@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import pymupdf
 from huggingface_hub import HfApi, HfFileSystem, Volume
 from huggingface_hub.errors import HfHubHTTPError
 from sqlalchemy import select
@@ -21,6 +22,7 @@ from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.models.database import Paper
 from backend.scripts.generate_missing_paper_markdown import (
+    download_external_pdf,
     validate_canonical_markdown,
 )
 from backend.services.paper_markdown_budget_service import (
@@ -839,6 +841,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
             f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
         )
         for shard_number, entries in enumerate(plans):
+            if self.should_execute:
+                self._archive_external_pdfs(entries)
             shard_id = f"{shard_number:05d}"
             manifest_key = f"_jobs/manifests/{run_id}/{shard_id}.jsonl"
             manifest = (
@@ -909,6 +913,30 @@ class PaperMarkdownBackfillJob(CronJobBase):
             len(launched),
         )
         return launched
+
+    def _archive_external_pdfs(self, entries: list[dict[str, object]]) -> None:
+        external = [
+            entry
+            for entry in entries
+            if entry.get("source") == "external" and entry.get("pdf_key")
+        ]
+        existing = self._existing_paths(
+            self.settings.paper_markdown_hf_bucket_id,
+            [str(entry["pdf_key"]) for entry in external],
+        )
+        for entry in external:
+            pdf_key = str(entry["pdf_key"])
+            if pdf_key in existing:
+                continue
+            pdf = download_external_pdf(str(entry["pdf_url"]))
+            with pymupdf.open(stream=pdf, filetype="pdf") as document:
+                if document.page_count < 1:
+                    raise ValueError("invalid_pdf")
+            self.api.batch_bucket_files(
+                self.settings.paper_markdown_hf_bucket_id,
+                add=[(pdf, pdf_key)],
+                token=self.settings.hf_token or None,
+            )
 
     def run(self) -> None:
         if self.should_execute and not self.settings.hf_token:

@@ -720,6 +720,21 @@ def _candidates(count: int):
     ]
 
 
+def _external_candidate():
+    return {
+        "paper_key": "external/109743",
+        "paper_id": "109743",
+        "source": "external",
+        "arxiv_id": None,
+        "version": "v1",
+        "title": "External report",
+        "source_url": "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        "pdf_url": "https://huggingface.co/acme/report/resolve/main/report.pdf",
+        "pdf_key": "external/109743/paper.pdf",
+        "output_key": "external/109743.md",
+    }
+
+
 def test_paid_dispatch_requires_confirmation(monkeypatch):
     job = _scheduler(execute=True, confirm=False, full=False)
     monkeypatch.setattr(
@@ -788,6 +803,115 @@ def test_launch_request_uses_the_shared_profile_and_bucket_api_contract():
         "--manifest-key",
         "_jobs/manifests/live/00000.jsonl",
     ]
+
+
+def test_external_pdf_is_validated_and_archived_before_remote_launch(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(
+        MODULE, "download_external_pdf", lambda _url: b"%PDF-valid", raising=False
+    )
+    document = Mock()
+    document.__enter__ = Mock(return_value=SimpleNamespace(page_count=2))
+    document.__exit__ = Mock(return_value=None)
+    monkeypatch.setattr(MODULE.pymupdf, "open", Mock(return_value=document))
+
+    job._launch([_external_candidate()])
+
+    assert job.api.batch_bucket_files.call_args_list[0] == call(
+        "test/paper-markdown",
+        add=[(b"%PDF-valid", "external/109743/paper.pdf")],
+        token="test-token",
+    )
+    MODULE.pymupdf.open.assert_called_once_with(stream=b"%PDF-valid", filetype="pdf")
+    assert (
+        job.api.batch_bucket_files.call_args_list[1]
+        .kwargs["add"][0][1]
+        .endswith("/00000.jsonl")
+    )
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_archive_is_reused_without_downloading(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(
+        return_value={"external/109743/paper.pdf": SimpleNamespace(size=123)}
+    )
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(side_effect=AssertionError("archived PDF must be reused"))
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+
+    job._launch([_external_candidate()])
+
+    download.assert_not_called()
+    assert job.api.batch_bucket_files.call_count == 1
+    job._run_ocr_job.assert_called_once()
+
+
+def test_external_pdf_is_not_archived_during_dry_run(monkeypatch):
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._existing_paths = Mock()
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    download = Mock(side_effect=AssertionError("dry run must not download PDFs"))
+    monkeypatch.setattr(MODULE, "download_external_pdf", download)
+
+    launched = job._launch([_external_candidate()])
+
+    assert launched[0]["mode"] == "dry_run"
+    download.assert_not_called()
+    job._existing_paths.assert_not_called()
+    job.api.batch_bucket_files.assert_not_called()
+
+
+def test_invalid_external_pdf_is_not_archived_or_dispatched(monkeypatch):
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.settings.paper_markdown_cost_policy = "unmetered_hf"
+    job.api = Mock()
+    job._persist_dispatch = Mock()
+    job._run_ocr_job = Mock(return_value=SimpleNamespace(id="job-1"))
+    job._existing_paths = Mock(return_value={})
+    monkeypatch.setattr(
+        job,
+        "_budget_decision",
+        lambda desired, _jobs: {"affordable_jobs": desired},
+    )
+    monkeypatch.setattr(
+        MODULE, "download_external_pdf", lambda _url: b"%PDF-broken", raising=False
+    )
+    monkeypatch.setattr(
+        MODULE.pymupdf,
+        "open",
+        Mock(side_effect=ValueError("broken PDF structure")),
+    )
+
+    with pytest.raises(ValueError, match="broken PDF structure"):
+        job._launch([_external_candidate()])
+
+    job.api.batch_bucket_files.assert_not_called()
+    job._run_ocr_job.assert_not_called()
 
 
 def test_unmetered_hf_dispatch_does_not_require_paid_gate(monkeypatch):
