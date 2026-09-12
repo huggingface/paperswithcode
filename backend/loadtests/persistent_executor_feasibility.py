@@ -140,7 +140,7 @@ class ResourceLimits(_StrictModel):
 
 
 class SpendLimits(_StrictModel):
-    total_experiment_microusd: int = Field(gt=0, le=16_000_000)
+    total_experiment_microusd: int = Field(gt=0, le=16_250_000)
     pricing_source_id: ArtifactId
     pricing_attested_at: str = Field(
         pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"

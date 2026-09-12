@@ -241,11 +241,11 @@ def test_missing_profile_fails_preflight() -> None:
         validate_manifest(value)
 
 
-def test_revision_79_budget_ceiling_is_sixteen_dollars() -> None:
+def test_revision_81_budget_ceiling_is_sixteen_dollars_and_twenty_five_cents() -> None:
     value = _manifest()
-    value["spend_limits"]["total_experiment_microusd"] = 16_000_000  # type: ignore[index]
+    value["spend_limits"]["total_experiment_microusd"] = 16_250_000  # type: ignore[index]
     validate_manifest(value)
-    value["spend_limits"]["total_experiment_microusd"] = 16_000_001  # type: ignore[index]
+    value["spend_limits"]["total_experiment_microusd"] = 16_250_001  # type: ignore[index]
 
     with pytest.raises(ValidationError):
         validate_manifest(value)

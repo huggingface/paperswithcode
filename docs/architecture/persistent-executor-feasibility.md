@@ -140,12 +140,13 @@ It requires exact source/image/protocol/schema identities, staging environment
 and region, idle and loaded baseline evidence, workload and fault schedules,
 nearest-rank percentile rules, and every numeric resource/spend ceiling.
 
-The revision 79 feasibility budget ceiling is $16. Provider calls and tokens
+The revision 81 feasibility budget ceiling is $16.25. Provider calls and tokens
 are zero for Task 0. The increase from the preliminary $10 ceiling preserves
 both frozen 1,000-sample destructive partition-Stop profiles at the official
 0.5-core/0.5-GiB sandbox rate rounded up to 24 micro-USD/second and reserves the
 full 240-second lifetime for every creation, including discarded preliminary
-attempts. Per-profile offered rates separate the 32-way cold burst from cold
+attempts plus the distinct 32-sandbox real-network reconnect cohort. Per-profile
+offered rates separate the 32-way cold burst from cold
 samples paced at four starts/second under the measured five-start/second Modal
 workspace ceiling. The sandbox creation/runtime
 envelope, operating reserves, and unknown-usage reserve are explicit in the
