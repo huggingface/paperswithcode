@@ -6,7 +6,10 @@ import pytest
 from pydantic import ValidationError
 
 from backend.loadtests.persistent_executor_feasibility import (
+    BudgetExhausted,
+    ExperimentBudget,
     EXPECTED_PROFILE_COUNTS,
+    StopMeasurement,
     validate_manifest,
     validate_report,
 )
@@ -267,3 +270,40 @@ def test_report_rejects_missing_recommendation() -> None:
 
     with pytest.raises(ValidationError):
         validate_report(value)
+
+
+def test_budget_exhaustion_stops_unreserved_sandbox_work() -> None:
+    manifest = validate_manifest(_manifest())
+    budget = ExperimentBudget(manifest.spend_limits)
+
+    reservations = [budget.reserve_sandbox() for _ in range(1100)]
+    with pytest.raises(BudgetExhausted):
+        budget.reserve_sandbox()
+
+    assert budget.sandbox_creates == 1100
+    assert len(set(reservations)) == 1100
+
+
+def test_unknown_usage_retains_reservation_and_reconciliation_is_exactly_once() -> None:
+    manifest = validate_manifest(_manifest())
+    budget = ExperimentBudget(manifest.spend_limits)
+    reservation = budget.reserve_sandbox()
+
+    budget.reconcile(reservation, actual_billed_seconds=None)
+    assert budget.reserved_microusd > 0
+    with pytest.raises(ValueError, match="already reconciled"):
+        budget.reconcile(reservation, actual_billed_seconds=1)
+
+
+def test_control_plane_termination_cannot_substitute_for_stop_observation() -> None:
+    measurement = StopMeasurement(
+        stop_committed_at=100.0,
+        executor_observed_at=None,
+        process_exit_confirmed_at=100.8,
+        egress_revoked_at=100.8,
+        sandbox_termination_confirmed_at=100.8,
+    )
+
+    assert measurement.delivery_ms is None
+    assert measurement.containment_ms == pytest.approx(800)
+    assert not measurement.passed

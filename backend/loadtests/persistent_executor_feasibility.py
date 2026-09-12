@@ -8,6 +8,7 @@ preliminary feasibility evidence from release qualification evidence.
 from __future__ import annotations
 
 from collections import Counter
+from dataclasses import dataclass
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -172,6 +173,129 @@ class SpendLimits(_StrictModel):
         if sandbox_reserve + reserve > self.total_experiment_microusd:
             raise ValueError("sandbox and operating reserves exceed the budget")
         return self
+
+
+class BudgetExhausted(RuntimeError):
+    """Raised before work starts when no frozen experiment reserve remains."""
+
+
+class ExperimentBudget:
+    """In-memory preflight ledger for one bounded feasibility process.
+
+    A caller must reserve before every sandbox creation. Unknown provider usage
+    deliberately keeps its full reservation, and every reservation has one
+    terminal reconciliation transition.
+    """
+
+    def __init__(self, limits: SpendLimits) -> None:
+        self._limits = limits
+        self._next_id = 1
+        self._sandbox_creates = 0
+        self._reserved_seconds = 0
+        self._reserved_microusd = self._operating_reserve
+        self._reservations: dict[str, tuple[bool, int]] = {}
+
+    @property
+    def _operating_reserve(self) -> int:
+        return sum(
+            (
+                self._limits.blank_reserve_microusd,
+                self._limits.retained_reserve_microusd,
+                self._limits.rotation_reserve_microusd,
+                self._limits.replacement_reserve_microusd,
+                self._limits.uncertain_usage_reserve_microusd,
+            )
+        )
+
+    @property
+    def sandbox_creates(self) -> int:
+        return self._sandbox_creates
+
+    @property
+    def reserved_microusd(self) -> int:
+        return self._reserved_microusd
+
+    def reserve_sandbox(self) -> str:
+        seconds = self._limits.sandbox_lifetime_seconds_max
+        charge = seconds * self._limits.sandbox_rate_microusd_per_second
+        if (
+            self._sandbox_creates >= self._limits.sandbox_create_max
+            or self._reserved_seconds + seconds
+            > self._limits.sandbox_billed_seconds_max
+            or self._reserved_microusd + charge > self._limits.total_experiment_microusd
+        ):
+            raise BudgetExhausted("sandbox experiment budget is exhausted")
+        reservation_id = f"sandbox-{self._next_id:06d}"
+        self._next_id += 1
+        self._sandbox_creates += 1
+        self._reserved_seconds += seconds
+        self._reserved_microusd += charge
+        self._reservations[reservation_id] = (False, charge)
+        return reservation_id
+
+    def reconcile(
+        self, reservation_id: str, *, actual_billed_seconds: int | None
+    ) -> None:
+        try:
+            reconciled, charge = self._reservations[reservation_id]
+        except KeyError as error:
+            raise ValueError("unknown reservation") from error
+        if reconciled:
+            raise ValueError("reservation was already reconciled")
+        if actual_billed_seconds is not None:
+            if (
+                not 0
+                <= actual_billed_seconds
+                <= self._limits.sandbox_lifetime_seconds_max
+            ):
+                raise ValueError("actual billed seconds exceed the reservation")
+            actual_charge = (
+                actual_billed_seconds * self._limits.sandbox_rate_microusd_per_second
+            )
+            self._reserved_microusd -= charge - actual_charge
+        self._reservations[reservation_id] = (True, charge)
+
+
+@dataclass(frozen=True, slots=True)
+class StopMeasurement:
+    """Independent timestamps required by the partition cancellation gate."""
+
+    stop_committed_at: float
+    executor_observed_at: float | None
+    process_exit_confirmed_at: float | None
+    egress_revoked_at: float | None
+    sandbox_termination_confirmed_at: float | None
+
+    @property
+    def delivery_ms(self) -> float | None:
+        if self.executor_observed_at is None:
+            return None
+        return (self.executor_observed_at - self.stop_committed_at) * 1000
+
+    @property
+    def containment_ms(self) -> float | None:
+        confirmations = (
+            self.process_exit_confirmed_at,
+            self.egress_revoked_at,
+            self.sandbox_termination_confirmed_at,
+        )
+        if any(value is None for value in confirmations):
+            return None
+        return (
+            max(value for value in confirmations if value is not None)
+            - self.stop_committed_at
+        ) * 1000
+
+    @property
+    def passed(self) -> bool:
+        delivery = self.delivery_ms
+        containment = self.containment_ms
+        return (
+            delivery is not None
+            and delivery <= 500
+            and containment is not None
+            and containment <= 2000
+        )
 
 
 ProfileName = Literal[
