@@ -197,6 +197,18 @@ def _distribution(values: list[float]) -> dict[str, float]:
     }
 
 
+def _gate_is_impossible(samples: list[Sample], *, include_cold: bool) -> bool:
+    if (
+        sum(sample.containment_ms > 1000 for sample in samples) > 50
+        or sum(sample.containment_ms > 2000 for sample in samples) > 10
+    ):
+        return True
+    return include_cold and (
+        sum(sample.cold_first_pwd_ms > 2000 for sample in samples) > 50
+        or sum(sample.cold_first_pwd_ms > 5000 for sample in samples) > 10
+    )
+
+
 async def run(args: argparse.Namespace) -> dict[str, object]:
     manifest = validate_manifest(json.loads(args.manifest.read_text()))
     if args.confirm != CONFIRMATION:
@@ -226,6 +238,7 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
     image = modal.Image.from_id(manifest.image_reference)
     semaphore = asyncio.Semaphore(CONCURRENCY)
     all_samples: list[Sample] = []
+    partial_output = args.output.with_suffix(args.output.suffix + ".partial")
     for profile, operations in (
         ("disconnected_stop_one", 1),
         ("disconnected_stop_four", 4),
@@ -248,9 +261,28 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
                 )
             )
             all_samples.extend(batch)
+            partial_output.write_text(
+                json.dumps(
+                    {
+                        "manifest_id": manifest.manifest_id,
+                        "generated_at": _utc_now(),
+                        "samples": [asdict(sample) for sample in all_samples],
+                    },
+                    indent=2,
+                )
+                + "\n"
+            )
             print(
                 f"{profile}: {min(offset + CONCURRENCY, observations)}/{observations}"
             )
+            profile_samples = [
+                sample for sample in all_samples if sample.profile == profile
+            ]
+            if _gate_is_impossible(
+                profile_samples,
+                include_cold=profile == "disconnected_stop_one",
+            ):
+                raise RuntimeError(f"{profile} can no longer satisfy its frozen gates")
 
     by_profile = {
         profile: [sample for sample in all_samples if sample.profile == profile]
@@ -328,6 +360,7 @@ def main() -> None:
     report = asyncio.run(run(args))
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
+    args.output.with_suffix(args.output.suffix + ".partial").unlink(missing_ok=True)
     print(
         json.dumps({"results": report["results"], "passed": report["passed"]}, indent=2)
     )

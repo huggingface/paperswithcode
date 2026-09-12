@@ -14,6 +14,10 @@ from backend.loadtests.persistent_executor_feasibility import (
     validate_manifest,
     validate_report,
 )
+from backend.scripts.qualify_persistent_executor_modal_task0 import (
+    Sample,
+    _gate_is_impossible,
+)
 
 
 def _manifest() -> dict[str, object]:
@@ -354,3 +358,33 @@ def test_nearest_rank_keeps_tail_failures_in_distribution() -> None:
 
     assert nearest_rank(values, 0.95) == 950
     assert nearest_rank(values, 0.99) == 990
+
+
+def test_modal_cohort_stops_when_frozen_tail_gate_is_impossible() -> None:
+    healthy = Sample(
+        profile="disconnected_stop_one",
+        index=0,
+        sandbox_id="sb-1",
+        cold_first_pwd_ms=1000,
+        containment_ms=500,
+        process_exit_confirmed=True,
+        egress_revoked=True,
+        sandbox_termination_confirmed=True,
+        reservation_retained=True,
+        error=None,
+    )
+    failed = Sample(
+        profile="disconnected_stop_one",
+        index=1,
+        sandbox_id=None,
+        cold_first_pwd_ms=240_000,
+        containment_ms=240_000,
+        process_exit_confirmed=False,
+        egress_revoked=False,
+        sandbox_termination_confirmed=False,
+        reservation_retained=True,
+        error="SandboxError",
+    )
+
+    assert not _gate_is_impossible([healthy] * 989 + [failed] * 10, include_cold=True)
+    assert _gate_is_impossible([healthy] * 989 + [failed] * 11, include_cold=True)
