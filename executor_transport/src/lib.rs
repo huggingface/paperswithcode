@@ -1,4 +1,4 @@
-//! Bounded Task 0 transport prototype.
+//! Bounded persistent-executor transport core.
 //!
 //! The cryptographic construction is a narrow, attributed adaptation of
 //! `openai/codex`'s remote exec-server Noise channel at the commit recorded in
@@ -6,3 +6,4 @@
 //! in Papers With Code.
 
 pub mod noise;
+pub mod protocol;

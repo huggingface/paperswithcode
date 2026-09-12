@@ -16,6 +16,9 @@ use clatter::traits::{Cipher, Dh, Handshaker, Kem};
 use clatter::transportstate::TransportState;
 use clatter::{HybridHandshake, HybridHandshakeParams, KeyPair};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256 as KeyIdSha256};
+
+use crate::protocol::{ContentFreeError, HandshakeBinding};
 
 pub const SUITE: &str = "Noise_hybridIK_X25519+MLKEM768_AESGCM_SHA256";
 const PROLOGUE_DOMAIN: &[u8] = b"pwc-persistent-executor-noise/v1";
@@ -57,7 +60,6 @@ impl NoisePublicKey {
     }
 }
 
-#[derive(Clone)]
 pub struct NoiseIdentity {
     dh: DhKeyPair,
     kem: KemKeyPair,
@@ -77,6 +79,25 @@ impl NoiseIdentity {
             x25519_public_key: STANDARD.encode(self.dh.public),
             mlkem768_public_key: STANDARD.encode(self.kem.public.as_slice()),
         }
+    }
+
+    /// A content-free identifier for the public identity. Private key material
+    /// has no serialization, debug, clone, or accessor surface.
+    pub fn key_id(&self) -> String {
+        self.public_key().key_id()
+    }
+}
+
+impl NoisePublicKey {
+    pub fn key_id(&self) -> String {
+        let mut digest = KeyIdSha256::new();
+        digest.update(PROLOGUE_DOMAIN);
+        digest.update(self.suite.as_bytes());
+        digest.update([0]);
+        digest.update(self.x25519_public_key.as_bytes());
+        digest.update([0]);
+        digest.update(self.mlkem768_public_key.as_bytes());
+        hex_lower(&digest.finalize())
     }
 }
 
@@ -211,6 +232,22 @@ pub fn prologue(environment_id: &str, registration_id: &str, stream_id: &str) ->
     ] {
         value.extend_from_slice(&(part.len() as u64).to_be_bytes());
         value.extend_from_slice(part);
+    }
+    value
+}
+
+/// Construct the production transcript, including the exact authorized
+/// protocol/schema and both endpoint key identifiers.
+pub fn bound_prologue(binding: &HandshakeBinding) -> Result<Vec<u8>, ContentFreeError> {
+    binding.encode_prologue()
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut value = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        value.push(DIGITS[(byte >> 4) as usize] as char);
+        value.push(DIGITS[(byte & 0x0f) as usize] as char);
     }
     value
 }
