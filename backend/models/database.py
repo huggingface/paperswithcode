@@ -3300,6 +3300,406 @@ class ChatExternalWorkerReservation(Base):
     )
 
 
+class ChatExecutorManifest(Base):
+    """Immutable component lineage and mutable qualification/capacity state."""
+
+    __tablename__ = "chat_executor_manifests"
+
+    digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    parent_digest: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("chat_executor_manifests.digest"), nullable=True
+    )
+    image_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment_binary_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    daemon_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_commit: Mapped[str] = mapped_column(String(64), nullable=False)
+    protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    schema_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    qualification_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    compatibility_state: Mapped[str] = mapped_column(String(16), nullable=False)
+    qualification_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    ready_capacity: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    compatibility_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "protocol_version > 0 AND ready_capacity >= 0",
+            name="chat_executor_manifests_numeric_check",
+        ),
+        CheckConstraint(
+            "qualification_status IN ('pending','qualified','failed')",
+            name="chat_executor_manifests_qualification_check",
+        ),
+        CheckConstraint(
+            "compatibility_state IN ('current','compatible','incompatible')",
+            name="chat_executor_manifests_compatibility_check",
+        ),
+        CheckConstraint(
+            "length(digest)=64 AND length(image_digest)=64 "
+            "AND length(environment_binary_digest)=64 AND length(daemon_digest)=64 "
+            "AND length(source_commit)=64 AND length(schema_digest)=64",
+            name="chat_executor_manifests_digest_check",
+        ),
+    )
+
+
+class ChatExecutorCell(Base):
+    """One durable route, key epoch, and rollout circuit per logical cell."""
+
+    __tablename__ = "chat_executor_cells"
+
+    cell_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    active_shard_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "chat_executor_shards.id",
+            name="fk_chat_executor_cells_active_shard",
+            use_alter=True,
+        ),
+        nullable=True,
+    )
+    selected_manifest_digest: Mapped[Optional[str]] = mapped_column(
+        String(64), ForeignKey("chat_executor_manifests.digest"), nullable=True
+    )
+    circuit_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="closed"
+    )
+    circuit_revision: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="1"
+    )
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    failure_window_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    consecutive_attach_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    canary_lease_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    canary_lease_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    canary_successes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    key_epoch: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="1"
+    )
+    rollback_epoch: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, server_default="0"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "circuit_state IN ('closed','open','half_open','security_hold')",
+            name="chat_executor_cells_circuit_check",
+        ),
+        CheckConstraint(
+            "circuit_revision > 0 AND key_epoch > 0 AND rollback_epoch >= 0 "
+            "AND consecutive_attach_failures >= 0 AND canary_successes BETWEEN 0 AND 3",
+            name="chat_executor_cells_numeric_check",
+        ),
+        CheckConstraint(
+            "(canary_lease_id IS NULL) = (canary_lease_expires_at IS NULL)",
+            name="chat_executor_cells_canary_pair_check",
+        ),
+    )
+
+
+class ChatExecutorShard(Base):
+    """A generation-addressable rendezvous route within a logical cell."""
+
+    __tablename__ = "chat_executor_shards"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    cell_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("chat_executor_cells.cell_id"), nullable=False
+    )
+    shard_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    ready_capacity: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
+    drain_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    drain_deadline_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "cell_id",
+            "shard_id",
+            "generation",
+            name="uq_chat_executor_shard_generation",
+        ),
+        CheckConstraint(
+            "generation > 0 AND ready_capacity >= 0",
+            name="chat_executor_shards_numeric_check",
+        ),
+        CheckConstraint(
+            "state IN ('preparing','ready','draining','fenced')",
+            name="chat_executor_shards_state_check",
+        ),
+        CheckConstraint(
+            "(drain_started_at IS NULL AND drain_deadline_at IS NULL) OR "
+            "(drain_started_at IS NOT NULL AND drain_deadline_at >= drain_started_at)",
+            name="chat_executor_shards_drain_check",
+        ),
+        Index("idx_chat_executor_shards_route", "cell_id", "state", "generation"),
+    )
+
+
+class ChatExecutorRegistration(Base):
+    """Public environment identity and fenced lifecycle metadata."""
+
+    __tablename__ = "chat_executor_registrations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    environment_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cell_id: Mapped[str] = mapped_column(
+        String(64), ForeignKey("chat_executor_cells.cell_id"), nullable=False
+    )
+    shard_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_executor_shards.id"), nullable=False
+    )
+    shard_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    public_key_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    public_noise_key: Mapped[dict] = mapped_column(
+        JSON().with_variant(JSONB, "postgresql"), nullable=False
+    )
+    authorization_key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    key_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    manifest_digest: Mapped[str] = mapped_column(
+        String(64), ForeignKey("chat_executor_manifests.digest"), nullable=False
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    assigned_session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "environment_id",
+            "environment_generation",
+            name="uq_chat_executor_environment_generation",
+        ),
+        CheckConstraint(
+            "environment_generation > 0 AND shard_generation > 0 AND key_epoch > 0",
+            name="chat_executor_registrations_generation_check",
+        ),
+        CheckConstraint(
+            "state IN ('pending','ready','assigned_idle','claimed','suspect',"
+            "'draining','fenced','terminated')",
+            name="chat_executor_registrations_state_check",
+        ),
+        CheckConstraint(
+            "length(public_key_id)=64 AND length(manifest_digest)=64",
+            name="chat_executor_registrations_digest_check",
+        ),
+        CheckConstraint(
+            "length(CAST(public_noise_key AS TEXT)) <= 4096",
+            name="chat_executor_registrations_public_key_size_check",
+        ),
+        Index(
+            "idx_chat_executor_registrations_ready",
+            "cell_id",
+            "shard_id",
+            "state",
+            "expires_at",
+        ),
+    )
+
+
+class ChatExecutorNonce(Base):
+    """Digest-only, generation-bound single-use authorization evidence."""
+
+    __tablename__ = "chat_executor_nonces"
+
+    nonce_digest: Mapped[str] = mapped_column(String(64), primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(16), nullable=False)
+    environment_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    environment_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    shard_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    shard_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    key_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    consumed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    invalidated_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    retention_expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "purpose IN ('launch','reconnect','liveness','recovery')",
+            name="chat_executor_nonces_purpose_check",
+        ),
+        CheckConstraint(
+            "environment_generation > 0 AND shard_generation > 0 AND key_epoch > 0",
+            name="chat_executor_nonces_generation_check",
+        ),
+        CheckConstraint(
+            "length(nonce_digest)=64 AND retention_expires_at >= expires_at",
+            name="chat_executor_nonces_retention_check",
+        ),
+        Index("idx_chat_executor_nonces_cleanup", "retention_expires_at"),
+    )
+
+
+class ChatExecutorClaim(Base):
+    """Exclusive turn-scoped workspace ownership with copied fence values."""
+
+    __tablename__ = "chat_executor_claims"
+
+    turn_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    registration_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("chat_executor_registrations.id"), nullable=False
+    )
+    claim_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    cell_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    shard_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    shard_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    environment_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False)
+    authorized_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    settled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    settlement_request_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), nullable=True
+    )
+    terminal_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "claim_generation > 0 AND shard_generation > 0 AND environment_generation > 0",
+            name="chat_executor_claims_generation_check",
+        ),
+        CheckConstraint(
+            "state IN ('active','settled','invalidated')",
+            name="chat_executor_claims_state_check",
+        ),
+        CheckConstraint(
+            "(state='active' AND settled_at IS NULL AND settlement_request_id IS NULL) OR "
+            "(state<>'active' AND settled_at IS NOT NULL)",
+            name="chat_executor_claims_settlement_check",
+        ),
+        Index(
+            "uq_chat_executor_claims_active_registration",
+            "registration_id",
+            unique=True,
+            postgresql_where=text("state='active'"),
+            sqlite_where=text("state='active'"),
+        ),
+        Index("idx_chat_executor_claims_expiry", "state", "expires_at"),
+    )
+
+
+class ChatExecutorKeyRevocation(Base):
+    """Idempotent audit of an exact authorization key epoch revocation."""
+
+    __tablename__ = "chat_executor_key_revocations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), nullable=False, unique=True
+    )
+    cell_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    key_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    previous_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    new_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason_class: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "cell_id", "new_epoch", name="uq_chat_executor_key_revocation_epoch"
+        ),
+        CheckConstraint(
+            "previous_epoch > 0 AND new_epoch = previous_epoch + 1",
+            name="chat_executor_key_revocations_epoch_check",
+        ),
+    )
+
+
+class ChatExecutorRollbackAudit(Base):
+    """Append-only evidence for one transactional manifest-pointer change."""
+
+    __tablename__ = "chat_executor_rollback_audits"
+
+    request_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    cell_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    actor: Mapped[str] = mapped_column(String(128), nullable=False)
+    reason_class: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    target_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    qualification_evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
+    outcome: Mapped[str] = mapped_column(String(16), nullable=False)
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        UniqueConstraint("cell_id", "epoch", name="uq_chat_executor_rollback_epoch"),
+        CheckConstraint("epoch > 0", name="chat_executor_rollback_epoch_check"),
+        CheckConstraint(
+            "outcome IN ('applied')", name="chat_executor_rollback_outcome_check"
+        ),
+        CheckConstraint(
+            "source_digest <> target_digest AND length(source_digest)=64 "
+            "AND length(target_digest)=64",
+            name="chat_executor_rollback_digest_check",
+        ),
+    )
+
+
 class ChatQualificationScope(Base):
     """Server-issued staging qualification cohort and retention boundary."""
 
