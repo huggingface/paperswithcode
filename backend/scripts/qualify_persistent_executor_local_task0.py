@@ -332,6 +332,7 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         raise RuntimeError("host disk crossed the frozen experiment floor")
     profiles = {profile.name: profile for profile in manifest.profiles}
     results = _run_warm_profiles(profiles)
+    print("warm profiles: complete", flush=True)
     samples: list[CancellationSample] = []
     for name in (
         "connected_stop_one",
@@ -342,7 +343,9 @@ def run(args: argparse.Namespace) -> dict[str, object]:
         result, profile_samples = _run_cancellation_profile(profiles[name])
         results[name] = result
         samples.extend(profile_samples)
+        print(f"{name}: complete", flush=True)
     results["catalog_call_overlap"] = _run_catalog_overlap()
+    print("catalog_call_overlap: complete", flush=True)
     return {
         "schema_version": "persistent-executor-local-cohorts-v1",
         "manifest_id": manifest.manifest_id,
