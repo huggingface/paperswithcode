@@ -90,7 +90,6 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             "infinity",
             app=app,
             image=image,
-            environment_name=manifest.environment,
             region=manifest.modal_region,
             timeout=manifest.spend_limits.sandbox_lifetime_seconds_max,
             idle_timeout=manifest.spend_limits.sandbox_lifetime_seconds_max,

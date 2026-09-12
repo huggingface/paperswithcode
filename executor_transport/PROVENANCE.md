@@ -67,5 +67,8 @@ X25519, ML-KEM, AES-GCM, SHA, allocation, and secure-random features. The
 `pwc-executor-environment --self-test` binary performs a real Hybrid IK
 exchange with distinct static identities, verifies the authenticated
 authorization payload, encrypts the `pwd` request and response, and reports
-stage timings. It is a feasibility artifact, not a production daemon or a
-substitute for the process-separated rendezvous and recovery gates.
+stage timings. The Modal candidate is compiled for
+`x86_64-unknown-linux-musl` as a static executable so its runtime ABI does not
+depend on the build host's glibc. It is a feasibility artifact, not a
+production daemon or a substitute for the process-separated rendezvous and
+recovery gates.
