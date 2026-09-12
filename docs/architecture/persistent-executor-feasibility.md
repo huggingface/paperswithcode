@@ -203,6 +203,31 @@ delivery gate fails even though the two-second containment gate passes.
 This observation blocked the revision 78 contract. Revision 79, explicitly
 approved on 2026-09-12, resolves the contradiction by making independent
 containment—not impossible remote receipt—the partition-case gate. It preserves
-all connected delivery and universal containment numbers. Task 0 qualification
-is reopened under manifest schema v2; Tasks 1–11 remain gated until all R1–R6
-evidence passes.
+all connected delivery and universal containment numbers.
+
+The completed revision 81 preliminary evidence passed R1–R6. The 1,000-sample
+cold profile measured p95 1,814.278 ms and p99 2,011.928 ms; the 32-way burst
+completed without error with a 2,249.686 ms maximum. One- and four-operation
+disconnected containment measured p99 976.794 ms and 985.964 ms. The raw data
+retains all outliers, including a 21,336.729 ms four-operation maximum.
+
+The local 1,000-turn profiles measured four-operation connected Stop delivery
+p99 7.371 ms and containment p99 12.004 ms, plus four-operation deadline
+delivery p99 11.889 ms and containment p99 20.582 ms. Four real read-only
+catalog processes overlapped for 1,174.134 ms under one capability. Sixteen
+actor/boundary process-loss cases used SIGKILL while holding an actual Hybrid
+IK stream; none replayed a command or duplicated a start.
+
+The 1,000-peer protocol cohort admitted exactly 250 starts/second, rejected
+nonce replay, reached p99 readiness in 3,962.542 ms, and held host CPU to 53.7%
+with at least 7,755 MiB available memory. The distinct 32-sandbox real-Modal
+cohort retained both Noise peers across TCP replacement and reached p99 usable
+resume in 143.473 ms with 32/32 successes. Its temporary image was
+`im-JhXGxTUCIyqTEGZmyeU0Co`; the cold/containment image remained
+`im-B65tTXXeeVuGY1Kp7HQbcO`.
+
+The schema-validated report is local evidence at
+`backend/outputs/persistent_executor/task0-report.json`. Task 0 success permits
+the implementation workflow to proceed to Tasks 1–11. It is not release
+qualification, a merge decision, staging deployment, or production
+authorization.
