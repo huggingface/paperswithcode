@@ -179,6 +179,8 @@ def main() -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2) + "\n")
     print(json.dumps(report, indent=2))
+    if not report["task0_may_proceed"]:
+        raise SystemExit(3)
 
 
 if __name__ == "__main__":

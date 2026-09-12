@@ -162,3 +162,27 @@ replacement is not reported as resumable connection loss.
 Task 0 stays incomplete until these profiles and partition cancellation have
 measured evidence with the frozen sample counts. A local deterministic pass is
 implementation evidence only and cannot substitute for the real-Modal gates.
+
+## Task 0 decision — 2026-09-12
+
+The staging probe used source commit
+`caf4cbb9c030c2c7b2df88674c93c01eafd05c0a`, candidate Modal image
+`im-B65tTXXeeVuGY1Kp7HQbcO`, and static environment binary SHA-256
+`b675b85a44b732309b947c71fd85fd5aed589bf141e415ff90224986a859b96c`.
+Its first cold `pwd`, including sandbox creation through terminal result, took
+1,600.994 ms. The in-sandbox Hybrid IK attach took 1.835 ms and the encrypted
+command took 1.655 ms. These are diagnostic single observations, not completed
+latency profiles.
+
+After the transport was treated as disconnected, an explicit Stop triggered
+the independent Modal control-plane fallback. Modal confirmed sandbox
+termination, process exit, and egress revocation in 735.542 ms, but the
+executor could not observe a Stop frame across the partition. Delivery is
+therefore a censored failure, not zero latency, and the accepted 500 ms p99
+delivery gate fails even though the two-second containment gate passes.
+
+The frozen manifest requires stopping on the first failed gate. Tasks 1–11 are
+therefore not authorized by Task 0. Progress requires a dated, explicitly
+approved contract decision that resolves the contradiction between sub-second
+explicit-Stop observation and 30 seconds of disconnected execution; the
+measured containment fallback does not itself justify changing either KPI.
