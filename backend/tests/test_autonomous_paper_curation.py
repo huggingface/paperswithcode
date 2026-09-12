@@ -286,6 +286,38 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
     assert not any("/pdf/" in url for url in fetched)
 
 
+def test_preflight_accepts_ocr_markdown_when_hf_papers_api_has_no_record(
+    monkeypatch,
+):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, _limit: int):
+        raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+
+    def fetch_ocr_markdown(arxiv_id: str, _limit: int, *, token: str):
+        assert arxiv_id == "2608.00042"
+        assert token == "hf-test"
+        return b"# Complete paper\n", "https://signed.example/markdown"
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    result = url_preflight.extract_candidates(
+        context,
+        fetch=fetch,
+        fetch_ocr_markdown=fetch_ocr_markdown,
+    )
+
+    assert result["complete"] is True
+    assert result["awaiting_markdown"] is False
+    assert result["markdown_available"] is True
+    assert result["errors"] == [{"source": "hf_api", "error": "HTTPError"}]
+
+
 def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch):
     monkeypatch.setattr(
         url_preflight.urllib.request,

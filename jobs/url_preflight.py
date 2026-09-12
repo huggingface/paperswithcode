@@ -376,6 +376,10 @@ def extract_candidates(
 
     def is_nonblocking(error: dict) -> bool:
         source = error.get("source")
+        if source == "hf_api":
+            # This endpoint only adds link metadata; paper text or verified
+            # first-party links are sufficient evidence for enrichment.
+            return markdown_available or official_source_available
         if source in {"hf_markdown", "ocr_markdown"}:
             return official_source_available
         if source == "pdf_first_two_pages":
