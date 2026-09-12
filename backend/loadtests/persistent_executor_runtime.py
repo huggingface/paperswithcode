@@ -31,6 +31,7 @@ class OperationResult:
     exit_code: int | None
     output: bytes
     started_at: float | None
+    terminal_at: float
     cancellation_observed_at: float | None
     process_contained_at: float | None
 
@@ -124,6 +125,7 @@ class TurnExecutionRuntime:
                     exit_code=None,
                     output=b"",
                     started_at=None,
+                    terminal_at=self._monotonic(),
                     cancellation_observed_at=self._monotonic(),
                     process_contained_at=None,
                 )
@@ -144,13 +146,18 @@ class TurnExecutionRuntime:
                 start_new_session=True,
                 bufsize=0,
             )
-            operation.process = process
-            operation.started_at = self._monotonic()
+            with self._condition:
+                operation.process = process
+                operation.started_at = self._monotonic()
+                self._condition.notify_all()
             if operation.cancel.is_set():
                 operation.cancellation_observed_at = self._monotonic()
                 self._terminate(operation)
             output = self._drain(operation, timeout_seconds)
             if operation.cancel.is_set():
+                # Synchronize with a concurrent cancel thread before publishing
+                # the result so containment proof cannot lag terminal state.
+                self._terminate(operation)
                 status = "cancelled"
                 exit_code = None
             elif process.returncode == 0:
@@ -165,6 +172,7 @@ class TurnExecutionRuntime:
                 exit_code=exit_code,
                 output=output,
                 started_at=operation.started_at,
+                terminal_at=self._monotonic(),
                 cancellation_observed_at=operation.cancellation_observed_at,
                 process_contained_at=operation.process_contained_at,
             )
@@ -177,6 +185,7 @@ class TurnExecutionRuntime:
                 exit_code=None,
                 output=b"",
                 started_at=operation.started_at,
+                terminal_at=self._monotonic(),
                 cancellation_observed_at=operation.cancellation_observed_at,
                 process_contained_at=operation.process_contained_at,
             )
@@ -237,8 +246,22 @@ class TurnExecutionRuntime:
             self._condition.notify_all()
         return evidence
 
-    def close(self) -> None:
-        self.cancel(transport_connected=True, remote_acknowledged=True)
+    def close(self) -> TurnContainmentEvidence:
+        return self.cancel(transport_connected=True, remote_acknowledged=True)
+
+    def wait_until_running(self, count: int, *, timeout_seconds: float) -> bool:
+        if not 0 < count <= MAX_PARALLEL_OPERATIONS:
+            raise ValueError("running operation count is out of range")
+        deadline = self._monotonic() + timeout_seconds
+        with self._condition:
+            while (
+                sum(item.process is not None for item in self._active.values()) < count
+            ):
+                remaining = deadline - self._monotonic()
+                if remaining <= 0 or not self._accepting:
+                    return False
+                self._condition.wait(timeout=min(remaining, 0.01))
+            return True
 
     def _watch_deadline(self) -> None:
         while True:

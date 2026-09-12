@@ -87,6 +87,31 @@ def test_ten_sequential_operations_keep_capability_until_turn_close() -> None:
     assert broker.requests[-1] == ("clear", "turn-capability")
 
 
+def test_runtime_exposes_running_and_terminal_boundaries(tmp_path: Path) -> None:
+    broker = Broker()
+    runtime = _runtime(broker)
+    release = tmp_path / "release"
+    results = []
+    thread = threading.Thread(
+        target=lambda: results.append(
+            runtime.execute(
+                "operation",
+                f"while [ ! -f {release} ]; do sleep 0.01; done",
+            )
+        )
+    )
+    thread.start()
+
+    assert runtime.wait_until_running(1, timeout_seconds=2)
+    release.touch()
+    thread.join(timeout=2)
+    evidence = runtime.close()
+
+    assert results[0].started_at is not None
+    assert results[0].terminal_at >= results[0].started_at
+    assert evidence.capability_revoked_at is not None
+
+
 def test_sibling_failure_does_not_revoke_shared_capability() -> None:
     broker = Broker()
     runtime = _runtime(broker)
@@ -129,6 +154,11 @@ def test_fifth_operation_waits_without_blocking_turn_cancellation(
     assert all(not thread.is_alive() for thread in threads)
     assert len(results) == 5
     assert all(item.status == "cancelled" for item in results)
+    assert all(
+        item.process_contained_at is not None
+        for item in results
+        if item.started_at is not None
+    )
     assert evidence.capability_revoked_at is not None
     assert broker.requests.count(("clear", "turn-capability")) == 1
 
