@@ -169,7 +169,6 @@ async def _sample(
         await sandbox.poll.aio()
         await sandbox.terminate.aio(wait=True)
         sandbox = None
-        budget.reconcile(reservation_id, actual_billed_seconds=None)
         return ReconnectSample(
             index=index,
             sandbox_id=sandbox_id,
@@ -182,12 +181,6 @@ async def _sample(
             error=None,
         )
     except Exception as error:
-        if sandbox is not None:
-            try:
-                await sandbox.terminate.aio(wait=True)
-            except Exception:
-                pass
-        budget.reconcile(reservation_id, actual_billed_seconds=None)
         return ReconnectSample(
             index=index,
             sandbox_id=sandbox_id,
@@ -199,6 +192,15 @@ async def _sample(
             reservation_retained=True,
             error=type(error).__name__,
         )
+    finally:
+        try:
+            if sandbox is not None:
+                try:
+                    await asyncio.shield(sandbox.terminate.aio(wait=True))
+                except Exception:
+                    pass
+        finally:
+            budget.reconcile(reservation_id, actual_billed_seconds=None)
 
 
 def _distribution(values: list[float]) -> dict[str, float]:

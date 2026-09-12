@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import copy
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -21,6 +22,9 @@ from backend.scripts.qualify_persistent_executor_modal_task0 import (
     StartRateLimiter,
     _gate_is_impossible,
     _sample,
+)
+from backend.scripts.qualify_persistent_executor_modal_reconnect_task0 import (
+    _sample as _reconnect_sample,
 )
 
 
@@ -497,6 +501,74 @@ def test_cancelled_modal_sample_terminates_and_reconciles(monkeypatch) -> None:
             )
         )
         await operation_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert terminated
+        assert reconciliations == [("sandbox-000001", None)]
+
+    asyncio.run(scenario())
+
+
+def test_cancelled_modal_reconnect_terminates_and_reconciles(monkeypatch) -> None:
+    async def scenario() -> None:
+        tunnel_lookup_started = asyncio.Event()
+        terminated = False
+        reconciliations = []
+
+        class AsyncMethod:
+            def __init__(self, function) -> None:
+                self.aio = function
+
+        async def tunnels(*args, **kwargs):
+            tunnel_lookup_started.set()
+            await asyncio.Event().wait()
+
+        async def terminate(*args, **kwargs):
+            nonlocal terminated
+            terminated = True
+
+        sandbox = SimpleNamespace(
+            object_id="sb-reconnect-cancelled",
+            tunnels=AsyncMethod(tunnels),
+            terminate=AsyncMethod(terminate),
+        )
+
+        async def create(*args, **kwargs):
+            return sandbox
+
+        class Budget:
+            def reserve_sandbox(self) -> str:
+                return "sandbox-000001"
+
+            def reconcile(self, reservation_id: str, *, actual_billed_seconds) -> None:
+                reconciliations.append((reservation_id, actual_billed_seconds))
+
+        monkeypatch.setattr(
+            "backend.scripts.qualify_persistent_executor_modal_reconnect_task0._registered_token",
+            lambda index: ("token", object()),
+        )
+        monkeypatch.setattr(
+            "backend.scripts.qualify_persistent_executor_modal_reconnect_task0.modal.Sandbox",
+            SimpleNamespace(create=AsyncMethod(create)),
+        )
+        manifest = SimpleNamespace(
+            modal_region="eu-west",
+            manifest_id="manifest",
+            spend_limits=SimpleNamespace(sandbox_lifetime_seconds_max=240),
+        )
+        task = asyncio.create_task(
+            _reconnect_sample(
+                index=0,
+                app=object(),
+                image=object(),
+                manifest=manifest,
+                budget=Budget(),
+                client_binary=Path("client"),
+            )
+        )
+        await tunnel_lookup_started.wait()
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
             await task
