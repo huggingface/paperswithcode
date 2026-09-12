@@ -20,7 +20,7 @@ from pydantic import (
     model_validator,
 )
 
-MANIFEST_SCHEMA_VERSION = "persistent-executor-feasibility-v1"
+MANIFEST_SCHEMA_VERSION = "persistent-executor-feasibility-v2"
 QUALIFICATION_STATUS = "preliminary_feasibility"
 EXPECTED_PROFILE_COUNTS = {
     "cold_first_pwd": 1_000,
@@ -265,6 +265,7 @@ class StopMeasurement:
     process_exit_confirmed_at: float | None
     egress_revoked_at: float | None
     sandbox_termination_confirmed_at: float | None
+    delivery_required: bool = True
 
     @property
     def delivery_ms(self) -> float | None:
@@ -290,12 +291,10 @@ class StopMeasurement:
     def passed(self) -> bool:
         delivery = self.delivery_ms
         containment = self.containment_ms
-        return (
-            delivery is not None
-            and delivery <= 500
-            and containment is not None
-            and containment <= 2000
+        delivery_passed = (
+            not self.delivery_required or delivery is not None and delivery <= 500
         )
+        return delivery_passed and containment is not None and containment <= 2000
 
 
 ProfileName = Literal[
@@ -323,6 +322,11 @@ class FeasibilityProfile(_StrictModel):
     p99_target_ms: int | None = Field(default=None, gt=0)
     containment_p95_target_ms: int | None = Field(default=None, gt=0)
     containment_p99_target_ms: int | None = Field(default=None, gt=0)
+    delivery_requirement: Literal[
+        "profile_latency",
+        "executor_observation",
+        "not_applicable_partition_termination",
+    ]
     includes_saturated_output: bool
     includes_unresponsive_process: bool
     includes_failed_broker_revocation: bool
@@ -330,19 +334,38 @@ class FeasibilityProfile(_StrictModel):
     @model_validator(mode="after")
     def validate_cancellation_targets(self) -> FeasibilityProfile:
         cancellation = "stop" in self.name or "deadline" in self.name
+        disconnected_stop = self.name.startswith("disconnected_stop")
         containment = (
             self.containment_p95_target_ms,
             self.containment_p99_target_ms,
         )
-        if cancellation and (
-            (self.p95_target_ms, self.p99_target_ms) != (250, 500)
+        if disconnected_stop and (
+            (self.p95_target_ms, self.p99_target_ms) != (None, None)
             or containment != (1000, 2000)
+            or self.delivery_requirement != "not_applicable_partition_termination"
+        ):
+            raise ValueError(
+                "partition Stop profiles require containment without a delivery KPI"
+            )
+        if (
+            cancellation
+            and not disconnected_stop
+            and (
+                (self.p95_target_ms, self.p99_target_ms) != (250, 500)
+                or containment != (1000, 2000)
+                or self.delivery_requirement != "executor_observation"
+            )
         ):
             raise ValueError(
                 "cancellation profiles require delivery and containment KPIs"
             )
-        if not cancellation and any(value is not None for value in containment):
-            raise ValueError("non-cancellation profiles cannot declare containment KPI")
+        if not cancellation and (
+            any(value is not None for value in containment)
+            or self.delivery_requirement != "profile_latency"
+        ):
+            raise ValueError(
+                "non-cancellation profiles require latency without containment"
+            )
         return self
 
 
@@ -388,7 +411,7 @@ class FaultSchedule(_StrictModel):
 
 
 class PersistentExecutorFeasibilityManifest(_StrictModel):
-    schema_version: Literal["persistent-executor-feasibility-v1"]
+    schema_version: Literal["persistent-executor-feasibility-v2"]
     status: Literal["preliminary_feasibility"]
     manifest_id: ArtifactId
     frozen_at: str = Field(
@@ -547,7 +570,7 @@ class RecommendationResult(_StrictModel):
 
 
 class PersistentExecutorFeasibilityReport(_StrictModel):
-    schema_version: Literal["persistent-executor-feasibility-report-v1"]
+    schema_version: Literal["persistent-executor-feasibility-report-v2"]
     status: Literal["preliminary_feasibility"]
     manifest_id: ArtifactId
     source_commit: CommitSha

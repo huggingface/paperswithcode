@@ -25,9 +25,16 @@ short enough for sub-second Stop containment would expire during the allowed
 30-second connection recovery window; a lease long enough for that recovery
 cannot observe an early Stop inside the 250/500 ms delivery KPI. V1 therefore
 keeps the absolute local deadline and Modal termination fallback. Lease expiry
-may be additional containment evidence, but never Stop receipt. If measured
-partition cancellation misses either accepted KPI, Task 0 fails pending an
-explicit dated contract decision.
+may be additional containment evidence, but never Stop receipt.
+
+Revision 79 distinguishes delivery from containment. Connected explicit Stop
+and every local deadline still require executor observation within p95/p99
+250/500 ms and containment within p95/p99 1/2 seconds. A Stop committed while
+the executor is disconnected has no delivery percentile: it immediately
+revokes authorization, bypasses the 30-second recovery window, requests Modal
+termination, and must independently prove process exit, egress shutdown, and
+sandbox termination within p95/p99 1/2 seconds. Missing proof is a failure and
+retains every uncertain environment and spend reservation.
 
 ## R2 — actual process parallelism
 
@@ -163,7 +170,7 @@ Task 0 stays incomplete until these profiles and partition cancellation have
 measured evidence with the frozen sample counts. A local deterministic pass is
 implementation evidence only and cannot substitute for the real-Modal gates.
 
-## Task 0 decision — 2026-09-12
+## Task 0 diagnostic — 2026-09-12
 
 The staging probe used source commit
 `caf4cbb9c030c2c7b2df88674c93c01eafd05c0a`, candidate Modal image
@@ -181,8 +188,9 @@ executor could not observe a Stop frame across the partition. Delivery is
 therefore a censored failure, not zero latency, and the accepted 500 ms p99
 delivery gate fails even though the two-second containment gate passes.
 
-The frozen manifest requires stopping on the first failed gate. Tasks 1–11 are
-therefore not authorized by Task 0. Progress requires a dated, explicitly
-approved contract decision that resolves the contradiction between sub-second
-explicit-Stop observation and 30 seconds of disconnected execution; the
-measured containment fallback does not itself justify changing either KPI.
+This observation blocked the revision 78 contract. Revision 79, explicitly
+approved on 2026-09-12, resolves the contradiction by making independent
+containment—not impossible remote receipt—the partition-case gate. It preserves
+all connected delivery and universal containment numbers. Task 0 qualification
+is reopened under manifest schema v2; Tasks 1–11 remain gated until all R1–R6
+evidence passes.

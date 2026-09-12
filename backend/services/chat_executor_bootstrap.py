@@ -249,7 +249,8 @@ class ExecutorBootstrapStateMachine:
             record = self._registered_environment(key, now)
             attempt = self._recoverable_attempt(key, attempt_id, now)
             if (
-                attempt.challenge_digest is None
+                attempt.completed
+                or attempt.challenge_digest is None
                 or attempt.challenge_expires_at is None
                 or now >= attempt.challenge_expires_at
                 or not secrets.compare_digest(
@@ -344,8 +345,8 @@ class ExecutorBootstrapStateMachine:
                 return ReconnectAdmission(
                     admitted=False, retry_after_seconds=retry_after_seconds
                 )
-            self._consumed_nonces[nonce] = now
             attempt = self._new_attempt(key, "reconnect", now)
+            self._consumed_nonces[nonce] = now
             return ReconnectAdmission(admitted=True, attempt_id=attempt.attempt_id)
 
     def authorize_generation_transition(
@@ -415,7 +416,11 @@ class ExecutorBootstrapStateMachine:
         active = self._active_attempt_by_environment.get(key)
         if active is not None:
             previous = self._attempts.get(active)
-            if previous is not None and now < previous.recovery_expires_at:
+            if (
+                previous is not None
+                and not previous.completed
+                and now < previous.recovery_expires_at
+            ):
                 raise BootstrapRejected("an authentication attempt is already active")
         attempt_id = self._token(self._random_bytes(18))
         attempt = AuthenticationAttempt(

@@ -322,6 +322,86 @@ def test_lost_heartbeat_token_can_be_replaced_without_reusing_a_nonce() -> None:
     assert first.expires_at == second.expires_at
 
 
+def test_active_attempt_rejection_does_not_consume_replacement_nonce() -> None:
+    clock = Clock()
+    machine = _machine(clock)
+    identity = Ed25519PrivateKey.from_private_bytes(b"\x01" * 32)
+    _register(machine, identity)
+    first = machine.issue_reconnect_token(
+        "env-1",
+        1,
+        shard_id="staging-1",
+        shard_generation=7,
+        lifecycle_class="active_claim",
+    )
+    replacement = machine.issue_reconnect_token(
+        "env-1",
+        1,
+        shard_id="staging-1",
+        shard_generation=7,
+        lifecycle_class="active_claim",
+    )
+    first_admission = machine.admit_reconnect(
+        first.encoded,
+        expected_shard_id="staging-1",
+        expected_shard_generation=7,
+        scheduler_slot_acquired=True,
+    )
+
+    with pytest.raises(BootstrapRejected):
+        machine.admit_reconnect(
+            replacement.encoded,
+            expected_shard_id="staging-1",
+            expected_shard_generation=7,
+            scheduler_slot_acquired=True,
+        )
+    assert first_admission.attempt_id is not None
+    challenge = machine.issue_recovery_challenge("env-1", 1, first_admission.attempt_id)
+    machine.recover(
+        environment_id="env-1",
+        generation=1,
+        attempt_id=first_admission.attempt_id,
+        challenge=challenge,
+        signature=identity.sign(
+            recovery_proof_message("env-1", 1, challenge, _public(identity))
+        ),
+    )
+
+    admitted = machine.admit_reconnect(
+        replacement.encoded,
+        expected_shard_id="staging-1",
+        expected_shard_generation=7,
+        scheduler_slot_acquired=True,
+    )
+    assert admitted.admitted
+
+
+def test_completed_attempt_rejects_already_issued_recovery_challenge() -> None:
+    clock = Clock()
+    machine = _machine(clock)
+    identity = Ed25519PrivateKey.from_private_bytes(b"\x01" * 32)
+    authorization = _register(machine, identity)
+    challenge = machine.issue_recovery_challenge("env-1", 1, authorization.attempt_id)
+    machine.issue_reconnect_token(
+        "env-1",
+        1,
+        shard_id="staging-1",
+        shard_generation=7,
+        lifecycle_class="active_claim",
+    )
+
+    with pytest.raises(BootstrapRejected):
+        machine.recover(
+            environment_id="env-1",
+            generation=1,
+            attempt_id=authorization.attempt_id,
+            challenge=challenge,
+            signature=identity.sign(
+                recovery_proof_message("env-1", 1, challenge, _public(identity))
+            ),
+        )
+
+
 def test_reconnect_rejects_expiry_revocation_and_wrong_shard_generation() -> None:
     clock = Clock()
     machine = _machine(clock)

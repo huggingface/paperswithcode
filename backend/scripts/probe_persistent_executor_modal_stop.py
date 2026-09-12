@@ -134,6 +134,7 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             process_exit_confirmed_at=termination_confirmed_at,
             egress_revoked_at=termination_confirmed_at,
             sandbox_termination_confirmed_at=termination_confirmed_at,
+            delivery_required=False,
         )
         sandbox = None
         budget.reconcile(reservation_id, actual_billed_seconds=None)

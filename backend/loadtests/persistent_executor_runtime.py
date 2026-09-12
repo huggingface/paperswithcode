@@ -192,6 +192,10 @@ class TurnExecutionRuntime:
     ) -> TurnContainmentEvidence:
         requested_at = self._monotonic()
         with self._condition:
+            if self._teardown_started:
+                while self._containment is None:
+                    self._condition.wait(timeout=0.01)
+                return self._containment
             self._accepting = False
             self._teardown_started = True
             operations = tuple(self._active.values())
@@ -230,20 +234,11 @@ class TurnExecutionRuntime:
         )
         with self._condition:
             self._containment = evidence
+            self._condition.notify_all()
         return evidence
 
     def close(self) -> None:
-        with self._condition:
-            self._accepting = False
-            self._teardown_started = True
-            operations = tuple(self._active.values())
-            for operation in operations:
-                operation.cancel.set()
-            self._condition.notify_all()
-        for operation in operations:
-            if operation.process is not None:
-                self._terminate(operation)
-        self._finish_teardown()
+        self.cancel(transport_connected=True, remote_acknowledged=True)
 
     def _watch_deadline(self) -> None:
         while True:

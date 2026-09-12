@@ -45,7 +45,7 @@ def _manifest() -> dict[str, object]:
         "reconnect_real_modal": 32,
     }
     return {
-        "schema_version": "persistent-executor-feasibility-v1",
+        "schema_version": "persistent-executor-feasibility-v2",
         "status": "preliminary_feasibility",
         "manifest_id": "persistent-executor-feasibility-20260911-r1",
         "frozen_at": "2026-09-11T12:00:00Z",
@@ -135,10 +135,25 @@ def _manifest() -> dict[str, object]:
                 "observations": observations,
                 "simultaneous_operations": simultaneous.get(name, 1),
                 "p95_target_ms": (
-                    250 if "stop" in name or "deadline" in name else 1000
+                    None
+                    if name.startswith("disconnected_stop")
+                    else 250
+                    if "stop" in name or "deadline" in name
+                    else 1000
                 ),
                 "p99_target_ms": (
-                    500 if "stop" in name or "deadline" in name else 5000
+                    None
+                    if name.startswith("disconnected_stop")
+                    else 500
+                    if "stop" in name or "deadline" in name
+                    else 5000
+                ),
+                "delivery_requirement": (
+                    "not_applicable_partition_termination"
+                    if name.startswith("disconnected_stop")
+                    else "executor_observation"
+                    if "stop" in name or "deadline" in name
+                    else "profile_latency"
                 ),
                 "containment_p95_target_ms": (
                     1000 if "stop" in name or "deadline" in name else None
@@ -228,7 +243,7 @@ def test_release_qualification_status_is_not_accepted() -> None:
 
 def _report() -> dict[str, object]:
     return {
-        "schema_version": "persistent-executor-feasibility-report-v1",
+        "schema_version": "persistent-executor-feasibility-report-v2",
         "status": "preliminary_feasibility",
         "manifest_id": "persistent-executor-feasibility-20260911-r1",
         "source_commit": "67e575c680b853b0a92e0173916916ec5a7404e0",
@@ -295,15 +310,29 @@ def test_unknown_usage_retains_reservation_and_reconciliation_is_exactly_once() 
         budget.reconcile(reservation, actual_billed_seconds=1)
 
 
-def test_control_plane_termination_cannot_substitute_for_stop_observation() -> None:
+def test_partition_stop_passes_only_on_independent_containment() -> None:
     measurement = StopMeasurement(
         stop_committed_at=100.0,
         executor_observed_at=None,
         process_exit_confirmed_at=100.8,
         egress_revoked_at=100.8,
         sandbox_termination_confirmed_at=100.8,
+        delivery_required=False,
     )
 
     assert measurement.delivery_ms is None
     assert measurement.containment_ms == pytest.approx(800)
+    assert measurement.passed
+
+
+def test_connected_stop_still_requires_executor_observation() -> None:
+    measurement = StopMeasurement(
+        stop_committed_at=100.0,
+        executor_observed_at=None,
+        process_exit_confirmed_at=100.8,
+        egress_revoked_at=100.8,
+        sandbox_termination_confirmed_at=100.8,
+        delivery_required=True,
+    )
+
     assert not measurement.passed

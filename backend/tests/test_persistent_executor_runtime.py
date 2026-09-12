@@ -200,6 +200,44 @@ def test_executor_local_deadline_watchdog_cancels_without_transport() -> None:
     assert broker.requests[-1] == ("clear", "turn-capability")
 
 
+def test_concurrent_deadline_and_stop_share_one_teardown_result() -> None:
+    broker = Broker()
+    terminator_entered = threading.Event()
+    release_terminator = threading.Event()
+    termination_calls = 0
+
+    def terminate() -> bool:
+        nonlocal termination_calls
+        termination_calls += 1
+        terminator_entered.set()
+        assert release_terminator.wait(timeout=2)
+        return True
+
+    runtime = _runtime(broker, terminator=terminate)
+    evidence = []
+    deadline = threading.Thread(
+        target=lambda: evidence.append(
+            runtime.cancel(transport_connected=False, remote_acknowledged=False)
+        )
+    )
+    stop = threading.Thread(
+        target=lambda: evidence.append(
+            runtime.cancel(transport_connected=True, remote_acknowledged=True)
+        )
+    )
+    deadline.start()
+    assert terminator_entered.wait(timeout=2)
+    stop.start()
+    release_terminator.set()
+    deadline.join(timeout=2)
+    stop.join(timeout=2)
+
+    assert termination_calls == 1
+    assert broker.requests.count(("clear", "turn-capability")) == 1
+    assert len(evidence) == 2
+    assert evidence[0] == evidence[1]
+
+
 def test_saturated_output_is_drained_after_capture_limit() -> None:
     broker = Broker()
     runtime = _runtime(broker)
