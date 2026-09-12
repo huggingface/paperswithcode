@@ -248,15 +248,15 @@ def _run_cancellation_profile(
 
 def _run_warm_profiles(profiles: dict[str, object]) -> dict[str, object]:
     broker = Broker()
-    runtime = _runtime(broker)
+    offered_rate = min(
+        profiles["warm_ack"].offered_requests_per_second,
+        profiles["warm_noop"].offered_requests_per_second,
+    )
+    cohort_seconds = profiles["warm_noop"].observations / offered_rate
+    runtime = _runtime(broker, deadline_seconds=cohort_seconds + 30)
     ack_values = []
     terminal_values = []
-    rate_limiter = StartRateLimiter(
-        min(
-            profiles["warm_ack"].offered_requests_per_second,
-            profiles["warm_noop"].offered_requests_per_second,
-        )
-    )
+    rate_limiter = StartRateLimiter(offered_rate)
     for index in range(profiles["warm_noop"].observations):
         rate_limiter.wait()
         invoked_at = time.monotonic()
