@@ -43,6 +43,21 @@ class Sample:
     error: str | None
 
 
+class StartRateLimiter:
+    def __init__(self, starts_per_second: float) -> None:
+        self._interval = 1 / starts_per_second
+        self._next_start = 0.0
+        self._lock = asyncio.Lock()
+
+    async def wait(self) -> None:
+        async with self._lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next_start - now)
+            if delay:
+                await asyncio.sleep(delay)
+            self._next_start = max(now, self._next_start) + self._interval
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -111,13 +126,17 @@ async def _sample(
     manifest: object,
     budget: ExperimentBudget,
     semaphore: asyncio.Semaphore,
+    rate_limiter: StartRateLimiter,
+    burst: bool,
 ) -> Sample:
     reservation_id = budget.reserve_sandbox()
     sandbox = None
     sandbox_id = None
-    created_at = time.monotonic()
     try:
         async with semaphore:
+            if not burst:
+                await rate_limiter.wait()
+            created_at = time.monotonic()
             sandbox = await modal.Sandbox.create.aio(
                 "sleep",
                 "infinity",
@@ -237,6 +256,10 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
     )
     image = modal.Image.from_id(manifest.image_reference)
     semaphore = asyncio.Semaphore(CONCURRENCY)
+    rate_limiters = {
+        name: StartRateLimiter(profiles[name].offered_requests_per_second)
+        for name in ("disconnected_stop_one", "disconnected_stop_four")
+    }
     all_samples: list[Sample] = []
     partial_output = args.output.with_suffix(args.output.suffix + ".partial")
     for profile, operations in (
@@ -256,6 +279,8 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
                         manifest=manifest,
                         budget=budget,
                         semaphore=semaphore,
+                        rate_limiter=rate_limiters[profile],
+                        burst=profile == "disconnected_stop_one" and offset == 0,
                     )
                     for index in range(offset, min(offset + CONCURRENCY, observations))
                 )
@@ -278,6 +303,15 @@ async def run(args: argparse.Namespace) -> dict[str, object]:
             profile_samples = [
                 sample for sample in all_samples if sample.profile == profile
             ]
+            if profile == "disconnected_stop_one" and offset == 0:
+                cold_32 = _distribution(
+                    [sample.cold_first_pwd_ms for sample in profile_samples]
+                )
+                if (
+                    cold_32["p95_ms"] > profiles["cold_32_way"].p95_target_ms
+                    or cold_32["p99_ms"] > profiles["cold_32_way"].p99_target_ms
+                ):
+                    raise RuntimeError("cold_32_way failed its frozen gate")
             if _gate_is_impossible(
                 profile_samples,
                 include_cold=profile == "disconnected_stop_one",

@@ -125,7 +125,7 @@ class ResourceLimits(_StrictModel):
 
 
 class SpendLimits(_StrictModel):
-    total_experiment_microusd: int = Field(gt=0, le=15_000_000)
+    total_experiment_microusd: int = Field(gt=0, le=16_000_000)
     pricing_source_id: ArtifactId
     pricing_attested_at: str = Field(
         pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
@@ -319,6 +319,7 @@ class FeasibilityProfile(_StrictModel):
     coverage: Literal["local_process", "protocol_simulator", "real_modal"]
     observations: int = Field(gt=0)
     simultaneous_operations: Literal[1, 4, 32, 1000]
+    offered_requests_per_second: float = Field(gt=0, le=250)
     p95_target_ms: int | None = Field(default=None, gt=0)
     p99_target_ms: int | None = Field(default=None, gt=0)
     containment_p95_target_ms: int | None = Field(default=None, gt=0)

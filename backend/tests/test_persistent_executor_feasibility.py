@@ -139,6 +139,13 @@ def _manifest() -> dict[str, object]:
                 "coverage": coverage[name],
                 "observations": observations,
                 "simultaneous_operations": simultaneous.get(name, 1),
+                "offered_requests_per_second": (
+                    250
+                    if name == "reconnect_protocol_peers"
+                    else 32
+                    if name in {"cold_32_way", "reconnect_real_modal"}
+                    else 4
+                ),
                 "p95_target_ms": (
                     None
                     if name.startswith("disconnected_stop")
@@ -222,14 +229,22 @@ def test_missing_profile_fails_preflight() -> None:
         validate_manifest(value)
 
 
-def test_revision_79_budget_ceiling_is_fifteen_dollars() -> None:
+def test_revision_79_budget_ceiling_is_sixteen_dollars() -> None:
     value = _manifest()
-    value["spend_limits"]["total_experiment_microusd"] = 15_000_000  # type: ignore[index]
+    value["spend_limits"]["total_experiment_microusd"] = 16_000_000  # type: ignore[index]
     validate_manifest(value)
-    value["spend_limits"]["total_experiment_microusd"] = 15_000_001  # type: ignore[index]
+    value["spend_limits"]["total_experiment_microusd"] = 16_000_001  # type: ignore[index]
 
     with pytest.raises(ValidationError):
         validate_manifest(value)
+
+
+def test_budget_ledger_counts_each_operating_reserve_once() -> None:
+    manifest = validate_manifest(_manifest())
+
+    budget = ExperimentBudget(manifest.spend_limits)
+
+    assert budget.reserved_microusd == 2_250_000
 
 
 def test_post_hoc_sample_reduction_fails_preflight() -> None:
