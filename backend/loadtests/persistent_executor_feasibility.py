@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from math import ceil
 from typing import Annotated, Literal
 
 from pydantic import (
@@ -124,7 +125,7 @@ class ResourceLimits(_StrictModel):
 
 
 class SpendLimits(_StrictModel):
-    total_experiment_microusd: int = Field(gt=0, le=10_000_000)
+    total_experiment_microusd: int = Field(gt=0, le=15_000_000)
     pricing_source_id: ArtifactId
     pricing_attested_at: str = Field(
         pattern=r"^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
@@ -476,6 +477,15 @@ class PersistentExecutorFeasibilityManifest(_StrictModel):
 def validate_manifest(value: object) -> PersistentExecutorFeasibilityManifest:
     """Validate the frozen preflight before any provisioned or billed action."""
     return PersistentExecutorFeasibilityManifest.model_validate(value)
+
+
+def nearest_rank(values: list[float], percentile: float) -> float:
+    """Return the frozen nearest-rank percentile without dropping failures."""
+    if not values or not 0 < percentile <= 1:
+        raise ValueError("nearest-rank requires values and a percentile in (0, 1]")
+    ordered = sorted(values)
+    rank = ceil(len(ordered) * percentile)
+    return ordered[rank - 1]
 
 
 Recommendation = Literal["R1", "R2", "R3", "R4", "R5", "R6"]

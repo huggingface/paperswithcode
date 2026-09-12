@@ -140,11 +140,15 @@ It requires exact source/image/protocol/schema identities, staging environment
 and region, idle and loaded baseline evidence, workload and fault schedules,
 nearest-rank percentile rules, and every numeric resource/spend ceiling.
 
-The current feasibility budget ceiling is $10. Provider calls and tokens are
-zero for Task 0. The sandbox creation/runtime envelope, operating reserves, and
-unknown-usage reserve are explicit in the frozen run manifest. Unknown usage
-retains its reservation, and exhaustion stops new work without abandoning
-covered turns. Preliminary and release reports have disjoint status values.
+The revision 79 feasibility budget ceiling is $15. Provider calls and tokens
+are zero for Task 0. The increase from the preliminary $10 ceiling preserves
+both frozen 1,000-sample destructive partition-Stop profiles at the official
+0.5-core/0.5-GiB sandbox rate rounded up to 24 micro-USD/second and reserves the
+full 240-second lifetime for every creation. The sandbox creation/runtime
+envelope, operating reserves, and unknown-usage reserve are explicit in the
+frozen run manifest. Unknown usage retains its reservation, and exhaustion
+stops new work without abandoning covered turns. Preliminary and release
+reports have disjoint status values.
 
 Resource gates retain host CPU below 80% and `MemAvailable` at least 1,536 MiB.
 The run manifest additionally freezes disk, process RSS/FDs, PostgreSQL total

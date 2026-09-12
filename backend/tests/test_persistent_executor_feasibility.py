@@ -10,6 +10,7 @@ from backend.loadtests.persistent_executor_feasibility import (
     ExperimentBudget,
     EXPECTED_PROFILE_COUNTS,
     StopMeasurement,
+    nearest_rank,
     validate_manifest,
     validate_report,
 )
@@ -217,6 +218,16 @@ def test_missing_profile_fails_preflight() -> None:
         validate_manifest(value)
 
 
+def test_revision_79_budget_ceiling_is_fifteen_dollars() -> None:
+    value = _manifest()
+    value["spend_limits"]["total_experiment_microusd"] = 15_000_000  # type: ignore[index]
+    validate_manifest(value)
+    value["spend_limits"]["total_experiment_microusd"] = 15_000_001  # type: ignore[index]
+
+    with pytest.raises(ValidationError):
+        validate_manifest(value)
+
+
 def test_post_hoc_sample_reduction_fails_preflight() -> None:
     value = _manifest()
     value["profiles"][0]["observations"] = 999  # type: ignore[index]
@@ -336,3 +347,10 @@ def test_connected_stop_still_requires_executor_observation() -> None:
     )
 
     assert not measurement.passed
+
+
+def test_nearest_rank_keeps_tail_failures_in_distribution() -> None:
+    values = [float(value) for value in range(1, 1001)]
+
+    assert nearest_rank(values, 0.95) == 950
+    assert nearest_rank(values, 0.99) == 990
