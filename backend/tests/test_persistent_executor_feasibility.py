@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import copy
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -16,7 +18,9 @@ from backend.loadtests.persistent_executor_feasibility import (
 )
 from backend.scripts.qualify_persistent_executor_modal_task0 import (
     Sample,
+    StartRateLimiter,
     _gate_is_impossible,
+    _sample,
 )
 
 
@@ -433,3 +437,71 @@ def test_cold_burst_is_not_a_second_tail_latency_profile() -> None:
     assert profiles["cold_first_pwd"].p99_target_ms == 5_000
     assert profiles["cold_32_way"].p95_target_ms is None
     assert profiles["cold_32_way"].p99_target_ms == 5_000
+
+
+def test_cancelled_modal_sample_terminates_and_reconciles(monkeypatch) -> None:
+    async def scenario() -> None:
+        operation_started = asyncio.Event()
+        terminated = False
+        reconciliations = []
+
+        class AsyncMethod:
+            def __init__(self, function) -> None:
+                self.aio = function
+
+        async def execute(*args, **kwargs):
+            operation_started.set()
+            await asyncio.Event().wait()
+
+        async def terminate(*args, **kwargs):
+            nonlocal terminated
+            terminated = True
+
+        sandbox = SimpleNamespace(
+            object_id="sb-cancelled",
+            exec=AsyncMethod(execute),
+            terminate=AsyncMethod(terminate),
+        )
+
+        async def create(*args, **kwargs):
+            return sandbox
+
+        class Budget:
+            def reserve_sandbox(self) -> str:
+                return "sandbox-000001"
+
+            def reconcile(self, reservation_id: str, *, actual_billed_seconds) -> None:
+                reconciliations.append((reservation_id, actual_billed_seconds))
+
+        monkeypatch.setattr(
+            "backend.scripts.qualify_persistent_executor_modal_task0.modal.Sandbox",
+            SimpleNamespace(create=AsyncMethod(create)),
+        )
+        manifest = SimpleNamespace(
+            modal_region="eu-west",
+            manifest_id="manifest",
+            spend_limits=SimpleNamespace(sandbox_lifetime_seconds_max=240),
+        )
+        task = asyncio.create_task(
+            _sample(
+                profile="disconnected_stop_one",
+                index=0,
+                operations=1,
+                app=object(),
+                image=object(),
+                manifest=manifest,
+                budget=Budget(),
+                semaphore=asyncio.Semaphore(1),
+                rate_limiter=StartRateLimiter(4),
+                burst=True,
+            )
+        )
+        await operation_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+        assert terminated
+        assert reconciliations == [("sandbox-000001", None)]
+
+    asyncio.run(scenario())

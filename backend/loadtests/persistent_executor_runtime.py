@@ -211,39 +211,45 @@ class TurnExecutionRuntime:
             for operation in operations:
                 operation.cancel.set()
             self._condition.notify_all()
-        for operation in operations:
-            if operation.process is not None:
-                if operation.cancellation_observed_at is None:
-                    operation.cancellation_observed_at = self._monotonic()
-                self._terminate(operation)
-
         termination_requested_at: float | None = None
         termination_confirmed_at: float | None = None
         unknown = False
         reservation_retained = False
-        if not transport_connected or not remote_acknowledged:
-            termination_requested_at = self._monotonic()
-            if self._sandbox_terminator():
-                termination_confirmed_at = self._monotonic()
-            else:
+        revoked_at: float | None = None
+        try:
+            for operation in operations:
+                if operation.process is not None:
+                    if operation.cancellation_observed_at is None:
+                        operation.cancellation_observed_at = self._monotonic()
+                    self._terminate(operation)
+            if not transport_connected or not remote_acknowledged:
+                termination_requested_at = self._monotonic()
+                if self._sandbox_terminator():
+                    termination_confirmed_at = self._monotonic()
+                else:
+                    unknown = True
+                    reservation_retained = True
+            revoked_at = self._finish_teardown()
+            if revoked_at is None:
                 unknown = True
                 reservation_retained = True
-
-        revoked_at = self._finish_teardown()
-        if revoked_at is None:
+        except Exception:
+            # Teardown is an external-failure boundary. Publish fail-closed
+            # evidence so concurrent callers cannot wait forever.
             unknown = True
             reservation_retained = True
-        evidence = TurnContainmentEvidence(
-            cancellation_requested_at=requested_at,
-            capability_revoked_at=revoked_at,
-            sandbox_termination_requested_at=termination_requested_at,
-            sandbox_termination_confirmed_at=termination_confirmed_at,
-            reservation_retained=reservation_retained,
-            unknown_outcome=unknown,
-        )
-        with self._condition:
-            self._containment = evidence
-            self._condition.notify_all()
+        finally:
+            evidence = TurnContainmentEvidence(
+                cancellation_requested_at=requested_at,
+                capability_revoked_at=revoked_at,
+                sandbox_termination_requested_at=termination_requested_at,
+                sandbox_termination_confirmed_at=termination_confirmed_at,
+                reservation_retained=reservation_retained,
+                unknown_outcome=unknown,
+            )
+            with self._condition:
+                self._containment = evidence
+                self._condition.notify_all()
         return evidence
 
     def close(self) -> TurnContainmentEvidence:

@@ -268,6 +268,43 @@ def test_concurrent_deadline_and_stop_share_one_teardown_result() -> None:
     assert evidence[0] == evidence[1]
 
 
+def test_teardown_owner_failure_releases_concurrent_waiters() -> None:
+    broker = Broker()
+    terminator_entered = threading.Event()
+    release_terminator = threading.Event()
+
+    def terminate() -> bool:
+        terminator_entered.set()
+        assert release_terminator.wait(timeout=2)
+        raise RuntimeError("control plane failed")
+
+    runtime = _runtime(broker, terminator=terminate)
+    evidence = []
+    owner = threading.Thread(
+        target=lambda: evidence.append(
+            runtime.cancel(transport_connected=False, remote_acknowledged=False)
+        )
+    )
+    waiter = threading.Thread(
+        target=lambda: evidence.append(
+            runtime.cancel(transport_connected=True, remote_acknowledged=True)
+        )
+    )
+    owner.start()
+    assert terminator_entered.wait(timeout=2)
+    waiter.start()
+    release_terminator.set()
+    owner.join(timeout=2)
+    waiter.join(timeout=2)
+
+    assert not owner.is_alive()
+    assert not waiter.is_alive()
+    assert len(evidence) == 2
+    assert evidence[0] == evidence[1]
+    assert evidence[0].unknown_outcome
+    assert evidence[0].reservation_retained
+
+
 def test_saturated_output_is_drained_after_capture_limit() -> None:
     broker = Broker()
     runtime = _runtime(broker)
