@@ -132,7 +132,7 @@ async def _sample(
             encrypted_ports=[],
             unencrypted_ports=[REMOTE_PORT],
             include_oidc_identity_token=False,
-            readiness_probe=modal.sandbox.Probe.tcp(REMOTE_PORT),
+            readiness_probe=modal.sandbox.Probe.with_tcp(REMOTE_PORT),
             tags={
                 "service": "pwc-chat",
                 "environment": "task0-feasibility",
