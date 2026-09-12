@@ -15,14 +15,16 @@ is copied in this milestone.
   `executor_transport/vectors/bootstrap_v1.json` at SHA-256
   `9db33156d64742c2510604064b7e5b8733b196c8c9611d0755e889aafa5e0743`
 
-The upstream `codex-rs/Cargo.lock` is the dependency-closure record being
-reviewed. A later local `Cargo.lock` must pin the smaller selected closure and
-is independently reviewed; the upstream lock is not a substitute for it.
+The upstream `codex-rs/Cargo.lock` is the dependency-closure record that was
+reviewed. The smaller local `Cargo.lock` is independently pinned at SHA-256
+`22e0789ed26c4bf074f623c073de12ef174e302a4bd6cdd28f19106bf5022cd2`;
+the upstream lock is not a substitute for it.
 
 ## Reviewed source boundary
 
 | Upstream path | Git blob | Task 1 disposition |
 | --- | --- | --- |
+| `codex-rs/exec-server/src/noise_channel.rs` | `cde2aae4eeb1ccedf3d3617bd1e7fa2ba2e21796` | Narrow attributed Task 0 adaptation of the Hybrid IK identity, transcript, and transport wrapper. |
 | `codex-rs/exec-server/src/remote.rs` | `0d2711b7a8a4c4284220cc2e296dd04e678cc879` | Study registry client, profile check, and connection lifecycle; reimplement the Papers With Code bootstrap. |
 | `codex-rs/exec-server/src/remote/registration_retry.rs` | `1a2dc989da947393a1191ea4200ab8346825925c` | Study bounded retry behavior; replace authentication with the generation-bound state machine. |
 | `codex-rs/exec-server/src/noise_relay/message_framing.rs` | `af9fbd49986f0e23da32acf44ecee4ac377f536c` | Candidate for a narrow attributed port. |
@@ -56,3 +58,14 @@ service for this product. Papers With Code must implement and own:
 
 No upstream registry endpoint, OpenAI authentication mechanism, hosted relay,
 telemetry route, command dispatcher, or local CLI sandbox policy is copied.
+
+## Task 0 candidate
+
+The candidate uses Rust 1.95.0, matching the pinned upstream
+`codex-rs/rust-toolchain.toml`, and `clatter` 2.2.0 with only the reviewed
+X25519, ML-KEM, AES-GCM, SHA, allocation, and secure-random features. The
+`pwc-executor-environment --self-test` binary performs a real Hybrid IK
+exchange with distinct static identities, verifies the authenticated
+authorization payload, encrypts the `pwd` request and response, and reports
+stage timings. It is a feasibility artifact, not a production daemon or a
+substitute for the process-separated rendezvous and recovery gates.
