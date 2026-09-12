@@ -9,6 +9,8 @@ CREATE TABLE IF NOT EXISTS chat_executor_manifests (
     environment_binary_digest varchar(64) NOT NULL,
     daemon_digest varchar(64) NOT NULL,
     source_commit varchar(64) NOT NULL,
+    release_id varchar(128) NOT NULL DEFAULT 'legacy'
+        CHECK (length(release_id) BETWEEN 1 AND 128),
     protocol_version integer NOT NULL CHECK (protocol_version > 0),
     schema_digest varchar(64) NOT NULL,
     qualification_status varchar(16) NOT NULL
@@ -214,6 +216,7 @@ BEGIN
        OR NEW.environment_binary_digest IS DISTINCT FROM OLD.environment_binary_digest
        OR NEW.daemon_digest IS DISTINCT FROM OLD.daemon_digest
        OR NEW.source_commit IS DISTINCT FROM OLD.source_commit
+       OR NEW.release_id IS DISTINCT FROM OLD.release_id
        OR NEW.protocol_version IS DISTINCT FROM OLD.protocol_version
        OR NEW.schema_digest IS DISTINCT FROM OLD.schema_digest THEN
         RAISE EXCEPTION 'chat executor manifest lineage is immutable';

@@ -5,5 +5,9 @@
 //! `PROVENANCE.md`. Product-specific authorization and lifecycle state remain
 //! in Papers With Code.
 
+pub mod admission;
 pub mod noise;
+pub mod postgres_registry;
 pub mod protocol;
+pub mod registry;
+pub mod scheduler;

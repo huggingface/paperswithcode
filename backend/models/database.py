@@ -3313,6 +3313,9 @@ class ChatExecutorManifest(Base):
     environment_binary_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     daemon_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     source_commit: Mapped[str] = mapped_column(String(64), nullable=False)
+    release_id: Mapped[str] = mapped_column(
+        String(128), nullable=False, server_default="legacy"
+    )
     protocol_version: Mapped[int] = mapped_column(Integer, nullable=False)
     schema_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     qualification_status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -3347,6 +3350,10 @@ class ChatExecutorManifest(Base):
             "AND length(environment_binary_digest)=64 AND length(daemon_digest)=64 "
             "AND length(source_commit)=64 AND length(schema_digest)=64",
             name="chat_executor_manifests_digest_check",
+        ),
+        CheckConstraint(
+            "length(release_id) BETWEEN 1 AND 128",
+            name="chat_executor_manifests_release_check",
         ),
     )
 

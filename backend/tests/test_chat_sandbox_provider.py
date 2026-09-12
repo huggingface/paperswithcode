@@ -18,6 +18,7 @@ from backend.config import Settings
 from backend.services import chat_sandbox_provider, chat_sandbox_service
 from backend.services.chat_sandbox_provider import (
     ModalSandboxProviderAdapter,
+    ExecutorLaunchBundle,
     SandboxLaunchMode,
     SandboxError,
     sandbox_environment,
@@ -131,21 +132,9 @@ def test_create_nonpersistent_sandbox_preserves_provider_isolation_contract(
 
 def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatch):
     captured: dict[str, object] = {}
-    probes: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     class Sandbox:
         object_id = "sb-executor"
-
-        def __init__(self):
-            self.exec = _AsyncCall(self._exec)
-
-        async def _exec(self, *command, **options):
-            probes.append((command, options))
-
-            async def wait():
-                return None
-
-            return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
 
     async def lookup(*_args, **_options):
         return object()
@@ -181,35 +170,29 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
             },
             worker_generation="generation-a",
             launch_mode=SandboxLaunchMode.EXECUTOR,
+            executor_launch=ExecutorLaunchBundle(b"signed-launch"),
         )
     )
 
     assert result.object_id == "sb-executor"
     assert captured["command"] == (
-        "python",
-        "-m",
-        "backend.chat_sandbox_worker.executor_daemon",
+        "/usr/local/bin/pwc-executor-environment",
+        "--connect",
+        "wss://chat-executor.staging.paperswithcode.co/v1/environment",
+        "--admission-env",
+        "PWC_CHAT_EXECUTOR_ADMISSION",
     )
     options = captured["options"]
     assert options["env"]["PWC_CHAT_EXECUTOR_CONTRACT_VERSION"] == EXECUTOR_PROTOCOL
     assert options["env"]["PWC_CHAT_WORKER_GENERATION"] == "generation-a"
+    assert options["env"]["PWC_CHAT_EXECUTOR_ADMISSION"] == "c2lnbmVkLWxhdW5jaA=="
     assert "OPENAI_API_KEY" not in options["env"]
     assert "OPENROUTER_API_KEY" not in options["env"]
     assert "HF_TOKEN" not in options["env"]
     assert options["inbound_cidr_allowlist"] == []
-    assert probes == [
-        (
-            ("test", "-S", "/run/pwc-chat-executor/executor.sock"),
-            {"timeout": 5},
-        ),
-        (
-            (
-                "sh",
-                "-c",
-                "printf durable-ready > /workspace/durable-ready.txt",
-            ),
-            {"timeout": 5},
-        ),
+    assert options["outbound_domain_allowlist"] == [
+        "gateway.example.test",
+        "chat-executor.staging.paperswithcode.co",
     ]
 
 

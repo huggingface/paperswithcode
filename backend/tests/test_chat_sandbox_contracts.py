@@ -3703,7 +3703,7 @@ def test_persistent_control_uses_authenticated_connect_token(monkeypatch):
     assert control.stderr_task is None
 
 
-def test_image_publication_initializes_modal_app(monkeypatch, capsys):
+def test_image_publication_initializes_modal_app(monkeypatch, capsys, tmp_path):
     events: list[str] = []
 
     class Lookup:
@@ -3741,7 +3741,21 @@ def test_image_publication_initializes_modal_app(monkeypatch, capsys):
 
     monkeypatch.setattr(publish_image, "app", App())
     monkeypatch.setattr(publish_image, "image", Image())
+    monkeypatch.setattr(
+        publish_image, "with_executor_binary", lambda image, _path: image
+    )
+    monkeypatch.setattr(publish_image.subprocess, "run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        publish_image,
+        "signed_release_manifest",
+        lambda **_kwargs: {"signature": "signed"},
+    )
     monkeypatch.setattr(publish_image.modal.App, "lookup", Lookup())
+    monkeypatch.setenv("PWC_EXECUTOR_CARGO_TARGET_DIR", str(tmp_path))
+    monkeypatch.setenv(
+        "PWC_CHAT_EXECUTOR_MANIFEST_SIGNING_KEY_FILE", str(tmp_path / "key")
+    )
+    monkeypatch.setenv("PWC_CHAT_EXECUTOR_RELEASE_ID", "release-test")
 
     assert publish_image.main() == 0
     assert events == [
@@ -3751,7 +3765,7 @@ def test_image_publication_initializes_modal_app(monkeypatch, capsys):
         f"publish:{IMAGE_PUBLISH_NAME}",
         "exit",
     ]
-    assert capsys.readouterr().out == "im-test\n"
+    assert capsys.readouterr().out == '{"signature":"signed"}\n'
 
 
 def test_immutable_modal_image_uses_supported_constructor(monkeypatch):

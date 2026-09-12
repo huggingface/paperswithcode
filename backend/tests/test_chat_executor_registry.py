@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import json
+import hashlib
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -8,6 +10,7 @@ from pathlib import Path
 from threading import Barrier
 
 import pytest
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 from sqlalchemy import create_engine, func, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
@@ -31,6 +34,12 @@ from backend.services.chat_executor_registry import (
     ExecutorRollbackRejected,
     ExecutorStorageUnavailable,
 )
+from backend.services.chat_executor_admission import (
+    AdmissionManifest,
+    AdmissionSigningKey,
+    canonical_claims,
+    issue_launch_admission,
+)
 
 
 MIGRATION = (
@@ -47,6 +56,60 @@ TABLES = (
     ChatExecutorKeyRevocation,
     ChatExecutorRollbackAudit,
 )
+
+
+def test_launch_issuer_persists_digest_only_nonce_and_signs_rust_canonical_frame(
+    db, monkeypatch
+):
+    repository, registration = _seed(db)
+    row = db.get(ChatExecutorManifest, registration.manifest_digest)
+    assert row is not None
+    now_ms = int(_database_now(db).timestamp() * 1000)
+    private_key = Ed25519PrivateKey.from_private_bytes(b"\x19" * 32)
+    monkeypatch.setattr(
+        "backend.services.chat_executor_admission.secrets.token_bytes",
+        lambda size: b"\x08" * size,
+    )
+    frame = issue_launch_admission(
+        db,
+        registry=repository,
+        signing_key=AdmissionSigningKey(
+            key_id="issuer-v1",
+            private_key=private_key,
+            not_before_ms=now_ms - 1,
+            not_after_ms=now_ms + 1_000_000,
+        ),
+        environment_id="new-environment",
+        environment_generation=4,
+        cell_id=registration.cell_id,
+        shard_id="shard-v1",
+        shard_database_id=registration.shard_id,
+        shard_generation=registration.shard_generation,
+        key_epoch=registration.key_epoch,
+        lifecycle_class="blank_pool",
+        manifest=AdmissionManifest(
+            manifest_digest=row.digest,
+            image_digest=row.image_digest,
+            environment_binary_digest=row.environment_binary_digest,
+            daemon_digest=row.daemon_digest,
+            source_commit=row.source_commit,
+            protocol_version=row.protocol_version,
+            schema_digest=row.schema_digest,
+            release_id=row.release_id,
+            compatibility_expires_at=row.compatibility_expires_at,
+        ),
+        remaining_lifetime_ms=240_000,
+    )
+    envelope = json.loads(frame)
+    private_key.public_key().verify(
+        bytes(envelope["signature"]),
+        canonical_claims(envelope["claims"], signer_key_id="issuer-v1"),
+    )
+    nonce_digest = hashlib.sha256(bytes(envelope["claims"]["nonce"])).hexdigest()
+    nonce = db.get(ChatExecutorNonce, nonce_digest)
+    assert nonce is not None
+    assert nonce.purpose == "launch"
+    assert "08" * 16 not in repr(nonce.__dict__)
 
 
 @pytest.fixture
@@ -96,6 +159,7 @@ def _seed(
         environment_binary_digest=_digest("2"),
         daemon_digest=_digest("3"),
         source_commit=_digest("4"),
+        release_id="release-v6",
         protocol_version=6,
         schema_digest=_digest("5"),
         qualification_status="qualified",
@@ -112,6 +176,7 @@ def _seed(
         environment_binary_digest=_digest("7"),
         daemon_digest=_digest("8"),
         source_commit=_digest("9"),
+        release_id="release-v7",
         protocol_version=7,
         schema_digest=_digest("c"),
         qualification_status="qualified",
@@ -623,6 +688,63 @@ def test_manifest_rollback_is_lineage_checked_atomic_and_reconciled_by_request(d
     assert cell.rollback_epoch == 1
     assert repository.reconcile_rollback(db, request_id=request_id).epoch == 1
     assert db.query(ChatExecutorRollbackAudit).count() == 1
+
+    liveness = _liveness_nonce(db, repository, _registration)
+    with pytest.raises(ExecutorClaimUnavailable):
+        repository.claim_workspace(
+            db,
+            turn_id=uuid.uuid4(),
+            registration_id=_registration.id,
+            environment_generation=_registration.environment_generation,
+            shard_generation=_registration.shard_generation,
+            liveness_nonce_digest=liveness,
+            claim_generation=1,
+            ttl_seconds=60,
+        )
+
+
+def test_manifest_activation_fences_new_claims_then_drains_old_blanks_after_readiness(
+    db,
+):
+    repository, registration = _seed(db)
+    target = ChatExecutorManifest(
+        digest=_digest("d"),
+        parent_digest=_digest("b"),
+        image_digest=_digest("d"),
+        environment_binary_digest=_digest("e"),
+        daemon_digest=_digest("f"),
+        source_commit=_digest("1"),
+        release_id="release-v8",
+        protocol_version=8,
+        schema_digest=_digest("2"),
+        qualification_status="qualified",
+        compatibility_state="current",
+        qualification_evidence_ref="qualification/current-v8.json",
+        ready_capacity=0,
+    )
+    db.add(target)
+    db.flush()
+
+    repository.activate_manifest(db, cell_id="cell-v1", target_digest=target.digest)
+    assert registration.state == "ready"
+    assert repository.reconcile_manifest_activation(db, cell_id="cell-v1") == 0
+    liveness = _liveness_nonce(db, repository, registration)
+    with pytest.raises(ExecutorClaimUnavailable):
+        repository.claim_workspace(
+            db,
+            turn_id=uuid.uuid4(),
+            registration_id=registration.id,
+            environment_generation=registration.environment_generation,
+            shard_generation=registration.shard_generation,
+            liveness_nonce_digest=liveness,
+            claim_generation=1,
+            ttl_seconds=60,
+        )
+
+    target.ready_capacity = 1
+    db.flush()
+    assert repository.reconcile_manifest_activation(db, cell_id="cell-v1") == 1
+    assert registration.state == "draining"
 
     unrelated = ChatExecutorManifest(
         digest=_digest("f"),

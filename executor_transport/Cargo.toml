@@ -16,10 +16,16 @@ clatter = { version = "=2.2.0", default-features = false, features = [
     "use-sha",
 ] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
+futures-util = "=0.3.34"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "=0.10.9"
 thiserror = "2"
+tokio = { version = "=1.53.1", features = ["fs", "macros", "net", "process", "rt-multi-thread", "signal", "sync", "time"] }
+tokio-tungstenite = { version = "=0.30.0", default-features = false, features = ["connect", "handshake", "rustls-tls-webpki-roots", "url"] }
+tokio-postgres = { version = "=0.7.18", features = ["with-serde_json-1", "with-uuid-1"] }
+url = "=2.5.8"
+uuid = { version = "=1.26.1", features = ["serde", "v4"] }
 
 [profile.release]
 strip = true

@@ -217,6 +217,7 @@ class ChatExecutorRegistry:
             or cell.active_shard_id != registration.shard_id
             or shard.state != "ready"
             or registration.state not in {"ready", "assigned_idle"}
+            or registration.manifest_digest != cell.selected_manifest_digest
             or registration.environment_generation != environment_generation
             or registration.shard_generation != shard_generation
             or registration.shard_generation != shard.generation
@@ -386,6 +387,66 @@ class ChatExecutorRegistry:
         cell.updated_at = now
         db.flush()
 
+    def activate_manifest(
+        self, db: Session, *, cell_id: str, target_digest: str
+    ) -> None:
+        """Atomically select an immutable qualified child for new creation."""
+        cell = db.scalar(
+            select(ChatExecutorCell)
+            .where(ChatExecutorCell.cell_id == cell_id)
+            .with_for_update()
+        )
+        target = db.get(
+            ChatExecutorManifest, self._digest(target_digest, name="target digest")
+        )
+        now = self._database_now(db)
+        if (
+            cell is None
+            or cell.selected_manifest_digest is None
+            or cell.circuit_state != "closed"
+            or target is None
+            or target.parent_digest != cell.selected_manifest_digest
+            or target.qualification_status != "qualified"
+            or target.compatibility_state != "current"
+            or target.revoked_at is not None
+            or (
+                target.compatibility_expires_at is not None
+                and self._as_utc(target.compatibility_expires_at) < now
+            )
+        ):
+            raise ExecutorRollbackRejected("Executor activation target is ineligible")
+        cell.selected_manifest_digest = target.digest
+        cell.updated_at = now
+        db.flush()
+
+    def reconcile_manifest_activation(self, db: Session, *, cell_id: str) -> int:
+        """Drain old blanks only after one selected-image replacement is ready."""
+        cell = db.scalar(
+            select(ChatExecutorCell)
+            .where(ChatExecutorCell.cell_id == cell_id)
+            .with_for_update()
+        )
+        if cell is None or cell.selected_manifest_digest is None:
+            raise ExecutorClaimUnavailable("Executor creation manifest is unavailable")
+        selected = db.get(ChatExecutorManifest, cell.selected_manifest_digest)
+        if selected is None or selected.ready_capacity < 1:
+            return 0
+        return self._drain_unselected_blanks(db, cell=cell)
+
+    def _drain_unselected_blanks(self, db: Session, *, cell: ChatExecutorCell) -> int:
+        now = self._database_now(db)
+        result = db.execute(
+            update(ChatExecutorRegistration)
+            .where(
+                ChatExecutorRegistration.cell_id == cell.cell_id,
+                ChatExecutorRegistration.manifest_digest
+                != cell.selected_manifest_digest,
+                ChatExecutorRegistration.state == "ready",
+            )
+            .values(state="draining", updated_at=now)
+        )
+        return result.rowcount or 0
+
     def settle_claim(
         self,
         db: Session,
@@ -419,7 +480,13 @@ class ChatExecutorRegistry:
         )
         registration = db.get(ChatExecutorRegistration, row.registration_id)
         if registration is not None and registration.state == "claimed":
-            registration.state = "ready"
+            cell = db.get(ChatExecutorCell, registration.cell_id)
+            registration.state = (
+                "ready"
+                if cell is not None
+                and registration.manifest_digest == cell.selected_manifest_digest
+                else "draining"
+            )
             registration.updated_at = now
         db.flush()
 
@@ -808,6 +875,8 @@ class ChatExecutorRegistry:
         cell.rollback_epoch = epoch
         cell.updated_at = now
         try:
+            db.flush()
+            self._drain_unselected_blanks(db, cell=cell)
             db.flush()
         except DBAPIError as error:
             raise ExecutorStorageUnavailable(

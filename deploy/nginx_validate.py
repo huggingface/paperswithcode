@@ -110,7 +110,7 @@ def validate(production: str, staging: str) -> list[str]:
         )
         if not operator_block or "return 404;" not in operator_block:
             failures.append(f"{environment} does not deny public deployment operators")
-    if "8081" in staging or "proxy_set_header Upgrade" in staging:
+    if "8081" in staging:
         failures.append("staging exposes Vite/HMR")
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
@@ -192,6 +192,33 @@ def validate(production: str, staging: str) -> list[str]:
                 )
         if "client_max_body_size 512k;" not in config:
             failures.append(f"{environment} chat gateway body limit is missing")
+    for config, environment, hostname in (
+        (production, "production", "chat-executor.paperswithcode.co"),
+        (staging, "staging", "chat-executor.staging.paperswithcode.co"),
+    ):
+        if f"server_name {hostname};" not in config:
+            failures.append(f"{environment} executor hostname is missing")
+        if f"/etc/letsencrypt/live/{hostname}/fullchain.pem" not in config:
+            failures.append(f"{environment} executor TLS certificate is missing")
+        block = location_block(config, "location = /v1/environment")
+        for requirement in (
+            "proxy_pass http://unix:/run/pwc-chat-executor/chat-executor-rendezvous.sock:;",
+            "proxy_http_version 1.1;",
+            "proxy_set_header Upgrade $http_upgrade;",
+            'proxy_set_header Connection "upgrade";',
+            "proxy_set_header X-PWC-Network-Source $remote_addr;",
+            "proxy_read_timeout 20s;",
+            "proxy_send_timeout 20s;",
+            "proxy_buffering off;",
+        ):
+            if requirement not in block:
+                failures.append(
+                    f"{environment} executor rendezvous misses: {requirement}"
+                )
+        if config.count("proxy_set_header Upgrade") != 1:
+            failures.append(
+                f"{environment} exposes an unexpected WebSocket upgrade route"
+            )
     if staging.count("location / {") != 1 or production.count("location / {") != 1:
         failures.append("ambiguous catch-all location")
     failures.extend(
