@@ -163,7 +163,11 @@ buffers, reserved control capacity, sampling interval, and breach action.
 Cold first `pwd` uses the intended immutable staging image in `eu-west`, with
 blank and retained reuse disabled, and attributes provisioning, bootstrap,
 Noise attach, readiness, and command time while retaining end-to-end latency.
-The same profile runs with 32 simultaneous cold turns. Warm ACK and no-op are
+The same profile runs with 32 simultaneous cold turns as a correctness and
+capacity gate: all 32 must finish without error and the reported p99 (the
+maximum with this cohort size) remains bounded by the unchanged five-second
+cold p99 target. The separately frozen 1,000-sample cold profile owns the
+unchanged two-second p95 and five-second p99 tail gates. Warm ACK and no-op are
 separate profiles.
 
 The reconnect gate first runs 1,000 protocol-faithful peers through the real

@@ -148,9 +148,15 @@ def _manifest() -> dict[str, object]:
                 ),
                 "p95_target_ms": (
                     None
-                    if name.startswith("disconnected_stop")
+                    if name.startswith("disconnected_stop") or name == "cold_32_way"
                     else 250
                     if "stop" in name or "deadline" in name
+                    else 500
+                    if name == "warm_ack"
+                    else 5000
+                    if name.startswith("reconnect")
+                    else 2000
+                    if name == "cold_first_pwd"
                     else 1000
                 ),
                 "p99_target_ms": (
@@ -158,6 +164,10 @@ def _manifest() -> dict[str, object]:
                     if name.startswith("disconnected_stop")
                     else 500
                     if "stop" in name or "deadline" in name
+                    else 1000
+                    if name == "warm_ack"
+                    else 2000
+                    if name == "warm_noop"
                     else 5000
                 ),
                 "delivery_requirement": (
@@ -252,6 +262,14 @@ def test_post_hoc_sample_reduction_fails_preflight() -> None:
     value["profiles"][0]["observations"] = 999  # type: ignore[index]
 
     with pytest.raises(ValidationError):
+        validate_manifest(value)
+
+
+def test_post_hoc_kpi_change_fails_preflight() -> None:
+    value = _manifest()
+    value["profiles"][0]["p95_target_ms"] = 2_001  # type: ignore[index]
+
+    with pytest.raises(ValidationError, match="changed a frozen KPI target"):
         validate_manifest(value)
 
 
@@ -403,3 +421,13 @@ def test_modal_cohort_stops_when_frozen_tail_gate_is_impossible() -> None:
 
     assert not _gate_is_impossible([healthy] * 989 + [failed] * 10, include_cold=True)
     assert _gate_is_impossible([healthy] * 989 + [failed] * 11, include_cold=True)
+
+
+def test_cold_burst_is_not_a_second_tail_latency_profile() -> None:
+    manifest = validate_manifest(_manifest())
+    profiles = {profile.name: profile for profile in manifest.profiles}
+
+    assert profiles["cold_first_pwd"].p95_target_ms == 2_000
+    assert profiles["cold_first_pwd"].p99_target_ms == 5_000
+    assert profiles["cold_32_way"].p95_target_ms is None
+    assert profiles["cold_32_way"].p99_target_ms == 5_000

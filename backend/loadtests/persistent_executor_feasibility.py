@@ -38,6 +38,21 @@ EXPECTED_PROFILE_COUNTS = {
     "reconnect_real_modal": 32,
 }
 
+EXPECTED_PROFILE_TARGETS = {
+    "cold_first_pwd": (2000, 5000, None, None),
+    "cold_32_way": (None, 5000, None, None),
+    "warm_ack": (500, 1000, None, None),
+    "warm_noop": (1000, 2000, None, None),
+    "connected_stop_one": (250, 500, 1000, 2000),
+    "connected_stop_four": (250, 500, 1000, 2000),
+    "disconnected_stop_one": (None, None, 1000, 2000),
+    "disconnected_stop_four": (None, None, 1000, 2000),
+    "deadline_one": (250, 500, 1000, 2000),
+    "deadline_four": (250, 500, 1000, 2000),
+    "reconnect_protocol_peers": (5000, 5000, None, None),
+    "reconnect_real_modal": (5000, 5000, None, None),
+}
+
 Sha256 = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 CommitSha = Annotated[str, Field(pattern=r"^[0-9a-f]{40}$")]
 ArtifactId = Annotated[
@@ -461,6 +476,14 @@ class PersistentExecutorFeasibilityManifest(_StrictModel):
                     f"{profile.name} must freeze exactly "
                     f"{EXPECTED_PROFILE_COUNTS[profile.name]} observations"
                 )
+            targets = (
+                profile.p95_target_ms,
+                profile.p99_target_ms,
+                profile.containment_p95_target_ms,
+                profile.containment_p99_target_ms,
+            )
+            if targets != EXPECTED_PROFILE_TARGETS[profile.name]:
+                raise ValueError(f"{profile.name} changed a frozen KPI target")
         coverage = {item.name: item.coverage for item in self.profiles}
         if coverage["cold_first_pwd"] != "real_modal":
             raise ValueError("cold first pwd requires real Modal coverage")
