@@ -77,6 +77,21 @@ class Broker:
             return False
 
 
+class StartRateLimiter:
+    def __init__(self, starts_per_second: float) -> None:
+        self._interval = 1 / starts_per_second
+        self._next_start = 0.0
+        self._lock = threading.Lock()
+
+    def wait(self) -> None:
+        with self._lock:
+            now = time.monotonic()
+            delay = max(0.0, self._next_start - now)
+            if delay:
+                time.sleep(delay)
+            self._next_start = max(now, self._next_start) + self._interval
+
+
 def _utc_now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -132,10 +147,16 @@ def _execute_operations(
 
 
 def _cancellation_sample(
-    profile: str, index: int, operations: int, *, deadline: bool
+    profile: str,
+    index: int,
+    operations: int,
+    *,
+    deadline: bool,
+    rate_limiter: StartRateLimiter,
 ) -> CancellationSample:
+    rate_limiter.wait()
     broker = Broker()
-    runtime = _runtime(broker, deadline_seconds=0.05 if deadline else 30)
+    runtime = _runtime(broker, deadline_seconds=0.5 if deadline else 30)
     commands = (DEADLINE_COMMANDS if deadline else CANCEL_COMMANDS)[:operations]
     results, threads = _execute_operations(runtime, commands, index)
     if not runtime.wait_until_running(operations, timeout_seconds=2):
@@ -184,6 +205,7 @@ def _run_cancellation_profile(
     profile: object,
 ) -> tuple[dict[str, object], list[CancellationSample]]:
     deadline = str(profile.name).startswith("deadline")
+    rate_limiter = StartRateLimiter(profile.offered_requests_per_second)
     with concurrent.futures.ThreadPoolExecutor(max_workers=MAX_PARALLEL_TURNS) as pool:
         samples = list(
             pool.map(
@@ -192,6 +214,7 @@ def _run_cancellation_profile(
                     index,
                     profile.simultaneous_operations,
                     deadline=deadline,
+                    rate_limiter=rate_limiter,
                 ),
                 range(profile.observations),
             )
@@ -228,7 +251,14 @@ def _run_warm_profiles(profiles: dict[str, object]) -> dict[str, object]:
     runtime = _runtime(broker)
     ack_values = []
     terminal_values = []
+    rate_limiter = StartRateLimiter(
+        min(
+            profiles["warm_ack"].offered_requests_per_second,
+            profiles["warm_noop"].offered_requests_per_second,
+        )
+    )
     for index in range(profiles["warm_noop"].observations):
+        rate_limiter.wait()
         invoked_at = time.monotonic()
         result = runtime.execute(f"warm-{index}", "true")
         if result.started_at is None or result.status != "completed":

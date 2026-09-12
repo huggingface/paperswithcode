@@ -145,6 +145,8 @@ def _manifest() -> dict[str, object]:
                     else 32
                     if name in {"cold_32_way", "reconnect_real_modal"}
                     else 4
+                    if name.startswith("disconnected_stop") or name == "cold_first_pwd"
+                    else 16
                 ),
                 "p95_target_ms": (
                     None
