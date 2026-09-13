@@ -250,6 +250,10 @@ impl SequenceReceiver {
         Self::default()
     }
 
+    pub fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
     pub fn push(&mut self, frame: RelayFrame) -> Result<Vec<RelayFrame>, ContentFreeError> {
         if frame.sequence < self.next_sequence || self.pending.contains_key(&frame.sequence) {
             return Ok(Vec::new());
@@ -339,6 +343,14 @@ impl ReplayBuffer {
         self.buffered_data_bytes = buffered_data_bytes;
         self.buffered_control_bytes = buffered_control_bytes;
         Ok(())
+    }
+
+    pub fn next_sequence(&self) -> u64 {
+        self.next_sequence
+    }
+
+    pub fn acknowledged_sequence(&self) -> u64 {
+        self.ack_next
     }
 
     pub fn acknowledge(&mut self, ack_next: u64) -> Result<usize, ContentFreeError> {

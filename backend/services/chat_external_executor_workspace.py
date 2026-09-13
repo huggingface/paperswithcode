@@ -274,6 +274,7 @@ class ChatExternalExecutorWorkspaceManager:
     ) -> ExternalExecutorWorkspace:
         deadline = self.monotonic() + self.acquisition.ready_timeout_seconds
         replacement_attempts = 0
+        self._mark_executor_resource_started(turn_claim.turn_id)
         while True:
             self._require_live_turn(session_id, turn_claim)
             outcome = await self.acquisition.acquire(
@@ -360,6 +361,8 @@ class ChatExternalExecutorWorkspaceManager:
                 claim=workspace.claim,
                 now=self.utcnow(),
             )
+            if released:
+                self._mark_executor_resource_ended(workspace.turn_id, db=db)
         if released:
             self._observe_active_duration(workspace)
             self.observe("workspace_state", "released", 1)
@@ -379,6 +382,7 @@ class ChatExternalExecutorWorkspaceManager:
             workspace.claim,
             failure_code=failure_code,
         )
+        self._mark_executor_resource_ended(workspace.turn_id)
         self._observe_active_duration(workspace)
         self.observe("workspace_state", "invalidated", 1)
         self.record_evidence(
@@ -396,6 +400,48 @@ class ChatExternalExecutorWorkspaceManager:
             ),
         )
         self.observe("workspace_active_ms", None, elapsed_ms)
+
+    def _mark_executor_resource_started(self, turn_id: uuid.UUID) -> None:
+        if self.executor_runtime is None:
+            return
+        from backend.services.chat_turn_admission import ChatTurnAdmissionService
+
+        with self.session_factory() as db, db.begin():
+            ChatTurnAdmissionService(
+                environment=self.settings.environment,
+                spend_limit_microusd=(
+                    self.settings.chat_sandbox_application_cap_microusd
+                ),
+            ).mark_resource_started(db, turn_id=turn_id, now=self.utcnow())
+
+    def _mark_executor_resource_ended(
+        self, turn_id: uuid.UUID, *, db: Session | None = None
+    ) -> None:
+        if self.executor_runtime is None:
+            return
+        from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
+        from backend.services.chat_turn_admission import ChatTurnAdmissionService
+
+        def mark(session: Session) -> None:
+            ChatTurnAdmissionService(
+                environment=self.settings.environment,
+                spend_limit_microusd=(
+                    self.settings.chat_sandbox_application_cap_microusd
+                ),
+            ).mark_resource_ended_and_reconcile(
+                session,
+                turn_id=turn_id,
+                cost_per_second_microusd=ChatSandboxSpendService(
+                    session, self.settings
+                ).cost_per_second(),
+                now=self.utcnow(),
+            )
+
+        if db is not None:
+            mark(db)
+            return
+        with self.session_factory() as session, session.begin():
+            mark(session)
 
     async def _release_preserving_primary(
         self, workspace: ExternalExecutorWorkspace

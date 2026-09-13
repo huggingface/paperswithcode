@@ -13,7 +13,10 @@ from backend.models.database import (
     ChatTurnReservation,
 )
 from backend.config import Settings
-from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
+from backend.services.chat_executor_turn_admission import (
+    ChatExecutorTurnAdmission,
+    maximum_provider_turn_microusd,
+)
 from backend.services.chat_executor_transport_circuit import (
     ChatTransportUnavailable,
     ExecutorTransportCircuit,
@@ -21,6 +24,28 @@ from backend.services.chat_executor_transport_circuit import (
 from backend.services.chat_turn_admission import ChatTurnAdmissionService
 
 NOW = datetime(2026, 9, 4, 12, tzinfo=UTC)
+
+
+def test_provider_turn_reserve_prices_the_full_selected_model_envelope():
+    settings = Settings(_env_file=None, environment="staging")
+    assert (
+        maximum_provider_turn_microusd(
+            settings, model_route=settings.chat_luna_route, now=NOW
+        )
+        == 4_768_000
+    )
+
+    direct = Settings(
+        _env_file=None,
+        environment="staging",
+        chat_openai_direct_enabled=True,
+    )
+    assert (
+        maximum_provider_turn_microusd(
+            direct, model_route=direct.chat_openai_luna_route, now=NOW
+        )
+        == 614_400
+    )
 
 
 def test_live_turn_admission_persists_the_route_health_decision():
@@ -49,6 +74,9 @@ def test_live_turn_admission_persists_the_route_health_decision():
             turn_id=uuid.uuid4(),
             request_id="live-route-request",
             owner_id="owner-live-route",
+            model_route=settings.chat_model_routes[
+                settings.chat_model_choices[0]["id"]
+            ],
             now=NOW,
         )
 

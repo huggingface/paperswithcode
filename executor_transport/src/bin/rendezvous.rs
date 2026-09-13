@@ -29,7 +29,7 @@ use serde_json::json;
 use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::sync::{Mutex, Semaphore, mpsc};
-use tokio::time::{Instant as TokioInstant, sleep_until, timeout};
+use tokio::time::{Instant as TokioInstant, interval, sleep_until, timeout};
 use tokio_tungstenite::accept_hdr_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
@@ -82,6 +82,11 @@ struct LiveRegistration {
 
 enum PeerEvent {
     Attach {
+        connection_id: Uuid,
+        frame: Vec<u8>,
+        outbound: mpsc::Sender<Vec<u8>>,
+    },
+    Resume {
         connection_id: Uuid,
         frame: Vec<u8>,
         outbound: mpsc::Sender<Vec<u8>>,
@@ -206,6 +211,23 @@ async fn serve(
         capacity: Arc::new(Semaphore::new(MAX_PREAUTH_SOCKETS)),
         live: Mutex::new(HashMap::new()),
     });
+    let recovery_state = state.clone();
+    tokio::spawn(async move {
+        let mut cleanup = interval(Duration::from_secs(1));
+        cleanup.tick().await;
+        loop {
+            cleanup.tick().await;
+            if let Err(error) = recovery_state
+                .database
+                .lock()
+                .await
+                .expire_suspect_recoveries()
+                .await
+            {
+                eprintln!("executor recovery reconciliation failed: {error}");
+            }
+        }
+    });
 
     prepare_socket_path(&path)?;
     let listener = UnixListener::bind(&path)?;
@@ -296,9 +318,13 @@ async fn handle_local(
             validate_peer(&stream, allowed_backend_uid)?;
             handle_liveness(stream, state, value).await
         }
-        Some("peer_attach") => {
+        Some("peer_attach" | "peer_resume") => {
             validate_peer(&stream, allowed_harness_uid)?;
             handle_peer(stream, state, value, frame).await
+        }
+        Some("peer_detach") => {
+            validate_peer(&stream, allowed_harness_uid)?;
+            handle_peer_detach(state, value).await
         }
         Some("route_health") => {
             validate_peer(&stream, allowed_backend_uid)?;
@@ -385,12 +411,55 @@ async fn handle_liveness(
     Ok(())
 }
 
+async fn handle_peer_detach(
+    state: Arc<State>,
+    value: serde_json::Value,
+) -> Result<(), ConnectionError> {
+    let registration_id = value
+        .get("registration_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer detach rejected")?
+        .parse::<Uuid>()?;
+    let environment_id = value
+        .get("environment_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer detach rejected")?;
+    let environment_generation = value
+        .get("environment_generation")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("executor peer detach rejected")?;
+    let connection_id = value
+        .get("connection_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer detach rejected")?
+        .parse::<Uuid>()?;
+    let events = {
+        let live = state.live.lock().await;
+        live.get(&registration_id)
+            .filter(|entry| {
+                entry.claims.environment_id == environment_id
+                    && entry.claims.environment_generation == environment_generation
+            })
+            .map(|entry| entry.peer_events.clone())
+            .ok_or("executor peer detach rejected")?
+    };
+    events.send(PeerEvent::Closed { connection_id }).await?;
+    Ok(())
+}
+
 async fn handle_peer(
     mut stream: UnixStream,
     state: Arc<State>,
     value: serde_json::Value,
     initial: Vec<u8>,
 ) -> Result<(), ConnectionError> {
+    let kind = value
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer kind rejected")?;
+    if !matches!(kind, "peer_attach" | "peer_resume") {
+        return Err("executor peer kind rejected".into());
+    }
     let registration_id = value
         .get("registration_id")
         .and_then(serde_json::Value::as_str)
@@ -415,35 +484,54 @@ async fn handle_peer(
             .ok_or("executor peer route rejected")?;
         (entry.peer_events.clone(), entry.claims.clone())
     };
-    let binding = value
-        .get("binding")
-        .and_then(serde_json::Value::as_object)
-        .ok_or("executor peer binding rejected")?;
-    if binding
-        .get("registration_id")
-        .and_then(serde_json::Value::as_str)
-        != Some(
-            value["registration_id"]
-                .as_str()
-                .expect("registration parsed"),
-        )
-        || value
+    if kind == "peer_attach" {
+        let binding = value
             .get("binding")
-            .and_then(|binding| binding.get("environment_id"))
+            .and_then(serde_json::Value::as_object)
+            .ok_or("executor peer binding rejected")?;
+        if binding
+            .get("registration_id")
             .and_then(serde_json::Value::as_str)
-            != Some(claims.environment_id.as_str())
-    {
-        return Err("executor peer binding rejected".into());
+            != Some(
+                value["registration_id"]
+                    .as_str()
+                    .expect("registration parsed"),
+            )
+            || value
+                .get("binding")
+                .and_then(|binding| binding.get("environment_id"))
+                .and_then(serde_json::Value::as_str)
+                != Some(claims.environment_id.as_str())
+        {
+            return Err("executor peer binding rejected".into());
+        }
     }
-    let connection_id = Uuid::new_v4();
+    let connection_id = if kind == "peer_resume" {
+        value
+            .get("connection_id")
+            .and_then(serde_json::Value::as_str)
+            .ok_or("executor peer resume identity rejected")?
+            .parse()?
+    } else {
+        Uuid::new_v4()
+    };
     let (outbound, mut responses) = mpsc::channel(4);
-    timeout(
-        Duration::from_millis(PREAUTH_DEADLINE_MS),
-        events.send(PeerEvent::Attach {
+    let event = if kind == "peer_resume" {
+        PeerEvent::Resume {
             connection_id,
             frame: initial,
             outbound,
-        }),
+        }
+    } else {
+        PeerEvent::Attach {
+            connection_id,
+            frame: initial,
+            outbound,
+        }
+    };
+    timeout(
+        Duration::from_millis(PREAUTH_DEADLINE_MS),
+        events.send(event),
     )
     .await??;
     loop {
@@ -462,7 +550,6 @@ async fn handle_peer(
             }
         }
     }
-    let _ = events.send(PeerEvent::Closed { connection_id }).await;
     Ok(())
 }
 
@@ -720,6 +807,11 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
                                 active_peer = Some((peer_id, outbound));
                                 send_peer_frame(&mut socket, &mut transport, peer_id, &frame).await?;
                             }
+                        Some(PeerEvent::Resume { connection_id: peer_id, frame, outbound })
+                            if active_peer.as_ref().is_none_or(|(active, _)| *active == peer_id) => {
+                                active_peer = Some((peer_id, outbound));
+                                send_peer_frame(&mut socket, &mut transport, peer_id, &frame).await?;
+                            }
                         Some(PeerEvent::Data { connection_id: peer_id, frame })
                             if active_peer.as_ref().is_some_and(|(active, _)| *active == peer_id) => {
                                 send_peer_frame(&mut socket, &mut transport, peer_id, &frame).await?;
@@ -729,7 +821,7 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
                                 send_peer_close(&mut socket, &mut transport, peer_id).await?;
                                 active_peer = None;
                             }
-                        Some(PeerEvent::Attach { .. } | PeerEvent::Data { .. } | PeerEvent::Closed { .. }) => {}
+                        Some(PeerEvent::Attach { .. } | PeerEvent::Resume { .. } | PeerEvent::Data { .. } | PeerEvent::Closed { .. }) => {}
                         None => break,
                     }
                 }
@@ -738,20 +830,24 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
         Ok(())
     }
     .await;
-    let fence_result = state
-        .database
-        .lock()
-        .await
-        .mark_suspect(registration_id)
-        .await;
     let mut live = state.live.lock().await;
-    if live
+    let owns_registration = live
         .get(&registration_id)
-        .is_some_and(|entry| entry.connection_id == connection_id)
-    {
+        .is_some_and(|entry| entry.connection_id == connection_id);
+    if owns_registration {
         live.remove(&registration_id);
     }
     drop(live);
+    let fence_result = if owns_registration {
+        state
+            .database
+            .lock()
+            .await
+            .mark_suspect(registration_id)
+            .await
+    } else {
+        Ok(())
+    };
     session_result?;
     fence_result?;
     Ok(())

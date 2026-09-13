@@ -12,7 +12,7 @@ fn digest(byte: u8) -> [u8; 32] {
 }
 
 #[tokio::test]
-async fn durable_registration_consumes_nonce_and_updates_capacity_atomically() {
+async fn durable_registration_bounds_identity_proven_lost_response_recovery() {
     let Ok(database_url) = std::env::var("PWC_EXECUTOR_RUST_TEST_DATABASE_URL") else {
         return;
     };
@@ -114,6 +114,12 @@ async fn durable_registration_consumes_nonce_and_updates_capacity_atomically() {
         .consume_and_register(&request, &admission)
         .await
         .unwrap();
+    for _ in 0..3 {
+        registry
+            .consume_and_register(&request, &admission)
+            .await
+            .unwrap();
+    }
     assert!(
         registry
             .consume_and_register(&request, &admission)
@@ -129,6 +135,15 @@ async fn durable_registration_consumes_nonce_and_updates_capacity_atomically() {
         .unwrap()
         .get(0);
     assert_eq!(ready, 1);
+    let recovery_attempts: i32 = client
+        .query_one(
+            "SELECT recovery_attempts FROM chat_executor_registrations WHERE environment_id='environment-v1'",
+            &[],
+        )
+        .await
+        .unwrap()
+        .get(0);
+    assert_eq!(recovery_attempts, 3);
 }
 
 fn hex(bytes: &[u8]) -> String {

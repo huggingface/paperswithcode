@@ -124,8 +124,15 @@ def test_release_manifest_signs_every_immutable_component(
 
 def test_rendezvous_has_no_tcp_listener_and_nginx_uses_exact_unix_route() -> None:
     rendezvous = (REPOSITORY / "executor_transport/src/bin/rendezvous.rs").read_text()
+    harness = (REPOSITORY / "executor_transport/src/bin/harness_proxy.rs").read_text()
+    environment = (REPOSITORY / "executor_transport/src/bin/environment.rs").read_text()
     assert "UnixListener" in rendezvous
     assert "TcpListener" not in rendezvous
+    assert 'Some("peer_attach" | "peer_resume")' in rendezvous
+    assert "PeerEvent::Resume" in rendezvous
+    assert ".expire_suspect_recoveries()" in rendezvous
+    assert ".frames_from(peer_receiver_next)?" in harness
+    assert "active.resume(&frame, identity)" in environment
     for environment in ("production", "staging"):
         nginx = (
             REPOSITORY

@@ -96,6 +96,7 @@ async fn harness_uses_one_bound_noise_stream_and_consumes_authorization_once() {
             &serde_json::to_vec(&json!({
                 "kind": "peer_attached",
                 "stream_id": binding.stream_id,
+                "connection_id": "11111111-1111-4111-8111-111111111111",
                 "handshake": STANDARD.encode(response),
             }))
             .unwrap(),
@@ -293,7 +294,9 @@ async fn receive_noise_message(
         assert!(!contains(&ciphertext, b"eHh4eHh4eHh4eHh4"));
         let frame = RelayFrame::decode(&transport.decrypt(&ciphertext).unwrap()).unwrap();
         for ordered in receiver.push(frame).unwrap() {
-            if let Some(message) = decoder.push(ordered.payload()).unwrap() {
+            if ordered.kind() == FrameKind::Data
+                && let Some(message) = decoder.push(ordered.payload()).unwrap()
+            {
                 return message;
             }
         }

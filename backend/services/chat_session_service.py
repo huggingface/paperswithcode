@@ -34,6 +34,7 @@ from backend.models.database import (
     ChatTurnReservation,
 )
 from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
+from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 from backend.services.chat_edit_service import (
     INACTIVE_STATUSES,
     PREPARING_STATUS,
@@ -2082,6 +2083,7 @@ class ChatSessionService:
                     turn_id=plan.replacement.turn_id,
                     request_id=client_message_id,
                     owner_id=owner.hf_user_id,
+                    model_route=plan.model_route,
                     now=now,
                 )
             except (TurnReservationError, RuntimeError, SQLAlchemyError) as error:
@@ -2380,15 +2382,18 @@ class ChatSessionService:
         revision = getattr(admission, "executor_reservation_revision", None)
         if revision is None:
             return
-        ChatTurnAdmissionService(
+        service = ChatTurnAdmissionService(
             environment=self.settings.environment,
             spend_limit_microusd=self.settings.chat_sandbox_application_cap_microusd,
-        ).settle(
+        )
+        service.settle_terminal(
             self.db,
             turn_id=admission.turn_id,
             revision=revision,
             outcome=outcome,
-            actual_microusd=None,
+            cost_per_second_microusd=ChatSandboxSpendService(
+                self.db, self.settings
+            ).cost_per_second(),
             now=_now(),
         )
 

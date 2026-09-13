@@ -2096,10 +2096,10 @@ class ChatStreamOrchestrator:
     async def _heartbeat_durable_turn(self) -> None:
         try:
             while True:
-                await asyncio.sleep(self.settings.chat_external_pi_heartbeat_seconds)
                 await asyncio.to_thread(
                     _heartbeat_local_turn, self.settings, self.admission
                 )
+                await asyncio.sleep(self.settings.chat_external_pi_heartbeat_seconds)
         except asyncio.CancelledError:
             raise
         except (TurnJobError, SQLAlchemyError, ValueError) as exc:

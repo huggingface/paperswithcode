@@ -7,7 +7,12 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from backend.models.database import ChatTurnAdmissionBudget, ChatTurnReservation
+from backend.models.database import (
+    ChatOpenAIProviderCall,
+    ChatOpenRouterProviderCall,
+    ChatTurnAdmissionBudget,
+    ChatTurnReservation,
+)
 from backend.services.chat_turn_admission import (
     AccountBusy,
     CapacityOverloaded,
@@ -23,6 +28,8 @@ def db():
     engine = create_engine("sqlite+pysqlite:///:memory:")
     ChatTurnAdmissionBudget.__table__.create(engine)
     ChatTurnReservation.__table__.create(engine)
+    ChatOpenRouterProviderCall.__table__.create(engine)
+    ChatOpenAIProviderCall.__table__.create(engine)
     with Session(engine, expire_on_commit=False) as session:
         yield session
 
@@ -274,6 +281,102 @@ def test_unknown_worker_loss_releases_capacity_but_retains_spend_until_reconcile
     )
     assert budget.reserved_microusd == 0
     assert budget.spent_microusd == 40_000
+
+
+def test_model_only_terminal_releases_the_unused_resource_reserve(service, db):
+    reservation = _reserve(service, db, 1, amount=50_000)
+
+    assert service.settle_terminal(
+        db,
+        turn_id=reservation.turn_id,
+        revision=reservation.revision,
+        outcome="completed",
+        cost_per_second_microusd=100,
+        now=NOW + timedelta(seconds=2),
+    )
+
+    row = db.get(ChatTurnReservation, reservation.turn_id)
+    budget = db.get(ChatTurnAdmissionBudget, "staging")
+    assert row.state == "completed"
+    assert row.actual_microusd == 0
+    assert row.terminal_outcome == "completed"
+    assert budget.reserved_microusd == 0
+
+
+def test_resource_cost_stays_reserved_until_proven_end_then_reconciles(service, db):
+    reservation = _reserve(service, db, 1, amount=50_000)
+    service.mark_resource_started(db, turn_id=reservation.turn_id, now=NOW)
+
+    assert service.settle_terminal(
+        db,
+        turn_id=reservation.turn_id,
+        revision=reservation.revision,
+        outcome="failed",
+        cost_per_second_microusd=100,
+        now=NOW + timedelta(milliseconds=500),
+    )
+    row = db.get(ChatTurnReservation, reservation.turn_id)
+    assert row.state == "cost_unknown"
+    assert db.get(ChatTurnAdmissionBudget, "staging").reserved_microusd == 50_000
+
+    assert service.mark_resource_ended_and_reconcile(
+        db,
+        turn_id=reservation.turn_id,
+        cost_per_second_microusd=100,
+        now=NOW + timedelta(milliseconds=1500),
+    )
+    assert row.state == "failed"
+    assert row.actual_microusd == 200
+    budget = db.get(ChatTurnAdmissionBudget, "staging")
+    assert budget.reserved_microusd == 0
+    assert budget.spent_microusd == 200
+
+
+def test_unknown_provider_cost_retains_turn_reserve_until_reconciled(service, db):
+    reservation = _reserve(service, db, 1, amount=50_000)
+    call = ChatOpenRouterProviderCall(
+        id=uuid.uuid4(),
+        turn_id=reservation.turn_id,
+        call_sequence=1,
+        hf_user_id="owner-1",
+        month_start=NOW.date(),
+        model_route="provider/model",
+        reasoning_effort="low",
+        routing_policy="throughput",
+        fallback_count=0,
+        state="cost_unknown",
+        reserved_microusd=10_000,
+        actual_microusd=None,
+        reserved_at=NOW,
+        updated_at=NOW,
+    )
+    db.add(call)
+    db.flush()
+
+    assert service.settle_terminal(
+        db,
+        turn_id=reservation.turn_id,
+        revision=reservation.revision,
+        outcome="completed",
+        cost_per_second_microusd=100,
+        now=NOW + timedelta(seconds=1),
+    )
+    assert db.get(ChatTurnReservation, reservation.turn_id).state == "cost_unknown"
+    assert db.get(ChatTurnAdmissionBudget, "staging").reserved_microusd == 50_000
+
+    call.state = "settled"
+    call.actual_microusd = 3_000
+    assert (
+        service.reconcile_cost_unknown(
+            db,
+            cost_per_second_microusd=100,
+            now=NOW + timedelta(seconds=2),
+        )
+        == 1
+    )
+    row = db.get(ChatTurnReservation, reservation.turn_id)
+    assert row.state == "completed"
+    assert row.actual_microusd == 3_000
 
 
 def test_migration_pins_capacity_spend_and_owner_guards():

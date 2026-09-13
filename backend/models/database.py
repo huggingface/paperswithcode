@@ -2692,6 +2692,13 @@ class ChatTurnReservation(Base):
     reserved_operations: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
     reserved_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
     actual_microusd: Mapped[Optional[int]] = mapped_column(BigInteger)
+    terminal_outcome: Mapped[Optional[str]] = mapped_column(String(16))
+    resource_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    resource_ended_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
     reserved_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
@@ -2705,6 +2712,16 @@ class ChatTurnReservation(Base):
         CheckConstraint(
             "transport IN ('legacy','persistent')",
             name="chat_turn_reservations_transport_check",
+        ),
+        CheckConstraint(
+            "terminal_outcome IS NULL OR "
+            "terminal_outcome IN ('completed','failed','cancelled')",
+            name="chat_turn_reservations_outcome_check",
+        ),
+        CheckConstraint(
+            "resource_ended_at IS NULL OR "
+            "(resource_started_at IS NOT NULL AND resource_ended_at >= resource_started_at)",
+            name="chat_turn_reservations_resource_window_check",
         ),
         CheckConstraint(
             "revision > 0 AND reserved_turns = 1 AND reserved_environments = 1 "
@@ -3695,6 +3712,9 @@ class ChatExecutorRegistration(Base):
         String(64), ForeignKey("chat_executor_manifests.digest"), nullable=False
     )
     state: Mapped[str] = mapped_column(String(24), nullable=False)
+    recovery_attempts: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="0"
+    )
     assigned_session_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True), nullable=True
     )
@@ -3716,7 +3736,8 @@ class ChatExecutorRegistration(Base):
             name="uq_chat_executor_environment_generation",
         ),
         CheckConstraint(
-            "environment_generation > 0 AND shard_generation > 0 AND key_epoch > 0",
+            "environment_generation > 0 AND shard_generation > 0 AND key_epoch > 0 "
+            "AND recovery_attempts BETWEEN 0 AND 3",
             name="chat_executor_registrations_generation_check",
         ),
         CheckConstraint(

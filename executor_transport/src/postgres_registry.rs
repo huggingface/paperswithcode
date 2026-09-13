@@ -97,7 +97,43 @@ impl PostgresRegistry {
                 ],
             )
             .await?;
-        if nonce.is_none() {
+        let recovering_connection = if nonce.is_none()
+            && matches!(
+                claims.purpose,
+                AdmissionPurpose::Registration | AdmissionPurpose::Reconnect
+            ) {
+            transaction
+                .query_opt(
+                    r#"
+                    SELECT nonce_digest
+                    FROM chat_executor_nonces
+                    WHERE nonce_digest = $1
+                      AND purpose = $2
+                      AND environment_id = $3
+                      AND environment_generation = $4
+                      AND shard_id = $5
+                      AND shard_generation = $6
+                      AND key_epoch = $7
+                      AND consumed_at IS NOT NULL
+                      AND invalidated_at IS NULL
+                      AND expires_at >= current_timestamp
+                    "#,
+                    &[
+                        &admission.nonce_digest(),
+                        &claims.purpose.database_name(),
+                        &claims.environment_id,
+                        &(claims.environment_generation as i64),
+                        &self.shard_database_id,
+                        &(claims.shard_generation as i64),
+                        &(claims.key_epoch as i64),
+                    ],
+                )
+                .await?
+                .is_some()
+        } else {
+            false
+        };
+        if nonce.is_none() && !recovering_connection {
             return Err(DurableRegistryError::Rejected);
         }
 
@@ -165,7 +201,9 @@ impl PostgresRegistry {
         let latest = transaction
             .query_opt(
                 r#"
-                SELECT id, environment_generation, public_key_id, public_noise_key, state
+                SELECT id, environment_generation, public_key_id, public_noise_key, state,
+                       recovery_attempts,
+                       updated_at >= current_timestamp - interval '30 seconds'
                 FROM chat_executor_registrations
                 WHERE environment_id = $1
                 ORDER BY environment_generation DESC
@@ -181,25 +219,58 @@ impl PostgresRegistry {
             let latest_key_id: String = latest.get(2);
             let latest_public_key: Value = latest.get(3);
             let latest_state: String = latest.get(4);
+            let recovery_attempts: i32 = latest.get(5);
+            let inside_recovery_window: bool = latest.get(6);
             if request.environment_generation as i64 == latest_generation {
-                if claims.purpose != AdmissionPurpose::Reconnect
-                    || latest_state != "suspect"
-                    || latest_key_id != request.public_noise_key_id
-                    || latest_public_key != public_noise_key
+                let identity_matches = latest_key_id == request.public_noise_key_id
+                    && latest_public_key == public_noise_key;
+                if claims.purpose == AdmissionPurpose::Reconnect
+                    && latest_state == "suspect"
+                    && identity_matches
+                    && inside_recovery_window
                 {
+                    transaction
+                        .execute(
+                            r#"
+                            UPDATE chat_executor_registrations
+                            SET state=CASE WHEN EXISTS (
+                                    SELECT 1 FROM chat_executor_claims
+                                    WHERE registration_id=$1 AND state='active'
+                                ) THEN 'claimed' ELSE 'ready' END,
+                                last_seen_at=current_timestamp,
+                                recovery_attempts=0, updated_at=current_timestamp
+                            WHERE id=$1
+                            "#,
+                            &[&latest_id],
+                        )
+                        .await?;
+                } else if recovering_connection
+                    && matches!(latest_state.as_str(), "ready" | "claimed" | "suspect")
+                    && identity_matches
+                    && (latest_state != "suspect" || inside_recovery_window)
+                    && recovery_attempts < 3
+                {
+                    let recovered = transaction
+                        .execute(
+                            r#"
+                            UPDATE chat_executor_registrations
+                            SET state=CASE WHEN EXISTS (
+                                    SELECT 1 FROM chat_executor_claims
+                                    WHERE registration_id=$1 AND state='active'
+                                ) THEN 'claimed' ELSE 'ready' END,
+                                recovery_attempts=recovery_attempts+1,
+                                last_seen_at=current_timestamp, updated_at=current_timestamp
+                            WHERE id=$1 AND recovery_attempts=$2 AND recovery_attempts < 3
+                            "#,
+                            &[&latest_id, &recovery_attempts],
+                        )
+                        .await?;
+                    if recovered != 1 {
+                        return Err(DurableRegistryError::Rejected);
+                    }
+                } else {
                     return Err(DurableRegistryError::Rejected);
                 }
-                transaction
-                    .execute(
-                        r#"
-                        UPDATE chat_executor_registrations
-                        SET state='ready', last_seen_at=current_timestamp,
-                            updated_at=current_timestamp
-                        WHERE id=$1
-                        "#,
-                        &[&latest_id],
-                    )
-                    .await?;
                 latest_id
             } else {
                 if claims.purpose != AdmissionPurpose::Registration
@@ -287,18 +358,6 @@ impl PostgresRegistry {
             .await?;
         transaction
             .execute(
-                r#"
-                UPDATE chat_executor_claims c
-                SET state='invalidated', settled_at=current_timestamp,
-                    terminal_code='rendezvous_restart'
-                FROM chat_executor_registrations r
-                WHERE c.registration_id=r.id AND r.shard_id=$1 AND c.state='active'
-                "#,
-                &[&self.shard_database_id],
-            )
-            .await?;
-        transaction
-            .execute(
                 "UPDATE chat_executor_shards SET ready_capacity=0, updated_at=current_timestamp WHERE id=$1",
                 &[&self.shard_database_id],
             )
@@ -316,6 +375,58 @@ impl PostgresRegistry {
                 )
                 "#,
                 &[&self.shard_database_id],
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(changed)
+    }
+
+    pub async fn expire_suspect_recoveries(&mut self) -> Result<u64, DurableRegistryError> {
+        let transaction = self.client.transaction().await?;
+        let rows = transaction
+            .query(
+                r#"
+                SELECT r.id
+                FROM chat_executor_registrations r
+                WHERE r.shard_id=$1
+                  AND r.state='suspect'
+                  AND r.updated_at <= current_timestamp - interval '30 seconds'
+                  AND EXISTS (
+                      SELECT 1 FROM chat_executor_claims c
+                      WHERE c.registration_id=r.id AND c.state='active'
+                  )
+                FOR UPDATE
+                "#,
+                &[&self.shard_database_id],
+            )
+            .await?;
+        let registration_ids = rows
+            .iter()
+            .map(|row| row.get::<_, Uuid>(0))
+            .collect::<Vec<_>>();
+        if registration_ids.is_empty() {
+            transaction.commit().await?;
+            return Ok(0);
+        }
+        let changed = transaction
+            .execute(
+                r#"
+                UPDATE chat_executor_claims
+                SET state='invalidated', settled_at=current_timestamp,
+                    terminal_code='transport_recovery_expired'
+                WHERE registration_id = ANY($1) AND state='active'
+                "#,
+                &[&registration_ids],
+            )
+            .await?;
+        transaction
+            .execute(
+                r#"
+                UPDATE chat_executor_registrations
+                SET state='fenced', updated_at=current_timestamp
+                WHERE id = ANY($1) AND state='suspect'
+                "#,
+                &[&registration_ids],
             )
             .await?;
         transaction.commit().await?;
@@ -427,7 +538,7 @@ impl PostgresRegistry {
                     END,
                     updated_at=current_timestamp
                 WHERE r.id=$1 AND r.state IN ('ready','assigned_idle','claimed')
-                RETURNING shard_id, manifest_digest
+                RETURNING shard_id, manifest_digest, state
                 "#,
                 &[&registration_id],
             )
@@ -435,17 +546,20 @@ impl PostgresRegistry {
         if let Some(row) = row {
             let shard_id: Uuid = row.get(0);
             let manifest_digest: String = row.get(1);
-            transaction
-                .execute(
-                    r#"
-                    UPDATE chat_executor_claims
-                    SET state='invalidated', settled_at=current_timestamp,
-                        terminal_code='registration_suspect'
-                    WHERE registration_id=$1 AND state='active'
-                    "#,
-                    &[&registration_id],
-                )
-                .await?;
+            let state: String = row.get(2);
+            if state == "fenced" {
+                transaction
+                    .execute(
+                        r#"
+                        UPDATE chat_executor_claims
+                        SET state='invalidated', settled_at=current_timestamp,
+                            terminal_code='registration_fenced'
+                        WHERE registration_id=$1 AND state='active'
+                        "#,
+                        &[&registration_id],
+                    )
+                    .await?;
+            }
             transaction
                 .execute(
                     r#"

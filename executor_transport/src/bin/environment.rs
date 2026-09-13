@@ -13,8 +13,8 @@ use pwc_persistent_executor_transport::noise::{
     prologue,
 };
 use pwc_persistent_executor_transport::protocol::{
-    FrameKind, HandshakeBinding, KeyRing, RelayFrame, SequenceReceiver, SignedAuthorization,
-    VerificationKey,
+    FrameKind, HandshakeBinding, KeyRing, RelayFrame, ReplayBuffer, SequenceReceiver,
+    SignedAuthorization, VerificationKey,
 };
 use pwc_persistent_executor_transport::scheduler::ReconnectBackoff;
 use serde::{Deserialize, Serialize};
@@ -81,16 +81,54 @@ struct PeerAttach {
 struct PeerAttached<'a> {
     kind: &'static str,
     stream_id: &'a str,
+    connection_id: Uuid,
+    handshake: String,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PeerResume {
+    kind: String,
+    environment_id: String,
+    environment_generation: u64,
+    registration_id: String,
+    stream_id: String,
+    connection_id: Uuid,
+    receiver_next: u64,
+    harness_public_key: NoisePublicKey,
+    handshake: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PeerResumeClaims {
+    kind: String,
+    connection_id: Uuid,
+    stream_id: String,
+    receiver_next: u64,
+}
+
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct PeerResumed {
+    kind: String,
+    stream_id: String,
+    connection_id: Uuid,
+    receiver_next: u64,
     handshake: String,
 }
 
 struct PeerEndpoint {
     connection_id: Uuid,
+    environment_generation: u64,
+    binding: HandshakeBinding,
+    harness_public_key: NoisePublicKey,
     transport: NoiseTransport,
-    send_sequence: u64,
     send_message_id: u64,
+    replay: ReplayBuffer,
     receiver: SequenceReceiver,
     decoder: PeerMessageDecoder,
+    last_ack_sent: u64,
     streams: HashMap<String, OwnedWriteHalf>,
     daemon_events: mpsc::Sender<DaemonEvent>,
     daemon_path: PathBuf,
@@ -101,6 +139,23 @@ struct DaemonEvent {
     stream_id: String,
     payload: Vec<u8>,
     closed: bool,
+}
+
+struct EnvironmentPeerState {
+    endpoint: Option<PeerEndpoint>,
+    daemon_events: mpsc::Sender<DaemonEvent>,
+    daemon_receiver: mpsc::Receiver<DaemonEvent>,
+}
+
+impl EnvironmentPeerState {
+    fn new() -> Self {
+        let (daemon_events, daemon_receiver) = mpsc::channel(4);
+        Self {
+            endpoint: None,
+            daemon_events,
+            daemon_receiver,
+        }
+    }
 }
 
 #[tokio::main]
@@ -209,7 +264,14 @@ async fn launch(
         .kill_on_drop(true)
         .spawn()?;
     let identity = NoiseIdentity::generate()?;
-    let connection = maintain_connection(url, admission, &identity, &authorization_keys);
+    let mut peer_state = EnvironmentPeerState::new();
+    let connection = maintain_connection(
+        url,
+        admission,
+        &identity,
+        &authorization_keys,
+        &mut peer_state,
+    );
     let result = tokio::select! {
         result = connection => result,
         status = daemon.wait() => Err(format!("executor daemon exited: {}", status?).into()),
@@ -223,13 +285,24 @@ async fn maintain_connection(
     admission: Vec<u8>,
     identity: &NoiseIdentity,
     authorization_keys: &KeyRing,
+    peer_state: &mut EnvironmentPeerState,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let mut next_admission = admission;
     let mut backoff = ReconnectBackoff::new();
+    let mut recovery_attempts = 0_u8;
     loop {
         let connected_at = Instant::now();
-        match connect(url, next_admission, identity, authorization_keys).await {
+        match connect(
+            url,
+            &next_admission,
+            identity,
+            authorization_keys,
+            peer_state,
+        )
+        .await
+        {
             Ok(reconnect) => {
+                recovery_attempts = 0;
                 backoff.connected(0);
                 backoff.disconnected(connected_at.elapsed().as_millis() as u64);
                 next_admission = reconnect;
@@ -241,21 +314,36 @@ async fn maintain_connection(
                 );
                 tokio::time::sleep(Duration::from_millis(backoff.next_delay_ms(entropy))).await;
             }
-            Err(error) => return Err(error),
+            Err(error) => {
+                recovery_attempts += 1;
+                if recovery_attempts > 3 {
+                    return Err(error);
+                }
+                let entropy = u64::from_be_bytes(
+                    *Uuid::new_v4()
+                        .as_bytes()
+                        .first_chunk()
+                        .expect("UUID is 16 bytes"),
+                );
+                tokio::time::sleep(Duration::from_millis(backoff.next_delay_ms(entropy))).await;
+            }
         }
     }
 }
 
 async fn connect(
     url: &str,
-    admission: Vec<u8>,
+    admission: &[u8],
     identity: &NoiseIdentity,
     authorization_keys: &KeyRing,
+    peer_state: &mut EnvironmentPeerState,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = validate_url(url)?;
     let (mut socket, _) =
         connect_async_with_config(url.as_str(), Some(websocket_config()), false).await?;
-    socket.send(Message::Binary(admission.into())).await?;
+    socket
+        .send(Message::Binary(admission.to_vec().into()))
+        .await?;
     socket
         .send(Message::Text(
             serde_json::to_string(&identity.public_key())?.into(),
@@ -307,8 +395,6 @@ async fn connect(
             _ => return Err("rendezvous registration rejected".into()),
         };
 
-    let (daemon_events, mut daemon_receiver) = mpsc::channel(4);
-    let mut peer: Option<PeerEndpoint> = None;
     let mut heartbeats = interval(HEARTBEAT);
     heartbeats.tick().await;
     let mut sequence = 0_u64;
@@ -345,7 +431,7 @@ async fn connect(
                     Some("peer") => {
                         let connection_id = parse_connection_id(&message)?;
                         let frame = decode_outer_payload(&message)?;
-                        match peer.as_mut() {
+                        match peer_state.endpoint.as_mut() {
                             None => {
                                 let (endpoint, response) = PeerEndpoint::attach(
                                     connection_id,
@@ -356,14 +442,23 @@ async fn connect(
                                     &durable_registration_id,
                                     environment_generation,
                                     shard_generation,
-                                    daemon_events.clone(),
+                                    peer_state.daemon_events.clone(),
                                     PathBuf::from(EXECUTOR_SOCKET),
                                 )?;
-                                peer = Some(endpoint);
+                                peer_state.endpoint = Some(endpoint);
                                 send_outer_peer(&mut socket, &mut transport, connection_id, &response).await?;
                             }
                             Some(active) if active.connection_id == connection_id => {
-                                let responses = active.receive(&frame).await?;
+                                let responses = if serde_json::from_slice::<Value>(&frame)
+                                    .ok()
+                                    .and_then(|value| value.get("kind").and_then(Value::as_str).map(str::to_owned))
+                                    .as_deref()
+                                    == Some("peer_resume")
+                                {
+                                    active.resume(&frame, identity)?
+                                } else {
+                                    active.receive(&frame).await?
+                                };
                                 for response in responses {
                                     send_outer_peer(&mut socket, &mut transport, connection_id, &response).await?;
                                 }
@@ -373,16 +468,16 @@ async fn connect(
                     }
                     Some("peer_close") => {
                         let connection_id = parse_connection_id(&message)?;
-                        if peer.as_ref().is_some_and(|active| active.connection_id == connection_id) {
-                            peer = None;
+                        if peer_state.endpoint.as_ref().is_some_and(|active| active.connection_id == connection_id) {
+                            peer_state.endpoint = None;
                         }
                     }
                     _ => return Err("rendezvous message rejected".into()),
                 }
             }
-            event = daemon_receiver.recv() => {
+            event = peer_state.daemon_receiver.recv() => {
                 let Some(event) = event else { continue };
-                if let Some(active) = peer.as_mut()
+                if let Some(active) = peer_state.endpoint.as_mut()
                     && active.connection_id == event.connection_id
                 {
                     for response in active.daemon_event(event)? {
@@ -494,16 +589,21 @@ impl PeerEndpoint {
         let attached = serde_json::to_vec(&PeerAttached {
             kind: "peer_attached",
             stream_id: &attach.stream_id,
+            connection_id,
             handshake: STANDARD.encode(response),
         })?;
         Ok((
             Self {
                 connection_id,
+                environment_generation,
+                binding: attach.binding,
+                harness_public_key: attach.harness_public_key,
                 transport,
-                send_sequence: 0,
                 send_message_id: 1,
+                replay: ReplayBuffer::new(),
                 receiver: SequenceReceiver::new(),
                 decoder: PeerMessageDecoder::new(),
+                last_ack_sent: 0,
                 streams: HashMap::new(),
                 daemon_events,
                 daemon_path,
@@ -517,19 +617,87 @@ impl PeerEndpoint {
         ciphertext: &[u8],
     ) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
         let frame = RelayFrame::decode(&self.transport.decrypt(ciphertext)?)?;
-        if frame.kind() != FrameKind::Data || frame.stream_id() != 1 || frame.operation_id() != 0 {
+        if !matches!(frame.kind(), FrameKind::Data | FrameKind::Ack)
+            || frame.stream_id() != 1
+            || frame.operation_id() != 0
+        {
             return Err(LocalSocketError::FrameRejected.into());
+        }
+        self.replay.acknowledge(frame.ack_next())?;
+        if frame.kind() == FrameKind::Ack {
+            return Ok(Vec::new());
         }
         let mut responses = Vec::new();
         for ordered in self.receiver.push(frame)? {
-            if let Some(message) = self.decoder.push(ordered.payload())? {
+            if ordered.kind() == FrameKind::Data
+                && let Some(message) = self.decoder.push(ordered.payload())?
+            {
                 let response = self.handle_message(&message).await?;
                 if !response.is_empty() {
                     responses.extend(self.encrypt_message(&response)?);
                 }
             }
         }
+        responses.extend(self.encrypt_acknowledgement()?);
         Ok(responses)
+    }
+
+    fn resume(
+        &mut self,
+        frame: &[u8],
+        identity: &NoiseIdentity,
+    ) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+        let request: PeerResume = serde_json::from_slice(frame)?;
+        if request.kind != "peer_resume"
+            || request.environment_id != self.binding.environment_id
+            || request.environment_generation != self.environment_generation
+            || request.registration_id != self.binding.registration_id
+            || request.stream_id != self.binding.stream_id
+            || request.connection_id != self.connection_id
+            || request.harness_public_key != self.harness_public_key
+        {
+            return Err("executor peer resume rejected".into());
+        }
+        let pending = PendingResponderHandshake::read_request(
+            identity,
+            &self.binding.encode_prologue()?,
+            &STANDARD.decode(&request.handshake)?,
+        )?;
+        if pending.initiator_public_key() != &self.harness_public_key {
+            return Err("executor peer resume identity rejected".into());
+        }
+        let claims: PeerResumeClaims = serde_json::from_slice(pending.authorization())?;
+        let expected = PeerResumeClaims {
+            kind: "resume".into(),
+            connection_id: self.connection_id,
+            stream_id: self.binding.stream_id.clone(),
+            receiver_next: request.receiver_next,
+        };
+        if claims != expected {
+            return Err("executor peer resume binding rejected".into());
+        }
+        self.replay.acknowledge(request.receiver_next)?;
+        let (transport, handshake) = pending.complete()?;
+        self.transport = transport;
+        let receiver_next = self.receiver.next_sequence();
+        let response = serde_json::to_vec(&PeerResumed {
+            kind: "peer_resumed".into(),
+            stream_id: self.binding.stream_id.clone(),
+            connection_id: self.connection_id,
+            receiver_next,
+            handshake: STANDARD.encode(handshake),
+        })?;
+        let frames = self
+            .replay
+            .frames_from(request.receiver_next)?
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        let mut output = vec![response];
+        for replay in frames {
+            output.push(self.transport.encrypt(&replay.encode())?);
+        }
+        Ok(output)
     }
 
     async fn handle_message(
@@ -651,14 +819,28 @@ impl PeerEndpoint {
             .ok_or("executor peer message identity exhausted")?;
         let mut output = Vec::new();
         for record in encode_peer_message(message_id, message)? {
-            let frame = RelayFrame::new(FrameKind::Data, 1, 0, self.send_sequence, 0, record)?;
-            self.send_sequence = self
-                .send_sequence
-                .checked_add(1)
-                .ok_or("executor peer sequence exhausted")?;
+            let frame = RelayFrame::new(
+                FrameKind::Data,
+                1,
+                0,
+                self.replay.next_sequence(),
+                self.receiver.next_sequence(),
+                record,
+            )?;
+            self.replay.record(frame.clone())?;
             output.push(self.transport.encrypt(&frame.encode())?);
         }
         Ok(output)
+    }
+
+    fn encrypt_acknowledgement(&mut self) -> Result<Vec<Vec<u8>>, Box<dyn std::error::Error>> {
+        let ack_next = self.receiver.next_sequence();
+        if ack_next == self.last_ack_sent {
+            return Ok(Vec::new());
+        }
+        let frame = RelayFrame::new(FrameKind::Ack, 1, 0, 0, ack_next, Vec::new())?;
+        self.last_ack_sent = ack_next;
+        Ok(vec![self.transport.encrypt(&frame.encode())?])
     }
 }
 
@@ -723,9 +905,17 @@ mod tests {
     use super::*;
     use pwc_persistent_executor_transport::protocol::{AuthorizationClaims, AuthorizationSigner};
 
+    struct AttachedFixture {
+        endpoint: PeerEndpoint,
+        transport: NoiseTransport,
+        environment: NoiseIdentity,
+        harness: NoiseIdentity,
+        binding: HandshakeBinding,
+    }
+
     fn attach_fixture(
         environment_generation: u64,
-    ) -> Result<(PeerEndpoint, NoiseTransport), Box<dyn std::error::Error>> {
+    ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
         let now = unix_seconds()?;
         let environment = NoiseIdentity::from_seed([4; 32])?;
         let harness = NoiseIdentity::from_seed([3; 32])?;
@@ -765,7 +955,7 @@ mod tests {
             "environment_generation": environment_generation,
             "registration_id": "registration-v1",
             "stream_id": stream_id,
-            "binding": binding,
+            "binding": binding.clone(),
             "harness_public_key": harness.public_key(),
             "handshake": STANDARD.encode(handshake),
         }))?;
@@ -792,7 +982,13 @@ mod tests {
                     .ok_or("peer response rejected")?,
             )?,
         )?;
-        Ok((endpoint, transport))
+        Ok(AttachedFixture {
+            endpoint,
+            transport,
+            environment,
+            harness,
+            binding,
+        })
     }
 
     #[test]
@@ -803,5 +999,73 @@ mod tests {
             Err(error) => error,
         };
         assert!(error.to_string().contains("attachment rejected"));
+    }
+
+    #[test]
+    fn peer_resume_rekeys_and_replays_only_unacknowledged_frames() {
+        let AttachedFixture {
+            mut endpoint,
+            transport: mut harness_transport,
+            environment,
+            harness,
+            binding,
+        } = attach_fixture(3).expect("valid attachment");
+        let original = endpoint
+            .encrypt_message(br#"{"kind":"closed","stream_id":"operation-1"}"#)
+            .expect("outbound frame");
+        let first = RelayFrame::decode(
+            &harness_transport
+                .decrypt(&original[0])
+                .expect("original decrypt"),
+        )
+        .expect("original relay frame");
+        assert_eq!(first.sequence(), 0);
+
+        let claims = PeerResumeClaims {
+            kind: "resume".into(),
+            connection_id: endpoint.connection_id,
+            stream_id: binding.stream_id.clone(),
+            receiver_next: 0,
+        };
+        let (pending, handshake) = InitiatorHandshake::start(
+            &harness,
+            &environment.public_key(),
+            &binding.encode_prologue().expect("resume prologue"),
+            &serde_json::to_vec(&claims).expect("resume claims"),
+        )
+        .expect("resume handshake");
+        let request = serde_json::to_vec(&PeerResume {
+            kind: "peer_resume".into(),
+            environment_id: binding.environment_id.clone(),
+            environment_generation: 3,
+            registration_id: binding.registration_id.clone(),
+            stream_id: binding.stream_id.clone(),
+            connection_id: endpoint.connection_id,
+            receiver_next: 0,
+            harness_public_key: harness.public_key(),
+            handshake: STANDARD.encode(handshake),
+        })
+        .expect("resume request");
+        let resumed = endpoint
+            .resume(&request, &environment)
+            .expect("resume response");
+        assert_eq!(resumed.len(), 2);
+        let response: PeerResumed =
+            serde_json::from_slice(&resumed[0]).expect("resume response frame");
+        let mut resumed_transport = pending
+            .finish(
+                &STANDARD
+                    .decode(response.handshake)
+                    .expect("resume handshake response"),
+            )
+            .expect("resumed transport");
+        let replay = RelayFrame::decode(
+            &resumed_transport
+                .decrypt(&resumed[1])
+                .expect("replay decrypt"),
+        )
+        .expect("replay relay frame");
+        assert_eq!(replay.sequence(), 0);
+        assert_eq!(replay.payload(), first.payload());
     }
 }

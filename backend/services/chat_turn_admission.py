@@ -2,15 +2,21 @@
 
 from __future__ import annotations
 
+import math
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from backend.models.database import ChatTurnAdmissionBudget, ChatTurnReservation
+from backend.models.database import (
+    ChatOpenAIProviderCall,
+    ChatOpenRouterProviderCall,
+    ChatTurnAdmissionBudget,
+    ChatTurnReservation,
+)
 
 TURN_LIMIT = 32
 ENVIRONMENT_LIMIT = 32
@@ -135,6 +141,9 @@ class ChatTurnAdmissionService:
             reserved_operations=OPERATIONS_PER_TURN,
             reserved_microusd=reserve_microusd,
             actual_microusd=None,
+            terminal_outcome=None,
+            resource_started_at=None,
+            resource_ended_at=None,
             reserved_at=now,
             dispatched_at=None,
             settled_at=None,
@@ -176,6 +185,108 @@ class ChatTurnAdmissionService:
                 raise CapacityOverloaded("Turn capacity is full")
             raise SpendUnavailable("Turn spend capacity is full")
         return self._result(row)
+
+    def mark_resource_started(
+        self, db: Session, *, turn_id: uuid.UUID, now: datetime
+    ) -> None:
+        if now.tzinfo is None:
+            raise ValueError("Turn resource timestamp is invalid")
+        row = self._reservation(db, turn_id)
+        if row.state not in ACTIVE_STATES:
+            raise ValueError("Turn resource start is stale")
+        row.resource_started_at = row.resource_started_at or now
+        db.flush()
+
+    def mark_resource_ended_and_reconcile(
+        self,
+        db: Session,
+        *,
+        turn_id: uuid.UUID,
+        cost_per_second_microusd: int,
+        now: datetime,
+    ) -> bool:
+        if cost_per_second_microusd <= 0 or now.tzinfo is None:
+            raise ValueError("Turn resource settlement is invalid")
+        row = self._reservation(db, turn_id)
+        if row.resource_started_at is None:
+            raise ValueError("Turn resource was not started")
+        row.resource_ended_at = row.resource_ended_at or now
+        if self._aware(row.resource_ended_at) < self._aware(row.resource_started_at):
+            raise ValueError("Turn resource settlement is invalid")
+        db.flush()
+        if row.terminal_outcome is None:
+            return False
+        return self.settle(
+            db,
+            turn_id=turn_id,
+            revision=row.revision,
+            outcome=row.terminal_outcome,
+            actual_microusd=self._actual_cost(db, row, cost_per_second_microusd),
+            now=now,
+        )
+
+    def settle_terminal(
+        self,
+        db: Session,
+        *,
+        turn_id: uuid.UUID,
+        revision: int,
+        outcome: str,
+        cost_per_second_microusd: int,
+        now: datetime,
+    ) -> bool:
+        if outcome not in TERMINAL_STATES or cost_per_second_microusd <= 0:
+            raise ValueError("Turn terminal settlement is invalid")
+        row = self._reservation(db, turn_id)
+        if row.revision != revision:
+            return False
+        if row.terminal_outcome is not None and row.terminal_outcome != outcome:
+            raise ValueError("Turn terminal outcome changed")
+        row.terminal_outcome = outcome
+        actual = self._actual_cost(db, row, cost_per_second_microusd)
+        return self.settle(
+            db,
+            turn_id=turn_id,
+            revision=revision,
+            outcome=outcome,
+            actual_microusd=actual,
+            now=now,
+        )
+
+    def reconcile_cost_unknown(
+        self,
+        db: Session,
+        *,
+        cost_per_second_microusd: int,
+        now: datetime,
+        batch_size: int = 100,
+    ) -> int:
+        if cost_per_second_microusd <= 0 or not 1 <= batch_size <= 500:
+            raise ValueError("Turn reconciliation bounds are invalid")
+        turn_ids = db.scalars(
+            select(ChatTurnReservation.turn_id)
+            .where(
+                ChatTurnReservation.environment == self.environment,
+                ChatTurnReservation.state == "cost_unknown",
+                ChatTurnReservation.terminal_outcome.is_not(None),
+            )
+            .order_by(ChatTurnReservation.settled_at)
+            .limit(batch_size)
+        ).all()
+        reconciled = 0
+        for turn_id in turn_ids:
+            row = self._reservation(db, turn_id)
+            actual = self._actual_cost(db, row, cost_per_second_microusd)
+            if actual is not None and self.settle(
+                db,
+                turn_id=turn_id,
+                revision=row.revision,
+                outcome=row.terminal_outcome,
+                actual_microusd=actual,
+                now=now,
+            ):
+                reconciled += 1
+        return reconciled
 
     def mark_dispatched(
         self, db: Session, *, turn_id: uuid.UUID, revision: int, now: datetime
@@ -287,6 +398,55 @@ class ChatTurnAdmissionService:
         if row is None or row.environment != self.environment:
             raise ValueError("Turn reservation is missing")
         return row
+
+    @staticmethod
+    def _resource_cost(row: ChatTurnReservation, cost_per_second_microusd: int) -> int:
+        if row.resource_started_at is None or row.resource_ended_at is None:
+            raise ValueError("Turn resource cost is not ready")
+        seconds = max(
+            0,
+            math.ceil(
+                (
+                    ChatTurnAdmissionService._aware(row.resource_ended_at)
+                    - ChatTurnAdmissionService._aware(row.resource_started_at)
+                ).total_seconds()
+            ),
+        )
+        return seconds * cost_per_second_microusd
+
+    @staticmethod
+    def _provider_cost(db: Session, turn_id: uuid.UUID) -> int | None:
+        actual = 0
+        for model in (ChatOpenRouterProviderCall, ChatOpenAIProviderCall):
+            rows = db.scalars(select(model).where(model.turn_id == turn_id)).all()
+            for row in rows:
+                if row.state in {"dispatched", "cost_unknown"}:
+                    return None
+                if row.state == "settled":
+                    if row.actual_microusd is None:
+                        return None
+                    actual += row.actual_microusd
+        return actual
+
+    @classmethod
+    def _actual_cost(
+        cls,
+        db: Session,
+        row: ChatTurnReservation,
+        cost_per_second_microusd: int,
+    ) -> int | None:
+        provider_cost = cls._provider_cost(db, row.turn_id)
+        if provider_cost is None:
+            return None
+        if row.resource_started_at is None:
+            return provider_cost
+        if row.resource_ended_at is None:
+            return None
+        return provider_cost + cls._resource_cost(row, cost_per_second_microusd)
+
+    @staticmethod
+    def _aware(value: datetime) -> datetime:
+        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
     @staticmethod
     def _validate_request(

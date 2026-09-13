@@ -772,6 +772,31 @@ drop-in absent while the feature is disabled so a missing candidate credential
 cannot prevent the existing backend from starting. Validate the drop-in and
 credential path in staging before enabling the flag.
 
+The harness and environment retain the inner stream's Noise identities,
+ordered-frame receiver state, and bounded replay buffers across a rendezvous
+socket replacement. Resume rekeys the physical path, exchanges exact
+acknowledgement positions, and replays only unacknowledged frames; the fixed
+30-second recovery attempt never reissues an executor command. A lost initial
+registration response may recover at most three times with the same launch or
+reconnect nonce and the already-proven environment identity. Harness or
+environment process loss cannot use this path and must fence and reconcile the
+turn with a typed transport failure.
+
+Turn admission prices and atomically reserves the selected server-funded
+provider's full request/token envelope together with the sandbox lifetime
+envelope. It records the resource window independently of terminal chat state.
+Model-only turns return their unused sandbox reserve after adding settled
+provider usage. A turn whose workspace end or provider usage is not yet proven
+becomes `cost_unknown`, releases only concurrency, and retains spend until the
+provider ledger and release or termination evidence settle the combined cost
+exactly once.
+
+Rendezvous loss marks claimed registrations suspect without destroying their
+durable claim. The same environment identity may restore `claimed` state only
+inside 30 seconds; a one-second bounded reconciler fences expired suspect
+registrations and invalidates their active claims with
+`transport_recovery_expired`.
+
 For an ordinary blue/green service release:
 
 1. Build the exact merged source once and record the commit, Rust/Python/image

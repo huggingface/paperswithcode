@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS chat_executor_registrations (
     state varchar(24) NOT NULL CHECK (
         state IN ('pending','ready','assigned_idle','claimed','suspect','draining','fenced','terminated')
     ),
+    recovery_attempts integer NOT NULL DEFAULT 0,
     assigned_session_id uuid,
     last_seen_at timestamptz,
     expires_at timestamptz NOT NULL,
@@ -110,8 +111,27 @@ CREATE TABLE IF NOT EXISTS chat_executor_registrations (
     CONSTRAINT uq_chat_executor_environment_generation
         UNIQUE (environment_id,environment_generation),
     CONSTRAINT chat_executor_registrations_public_key_size_check
-        CHECK (pg_column_size(public_noise_key) <= 4096)
+        CHECK (pg_column_size(public_noise_key) <= 4096),
+    CONSTRAINT chat_executor_registrations_recovery_attempts_check
+        CHECK (recovery_attempts BETWEEN 0 AND 3)
 );
+
+ALTER TABLE chat_executor_registrations
+    ADD COLUMN IF NOT EXISTS recovery_attempts integer NOT NULL DEFAULT 0;
+
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'chat_executor_registrations_recovery_attempts_check'
+          AND conrelid = 'chat_executor_registrations'::regclass
+    ) THEN
+        ALTER TABLE chat_executor_registrations
+            ADD CONSTRAINT chat_executor_registrations_recovery_attempts_check
+            CHECK (recovery_attempts BETWEEN 0 AND 3);
+    END IF;
+END;
+$$;
 
 CREATE INDEX IF NOT EXISTS idx_chat_executor_registrations_ready
     ON chat_executor_registrations(cell_id,shard_id,state,expires_at);
