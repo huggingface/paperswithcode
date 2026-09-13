@@ -1,12 +1,64 @@
 from __future__ import annotations
 
+import hashlib
 import io
+import json
 
+import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import create_app
 from backend.routers import research_catalog
 from backend.services import paper_markdown_service
+
+
+def _versioned_files(data: bytes, paper_key: str = "1706.03762") -> dict[str, bytes]:
+    digest = hashlib.sha256(data).hexdigest()
+    source = "external" if paper_key.startswith("external/") else "arxiv"
+    content_key = f"_content/sha256/{digest[:2]}/{digest}.md"
+    manifest = {
+        "schema_version": 1,
+        "paper_key": paper_key,
+        "source": source,
+        "content_sha256": digest,
+        "content_key": content_key,
+        "size_bytes": len(data),
+    }
+    return {
+        f"_content/manifests/{paper_key}.json": json.dumps(manifest).encode(),
+        content_key: data,
+    }
+
+
+def _install_versioned_filesystem(monkeypatch, files: dict[str, bytes]):
+    operations: list[tuple[str, int]] = []
+
+    class TrackedFile(io.BytesIO):
+        def seek(self, offset, whence=0):
+            operations.append(("seek", offset))
+            return super().seek(offset, whence)
+
+        def read(self, size=-1):
+            operations.append(("read", size))
+            return super().read(size)
+
+    class FakeFileSystem:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def open(self, path, mode, *, block_size):
+            assert mode == "rb"
+            assert block_size == 0
+            prefix = "hf://buckets/owner/content/"
+            assert path.startswith(prefix)
+            key = path.removeprefix(prefix)
+            if key not in files:
+                raise FileNotFoundError(key)
+            return TrackedFile(files[key])
+
+    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    paper_markdown_service._paper_markdown_chunk_cache.clear()
+    return operations
 
 
 def test_paper_read_is_anonymous(monkeypatch):
@@ -149,3 +201,128 @@ def test_bounded_markdown_read_caches_the_public_artifact(monkeypatch):
 
     assert first == second == ("# Cached paper\n", False)
     assert opens == 1
+
+
+def test_versioned_markdown_chunk_reads_bounded_utf8_bytes(monkeypatch):
+    data = "aα🙂z".encode()
+    files = _versioned_files(data)
+    operations = _install_versioned_filesystem(monkeypatch, files)
+
+    first = paper_markdown_service.read_paper_markdown_chunk(
+        "1706.03762v4",
+        bucket_id="owner/content",
+        token="private-token",
+        offset=0,
+        limit=4,
+    )
+    second = paper_markdown_service.read_paper_markdown_chunk(
+        "1706.03762",
+        bucket_id="owner/content",
+        token="private-token",
+        offset=first.next_offset,
+        limit=5,
+        content_version=first.content_version,
+    )
+
+    assert first.markdown == "aα"
+    assert first.next_offset == 3
+    assert first.truncated is True
+    assert second.markdown == "🙂z"
+    assert second.next_offset is None
+    assert second.truncated is False
+    assert ("read", 8) in operations
+    assert ("seek", 3) in operations
+
+
+def test_versioned_markdown_chunk_validates_offsets_and_versions(monkeypatch):
+    data = "aα🙂z".encode()
+    files = _versioned_files(data)
+    _install_versioned_filesystem(monkeypatch, files)
+    kwargs = {
+        "bucket_id": "owner/content",
+        "token": "private-token",
+        "limit": 10,
+    }
+
+    with pytest.raises(
+        paper_markdown_service.PaperMarkdownRangeError, match="code-point boundary"
+    ):
+        paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762", offset=2, **kwargs
+        )
+    with pytest.raises(paper_markdown_service.PaperMarkdownRangeError, match="beyond"):
+        paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762", offset=len(data) + 1, **kwargs
+        )
+    with pytest.raises(
+        paper_markdown_service.PaperMarkdownVersionMismatchError, match="restart"
+    ):
+        paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762", offset=1, content_version="0" * 64, **kwargs
+        )
+
+    terminal = paper_markdown_service.read_paper_markdown_chunk(
+        "1706.03762", offset=len(data), **kwargs
+    )
+    assert terminal.markdown == ""
+    assert terminal.next_offset is None
+
+
+def test_versioned_markdown_chunk_rejects_nonadvancing_utf8_limit(monkeypatch):
+    files = _versioned_files("🙂".encode())
+    _install_versioned_filesystem(monkeypatch, files)
+
+    with pytest.raises(
+        paper_markdown_service.PaperMarkdownRangeError, match="cannot fit"
+    ):
+        paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            offset=0,
+            limit=3,
+        )
+
+
+def test_versioned_markdown_chunk_rejects_invalid_manifest_without_leaking_path(
+    monkeypatch,
+):
+    files = {"_content/manifests/1706.03762.json": b'{"content_key":"../secret"}'}
+    _install_versioned_filesystem(monkeypatch, files)
+
+    with pytest.raises(
+        paper_markdown_service.PaperMarkdownStorageError,
+        match="Paper Markdown manifest is invalid",
+    ) as captured:
+        paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            offset=0,
+            limit=10,
+        )
+
+    assert "secret" not in str(captured.value)
+
+
+def test_versioned_markdown_chunk_cache_is_separate_and_avoids_content_reread(
+    monkeypatch,
+):
+    data = b"complete markdown"
+    files = _versioned_files(data)
+    operations = _install_versioned_filesystem(monkeypatch, files)
+    kwargs = {
+        "bucket_id": "owner/content",
+        "token": "private-token",
+        "offset": 0,
+        "limit": 8,
+    }
+
+    first = paper_markdown_service.read_paper_markdown_chunk("1706.03762", **kwargs)
+    reads_after_first = list(operations)
+    second = paper_markdown_service.read_paper_markdown_chunk("1706.03762", **kwargs)
+
+    assert first == second
+    assert operations[len(reads_after_first) :] == [
+        ("read", paper_markdown_service.PAPER_MARKDOWN_MANIFEST_MAX_BYTES + 1)
+    ]

@@ -3,20 +3,31 @@
 from __future__ import annotations
 
 import re
+import json
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Iterator
+from dataclasses import dataclass
 from functools import lru_cache
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from huggingface_hub import HfFileSystem, download_bucket_files
-from huggingface_hub.errors import EntryNotFoundError
+from huggingface_hub.errors import EntryNotFoundError, HfHubHTTPError
 from PIL import Image
 
 _MODERN_ARXIV_ID = re.compile(r"^(?P<base>\d{4}\.\d{4,5})(?:v\d+)?$")
 _EXTERNAL_PAPER_ID = re.compile(r"^[1-9]\d{0,19}$")
 PAPER_PDF_MAX_BYTES = 150 * 1024 * 1024
 PAPER_PDF_CHUNK_BYTES = 1024 * 1024
+PAPER_MARKDOWN_MAX_BYTES = 64 * 1024 * 1024
+PAPER_MARKDOWN_MANIFEST_MAX_BYTES = 4096
+PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES = 256
+PAPER_MARKDOWN_CHUNK_CACHE_BYTES = 16 * 1024 * 1024
+PAPER_MARKDOWN_CHUNK_CACHE_SECONDS = 3600
+_SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
 _PAPER_ASSET_NAME = re.compile(
@@ -28,6 +39,99 @@ _ASSET_MEDIA_TYPES = {
     "jpeg": "image/jpeg",
     "webp": "image/webp",
 }
+
+
+class PaperMarkdownNotFoundError(ValueError):
+    pass
+
+
+class PaperMarkdownRangeError(ValueError):
+    pass
+
+
+class PaperMarkdownVersionMismatchError(ValueError):
+    pass
+
+
+class PaperMarkdownStorageError(ValueError):
+    pass
+
+
+@dataclass(frozen=True)
+class PaperMarkdownChunk:
+    markdown: str
+    content_version: str
+    next_offset: int | None
+
+    @property
+    def truncated(self) -> bool:
+        return self.next_offset is not None
+
+
+@dataclass(frozen=True)
+class _PaperMarkdownManifest:
+    paper_key: str
+    source: str
+    content_version: str
+    content_key: str
+    size_bytes: int
+
+
+class _ChunkCache:
+    def __init__(self, *, maximum_entries: int, maximum_bytes: int) -> None:
+        self.maximum_entries = maximum_entries
+        self.maximum_bytes = maximum_bytes
+        self._values: OrderedDict[object, tuple[float, int, PaperMarkdownChunk]] = (
+            OrderedDict()
+        )
+        self._bytes = 0
+        self._lock = threading.Lock()
+
+    def get(self, key: object) -> PaperMarkdownChunk | None:
+        now = time.monotonic()
+        with self._lock:
+            cached = self._values.get(key)
+            if cached is None:
+                return None
+            expires_at, size, value = cached
+            if expires_at <= now:
+                self._bytes -= size
+                del self._values[key]
+                return None
+            self._values.move_to_end(key)
+            return value
+
+    def put(self, key: object, value: PaperMarkdownChunk) -> None:
+        size = len(value.markdown.encode("utf-8"))
+        if size > self.maximum_bytes:
+            return
+        with self._lock:
+            previous = self._values.pop(key, None)
+            if previous is not None:
+                self._bytes -= previous[1]
+            self._values[key] = (
+                time.monotonic() + PAPER_MARKDOWN_CHUNK_CACHE_SECONDS,
+                size,
+                value,
+            )
+            self._bytes += size
+            while (
+                len(self._values) > self.maximum_entries
+                or self._bytes > self.maximum_bytes
+            ):
+                _, (_, removed_size, _) = self._values.popitem(last=False)
+                self._bytes -= removed_size
+
+    def clear(self) -> None:
+        with self._lock:
+            self._values.clear()
+            self._bytes = 0
+
+
+_paper_markdown_chunk_cache = _ChunkCache(
+    maximum_entries=PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES,
+    maximum_bytes=PAPER_MARKDOWN_CHUNK_CACHE_BYTES,
+)
 
 
 def normalize_markdown_arxiv_id(value: str) -> str:
@@ -61,6 +165,20 @@ def paper_markdown_bucket_key(paper_id: str, *, source: str | None = None) -> st
     if resolved_source == "external":
         return f"external/{normalized}.md"
     return f"{normalized[:4]}/{normalized}.md"
+
+
+def paper_markdown_manifest_key(paper_id: str, *, source: str | None = None) -> str:
+    resolved_source, normalized = normalize_markdown_paper_id(paper_id, source)
+    paper_key = (
+        f"external/{normalized}" if resolved_source == "external" else normalized
+    )
+    return f"_content/manifests/{paper_key}.json"
+
+
+def paper_markdown_content_key(content_version: str) -> str:
+    if _SHA256_HEX.fullmatch(content_version) is None:
+        raise PaperMarkdownStorageError("Paper Markdown manifest is invalid")
+    return f"_content/sha256/{content_version[:2]}/{content_version}.md"
 
 
 def paper_asset_bucket_key(
@@ -218,6 +336,173 @@ def read_paper_markdown_bounded(
         except UnicodeDecodeError as error:
             raw = raw[: error.start]
     return "", truncated
+
+
+def _read_markdown_manifest(
+    filesystem: HfFileSystem,
+    *,
+    bucket_id: str,
+    paper_id: str,
+    source: str,
+) -> _PaperMarkdownManifest:
+    normalized_source, normalized = normalize_markdown_paper_id(paper_id, source)
+    expected_paper_key = (
+        f"external/{normalized}" if normalized_source == "external" else normalized
+    )
+    key = paper_markdown_manifest_key(normalized, source=normalized_source)
+    path = f"hf://buckets/{bucket_id}/{key}"
+    try:
+        with filesystem.open(path, "rb", block_size=0) as handle:
+            raw = handle.read(PAPER_MARKDOWN_MANIFEST_MAX_BYTES + 1)
+    except (EntryNotFoundError, FileNotFoundError) as error:
+        raise PaperMarkdownNotFoundError(
+            "Versioned Markdown is not available for this paper"
+        ) from error
+    except (HfHubHTTPError, OSError) as error:
+        raise PaperMarkdownStorageError(
+            "Paper Markdown storage is temporarily unavailable"
+        ) from error
+    if not raw or len(raw) > PAPER_MARKDOWN_MANIFEST_MAX_BYTES:
+        raise PaperMarkdownStorageError("Paper Markdown manifest is invalid")
+    try:
+        payload = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise PaperMarkdownStorageError("Paper Markdown manifest is invalid") from error
+    if not isinstance(payload, dict):
+        raise PaperMarkdownStorageError("Paper Markdown manifest is invalid")
+    content_version = payload.get("content_sha256")
+    content_key = payload.get("content_key")
+    size_bytes = payload.get("size_bytes")
+    if (
+        payload.get("schema_version") != 1
+        or payload.get("paper_key") != expected_paper_key
+        or payload.get("source") != normalized_source
+        or not isinstance(content_version, str)
+        or not isinstance(content_key, str)
+        or content_key != paper_markdown_content_key(content_version)
+        or not isinstance(size_bytes, int)
+        or isinstance(size_bytes, bool)
+        or size_bytes < 1
+        or size_bytes > PAPER_MARKDOWN_MAX_BYTES
+    ):
+        raise PaperMarkdownStorageError("Paper Markdown manifest is invalid")
+    return _PaperMarkdownManifest(
+        paper_key=expected_paper_key,
+        source=normalized_source,
+        content_version=content_version,
+        content_key=content_key,
+        size_bytes=size_bytes,
+    )
+
+
+def _complete_utf8_prefix(raw: bytes, limit: int) -> bytes:
+    candidate = raw[:limit]
+    try:
+        candidate.decode("utf-8")
+        return candidate
+    except UnicodeDecodeError as error:
+        if error.reason != "unexpected end of data" or error.end != len(candidate):
+            raise PaperMarkdownStorageError(
+                "Stored Paper Markdown is not valid UTF-8"
+            ) from error
+        candidate = candidate[: error.start]
+    if not candidate:
+        raise PaperMarkdownRangeError(
+            "The requested limit cannot fit the next UTF-8 code point"
+        )
+    try:
+        candidate.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise PaperMarkdownStorageError(
+            "Stored Paper Markdown is not valid UTF-8"
+        ) from error
+    return candidate
+
+
+def read_paper_markdown_chunk(
+    paper_id: str,
+    *,
+    source: str | None = None,
+    bucket_id: str,
+    token: str | None,
+    offset: int,
+    limit: int,
+    content_version: str | None = None,
+) -> PaperMarkdownChunk:
+    """Read one UTF-8-safe byte range from an immutable Markdown revision."""
+    resolved_source, normalized = normalize_markdown_paper_id(paper_id, source)
+    if not bucket_id.strip():
+        raise PaperMarkdownStorageError("Paper Markdown storage is not configured")
+    if (
+        isinstance(offset, bool)
+        or not isinstance(offset, int)
+        or offset < 0
+        or offset > 2**63 - 1
+    ):
+        raise PaperMarkdownRangeError("Paper Markdown offset is invalid")
+    if (
+        isinstance(limit, bool)
+        or not isinstance(limit, int)
+        or limit < 1
+        or limit > 262_144
+    ):
+        raise PaperMarkdownRangeError("Paper Markdown limit is invalid")
+
+    filesystem = HfFileSystem(token=token)
+    manifest = _read_markdown_manifest(
+        filesystem,
+        bucket_id=bucket_id.strip(),
+        paper_id=normalized,
+        source=resolved_source,
+    )
+    if content_version is not None and content_version != manifest.content_version:
+        raise PaperMarkdownVersionMismatchError(
+            "Paper Markdown changed; restart reading from offset zero"
+        )
+    if offset > manifest.size_bytes:
+        raise PaperMarkdownRangeError("Paper Markdown offset is beyond the document")
+    if offset == manifest.size_bytes:
+        return PaperMarkdownChunk("", manifest.content_version, None)
+
+    cache_key = (
+        bucket_id.strip(),
+        manifest.paper_key,
+        manifest.content_version,
+        offset,
+        limit,
+    )
+    cached = _paper_markdown_chunk_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    path = f"hf://buckets/{bucket_id.strip()}/{manifest.content_key}"
+    try:
+        with filesystem.open(path, "rb", block_size=0) as handle:
+            handle.seek(offset)
+            raw = handle.read(min(limit + 4, manifest.size_bytes - offset))
+    except (EntryNotFoundError, FileNotFoundError) as error:
+        raise PaperMarkdownStorageError(
+            "The immutable Paper Markdown revision is unavailable"
+        ) from error
+    except (HfHubHTTPError, OSError) as error:
+        raise PaperMarkdownStorageError(
+            "Paper Markdown storage is temporarily unavailable"
+        ) from error
+    if not raw:
+        raise PaperMarkdownStorageError("Paper Markdown manifest size is inconsistent")
+    if raw[0] & 0b1100_0000 == 0b1000_0000:
+        raise PaperMarkdownRangeError(
+            "Paper Markdown offset must be a UTF-8 code-point boundary"
+        )
+    chunk_bytes = _complete_utf8_prefix(raw, min(limit, len(raw)))
+    next_offset = offset + len(chunk_bytes)
+    chunk = PaperMarkdownChunk(
+        markdown=chunk_bytes.decode("utf-8"),
+        content_version=manifest.content_version,
+        next_offset=next_offset if next_offset < manifest.size_bytes else None,
+    )
+    _paper_markdown_chunk_cache.put(cache_key, chunk)
+    return chunk
 
 
 @lru_cache(maxsize=128)
