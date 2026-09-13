@@ -116,3 +116,43 @@ def test_partial_batch_is_flushed_before_deadline_exit(monkeypatch):
     assert completed is False
     job.update_citations_batch.assert_called_once_with([result])
     job.process_single_paper.assert_awaited_once_with(papers[0])
+
+
+def _fetch_job(responses):
+    job = _job()
+    job.base_url = "https://example.com"
+    job.client = SimpleNamespace(get=AsyncMock(side_effect=responses))
+    job.stats.update(api_calls=0, api_successes=0, api_errors=0, rate_limit_hits=0)
+    return job
+
+
+def test_rate_limit_retries_same_paper_and_honors_retry_after(monkeypatch):
+    data = {"title": "One", "citationCount": 12}
+    job = _fetch_job(
+        [
+            SimpleNamespace(status_code=429, headers={"Retry-After": "12"}),
+            SimpleNamespace(status_code=200, json=lambda: data),
+        ]
+    )
+    sleep = AsyncMock()
+    monkeypatch.setattr(MODULE.asyncio, "sleep", sleep)
+    assert asyncio.run(job.fetch_citation_data("2601.00001", "One")) == data
+    assert job.stats["api_calls"] == 2
+    assert job.stats["api_errors"] == 0
+    assert job.stats["rate_limit_hits"] == 1
+    sleep.assert_awaited_once_with(12)
+
+
+def test_rate_limit_does_not_retry_beyond_deadline(monkeypatch):
+    import pytest
+
+    job = _fetch_job([SimpleNamespace(status_code=429, headers={"Retry-After": "30"})])
+    job.deadline_monotonic = 60
+    monkeypatch.setattr(MODULE.time, "monotonic", lambda: 10)
+    sleep = AsyncMock()
+    monkeypatch.setattr(MODULE.asyncio, "sleep", sleep)
+    with pytest.raises(RuntimeError, match="deadline"):
+        asyncio.run(job.fetch_citation_data("2601.00001", "One"))
+    assert job.stats["deadline_reached"] is True
+    sleep.assert_not_awaited()
+    assert job.client.get.await_count == 1

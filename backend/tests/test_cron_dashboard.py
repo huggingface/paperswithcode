@@ -1567,8 +1567,11 @@ def test_daily_curation_old_queue_age_is_unhealthy():
     assert "queued curation job" in evaluated["output_health"]["reason"]
 
 
-def test_daily_curation_partial_workflow_is_broken():
-    job = _job("enqueue_hf_daily_paper_curation")
+@pytest.mark.parametrize(
+    "job_id", ["enqueue_hf_daily_paper_curation", "enqueue_hf_trending_model_curation"]
+)
+def test_daily_curation_partial_workflow_is_broken(job_id):
+    job = _job(job_id)
     now = datetime.now(timezone.utc)
     with patch("backend.services.cron_health.is_process_running", return_value=False):
         evaluated = evaluate_job_health(
@@ -1578,6 +1581,21 @@ def test_daily_curation_partial_workflow_is_broken():
         )
     assert evaluated["output_health"]["status"] == "broken"
     assert "partial workflow" in evaluated["output_health"]["reason"]
+
+
+def test_trending_curation_failed_resolution_overrides_fresh_discovery():
+    now = datetime.now(timezone.utc)
+    evaluated = evaluate_job_health(
+        _job("enqueue_hf_trending_model_curation"),
+        {"status": "success_no_work", "last_run": now, "is_running": False},
+        db_metrics={"last_write": now, "failed": 2},
+        process_running=False,
+        lock_state={},
+    )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert (
+        "2 model resolution candidate(s) failed" in evaluated["output_health"]["reason"]
+    )
 
 
 def test_managed_organization_snapshot_gap_degrades_output():

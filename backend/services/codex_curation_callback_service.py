@@ -22,6 +22,7 @@ from backend.models.database import (
     ModelProviderAlias,
     ModelRelease,
     Paper,
+    PaperCurationJob,
     PaperCurationWorkflow,
     PaperHfArtifact,
     PaperMethod,
@@ -110,7 +111,13 @@ def _retryable_scheduled_validation(row, exc: Exception) -> bool:
     return bool(
         getattr(row, "trigger", "admin") != "admin"
         and not prior_rejection
-        and (type(exc) is ValueError or isinstance(exc, CatalogValidationError))
+        and (
+            type(exc) is ValueError
+            or isinstance(
+                exc,
+                (CatalogValidationError, CodexCurationEvaluationsNotAllowedError),
+            )
+        )
     )
 
 
@@ -226,6 +233,29 @@ class CodexCurationCallbackService:
         """Allow exact and same-family matches, never publisher-only siblings."""
         return self._resolution_candidates(candidate)[1]
 
+    def _retry_feedback(self, row) -> dict[str, Any] | None:
+        retry_id = getattr(row, "retry_of_id", None)
+        if retry_id is None:
+            return None
+        previous = self.db.get(PaperCurationJob, retry_id)
+        if (
+            previous is None
+            or previous.kind != row.kind
+            or (
+                previous.paper_id != row.paper_id
+                or previous.candidate_id != getattr(row, "candidate_id", None)
+            )
+        ):
+            return None
+        validation = previous.validation_summary or {}
+        return {
+            "job_id": str(previous.id),
+            "error": previous.error,
+            "validation_error": validation.get("error"),
+            "benchmark_gaps_rejected": validation.get("benchmark_gaps_rejected", []),
+            "instruction": "Correct this rejection using fresh context and primary sources; do not repeat the rejected proposal or bypass validation.",
+        }
+
     def context(self, row, settings: Settings) -> dict[str, Any]:
         if getattr(row, "kind", None) == "resolve-model-paper":
             candidate = self.db.get(TrendingModelCandidate, row.candidate_id)
@@ -239,6 +269,7 @@ class CodexCurationCallbackService:
                 "job": self.job_service.serialize(row, settings).model_dump(
                     mode="json"
                 ),
+                "retry_feedback": self._retry_feedback(row),
                 "candidate": {
                     "id": str(candidate.id),
                     "repo_id": candidate.repo_id,
@@ -349,6 +380,7 @@ class CodexCurationCallbackService:
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
             "source_candidate": source_candidate,
+            "retry_feedback": self._retry_feedback(row),
             "paper": {
                 "id": paper.id,
                 "title": paper.title,

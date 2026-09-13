@@ -260,6 +260,7 @@ class ArtificialAnalysisIndexStats:
     matched: int = 0
     created: int = 0
     updated: int = 0
+    retired: int = 0
     missing_papers: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
@@ -273,6 +274,7 @@ class ArtificialAnalysisSyncStats:
     matched: int = 0
     created: int = 0
     updated: int = 0
+    retired: int = 0
     indexed_papers: int = 0
     missing_papers: list[str] = field(default_factory=list)
     indexes: dict[str, ArtificialAnalysisIndexStats] = field(default_factory=dict)
@@ -284,6 +286,7 @@ class ArtificialAnalysisSyncStats:
             "matched": self.matched,
             "created": self.created,
             "updated": self.updated,
+            "retired": self.retired,
             "indexed_papers": self.indexed_papers,
             "missing_papers": self.missing_papers,
         }
@@ -402,9 +405,16 @@ def fetch_artificial_analysis_leaderboard(
         if owned_client:
             active_client.close()
 
-    slugs = [entry.slug for entry in all_entries]
-    if len(slugs) != len(set(slugs)):
-        raise ValueError("Artificial Analysis response contains duplicate model slugs")
+    unique_entries: dict[str, ArtificialAnalysisEntry] = {}
+    for entry in all_entries:
+        previous = unique_entries.get(entry.slug)
+        if previous is not None and previous != entry:
+            raise ValueError(
+                f"Artificial Analysis response contains conflicting model slug: {entry.slug}"
+            )
+        unique_entries[entry.slug] = entry
+    all_entries = list(unique_entries.values())
+    slugs = list(unique_entries)
     missing = sorted(set(MODEL_PAPER_IDENTITIES) - set(slugs))
     if missing:
         raise ValueError(
@@ -580,8 +590,25 @@ class ArtificialAnalysisSyncService:
             for row in candidate_rows
             if (row.external_source_url or "").startswith(SOURCE_URL_PREFIX)
         }
+        entries_by_slug = {entry.slug: entry for entry in leaderboard.entries}
+        papers = dict(discovery.papers)
+        for row in candidate_rows:
+            if not (row.methodology or "").startswith(MANAGED_METHODOLOGY_PREFIX):
+                continue
+            slug = (row.external_source_url or "").removeprefix(SOURCE_URL_PREFIX)
+            entry = entries_by_slug.get(slug)
+            if entry is None:
+                continue
+            if index.key not in entry.scores:
+                self.db.delete(row)
+                stats.retired += 1
+            elif slug not in papers:
+                # Preserve the already curated paper binding for managed rows.
+                papers[slug] = row.paper_id
+                selected.append(entry)
+        stats.selected = len(selected)
         for entry in selected:
-            paper_id = discovery.papers.get(entry.slug)
+            paper_id = papers.get(entry.slug)
             if paper_id is None:
                 if commit:
                     raise RuntimeError(f"No reviewed paper resolved for {entry.slug}")
@@ -628,7 +655,9 @@ class ArtificialAnalysisSyncService:
             row.is_open = (
                 identity.is_open
                 if identity is not None
-                else bool(release and release.is_open)
+                else release.is_open
+                if release is not None
+                else bool(row.is_open)
             )
             row.best_metric = METRIC_NAME
             row.evaluated_on = now.date()
@@ -681,6 +710,7 @@ class ArtificialAnalysisSyncService:
                 stats.matched += index_stats.matched
                 stats.created += index_stats.created
                 stats.updated += index_stats.updated
+                stats.retired += index_stats.retired
                 stats.missing_papers.extend(index_stats.missing_papers)
             if commit:
                 self.db.commit()

@@ -262,6 +262,12 @@ def extract_candidates(
         try:
             url = f"https://huggingface.co/papers/{arxiv_id}.md"
             markdown, final_url = fetch(url, MAX_TEXT_BYTES)
+            if re.match(
+                rb"Title:\s+https?://\S+\.(?:svg|png|jpe?g)(?:\?\S*)?\s*(?:\n|$)",
+                markdown,
+                re.IGNORECASE,
+            ):
+                raise ValueError("paper Markdown endpoint returned an image caption")
             hf_markdown_available = True
             fetched("hf_markdown", url, markdown, final_url)
             for raw in _matches(markdown.decode("utf-8", "replace")):
@@ -341,6 +347,9 @@ def extract_candidates(
                         "source": "project_page_html",
                         "url": project_url,
                         "error": type(exc).__name__,
+                        "http_status": exc.code
+                        if isinstance(exc, urllib.error.HTTPError)
+                        else None,
                     }
                 )
 
@@ -376,10 +385,16 @@ def extract_candidates(
 
     def is_nonblocking(error: dict) -> bool:
         source = error.get("source")
+        if source == "hf_api":
+            # This endpoint only adds link metadata; paper text or verified
+            # first-party links are sufficient evidence for enrichment.
+            return markdown_available or official_source_available
         if source in {"hf_markdown", "ocr_markdown"}:
             return official_source_available
         if source == "pdf_first_two_pages":
             return markdown_available or official_source_available
+        if source == "project_page_html" and error.get("http_status") in {404, 410}:
+            return markdown_available
         return False
 
     blocking_errors = [error for error in errors if not is_nonblocking(error)]

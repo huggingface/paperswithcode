@@ -1109,19 +1109,12 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         and not settings.chat_openrouter_server_funded_enabled
     ):
         raise RuntimeError("staging OpenRouter funded/BYOK paths must remain enabled")
+    # Production's OpenAI and HF routes do not use the shared OpenRouter key.
+    # Keep durable accounting validation for existing sessions and BYOK below.
     if (
-        settings.environment == "production"
-        and (
-            settings.chat_public_admission_enabled
-            or settings.chat_sandbox_admission_enabled
-            or settings.chat_blank_pool_enabled
-        )
-        and not settings.chat_openrouter_server_funded_enabled
+        settings.chat_openrouter_server_funded_enabled
+        and not settings.chat_openrouter_api_key
     ):
-        raise RuntimeError(
-            "production admission requires server-funded OpenRouter dispatch"
-        )
-    if not settings.chat_openrouter_api_key:
         raise RuntimeError("server-funded OpenRouter chat requires an OpenRouter key")
     if settings.chat_openrouter_workspace_monthly_budget_usd != 200:
         raise RuntimeError("OpenRouter workspace budget must equal $200")

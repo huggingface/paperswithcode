@@ -12,6 +12,16 @@ or edit repository files. Fetch the job-scoped paper context with:
 python jobs/curation_api.py context
 ```
 
+If context includes `retry_feedback`, address its exact rejection before apply.
+Re-read current rows and sources; a prior proposal is not evidence.
+
+Choose the workflow from the context's job kind. For `enrich-paper`, submit
+only the `enrich` payload; keep `evaluations`, `evaluation_removals`,
+`validation_evidence`, and `benchmark_gaps` as empty arrays. Benchmark discovery
+and score/gap submission below belong to `add-evals`, even if the enrichment
+paper contains evaluation tables. The scheduled workflow runs that stage
+separately. Follow the enrichment instructions below for links and taxonomy.
+
 Search existing task/method taxonomy with:
 
 ```bash
@@ -47,11 +57,17 @@ Never invent IDs, create benchmark metadata, or import comparator rows. Submit
 an empty evaluation list only after running the `leaderboards` command for every
 benchmark found across the required sources and checking eligible results against
 configured leaderboards and existing rows. Already-satisfied results are omitted.
+Never submit `best_rank`: the server derives ranks from the complete leaderboard.
+Do not rewrite existing rows just to rephrase methodology or source URLs; omit
+already-correct rows. If an actual factual correction is needed, supply the exact
+field diff and primary evidence required by the schema.
 The helper will report `no_changes` when nothing needs writing; do not describe
 that outcome as an applied mutation.
 
-For `hf-trending-cron`, eligibility is restricted to the exact release in
-`context.source_candidate.model_release`, including its canonical name and aliases.
+Whenever `context.source_candidate.model_release` is present, eligibility is
+restricted to that exact release, including its canonical name and aliases. This
+also applies to retries labeled `hf-daily-cron`; the supplied release determines
+scope, not the trigger label.
 An older paper may document the family without reporting results for this release.
 Never relabel older or sibling model results as the triggering release, including
 after a model-ownership validation error. If the exact release has no eligible
@@ -80,7 +96,7 @@ eligible result from a model introduced by the paper, exactly as required by
 gamma sweeps, or other ablation rows. Apply the same best-eligible-only rule to
 `blocked_evaluations` inside benchmark gaps.
 
-For every paper-native result blocked by missing catalog configuration, include
+For `add-evals`, when a paper-native result is blocked by missing catalog configuration, include
 one structured `benchmark_gaps` entry conforming to
 `jobs/schemas/curation_proposal.schema.json`. Group all introduced-model results
 blocked by the same configuration in one entry, include primary-paper evidence
@@ -91,7 +107,10 @@ observations never create tasks, datasets, metrics, or leaderboards.
 Within each gap, every `blocked_evaluations.metrics` key and `best_metric` must
 exactly match a name in that gap's `protocol.metrics`. Represent ID/OOD or other
 evaluation splits in `split`; do not append split suffixes to metric names unless
-those exact names are defined by the protocol. Check this consistency before apply.
+those exact names are defined by the protocol. Every protocol metric requires a
+nonempty `definition` explaining what it measures, grounded in the source. Copy
+the manifest source kind into each gap's evidence too. Check these fields before
+apply; schema-shaped objects with empty definitions are rejected.
 
 For `enrich-paper`, preserve the existing task/method/link lists from context,
 append only high-confidence additions, and submit an `enrich` payload with the

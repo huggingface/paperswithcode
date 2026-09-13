@@ -13,6 +13,9 @@ from backend.tests.test_deployment_runtime import deployed_settings, make_bundle
 from deploy.release import profile_features
 
 
+_REAL_OPENROUTER_GUARDRAIL = openrouter_budget_service.validate_openrouter_guardrail
+
+
 @pytest.fixture(autouse=True)
 def _avoid_live_openrouter_guardrail(monkeypatch):
     monkeypatch.setattr(
@@ -1051,6 +1054,53 @@ def test_runtime_finishes_local_chat_policy_before_openrouter_guardrail(
     runtime_validation.validate_runtime(settings)
 
     assert calls == ["provider", "capacity", "openrouter"]
+
+
+@pytest.mark.parametrize("key", ["", "revoked-production-key"])
+def test_production_direct_routes_allow_admission_without_openrouter(
+    settings_factory, monkeypatch, key
+):
+    settings, _release = settings_factory("production")
+    settings.chat_openai_direct_enabled = True
+    settings.chat_public_admission_enabled = True
+    settings.chat_sandbox_admission_enabled = True
+    settings.chat_openrouter_server_funded_enabled = False
+    settings.chat_openrouter_api_key = key
+    monkeypatch.setattr(
+        openrouter_budget_service,
+        "validate_openrouter_guardrail",
+        _REAL_OPENROUTER_GUARDRAIL,
+    )
+
+    def unexpected_provider_call(*args, **kwargs):
+        pytest.fail("Direct OpenAI/HF startup must not contact OpenRouter")
+
+    monkeypatch.setattr(
+        openrouter_budget_service.httpx, "Client", unexpected_provider_call
+    )
+
+    assert [choice["funding_mode"] for choice in settings.chat_model_registry] == [
+        "openai_funded",
+        "hf_user_billed",
+    ]
+    runtime_validation._validate_chat_openrouter_policy(settings)
+
+
+def test_production_funded_openrouter_still_requires_provider_guardrail(
+    settings_factory, monkeypatch
+):
+    settings, _release = settings_factory("production")
+    settings.chat_public_admission_enabled = True
+    settings.chat_openrouter_server_funded_enabled = True
+
+    def rejected_key(_settings):
+        raise openrouter_budget_service.OpenRouterBudgetUnavailable("rejected key")
+
+    monkeypatch.setattr(
+        openrouter_budget_service, "validate_openrouter_guardrail", rejected_key
+    )
+    with pytest.raises(RuntimeError, match="provider-enforced guardrail is invalid"):
+        runtime_validation._validate_chat_openrouter_policy(settings)
 
 
 def test_runtime_validates_external_migration_policy_exactly_once(

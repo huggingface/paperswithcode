@@ -1698,6 +1698,19 @@ def _daily_curation_contract(
     return status, reasons
 
 
+def _trending_curation_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    status, reasons = _daily_curation_contract(status, reasons, context)
+    failed = int(context.db.get("failed", 0) or 0)
+    if failed:
+        status = _worse_output(status, "broken")
+        reasons.append(f"{failed} model resolution candidate(s) failed")
+    return status, reasons
+
+
 def _curation_thumbnail_contract(
     status: str,
     reasons: List[str],
@@ -1830,6 +1843,7 @@ OUTPUT_POLICIES = {
     ),
     "hf_paper_import": OutputPolicy(_hf_import_contract),
     "daily_curation": OutputPolicy(_daily_curation_contract),
+    "trending_curation": OutputPolicy(_trending_curation_contract),
     "citations": OutputPolicy(_provider_counter_contract),
     "hf_artifacts": OutputPolicy(_provider_counter_contract),
     "paper_markdown": OutputPolicy(_paper_markdown_contract),

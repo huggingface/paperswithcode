@@ -1079,11 +1079,24 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         critical=True,
         healthy_no_work_allowed=True,
         db_freshness_query="""
-            SELECT max(last_seen_at) AS last_write,
+            WITH candidate_metrics AS (
+                SELECT max(last_seen_at) AS last_write,
                    count(*) FILTER (WHERE status IN ('discovered','queued','resolving')) AS active,
                    count(*) FILTER (WHERE status = 'resolved') AS resolved,
                    count(*) FILTER (WHERE status = 'failed') AS failed
-            FROM trending_model_candidates
+                FROM trending_model_candidates
+            ), workflow_metrics AS (
+                SELECT count(*) FILTER (WHERE status = 'failed') AS failed_workflows,
+                       count(*) FILTER (WHERE status = 'partial') AS partial_workflows
+                FROM paper_curation_workflows AS workflow
+                WHERE workflow.status IN ('failed', 'partial') AND EXISTS (
+                    SELECT 1 FROM paper_curation_jobs AS job
+                    WHERE job.parent_workflow_id = workflow.id
+                      AND job.trigger = 'hf-trending-cron'
+                )
+            )
+            SELECT candidate_metrics.*, workflow_metrics.*
+            FROM candidate_metrics CROSS JOIN workflow_metrics
         """,
         workflow_file="cron-enqueue-hf-trending-model-curation.yml",
         workflow_jobs=("run",),
@@ -1630,6 +1643,7 @@ _OUTPUT_EVALUATORS: dict[str, str] = {
     "calculate_paper_trending_scores": "paper_trending",
     "import_hf_daily_papers": "hf_paper_import",
     "enqueue_hf_daily_paper_curation": "daily_curation",
+    "enqueue_hf_trending_model_curation": "trending_curation",
     "update_citations": "citations",
     "update_hf_artifacts": "hf_artifacts",
     "paper_markdown_backfill": "paper_markdown",
