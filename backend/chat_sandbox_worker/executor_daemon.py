@@ -949,6 +949,8 @@ class ExecutorServer:
                     or response.get("ok") is not True
                     or response.get("active") is not True
                 ):
+                    if not self._clear_or_prove_inactive(execution):
+                        self._contained.set()
                     raise RuntimeError("Broker did not confirm capability install")
                 self._broker_binding = key
             elif self._broker_binding != key:

@@ -1503,6 +1503,58 @@ def test_lost_install_response_still_clears_mutated_broker(tmp_path: Path) -> No
     thread.join(timeout=2)
 
 
+def test_refused_install_response_still_clears_mutated_broker(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+
+    class RefusedInstallBroker:
+        def __init__(self) -> None:
+            self.active = False
+            self.operations: list[object] = []
+
+        def __call__(self, payload: dict[str, object]) -> dict[str, object]:
+            self.operations.append(payload["operation"])
+            if payload["operation"] == "install":
+                self.active = True
+                return {"ok": False, "active": True}
+            if payload["operation"] == "clear":
+                self.active = False
+            return {"ok": True, "active": self.active}
+
+    broker = RefusedInstallBroker()
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        worker_generation="worker-1",
+        broker_control=broker,
+        command_preexec=None,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+
+    responses = _operation(
+        server.socket_path,
+        {
+            "protocol": PROTOCOL,
+            "type": "exec",
+            "request_id": "request-refused-install",
+            **IDENTITY,
+            "command": "printf bad > refused-install-side-effect",
+            "timeout_ms": 2_000,
+        },
+    )
+
+    assert responses[-1]["status"] == "failed"
+    assert responses[-1]["error"] == "execution_start_failed"
+    assert broker.operations == ["install", "clear"]
+    assert broker.active is False
+    assert not (workspace / "refused-install-side-effect").exists()
+    server.shutdown()
+    thread.join(timeout=2)
+
+
 def test_unexpected_broker_defect_propagates_after_cleanup(
     tmp_path: Path, monkeypatch
 ) -> None:
