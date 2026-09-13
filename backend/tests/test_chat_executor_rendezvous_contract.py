@@ -59,6 +59,8 @@ def test_publishing_builds_locked_binary_and_sandbox_start_has_no_installs() -> 
     provider = (REPOSITORY / "backend/services/chat_sandbox_provider.py").read_text()
     environment = (REPOSITORY / "executor_transport/src/bin/environment.rs").read_text()
     assert '"build",\n            "--locked",\n            "--release"' in publisher
+    assert '"--target",\n            "x86_64-unknown-linux-musl"' in publisher
+    assert 'target_dir / "x86_64-unknown-linux-musl/release/environment"' in publisher
     assert "with_executor_binary(image, environment_binary)" in publisher
     assert '"/usr/local/bin/pwc-executor-environment"' in provider
     start = provider[provider.index("command = (") : provider.index("cpu_limit = (")]
