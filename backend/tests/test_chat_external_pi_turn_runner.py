@@ -382,6 +382,113 @@ class LostExecutor(FakeExecutor):
         )
 
 
+def test_turn_binding_is_lazy_ordered_shared_bounded_and_settled_once():
+    events: list[str] = []
+
+    class Manager(FakeWorkspaceManager):
+        async def acquire_for_binding(self, *, session_id, turn_claim):
+            events.extend(("live_turn", "environment_claim"))
+            return await self.acquire(session_id=session_id, turn_claim=turn_claim)
+
+    class Channel:
+        def __init__(self):
+            self.health_calls = 0
+            self.workspace_calls = 0
+            self.exec_calls = 0
+            self.active = 0
+            self.maximum_active = 0
+            self.four_started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.closed = 0
+
+        async def health(self):
+            self.health_calls += 1
+            events.append("health")
+            return "ok"
+
+        async def ensure_workspace(self, _context):
+            self.workspace_calls += 1
+            events.append("workspace_ack")
+
+        async def exec_resumable(self, _context, *, command, timeout_ms):
+            assert timeout_ms == 1000
+            self.exec_calls += 1
+            if command == "parallel":
+                self.active += 1
+                self.maximum_active = max(self.maximum_active, self.active)
+                if self.active == 4:
+                    self.four_started.set()
+                await self.release.wait()
+                self.active -= 1
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "completed", "exit_code": 0, "error": None},
+            )
+
+        async def cancel(self, _context):
+            return True
+
+        async def aclose(self):
+            self.closed += 1
+
+    manager = Manager(FakeProvider())
+    channel = Channel()
+    runner = _tool_runner(FakeExecutor(), manager)
+
+    async def channel_factory(_workspace, _turn_claim, minimum_remaining_seconds):
+        assert minimum_remaining_seconds == 240
+        events.extend(("route", "authorization", "noise_attach", "generation"))
+        return channel
+
+    runner.tool_executor.channel_factory = channel_factory
+
+    async def tool(index: int, command: str):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": command,
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def exercise():
+        runner.tool_executor.begin_turn()
+        for index in range(10):
+            assert (await tool(index, "sequential"))["ok"] is True
+        tasks = [
+            asyncio.create_task(tool(10 + index, "parallel")) for index in range(5)
+        ]
+        await asyncio.wait_for(channel.four_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert channel.maximum_active == 4
+        channel.release.set()
+        assert all(result["ok"] for result in await asyncio.gather(*tasks))
+        await runner.tool_executor.settle_turn()
+        await runner.tool_executor.settle_turn()
+
+    asyncio.run(exercise())
+
+    assert events[:8] == [
+        "live_turn",
+        "environment_claim",
+        "route",
+        "authorization",
+        "noise_attach",
+        "generation",
+        "health",
+        "workspace_ack",
+    ]
+    assert len(manager.acquired) == 1
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
+    assert channel.health_calls == 1
+    assert channel.workspace_calls == 1
+    assert channel.exec_calls == 15
+    assert channel.closed == 1
+
+
 def worker_status(claim):
     return SimpleNamespace(
         worker_id=claim.worker_id,

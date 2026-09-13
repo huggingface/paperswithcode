@@ -20,6 +20,7 @@ from backend.services.chat_sandbox_acquisition_coordinator import (
 )
 from backend.services.chat_sandbox_executor import (
     ExecutorTransportError,
+    PersistentExecutorChannel,
     SandboxExecutorClient,
 )
 from backend.services.chat_sandbox_lease_lifecycle_coordinator import (
@@ -49,6 +50,9 @@ SessionFactory = Callable[[], Session]
 LifecycleObserver = Callable[[str, str | None, int], None]
 QualificationEvidenceRecorder = Callable[..., bool]
 QualificationCapacityResolver = Callable[..., int | None]
+EXECUTOR_IDLE_RETENTION_SECONDS = 5 * 60
+EXECUTOR_RETAINED_GLOBAL_CAP = 10
+MIN_EXECUTOR_CLAIM_SECONDS = 240
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,16 @@ class ExternalExecutorWorkspace:
     workspace_generation: int
     claim: WorkerClaim
     acquired_monotonic: float
+
+
+@dataclass(slots=True)
+class ExternalExecutorTurnBinding:
+    """One turn's workspace and already-authorized persistent channel."""
+
+    workspace: ExternalExecutorWorkspace
+    channel: PersistentExecutorChannel
+    settlement: str = "invalidate"
+    settled: bool = False
 
 
 def _workspace_generation(worker_generation: str) -> int:
@@ -98,6 +112,11 @@ class ChatExternalExecutorWorkspaceManager:
     ) -> None:
         if settings.chat_workspace_snapshots_enabled:
             raise ValueError("External executor workspaces require snapshots disabled")
+        if (
+            settings.chat_sandbox_warm_seconds != EXECUTOR_IDLE_RETENTION_SECONDS
+            or settings.chat_sandbox_max_warm != EXECUTOR_RETAINED_GLOBAL_CAP
+        ):
+            raise ValueError("External executor retention contract is invalid")
         if acquisition.settings is not settings:
             raise ValueError("Workspace acquisition settings must be shared")
         if acquisition.session_factory is not session_factory:
@@ -194,6 +213,33 @@ class ChatExternalExecutorWorkspaceManager:
         session_id: uuid.UUID,
         turn_claim: TurnLeaseClaim,
     ) -> ExternalExecutorWorkspace:
+        return await self._acquire(
+            session_id=session_id,
+            turn_claim=turn_claim,
+            verify_executor_health=True,
+        )
+
+    async def acquire_for_binding(
+        self,
+        *,
+        session_id: uuid.UUID,
+        turn_claim: TurnLeaseClaim,
+    ) -> ExternalExecutorWorkspace:
+        """Claim lifecycle capacity without launching a legacy health relay."""
+
+        return await self._acquire(
+            session_id=session_id,
+            turn_claim=turn_claim,
+            verify_executor_health=False,
+        )
+
+    async def _acquire(
+        self,
+        *,
+        session_id: uuid.UUID,
+        turn_claim: TurnLeaseClaim,
+        verify_executor_health: bool,
+    ) -> ExternalExecutorWorkspace:
         deadline = self.monotonic() + self.acquisition.ready_timeout_seconds
         replacement_attempts = 0
         while True:
@@ -226,16 +272,19 @@ class ChatExternalExecutorWorkspaceManager:
                 claim=claim,
                 acquired_monotonic=self.monotonic(),
             )
-            try:
-                healthy = await self.executor.health(workspace.sandbox) == "ok"
-            except asyncio.CancelledError:
-                await self._invalidate_preserving_primary(workspace)
-                raise
-            except (ExecutorTransportError, ProtocolError, SandboxError):
-                healthy = False
-            except Exception:
-                await self._invalidate_preserving_primary(workspace)
-                raise
+            if verify_executor_health:
+                try:
+                    healthy = await self.executor.health(workspace.sandbox) == "ok"
+                except asyncio.CancelledError:
+                    await self._invalidate_preserving_primary(workspace)
+                    raise
+                except (ExecutorTransportError, ProtocolError, SandboxError):
+                    healthy = False
+                except Exception:
+                    await self._invalidate_preserving_primary(workspace)
+                    raise
+            else:
+                healthy = True
             if healthy:
                 try:
                     self._require_live_turn(session_id, turn_claim)

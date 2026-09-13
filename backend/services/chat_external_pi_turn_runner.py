@@ -40,6 +40,7 @@ from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
 )
 from backend.services.chat_external_pi_tool_executor import (
+    ChannelFactory,
     ExternalPiToolWorkspaceExecutor,
 )
 from backend.services.chat_external_pi_lifecycle import ExternalPiTurnLifecycle
@@ -100,6 +101,7 @@ class ExternalPiChatTurnRunner:
         turn_state_transition: Callable[[str], Awaitable[None]] | None = None,
         observe: LifecycleObserver | None = None,
         cancel_timeout_seconds: float = 5.0,
+        channel_factory: ChannelFactory | None = None,
     ) -> None:
         self.settings = settings
         self.admission = admission
@@ -137,6 +139,7 @@ class ExternalPiChatTurnRunner:
             transition=lambda state: self.turn_state_transition(state),
             observe=lambda event, code, value: self.observe(event, code, value),
             record_evidence=self.record_evidence,
+            channel_factory=channel_factory,
         )
         self.lifecycle = ExternalPiTurnLifecycle(
             capability_id=self.capability_id,
@@ -159,12 +162,23 @@ class ExternalPiChatTurnRunner:
             chat_session_id=self.admission.session_id,
             recorder=self.record_evidence,
         )
+        self.tool_executor.begin_turn()
+        primary_exception_active = True
         try:
             async for event in self._events(boundary):
                 yield event
+            primary_exception_active = False
         except QUALIFIED_OWNERSHIP_REJECTIONS:
             boundary.reject()
             raise
+        finally:
+            try:
+                await self.tool_executor.settle_turn()
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if not primary_exception_active:
+                    raise
 
     async def _events(
         self, stale_boundary: QualificationStaleFenceBoundary
@@ -591,7 +605,11 @@ class ExternalPiChatTurnRunner:
         await self.lifecycle.persist_turn_state(state)
 
     async def _cancel_executor(self, context: ExecutorContext) -> bool:
-        return await self.tool_executor.cancel_executor(context)
+        binding = self.tool_executor._binding
+        return await self.tool_executor.cancel_executor(
+            context,
+            channel=binding.channel if binding is not None else None,
+        )
 
     def _durable_turn_claim(self) -> TurnLeaseClaim:
         return self.tool_executor._durable_turn_claim()

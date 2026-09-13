@@ -89,10 +89,14 @@ def setup_manager(
     record=None,
     qualification_capacity=None,
     sandbox_cap=2,
+    warm_seconds=300,
+    max_warm=10,
 ):
     settings = _settings(
         chat_workspace_snapshots_enabled=False,
         chat_sandbox_total_live_cap=sandbox_cap,
+        chat_sandbox_warm_seconds=warm_seconds,
+        chat_sandbox_max_warm=max_warm,
     )
     sessions = _database()
     session_id = uuid.uuid4()
@@ -118,6 +122,15 @@ def setup_manager(
         ),
     )
     return manager, sessions, session_id, provider
+
+
+@pytest.mark.parametrize(
+    ("warm_seconds", "max_warm"),
+    [(299, 10), (300, 11)],
+)
+def test_executor_retention_contract_is_exact(warm_seconds, max_warm):
+    with pytest.raises(ValueError, match="retention contract"):
+        setup_manager(warm_seconds=warm_seconds, max_warm=max_warm)
 
 
 @pytest.mark.parametrize(
@@ -316,6 +329,22 @@ def test_executor_workspace_reuse_uses_executor_launch_mode_health():
 
     assert second.sandbox_id == first.sandbox_id
     assert len(provider.create_options) == 1
+
+
+def test_binding_acquisition_defers_health_to_the_persistent_channel():
+    health = ExecutorHealth()
+    manager, _sessions, session_id, _provider = setup_manager(health=health)
+
+    async def exercise():
+        workspace = await manager.acquire_for_binding(
+            session_id=session_id,
+            turn_claim=TURN_CLAIM,
+        )
+        assert await manager.release(workspace)
+
+    asyncio.run(exercise())
+
+    assert health.sandboxes == []
 
 
 def test_concurrent_acquisition_waits_for_existing_busy_workspace():

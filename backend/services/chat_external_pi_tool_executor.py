@@ -12,7 +12,9 @@ from backend.config import Settings
 from backend.services.chat_capability_service import IssuedCapability
 from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
+    ExternalExecutorTurnBinding,
     ExternalExecutorWorkspace,
+    MIN_EXECUTOR_CLAIM_SECONDS,
 )
 from backend.services.chat_sandbox_executor import (
     ExecutorContext,
@@ -20,6 +22,7 @@ from backend.services.chat_sandbox_executor import (
     ExecutorExecutionResult,
     ExecutorOperationError,
     ExecutorTransportError,
+    PersistentExecutorChannel,
     SandboxExecutorClient,
 )
 from backend.services.chat_sandbox_provider import (
@@ -32,9 +35,38 @@ from backend.services.chat_qualification_stale_boundary import (
     QualificationStaleFenceBoundary,
 )
 
-type WorkspaceSettlement = Literal["release", "invalidate"]
 type LifecycleObserver = Callable[[str, str | None, int], None]
 type QualificationEvidenceRecorder = Callable[..., bool]
+type ChannelFactory = Callable[
+    [ExternalExecutorWorkspace, TurnLeaseClaim, int],
+    Awaitable[PersistentExecutorChannel],
+]
+
+
+class _LegacyExecutorChannel:
+    """Compatibility adapter until persistent admission selects the new route."""
+
+    def __init__(self, executor: Any, sandbox: object) -> None:
+        self.executor = executor
+        self.sandbox = sandbox
+
+    async def health(self) -> str:
+        return await self.executor.health(self.sandbox)
+
+    async def ensure_workspace(self, context: ExecutorContext) -> None:
+        await self.executor.ensure_workspace(context)
+
+    async def exec_resumable(self, context: ExecutorContext, **kwargs: Any):
+        return await self.executor.exec_resumable(context, **kwargs)
+
+    async def read_file(self, context: ExecutorContext, **kwargs: Any):
+        return await self.executor.read_file(context, **kwargs)
+
+    async def cancel(self, context: ExecutorContext) -> bool:
+        result = await self.executor.cancel_execution(context)
+        return isinstance(result, ExecutorExecutionResult) and is_safe_cancel_terminal(
+            result.terminal
+        )
 
 
 def is_safe_cancel_terminal(terminal: object) -> bool:
@@ -72,6 +104,7 @@ class ExternalPiToolWorkspaceExecutor:
         transition: Callable[[str], Awaitable[None]],
         observe: LifecycleObserver,
         record_evidence: QualificationEvidenceRecorder | None = None,
+        channel_factory: ChannelFactory | None = None,
     ) -> None:
         self.settings = settings
         self.admission = admission
@@ -82,7 +115,38 @@ class ExternalPiToolWorkspaceExecutor:
         self.transition = transition
         self.observe = observe
         self.record_evidence = record_evidence or (lambda **_kwargs: False)
+        self.channel_factory = channel_factory
         self.active_context: ExecutorContext | None = None
+        self._binding: ExternalExecutorTurnBinding | None = None
+        self._binding_lock = asyncio.Lock()
+        self._operation_limit = asyncio.Semaphore(4)
+        self._hold_binding = False
+
+    def begin_turn(self) -> None:
+        """Keep the lazy binding until the runner's outermost cleanup boundary."""
+
+        self._hold_binding = True
+
+    async def settle_turn(self) -> None:
+        """Settle and close the cached turn binding exactly once."""
+
+        async with self._binding_lock:
+            binding = self._binding
+            self._hold_binding = False
+            if binding is None or binding.settled:
+                return
+            boundary = QualificationStaleFenceBoundary(
+                turn_id=self.admission.turn_id,
+                chat_session_id=self.admission.session_id,
+                recorder=self.record_evidence,
+            )
+            await self._settle(
+                binding=binding,
+                primary_exception_active=False,
+                stale_boundary=boundary,
+            )
+            binding.settled = True
+            self._binding = None
 
     async def tool_result(self, request: dict[str, object]) -> dict[str, object]:
         operation_id = str(request.get("operation_id") or "")
@@ -123,82 +187,125 @@ class ExternalPiToolWorkspaceExecutor:
             "type": "tool_result",
             "operation_id": operation_id,
         }
-        tool_call_id = str(request.get("tool_call_id") or "")
         context: ExecutorContext | None = None
-        workspace: ExternalExecutorWorkspace | None = None
-        settlement: WorkspaceSettlement = "invalidate"
+        binding: ExternalExecutorTurnBinding | None = None
         primary_exception_active = False
         try:
-            workspace = await self._workspace_manager().acquire(
-                session_id=self.admission.session_id,
-                turn_claim=self._durable_turn_claim(),
-            )
-            context = await self._ensure_executor(workspace, tool_call_id, operation_id)
-            if operation == "exec":
-                result = await self.executor.exec_resumable(
+            binding = await self._turn_binding(operation_id)
+            context = self._context(binding.workspace, operation_id)
+            self.active_context = context
+            async with self._operation_limit:
+                if operation == "exec":
+                    result = await binding.channel.exec_resumable(
+                        context,
+                        command=str(request["command"]),
+                        timeout_ms=int(request["timeout_ms"]),
+                    )
+                    self._record_executor_start(operation_id, operation_kind="bash")
+                    if result.recovered:
+                        self.observe("executor_recovery", "succeeded", 1)
+                    terminal = dict(result.terminal)
+                    return {
+                        **base,
+                        "ok": terminal.get("status") == "completed",
+                        "outputs": list(result.outputs),
+                        "terminal": terminal,
+                        **(
+                            {"error": str(terminal["error"])}
+                            if terminal.get("error")
+                            else {}
+                        ),
+                    }
+                result = await binding.channel.read_file(
                     context,
-                    command=str(request["command"]),
-                    timeout_ms=int(request["timeout_ms"]),
+                    path=str(request["path"]),
+                    offset=int(request["offset"]),
+                    max_bytes=int(request["max_bytes"]),
                 )
-                self._record_executor_start(operation_id, operation_kind="bash")
-                if result.recovered:
-                    self.observe("executor_recovery", "succeeded", 1)
-                terminal = dict(result.terminal)
-                settlement = "release"
+                self._record_executor_start(operation_id, operation_kind="read")
                 return {
                     **base,
-                    "ok": terminal.get("status") == "completed",
-                    "outputs": list(result.outputs),
-                    "terminal": terminal,
-                    **(
-                        {"error": str(terminal["error"])}
-                        if terminal.get("error")
-                        else {}
-                    ),
+                    "ok": True,
+                    "data_base64": base64.b64encode(result.data).decode("ascii"),
+                    "eof": result.eof,
                 }
-            result = await self.executor.read_file(
-                context,
-                path=str(request["path"]),
-                offset=int(request["offset"]),
-                max_bytes=int(request["max_bytes"]),
-            )
-            self._record_executor_start(operation_id, operation_kind="read")
-            settlement = "release"
-            return {
-                **base,
-                "ok": True,
-                "data_base64": base64.b64encode(result.data).decode("ascii"),
-                "eof": result.eof,
-            }
         except ExecutorExecutionLost:
             primary_exception_active = True
-            if context is not None:
-                settlement = (
-                    "release" if await self.cancel_executor(context) else "invalidate"
-                )
+            if context is not None and binding is not None:
+                if not await self.cancel_executor(context, channel=binding.channel):
+                    binding.settlement = "invalidate"
             raise
         except asyncio.CancelledError:
             primary_exception_active = True
-            if context is not None:
-                settlement = (
-                    "release" if await self.cancel_executor(context) else "invalidate"
-                )
+            if context is not None and binding is not None:
+                if not await self.cancel_executor(context, channel=binding.channel):
+                    binding.settlement = "invalidate"
             raise
         except ExecutorOperationError as error:
-            if context is not None:
-                settlement = "release"
             return {**base, "ok": False, "error": error.code}
         except (ExecutorTransportError, ProtocolError, SandboxError) as error:
+            if binding is not None:
+                binding.settlement = "invalidate"
             return {**base, "ok": False, "error": getattr(error, "code", "tool_failed")}
         finally:
             self.active_context = None
-            if workspace is not None:
-                await self._settle(
-                    workspace,
-                    settlement=settlement,
+            if binding is not None and not self._hold_binding:
+                await self._settle_direct(
+                    binding,
                     primary_exception_active=primary_exception_active,
                     stale_boundary=stale_boundary,
                 )
+
+    async def _turn_binding(
+        self,
+        operation_id: str,
+    ) -> ExternalExecutorTurnBinding:
+        async with self._binding_lock:
+            if self._binding is not None:
+                return self._binding
+            manager = self._workspace_manager()
+            turn_claim = self._durable_turn_claim()
+            acquire_for_binding = getattr(manager, "acquire_for_binding", None)
+            if acquire_for_binding is None:
+                workspace = await manager.acquire(
+                    session_id=self.admission.session_id,
+                    turn_claim=turn_claim,
+                )
+            else:
+                workspace = await acquire_for_binding(
+                    session_id=self.admission.session_id,
+                    turn_claim=turn_claim,
+                )
+            try:
+                channel = (
+                    await self.channel_factory(
+                        workspace,
+                        turn_claim,
+                        MIN_EXECUTOR_CLAIM_SECONDS,
+                    )
+                    if self.channel_factory is not None
+                    else _LegacyExecutorChannel(self.executor, workspace.sandbox)
+                )
+                if acquire_for_binding is not None and await channel.health() != "ok":
+                    raise SandboxError(
+                        "sandbox_worker_failed",
+                        "Secure workspace executor is unavailable",
+                    )
+                context = self._context(workspace, operation_id)
+                await channel.ensure_workspace(context)
+            except asyncio.CancelledError:
+                await self._invalidate(workspace, primary_exception_active=True)
+                raise
+            except Exception:
+                await self._invalidate(workspace, primary_exception_active=True)
+                raise
+            binding = ExternalExecutorTurnBinding(
+                workspace=workspace,
+                channel=channel,
+                settlement="release",
+            )
+            self._binding = binding
+            return binding
 
     async def _ensure_executor(
         self,
@@ -206,8 +313,32 @@ class ExternalPiToolWorkspaceExecutor:
         _tool_call_id: str,
         operation_id: str,
     ) -> ExecutorContext:
+        """Compatibility seam for callers that perform a one-off legacy bind."""
+
         turn_claim = self._durable_turn_claim()
         context = ExecutorContext(
+            sandbox=workspace.sandbox,
+            workspace_id=str(self.admission.session_id),
+            workspace_generation=workspace.workspace_generation,
+            session_id=str(self.admission.session_id),
+            turn_id=str(self.admission.turn_id),
+            execution_id=operation_id,
+            tool_call_id=operation_id,
+            worker_generation=workspace.worker_generation,
+            capability=self.capability.token,
+            turn_worker_id=turn_claim.worker_id,
+            turn_worker_generation=str(turn_claim.worker_generation),
+            turn_lease_generation=str(turn_claim.lease_generation),
+        )
+        await self.executor.ensure_workspace(context)
+        self.active_context = context
+        return context
+
+    def _context(
+        self, workspace: ExternalExecutorWorkspace, operation_id: str
+    ) -> ExecutorContext:
+        turn_claim = self._durable_turn_claim()
+        return ExecutorContext(
             sandbox=workspace.sandbox,
             workspace_id=str(self.admission.session_id),
             workspace_generation=workspace.workspace_generation,
@@ -224,9 +355,6 @@ class ExternalPiToolWorkspaceExecutor:
             turn_worker_generation=str(turn_claim.worker_generation),
             turn_lease_generation=str(turn_claim.lease_generation),
         )
-        await self.executor.ensure_workspace(context)
-        self.active_context = context
-        return context
 
     def _record_executor_start(
         self, operation_id: str, *, operation_kind: Literal["read", "bash"]
@@ -239,8 +367,15 @@ class ExternalPiToolWorkspaceExecutor:
             operation_kind=operation_kind,
         )
 
-    async def cancel_executor(self, context: ExecutorContext) -> bool:
+    async def cancel_executor(
+        self,
+        context: ExecutorContext,
+        *,
+        channel: PersistentExecutorChannel | None = None,
+    ) -> bool:
         try:
+            if channel is not None:
+                return await channel.cancel(context)
             result = await self.executor.cancel_execution(context)
         except (
             ExecutorTransportError,
@@ -256,14 +391,26 @@ class ExternalPiToolWorkspaceExecutor:
 
     async def _settle(
         self,
-        workspace: ExternalExecutorWorkspace,
         *,
-        settlement: WorkspaceSettlement,
+        binding: ExternalExecutorTurnBinding,
         primary_exception_active: bool,
         stale_boundary: QualificationStaleFenceBoundary,
     ) -> None:
         manager = self._workspace_manager()
-        if settlement == "release":
+        workspace = binding.workspace
+        close = getattr(binding.channel, "aclose", None)
+        if close is not None:
+            try:
+                await close()
+            except asyncio.CancelledError:
+                binding.settlement = "invalidate"
+                await self._invalidate(workspace, primary_exception_active=True)
+                if not primary_exception_active:
+                    raise
+                return
+            except Exception:
+                binding.settlement = "invalidate"
+        if binding.settlement == "release":
             try:
                 released = await manager.release(workspace)
                 if not released:
@@ -287,6 +434,29 @@ class ExternalPiToolWorkspaceExecutor:
             workspace,
             primary_exception_active=primary_exception_active,
         )
+
+    async def _settle_direct(
+        self,
+        binding: ExternalExecutorTurnBinding,
+        *,
+        primary_exception_active: bool,
+        stale_boundary: QualificationStaleFenceBoundary,
+    ) -> None:
+        async with self._binding_lock:
+            if binding.settled:
+                return
+            try:
+                await self._settle(
+                    binding=binding,
+                    primary_exception_active=primary_exception_active,
+                    stale_boundary=stale_boundary,
+                )
+            except asyncio.CancelledError:
+                if not primary_exception_active:
+                    raise
+            binding.settled = True
+            if self._binding is binding:
+                self._binding = None
 
     async def _invalidate(
         self,
