@@ -251,11 +251,18 @@ UTF-8 code point, but it never downloads the complete object to serve a chunk.
 The service determines whether another byte exists with a one-byte bounded
 lookahead. Error responses never expose bucket IDs, object keys, or credentials.
 
-Prove revision-consistent reads using the bucket's version or conditional-read
-support, including replacement during a request. Metadata followed by an
-unconditional range read is not sufficient. If the storage API cannot bind a
-bounded read to an object revision, immutable versioned objects/metadata are a
-prerequisite; do not emulate this by hashing or downloading the whole object.
+Hugging Face Buckets are non-versioned and their S3-compatible `GetObject` does
+not honor `If-Match`, so the implementation uses content-addressed immutable
+Markdown objects plus a small per-paper manifest. Writers upload and verify the
+immutable SHA-256 object before publishing the manifest; a repair publishes a
+new object and switches the manifest last while retaining the old object for
+active cursors. Readers resolve the manifest once, validate its bounded schema,
+and read only the immutable object it names. Existing canonical objects are
+migrated in bounded remote batches before continuation is enabled. The legacy
+canonical object remains during the compatibility period, but is never used for
+version-bound continuation. Metadata followed by a range read of the mutable
+canonical key is not sufficient; do not emulate consistency by hashing or
+downloading the whole object on a request path.
 Test actual upstream Range behavior and byte counts with the pinned HF client;
 `seek()` plus `read(n)` alone is not evidence of bounded network transfer.
 Keep range caching separate from the existing non-expiring process LRU.

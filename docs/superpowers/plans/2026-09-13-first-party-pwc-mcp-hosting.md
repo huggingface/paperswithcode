@@ -58,9 +58,11 @@ nginx, systemd, Python MCP SDK, pytest, Vitest, Ruff, and TypeScript.
 4. Record the exact usable metadata field, conditional/version argument, and
    observed request behavior in the Papers With Code PR description. Do not
    commit bucket names, object keys, credentials, signed URLs, or raw debug logs.
-5. If the Hub API cannot provide both bounded transfer and revision consistency,
-   stop implementation. Open a prerequisite ticket for immutable versioned
-   Markdown objects; do not implement whole-object hashing or downloads.
+5. The gate established that Buckets are non-versioned and conditional
+   `GetObject` is unavailable. Implement the approved prerequisite: immutable
+   content-addressed Markdown objects, a per-paper manifest published last, and
+   a bounded remote migration for existing canonical objects. Never hash or
+   download the whole object on an API request path.
 
 **Verification:**
 
@@ -68,8 +70,42 @@ nginx, systemd, Python MCP SDK, pytest, Vitest, Ruff, and TypeScript.
 uv run --env-file backend/keys.env python -c "import huggingface_hub; print(huggingface_hub.__version__)"
 ```
 
-Expected: the exact pinned client version is recorded and the manual evidence
-satisfies both gates. No repository change is committed for this task.
+Expected: the exact pinned client behavior is recorded and bounded range reads
+are proven against immutable content-addressed keys.
+
+### Task 1a: Publish immutable Markdown revisions and migrate existing objects
+
+**Files:**
+
+- Modify: `backend/scripts/generate_missing_paper_markdown.py`
+- Create: `backend/scripts/migrate_paper_markdown_versions.py`
+- Modify: `backend/tests/test_paper_markdown_backfill.py`
+- Create: `backend/tests/test_paper_markdown_version_migration.py`
+
+**Steps:**
+
+1. Define a bounded manifest schema containing the canonical paper identity,
+   exact SHA-256 content version, immutable object key, byte size, and schema
+   version. Reject path traversal and inconsistent digest/key combinations.
+2. Make the existing writer materialize the content-addressed object and verify
+   any pre-existing object byte-for-byte. Upload canonical compatibility output
+   and the immutable revision first, then publish the manifest in a separate
+   final bucket mutation. Repairs retain old revisions.
+3. Add a resumable remote migration that processes bounded batches, downloads
+   at most one canonical Markdown object at a time, validates UTF-8 and size,
+   publishes/verifies its immutable revision, and writes the manifest last.
+   Persist bounded progress without exposing bucket details.
+4. Make reruns idempotent, reject conflicts, and expose dry-run plus explicit
+   batch limits. Do not run the corpus migration from the disk-constrained VPS.
+
+**Verification:**
+
+```bash
+uv run --env-file backend/keys.env pytest backend/tests/test_paper_markdown_backfill.py backend/tests/test_paper_markdown_version_migration.py -q
+uv run --env-file backend/keys.env ruff check backend/scripts/generate_missing_paper_markdown.py backend/scripts/migrate_paper_markdown_versions.py backend/tests/test_paper_markdown_version_migration.py
+```
+
+**Commit:** `feat(storage): version paper markdown immutably`
 
 ### Task 2: Freeze the MCP SDK wire contract
 

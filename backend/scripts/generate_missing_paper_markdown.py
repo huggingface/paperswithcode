@@ -82,6 +82,9 @@ IMAGE_FILENAME_ONLY = re.compile(
     re.IGNORECASE,
 )
 STATUS_SCHEMA_VERSION = 2
+MARKDOWN_MANIFEST_SCHEMA_VERSION = 1
+SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
+MARKDOWN_MIGRATION_LOCK_KEY = "_content/migration.lock"
 MAX_ATTEMPTS = int(os.environ.get("PWC_MARKDOWN_MAX_ATTEMPTS", "3"))
 CHANDRA_TIMEOUT_SECONDS = int(
     os.environ.get("PWC_MARKDOWN_CHANDRA_TIMEOUT_SECONDS", "1800")
@@ -216,8 +219,17 @@ class BucketContentStore:
         output_keys = [str(entry["output_key"]) for entry in entries]
         pdf_keys = [str(entry["pdf_key"]) for entry in entries if entry.get("pdf_key")]
         existing = self.existing(
-            [result_key, progress_key, *status_keys, *output_keys, *pdf_keys]
+            [
+                MARKDOWN_MIGRATION_LOCK_KEY,
+                result_key,
+                progress_key,
+                *status_keys,
+                *output_keys,
+                *pdf_keys,
+            ]
         )
+        if MARKDOWN_MIGRATION_LOCK_KEY in existing:
+            raise ValueError("markdown_migration_locked")
         self.repairs = {
             str(entry["output_key"]): entry
             for entry in entries
@@ -246,7 +258,8 @@ class BucketContentStore:
 
     def upload(self, keys: list[str]) -> None:
         unique = list(dict.fromkeys(keys))
-        immutable = [key for key in unique if not key.startswith("_jobs/")]
+        mutable_prefixes = ("_jobs/", "_content/manifests/")
+        immutable = [key for key in unique if not key.startswith(mutable_prefixes)]
         for key in self.existing(immutable):
             local = (self.content_root / key).read_bytes()
             remote = self.read(key)
@@ -482,6 +495,34 @@ def entry_paper_key(entry: dict[str, object]) -> str:
     return str(entry.get("paper_key") or entry["arxiv_id"])
 
 
+def markdown_content_key(content_sha256: str) -> str:
+    if SHA256_HEX.fullmatch(content_sha256) is None:
+        raise ValueError("invalid_markdown_content_version")
+    return f"_content/sha256/{content_sha256[:2]}/{content_sha256}.md"
+
+
+def markdown_manifest_key(paper_key: str) -> str:
+    if re.fullmatch(r"(?:\d{4}\.\d{4,5}|external/[1-9]\d{0,19})", paper_key) is None:
+        raise ValueError("invalid_markdown_paper_key")
+    return f"_content/manifests/{paper_key}.json"
+
+
+def markdown_manifest(
+    entry: dict[str, object], content_sha256: str, size_bytes: int
+) -> dict[str, object]:
+    paper_key = entry_paper_key(entry)
+    if size_bytes < 1 or size_bytes > 64 * 1024 * 1024:
+        raise ValueError("invalid_markdown_size")
+    return {
+        "schema_version": MARKDOWN_MANIFEST_SCHEMA_VERSION,
+        "paper_key": paper_key,
+        "source": "external" if paper_key.startswith("external/") else "arxiv",
+        "content_sha256": content_sha256,
+        "content_key": markdown_content_key(content_sha256),
+        "size_bytes": size_bytes,
+    }
+
+
 def _alphanumeric_tokens(value: str) -> list[str]:
     normalized = unicodedata.normalize("NFKC", value).casefold()
     return re.findall(r"[^\W_]+", normalized, flags=re.UNICODE)
@@ -648,6 +689,8 @@ def publish(
     processed_pages: int | None = None,
     allow_missing_images: bool = False,
 ) -> dict:
+    if (content_root / MARKDOWN_MIGRATION_LOCK_KEY).exists():
+        raise ValueError("markdown_migration_locked")
     paper_key = entry_paper_key(entry)
     arxiv_id = entry.get("arxiv_id")
     version = str(entry["version"])
@@ -688,6 +731,9 @@ def publish(
     ).encode()
     if len(markdown) < 120 or len(markdown) > 64 * 1024 * 1024:
         raise ValueError("invalid_markdown_size")
+    content_sha256 = hashlib.sha256(markdown).hexdigest()
+    content_key = markdown_content_key(content_sha256)
+    manifest_key = markdown_manifest_key(paper_key)
 
     for key, data in canonical_assets.items():
         destination = content_root / key
@@ -699,9 +745,21 @@ def publish(
             raise ValueError(f"asset_verification_failed:{key}")
 
     output = content_root / str(entry["output_key"])
+    immutable_output = content_root / content_key
+    if immutable_output.exists() and immutable_output.read_bytes() != markdown:
+        raise ValueError(f"immutable_asset_conflict:{content_key}")
+    if not immutable_output.exists():
+        atomic_write(immutable_output, markdown)
+    if immutable_output.read_bytes() != markdown:
+        raise ValueError("markdown_version_verification_failed")
     atomic_write(output, markdown)
     if output.read_bytes() != markdown:
         raise ValueError("markdown_verification_failed")
+    manifest = markdown_manifest(entry, content_sha256, len(markdown))
+    atomic_write(
+        content_root / manifest_key,
+        (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
     return {
         "paper_key": paper_key,
         "paper_id": entry.get("paper_id"),
@@ -721,7 +779,10 @@ def publish(
         "asset_sha256": {
             key: hashlib.sha256(canonical_assets[key]).hexdigest() for key in asset_keys
         },
-        "markdown_sha256": hashlib.sha256(markdown).hexdigest(),
+        "markdown_sha256": content_sha256,
+        "markdown_size_bytes": len(markdown),
+        "markdown_content_key": content_key,
+        "markdown_manifest_key": manifest_key,
     }
 
 
@@ -1168,10 +1229,15 @@ def main() -> None:
             if pdf_key and (content_root / str(pdf_key)).is_file():
                 published_keys.append(str(pdf_key))
             if result.get("status") == "succeeded":
-                published_keys.extend(
-                    str(key) for key in result.get("asset_keys") or []
+                content_keys = [str(key) for key in result.get("asset_keys") or []]
+                content_keys.extend(
+                    [
+                        str(entry["output_key"]),
+                        str(result["markdown_content_key"]),
+                    ]
                 )
-                published_keys.append(str(entry["output_key"]))
+                upload_checkpoint(content_keys)
+                published_keys.append(str(result["markdown_manifest_key"]))
             upload_checkpoint(published_keys)
     except Exception as error:
         fatal_error = str(error)[:1000]

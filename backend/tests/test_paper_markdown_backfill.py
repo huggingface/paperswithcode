@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import subprocess
@@ -568,6 +569,61 @@ def test_worker_omits_missing_extracted_image_on_final_attempt(tmp_path):
     ]
 
 
+def test_worker_publishes_content_addressed_markdown_and_manifest(tmp_path):
+    entry = {
+        "arxiv_id": "2607.00001",
+        "version": "v1",
+        "title": "Versioned paper",
+        "output_key": "2607/2607.00001.md",
+    }
+
+    result = WORKER.publish(
+        entry,
+        "Versioned paper explains immutable Markdown storage. " * 4,
+        {},
+        tmp_path,
+    )
+
+    canonical = (tmp_path / entry["output_key"]).read_bytes()
+    assert result["markdown_sha256"] == hashlib.sha256(canonical).hexdigest()
+    assert (tmp_path / result["markdown_content_key"]).read_bytes() == canonical
+    manifest = json.loads((tmp_path / result["markdown_manifest_key"]).read_text())
+    assert manifest == {
+        "schema_version": 1,
+        "paper_key": "2607.00001",
+        "source": "arxiv",
+        "content_sha256": result["markdown_sha256"],
+        "content_key": result["markdown_content_key"],
+        "size_bytes": len(canonical),
+    }
+
+
+def test_worker_rejects_invalid_content_versions_and_paper_keys():
+    with pytest.raises(ValueError, match="invalid_markdown_content_version"):
+        WORKER.markdown_content_key("../not-a-digest")
+    with pytest.raises(ValueError, match="invalid_markdown_paper_key"):
+        WORKER.markdown_manifest_key("../../secret")
+
+
+def test_worker_refuses_to_publish_during_version_migration(tmp_path):
+    lock = tmp_path / WORKER.MARKDOWN_MIGRATION_LOCK_KEY
+    lock.parent.mkdir(parents=True)
+    lock.write_text("occupied")
+
+    with pytest.raises(ValueError, match="markdown_migration_locked"):
+        WORKER.publish(
+            {
+                "arxiv_id": "2607.00001",
+                "version": "v1",
+                "title": "Versioned paper",
+                "output_key": "2607/2607.00001.md",
+            },
+            "Versioned paper explains immutable Markdown storage. " * 4,
+            {},
+            tmp_path,
+        )
+
+
 def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
     tmp_path, monkeypatch
 ):
@@ -579,6 +635,7 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
         "output_key": "2608/2608.00001.md",
     }
     remote = {manifest_key: (json.dumps(entry) + "\n").encode()}
+    upload_batches = []
     stub = tmp_path / "stub"
     stub.mkdir()
     (stub / "2608.00001.md").write_text("Bucket transport paper text. " * 12)
@@ -595,6 +652,7 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
                 destination.write_bytes(remote[key])
             return {}
         if request["operation"] == "upload":
+            upload_batches.append([key for _source, key in request["files"]])
             for source, key in request["files"]:
                 remote[key] = Path(source).read_bytes()
             return {}
@@ -623,6 +681,17 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
     assert remote[entry["output_key"]].startswith(b"Title: Bucket transport")
     status = json.loads(remote["_jobs/status/2608.00001.json"])
     assert status["status"] == "succeeded"
+    assert remote[status["markdown_content_key"]] == remote[entry["output_key"]]
+    version_manifest = json.loads(remote[status["markdown_manifest_key"]])
+    assert version_manifest["content_sha256"] == status["markdown_sha256"]
+    content_batch = next(
+        batch for batch in upload_batches if status["markdown_content_key"] in batch
+    )
+    manifest_batch = next(
+        batch for batch in upload_batches if status["markdown_manifest_key"] in batch
+    )
+    assert upload_batches.index(content_batch) < upload_batches.index(manifest_batch)
+    assert status["markdown_content_key"] not in manifest_batch
     progress = json.loads(
         remote["_jobs/progress/backfill-20260824T120000-12345678/00000.json"]
     )
