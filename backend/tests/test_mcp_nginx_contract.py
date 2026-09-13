@@ -26,6 +26,8 @@ def test_mcp_protocol_signals_precede_html_and_honor_q_zero():
         assert f"${prefix}_html_q0" in config
         assert "text/event-stream" in config
         assert "text/html" in config
+        assert "(?:(?!\\bq\\s*=)[^,])*" in config
+        assert "~^0:1: 1;" in config
 
 
 def test_mcp_media_patterns_are_quoted_for_real_nginx_parsing():

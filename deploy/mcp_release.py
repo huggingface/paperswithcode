@@ -99,6 +99,27 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _source_tree_sha256(release: Path) -> str:
+    import hashlib
+
+    digest = hashlib.sha256()
+    files = sorted(
+        path
+        for root in (release / "mcp_server", release / "standalone_cli")
+        if root.is_dir()
+        for path in root.rglob("*")
+        if path.is_file() and ".venv" not in path.relative_to(release).parts
+    )
+    for path in files:
+        relative = path.relative_to(release).as_posix().encode()
+        digest.update(len(relative).to_bytes(4, "big"))
+        digest.update(relative)
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+    return digest.hexdigest()
+
+
 def _extract(sha: str, destination: Path) -> None:
     descriptor, archive_name = tempfile.mkstemp(
         prefix="pwc-mcp-source-", suffix=".tar", dir=destination.parent
@@ -170,6 +191,7 @@ def _descriptor(release: Path, sha: str) -> dict[str, object]:
         "supported_protocols": supported_protocols,
         "health_schema_version": 1,
         "api_urls": MCP_API_URLS,
+        "source_tree_sha256": _source_tree_sha256(release),
         "artifact_sha256": {
             "mcp_server/pyproject.toml": _sha256(project / "pyproject.toml"),
             "mcp_server/uv.lock": _sha256(project / "uv.lock"),
@@ -191,6 +213,7 @@ def validate_release(release: Path | None) -> dict[str, object]:
         or manifest.get("component") != "mcp"
         or SHA.fullmatch(str(manifest.get("git_sha") or "")) is None
         or manifest.get("lock_sha256") != _sha256(release / "mcp_server/uv.lock")
+        or manifest.get("source_tree_sha256") != _source_tree_sha256(release)
         or not (release / "mcp_server/.venv/bin/pwc-mcp").is_file()
         or not os.access(release / "mcp_server/.venv/bin/pwc-mcp", os.X_OK)
         or not isinstance(artifacts, dict)

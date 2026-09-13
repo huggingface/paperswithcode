@@ -37,6 +37,7 @@ def _release(root: Path, name: str = "aaaaaaaaaaaaaaaa") -> Path:
         project / "pyproject.toml"
     )
     executable.chmod(0o755)
+    manifest["source_tree_sha256"] = mcp_release._source_tree_sha256(release)
     (release / "manifest.json").write_text(json.dumps(manifest))
     return release
 
@@ -85,6 +86,7 @@ def test_descriptor_records_locked_contract_and_artifacts(tmp_path):
     assert descriptor["mcp_sdk_version"] == "1.20.0"
     assert descriptor["supported_protocols"] == ["2026-07-28", "2025-11-25"]
     assert descriptor["api_urls"] == mcp_release.MCP_API_URLS
+    assert descriptor["source_tree_sha256"]
     assert descriptor["artifact_sha256"]["mcp_server/uv.lock"]
 
 

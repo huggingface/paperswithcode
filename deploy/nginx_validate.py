@@ -63,11 +63,15 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
         "proxy_http_version 1.1;",
         'proxy_set_header Connection "";',
         "proxy_set_header Origin $http_origin;",
+        "proxy_set_header X-Real-IP $remote_addr;",
+        "proxy_set_header X-Forwarded-Proto $scheme;",
         "proxy_set_header X-Forwarded-For $remote_addr;",
         'proxy_set_header Cookie "";',
         'proxy_set_header Authorization "";',
         "proxy_buffering off;",
         "proxy_cache off;",
+        "client_max_body_size 2m;",
+        "client_body_timeout 10s;",
         'add_header Cache-Control "no-store" always;',
         'add_header Vary "Accept, MCP-Protocol-Version" always;',
     )
@@ -100,6 +104,8 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
             "try_files /index.html =404;",
             'add_header Vary "Accept, MCP-Protocol-Version" always;',
             'add_header Allow "GET, HEAD, POST, DELETE, OPTIONS" always;',
+            "client_max_body_size 2m;",
+            "client_body_timeout 10s;",
         )
         if not block:
             failures.append(f"{environment} MCP HTML location is missing: {location}")
