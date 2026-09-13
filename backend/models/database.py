@@ -2629,6 +2629,96 @@ class ChatTurnJob(Base):
     )
 
 
+class ChatTurnAdmissionBudget(Base):
+    """Environment-wide capacity and incremental-spend reservation totals."""
+
+    __tablename__ = "chat_turn_admission_budgets"
+
+    environment: Mapped[str] = mapped_column(String(16), primary_key=True)
+    turn_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    environment_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    operation_limit: Mapped[int] = mapped_column(Integer, nullable=False)
+    spend_limit_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    active_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved_environments: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    reserved_operations: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    reserved_microusd: Mapped[int] = mapped_column(
+        BigInteger, nullable=False, default=0
+    )
+    spent_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "environment IN ('staging','production')",
+            name="chat_turn_admission_budget_environment_check",
+        ),
+        CheckConstraint(
+            "turn_limit = 32 AND environment_limit = 32 AND operation_limit = 128",
+            name="chat_turn_admission_budget_limits_check",
+        ),
+        CheckConstraint(
+            "spend_limit_microusd > 0 AND active_turns >= 0 AND "
+            "reserved_environments >= 0 AND reserved_operations >= 0 AND "
+            "reserved_microusd >= 0 AND spent_microusd >= 0",
+            name="chat_turn_admission_budget_nonnegative_check",
+        ),
+    )
+
+
+class ChatTurnReservation(Base):
+    """Exactly-once capacity and spend ownership for one admitted turn."""
+
+    __tablename__ = "chat_turn_reservations"
+
+    turn_id: Mapped[str] = mapped_column(UUID(as_uuid=True), primary_key=True)
+    request_id: Mapped[str] = mapped_column(String(200), nullable=False, unique=True)
+    owner_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    environment: Mapped[str] = mapped_column(
+        String(16),
+        ForeignKey("chat_turn_admission_budgets.environment", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    state: Mapped[str] = mapped_column(String(24), nullable=False)
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    reserved_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    reserved_environments: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1
+    )
+    reserved_operations: Mapped[int] = mapped_column(Integer, nullable=False, default=4)
+    reserved_microusd: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    actual_microusd: Mapped[Optional[int]] = mapped_column(BigInteger)
+    reserved_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    settled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    __table_args__ = (
+        CheckConstraint(
+            "state IN ('reserved','dispatched','completed','failed','cancelled','cost_unknown')",
+            name="chat_turn_reservations_state_check",
+        ),
+        CheckConstraint(
+            "revision > 0 AND reserved_turns = 1 AND reserved_environments = 1 "
+            "AND reserved_operations = 4 AND reserved_microusd >= 0 AND "
+            "(actual_microusd IS NULL OR actual_microusd >= 0)",
+            name="chat_turn_reservations_bounds_check",
+        ),
+        Index(
+            "uq_chat_turn_reservations_active_owner",
+            "environment",
+            "owner_id",
+            unique=True,
+            postgresql_where=text("state IN ('reserved','dispatched')"),
+            sqlite_where=text("state IN ('reserved','dispatched')"),
+        ),
+        Index("idx_chat_turn_reservations_state", "environment", "state"),
+    )
+
+
 class ChatTurnEventChunk(Base):
     """A bounded contiguous batch of public stream events for one turn."""
 
