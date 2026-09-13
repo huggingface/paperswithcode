@@ -6,6 +6,7 @@ from __future__ import annotations
 import grp
 import os
 import pwd
+import secrets
 import shutil
 import subprocess
 from pathlib import Path
@@ -26,6 +27,7 @@ SYSTEMD_UNITS = (
     "paperswithcode-production-external-pi-worker@.service",
     "paperswithcode-production-backend@.service",
     "paperswithcode-production-backend@.socket",
+    "paperswithcode-mcp@.service",
     "pwc-postgres-backup.service",
     "pwc-postgres-backup.timer",
     "pwc-curation-thumbnails.service",
@@ -125,6 +127,7 @@ def main() -> int:
         "pwc-cron-trending",
         "pwc-external-pi",
         "pwc-chat-executor",
+        "pwc-mcp",
     ):
         ensure_user(user)
     subprocess.run(
@@ -145,6 +148,24 @@ def main() -> int:
     ):
         ensure_dir(path, "root", "root", 0o755)
     ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
+    for environment, port, api_url in (
+        ("production", 8002, "https://paperswithcode.co/api/v1"),
+        ("staging", 8003, "http://127.0.0.1:8001/api/v1"),
+    ):
+        mcp_config = CONFIG_ROOT / f"mcp-{environment}.env"
+        if not mcp_config.exists():
+            mcp_config.write_text(
+                f"PORT={port}\n"
+                f"PWC_MCP_PORT={port}\n"
+                f"PWC_API_URL={api_url}\n"
+                f"PWC_MCP_ALLOWED_HOSTS={'paperswithcode.co' if environment == 'production' else 'staging.paperswithcode.co'},localhost:*,127.0.0.1:*\n"
+                "PWC_MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://claude.ai\n"
+                f"PWC_MCP_CURSOR_KEY_CURRENT={secrets.token_urlsafe(32)}\n"
+                "PWC_MCP_CURSOR_KEY_PREVIOUS=\n",
+                encoding="utf-8",
+            )
+        os.chown(mcp_config, 0, grp.getgrnam("pwc-mcp").gr_gid)
+        mcp_config.chmod(0o640)
     for worker_environment in (
         CONFIG_ROOT / "external-pi-worker.env",
         CONFIG_ROOT / "external-pi-worker-production.env",
@@ -189,6 +210,15 @@ def main() -> int:
             0o750,
         )
     ensure_dir(STATE_ROOT / "shared", "root", "root", 0o755)
+    mcp_root = APP_ROOT / "mcp"
+    for path in (
+        mcp_root,
+        mcp_root / "releases",
+        mcp_root / "environments",
+        mcp_root / "environments" / "production",
+        mcp_root / "environments" / "staging",
+    ):
+        ensure_dir(path, "root", "root", 0o755)
     # Root publishes only content-free compiler qualification evidence here.
     # The staging service can read it but cannot replace its directory or file.
     ensure_dir(
@@ -287,6 +317,19 @@ def main() -> int:
                 "set-url",
                 "origin",
                 origin,
+            ],
+            check=True,
+        )
+
+    mcp_repository = APP_ROOT / "mcp" / "repository.git"
+    if not mcp_repository.exists():
+        subprocess.run(
+            [
+                "git",
+                "clone",
+                "--mirror",
+                "https://github.com/huggingface/pwc-cli.git",
+                str(mcp_repository),
             ],
             check=True,
         )

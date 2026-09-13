@@ -1,0 +1,38 @@
+[Unit]
+Description=Papers With Code MCP server (%i)
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=pwc-mcp
+Group=pwc-mcp
+Environment=HOST=127.0.0.1
+Environment=PWC_MCP_HOST=127.0.0.1
+EnvironmentFile=/etc/paperswithcode/mcp-%i.env
+ExecStart=/usr/bin/python3 /usr/local/lib/paperswithcode-deploy/mcp_launcher.py %i
+Restart=on-failure
+RestartSec=3
+TimeoutStartSec=60
+TimeoutStopSec=30
+KillSignal=SIGTERM
+SyslogIdentifier=paperswithcode-mcp-%i
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryMax=768M
+CPUQuota=75%
+TasksMax=64
+LimitNOFILE=4096
+ReadOnlyPaths=/srv/paperswithcode/mcp /etc/paperswithcode
+
+[Install]
+WantedBy=multi-user.target

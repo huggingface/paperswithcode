@@ -377,6 +377,7 @@ def main() -> int:
             "paperswithcode-production-external-pi-worker@.service",
             "paperswithcode-production-backend@.service",
             "paperswithcode-production-backend@.socket",
+            "paperswithcode-mcp@.service",
             "pwc-curation-thumbnails.service",
             "pwc-curation-thumbnails.timer",
             "pwc-chat-alert-monitor.service",

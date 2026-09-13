@@ -270,6 +270,8 @@ def request(
     *,
     allow_redirects: bool = True,
     headers: dict[str, str] | None = None,
+    method: str = "GET",
+    data: bytes | None = None,
 ) -> tuple[int, dict, bytes]:
     if _UNIX_SOCKET is not None:
         parsed = urlsplit(url)
@@ -279,8 +281,9 @@ def request(
         unix_socket.connect(str(_UNIX_SOCKET))
         path = parsed.path + (f"?{parsed.query}" if parsed.query else "")
         connection.request(
-            "GET",
+            method,
             path,
+            body=data,
             headers={"User-Agent": "pwc-smoke/1", **(headers or {})},
         )
         response = connection.getresponse()
@@ -301,6 +304,8 @@ def request(
         with opener.open(
             urllib.request.Request(
                 url,
+                data=data,
+                method=method,
                 headers={"User-Agent": "pwc-smoke/1", **(headers or {})},
             ),
             timeout=20,
@@ -308,6 +313,157 @@ def request(
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as exc:
         return exc.code, dict(exc.headers), exc.read()
+
+
+def _mcp_exchange(
+    base_url: str,
+    request_id: int,
+    method: str,
+    params: dict,
+    *,
+    protocol_version: str | None = None,
+    mcp_name: str | None = None,
+) -> dict:
+    headers = {
+        "Accept": "application/json, text/event-stream",
+        "Content-Type": "application/json",
+    }
+    if protocol_version:
+        headers["MCP-Protocol-Version"] = protocol_version
+        headers["Mcp-Method"] = method
+    if mcp_name:
+        headers["Mcp-Name"] = mcp_name
+    status, _, body = request(
+        urljoin(base_url.rstrip("/") + "/", "mcp"),
+        method="POST",
+        data=json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": method,
+                "params": params,
+            }
+        ).encode(),
+        headers=headers,
+    )
+    if status != 200:
+        raise ValueError(f"{method} returned HTTP {status}")
+    payload = json.loads(body)
+    if not isinstance(payload, dict) or payload.get("id") != request_id:
+        raise ValueError(f"{method} returned an invalid JSON-RPC response")
+    if payload.get("error") is not None or not isinstance(payload.get("result"), dict):
+        raise ValueError(f"{method} returned a JSON-RPC error")
+    return payload["result"]
+
+
+def run_mcp_smoke(
+    base_url: str,
+    *,
+    expected_version: str | None = None,
+    protocol_version: str = "2026-07-28",
+    public_routes: bool = False,
+) -> list[str]:
+    """Probe MCP health, discovery, and one bounded read-only catalog call."""
+    failures: list[str] = []
+    health_path = "mcp/health" if public_routes else "health"
+    status, _, body = request(urljoin(base_url.rstrip("/") + "/", health_path))
+    try:
+        health = json.loads(body)
+    except json.JSONDecodeError:
+        health = None
+    if status != 200 or not isinstance(health, dict) or health.get("status") != "ok":
+        return [f"MCP health returned {status} or invalid JSON"]
+    if expected_version and health.get("version") != expected_version:
+        failures.append("MCP health version mismatch")
+    if health.get("protocol") != protocol_version:
+        failures.append("MCP health protocol mismatch")
+
+    def check_catalog(*, request_id: int, selected_protocol: str, modern: bool) -> None:
+        metadata = (
+            {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": selected_protocol,
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "pwc-deploy-smoke",
+                        "version": "1",
+                    },
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                }
+            }
+            if modern
+            else {}
+        )
+        discovery = _mcp_exchange(
+            base_url,
+            request_id,
+            "tools/list",
+            metadata,
+            protocol_version=selected_protocol,
+        )
+        tools = discovery.get("tools")
+        names = {
+            item.get("name")
+            for item in (tools if isinstance(tools, list) else [])
+            if isinstance(item, dict)
+        }
+        if not {"get_paper_info", "read_paper", "list_papers"}.issubset(names):
+            failures.append("MCP tool discovery is incomplete")
+        call = _mcp_exchange(
+            base_url,
+            request_id + 1,
+            "tools/call",
+            {
+                "name": "list_papers",
+                "arguments": {"page": 1, "limit": 1},
+                **metadata,
+            },
+            protocol_version=selected_protocol,
+            mcp_name="list_papers" if modern else None,
+        )
+        if call.get("isError") is True:
+            failures.append("MCP read-only catalog smoke returned a tool error")
+
+    try:
+        if protocol_version >= "2026-07-28":
+            metadata = {
+                "_meta": {
+                    "io.modelcontextprotocol/protocolVersion": protocol_version,
+                    "io.modelcontextprotocol/clientInfo": {
+                        "name": "pwc-deploy-smoke",
+                        "version": "1",
+                    },
+                    "io.modelcontextprotocol/clientCapabilities": {},
+                }
+            }
+            discovered = _mcp_exchange(
+                base_url,
+                1,
+                "server/discover",
+                metadata,
+                protocol_version=protocol_version,
+            )
+            supported = discovered.get("supportedVersions")
+            if not isinstance(supported, list) or protocol_version not in supported:
+                failures.append("MCP server/discover omitted the primary protocol")
+            check_catalog(request_id=2, selected_protocol=protocol_version, modern=True)
+
+        initialized = _mcp_exchange(
+            base_url,
+            4,
+            "initialize",
+            {
+                "protocolVersion": "2025-11-25",
+                "capabilities": {},
+                "clientInfo": {"name": "pwc-deploy-smoke", "version": "1"},
+            },
+        )
+        negotiated = initialized.get("protocolVersion")
+        if not isinstance(negotiated, str) or negotiated >= "2026-07-28":
+            raise ValueError("MCP initialize omitted a legacy negotiated protocol")
+        check_catalog(request_id=5, selected_protocol=negotiated, modern=False)
+    except (OSError, ValueError, json.JSONDecodeError) as error:
+        failures.append(f"MCP protocol smoke failed: {error}")
+    return failures
 
 
 def validate_local_bundle(
@@ -488,9 +644,23 @@ def main() -> int:
     parser.add_argument("--candidate", action="store_true")
     parser.add_argument("--unix-socket", type=Path)
     parser.add_argument("--gateway-url")
+    parser.add_argument("--mcp", action="store_true")
+    parser.add_argument("--mcp-public-routes", action="store_true")
     args = parser.parse_args()
     global _UNIX_SOCKET
     _UNIX_SOCKET = args.unix_socket
+    if args.mcp:
+        failures = run_mcp_smoke(
+            args.base_url,
+            expected_version=args.expected_release,
+            public_routes=args.mcp_public_routes,
+        )
+        if failures:
+            for failure in failures:
+                print(f"FAIL: {failure}", file=sys.stderr)
+            return 1
+        print(f"{args.environment} MCP smoke checks passed")
+        return 0
     failures = []
     chat_enabled = False
     if args.release_dir:

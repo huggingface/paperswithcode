@@ -52,6 +52,7 @@ try:
         slot_status as external_pi_slot_status,
         stop_slot_if_enabled,
     )
+    from deploy import mcp_release
 except ModuleNotFoundError:
     from release import (  # type: ignore[no-redef]
         ENVIRONMENTS,
@@ -84,6 +85,7 @@ except ModuleNotFoundError:
         slot_status as external_pi_slot_status,
         stop_slot_if_enabled,
     )
+    import mcp_release  # type: ignore[no-redef]
 
 APP_ROOT = Path(os.environ.get("PWC_DEPLOY_APP_ROOT", "/srv/paperswithcode"))
 REPOSITORY = Path(os.environ.get("PWC_DEPLOY_REPOSITORY", APP_ROOT / "repository.git"))
@@ -1670,6 +1672,10 @@ def cleanup_command(args: argparse.Namespace) -> int:
     if args.confirm != "CLEAN_RELEASES":
         raise DeployError("cleanup requires --confirm CLEAN_RELEASES")
     with deployment_lock():
+        if getattr(args, "component", "site") == "mcp":
+            mcp_release.cleanup_releases()
+            print(json.dumps(mcp_release.status(), indent=2))
+            return 0
         protected = protected_release_paths()
         targets = [
             path
@@ -1720,6 +1726,15 @@ def deploy(args: argparse.Namespace) -> int:
     require_root()
     if args.environment == "production" and args.confirm != "DEPLOY_PRODUCTION":
         raise DeployError("production requires --confirm DEPLOY_PRODUCTION")
+    if getattr(args, "component", "site") == "mcp":
+        with deployment_lock():
+            result = mcp_release.deploy(
+                args.source,
+                args.environment,
+                qualify_only=args.qualify_only,
+            )
+        print(json.dumps(result, indent=2))
+        return 0
     if args.defer_public_smoke:
         raise DeployError(
             "--defer-public-smoke is retired; slot activation has no listener gap"
@@ -1887,6 +1902,11 @@ def rollback(args: argparse.Namespace) -> int:
     require_root()
     if args.environment == "production" and args.confirm != "ROLLBACK_PRODUCTION":
         raise DeployError("production requires --confirm ROLLBACK_PRODUCTION")
+    if getattr(args, "component", "site") == "mcp":
+        with deployment_lock():
+            result = mcp_release.rollback(args.environment)
+        print(json.dumps(result, indent=2))
+        return 0
     with deployment_lock():
         _recover_interrupted_activation(args.environment)
         root = ENVIRONMENTS_ROOT / args.environment
@@ -2015,7 +2035,10 @@ def _systemctl_enabled_state(unit: str) -> str:
     return result.stdout.strip() or "unknown"
 
 
-def status(_: argparse.Namespace) -> int:
+def status(args: argparse.Namespace) -> int:
+    if getattr(args, "component", "site") == "mcp":
+        print(json.dumps(mcp_release.status(), indent=2))
+        return 0
     result: dict[str, object] = {
         "runtime_lock_sha256": (
             RUNTIME_LOCK.read_text().strip() if RUNTIME_LOCK.is_file() else None
@@ -2121,19 +2144,23 @@ def parser_for(program: str) -> argparse.ArgumentParser:
         parser.add_argument("--qualify-only", action="store_true")
         parser.add_argument("--legacy-bridge", action="store_true")
         parser.add_argument("--refresh-environment", action="store_true")
+        parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=deploy)
     elif program.endswith("pwc-rollback"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
         parser.add_argument("--failed-sha")
         parser.add_argument("--confirm")
+        parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=rollback)
     elif program.endswith("pwc-cleanup"):
         parser.add_argument("--confirm")
+        parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=cleanup_command)
     elif program.endswith("pwc-reap"):
         parser.add_argument("environment", choices=ENVIRONMENTS)
         parser.set_defaults(handler=reap)
     else:
+        parser.add_argument("--component", choices=("site", "mcp"), default="site")
         parser.set_defaults(handler=status)
     return parser
 
