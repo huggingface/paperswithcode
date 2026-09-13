@@ -18,6 +18,9 @@ use crate::protocol::{
 
 pub const MAX_LOCAL_FRAME_BYTES: usize = 2 * 1024 * 1024;
 pub const MAX_ATTACH_LIFETIME_SECONDS: u64 = 2;
+const PEER_CHUNK_MAGIC: &[u8; 4] = b"PWL1";
+const PEER_CHUNK_HEADER_BYTES: usize = 20;
+const MAX_PEER_CHUNK_BYTES: usize = crate::protocol::MAX_RELAY_PAYLOAD - PEER_CHUNK_HEADER_BYTES;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalSocketError {
@@ -123,6 +126,104 @@ pub fn prepare_listener_path(path: &Path) -> Result<(), LocalSocketError> {
         std::fs::remove_file(path)?;
     }
     Ok(())
+}
+
+pub fn encode_peer_message(
+    message_id: u64,
+    message: &[u8],
+) -> Result<Vec<Vec<u8>>, LocalSocketError> {
+    if message_id == 0 || message.is_empty() || message.len() > MAX_LOCAL_FRAME_BYTES {
+        return Err(LocalSocketError::FrameRejected);
+    }
+    let total: u32 = message
+        .len()
+        .try_into()
+        .map_err(|_| LocalSocketError::FrameRejected)?;
+    let mut records = Vec::new();
+    for (index, chunk) in message.chunks(MAX_PEER_CHUNK_BYTES).enumerate() {
+        let offset = index
+            .checked_mul(MAX_PEER_CHUNK_BYTES)
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or(LocalSocketError::FrameRejected)?;
+        let mut record = Vec::with_capacity(PEER_CHUNK_HEADER_BYTES + chunk.len());
+        record.extend_from_slice(PEER_CHUNK_MAGIC);
+        record.extend_from_slice(&message_id.to_be_bytes());
+        record.extend_from_slice(&offset.to_be_bytes());
+        record.extend_from_slice(&total.to_be_bytes());
+        record.extend_from_slice(chunk);
+        records.push(record);
+    }
+    Ok(records)
+}
+
+#[derive(Debug, Default)]
+pub struct PeerMessageDecoder {
+    current_id: Option<u64>,
+    last_completed_id: u64,
+    total: usize,
+    buffered: Vec<u8>,
+}
+
+impl PeerMessageDecoder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn push(&mut self, record: &[u8]) -> Result<Option<Vec<u8>>, LocalSocketError> {
+        if record.len() <= PEER_CHUNK_HEADER_BYTES
+            || record.len() > crate::protocol::MAX_RELAY_PAYLOAD
+            || &record[..4] != PEER_CHUNK_MAGIC
+        {
+            return Err(LocalSocketError::FrameRejected);
+        }
+        let message_id = u64::from_be_bytes(copy(&record[4..12]));
+        let offset = u32::from_be_bytes(copy(&record[12..16])) as usize;
+        let total = u32::from_be_bytes(copy(&record[16..20])) as usize;
+        if message_id == 0 || total == 0 || total > MAX_LOCAL_FRAME_BYTES {
+            return Err(LocalSocketError::FrameRejected);
+        }
+        match self.current_id {
+            None if message_id
+                == self
+                    .last_completed_id
+                    .checked_add(1)
+                    .ok_or(LocalSocketError::FrameRejected)?
+                && offset == 0 =>
+            {
+                self.current_id = Some(message_id);
+                self.total = total;
+                self.buffered = Vec::with_capacity(total);
+            }
+            Some(current) if current == message_id && total == self.total => {}
+            _ => return Err(LocalSocketError::FrameRejected),
+        }
+        let chunk_len = record.len() - PEER_CHUNK_HEADER_BYTES;
+        if offset != self.buffered.len()
+            || self
+                .buffered
+                .len()
+                .checked_add(chunk_len)
+                .is_none_or(|length| length > self.total)
+        {
+            return Err(LocalSocketError::FrameRejected);
+        }
+        self.buffered
+            .extend_from_slice(&record[PEER_CHUNK_HEADER_BYTES..]);
+        if self.buffered.len() != self.total {
+            return Ok(None);
+        }
+        let complete = std::mem::take(&mut self.buffered);
+        self.last_completed_id = message_id;
+        self.current_id = None;
+        self.total = 0;
+        Ok(Some(complete))
+    }
+}
+
+fn copy<const N: usize>(value: &[u8]) -> [u8; N] {
+    let mut output = [0; N];
+    output.copy_from_slice(value);
+    output
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -281,6 +382,28 @@ mod tests {
         });
         assert!(matches!(
             read_frame(&mut server).await,
+            Err(LocalSocketError::FrameRejected)
+        ));
+    }
+
+    #[test]
+    fn peer_codec_reassembles_the_largest_local_frame_and_rejects_replay() {
+        let message = vec![8; MAX_LOCAL_FRAME_BYTES];
+        let records = encode_peer_message(1, &message).unwrap();
+        assert!(records.len() > 1);
+        assert!(
+            records
+                .iter()
+                .all(|record| record.len() <= crate::protocol::MAX_RELAY_PAYLOAD)
+        );
+        let mut decoder = PeerMessageDecoder::new();
+        let mut complete = None;
+        for record in &records {
+            complete = decoder.push(record).unwrap().or(complete);
+        }
+        assert_eq!(complete.unwrap(), message);
+        assert!(matches!(
+            decoder.push(&records[0]),
             Err(LocalSocketError::FrameRejected)
         ));
     }

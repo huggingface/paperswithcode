@@ -7,12 +7,13 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use pwc_persistent_executor_transport::local_socket::{
-    AttachmentGate, AttachmentRequest, LocalSocketError, prepare_listener_path, read_frame,
-    read_private_seed, validate_peer, validate_socket_path, write_frame,
+    AttachmentGate, AttachmentRequest, LocalSocketError, PeerMessageDecoder, encode_peer_message,
+    prepare_listener_path, read_frame, read_private_seed, validate_peer, validate_socket_path,
+    write_frame,
 };
 use pwc_persistent_executor_transport::noise::{InitiatorHandshake, NoiseIdentity, NoiseTransport};
 use pwc_persistent_executor_transport::protocol::{
-    AuthorizationSigner, FrameKind, MessageDecoder, RelayFrame, SequenceReceiver, frame_records,
+    AuthorizationSigner, FrameKind, RelayFrame, SequenceReceiver,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
@@ -57,8 +58,9 @@ struct PeerAttached {
 struct EncryptedPeer {
     transport: NoiseTransport,
     send_sequence: u64,
+    send_message_id: u64,
     receiver: SequenceReceiver,
-    decoder: MessageDecoder,
+    decoder: PeerMessageDecoder,
 }
 
 impl EncryptedPeer {
@@ -66,13 +68,19 @@ impl EncryptedPeer {
         Self {
             transport,
             send_sequence: 0,
+            send_message_id: 1,
             receiver: SequenceReceiver::new(),
-            decoder: MessageDecoder::new(),
+            decoder: PeerMessageDecoder::new(),
         }
     }
 
     async fn send(&mut self, stream: &mut UnixStream, message: &[u8]) -> Result<(), ProxyError> {
-        for record in frame_records(message)? {
+        let message_id = self.send_message_id;
+        self.send_message_id = self
+            .send_message_id
+            .checked_add(1)
+            .ok_or("peer message identity exhausted")?;
+        for record in encode_peer_message(message_id, message)? {
             let frame = RelayFrame::new(FrameKind::Data, 1, 0, self.send_sequence, 0, record)?;
             self.send_sequence = self
                 .send_sequence
@@ -90,7 +98,9 @@ impl EncryptedPeer {
         }
         let mut messages = Vec::new();
         for ordered in self.receiver.push(frame)? {
-            messages.extend(self.decoder.push(ordered.payload())?);
+            if let Some(message) = self.decoder.push(ordered.payload())? {
+                messages.push(message);
+            }
         }
         Ok(messages)
     }

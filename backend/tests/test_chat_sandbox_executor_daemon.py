@@ -18,6 +18,7 @@ from backend.chat_sandbox_worker.executor_daemon import (
     ExecutorServer,
 )
 from backend.chat_sandbox_worker.executor_protocol import (
+    MAX_REMOTE_READ_BYTES,
     PROTOCOL,
     decode_response,
     encode_request,
@@ -312,6 +313,41 @@ def test_read_is_bounded_and_descriptor_contained(tmp_path: Path) -> None:
     assert nul[1]["data_base64"] == "AA=="
     assert traversal[-1]["error"] == "invalid_workspace_path"
     assert symlink[-1]["error"] == "invalid_workspace_path"
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+def test_remote_read_limits_reject_before_broker_or_workspace_access(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    broker = _Broker()
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        worker_generation="worker-1",
+        broker_control=broker,
+        command_preexec=None,
+        remote_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+    request = {
+        "protocol": PROTOCOL,
+        "type": "read_file",
+        "request_id": "request-remote-oversized",
+        **IDENTITY,
+        "path": "missing.bin",
+        "offset": 0,
+        "max_bytes": MAX_REMOTE_READ_BYTES + 1,
+    }
+
+    assert _operation(server.socket_path, request) == []
+    assert broker.requests == []
+    assert list(workspace.iterdir()) == []
     server.shutdown()
     thread.join(timeout=2)
 

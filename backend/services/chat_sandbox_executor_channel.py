@@ -12,6 +12,10 @@ from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
+from backend.chat_sandbox_worker.executor_protocol import (
+    validate_remote_exec_request,
+    validate_remote_read_request,
+)
 from backend.services.chat_sandbox_executor import (
     ExecutorContext,
     ExecutorExecutionResult,
@@ -276,6 +280,7 @@ class PersistentSandboxExecutorChannel:
         timeout_ms: int,
         max_attach_attempts: int = 2,
     ) -> ExecutorExecutionResult:
+        validate_remote_exec_request(command, timeout_ms)
         self._require_attached()
         return await self._client.exec_resumable(
             context,
@@ -292,6 +297,7 @@ class PersistentSandboxExecutorChannel:
         offset: int,
         max_bytes: int,
     ) -> ExecutorReadResult:
+        validate_remote_read_request(path, offset, max_bytes)
         self._require_attached()
         return await self._client.read_file(
             context, path=path, offset=offset, max_bytes=max_bytes

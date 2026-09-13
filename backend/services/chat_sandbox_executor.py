@@ -87,6 +87,34 @@ class ExecutorReadResult:
     eof: bool
 
 
+class PersistentExecutorChannel(Protocol):
+    """Task-scoped executor operations over one already attached stream."""
+
+    async def health(self) -> str: ...
+
+    async def ensure_workspace(self, context: ExecutorContext) -> None: ...
+
+    async def exec_resumable(
+        self,
+        context: ExecutorContext,
+        *,
+        command: str,
+        timeout_ms: int,
+        max_attach_attempts: int = 2,
+    ) -> ExecutorExecutionResult: ...
+
+    async def read_file(
+        self,
+        context: ExecutorContext,
+        *,
+        path: str,
+        offset: int,
+        max_bytes: int,
+    ) -> ExecutorReadResult: ...
+
+    async def cancel(self, context: ExecutorContext) -> bool: ...
+
+
 class ExecutorTransportError(RuntimeError):
     """The trusted client could not prove a complete relay exchange."""
 

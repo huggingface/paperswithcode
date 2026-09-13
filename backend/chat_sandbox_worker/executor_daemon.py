@@ -30,6 +30,7 @@ from backend.chat_sandbox_worker.executor_protocol import (
     ProtocolError,
     decode_request,
     encode_response,
+    validate_remote_request,
 )
 from backend.chat_sandbox_worker.supervisor import (
     SUPERVISOR_PREFIX,
@@ -193,6 +194,7 @@ class ExecutorServer:
         terminate_grace: float = TERMINATE_GRACE_SECONDS,
         containment_proof_timeout: float = TERMINATE_GRACE_SECONDS,
         process_group_probe: Callable[[int], bool] | None = None,
+        remote_mode: bool | None = None,
     ) -> None:
         self.socket_path = socket_path
         self.state_path = state_path
@@ -214,6 +216,12 @@ class ExecutorServer:
         self.containment_proof_timeout = containment_proof_timeout
         self.process_group_probe = (
             process_group_probe or self._process_group_has_live_member
+        )
+        configured_remote_mode = os.environ.get("PWC_CHAT_EXECUTOR_REMOTE_MODE", "0")
+        if configured_remote_mode not in {"0", "1"}:
+            raise ValueError("Invalid executor remote mode")
+        self.remote_mode = (
+            configured_remote_mode == "1" if remote_mode is None else remote_mode
         )
         self._ready = threading.Event()
         self._stop = threading.Event()
@@ -288,6 +296,8 @@ class ExecutorServer:
                         else None
                     )
                     request = decode_request(request_line)
+                    if self.remote_mode:
+                        validate_remote_request(request)
                     if request["type"] != "health":
                         if bootstrap is None:
                             return

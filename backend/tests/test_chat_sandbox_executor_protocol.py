@@ -11,6 +11,7 @@ from backend.chat_sandbox_worker.executor_protocol import (
     MAX_OUTPUT_CHUNK_BYTES,
     MAX_PATH_BYTES,
     MAX_READ_BYTES,
+    MAX_REMOTE_READ_BYTES,
     MAX_TIMEOUT_MS,
     MAX_TOOL_CALL_ID_BYTES,
     PROTOCOL,
@@ -21,6 +22,7 @@ from backend.chat_sandbox_worker.executor_protocol import (
     encode_request,
     encode_response,
     validate_response_sequence,
+    validate_remote_request,
 )
 
 OPERATION_IDENTITY = {
@@ -534,6 +536,27 @@ def test_execution_frames_require_full_immutable_identity() -> None:
         encode_request(missing_turn)
     with pytest.raises(ProtocolError):
         encode_request({**request_frame, "workspace_generation": 0})
+
+
+def test_remote_read_ceiling_and_workspace_confinement_do_not_shrink_legacy() -> None:
+    request = {
+        "protocol": PROTOCOL,
+        "type": "read_file",
+        "request_id": "request-remote",
+        **OPERATION_IDENTITY,
+        "path": "notes.txt",
+        "offset": 0,
+        "max_bytes": MAX_REMOTE_READ_BYTES,
+    }
+    validate_remote_request(request)
+    assert decode_request(encode_request({**request, "max_bytes": MAX_READ_BYTES}))
+    for invalid in (
+        {**request, "max_bytes": MAX_REMOTE_READ_BYTES + 1},
+        {**request, "path": "../credential"},
+        {**request, "path": "/etc/passwd"},
+    ):
+        with pytest.raises(ProtocolError):
+            validate_remote_request(invalid)
 
 
 @pytest.mark.parametrize(

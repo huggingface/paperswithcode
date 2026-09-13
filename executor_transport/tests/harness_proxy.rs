@@ -5,13 +5,15 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
-use pwc_persistent_executor_transport::local_socket::{read_frame, write_frame};
+use pwc_persistent_executor_transport::local_socket::{
+    PeerMessageDecoder, encode_peer_message, read_frame, write_frame,
+};
 use pwc_persistent_executor_transport::noise::{
     NoiseIdentity, NoisePublicKey, PendingResponderHandshake,
 };
 use pwc_persistent_executor_transport::protocol::{
-    AuthorizationSigner, FrameKind, HandshakeBinding, KeyRing, MessageDecoder, RelayFrame,
-    SequenceReceiver, SignedAuthorization, frame_records,
+    AuthorizationSigner, FrameKind, HandshakeBinding, KeyRing, RelayFrame, SequenceReceiver,
+    SignedAuthorization,
 };
 use serde_json::{Value, json};
 use tokio::net::{UnixListener, UnixStream};
@@ -102,8 +104,9 @@ async fn harness_uses_one_bound_noise_stream_and_consumes_authorization_once() {
         .unwrap();
 
         let mut receiver = SequenceReceiver::new();
-        let mut decoder = MessageDecoder::new();
+        let mut decoder = PeerMessageDecoder::new();
         let mut send_sequence = 0;
+        let mut send_message_id = 1;
         let open =
             receive_noise_message(&mut stream, &mut transport, &mut receiver, &mut decoder).await;
         assert_eq!(
@@ -114,6 +117,7 @@ async fn harness_uses_one_bound_noise_stream_and_consumes_authorization_once() {
             &mut stream,
             &mut transport,
             &mut send_sequence,
+            &mut send_message_id,
             &serde_json::to_vec(&json!({
                 "kind": "opened",
                 "stream_id": "operation-1",
@@ -134,6 +138,7 @@ async fn harness_uses_one_bound_noise_stream_and_consumes_authorization_once() {
             &mut stream,
             &mut transport,
             &mut send_sequence,
+            &mut send_message_id,
             &serde_json::to_vec(&json!({
                 "kind": "data",
                 "stream_id": "operation-1",
@@ -262,9 +267,12 @@ async fn send_noise_message(
     stream: &mut UnixStream,
     transport: &mut pwc_persistent_executor_transport::noise::NoiseTransport,
     sequence: &mut u64,
+    message_id: &mut u64,
     message: &[u8],
 ) {
-    for record in frame_records(message).unwrap() {
+    let current_message_id = *message_id;
+    *message_id += 1;
+    for record in encode_peer_message(current_message_id, message).unwrap() {
         let frame = RelayFrame::new(FrameKind::Data, 1, 0, *sequence, 0, record).unwrap();
         *sequence += 1;
         let ciphertext = transport.encrypt(&frame.encode()).unwrap();
@@ -277,7 +285,7 @@ async fn receive_noise_message(
     stream: &mut UnixStream,
     transport: &mut pwc_persistent_executor_transport::noise::NoiseTransport,
     receiver: &mut SequenceReceiver,
-    decoder: &mut MessageDecoder,
+    decoder: &mut PeerMessageDecoder,
 ) -> Vec<u8> {
     loop {
         let ciphertext = read_frame(stream).await.unwrap();
@@ -285,8 +293,7 @@ async fn receive_noise_message(
         assert!(!contains(&ciphertext, b"eHh4eHh4eHh4eHh4"));
         let frame = RelayFrame::decode(&transport.decrypt(&ciphertext).unwrap()).unwrap();
         for ordered in receiver.push(frame).unwrap() {
-            let messages = decoder.push(ordered.payload()).unwrap();
-            if let Some(message) = messages.into_iter().next() {
+            if let Some(message) = decoder.push(ordered.payload()).unwrap() {
                 return message;
             }
         }

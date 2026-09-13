@@ -107,6 +107,7 @@ async fn launch(url: &str, source: AdmissionSource) -> Result<(), Box<dyn std::e
     let mut daemon = Command::new("python")
         .args(["-m", "backend.chat_sandbox_worker.executor_daemon"])
         .env_remove("PWC_CHAT_EXECUTOR_ADMISSION")
+        .env("PWC_CHAT_EXECUTOR_REMOTE_MODE", "1")
         .kill_on_drop(true)
         .spawn()?;
     let identity = NoiseIdentity::generate()?;

@@ -12,6 +12,7 @@ import pytest
 from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_BOOTSTRAP_PREFIX
 from backend.chat_sandbox_worker.executor_protocol import (
     PROTOCOL,
+    ProtocolError,
     decode_request,
     encode_response,
 )
@@ -78,12 +79,14 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
     socket_path = tmp_path / "harness.sock"
     connection_count = 0
     attach_count = 0
+    open_count = 0
     open_streams: set[str] = set()
     concurrent_execs: set[str] = set()
     overlap = asyncio.Event()
+    large_file = b"a" * (1024 * 1024) + b"tail"
 
     async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
-        nonlocal connection_count, attach_count
+        nonlocal connection_count, attach_count, open_count
         connection_count += 1
         try:
             while True:
@@ -104,6 +107,7 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
                     continue
                 stream_id = str(frame["stream_id"])
                 if kind == "open":
+                    open_count += 1
                     open_streams.add(stream_id)
                     await _write_frame(
                         writer, {"kind": "opened", "stream_id": stream_id}
@@ -133,6 +137,12 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
                         request, "acknowledged", operation="ensure_workspace"
                     )
                 elif request["type"] == "read_file":
+                    contents = (
+                        large_file if request["path"] == "large.bin" else b"paper"
+                    )
+                    offset = int(request["offset"])
+                    maximum = int(request["max_bytes"])
+                    chunk = contents[offset : offset + maximum]
                     response = b"".join(
                         (
                             _operation_response(
@@ -143,8 +153,8 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
                                 "read_result",
                                 path=request["path"],
                                 offset=request["offset"],
-                                data_base64=base64.b64encode(b"paper").decode(),
-                                eof=True,
+                                data_base64=base64.b64encode(chunk).decode(),
+                                eof=offset + len(chunk) >= len(contents),
                             ),
                         )
                     )
@@ -167,9 +177,6 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
                     )
                 else:
                     assert request["type"] == "exec"
-                    concurrent_execs.add(str(request["execution_id"]))
-                    if len(concurrent_execs) == 2:
-                        overlap.set()
 
                     async def finish_exec(
                         request: dict[str, object] = request,
@@ -203,8 +210,26 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
                         )
                         open_streams.discard(stream_id)
 
-                    asyncio.create_task(finish_exec())
-                    continue
+                    if request["command"] == "overlap":
+                        concurrent_execs.add(str(request["execution_id"]))
+                        if len(concurrent_execs) == 4:
+                            overlap.set()
+                        asyncio.create_task(finish_exec())
+                        continue
+                    response = b"".join(
+                        (
+                            _operation_response(
+                                request, "acknowledged", operation="exec"
+                            ),
+                            _operation_response(
+                                request,
+                                "terminal",
+                                status="completed",
+                                exit_code=0,
+                                error=None,
+                            ),
+                        )
+                    )
                 await _write_frame(
                     writer,
                     {
@@ -256,19 +281,55 @@ async def _exercise_one_attached_channel_serves_all_operations_without_modal_exe
             max_bytes=16,
         )
         assert read.data == b"paper"
-        results = await asyncio.gather(
-            channel.exec_resumable(
-                _context("exec-v1", "exec-v1"), command="pwd", timeout_ms=1_000
-            ),
-            channel.exec_resumable(
-                _context("exec-v2", "exec-v2"), command="pwd", timeout_ms=1_000
-            ),
+        first = await channel.read_file(
+            _context("large-v1", "large-v1"),
+            path="large.bin",
+            offset=0,
+            max_bytes=1024 * 1024,
         )
-        assert [result.terminal["status"] for result in results] == [
-            "completed",
-            "completed",
-        ]
+        second = await channel.read_file(
+            _context("large-v2", "large-v2"),
+            path="large.bin",
+            offset=len(first.data),
+            max_bytes=1024 * 1024,
+        )
+        assert first.eof is False
+        assert second.eof is True
+        assert first.data + second.data == large_file
+        for index in range(10):
+            sequential = await channel.exec_resumable(
+                _context(f"sequential-{index}", f"sequential-{index}"),
+                command="true",
+                timeout_ms=1_000,
+            )
+            assert sequential.terminal["status"] == "completed"
+        results = await asyncio.gather(
+            *(
+                channel.exec_resumable(
+                    _context(f"exec-{index}", f"exec-{index}"),
+                    command="overlap",
+                    timeout_ms=1_000,
+                )
+                for index in range(4)
+            )
+        )
+        assert [result.terminal["status"] for result in results] == ["completed"] * 4
         assert await channel.cancel(_context("cancel-v1", "cancel-v1")) is True
+        previous_open_count = open_count
+        with pytest.raises(ProtocolError):
+            await channel.exec_resumable(
+                _context("invalid-v1", "invalid-v1"),
+                command="x" * (64 * 1024 + 1),
+                timeout_ms=1_000,
+            )
+        with pytest.raises(ProtocolError):
+            await channel.read_file(
+                _context("invalid-v2", "invalid-v2"),
+                path="../credential",
+                offset=0,
+                max_bytes=1,
+            )
+        assert open_count == previous_open_count
         assert connection_count == 1
         assert attach_count == 1
         assert not open_streams
