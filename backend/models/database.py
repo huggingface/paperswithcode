@@ -2682,6 +2682,7 @@ class ChatTurnReservation(Base):
         ForeignKey("chat_turn_admission_budgets.environment", ondelete="RESTRICT"),
         nullable=False,
     )
+    transport: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy")
     state: Mapped[str] = mapped_column(String(24), nullable=False)
     revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     reserved_turns: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
@@ -2702,6 +2703,10 @@ class ChatTurnReservation(Base):
             name="chat_turn_reservations_state_check",
         ),
         CheckConstraint(
+            "transport IN ('legacy','persistent')",
+            name="chat_turn_reservations_transport_check",
+        ),
+        CheckConstraint(
             "revision > 0 AND reserved_turns = 1 AND reserved_environments = 1 "
             "AND reserved_operations = 4 AND reserved_microusd >= 0 AND "
             "(actual_microusd IS NULL OR actual_microusd >= 0)",
@@ -2716,6 +2721,101 @@ class ChatTurnReservation(Base):
             sqlite_where=text("state IN ('reserved','dispatched')"),
         ),
         Index("idx_chat_turn_reservations_state", "environment", "state"),
+    )
+
+
+class ChatExecutorTransportCircuit(Base):
+    """Shared rollout circuit state for one deployed environment."""
+
+    __tablename__ = "chat_executor_transport_circuits"
+
+    environment: Mapped[str] = mapped_column(String(16), primary_key=True)
+    state: Mapped[str] = mapped_column(String(24), nullable=False, default="closed")
+    revision: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    epoch: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    consecutive_failures: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    failure_window_started_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    opened_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    open_until: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    canary_owner: Mapped[Optional[str]] = mapped_column(String(128))
+    canary_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    half_open_successes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    security_reason: Mapped[Optional[str]] = mapped_column(String(64))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    __table_args__ = (
+        CheckConstraint(
+            "environment IN ('staging','production')",
+            name="chat_executor_transport_circuit_environment_check",
+        ),
+        CheckConstraint(
+            "state IN ('closed','open','half_open','security_hold')",
+            name="chat_executor_transport_circuit_state_check",
+        ),
+        CheckConstraint(
+            "revision > 0 AND epoch >= 0 AND consecutive_failures >= 0 "
+            "AND half_open_successes >= 0",
+            name="chat_executor_transport_circuit_nonnegative_check",
+        ),
+    )
+
+
+class ChatExecutorTransportAlert(Base):
+    """Content-free durable outbox row for one circuit transition epoch."""
+
+    __tablename__ = "chat_executor_transport_alerts"
+
+    event_id: Mapped[str] = mapped_column(String(160), primary_key=True)
+    environment: Mapped[str] = mapped_column(
+        String(16),
+        ForeignKey("chat_executor_transport_circuits.environment", ondelete="CASCADE"),
+        nullable=False,
+    )
+    epoch: Mapped[int] = mapped_column(Integer, nullable=False)
+    transition: Mapped[str] = mapped_column(String(24), nullable=False)
+    delivery_state: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="pending"
+    )
+    claim_owner: Mapped[Optional[str]] = mapped_column(String(128))
+    claim_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True)
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    acknowledged_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    __table_args__ = (
+        UniqueConstraint(
+            "environment",
+            "epoch",
+            "transition",
+            name="uq_chat_executor_transport_alert_epoch",
+        ),
+        CheckConstraint(
+            "environment IN ('staging','production') AND epoch > 0 AND attempts >= 0",
+            name="chat_executor_transport_alert_scope_check",
+        ),
+        CheckConstraint(
+            "transition IN ('open','security_hold','recovered') "
+            "AND delivery_state IN ('pending','claimed','acknowledged')",
+            name="chat_executor_transport_alert_state_check",
+        ),
+        CheckConstraint(
+            "(delivery_state = 'claimed') = "
+            "(claim_owner IS NOT NULL AND claim_expires_at IS NOT NULL)",
+            name="chat_executor_transport_alert_claim_check",
+        ),
     )
 
 

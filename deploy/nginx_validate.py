@@ -200,6 +200,11 @@ def validate(production: str, staging: str) -> list[str]:
             failures.append(f"{environment} executor hostname is missing")
         if f"/etc/letsencrypt/live/{hostname}/fullchain.pem" not in config:
             failures.append(f"{environment} executor TLS certificate is missing")
+        executor_server = config.split(f"server_name {hostname};", 1)[-1].split(
+            "\nserver {", 1
+        )[0]
+        if "ssl_protocols TLSv1.3;" not in executor_server:
+            failures.append(f"{environment} executor must require TLS 1.3")
         block = location_block(config, "location = /v1/environment")
         for requirement in (
             "proxy_pass http://unix:/run/pwc-chat-executor/chat-executor-rendezvous.sock:;",

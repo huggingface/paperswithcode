@@ -41,6 +41,7 @@ class TurnReservation:
     turn_id: uuid.UUID
     request_id: str
     owner_id: str
+    transport: str
     revision: int
     state: str
     reserved_microusd: int
@@ -90,8 +91,11 @@ class ChatTurnAdmissionService:
         owner_id: str,
         reserve_microusd: int,
         now: datetime,
+        transport: str = "legacy",
     ) -> TurnReservation:
-        self._validate_request(turn_id, request_id, owner_id, reserve_microusd, now)
+        self._validate_request(
+            turn_id, request_id, owner_id, reserve_microusd, now, transport
+        )
         existing = db.scalar(
             select(ChatTurnReservation).where(
                 ChatTurnReservation.request_id == request_id
@@ -102,6 +106,7 @@ class ChatTurnAdmissionService:
                 existing.turn_id != turn_id
                 or existing.owner_id != owner_id
                 or existing.environment != self.environment
+                or existing.transport != transport
             ):
                 raise ValueError("Turn reservation identity was reused")
             return self._result(existing)
@@ -122,6 +127,7 @@ class ChatTurnAdmissionService:
             request_id=request_id,
             owner_id=owner_id,
             environment=self.environment,
+            transport=transport,
             state="reserved",
             revision=1,
             reserved_turns=1,
@@ -287,6 +293,7 @@ class ChatTurnAdmissionService:
         owner_id: str,
         reserve_microusd: int,
         now: datetime,
+        transport: str,
     ) -> None:
         if (
             not isinstance(turn_id, uuid.UUID)
@@ -296,6 +303,7 @@ class ChatTurnAdmissionService:
             or len(owner_id) > 255
             or reserve_microusd < 0
             or now.tzinfo is None
+            or transport not in {"legacy", "persistent"}
         ):
             raise ValueError("Turn reservation request is invalid")
 
@@ -305,6 +313,7 @@ class ChatTurnAdmissionService:
             turn_id=row.turn_id,
             request_id=row.request_id,
             owner_id=row.owner_id,
+            transport=row.transport,
             revision=row.revision,
             state=row.state,
             reserved_microusd=row.reserved_microusd,

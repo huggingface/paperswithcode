@@ -11,6 +11,7 @@ pub const RECONNECT_TOKEN_TTL_MS: u64 = 45_000;
 pub const REGISTRATION_TOKEN_TTL_MS: u64 = 60_000;
 pub const LIVENESS_TOKEN_TTL_MS: u64 = 2_000;
 pub const MAX_PREVIOUS_KEY_OVERLAP_MS: u64 = 24 * 60 * 60 * 1_000;
+pub const MAX_KEY_LIFETIME_MS: u64 = 30 * 24 * 60 * 60 * 1_000;
 
 const SIGNATURE_DOMAIN: &[u8] = b"pwc-rendezvous-admission/v1";
 
@@ -101,7 +102,7 @@ impl AdmissionSigner {
         not_after_ms: u64,
     ) -> Result<Self, AdmissionError> {
         validate_identifier(key_id)?;
-        if not_after_ms < not_before_ms {
+        if not_after_ms < not_before_ms || not_after_ms - not_before_ms > MAX_KEY_LIFETIME_MS {
             return Err(AdmissionError::KeyRejected);
         }
         Ok(Self {
@@ -157,7 +158,7 @@ impl AdmissionVerificationKey {
     ) -> Result<Self, AdmissionError> {
         validate_identifier(key_id)?;
         VerifyingKey::from_bytes(&public_key).map_err(|_| AdmissionError::KeyRejected)?;
-        if not_after_ms < not_before_ms {
+        if not_after_ms < not_before_ms || not_after_ms - not_before_ms > MAX_KEY_LIFETIME_MS {
             return Err(AdmissionError::KeyRejected);
         }
         Ok(Self {

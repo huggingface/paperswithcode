@@ -12,7 +12,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.database import ChatMessageRecord
+from backend.models.database import ChatExecutorTransportAlert, ChatMessageRecord
 from backend.services.autonomous_operations_repository import (
     AutonomousOperationsRepository,
 )
@@ -86,6 +86,113 @@ LIFECYCLE_ALERT_NAMES = frozenset(
     }
 )
 MAX_LIFECYCLE_VALUE = 16 * 1024 * 1024
+EXECUTOR_ALERT_CLAIM_SECONDS = 60
+EXECUTOR_ALERT_RETRY_SECONDS = 60
+
+
+def _alert_now(db: Session, test_now: datetime | None) -> datetime:
+    if test_now is not None and db.get_bind().dialect.name == "sqlite":
+        return test_now
+    value = db.scalar(select(func.current_timestamp()))
+    if value is None:
+        raise RuntimeError("executor transport alert clock is unavailable")
+    return value
+
+
+def claim_executor_transport_alert(
+    db: Session, *, owner: str, now: datetime | None = None
+) -> ChatExecutorTransportAlert | None:
+    """Fence one pending/expired outbox row for immediate or minute retry delivery."""
+
+    if not owner or len(owner) > 128:
+        raise ValueError("executor transport alert owner is invalid")
+    observed = _alert_now(db, now)
+    row = db.scalar(
+        select(ChatExecutorTransportAlert)
+        .where(
+            ChatExecutorTransportAlert.delivery_state != "acknowledged",
+            ChatExecutorTransportAlert.next_attempt_at <= observed,
+            (
+                (ChatExecutorTransportAlert.delivery_state == "pending")
+                | (ChatExecutorTransportAlert.claim_expires_at <= observed)
+            ),
+        )
+        .order_by(
+            ChatExecutorTransportAlert.created_at, ChatExecutorTransportAlert.event_id
+        )
+        .limit(1)
+        .with_for_update(skip_locked=True)
+    )
+    if row is None:
+        return None
+    row.delivery_state = "claimed"
+    row.claim_owner = owner
+    row.claim_expires_at = observed + timedelta(seconds=EXECUTOR_ALERT_CLAIM_SECONDS)
+    row.attempts += 1
+    db.flush()
+    return row
+
+
+def settle_executor_transport_alert(
+    db: Session,
+    *,
+    event_id: str,
+    owner: str,
+    acknowledged: bool,
+    now: datetime | None = None,
+) -> bool:
+    """Acknowledge exactly once or return a failed delivery to minute retry."""
+
+    observed = _alert_now(db, now)
+    row = db.scalar(
+        select(ChatExecutorTransportAlert)
+        .where(ChatExecutorTransportAlert.event_id == event_id)
+        .with_for_update()
+    )
+    if row is None or row.delivery_state == "acknowledged":
+        return False
+    if row.delivery_state != "claimed" or row.claim_owner != owner:
+        raise RuntimeError("executor transport alert claim is stale")
+    row.claim_owner = None
+    row.claim_expires_at = None
+    if acknowledged:
+        row.delivery_state = "acknowledged"
+        row.acknowledged_at = observed
+    else:
+        row.delivery_state = "pending"
+        row.next_attempt_at = observed + timedelta(seconds=EXECUTOR_ALERT_RETRY_SECONDS)
+    db.flush()
+    return True
+
+
+def executor_transport_alert_event(
+    *, environment: str, epoch: int, transition: str, now: datetime
+) -> dict[str, Any]:
+    """Build the bounded, content-free event for a durably claimed epoch."""
+
+    if environment not in {"staging", "production"} or epoch < 1:
+        raise ValueError("executor transport alert scope is invalid")
+    if transition not in {"open", "security_hold", "recovered"}:
+        raise ValueError("executor transport alert transition is invalid")
+    recovered = transition == "recovered"
+    return {
+        "id": f"executor-circuit:{environment}:{epoch}:{transition}",
+        "signal": (
+            "chat_executor_transport_recovered"
+            if recovered
+            else "chat_executor_transport_circuit_open"
+        ),
+        "severity": "recovery" if recovered else "critical",
+        "count": 1,
+        "classifications": {f"executor_transport_{transition}": 1},
+        "window_start": now.isoformat(),
+        "window_end": now.isoformat(),
+        "primary_delivery_state": "pending",
+        "fallback_delivery_state": "pending",
+        "primary_attempts": 0,
+        "fallback_attempts": 0,
+        "created_at": now.isoformat(),
+    }
 
 
 def reliability_alert_classifications(

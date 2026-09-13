@@ -1,6 +1,7 @@
 use pwc_persistent_executor_transport::admission::{
     AdmissionClaims, AdmissionError, AdmissionPurpose, AdmissionSigner, AdmissionVerifier,
-    LifecycleClass, MAX_PREAUTH_FRAME_BYTES, PREAUTH_DEADLINE_MS, RECONNECT_TOKEN_TTL_MS,
+    LifecycleClass, MAX_KEY_LIFETIME_MS, MAX_PREAUTH_FRAME_BYTES, PREAUTH_DEADLINE_MS,
+    RECONNECT_TOKEN_TTL_MS,
 };
 
 fn claims(now_ms: u64) -> AdmissionClaims {
@@ -99,6 +100,18 @@ fn malformed_or_wrong_ttl_claims_never_produce_a_signed_frame() {
     let mut invalid = claims(1_000);
     invalid.expires_at_ms -= 1;
     assert_eq!(signer.sign(invalid), Err(AdmissionError::ClaimsRejected));
+}
+
+#[test]
+fn signing_keys_are_bounded_to_exactly_thirty_days() {
+    assert!(
+        AdmissionSigner::from_seed("issuer-v1", [3; 32], 1_000, 1_000 + MAX_KEY_LIFETIME_MS)
+            .is_ok()
+    );
+    assert!(
+        AdmissionSigner::from_seed("issuer-v1", [3; 32], 1_000, 1_001 + MAX_KEY_LIFETIME_MS,)
+            .is_err()
+    );
 }
 
 #[test]

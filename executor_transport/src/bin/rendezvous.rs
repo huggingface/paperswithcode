@@ -136,6 +136,10 @@ async fn serve(
     if config.current_protocol_version == 0 {
         return Err("rendezvous protocol version rejected".into());
     }
+    let now_ms = unix_ms()?;
+    if now_ms < config.current_key.not_before_ms || now_ms > config.current_key.not_after_ms {
+        return Err("rendezvous current key rejected".into());
+    }
     let current = verification_key(&config.current_key)?;
     let previous = config
         .previous_key

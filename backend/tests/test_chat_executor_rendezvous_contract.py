@@ -12,6 +12,7 @@ from backend.chat_sandbox_worker.executor_release_manifest import (
 )
 from backend.chat_sandbox_worker import publish_image
 from backend.scripts.rollback_chat_executor_image import run as rollback_image
+from backend.scripts.revoke_chat_executor_key import run as revoke_key
 from backend.services.chat_executor_admission import (
     AdmissionSigningKey,
     sign_admission,
@@ -129,6 +130,7 @@ def test_rendezvous_has_no_tcp_listener_and_nginx_uses_exact_unix_route() -> Non
                 else "staging.paperswithcode.co.conf"
             )
         ).read_text()
+        assert "ssl_protocols TLSv1.3;" in nginx
         assert "location = /v1/environment" in nginx
         assert "proxy_read_timeout 20s" in nginx
         assert "proxy_set_header X-PWC-Network-Source $remote_addr" in nginx
@@ -169,4 +171,33 @@ def test_image_rollback_cli_is_root_only_and_requires_exact_confirmation() -> No
         REPOSITORY / "backend/scripts/rollback_chat_executor_image.py"
     ).read_text()
     assert "ChatExecutorRegistry" in source
+    assert "FastAPI" not in source
+
+
+def test_key_revocation_cli_is_root_only_and_accepts_no_raw_key_material() -> None:
+    arguments = [
+        "--environment",
+        "staging",
+        "--cell",
+        "cell-v1",
+        "--key-id",
+        "displayed-key-v1",
+        "--reason-class",
+        "credential_exposure",
+        "--actor",
+        "operator@example.test",
+        "--request-id",
+        "00000000-0000-4000-8000-000000000001",
+        "--confirm",
+        "REVOKE wrong-key",
+    ]
+    with pytest.raises(PermissionError):
+        revoke_key(arguments, effective_uid=1000)
+    with pytest.raises(ValueError, match="confirmation"):
+        revoke_key(arguments, effective_uid=0)
+
+    source = (REPOSITORY / "backend/scripts/revoke_chat_executor_key.py").read_text()
+    assert "ChatExecutorRegistry" in source
+    assert "private-key" not in source
+    assert "raw-key" not in source
     assert "FastAPI" not in source

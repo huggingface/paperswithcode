@@ -573,6 +573,8 @@ class Settings(BaseSettings):
     chat_turn_event_journal_schema_enabled: bool = Field(default=False)
     chat_turn_event_replay_grace_seconds: int = Field(default=300, ge=30, le=3600)
     chat_turn_event_cleanup_batch_size: int = Field(default=100, ge=1, le=100)
+    chat_executor_remote_transport_enabled: bool = Field(default=False)
+    chat_executor_max_parallel_operations: Literal[4] = Field(default=4)
     chat_modal_image_version: str = Field(default="", max_length=255)
     chat_pwc_cli_version: str = Field(default="", max_length=64)
     chat_worker_contract_version: str = Field(default="", max_length=64)

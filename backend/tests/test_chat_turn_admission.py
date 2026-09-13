@@ -117,6 +117,31 @@ def test_model_only_turn_reserves_potential_capacity_without_provider_work(servi
     assert row.reserved_operations == 4
 
 
+def test_transport_choice_is_persisted_once_at_turn_boundary(service, db):
+    turn_id = uuid.uuid4()
+    persistent = service.reserve(
+        db,
+        turn_id=turn_id,
+        request_id="transport-choice",
+        owner_id="owner-choice",
+        reserve_microusd=1,
+        now=NOW,
+        transport="persistent",
+    )
+
+    assert persistent.transport == "persistent"
+    with pytest.raises(ValueError, match="identity was reused"):
+        service.reserve(
+            db,
+            turn_id=turn_id,
+            request_id="transport-choice",
+            owner_id="owner-choice",
+            reserve_microusd=1,
+            now=NOW,
+            transport="legacy",
+        )
+
+
 def test_spend_exhaustion_rejects_unreserved_work(service, db):
     _reserve(service, db, 1, amount=1_000_000)
 

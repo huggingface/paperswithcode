@@ -42,6 +42,8 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_chat_sandbox_runtime.sql` | Staging-only additive immutable chat backend selection, runtime provenance, sandbox leases, and hash-only turn capabilities; run as PostgreSQL superuser with `search_path=staging,public` before activating the bridge |
 | `add_chat_external_worker_registry.sql` | Additive durable identity, capacity, heartbeat, graceful-drain state, and fencing generations for trusted external Pi workers; apply to staging before enabling the external-worker shadow supervisor |
 | `add_chat_turn_jobs.sql` | Additive durable per-turn ownership, immediate admission, idempotency, worker lease fencing, and interruption state; apply to staging before enabling `PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED` |
+| `add_chat_turn_reservations.sql` | Environment-global 32-turn/128-operation capacity and bounded incremental spend reservations for persistent executor admission |
+| `add_chat_executor_transport_circuit.sql` | Immutable per-turn legacy/persistent selection plus a shared rollout circuit and durable alert-epoch claims; apply after turn reservations and before enabling remote transport |
 | `add_chat_turn_terminal_cleanup_index.sql` | Add the partial terminal replay-journal cleanup index before enabling durable terminal maintenance |
 | `add_chat_turn_latency.sql` | Staging-only, content-free per-turn server/browser latency telemetry with 30-day application retention; apply after `add_chat_sandbox_runtime.sql` |
 | `add_chat_sandbox_pool.sql` | Staging-only blank-worker pool lifecycle, generation binding, resource/cost accounting, and 35-day audit state; apply with `search_path=staging,public` before deploying pool-aware readiness |

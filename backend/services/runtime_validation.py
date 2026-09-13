@@ -1327,6 +1327,34 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
         "bash": settings.chat_remote_bash_enabled,
         "read": settings.chat_remote_read_enabled,
     }
+    if settings.chat_executor_remote_transport_enabled:
+        from backend.chat_sandbox_worker.executor_protocol import (
+            MAX_COMMAND_BYTES,
+            MAX_PATH_BYTES,
+            MAX_REMOTE_READ_BYTES,
+            MAX_TIMEOUT_MS,
+        )
+
+        if not settings.chat_external_pi_admission_enabled:
+            raise RuntimeError(
+                "remote executor transport requires external Pi admission"
+            )
+        if settings.chat_workspace_snapshots_enabled:
+            raise RuntimeError("remote executor transport rejects snapshots")
+        if (
+            settings.chat_executor_max_parallel_operations != 4
+            or settings.chat_tool_result_max_bytes != 24 * 1024
+            or settings.chat_turn_tool_output_max_bytes != 96 * 1024
+            or settings.chat_blank_pool_min_remaining_seconds != 240
+            or settings.chat_persistent_sandbox_lifetime_seconds != 86_400
+            or settings.chat_blank_pool_rotate_before_seconds != 3_600
+            or settings.chat_bash_timeout_seconds != 30
+            or MAX_COMMAND_BYTES != 64 * 1024
+            or MAX_PATH_BYTES != 4 * 1024
+            or MAX_TIMEOUT_MS != 30_000
+            or MAX_REMOTE_READ_BYTES != 1024 * 1024
+        ):
+            raise RuntimeError("remote executor transport limits are inconsistent")
     if any(worker_switches.values()):
         try:
             external_worker_endpoints(settings)
