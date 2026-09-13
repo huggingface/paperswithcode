@@ -27,6 +27,9 @@ PAPER_MARKDOWN_MANIFEST_MAX_BYTES = 4096
 PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES = 256
 PAPER_MARKDOWN_CHUNK_CACHE_BYTES = 16 * 1024 * 1024
 PAPER_MARKDOWN_CHUNK_CACHE_SECONDS = 3600
+PAPER_MARKDOWN_MANIFEST_CACHE_ENTRIES = 512
+PAPER_MARKDOWN_MANIFEST_CACHE_SECONDS = 60
+PAPER_MARKDOWN_MANIFEST_STALE_SECONDS = 300
 _SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -128,10 +131,48 @@ class _ChunkCache:
             self._bytes = 0
 
 
+class _ManifestKeyCache:
+    def __init__(self) -> None:
+        self._values: OrderedDict[object, tuple[float, float, str]] = OrderedDict()
+        self._lock = threading.Lock()
+
+    def get(self, key: object, *, allow_stale: bool = False) -> str | None:
+        now = time.monotonic()
+        with self._lock:
+            cached = self._values.get(key)
+            if cached is None:
+                return None
+            fresh_until, stale_until, value = cached
+            if stale_until <= now:
+                del self._values[key]
+                return None
+            if fresh_until <= now and not allow_stale:
+                return None
+            self._values.move_to_end(key)
+            return value
+
+    def put(self, key: object, value: str) -> None:
+        now = time.monotonic()
+        with self._lock:
+            self._values.pop(key, None)
+            self._values[key] = (
+                now + PAPER_MARKDOWN_MANIFEST_CACHE_SECONDS,
+                now + PAPER_MARKDOWN_MANIFEST_STALE_SECONDS,
+                value,
+            )
+            while len(self._values) > PAPER_MARKDOWN_MANIFEST_CACHE_ENTRIES:
+                self._values.popitem(last=False)
+
+    def clear(self) -> None:
+        with self._lock:
+            self._values.clear()
+
+
 _paper_markdown_chunk_cache = _ChunkCache(
     maximum_entries=PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES,
     maximum_bytes=PAPER_MARKDOWN_CHUNK_CACHE_BYTES,
 )
+_paper_markdown_manifest_key_cache = _ManifestKeyCache()
 
 
 def normalize_markdown_arxiv_id(value: str) -> str:
@@ -324,18 +365,12 @@ def read_paper_markdown_bounded(
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
 
-    filesystem = HfFileSystem(token=token)
-    try:
-        manifest = _read_markdown_manifest(
-            filesystem,
-            bucket_id=bucket_id.strip(),
-            paper_id=normalized,
-            source=resolved_source,
-        )
-    except PaperMarkdownNotFoundError:
-        bucket_key = paper_markdown_bucket_key(normalized, source=resolved_source)
-    else:
-        bucket_key = manifest.content_key
+    bucket_key = _resolve_bounded_markdown_key(
+        paper_id=normalized,
+        source=resolved_source,
+        bucket_id=bucket_id.strip(),
+        token=token,
+    )
 
     raw, truncated = _read_paper_markdown_bytes(
         bucket_key,
@@ -407,6 +442,35 @@ def _read_markdown_manifest(
         content_key=content_key,
         size_bytes=size_bytes,
     )
+
+
+def _resolve_bounded_markdown_key(
+    *, paper_id: str, source: str, bucket_id: str, token: str | None
+) -> str:
+    paper_key = f"external/{paper_id}" if source == "external" else paper_id
+    cache_key = (bucket_id, paper_key)
+    cached = _paper_markdown_manifest_key_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    filesystem = HfFileSystem(token=token)
+    try:
+        manifest = _read_markdown_manifest(
+            filesystem,
+            bucket_id=bucket_id,
+            paper_id=paper_id,
+            source=source,
+        )
+        bucket_key = manifest.content_key
+    except PaperMarkdownNotFoundError:
+        bucket_key = paper_markdown_bucket_key(paper_id, source=source)
+    except PaperMarkdownStorageError:
+        stale = _paper_markdown_manifest_key_cache.get(cache_key, allow_stale=True)
+        if stale is None:
+            raise
+        return stale
+    _paper_markdown_manifest_key_cache.put(cache_key, bucket_key)
+    return bucket_key
 
 
 def _complete_utf8_prefix(raw: bytes, limit: int) -> bytes:

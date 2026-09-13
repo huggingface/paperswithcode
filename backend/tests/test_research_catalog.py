@@ -12,6 +12,17 @@ from backend.routers import research_catalog
 from backend.services import paper_markdown_service
 
 
+@pytest.fixture(autouse=True)
+def _clear_markdown_caches():
+    paper_markdown_service._paper_markdown_manifest_key_cache.clear()
+    paper_markdown_service._paper_markdown_chunk_cache.clear()
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+    yield
+    paper_markdown_service._paper_markdown_manifest_key_cache.clear()
+    paper_markdown_service._paper_markdown_chunk_cache.clear()
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+
 def _versioned_files(data: bytes, paper_key: str = "1706.03762") -> dict[str, bytes]:
     digest = hashlib.sha256(data).hexdigest()
     source = "external" if paper_key.startswith("external/") else "arxiv"
@@ -240,6 +251,18 @@ def test_legacy_paper_read_sanitizes_storage_errors(monkeypatch):
     assert "secret-object" not in response.text
 
 
+def test_legacy_paper_read_reports_storage_errors_without_cache(monkeypatch):
+    def fake_read(*_args, **_kwargs):
+        raise paper_markdown_service.PaperMarkdownStorageError("unavailable")
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_bounded", fake_read)
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/research/papers/1706.03762/read")
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+
+
 def test_bounded_markdown_read_never_requests_the_full_object(monkeypatch):
     raw = ("α" * 20).encode()
     reads: list[int] = []
@@ -367,6 +390,54 @@ def test_bounded_markdown_read_uses_manifest_revision_over_mutable_alias(monkeyp
         paper_markdown_service._read_paper_markdown_bytes.cache_clear()
 
     assert result == (versioned.decode(), False)
+
+
+def test_bounded_markdown_read_uses_stale_resolution_during_manifest_outage(
+    monkeypatch,
+):
+    now = 0.0
+    manifest_reads = 0
+
+    class FakeFileSystem:
+        def __init__(self, *, token):
+            assert token == "private-token"
+
+        def open(self, path, mode, *, block_size):
+            nonlocal manifest_reads
+            assert mode == "rb"
+            assert block_size == 0
+            if path.endswith("/_content/manifests/1706.03762.json"):
+                manifest_reads += 1
+                if manifest_reads == 1:
+                    raise FileNotFoundError(path)
+                raise OSError("temporary outage")
+            assert path.endswith("/1706/1706.03762.md")
+            return io.BytesIO(b"# Cached compatibility paper\n")
+
+    monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
+    monkeypatch.setattr(paper_markdown_service.time, "monotonic", lambda: now)
+    paper_markdown_service._paper_markdown_manifest_key_cache.clear()
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+    try:
+        first = paper_markdown_service.read_paper_markdown_bounded(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            max_bytes=1024,
+        )
+        now = paper_markdown_service.PAPER_MARKDOWN_MANIFEST_CACHE_SECONDS + 1
+        second = paper_markdown_service.read_paper_markdown_bounded(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            max_bytes=1024,
+        )
+    finally:
+        paper_markdown_service._paper_markdown_manifest_key_cache.clear()
+        paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+    assert first == second == ("# Cached compatibility paper\n", False)
+    assert manifest_reads == 2
 
 
 def test_versioned_markdown_chunk_reads_bounded_utf8_bytes(monkeypatch):

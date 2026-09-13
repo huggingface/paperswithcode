@@ -163,6 +163,12 @@ def read_paper(
             token=settings.hf_token or None,
             max_bytes=_MARKDOWN_MAX_BYTES,
         )
+    except PaperMarkdownStorageError as error:
+        raise HTTPException(
+            status_code=503,
+            detail=str(error),
+            headers={"Cache-Control": "no-store"},
+        ) from error
     except ValueError as error:
         raise HTTPException(
             status_code=404,

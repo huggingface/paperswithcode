@@ -454,6 +454,9 @@ def rollback(environment: str) -> dict[str, object]:
         _atomic_pointer(current, MCP_ENVIRONMENTS / environment / "current")
         _atomic_pointer(previous, MCP_ENVIRONMENTS / environment / "previous")
         _run(["systemctl", "restart", f"paperswithcode-mcp@{environment}.service"])
+        restored = validate_release(current)
+        _health(MCP_PORTS[environment], str(restored["package_version"]))
+        _smoke(MCP_PORTS[environment], restored)
         raise
     return {"component": "mcp", "environment": environment, "release": previous.name}
 

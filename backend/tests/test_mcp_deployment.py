@@ -183,6 +183,38 @@ def test_rollback_swaps_current_and_previous(tmp_path, monkeypatch):
     assert mcp_release._pointer("staging", "previous") == current
 
 
+def test_failed_rollback_requalifies_restored_release(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
+    monkeypatch.setattr(mcp_release, "MCP_PORTS", {"staging": 8003})
+    previous = _release(tmp_path, "a" * 16)
+    current = _release(tmp_path, "b" * 16)
+    root = mcp_release.MCP_ENVIRONMENTS / "staging"
+    mcp_release._atomic_pointer(current, root / "current")
+    mcp_release._atomic_pointer(previous, root / "previous")
+    monkeypatch.setattr(mcp_release, "_run", lambda *args, **kwargs: None)
+    health_versions = []
+    smoke_releases = []
+    monkeypatch.setattr(
+        mcp_release,
+        "_health",
+        lambda _port, version: health_versions.append(version),
+    )
+
+    def smoke(_port, manifest):
+        smoke_releases.append(manifest["release_id"])
+        if len(smoke_releases) == 1:
+            raise mcp_release.McpReleaseError("rollback failed")
+
+    monkeypatch.setattr(mcp_release, "_smoke", smoke)
+    with pytest.raises(mcp_release.McpReleaseError, match="rollback failed"):
+        mcp_release.rollback("staging")
+
+    assert mcp_release._pointer("staging", "current") == current
+    assert mcp_release._pointer("staging", "previous") == previous
+    assert health_versions == ["0.1.0", "0.1.0"]
+    assert smoke_releases == [previous.name, current.name]
+
+
 def test_cleanup_retains_recent_and_pointed_releases(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_release, "MCP_ROOT", tmp_path)
     monkeypatch.setattr(mcp_release, "MCP_RELEASES", tmp_path / "releases")
