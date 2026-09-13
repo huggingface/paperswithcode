@@ -17,7 +17,8 @@ use tokio_tungstenite::tungstenite::Message;
 use url::Url;
 use uuid::Uuid;
 
-const ROUTE: &str = "/v1/environment";
+const ROUTE_PREFIX: &str = "/v1/generations/";
+const ROUTE_SUFFIX: &str = "/environment";
 const PRODUCTION_HOST: &str = "chat-executor.paperswithcode.co";
 const STAGING_HOST: &str = "chat-executor.staging.paperswithcode.co";
 const HEARTBEAT: Duration = Duration::from_secs(5);
@@ -78,7 +79,7 @@ fn validate_url(value: &str) -> Result<Url, &'static str> {
     if url.scheme() != "wss"
         || !matches!(url.host_str(), Some(PRODUCTION_HOST) | Some(STAGING_HOST))
         || url.port().is_some()
-        || url.path() != ROUTE
+        || !valid_generation_route(url.path())
         || url.query().is_some()
         || url.fragment().is_some()
         || !url.username().is_empty()
@@ -87,6 +88,18 @@ fn validate_url(value: &str) -> Result<Url, &'static str> {
         return Err("rendezvous URL rejected");
     }
     Ok(url)
+}
+
+fn valid_generation_route(path: &str) -> bool {
+    path.strip_prefix(ROUTE_PREFIX)
+        .and_then(|value| value.strip_suffix(ROUTE_SUFFIX))
+        .is_some_and(|generation| {
+            !generation.is_empty()
+                && generation.len() <= 20
+                && generation.bytes().all(|byte| byte.is_ascii_digit())
+                && generation != "0"
+                && !generation.starts_with('0')
+        })
 }
 
 enum AdmissionSource {

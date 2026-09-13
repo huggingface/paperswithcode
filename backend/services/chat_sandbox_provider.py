@@ -57,8 +57,8 @@ class SandboxLaunchMode(StrEnum):
 
 
 EXECUTOR_RENDEZVOUS_URLS = {
-    "production": "wss://chat-executor.paperswithcode.co/v1/environment",
-    "staging": "wss://chat-executor.staging.paperswithcode.co/v1/environment",
+    "production": "wss://chat-executor.paperswithcode.co",
+    "staging": "wss://chat-executor.staging.paperswithcode.co",
 }
 MAX_EXECUTOR_ADMISSION_BYTES = 2_048
 
@@ -68,6 +68,16 @@ class ExecutorLaunchBundle:
     """One daemon-only, short-lived registration capability."""
 
     admission: bytes
+    shard_generation: int
+
+    def rendezvous_url(self, environment: str) -> str:
+        base = EXECUTOR_RENDEZVOUS_URLS.get(environment)
+        if base is None or self.shard_generation <= 0:
+            raise SandboxError(
+                "sandbox_executor_generation_invalid",
+                "Sandbox executor generation is invalid",
+            )
+        return f"{base}/v1/generations/{self.shard_generation}/environment"
 
     def encoded_admission(self) -> str:
         if not self.admission or len(self.admission) > MAX_EXECUTOR_ADMISSION_BYTES:
@@ -279,12 +289,11 @@ class ModalSandboxProviderAdapter:
                 "sandbox_executor_admission_missing",
                 "Sandbox executor admission is unavailable",
             )
-        rendezvous_url = EXECUTOR_RENDEZVOUS_URLS.get(self.settings.environment)
-        if executor_enabled and rendezvous_url is None:
-            raise SandboxError(
-                "sandbox_executor_environment_invalid",
-                "Sandbox executor environment is invalid",
-            )
+        rendezvous_url = (
+            executor_launch.rendezvous_url(self.settings.environment)
+            if executor_enabled and executor_launch is not None
+            else None
+        )
         try:
             outbound_domains = sandbox_outbound_domains(self.settings)
         except ValueError as error:

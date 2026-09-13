@@ -36,12 +36,14 @@ def test_python_admission_rejects_identifiers_rust_would_reject() -> None:
 def test_launch_bundle_is_bounded_and_contains_no_plaintext_in_tags() -> None:
     admission = b"signed-once"
     assert (
-        base64.urlsafe_b64decode(ExecutorLaunchBundle(admission).encoded_admission())
+        base64.urlsafe_b64decode(
+            ExecutorLaunchBundle(admission, shard_generation=7).encoded_admission()
+        )
         == admission
     )
     for invalid in (b"", b"x" * 2_049):
         with pytest.raises(SandboxError) as exc_info:
-            ExecutorLaunchBundle(invalid).encoded_admission()
+            ExecutorLaunchBundle(invalid, shard_generation=7).encoded_admission()
         assert exc_info.value.code == "sandbox_executor_admission_invalid"
 
 
@@ -131,18 +133,43 @@ def test_rendezvous_has_no_tcp_listener_and_nginx_uses_exact_unix_route() -> Non
             )
         ).read_text()
         assert "ssl_protocols TLSv1.3;" in nginx
-        assert "location = /v1/environment" in nginx
+        assert 'location ~ "^/v1/generations/' in nginx
         assert "proxy_read_timeout 20s" in nginx
         assert "proxy_set_header X-PWC-Network-Source $remote_addr" in nginx
-        assert "chat-executor-rendezvous.sock" in nginx
+        assert (
+            f"/run/paperswithcode/{environment}/$pwc_executor_generation/"
+            "chat-executor-rendezvous.sock:"
+        ) in nginx
+        assert "rewrite ^ /v1/environment break;" in nginx
     unit = (
-        REPOSITORY / "deploy/systemd/paperswithcode-chat-executor@.service"
+        REPOSITORY / "deploy/systemd/pwc-chat-executor-rendezvous@.service"
     ).read_text()
     assert "LoadCredential=database-url:" in unit
     assert "LoadCredential=signing-key:" in unit
     assert "RuntimeDirectoryMode=0750" in unit
     assert "--database-url-file ${CREDENTIALS_DIRECTORY}/database-url" in unit
     assert "--signing-key-file ${CREDENTIALS_DIRECTORY}/signing-key" in unit
+    assert "LimitNOFILE=4096" in unit
+    assert "TimeoutStopSec=250" in unit
+    assert "ExecStartPost=/usr/bin/test -S" in unit
+    harness_unit = (
+        REPOSITORY / "deploy/systemd/pwc-chat-executor-harness-proxy@.service"
+    ).read_text()
+    assert "RestrictAddressFamilies=AF_UNIX" in harness_unit
+    assert "chat-executor-harness.sock" in harness_unit
+    assert "MemoryMax=536870912" in harness_unit
+    assert "PWC_CHAT_EXECUTOR_BACKEND_GROUP" in harness_unit
+    installer = (REPOSITORY / "deploy/install_deploy_tools.py").read_text()
+    host_layout = (REPOSITORY / "deploy/install_host_layout.py").read_text()
+    for service in (
+        "pwc-chat-executor-rendezvous.service",
+        "pwc-chat-executor-rendezvous@.service",
+        "pwc-chat-executor-harness-proxy.service",
+        "pwc-chat-executor-harness-proxy@.service",
+    ):
+        assert service in installer
+        assert service in host_layout
+    assert '"pwc-chat-executor"' in host_layout
 
 
 def test_image_rollback_cli_is_root_only_and_requires_exact_confirmation() -> None:

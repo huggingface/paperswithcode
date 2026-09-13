@@ -22,6 +22,7 @@ use tokio::sync::Mutex;
 use zeroize::Zeroizing;
 
 type ProxyError = Box<dyn std::error::Error + Send + Sync>;
+const SERVICE_DRAIN_SECONDS: u64 = 240;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -183,8 +184,13 @@ async fn serve(
     prepare_listener_path(&socket_path)?;
     let listener = UnixListener::bind(&socket_path)?;
     std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o660))?;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
-        let (stream, _) = listener.accept().await?;
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = terminate.recv() => break,
+        };
+        let (stream, _) = accepted?;
         if validate_peer(&stream, config.allowed_backend_uid).is_err() {
             continue;
         }
@@ -197,6 +203,10 @@ async fn serve(
             }
         });
     }
+    drop(listener);
+    std::fs::remove_file(&socket_path).ok();
+    tokio::time::sleep(std::time::Duration::from_secs(SERVICE_DRAIN_SECONDS)).await;
+    Ok(())
 }
 
 fn require_systemd_credential(path: &Path) -> Result<(), LocalSocketError> {

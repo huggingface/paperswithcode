@@ -403,6 +403,58 @@ def test_shard_replacement_requires_ready_capacity_and_drains_old_generation(db)
         repository.activate_shard(db, replacement_id=stale.id)
 
 
+def test_failed_replacement_readiness_keeps_old_generation_active(db):
+    repository, registration = _seed(db)
+    old_shard = db.get(ChatExecutorShard, registration.shard_id)
+    replacement = ChatExecutorShard(
+        id=uuid.uuid4(),
+        cell_id=old_shard.cell_id,
+        shard_id=old_shard.shard_id,
+        generation=old_shard.generation + 1,
+        state="preparing",
+        ready_capacity=0,
+    )
+    db.add(replacement)
+    db.flush()
+
+    with pytest.raises(ExecutorClaimUnavailable):
+        repository.activate_shard(db, replacement_id=replacement.id)
+
+    cell = db.get(ChatExecutorCell, old_shard.cell_id)
+    assert cell.active_shard_id == old_shard.id
+    assert old_shard.state == "ready"
+    assert old_shard.drain_started_at is None
+
+
+def test_drain_cutoff_fences_and_reconciles_before_process_stop(db):
+    repository, registration = _seed(db)
+    claim = repository.claim_workspace(
+        db,
+        turn_id=uuid.uuid4(),
+        registration_id=registration.id,
+        environment_generation=registration.environment_generation,
+        shard_generation=registration.shard_generation,
+        liveness_nonce_digest=_liveness_nonce(db, repository, registration),
+        claim_generation=1,
+        ttl_seconds=240,
+    )
+    shard = db.get(ChatExecutorShard, registration.shard_id)
+    shard.state = "draining"
+    shard.drain_started_at = _database_now(db) - timedelta(seconds=241)
+    shard.drain_deadline_at = _database_now(db) - timedelta(seconds=1)
+    db.flush()
+
+    reconciled = repository.fence_drained_shard(db, shard_id=shard.id)
+
+    assert reconciled == (claim.turn_id,)
+    assert shard.state == "fenced"
+    assert shard.ready_capacity == 0
+    assert registration.state == "suspect"
+    row = db.get(ChatExecutorClaim, claim.turn_id)
+    assert row.state == "invalidated"
+    assert row.terminal_code == "service_restarted"
+
+
 def test_expiry_and_settlement_are_fenced_and_idempotent(db):
     repository, registration = _seed(db)
     claim = repository.claim_workspace(

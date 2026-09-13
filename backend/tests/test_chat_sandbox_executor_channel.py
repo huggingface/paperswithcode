@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+import backend.services.chat_sandbox_executor_channel as channel_module
 from backend.chat_sandbox_worker.executor_daemon import EXECUTOR_BOOTSTRAP_PREFIX
 from backend.chat_sandbox_worker.executor_protocol import (
     PROTOCOL,
@@ -374,3 +375,30 @@ async def _exercise_channel_rejects_unprotected_or_non_socket_paths(
 
 def test_channel_rejects_unprotected_or_non_socket_paths(tmp_path: Path) -> None:
     asyncio.run(_exercise_channel_rejects_unprotected_or_non_socket_paths(tmp_path))
+
+
+async def _exercise_channel_accepts_protected_backend_group_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    socket_path = tmp_path / "harness.sock"
+    server = await asyncio.start_unix_server(
+        lambda _reader, _writer: None, path=socket_path
+    )
+    os.chmod(socket_path, 0o660)
+    socket_group = socket_path.stat().st_gid
+    monkeypatch.setattr(channel_module.os, "geteuid", lambda: os.getuid() + 1)
+    monkeypatch.setattr(channel_module.os, "getegid", lambda: socket_group)
+    monkeypatch.setattr(channel_module.os, "getgroups", lambda: [])
+    try:
+        PersistentSandboxExecutorChannel(socket_path)._validate_socket()
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
+def test_channel_accepts_protected_backend_group_socket(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    asyncio.run(
+        _exercise_channel_accepts_protected_backend_group_socket(tmp_path, monkeypatch)
+    )

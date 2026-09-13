@@ -716,3 +716,103 @@ visible `tool_limit` rate, finalizer latency/request/token overhead, and denied
 attempts after closure. The initial implementation intentionally adds no
 database migration; introduce durable latency columns only after a separate
 review demonstrates that structured logs and traces are insufficient.
+
+## Persistent chat executor transport
+
+The persistent executor transport is default-off in both environments. A
+feature PR stops after local verification. Only the designated publishing task
+may install these units, use `pwc-nginx`, or publish to staging after the PR is
+merged and Cursor Bugbot and required checks are clear. Production needs
+separate explicit authorization and must reuse the exact staging-qualified
+commit and artifact digests; never rebuild between environments.
+
+Each service generation is addressed as `<environment>/<positive-generation>`.
+Escape that path with `systemd-escape --path` and start matching rendezvous and
+harness instances. Their only listeners are
+`/run/paperswithcode/<environment>/<generation>/chat-executor-rendezvous.sock`
+and `chat-executor-harness.sock`. Nginx exposes only
+`/v1/generations/<generation>/environment` on the environment's dedicated TLS
+1.3 hostname and rewrites it to the rendezvous daemon's internal
+`/v1/environment` route. No executor TCP listener is permitted. The sandbox
+outbound policy contains exactly the applicable hostname; the pinned Modal SDK
+and Rust client validate normal public WSS certificates and that exact host,
+port, and generation route.
+
+Provision root-owned configuration beneath
+`/etc/paperswithcode/chat-executor/<environment>/<generation>/` with mode 0750
+on directories and 0600 on credential sources. Install database, admission
+signing, harness Noise, and authorization signing keys as distinct systemd
+credentials. Never place key bytes in an environment file, command line,
+diagnostic, journal query, or ticket. The service units bound file descriptors,
+memory, tasks, restart rate, startup, and the 240-second stop drain; their
+`--self-test` and Unix-socket probes are the local liveness and readiness gates.
+The non-secret `service.env` contains exactly
+`PWC_CHAT_EXECUTOR_BACKEND_GROUP=pwc-production` or `pwc-staging`; the harness
+configuration independently pins the matching backend UID.
+
+For an ordinary blue/green service release:
+
+1. Build the exact merged source once and record the commit, Rust/Python/image
+   digests, protocol version, schema digest, and signing-key IDs. Start the new
+   fenced generation without changing the active database route.
+2. Require registry connectivity, fresh authenticated ready capacity, local
+   self-tests, both socket probes, and a canary Noise exchange. If any check
+   fails, stop the candidate; the old shard remains wholly active.
+3. Atomically activate the replacement shard in PostgreSQL. New launch tokens
+   now contain its positive generation and URL. Existing connections and
+   claims remain pinned to the old, now-draining shard.
+4. Drain for exactly 240 seconds. At cutoff, commit
+   `fence_drained_shard` first: it marks the shard fenced, removes readiness,
+   and settles every residual active claim as `service_restarted`. Only after
+   that transaction commits may the old processes receive SIGTERM. They unlink
+   listeners, allow existing connection tasks the bounded drain, then exit.
+   Never replay an uncertain operation.
+5. Reconcile registrations, claims, operation settlements, capacity, and alert
+   outbox records. Retain content-free generation/digest/timing evidence.
+
+`pwc-nginx` remains the only supported nginx application interface. It runs the
+static validator and `nginx -t` before reload, restores the prior file on smoke
+failure, and verifies the active application release. A certificate renewal or
+nginx reload must be rehearsed with established WebSockets: accepted evidence
+is either uninterrupted streams or bounded reconnect to the same generation,
+never a mixed-generation resume. Do not edit `/etc/nginx` directly.
+
+Rotate every executor private key within 30 days. Publish and verify the new
+public identity first, record activation time and key ID, and permit only the
+immediately previous public key for at most 24 hours. Replace environments
+still using the old key, then fence their generations before removing the old
+verification key. A failed rotation keeps the old generation active only while
+it remains inside that overlap; restore the last qualified configuration and
+repeat with a fresh key rather than extending the window.
+
+Routine protocol releases accept only `N` and `N-1`. Record activation
+timestamps and exact schema digests; `N-1` expires no later than 24 hours after
+activation and its remaining environments are fenced and replaced. Log only
+bounded version/digest/reason diagnostics for downgrade rejection. An
+incompatible or security release permits no `N-1` attach, resume, or drain
+overlap and fences immediately.
+
+For suspected key compromise, identify the exact displayed key ID and invoke
+the root-only revocation command with its exact-ID confirmation. Revocation
+opens the security hold, fences bound generations, emits the incident alert,
+terminates affected environments, and audits uncertain operations without
+replay. Install clean credentials, rotate every related key, and clear the hold
+only after revocation persistence, alert delivery, reconciliation, clean
+generation readiness, and a canary succeed. Preserve bounded audit evidence;
+never record key material or chat content.
+
+The operational monitor classifies breaker open, reopen, recovery, and security
+hold as distinct content-free events. Primary and fallback webhooks must both
+be configured and different; immediate delivery uses primary, while the minute
+monitor retries and falls back. If durable admission storage is healthy, new
+ordinary turns use the separately persisted legacy transport while the remote
+breaker is unavailable. If storage itself is unavailable, both paths return
+the retryable dual-path `chat_unavailable` response before work.
+
+Rollback starts by setting
+`PWC_CHAT_EXECUTOR_REMOTE_TRANSPORT_ENABLED=false` for new turns. Existing
+turns retain their recorded transport until settled or reconciled. If legacy
+behavior is not restored, roll back the exact application release with
+`pwc-rollback`. This single VPS remains an availability boundary: loss of the
+host can interrupt both local executor services even though Modal environments
+remain isolated.

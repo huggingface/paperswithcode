@@ -170,7 +170,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
             },
             worker_generation="generation-a",
             launch_mode=SandboxLaunchMode.EXECUTOR,
-            executor_launch=ExecutorLaunchBundle(b"signed-launch"),
+            executor_launch=ExecutorLaunchBundle(b"signed-launch", shard_generation=7),
         )
     )
 
@@ -178,7 +178,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
     assert captured["command"] == (
         "/usr/local/bin/pwc-executor-environment",
         "--connect",
-        "wss://chat-executor.staging.paperswithcode.co/v1/environment",
+        "wss://chat-executor.staging.paperswithcode.co/v1/generations/7/environment",
         "--admission-env",
         "PWC_CHAT_EXECUTOR_ADMISSION",
     )

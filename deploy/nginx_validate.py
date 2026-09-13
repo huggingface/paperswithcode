@@ -205,9 +205,16 @@ def validate(production: str, staging: str) -> list[str]:
         )[0]
         if "ssl_protocols TLSv1.3;" not in executor_server:
             failures.append(f"{environment} executor must require TLS 1.3")
-        block = location_block(config, "location = /v1/environment")
+        route = (
+            'location ~ "^/v1/generations/'
+            '(?<pwc_executor_generation>[1-9][0-9]{0,19})/environment$"'
+        )
+        block = location_block(config, route)
         for requirement in (
-            "proxy_pass http://unix:/run/pwc-chat-executor/chat-executor-rendezvous.sock:;",
+            "proxy_pass http://unix:/run/paperswithcode/"
+            f"{environment}/$pwc_executor_generation/"
+            "chat-executor-rendezvous.sock:;",
+            "rewrite ^ /v1/environment break;",
             "proxy_http_version 1.1;",
             "proxy_set_header Upgrade $http_upgrade;",
             'proxy_set_header Connection "upgrade";',
@@ -224,7 +231,7 @@ def validate(production: str, staging: str) -> list[str]:
             failures.append(
                 f"{environment} exposes an unexpected WebSocket upgrade route"
             )
-    if staging.count("location / {") != 1 or production.count("location / {") != 1:
+    if staging.count("location / {") != 2 or production.count("location / {") != 2:
         failures.append("ambiguous catch-all location")
     failures.extend(
         _validate_seo_routes(production, "pwc_production_backend", "production")

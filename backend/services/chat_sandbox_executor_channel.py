@@ -231,11 +231,15 @@ class PersistentSandboxExecutorChannel:
     def _validate_socket(self) -> None:
         metadata = self.socket_path.stat()
         parent = self.socket_path.parent.stat()
+        trusted_groups = {os.getegid(), *os.getgroups()}
         if (
             not stat.S_ISSOCK(metadata.st_mode)
             or metadata.st_mode & 0o007
             or parent.st_mode & 0o022
-            or metadata.st_uid not in {0, os.geteuid()}
+            or (
+                metadata.st_uid not in {0, os.geteuid()}
+                and metadata.st_gid not in trusted_groups
+            )
         ):
             raise PermissionError("Executor harness requires a protected Unix socket")
 

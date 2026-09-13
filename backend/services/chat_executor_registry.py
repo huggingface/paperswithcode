@@ -387,6 +387,48 @@ class ChatExecutorRegistry:
         cell.updated_at = now
         db.flush()
 
+    def fence_drained_shard(
+        self, db: Session, *, shard_id: uuid.UUID
+    ) -> tuple[uuid.UUID, ...]:
+        """Fence an expired service generation and settle uncertain work first."""
+        shard = db.scalar(
+            select(ChatExecutorShard)
+            .where(ChatExecutorShard.id == shard_id)
+            .with_for_update()
+        )
+        now = self._database_now(db)
+        if (
+            shard is None
+            or shard.state != "draining"
+            or shard.drain_deadline_at is None
+            or self._as_utc(shard.drain_deadline_at) > now
+        ):
+            raise ExecutorClaimUnavailable("Executor shard drain is not complete")
+        shard.state = "fenced"
+        shard.ready_capacity = 0
+        shard.updated_at = now
+        registrations = db.scalars(
+            select(ChatExecutorRegistration)
+            .where(ChatExecutorRegistration.shard_id == shard.id)
+            .with_for_update()
+        ).all()
+        for registration in registrations:
+            registration.state = "suspect"
+            registration.updated_at = now
+        claims = db.scalars(
+            select(ChatExecutorClaim)
+            .where(
+                ChatExecutorClaim.shard_id == shard.id,
+                ChatExecutorClaim.state == "active",
+            )
+            .with_for_update()
+        ).all()
+        reconciled = tuple(row.turn_id for row in claims)
+        for claim in claims:
+            self._invalidate_claim(claim, now=now, code="service_restarted")
+        db.flush()
+        return reconciled
+
     def activate_manifest(
         self, db: Session, *, cell_id: str, target_digest: str
     ) -> None:

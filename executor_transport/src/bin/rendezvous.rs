@@ -32,6 +32,7 @@ use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
 use uuid::Uuid;
 
 const ROUTE: &str = "/v1/environment";
+const SERVICE_DRAIN_SECONDS: u64 = 240;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Clone, Deserialize)]
@@ -177,8 +178,13 @@ async fn serve(
     prepare_socket_path(&path)?;
     let listener = UnixListener::bind(&path)?;
     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o660))?;
+    let mut terminate = tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
     loop {
-        let (stream, _) = listener.accept().await?;
+        let accepted = tokio::select! {
+            accepted = listener.accept() => accepted,
+            _ = terminate.recv() => break,
+        };
+        let (stream, _) = accepted?;
         let Ok(permit) = Arc::clone(&state.capacity).try_acquire_owned() else {
             continue;
         };
@@ -188,6 +194,10 @@ async fn serve(
             let _ = handle(stream, state).await;
         });
     }
+    drop(listener);
+    std::fs::remove_file(&path).ok();
+    tokio::time::sleep(Duration::from_secs(SERVICE_DRAIN_SECONDS)).await;
+    Ok(())
 }
 
 fn verification_key(
