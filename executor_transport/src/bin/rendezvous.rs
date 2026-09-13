@@ -1,15 +1,18 @@
+use std::collections::HashMap;
 use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex as StandardMutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use base64::Engine;
-use base64::engine::general_purpose::URL_SAFE;
+use base64::engine::general_purpose::{STANDARD, URL_SAFE};
 use futures_util::{SinkExt, StreamExt};
 use pwc_persistent_executor_transport::admission::{
     AdmissionClaims, AdmissionPurpose, AdmissionSigner, AdmissionVerificationKey,
     AdmissionVerifier, LifecycleClass, MAX_PREAUTH_FRAME_BYTES, PREAUTH_DEADLINE_MS,
 };
+use pwc_persistent_executor_transport::local_socket::{validate_peer, write_frame};
 use pwc_persistent_executor_transport::noise::{
     NoiseIdentity, NoisePublicKey, PendingResponderHandshake, prologue,
 };
@@ -23,16 +26,21 @@ use pwc_persistent_executor_transport::scheduler::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::json;
+use tokio::io::AsyncReadExt;
 use tokio::net::{UnixListener, UnixStream};
-use tokio::sync::{Mutex, Semaphore};
-use tokio::time::timeout;
-use tokio_tungstenite::accept_hdr_async;
+use tokio::sync::{Mutex, Semaphore, mpsc};
+use tokio::time::{Instant as TokioInstant, sleep_until, timeout};
+use tokio_tungstenite::accept_hdr_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::handshake::server::{Request, Response};
+use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use uuid::Uuid;
 
 const ROUTE: &str = "/v1/environment";
 const SERVICE_DRAIN_SECONDS: u64 = 240;
+const MAX_LOCAL_PREAUTH_FRAME_BYTES: usize = 16 * 1024;
+const MAX_LOCAL_PEER_FRAME_BYTES: usize = 64 * 1024;
+const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
 
 #[derive(Clone, Deserialize)]
@@ -48,6 +56,8 @@ struct VerificationKeyConfig {
 #[serde(deny_unknown_fields)]
 struct RendezvousConfig {
     shard_database_id: Uuid,
+    allowed_backend_uid: u32,
+    allowed_harness_uid: u32,
     current_protocol_version: u32,
     current_key: VerificationKeyConfig,
     previous_key: Option<VerificationKeyConfig>,
@@ -61,6 +71,39 @@ struct State {
     scheduler: Mutex<ReconnectScheduler>,
     invalid_gate: Mutex<InvalidAttemptGate>,
     capacity: Arc<Semaphore>,
+    live: Mutex<HashMap<Uuid, LiveRegistration>>,
+}
+
+struct LiveRegistration {
+    connection_id: Uuid,
+    claims: AdmissionClaims,
+    peer_events: mpsc::Sender<PeerEvent>,
+}
+
+enum PeerEvent {
+    Attach {
+        connection_id: Uuid,
+        frame: Vec<u8>,
+        outbound: mpsc::Sender<Vec<u8>>,
+    },
+    Data {
+        connection_id: Uuid,
+        frame: Vec<u8>,
+    },
+    Closed {
+        connection_id: Uuid,
+    },
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LivenessRequest {
+    kind: String,
+    registration_id: Uuid,
+    environment_id: String,
+    environment_generation: u64,
+    shard_generation: u64,
+    turn_id: Uuid,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -69,18 +112,6 @@ struct RegistrationResponse {
     registration_id: String,
     environment_id: String,
     responder_public_key: NoisePublicKey,
-}
-
-#[derive(Deserialize)]
-#[serde(deny_unknown_fields)]
-struct Heartbeat {
-    sequence: u64,
-}
-
-#[derive(Serialize)]
-struct HeartbeatAck {
-    reconnect_token: String,
-    expires_at_ms: u64,
 }
 
 #[tokio::main]
@@ -173,6 +204,7 @@ async fn serve(
         scheduler: Mutex::new(ReconnectScheduler::new()),
         invalid_gate: Mutex::new(InvalidAttemptGate::new(unix_ms()?)),
         capacity: Arc::new(Semaphore::new(MAX_PREAUTH_SOCKETS)),
+        live: Mutex::new(HashMap::new()),
     });
 
     prepare_socket_path(&path)?;
@@ -189,14 +221,248 @@ async fn serve(
             continue;
         };
         let state = Arc::clone(&state);
+        let allowed_backend_uid = config.allowed_backend_uid;
+        let allowed_harness_uid = config.allowed_harness_uid;
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = handle(stream, state).await;
+            let _ = dispatch(stream, state, allowed_backend_uid, allowed_harness_uid).await;
         });
     }
     drop(listener);
     std::fs::remove_file(&path).ok();
     tokio::time::sleep(Duration::from_secs(SERVICE_DRAIN_SECONDS)).await;
+    Ok(())
+}
+
+async fn dispatch(
+    stream: UnixStream,
+    state: Arc<State>,
+    allowed_backend_uid: u32,
+    allowed_harness_uid: u32,
+) -> Result<(), ConnectionError> {
+    let mut prefix = [0_u8; 4];
+    timeout(Duration::from_millis(PREAUTH_DEADLINE_MS), async {
+        let result: Result<(), std::io::Error> = loop {
+            stream.readable().await?;
+            match stream.try_io(tokio::io::Interest::READABLE, || {
+                let read = unsafe {
+                    libc::recv(
+                        stream.as_raw_fd(),
+                        prefix.as_mut_ptr().cast(),
+                        prefix.len(),
+                        libc::MSG_PEEK,
+                    )
+                };
+                if read < 0 {
+                    Err(std::io::Error::last_os_error())
+                } else if read < prefix.len() as isize {
+                    Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
+                } else {
+                    Ok(())
+                }
+            }) {
+                Ok(result) => break Ok(result),
+                Err(_) => continue,
+            }
+        };
+        result
+    })
+    .await??;
+    if &prefix == b"GET " {
+        handle_environment(stream, state).await
+    } else {
+        handle_local(stream, state, allowed_backend_uid, allowed_harness_uid).await
+    }
+}
+
+async fn handle_local(
+    mut stream: UnixStream,
+    state: Arc<State>,
+    allowed_backend_uid: u32,
+    allowed_harness_uid: u32,
+) -> Result<(), ConnectionError> {
+    let peer_uid = stream.peer_cred()?.uid();
+    if peer_uid != allowed_backend_uid && peer_uid != allowed_harness_uid {
+        return Err("executor local peer rejected".into());
+    }
+    let frame = timeout(
+        Duration::from_millis(PREAUTH_DEADLINE_MS),
+        read_local_preauth(&mut stream),
+    )
+    .await??;
+    let value: serde_json::Value = serde_json::from_slice(&frame)?;
+    match value.get("kind").and_then(serde_json::Value::as_str) {
+        Some("claim_liveness") => {
+            validate_peer(&stream, allowed_backend_uid)?;
+            handle_liveness(stream, state, value).await
+        }
+        Some("peer_attach") => {
+            validate_peer(&stream, allowed_harness_uid)?;
+            handle_peer(stream, state, value, frame).await
+        }
+        Some("route_health") => {
+            validate_peer(&stream, allowed_backend_uid)?;
+            handle_route_health(stream, state).await
+        }
+        _ => Ok(()),
+    }
+}
+
+async fn read_local_preauth(stream: &mut UnixStream) -> Result<Vec<u8>, ConnectionError> {
+    read_bounded_frame(stream, MAX_LOCAL_PREAUTH_FRAME_BYTES).await
+}
+
+async fn read_bounded_frame(
+    stream: &mut UnixStream,
+    maximum: usize,
+) -> Result<Vec<u8>, ConnectionError> {
+    let length = stream.read_u32().await? as usize;
+    if length == 0 || length > maximum {
+        return Err("executor local preauthentication rejected".into());
+    }
+    let mut frame = vec![0_u8; length];
+    stream.read_exact(&mut frame).await?;
+    Ok(frame)
+}
+
+async fn handle_route_health(
+    mut stream: UnixStream,
+    state: Arc<State>,
+) -> Result<(), ConnectionError> {
+    let live_environments = state.live.lock().await.len();
+    write_frame(
+        &mut stream,
+        &serde_json::to_vec(&json!({
+            "kind": "route_health",
+            "age_ms": 0,
+            "live_environments": live_environments,
+        }))?,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn handle_liveness(
+    mut stream: UnixStream,
+    state: Arc<State>,
+    value: serde_json::Value,
+) -> Result<(), ConnectionError> {
+    let request: LivenessRequest = serde_json::from_value(value)?;
+    if request.kind != "claim_liveness" {
+        return Err("executor liveness rejected".into());
+    }
+    let live = state.live.lock().await;
+    let claims = live
+        .get(&request.registration_id)
+        .filter(|entry| {
+            entry.claims.environment_id == request.environment_id
+                && entry.claims.environment_generation == request.environment_generation
+                && entry.claims.shard_generation == request.shard_generation
+        })
+        .map(|entry| entry.claims.clone())
+        .ok_or("executor liveness rejected")?;
+    drop(live);
+    let now_ms = unix_ms()?;
+    let mut assertion = claims;
+    assertion.nonce = *Uuid::new_v4().as_bytes();
+    assertion.purpose = AdmissionPurpose::ClaimLiveness;
+    assertion.lifecycle_class = LifecycleClass::ActiveClaim;
+    assertion.issued_at_ms = now_ms;
+    assertion.expires_at_ms = now_ms + 2_000;
+    assertion.remaining_lifetime_ms = assertion.environment_expires_at_ms.saturating_sub(now_ms);
+    let frame = state.signer.sign(assertion)?;
+    let verified = state.verifier.verify(&frame, 0, now_ms)?;
+    state.database.lock().await.persist_nonce(&verified).await?;
+    write_frame(
+        &mut stream,
+        &serde_json::to_vec(&json!({
+            "kind": "claim_liveness",
+            "turn_id": request.turn_id,
+            "nonce_digest": verified.nonce_digest(),
+        }))?,
+    )
+    .await?;
+    Ok(())
+}
+
+async fn handle_peer(
+    mut stream: UnixStream,
+    state: Arc<State>,
+    value: serde_json::Value,
+    initial: Vec<u8>,
+) -> Result<(), ConnectionError> {
+    let registration_id = value
+        .get("registration_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer registration rejected")?
+        .parse::<Uuid>()?;
+    let environment_id = value
+        .get("environment_id")
+        .and_then(serde_json::Value::as_str)
+        .ok_or("executor peer environment rejected")?;
+    let environment_generation = value
+        .get("environment_generation")
+        .and_then(serde_json::Value::as_u64)
+        .ok_or("executor peer generation rejected")?;
+    let (events, claims) = {
+        let live = state.live.lock().await;
+        let entry = live
+            .get(&registration_id)
+            .filter(|entry| {
+                entry.claims.environment_id == environment_id
+                    && entry.claims.environment_generation == environment_generation
+            })
+            .ok_or("executor peer route rejected")?;
+        (entry.peer_events.clone(), entry.claims.clone())
+    };
+    let binding = value
+        .get("binding")
+        .and_then(serde_json::Value::as_object)
+        .ok_or("executor peer binding rejected")?;
+    if binding
+        .get("registration_id")
+        .and_then(serde_json::Value::as_str)
+        != Some(
+            value["registration_id"]
+                .as_str()
+                .expect("registration parsed"),
+        )
+        || value
+            .get("binding")
+            .and_then(|binding| binding.get("environment_id"))
+            .and_then(serde_json::Value::as_str)
+            != Some(claims.environment_id.as_str())
+    {
+        return Err("executor peer binding rejected".into());
+    }
+    let connection_id = Uuid::new_v4();
+    let (outbound, mut responses) = mpsc::channel(4);
+    timeout(
+        Duration::from_millis(PREAUTH_DEADLINE_MS),
+        events.send(PeerEvent::Attach {
+            connection_id,
+            frame: initial,
+            outbound,
+        }),
+    )
+    .await??;
+    loop {
+        tokio::select! {
+            frame = read_bounded_frame(&mut stream, MAX_LOCAL_PEER_FRAME_BYTES) => {
+                match frame {
+                    Ok(frame) => events.send(PeerEvent::Data { connection_id, frame }).await?,
+                    Err(_) => break,
+                }
+            }
+            response = responses.recv() => {
+                match response {
+                    Some(response) => write_frame(&mut stream, &response).await?,
+                    None => break,
+                }
+            }
+        }
+    }
+    let _ = events.send(PeerEvent::Closed { connection_id }).await;
     Ok(())
 }
 
@@ -231,20 +497,24 @@ fn prepare_socket_path(path: &Path) -> Result<(), ConnectionError> {
 }
 
 #[allow(clippy::result_large_err)]
-async fn handle(stream: UnixStream, state: Arc<State>) -> Result<(), ConnectionError> {
+async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(), ConnectionError> {
     let network_source = Arc::new(StandardMutex::new(String::from("nginx")));
     let captured_source = Arc::clone(&network_source);
-    let mut socket = accept_hdr_async(stream, move |request: &Request, response: Response| {
-        if let Some(value) = request
-            .headers()
-            .get("x-pwc-network-source")
-            .and_then(|value| value.to_str().ok())
-            .filter(|value| !value.is_empty() && value.len() <= 64)
-        {
-            *captured_source.lock().expect("network source lock") = value.into();
-        }
-        validate_upgrade(request, response)
-    })
+    let mut socket = accept_hdr_async_with_config(
+        stream,
+        move |request: &Request, response: Response| {
+            if let Some(value) = request
+                .headers()
+                .get("x-pwc-network-source")
+                .and_then(|value| value.to_str().ok())
+                .filter(|value| !value.is_empty() && value.len() <= 64)
+            {
+                *captured_source.lock().expect("network source lock") = value.into();
+            }
+            validate_upgrade(request, response)
+        },
+        Some(websocket_config()),
+    )
     .await?;
     let started = Instant::now();
     let frame = match timeout(Duration::from_millis(PREAUTH_DEADLINE_MS), socket.next()).await {
@@ -349,12 +619,24 @@ async fn handle(stream: UnixStream, state: Arc<State>) -> Result<(), ConnectionE
         .await
         .consume_and_register(&request, &admission)
         .await?;
+    let connection_id = Uuid::new_v4();
+    let (peer_events, mut peer_receiver) = mpsc::channel(4);
+    state.live.lock().await.insert(
+        registration_id,
+        LiveRegistration {
+            connection_id,
+            claims: claims.clone(),
+            peer_events,
+        },
+    );
     let session_result: Result<(), ConnectionError> = async {
         socket
             .send(Message::Binary(
                 transport
                     .encrypt(&serde_json::to_vec(&json!({
                         "registration_id": registration_id,
+                        "environment_generation": claims.environment_generation,
+                        "shard_generation": claims.shard_generation,
                     }))?)?
                     .into(),
             ))
@@ -362,45 +644,96 @@ async fn handle(stream: UnixStream, state: Arc<State>) -> Result<(), ConnectionE
 
         let mut last_sequence = None;
         let mut last_checkpoint_ms = now_ms;
+        let mut active_peer: Option<(Uuid, mpsc::Sender<Vec<u8>>)> = None;
+        let heartbeat_deadline = sleep_until(
+            TokioInstant::now() + Duration::from_millis(HEARTBEAT_SUSPECT_MS),
+        );
+        tokio::pin!(heartbeat_deadline);
         loop {
-            let message =
-                match timeout(Duration::from_millis(HEARTBEAT_SUSPECT_MS), socket.next()).await {
-                    Ok(Some(Ok(Message::Binary(ciphertext)))) => ciphertext,
-                    _ => break,
-                };
-            let heartbeat: Heartbeat = serde_json::from_slice(&transport.decrypt(&message)?)?;
-            if last_sequence.is_some_and(|previous| heartbeat.sequence <= previous) {
-                break;
+            tokio::select! {
+                _ = &mut heartbeat_deadline => break,
+                message = socket.next() => {
+                    let ciphertext = match message {
+                        Some(Ok(Message::Binary(ciphertext))) => ciphertext,
+                        _ => break,
+                    };
+                    let message: serde_json::Value =
+                        serde_json::from_slice(&transport.decrypt(&ciphertext)?)?;
+                    match message.get("kind").and_then(serde_json::Value::as_str) {
+                        Some("heartbeat") => {
+                            let sequence = message.get("sequence")
+                                .and_then(serde_json::Value::as_u64)
+                                .ok_or("executor heartbeat rejected")?;
+                            if last_sequence.is_some_and(|previous| sequence <= previous) {
+                                break;
+                            }
+                            last_sequence = Some(sequence);
+                            heartbeat_deadline.as_mut().reset(
+                                TokioInstant::now()
+                                    + Duration::from_millis(HEARTBEAT_SUSPECT_MS),
+                            );
+                            let heartbeat_now = unix_ms()?;
+                            if heartbeat_now >= claims.environment_expires_at_ms
+                                || claims.compatibility_expires_at_ms
+                                    .is_some_and(|expires| heartbeat_now >= expires)
+                            {
+                                break;
+                            }
+                            if heartbeat_now.saturating_sub(last_checkpoint_ms) >= 30_000 {
+                                state.database.lock().await
+                                    .checkpoint_seen(&[registration_id]).await?;
+                                last_checkpoint_ms = heartbeat_now;
+                            }
+                            let reconnect_claims = reconnect_claims(claims, &public_key_id, heartbeat_now);
+                            let reconnect_frame = state.signer.sign(reconnect_claims)?;
+                            let verified = state.verifier.verify(&reconnect_frame, 0, heartbeat_now)?;
+                            state.database.lock().await.persist_nonce(&verified).await?;
+                            let acknowledgement = serde_json::to_vec(&json!({
+                                "kind": "heartbeat_ack",
+                                "reconnect_token": URL_SAFE.encode(reconnect_frame),
+                                "expires_at_ms": heartbeat_now + 45_000,
+                            }))?;
+                            socket.send(Message::Binary(transport.encrypt(&acknowledgement)?.into())).await?;
+                        }
+                        Some("peer") => {
+                            let peer_id = message.get("connection_id")
+                                .and_then(serde_json::Value::as_str)
+                                .and_then(|value| value.parse::<Uuid>().ok());
+                            let payload = message.get("payload")
+                                .and_then(serde_json::Value::as_str)
+                                .map(|value| STANDARD.decode(value))
+                                .transpose()?;
+                            if let (Some((active_id, outbound)), Some(peer_id), Some(payload)) =
+                                (&active_peer, peer_id, payload)
+                                && *active_id == peer_id
+                            {
+                                outbound.send(payload).await?;
+                            }
+                        }
+                        _ => break,
+                    }
+                }
+                event = peer_receiver.recv() => {
+                    match event {
+                        Some(PeerEvent::Attach { connection_id: peer_id, frame, outbound })
+                            if active_peer.is_none() => {
+                                active_peer = Some((peer_id, outbound));
+                                send_peer_frame(&mut socket, &mut transport, peer_id, &frame).await?;
+                            }
+                        Some(PeerEvent::Data { connection_id: peer_id, frame })
+                            if active_peer.as_ref().is_some_and(|(active, _)| *active == peer_id) => {
+                                send_peer_frame(&mut socket, &mut transport, peer_id, &frame).await?;
+                            }
+                        Some(PeerEvent::Closed { connection_id: peer_id })
+                            if active_peer.as_ref().is_some_and(|(active, _)| *active == peer_id) => {
+                                send_peer_close(&mut socket, &mut transport, peer_id).await?;
+                                active_peer = None;
+                            }
+                        Some(PeerEvent::Attach { .. } | PeerEvent::Data { .. } | PeerEvent::Closed { .. }) => {}
+                        None => break,
+                    }
+                }
             }
-            last_sequence = Some(heartbeat.sequence);
-            let heartbeat_now = unix_ms()?;
-            if heartbeat_now >= claims.environment_expires_at_ms
-                || claims
-                    .compatibility_expires_at_ms
-                    .is_some_and(|expires| heartbeat_now >= expires)
-            {
-                break;
-            }
-            if heartbeat_now.saturating_sub(last_checkpoint_ms) >= 30_000 {
-                state
-                    .database
-                    .lock()
-                    .await
-                    .checkpoint_seen(&[registration_id])
-                    .await?;
-                last_checkpoint_ms = heartbeat_now;
-            }
-            let reconnect_claims = reconnect_claims(claims, &public_key_id, heartbeat_now);
-            let reconnect_frame = state.signer.sign(reconnect_claims)?;
-            let verified = state.verifier.verify(&reconnect_frame, 0, heartbeat_now)?;
-            state.database.lock().await.persist_nonce(&verified).await?;
-            let acknowledgement = serde_json::to_vec(&HeartbeatAck {
-                reconnect_token: URL_SAFE.encode(reconnect_frame),
-                expires_at_ms: heartbeat_now + 45_000,
-            })?;
-            socket
-                .send(Message::Binary(transport.encrypt(&acknowledgement)?.into()))
-                .await?;
         }
         Ok(())
     }
@@ -411,8 +744,63 @@ async fn handle(stream: UnixStream, state: Arc<State>) -> Result<(), ConnectionE
         .await
         .mark_suspect(registration_id)
         .await;
+    let mut live = state.live.lock().await;
+    if live
+        .get(&registration_id)
+        .is_some_and(|entry| entry.connection_id == connection_id)
+    {
+        live.remove(&registration_id);
+    }
+    drop(live);
     session_result?;
     fence_result?;
+    Ok(())
+}
+
+fn websocket_config() -> WebSocketConfig {
+    WebSocketConfig::default()
+        .read_buffer_size(4 * 1024)
+        .write_buffer_size(64 * 1024)
+        .max_write_buffer_size(256 * 1024)
+        .max_message_size(Some(MAX_OUTER_MESSAGE_BYTES))
+        .max_frame_size(Some(MAX_OUTER_MESSAGE_BYTES))
+}
+
+async fn send_peer_frame<S>(
+    socket: &mut tokio_tungstenite::WebSocketStream<S>,
+    transport: &mut pwc_persistent_executor_transport::noise::NoiseTransport,
+    connection_id: Uuid,
+    frame: &[u8],
+) -> Result<(), ConnectionError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let message = serde_json::to_vec(&json!({
+        "kind": "peer",
+        "connection_id": connection_id,
+        "payload": STANDARD.encode(frame),
+    }))?;
+    socket
+        .send(Message::Binary(transport.encrypt(&message)?.into()))
+        .await?;
+    Ok(())
+}
+
+async fn send_peer_close<S>(
+    socket: &mut tokio_tungstenite::WebSocketStream<S>,
+    transport: &mut pwc_persistent_executor_transport::noise::NoiseTransport,
+    connection_id: Uuid,
+) -> Result<(), ConnectionError>
+where
+    S: tokio::io::AsyncRead + tokio::io::AsyncWrite + Unpin,
+{
+    let message = serde_json::to_vec(&json!({
+        "kind": "peer_close",
+        "connection_id": connection_id,
+    }))?;
+    socket
+        .send(Message::Binary(transport.encrypt(&message)?.into()))
+        .await?;
     Ok(())
 }
 

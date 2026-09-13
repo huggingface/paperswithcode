@@ -181,6 +181,8 @@ class ChatTurnAdmissionService:
         self, db: Session, *, turn_id: uuid.UUID, revision: int, now: datetime
     ) -> TurnReservation:
         row = self._reservation(db, turn_id)
+        if row.revision == revision and row.state == "dispatched":
+            return self._result(row)
         if row.revision != revision or row.state != "reserved":
             raise ValueError("Turn reservation dispatch is stale")
         row.state = "dispatched"

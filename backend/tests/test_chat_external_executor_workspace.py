@@ -331,6 +331,21 @@ def test_executor_workspace_reuse_uses_executor_launch_mode_health():
     assert len(provider.create_options) == 1
 
 
+def test_circuit_fallback_uses_legacy_launch_without_rendezvous_admission():
+    manager, _sessions, session_id, provider = setup_manager()
+
+    async def exercise():
+        workspace = await manager.acquire_legacy(
+            session_id=session_id, turn_claim=TURN_CLAIM
+        )
+        assert await manager.release(workspace)
+
+    asyncio.run(exercise())
+
+    assert provider.create_options[0]["launch_mode"] is SandboxLaunchMode.LEGACY
+    assert provider.create_options[0]["executor_launch"] is None
+
+
 def test_binding_acquisition_defers_health_to_the_persistent_channel():
     health = ExecutorHealth()
     manager, _sessions, session_id, _provider = setup_manager(health=health)

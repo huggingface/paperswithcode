@@ -9,6 +9,7 @@ import json
 import os
 import re
 import stat
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -1339,6 +1340,94 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
             raise RuntimeError(
                 "remote executor transport requires external Pi admission"
             )
+        if not all(
+            (
+                settings.chat_executor_cell_id,
+                settings.chat_executor_admission_signing_key_id,
+                settings.chat_executor_harness_key_id,
+                settings.chat_executor_authorization_key_id,
+                settings.chat_executor_authorization_keys_json,
+            )
+        ) or not settings.chat_executor_admission_signing_key_file.startswith(
+            "/run/credentials/"
+        ):
+            raise RuntimeError(
+                "remote executor transport requires systemd credential configuration"
+            )
+        try:
+            authorization_keys = json.loads(
+                settings.chat_executor_authorization_keys_json
+            )
+            if set(authorization_keys) - {"current", "previous"}:
+                raise ValueError
+            current_authorization_key = authorization_keys["current"]
+            authorization_window = (
+                current_authorization_key["not_after"]
+                - current_authorization_key["not_before"]
+            )
+            now_seconds = int(time.time())
+            if (
+                set(current_authorization_key)
+                != {"key_id", "public_key", "not_before", "not_after"}
+                or current_authorization_key["key_id"]
+                != settings.chat_executor_authorization_key_id
+                or len(
+                    base64.b64decode(
+                        current_authorization_key["public_key"], validate=True
+                    )
+                )
+                != 32
+                or current_authorization_key["not_before"] <= 0
+                or current_authorization_key["not_after"]
+                <= current_authorization_key["not_before"]
+                or authorization_window > 30 * 24 * 60 * 60
+                or not current_authorization_key["not_before"]
+                <= now_seconds
+                <= current_authorization_key["not_after"]
+            ):
+                raise ValueError
+            previous_authorization_key = authorization_keys.get("previous")
+            if previous_authorization_key is not None and (
+                not isinstance(previous_authorization_key, dict)
+                or set(previous_authorization_key)
+                != {"key_id", "public_key", "not_before", "not_after"}
+                or previous_authorization_key["key_id"]
+                == current_authorization_key["key_id"]
+                or len(
+                    base64.b64decode(
+                        previous_authorization_key["public_key"], validate=True
+                    )
+                )
+                != 32
+                or previous_authorization_key["not_before"] <= 0
+                or previous_authorization_key["not_after"]
+                <= previous_authorization_key["not_before"]
+                or previous_authorization_key["not_before"]
+                >= current_authorization_key["not_before"]
+                or previous_authorization_key["not_after"]
+                - previous_authorization_key["not_before"]
+                > 30 * 24 * 60 * 60
+                or previous_authorization_key["not_after"]
+                > current_authorization_key["not_before"] + 24 * 60 * 60
+            ):
+                raise ValueError
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            raise RuntimeError(
+                "remote executor authorization key configuration is invalid"
+            ) from None
+        now_ms = int(time.time() * 1_000)
+        if (
+            settings.chat_executor_admission_key_not_before_ms <= 0
+            or settings.chat_executor_admission_key_not_after_ms
+            <= settings.chat_executor_admission_key_not_before_ms
+            or settings.chat_executor_admission_key_not_after_ms
+            - settings.chat_executor_admission_key_not_before_ms
+            > 30 * 24 * 60 * 60 * 1_000
+            or not settings.chat_executor_admission_key_not_before_ms
+            <= now_ms
+            <= settings.chat_executor_admission_key_not_after_ms
+        ):
+            raise RuntimeError("remote executor admission key window is invalid")
         if settings.chat_workspace_snapshots_enabled:
             raise RuntimeError("remote executor transport rejects snapshots")
         if (

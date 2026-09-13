@@ -750,6 +750,28 @@ The non-secret `service.env` contains exactly
 `PWC_CHAT_EXECUTOR_BACKEND_GROUP=pwc-production` or `pwc-staging`; the harness
 configuration independently pins the matching backend UID.
 
+Before starting a generation, render the two bounded JSON files from the
+qualified release manifest. `rendezvous.json` has exactly
+`shard_database_id`, `allowed_backend_uid`, `allowed_harness_uid`,
+`current_protocol_version`, `current_key`, and optional `previous_key` fields;
+each key object has `key_id`, URL-safe-base64 `public_key`,
+`not_before_ms`, and `not_after_ms`. `harness.json` has exactly
+`allowed_backend_uid`, `expected_rendezvous_uid`, `protocol_version`,
+hex `schema_digest`, `authorization_key_id`, `authorization_not_before`, and
+`authorization_not_after` (authorization times are Unix seconds). Resolve the
+three service-account UIDs from the host immediately before rendering; do not
+reuse the backend UID for the harness UID. The environment receives the
+matching authorization public-key document with exactly `current` and optional
+`previous` objects (`key_id`, standard-base64 `public_key`, `not_before`, and
+`not_after`, also in Unix seconds).
+
+When staging activation is authorized, install a backend systemd drop-in that
+loads the distinct admission-signing credential and sets
+`PWC_CHAT_EXECUTOR_ADMISSION_SIGNING_KEY_FILE` to its `%d/…` path. Keep that
+drop-in absent while the feature is disabled so a missing candidate credential
+cannot prevent the existing backend from starting. Validate the drop-in and
+credential path in staging before enabling the flag.
+
 For an ordinary blue/green service release:
 
 1. Build the exact merged source once and record the commit, Rust/Python/image

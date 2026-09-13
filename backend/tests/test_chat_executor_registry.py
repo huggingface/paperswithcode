@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import os
+import asyncio
 import json
 import hashlib
+import socket
+import threading
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
@@ -26,6 +29,7 @@ from backend.models.database import (
     ChatExecutorRollbackAudit,
     ChatExecutorShard,
 )
+from backend.config import Settings
 from backend.services.chat_executor_registry import (
     ChatExecutorRegistry,
     ExecutorAuthorizationRejected,
@@ -34,6 +38,11 @@ from backend.services.chat_executor_registry import (
     ExecutorRollbackRejected,
     ExecutorStorageUnavailable,
 )
+from backend.services.chat_executor_runtime import (
+    ChatExecutorRuntime,
+    executor_environment_generation,
+)
+from backend.services.chat_sandbox_provider import SandboxError
 from backend.services.chat_executor_admission import (
     AdmissionManifest,
     AdmissionSigningKey,
@@ -110,6 +119,110 @@ def test_launch_issuer_persists_digest_only_nonce_and_signs_rust_canonical_frame
     assert nonce is not None
     assert nonce.purpose == "launch"
     assert "08" * 16 not in repr(nonce.__dict__)
+
+
+def test_runtime_issues_launch_from_the_active_generation(
+    file_sessions, tmp_path: Path
+):
+    with file_sessions() as db, db.begin():
+        _repository, registration = _seed(db)
+        cell_id = registration.cell_id
+        shard_generation = registration.shard_generation
+    key_file = tmp_path / "admission.key"
+    key_file.write_bytes(b"\x21" * 32)
+    key_file.chmod(0o600)
+    now_ms = int(datetime.now(UTC).timestamp() * 1_000)
+    now_seconds = now_ms // 1_000
+    settings = Settings(
+        _env_file=None,
+        chat_executor_cell_id=cell_id,
+        chat_executor_admission_signing_key_file=str(key_file),
+        chat_executor_admission_signing_key_id="admission-v1",
+        chat_executor_admission_key_not_before_ms=now_ms - 1_000,
+        chat_executor_admission_key_not_after_ms=now_ms + 90_000_000,
+        chat_executor_authorization_keys_json=(
+            '{"current":{"key_id":"authorization-v1","public_key":"'
+            'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",'
+            f'"not_before":{now_seconds - 1},"not_after":{now_seconds + 90_000}'
+            "}}"
+        ),
+        chat_persistent_sandbox_lifetime_seconds=86_400,
+    )
+    runtime = ChatExecutorRuntime(settings, session_factory=file_sessions)
+
+    bundle = asyncio.run(runtime.prepare_launch("worker-generation-v1"))
+
+    assert bundle.shard_generation == shard_generation
+    envelope = json.loads(bundle.admission)
+    assert envelope["claims"]["environment_id"] == "worker-generation-v1"
+    assert envelope["claims"]["environment_generation"] == (
+        executor_environment_generation("worker-generation-v1")
+    )
+    assert envelope["claims"]["shard_generation"] == shard_generation
+    with file_sessions() as db:
+        nonce = db.scalar(select(ChatExecutorNonce))
+        assert nonce is not None
+        assert nonce.purpose == "launch"
+
+
+def test_runtime_rejects_an_unsafe_admission_key(file_sessions, tmp_path: Path):
+    with file_sessions() as db, db.begin():
+        _repository, registration = _seed(db)
+    key_file = tmp_path / "admission.key"
+    key_file.write_bytes(b"\x21" * 32)
+    key_file.chmod(0o644)
+    settings = Settings(
+        _env_file=None,
+        chat_executor_cell_id=registration.cell_id,
+        chat_executor_admission_signing_key_file=str(key_file),
+        chat_executor_admission_signing_key_id="admission-v1",
+        chat_executor_admission_key_not_before_ms=1,
+        chat_executor_admission_key_not_after_ms=2,
+        chat_executor_authorization_keys_json="{}",
+    )
+
+    with pytest.raises(SandboxError) as exc_info:
+        asyncio.run(
+            ChatExecutorRuntime(settings, session_factory=file_sessions).prepare_launch(
+                "worker-generation-v1"
+            )
+        )
+    assert exc_info.value.code == "sandbox_executor_admission_unavailable"
+
+
+def test_runtime_route_health_uses_the_live_generation_socket(
+    file_sessions, tmp_path: Path
+):
+    with file_sessions() as db, db.begin():
+        _repository, registration = _seed(db)
+        cell_id = registration.cell_id
+    socket_path = tmp_path / "rendezvous.sock"
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path))
+    socket_path.chmod(0o660)
+    listener.listen(1)
+
+    def respond() -> None:
+        with listener.accept()[0] as connection:
+            size = int.from_bytes(connection.recv(4), "big")
+            request = json.loads(connection.recv(size))
+            assert request == {"kind": "route_health"}
+            response = b'{"kind":"route_health","age_ms":125}'
+            connection.sendall(len(response).to_bytes(4, "big") + response)
+
+    server = threading.Thread(target=respond)
+    server.start()
+    try:
+        runtime = ChatExecutorRuntime(
+            Settings(_env_file=None, chat_executor_cell_id=cell_id),
+            session_factory=file_sessions,
+        )
+        runtime._rendezvous_socket = lambda _generation: socket_path
+        with file_sessions() as db:
+            assert runtime.route_health_seconds(db) == 0.125
+    finally:
+        server.join(timeout=2)
+        listener.close()
 
 
 @pytest.fixture

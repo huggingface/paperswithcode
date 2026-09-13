@@ -37,13 +37,17 @@ def test_launch_bundle_is_bounded_and_contains_no_plaintext_in_tags() -> None:
     admission = b"signed-once"
     assert (
         base64.urlsafe_b64decode(
-            ExecutorLaunchBundle(admission, shard_generation=7).encoded_admission()
+            ExecutorLaunchBundle(
+                admission, shard_generation=7, authorization_keys_json="{}"
+            ).encoded_admission()
         )
         == admission
     )
     for invalid in (b"", b"x" * 2_049):
         with pytest.raises(SandboxError) as exc_info:
-            ExecutorLaunchBundle(invalid, shard_generation=7).encoded_admission()
+            ExecutorLaunchBundle(
+                invalid, shard_generation=7, authorization_keys_json="{}"
+            ).encoded_admission()
         assert exc_info.value.code == "sandbox_executor_admission_invalid"
 
 

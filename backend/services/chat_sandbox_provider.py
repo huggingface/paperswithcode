@@ -69,6 +69,7 @@ class ExecutorLaunchBundle:
 
     admission: bytes
     shard_generation: int
+    authorization_keys_json: str
 
     def rendezvous_url(self, environment: str) -> str:
         base = EXECUTOR_RENDEZVOUS_URLS.get(environment)
@@ -86,6 +87,17 @@ class ExecutorLaunchBundle:
                 "Sandbox executor admission is invalid",
             )
         return base64.urlsafe_b64encode(self.admission).decode("ascii")
+
+    def authorization_keys(self) -> str:
+        if (
+            not self.authorization_keys_json
+            or len(self.authorization_keys_json.encode()) > 4_096
+        ):
+            raise SandboxError(
+                "sandbox_executor_authorization_keys_invalid",
+                "Sandbox executor authorization keys are invalid",
+            )
+        return self.authorization_keys_json
 
 
 def sanitized_failure_stage(value: object) -> str:
@@ -328,6 +340,8 @@ class ModalSandboxProviderAdapter:
                 rendezvous_url,
                 "--admission-env",
                 "PWC_CHAT_EXECUTOR_ADMISSION",
+                "--authorization-env",
+                "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
             )
             if executor_enabled
             else (
@@ -367,6 +381,9 @@ class ModalSandboxProviderAdapter:
                         ),
                         "PWC_CHAT_EXECUTOR_ADMISSION": (
                             executor_launch.encoded_admission()
+                        ),
+                        "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS": (
+                            executor_launch.authorization_keys()
                         ),
                     }
                     if executor_enabled

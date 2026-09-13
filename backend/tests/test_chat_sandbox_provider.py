@@ -170,7 +170,9 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
             },
             worker_generation="generation-a",
             launch_mode=SandboxLaunchMode.EXECUTOR,
-            executor_launch=ExecutorLaunchBundle(b"signed-launch", shard_generation=7),
+            executor_launch=ExecutorLaunchBundle(
+                b"signed-launch", shard_generation=7, authorization_keys_json="{}"
+            ),
         )
     )
 
@@ -181,11 +183,14 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
         "wss://chat-executor.staging.paperswithcode.co/v1/generations/7/environment",
         "--admission-env",
         "PWC_CHAT_EXECUTOR_ADMISSION",
+        "--authorization-env",
+        "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
     )
     options = captured["options"]
     assert options["env"]["PWC_CHAT_EXECUTOR_CONTRACT_VERSION"] == EXECUTOR_PROTOCOL
     assert options["env"]["PWC_CHAT_WORKER_GENERATION"] == "generation-a"
     assert options["env"]["PWC_CHAT_EXECUTOR_ADMISSION"] == "c2lnbmVkLWxhdW5jaA=="
+    assert options["env"]["PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS"] == "{}"
     assert "OPENAI_API_KEY" not in options["env"]
     assert "OPENROUTER_API_KEY" not in options["env"]
     assert "HF_TOKEN" not in options["env"]

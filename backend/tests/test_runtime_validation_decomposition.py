@@ -1,4 +1,5 @@
 import json
+import time
 from itertools import count
 from pathlib import Path
 
@@ -640,6 +641,8 @@ def test_external_pi_startup_keeps_exact_ordinary_research_deadline(
 
 
 def _arm_persistent_executor_transport(settings):
+    now_seconds = int(time.time())
+    now_ms = now_seconds * 1_000
     settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
     settings.chat_external_pi_worker_id = "worker-legacy"
     settings.chat_external_pi_worker_token = "s" * 32
@@ -657,6 +660,21 @@ def _arm_persistent_executor_transport(settings):
     settings.chat_external_pi_ready_registry_enabled = True
     settings.chat_external_pi_runtime_contract_version = "durable-external-pi-v1"
     settings.chat_executor_remote_transport_enabled = True
+    settings.chat_executor_cell_id = "cell-v1"
+    settings.chat_executor_admission_signing_key_file = (
+        "/run/credentials/test/executor-admission-key"
+    )
+    settings.chat_executor_admission_signing_key_id = "admission-v1"
+    settings.chat_executor_admission_key_not_before_ms = now_ms - 1_000
+    settings.chat_executor_admission_key_not_after_ms = now_ms + 60_000
+    settings.chat_executor_harness_key_id = "harness-v1"
+    settings.chat_executor_authorization_key_id = "authorization-v1"
+    settings.chat_executor_authorization_keys_json = (
+        '{"current":{"key_id":"authorization-v1","public_key":"'
+        'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",'
+        f'"not_before":{now_seconds - 1},"not_after":{now_seconds + 60}'
+        "}}"
+    )
 
 
 def test_persistent_executor_transport_is_default_off_and_parallelism_is_exact():
@@ -706,6 +724,15 @@ def test_persistent_executor_transport_accepts_only_fully_armed_ordinary_mode(
     _arm_persistent_executor_transport(settings)
 
     runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_persistent_executor_transport_requires_runtime_credentials(settings_factory):
+    settings, _release = settings_factory("staging")
+    _arm_persistent_executor_transport(settings)
+    settings.chat_executor_admission_signing_key_file = ""
+
+    with pytest.raises(RuntimeError, match="systemd credential configuration"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
 
 
 @pytest.mark.parametrize("environment", ["staging", "production"])

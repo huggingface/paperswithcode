@@ -17,6 +17,7 @@ clatter = { version = "=2.2.0", default-features = false, features = [
 ] }
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
 futures-util = "=0.3.34"
+libc = "=0.2.189"
 rand_chacha = "=0.3.1"
 rand_core = "=0.6.4"
 serde = { version = "1", features = ["derive"] }

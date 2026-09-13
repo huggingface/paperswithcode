@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 import uuid
 
 import pytest
@@ -11,6 +12,8 @@ from backend.models.database import (
     ChatTurnAdmissionBudget,
     ChatTurnReservation,
 )
+from backend.config import Settings
+from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
 from backend.services.chat_executor_transport_circuit import (
     ChatTransportUnavailable,
     ExecutorTransportCircuit,
@@ -18,6 +21,41 @@ from backend.services.chat_executor_transport_circuit import (
 from backend.services.chat_turn_admission import ChatTurnAdmissionService
 
 NOW = datetime(2026, 9, 4, 12, tzinfo=UTC)
+
+
+def test_live_turn_admission_persists_the_route_health_decision():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    for model in (
+        ChatTurnAdmissionBudget,
+        ChatTurnReservation,
+        ChatExecutorTransportCircuit,
+        ChatExecutorTransportAlert,
+    ):
+        model.__table__.create(engine)
+    settings = Settings(
+        _env_file=None,
+        environment="staging",
+        chat_executor_remote_transport_enabled=True,
+    )
+
+    def runtime_factory(_settings, _sessions):
+        return SimpleNamespace(route_health_seconds=lambda _db: 0.125)
+
+    with Session(engine, expire_on_commit=False) as session:
+        reservation = ChatExecutorTurnAdmission(
+            settings, runtime_factory=runtime_factory
+        ).reserve(
+            session,
+            turn_id=uuid.uuid4(),
+            request_id="live-route-request",
+            owner_id="owner-live-route",
+            now=NOW,
+        )
+
+        assert reservation.transport == "persistent"
+        assert session.get(ChatTurnReservation, reservation.turn_id).transport == (
+            "persistent"
+        )
 
 
 @pytest.fixture

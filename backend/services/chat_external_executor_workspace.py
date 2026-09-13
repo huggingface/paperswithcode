@@ -111,6 +111,7 @@ class ChatExternalExecutorWorkspaceManager:
         observe: LifecycleObserver | None = None,
         record_evidence: QualificationEvidenceRecorder | None = None,
         qualification_capacity: QualificationCapacityResolver | None = None,
+        executor_runtime: object | None = None,
     ) -> None:
         if settings.chat_workspace_snapshots_enabled:
             raise ValueError("External executor workspaces require snapshots disabled")
@@ -148,6 +149,7 @@ class ChatExternalExecutorWorkspaceManager:
         self.qualification_capacity = (
             qualification_capacity or self._persisted_qualification_capacity
         )
+        self.executor_runtime = executor_runtime
 
     def _persisted_qualification_capacity(
         self,
@@ -195,16 +197,26 @@ class ChatExternalExecutorWorkspaceManager:
         )
 
         owner = SandboxSessionManager(settings, sandbox_provider=provider)
+        executor_runtime = None
+        acquisition = owner._acquisition_coordinator()
+        if settings.chat_executor_remote_transport_enabled:
+            from backend.services.chat_executor_runtime import ChatExecutorRuntime
+
+            executor_runtime = ChatExecutorRuntime(
+                settings, session_factory=owner.session_factory
+            )
+            acquisition.executor_launch_factory = executor_runtime.prepare_launch
         manager = cls(
             settings=settings,
             session_factory=owner.session_factory,
             state_repository=owner._state_repository(),
-            acquisition=owner._acquisition_coordinator(),
+            acquisition=acquisition,
             lifecycle=owner._lease_lifecycle_coordinator(),
             maintenance=owner._lease_maintenance_coordinator(),
             executor=executor,
             observe=durable_lifecycle_observer(settings),
             record_evidence=record_qualification_event_safely,
+            executor_runtime=executor_runtime,
         )
         manager._dependency_owner = owner
         return manager
@@ -219,6 +231,7 @@ class ChatExternalExecutorWorkspaceManager:
             session_id=session_id,
             turn_claim=turn_claim,
             verify_executor_health=True,
+            launch_mode=SandboxLaunchMode.EXECUTOR,
         )
 
     async def acquire_for_binding(
@@ -233,6 +246,22 @@ class ChatExternalExecutorWorkspaceManager:
             session_id=session_id,
             turn_claim=turn_claim,
             verify_executor_health=False,
+            launch_mode=SandboxLaunchMode.EXECUTOR,
+        )
+
+    async def acquire_legacy(
+        self,
+        *,
+        session_id: uuid.UUID,
+        turn_claim: TurnLeaseClaim,
+    ) -> ExternalExecutorWorkspace:
+        """Use the pre-transport Modal relay after circuit fallback."""
+
+        return await self._acquire(
+            session_id=session_id,
+            turn_claim=turn_claim,
+            verify_executor_health=True,
+            launch_mode=SandboxLaunchMode.LEGACY,
         )
 
     async def _acquire(
@@ -241,6 +270,7 @@ class ChatExternalExecutorWorkspaceManager:
         session_id: uuid.UUID,
         turn_claim: TurnLeaseClaim,
         verify_executor_health: bool,
+        launch_mode: SandboxLaunchMode,
     ) -> ExternalExecutorWorkspace:
         deadline = self.monotonic() + self.acquisition.ready_timeout_seconds
         replacement_attempts = 0
@@ -248,7 +278,7 @@ class ChatExternalExecutorWorkspaceManager:
             self._require_live_turn(session_id, turn_claim)
             outcome = await self.acquisition.acquire(
                 session_id,
-                launch_mode=SandboxLaunchMode.EXECUTOR,
+                launch_mode=launch_mode,
                 allow_pool=False,
                 live_cap_resolver=lambda db: self._executor_live_cap(
                     db, session_id, turn_claim

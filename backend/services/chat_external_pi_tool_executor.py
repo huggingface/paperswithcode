@@ -314,9 +314,20 @@ class ExternalPiToolWorkspaceExecutor:
                 return self._binding
             manager = self._workspace_manager()
             turn_claim = self._durable_turn_claim()
-            acquire_for_binding = getattr(manager, "acquire_for_binding", None)
+            persistent = (
+                getattr(self.admission, "executor_transport", "legacy") == "persistent"
+                or self.channel_factory is not None
+            )
+            acquire_for_binding = (
+                getattr(manager, "acquire_for_binding", None) if persistent else None
+            )
             if acquire_for_binding is None:
-                workspace = await manager.acquire(
+                legacy_acquire = (
+                    getattr(manager, "acquire_legacy", None)
+                    if self.settings.chat_executor_remote_transport_enabled
+                    else None
+                )
+                workspace = await (legacy_acquire or manager.acquire)(
                     session_id=self.admission.session_id,
                     turn_claim=turn_claim,
                 )
@@ -326,13 +337,22 @@ class ExternalPiToolWorkspaceExecutor:
                     turn_claim=turn_claim,
                 )
             try:
+                channel_factory = self.channel_factory
+                if channel_factory is None and persistent:
+                    runtime = getattr(manager, "executor_runtime", None)
+                    channel_factory = getattr(runtime, "attach_channel", None)
+                    if channel_factory is None:
+                        raise SandboxError(
+                            "executor_transport_unavailable",
+                            "Persistent executor runtime is unavailable",
+                        )
                 channel = (
-                    await self.channel_factory(
+                    await channel_factory(
                         workspace,
                         turn_claim,
                         MIN_EXECUTOR_CLAIM_SECONDS,
                     )
-                    if self.channel_factory is not None
+                    if channel_factory is not None
                     else _LegacyExecutorChannel(self.executor, workspace.sandbox)
                 )
                 if acquire_for_binding is not None and await channel.health() != "ok":

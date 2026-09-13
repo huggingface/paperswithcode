@@ -1172,11 +1172,31 @@ def _claim_local_turn(settings: Settings, admission: TurnAdmission) -> TurnAdmis
             claim = ChatLocalTurnLeaseService(db, settings).claim(
                 admission.turn_id, now=datetime.now(UTC)
             )
+            reservation_revision = admission.executor_reservation_revision
+            if reservation_revision is not None:
+                from backend.services.chat_turn_admission import (
+                    ChatTurnAdmissionService,
+                )
+
+                reservation = ChatTurnAdmissionService(
+                    environment=settings.environment,
+                    spend_limit_microusd=settings.chat_sandbox_application_cap_microusd,
+                ).mark_dispatched(
+                    db,
+                    turn_id=admission.turn_id,
+                    revision=reservation_revision,
+                    now=datetime.now(UTC),
+                )
+                reservation_revision = reservation.revision
             db.commit()
         except (TurnJobError, SQLAlchemyError, ValueError):
             db.rollback()
             raise
-    return replace(admission, durable_claim=claim)
+    return replace(
+        admission,
+        durable_claim=claim,
+        executor_reservation_revision=reservation_revision,
+    )
 
 
 def _heartbeat_local_turn(settings: Settings, admission: TurnAdmission) -> None:
