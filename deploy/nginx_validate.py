@@ -53,6 +53,9 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
     ):
         if f"${prefix}_{mapping}" not in config:
             failures.append(f"{environment} MCP map is missing: {mapping}")
+    for media_type in ("text/event-stream", "text/html"):
+        if f'"~*(?:^|,)\\s*{media_type}' not in config:
+            failures.append(f"{environment} MCP {media_type} map regex must be quoted")
     protocol = location_block(config, f"location @{environment}_mcp_protocol")
     protocol_requirements = (
         "rewrite ^/mcp/$ /mcp break;",

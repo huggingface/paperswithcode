@@ -28,6 +28,12 @@ def test_mcp_protocol_signals_precede_html_and_honor_q_zero():
         assert "text/html" in config
 
 
+def test_mcp_media_patterns_are_quoted_for_real_nginx_parsing():
+    for config in (PRODUCTION, STAGING):
+        assert '"~*(?:^|,)\\s*text/event-stream' in config
+        assert '"~*(?:^|,)\\s*text/html' in config
+
+
 def test_mcp_validation_rejects_spa_fallthrough_and_untrusted_forwarding():
     broken_spa = PRODUCTION.replace(
         "try_files /index.html =404;", "try_files $uri /index.html;", 1
