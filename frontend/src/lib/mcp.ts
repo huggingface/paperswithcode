@@ -38,15 +38,22 @@ function parseHealth(payload: unknown): McpHealth {
 }
 
 export async function fetchMcpHealth(signal?: AbortSignal): Promise<McpHealth> {
-  const timeout = AbortSignal.timeout(5_000);
-  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  const response = await fetch(`${mcpEndpoint()}/health`, {
-    headers: { Accept: "application/json" },
-    signal: combined,
-    credentials: "omit",
-  });
-  if (!response.ok) throw new Error("MCP service is unavailable");
-  return parseHealth(await response.json());
+  const controller = new AbortController();
+  const cancel = () => controller.abort();
+  signal?.addEventListener("abort", cancel, { once: true });
+  const timeout = window.setTimeout(cancel, 5_000);
+  try {
+    const response = await fetch(`${mcpEndpoint()}/health`, {
+      headers: { Accept: "application/json" },
+      signal: controller.signal,
+      credentials: "omit",
+    });
+    if (!response.ok) throw new Error("MCP service is unavailable");
+    return parseHealth(await response.json());
+  } finally {
+    window.clearTimeout(timeout);
+    signal?.removeEventListener("abort", cancel);
+  }
 }
 
 export const mcpHealthQueryOptions = () =>
