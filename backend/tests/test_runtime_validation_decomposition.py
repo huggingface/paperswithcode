@@ -583,6 +583,62 @@ def test_external_pi_admission_requires_durable_bridge_and_exact_contracts(
         runtime_validation.validate_external_pi_migration_policy(settings)
 
 
+@pytest.mark.parametrize("authoring_mode", ["poster", "paper"])
+def test_external_pi_startup_rejects_authoring_modes(settings_factory, authoring_mode):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_admission_enabled = True
+    settings.chat_remote_workspace_tools_enabled = True
+    settings.chat_lazy_workspace_enabled = True
+    settings.chat_sandbox_executor_enabled = True
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    settings.chat_remote_bash_enabled = True
+    settings.chat_remote_read_enabled = True
+    settings.chat_durable_turn_dispatch_enabled = True
+    settings.chat_turn_event_journal_schema_enabled = True
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_ready_registry_enabled = True
+    settings.chat_external_pi_runtime_contract_version = "durable-external-pi-v1"
+    settings.chat_artifacts_enabled = True
+    if authoring_mode == "poster":
+        settings.chat_posterly_enabled = True
+    else:
+        settings.chat_latex_paper_enabled = True
+        settings.chat_latex_compiler_jobs_enabled = True
+
+    with pytest.raises(RuntimeError, match="ordinary research only"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
+def test_external_pi_startup_keeps_exact_ordinary_research_deadline(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
+    settings.chat_external_pi_worker_id = "worker-legacy"
+    settings.chat_external_pi_worker_token = "s" * 32
+    settings.chat_external_pi_worker_contract_version = "external-pi-v1"
+    settings.chat_external_pi_admission_enabled = True
+    settings.chat_remote_workspace_tools_enabled = True
+    settings.chat_lazy_workspace_enabled = True
+    settings.chat_sandbox_executor_enabled = True
+    settings.chat_sandbox_executor_contract_version = "sandbox-executor-v1"
+    settings.chat_remote_bash_enabled = True
+    settings.chat_remote_read_enabled = True
+    settings.chat_durable_turn_dispatch_enabled = True
+    settings.chat_turn_event_journal_schema_enabled = True
+    settings.chat_external_pi_supervisor_enabled = True
+    settings.chat_external_pi_ready_registry_enabled = True
+    settings.chat_external_pi_runtime_contract_version = "durable-external-pi-v1"
+    settings.chat_agent_timeout_seconds = 181
+
+    with pytest.raises(RuntimeError, match="180-second deadline"):
+        runtime_validation.validate_external_pi_migration_policy(settings)
+
+
 @pytest.mark.parametrize("environment", ["staging", "production"])
 def test_executor_bridge_environment_examples_remain_disabled(environment):
     source = Path(f"deploy/env/{environment}.env.example").read_text()

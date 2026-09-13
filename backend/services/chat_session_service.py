@@ -38,6 +38,10 @@ from backend.services.chat_edit_service import (
     ChatEditService,
     user_message_projection_bytes,
 )
+from backend.services.chat_external_worker_capacity import (
+    UnsupportedChatMode,
+    require_ordinary_research_mode,
+)
 from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
 from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
 from backend.services.chat_durable_qualification_evidence import QualificationContext
@@ -1885,9 +1889,34 @@ class ChatSessionService:
             )
             and target_harness == "pi"
         ):
+            poster_mode = (
+                self.settings.chat_artifacts_enabled
+                and self.settings.chat_posterly_enabled
+                and detect_poster_intent(text)
+            )
+            paper_artifacts_enabled = (
+                self.settings.chat_artifacts_enabled
+                and self.settings.chat_latex_paper_enabled
+                and self.settings.chat_latex_compiler_jobs_enabled
+                and session_primary_paper_id is None
+            )
+            try:
+                require_ordinary_research_mode(
+                    poster_mode=poster_mode,
+                    paper_artifacts_enabled=paper_artifacts_enabled,
+                )
+            except UnsupportedChatMode as error:
+                raise ChatServiceError(
+                    error.code,
+                    422,
+                    "Persistent executor v1 supports ordinary research only",
+                ) from error
             try:
                 durable_preflight = durable_coordinator.reserve_external_capacity(
-                    durable_preflight, now=now
+                    durable_preflight,
+                    now=now,
+                    poster_mode=poster_mode,
+                    paper_artifacts_enabled=paper_artifacts_enabled,
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
                 raise self._durable_admission_error(error) from error

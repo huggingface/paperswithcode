@@ -36,7 +36,11 @@ from backend.services.chat_runtime_contract import (
     require_external_admission_contract,
     require_immutable_image_id,
 )
-from backend.services.chat_external_worker_capacity import external_worker_endpoints
+from backend.services.chat_external_worker_capacity import (
+    UnsupportedChatMode,
+    external_worker_endpoints,
+    require_ordinary_research_mode,
+)
 from latex_compiler_contract import (
     EnvelopeError,
     validate_staging_sandbox_compiler_identity,
@@ -1381,6 +1385,25 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
             "external Pi admission requires the sandbox executor with Bash and Read"
         )
     if settings.chat_external_pi_admission_enabled:
+        try:
+            require_ordinary_research_mode(
+                poster_mode=(
+                    settings.chat_artifacts_enabled and settings.chat_posterly_enabled
+                ),
+                paper_artifacts_enabled=(
+                    settings.chat_artifacts_enabled
+                    and settings.chat_latex_paper_enabled
+                    and settings.chat_latex_compiler_jobs_enabled
+                ),
+            )
+        except UnsupportedChatMode as error:
+            raise RuntimeError(
+                "external Pi admission supports ordinary research only"
+            ) from error
+        if settings.chat_agent_timeout_seconds != 180:
+            raise RuntimeError(
+                "external Pi ordinary research requires a 180-second deadline"
+            )
         try:
             require_external_admission_contract(
                 ExternalAdmissionContract(

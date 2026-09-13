@@ -29,6 +29,7 @@ from backend.services.chat_external_worker_capacity import (
     ChatExternalWorkerCapacityRepository,
     ExternalWorkerEndpoint,
     external_worker_endpoints,
+    require_ordinary_research_mode,
 )
 from backend.services.chat_external_pi_shadow import (
     ExternalPiWorkerControlClient,
@@ -103,6 +104,10 @@ class ExternalPiChatTurnRunner:
         cancel_timeout_seconds: float = 5.0,
         channel_factory: ChannelFactory | None = None,
     ) -> None:
+        require_ordinary_research_mode(
+            poster_mode=admission.poster_mode,
+            paper_artifacts_enabled=admission.paper_artifacts_enabled,
+        )
         self.settings = settings
         self.admission = admission
         self.prompt = prompt
