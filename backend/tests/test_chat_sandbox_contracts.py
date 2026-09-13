@@ -3589,6 +3589,10 @@ def test_image_makes_copied_worker_readable_and_installs_skill():
     assert '"websockets==16.0"' in source
     assert "import backend.chat_sandbox_worker.executor_daemon" in source
     assert "import backend.chat_sandbox_worker.executor_relay" in source
+    assert (
+        "from backend.chat_sandbox_worker.executor_command import "
+        "DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER"
+    ) in source
     assert "EXECUTOR_USER == 'pwc-chat'" in source
     assert "DEFAULT_EXECUTOR_PIDS_MAX == 64" in source
 

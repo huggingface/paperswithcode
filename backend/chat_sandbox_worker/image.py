@@ -143,7 +143,7 @@ image = (
         "python -m pip install --no-deps /opt/pwc/s2_cli",
         "chmod 0755 /opt/pwc/restricted-hf && ln -s /opt/pwc/restricted-hf /usr/local/bin/hf",
         "PYTHONPATH=/opt/pwc python -c 'import backend.chat_execution_policy'",
-        "PYTHONPATH=/opt/pwc python -c \"import backend.chat_sandbox_worker.executor_daemon; import backend.chat_sandbox_worker.executor_relay; from backend.chat_sandbox_worker.executor_daemon import DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER; assert EXECUTOR_USER == 'pwc-chat' and DEFAULT_EXECUTOR_PIDS_MAX == 64\"",
+        "PYTHONPATH=/opt/pwc python -c \"import backend.chat_sandbox_worker.executor_daemon; import backend.chat_sandbox_worker.executor_relay; from backend.chat_sandbox_worker.executor_command import DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER; assert EXECUTOR_USER == 'pwc-chat' and DEFAULT_EXECUTOR_PIDS_MAX == 64\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; from backend.chat_sandbox_worker.contract import RESTRICTED_HF_CLI_SHA256, restricted_hf_cli_digest; assert restricted_hf_cli_digest(Path('/opt/pwc/restricted_hf_cli/restricted_hf_cli'), Path('/opt/pwc/restricted-hf')) == RESTRICTED_HF_CLI_SHA256\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; import hashlib; from backend.chat_sandbox_worker.contract import HF_CLI_SKILL_SHA256; assert hashlib.sha256(Path('/opt/pwc/HF_CLI_SKILL.md').read_bytes()).hexdigest() == HF_CLI_SKILL_SHA256\"",
         f"python /opt/pwc/install-pwc.py --version {PWC_CLI_VERSION} --prefix /usr/local",
