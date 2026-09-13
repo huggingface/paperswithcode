@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 from pathlib import Path
 
@@ -108,6 +109,9 @@ def test_release_manifest_signs_every_immutable_component(
 
     payload = manifest["payload"]
     assert isinstance(payload, dict)
+    expected_source_commit = hashlib.sha256(("a" * 40).encode()).hexdigest()
+    assert payload["source_commit"] == expected_source_commit
+    assert payload["source_commit_digest"] == expected_source_commit
     for field in (
         "image_digest",
         "environment_binary_digest",

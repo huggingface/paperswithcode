@@ -371,6 +371,45 @@ def test_remote_read_limits_reject_before_broker_or_workspace_access(
     thread.join(timeout=2)
 
 
+def test_remote_read_maps_workspace_absolute_path_to_workspace_root(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    (workspace / "note.bin").write_bytes(b"remote-workspace")
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        worker_generation="worker-1",
+        broker_control=_Broker(),
+        command_preexec=None,
+        remote_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+
+    responses = _operation(
+        server.socket_path,
+        {
+            "protocol": PROTOCOL,
+            "type": "read_file",
+            "request_id": "request-remote-absolute",
+            **IDENTITY,
+            "path": "/workspace/note.bin",
+            "offset": 0,
+            "max_bytes": 1024,
+        },
+    )
+
+    assert responses[1]["type"] == "read_result"
+    assert responses[1]["data_base64"] == "cmVtb3RlLXdvcmtzcGFjZQ=="
+    assert responses[1]["eof"] is True
+    server.shutdown()
+    thread.join(timeout=2)
+
+
 def test_remote_turn_binding_owns_capability_across_sequential_operations(
     tmp_path: Path,
 ) -> None:
@@ -444,6 +483,99 @@ def test_remote_turn_binding_owns_capability_across_sequential_operations(
     ]
     assert [frame["type"] for frame in released] == ["acknowledged"]
     assert not broker.active
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+def test_remote_release_is_idempotent_after_deadline_cleanup(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    broker = _Broker()
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        worker_generation="worker-1",
+        broker_control=broker,
+        command_preexec=None,
+        remote_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+    deadline = int((time.time() + 0.1) * 1000)
+
+    ensured = _operation(
+        server.socket_path,
+        {
+            "protocol": PROTOCOL,
+            "type": "ensure_workspace",
+            "request_id": "request-deadline-release-ensure",
+            **IDENTITY,
+        },
+        turn_deadline_unix_ms=deadline,
+    )
+    wait_until = time.monotonic() + 2
+    while broker.active and time.monotonic() < wait_until:
+        time.sleep(0.01)
+    released = _operation(
+        server.socket_path,
+        {
+            "protocol": PROTOCOL,
+            "type": "release_workspace",
+            "request_id": "request-deadline-release",
+            **IDENTITY,
+        },
+        turn_deadline_unix_ms=deadline,
+    )
+
+    assert [frame["type"] for frame in ensured] == ["acknowledged"]
+    assert not broker.active
+    assert [frame["type"] for frame in released] == ["acknowledged"]
+    server.shutdown()
+    thread.join(timeout=2)
+
+
+def test_remote_ensure_reports_refused_broker_install(tmp_path: Path) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    broker_active = False
+
+    def refuse_install(payload: dict[str, object]) -> dict[str, object]:
+        nonlocal broker_active
+        if payload["operation"] == "install":
+            broker_active = True
+            return {"ok": False, "active": True}
+        broker_active = False
+        return {"ok": True, "active": False}
+
+    server = ExecutorServer(
+        socket_path=tmp_path / "private" / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=workspace,
+        worker_generation="worker-1",
+        broker_control=refuse_install,
+        command_preexec=None,
+        remote_mode=True,
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    assert server.wait_until_ready(2)
+
+    responses = _operation(
+        server.socket_path,
+        {
+            "protocol": PROTOCOL,
+            "type": "ensure_workspace",
+            "request_id": "request-refused-ensure",
+            **IDENTITY,
+        },
+    )
+
+    assert [frame["type"] for frame in responses] == ["acknowledged", "terminal"]
+    assert responses[-1]["status"] == "failed"
+    assert responses[-1]["error"] == "executor_transport_unavailable"
+    assert not broker_active
     server.shutdown()
     thread.join(timeout=2)
 
@@ -1794,6 +1926,48 @@ def test_detached_resume_boundary_accepts_29_9_and_rejects_30_1_seconds(
     assert server._detached_resume_expired(execution) is False
     now[0] = 130.1
     assert server._detached_resume_expired(execution) is True
+
+
+def test_successful_attach_resets_detached_resume_window(
+    tmp_path: Path, monkeypatch
+) -> None:
+    server = ExecutorServer(
+        socket_path=tmp_path / "executor.sock",
+        state_path=tmp_path / "state",
+        workspace_root=tmp_path,
+        monotonic=lambda: 105.0,
+    )
+    execution = SimpleNamespace(
+        identity=dict(IDENTITY),
+        terminal=None,
+        detached_at=100.0,
+        cancel=threading.Event(),
+        process=None,
+        condition=threading.Condition(),
+    )
+    server._executions[("turn-1", "tool-1")] = execution
+    observed_detachments: list[float | None] = []
+    monkeypatch.setattr(
+        server,
+        "_stream",
+        lambda _connection, _request, active, _offset: observed_detachments.append(
+            active.detached_at
+        ),
+    )
+    connection = SimpleNamespace(sendall=lambda _payload: None)
+
+    server._attach(
+        connection,
+        {
+            "protocol": PROTOCOL,
+            "type": "attach_execution",
+            "request_id": "request-reset-detachment",
+            **IDENTITY,
+            "offset": 0,
+        },
+    )
+
+    assert observed_detachments == [None]
 
 
 def test_invalid_utf8_at_chunk_limit_still_reaches_terminal(tmp_path: Path) -> None:

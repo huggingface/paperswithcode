@@ -49,13 +49,14 @@ def signed_release_manifest(
     key_bytes = signing_key_file.read_bytes()
     if len(key_bytes) != 32:
         raise ValueError("Executor manifest signing key is invalid")
-    source_commit = subprocess.run(
+    source_revision = subprocess.run(
         ["git", "rev-parse", "HEAD"],
         cwd=REPOSITORY,
         check=True,
         capture_output=True,
         text=True,
     ).stdout.strip()
+    source_commit = hashlib.sha256(source_revision.encode()).hexdigest()
     daemon = REPOSITORY / "backend/chat_sandbox_worker/executor_daemon.py"
     python_protocol = REPOSITORY / "backend/chat_sandbox_worker/executor_protocol.py"
     transport_protocol = REPOSITORY / "executor_transport/src/protocol.rs"
@@ -70,7 +71,7 @@ def signed_release_manifest(
         "protocol_digest": _digest(transport_protocol),
         "schema_digest": _schema_digest((python_protocol, transport_protocol)),
         "source_commit": source_commit,
-        "source_commit_digest": hashlib.sha256(source_commit.encode()).hexdigest(),
+        "source_commit_digest": source_commit,
     }
     payload["manifest_digest"] = hashlib.sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

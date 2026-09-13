@@ -525,7 +525,20 @@ class ExecutorServer:
             )
             return
         if self.remote_mode:
-            self._install_turn_broker(request, bootstrap)
+            try:
+                self._install_turn_broker(request, bootstrap)
+            except RuntimeError:
+                self._ack(connection, request)
+                self._send_terminal(
+                    connection,
+                    request,
+                    {
+                        "status": "failed",
+                        "exit_code": None,
+                        "error": "executor_transport_unavailable",
+                    },
+                )
+                return
         self._ack(connection, request)
 
     def _release_workspace(
@@ -539,9 +552,12 @@ class ExecutorServer:
             return
         key = self._broker_key(request, bootstrap)
         with self._broker_lock:
-            if self._broker_binding != key or self._broker_users:
+            if self._broker_binding is None:
+                if self._broker_users:
+                    raise _ContainmentFailure
+            elif self._broker_binding != key or self._broker_users:
                 raise _ContainmentFailure
-            if not self._clear_remote_turn_locked(key):
+            elif not self._clear_remote_turn_locked(key):
                 raise _ContainmentFailure
         self._ack(connection, request)
 
@@ -671,6 +687,9 @@ class ExecutorServer:
                     else "process_containment_failed"
                 ),
             )
+        elif execution.terminal is None:
+            with execution.condition:
+                execution.detached_at = None
         self._stream(connection, request, execution, int(request["offset"]))
 
     def _detached_resume_expired(self, execution: _Execution) -> bool:
@@ -1285,10 +1304,14 @@ class ExecutorServer:
     ) -> tuple[bytes, bool]:
         requested = Path(path)
         if requested.is_absolute():
-            if requested not in self.readonly_paths:
+            if requested in self.readonly_paths:
+                root = requested.parent
+                parts = (requested.name,)
+            elif self.remote_mode and requested.parts[:2] == ("/", "workspace"):
+                root = self.workspace_root
+                parts = requested.parts[2:]
+            else:
                 raise ValueError
-            root = requested.parent
-            parts = (requested.name,)
         else:
             root = self.workspace_root
             parts = requested.parts
