@@ -34,6 +34,100 @@ SHARE_API_LOCATION = (
 CHAT_STREAM_LOCATION = "location = /api/v1/chat/stream"
 
 
+def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
+    failures: list[str] = []
+    prefix = f"pwc_{environment}_mcp"
+    for mapping in (
+        "method_signal",
+        "method_allowed",
+        "header_signal",
+        "stream_present",
+        "stream_q0",
+        "stream_positive",
+        "stream_signal",
+        "html_present",
+        "html_q0",
+        "html_positive",
+        "html_signal",
+        "protocol_signal",
+    ):
+        if f"${prefix}_{mapping}" not in config:
+            failures.append(f"{environment} MCP map is missing: {mapping}")
+    protocol = location_block(config, f"location @{environment}_mcp_protocol")
+    protocol_requirements = (
+        "rewrite ^/mcp/$ /mcp break;",
+        f"proxy_pass http://127.0.0.1:{port};",
+        "proxy_http_version 1.1;",
+        'proxy_set_header Connection "";',
+        "proxy_set_header Origin $http_origin;",
+        "proxy_set_header X-Forwarded-For $remote_addr;",
+        'proxy_set_header Cookie "";',
+        'proxy_set_header Authorization "";',
+        "proxy_buffering off;",
+        "proxy_cache off;",
+        'add_header Cache-Control "no-store" always;',
+        'add_header Vary "Accept, MCP-Protocol-Version" always;',
+    )
+    if not protocol:
+        failures.append(f"{environment} MCP protocol location is missing")
+    else:
+        for requirement in protocol_requirements:
+            if requirement not in protocol:
+                failures.append(
+                    f"{environment} MCP protocol location misses: {requirement}"
+                )
+        if "auth_request" in protocol:
+            failures.append(f"{environment} MCP protocol uses browser authentication")
+    health = location_block(config, "location = /mcp/health")
+    if (
+        not health
+        or f"proxy_pass http://127.0.0.1:{port}/health;" not in health
+        or 'add_header Cache-Control "no-store" always;' not in health
+        or "auth_request" in health
+    ):
+        failures.append(f"{environment} MCP health route is unsafe")
+    for location in ("location = /mcp {", "location = /mcp/ {"):
+        block = location_block(config, location)
+        html_requirements = (
+            f"error_page 418 = @{environment}_mcp_protocol;",
+            f"if (${prefix}_method_allowed = 0) {{ return 405; }}",
+            f"if (${prefix}_protocol_signal) {{ return 418; }}",
+            f"if (${prefix}_html_signal = 0) {{ return 406; }}",
+            "limit_except GET HEAD",
+            "try_files /index.html =404;",
+            'add_header Vary "Accept, MCP-Protocol-Version" always;',
+            'add_header Allow "GET, HEAD, POST, DELETE, OPTIONS" always;',
+        )
+        if not block:
+            failures.append(f"{environment} MCP HTML location is missing: {location}")
+            continue
+        for requirement in html_requirements:
+            if requirement not in block:
+                failures.append(
+                    f"{environment} MCP HTML location misses: {requirement}"
+                )
+        if (
+            environment == "staging"
+            and "auth_request /_staging_access_check;" not in block
+        ):
+            failures.append("staging MCP documentation bypasses browser authentication")
+    descendants = location_block(config, "location ^~ /mcp/")
+    if not descendants or "return 404;" not in descendants:
+        failures.append(f"{environment} unknown MCP descendants do not return 404")
+    log_marker = f"log_format {prefix} "
+    log_start = config.find(log_marker)
+    if log_start < 0:
+        failures.append(f"{environment} MCP privacy log format is missing")
+    else:
+        log_line = config[log_start : config.find("\n", log_start)]
+        for forbidden in ("$remote_addr", "$request_uri", "$request ", "$args"):
+            if forbidden in log_line:
+                failures.append(
+                    f"{environment} MCP privacy log contains {forbidden.strip()}"
+                )
+    return failures
+
+
 def _validate_seo_routes(config: str, backend: str, environment: str) -> list[str]:
     failures: list[str] = []
     catch_all = config.find("location / {")
@@ -64,7 +158,11 @@ def location_block(config: str, location: str) -> str:
     start = config.find(location)
     if start < 0:
         return ""
-    opening = config.find("{", start + len(location))
+    opening = (
+        start + location.rfind("{")
+        if location.rstrip().endswith("{")
+        else config.find("{", start + len(location))
+    )
     if opening < 0:
         return ""
     depth = 0
@@ -237,6 +335,8 @@ def validate(production: str, staging: str) -> list[str]:
         _validate_seo_routes(production, "pwc_production_backend", "production")
     )
     failures.extend(_validate_seo_routes(staging, "pwc_staging_backend", "staging"))
+    failures.extend(_validate_mcp_routes(production, "production", 8002))
+    failures.extend(_validate_mcp_routes(staging, "staging", 8003))
     staging_robots = staging.split("location = /robots.txt", 1)
     if len(staging_robots) == 2:
         robots_block = staging_robots[1].split("}", 1)[0]
