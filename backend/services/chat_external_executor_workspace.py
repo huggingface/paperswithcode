@@ -19,6 +19,7 @@ from backend.services.chat_sandbox_acquisition_coordinator import (
     ChatSandboxAcquisitionCoordinator,
 )
 from backend.services.chat_sandbox_executor import (
+    ExecutorContext,
     ExecutorTransportError,
     PersistentExecutorChannel,
     SandboxExecutorClient,
@@ -75,6 +76,7 @@ class ExternalExecutorTurnBinding:
 
     workspace: ExternalExecutorWorkspace
     channel: PersistentExecutorChannel
+    context: ExecutorContext
     settlement: str = "invalidate"
     settled: bool = False
 

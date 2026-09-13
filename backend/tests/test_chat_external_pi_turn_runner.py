@@ -160,7 +160,9 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
             session_id=session_id,
             durable_claim=TurnLeaseClaim(turn_id, "production-green-00", 4, 9),
         ),
-        capability=SimpleNamespace(token="capability"),
+        capability=SimpleNamespace(
+            token="capability", expires_at=datetime.now(UTC) + timedelta(minutes=4)
+        ),
         executor=Executor(),
         record_evidence=lambda **values: events.append(values) or True,
         active_context=None,
@@ -232,7 +234,9 @@ def test_executor_start_evidence_follows_successful_executor_operation():
             session_id=session_id,
             durable_claim=claim,
         ),
-        capability=SimpleNamespace(token="capability"),
+        capability=SimpleNamespace(
+            token="capability", expires_at=datetime.now(UTC) + timedelta(minutes=4)
+        ),
         provider=object(),
         executor=Executor(),
         workspace_manager=Manager(),
@@ -487,6 +491,74 @@ def test_turn_binding_is_lazy_ordered_shared_bounded_and_settled_once():
     assert channel.workspace_calls == 1
     assert channel.exec_calls == 15
     assert channel.closed == 1
+
+
+def test_turn_cancellation_reaches_four_siblings_and_blocks_the_fifth_start():
+    class BlockingExecutor(FakeExecutor):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.cancelled: list[str] = []
+
+        async def exec_resumable(self, context, *, command, timeout_ms):
+            assert command == "parallel"
+            assert timeout_ms == 1000
+            self.active += 1
+            if self.active == 4:
+                self.started.set()
+            await self.release.wait()
+            self.active -= 1
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "cancelled", "exit_code": None, "error": None},
+            )
+
+        async def cancel_execution(self, context):
+            self.cancelled.append(context.execution_id)
+            if len(self.cancelled) == 4:
+                self.release.set()
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "cancelled", "exit_code": None, "error": None},
+            )
+
+    executor = BlockingExecutor()
+    manager = FakeWorkspaceManager(FakeProvider())
+    runner = _tool_runner(executor, manager)
+
+    async def tool(index: int):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": "parallel",
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def exercise():
+        runner.tool_executor.begin_turn()
+        tasks = [asyncio.create_task(tool(index)) for index in range(5)]
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        assert await runner.tool_executor.cancel_active() is True
+        results = await asyncio.gather(*tasks)
+        await runner.tool_executor.settle_turn()
+        return results
+
+    results = asyncio.run(exercise())
+
+    assert sorted(executor.cancelled) == [f"operation-{index}" for index in range(4)]
+    assert results[4] == {
+        "type": "tool_result",
+        "operation_id": "operation-4",
+        "ok": False,
+        "error": "turn_cancelled",
+    }
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
 
 
 def worker_status(claim):

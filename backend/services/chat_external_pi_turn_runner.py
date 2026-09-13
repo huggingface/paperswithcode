@@ -669,11 +669,14 @@ class ExternalPiChatTurnRunner:
             return False
 
         async def cancel_executor() -> None:
-            if context is None:
+            if context is None and self.tool_executor._binding is None:
                 return
             try:
                 async with asyncio.timeout(self.cancel_timeout_seconds):
-                    await self._cancel_executor(context)
+                    if self.tool_executor._binding is not None:
+                        await self.tool_executor.cancel_active()
+                    elif context is not None:
+                        await self._cancel_executor(context)
             except TimeoutError:
                 return
 

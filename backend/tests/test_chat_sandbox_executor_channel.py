@@ -51,6 +51,7 @@ def _context(execution_id: str, tool_call_id: str) -> ExecutorContext:
         turn_worker_id="turn-worker-v1",
         turn_worker_generation="turn-worker-generation-v1",
         turn_lease_generation="turn-lease-v1",
+        turn_deadline_unix_ms=4_000_000_000_000,
     )
 
 

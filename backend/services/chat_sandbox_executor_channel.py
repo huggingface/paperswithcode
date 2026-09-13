@@ -272,6 +272,10 @@ class PersistentSandboxExecutorChannel:
         self._require_attached()
         await self._client.ensure_workspace(context)
 
+    async def release_workspace(self, context: ExecutorContext) -> None:
+        self._require_attached()
+        await self._client.release_workspace(context)
+
     async def exec_resumable(
         self,
         context: ExecutorContext,

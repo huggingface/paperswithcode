@@ -58,6 +58,7 @@ class ExecutorContext:
     turn_worker_id: str
     turn_worker_generation: str
     turn_lease_generation: str
+    turn_deadline_unix_ms: int
 
     @property
     def operation_identity(self) -> dict[str, object]:
@@ -93,6 +94,8 @@ class PersistentExecutorChannel(Protocol):
     async def health(self) -> str: ...
 
     async def ensure_workspace(self, context: ExecutorContext) -> None: ...
+
+    async def release_workspace(self, context: ExecutorContext) -> None: ...
 
     async def exec_resumable(
         self,
@@ -163,6 +166,12 @@ class ExecutorExecutionLost(RuntimeError):
         return self._responses
 
 
+class ExecutorTransportUnavailable(ExecutorExecutionLost):
+    """The bounded live-claim recovery window ended without a terminal."""
+
+    code = "executor_transport_unavailable"
+
+
 class ExecutorOperationError(RuntimeError):
     def __init__(self, code: str) -> None:
         super().__init__("Sandbox executor operation failed")
@@ -220,6 +229,15 @@ class SandboxExecutorClient:
         if len(responses) != 1:
             raise ProtocolError("Invalid ensure-workspace response sequence")
         self._validate_ack(responses[0], request, "ensure_workspace")
+
+    async def release_workspace(self, context: ExecutorContext) -> None:
+        request = self._request(context, "release_workspace")
+        responses = await self._exchange(
+            context.sandbox, request, context=context, timeout_seconds=10
+        )
+        if len(responses) != 1:
+            raise ProtocolError("Invalid release-workspace response sequence")
+        self._validate_ack(responses[0], request, "release_workspace")
 
     async def exec(
         self,
@@ -347,7 +365,7 @@ class SandboxExecutorClient:
                 responses=responses,
                 recovered=True,
             )
-        raise ExecutorExecutionLost(
+        raise ExecutorTransportUnavailable(
             execution_id=context.execution_id,
             last_sequence=cursor,
             responses=responses,
@@ -571,6 +589,9 @@ class SandboxExecutorClient:
             or not context.turn_worker_generation
             or not isinstance(context.turn_lease_generation, str)
             or not context.turn_lease_generation
+            or isinstance(context.turn_deadline_unix_ms, bool)
+            or not isinstance(context.turn_deadline_unix_ms, int)
+            or context.turn_deadline_unix_ms <= 0
         ):
             raise ProtocolError("Invalid executor bootstrap")
         value = {
@@ -584,6 +605,7 @@ class SandboxExecutorClient:
             "turn_worker_id": context.turn_worker_id,
             "turn_worker_generation": context.turn_worker_generation,
             "turn_lease_generation": context.turn_lease_generation,
+            "turn_deadline_unix_ms": context.turn_deadline_unix_ms,
         }
         try:
             encoded = (

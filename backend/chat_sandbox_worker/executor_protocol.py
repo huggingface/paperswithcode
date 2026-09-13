@@ -216,7 +216,7 @@ def _validate_request(value: dict[str, Any]) -> None:
         _exact_fields(value, common)
         return
     operation = common | _OPERATION_IDENTITY_FIELDS
-    if kind == "ensure_workspace":
+    if kind in {"ensure_workspace", "release_workspace"}:
         _exact_fields(value, operation)
     elif kind == "exec":
         _exact_fields(
@@ -273,6 +273,7 @@ def _validate_response(value: dict[str, Any]) -> None:
         _exact_fields(value, operation | {"operation"})
         if value["operation"] not in {
             "ensure_workspace",
+            "release_workspace",
             "exec",
             "attach_execution",
             "cancel_execution",

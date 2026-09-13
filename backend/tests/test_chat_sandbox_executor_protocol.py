@@ -98,6 +98,12 @@ def test_request_and_response_known_literals_round_trip() -> None:
         },
         {
             "protocol": PROTOCOL,
+            "type": "release_workspace",
+            "request_id": "request-release",
+            **OPERATION_IDENTITY,
+        },
+        {
+            "protocol": PROTOCOL,
             "type": "attach_execution",
             "request_id": "request-2",
             **OPERATION_IDENTITY,
