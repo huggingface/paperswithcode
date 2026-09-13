@@ -15,6 +15,8 @@ use clatter::handshakepattern::noise_hybrid_ik;
 use clatter::traits::{Cipher, Dh, Handshaker, Kem};
 use clatter::transportstate::TransportState;
 use clatter::{HybridHandshake, HybridHandshakeParams, KeyPair};
+use rand_chacha::ChaCha20Rng;
+use rand_core::{CryptoRng, Error as RandError, RngCore, SeedableRng};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256 as KeyIdSha256};
 
@@ -28,6 +30,41 @@ type Transport = TransportState<AesGcm, Sha256>;
 type DhKeyPair = KeyPair<<X25519 as Dh>::PubKey, <X25519 as Dh>::PrivateKey>;
 type KemKeyPair = KeyPair<<MlKem768 as Kem>::PubKey, <MlKem768 as Kem>::SecretKey>;
 type KemPublicKey = <MlKem768 as Kem>::PubKey;
+
+#[derive(Clone)]
+struct CredentialRng(ChaCha20Rng);
+
+impl CredentialRng {
+    fn from_seed(seed: [u8; 32]) -> Self {
+        Self(ChaCha20Rng::from_seed(seed))
+    }
+}
+
+impl Default for CredentialRng {
+    fn default() -> Self {
+        Self::from_seed([0; 32])
+    }
+}
+
+impl RngCore for CredentialRng {
+    fn next_u32(&mut self) -> u32 {
+        self.0.next_u32()
+    }
+
+    fn next_u64(&mut self) -> u64 {
+        self.0.next_u64()
+    }
+
+    fn fill_bytes(&mut self, dest: &mut [u8]) {
+        self.0.fill_bytes(dest);
+    }
+
+    fn try_fill_bytes(&mut self, dest: &mut [u8]) -> Result<(), RandError> {
+        self.0.try_fill_bytes(dest)
+    }
+}
+
+impl CryptoRng for CredentialRng {}
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -70,6 +107,24 @@ impl NoiseIdentity {
         let dh = X25519::genkey().map_err(|error| NoiseError::KeyGeneration(error.to_string()))?;
         let kem =
             MlKem768::genkey().map_err(|error| NoiseError::KeyGeneration(error.to_string()))?;
+        Ok(Self { dh, kem })
+    }
+
+    /// Derive the process identity from a root-owned systemd credential.
+    /// Private component bytes never receive a serialization or accessor API.
+    pub fn from_seed(seed: [u8; 32]) -> Result<Self, NoiseError> {
+        let mut dh_seed = KeyIdSha256::new();
+        dh_seed.update(b"pwc-harness-noise-dh/v1");
+        dh_seed.update(seed);
+        let mut kem_seed = KeyIdSha256::new();
+        kem_seed.update(b"pwc-harness-noise-kem/v1");
+        kem_seed.update(seed);
+        let mut dh_rng = CredentialRng::from_seed(dh_seed.finalize().into());
+        let mut kem_rng = CredentialRng::from_seed(kem_seed.finalize().into());
+        let dh = X25519::genkey_rng(&mut dh_rng)
+            .map_err(|error| NoiseError::KeyGeneration(error.to_string()))?;
+        let kem = MlKem768::genkey_rng(&mut kem_rng)
+            .map_err(|error| NoiseError::KeyGeneration(error.to_string()))?;
         Ok(Self { dh, kem })
     }
 

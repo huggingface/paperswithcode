@@ -6,6 +6,7 @@
 //! in Papers With Code.
 
 pub mod admission;
+pub mod local_socket;
 pub mod noise;
 pub mod postgres_registry;
 pub mod protocol;

@@ -574,6 +574,10 @@ impl AuthorizationSigner {
             not_after: self.not_after,
         }
     }
+
+    pub fn key_id(&self) -> &str {
+        &self.key_id
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
