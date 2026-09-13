@@ -141,10 +141,12 @@ def test_qualify_uses_unprivileged_user_distinct_config_and_temporary_port(
 
 def test_failed_activation_restores_previous_pointer(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
+    previous = _release(tmp_path, "0" * 16)
     old = _release(tmp_path, "a" * 16)
     new = _release(tmp_path, "b" * 16)
     root = mcp_release.MCP_ENVIRONMENTS / "staging"
     mcp_release._atomic_pointer(old, root / "current")
+    mcp_release._atomic_pointer(previous, root / "previous")
     monkeypatch.setattr(mcp_release, "_run", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         mcp_release, "_ensure_permanent_port_available", lambda *args: None
@@ -162,6 +164,7 @@ def test_failed_activation_restores_previous_pointer(tmp_path, monkeypatch):
     with pytest.raises(mcp_release.McpReleaseError, match="candidate failed"):
         mcp_release.activate_release(new, "staging")
     assert mcp_release._pointer("staging", "current") == old
+    assert mcp_release._pointer("staging", "previous") == previous
 
 
 def test_rollback_swaps_current_and_previous(tmp_path, monkeypatch):

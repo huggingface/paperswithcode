@@ -193,6 +193,15 @@ def test_paper_chunk_rejects_invalid_query_before_bucket_io(monkeypatch, query):
     assert called is False
 
 
+def test_paper_chunk_rejects_invalid_paper_id_without_leaking_details():
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/research/papers/not-an-id/read?limit=12")
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert response.json() == {"detail": "Paper Markdown was not found"}
+
+
 @pytest.mark.parametrize(
     ("error", "status"),
     [
@@ -245,9 +254,11 @@ def test_bounded_markdown_read_never_requests_the_full_object(monkeypatch):
             assert token == "private-token"
 
         def open(self, path, mode, *, block_size):
-            assert path == "hf://buckets/owner/content/1706/1706.03762.md"
             assert mode == "rb"
             assert block_size == 0
+            if path.endswith("/_content/manifests/1706.03762.json"):
+                raise FileNotFoundError(path)
+            assert path == "hf://buckets/owner/content/1706/1706.03762.md"
             return TrackedFile(raw)
 
     monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
@@ -279,9 +290,11 @@ def test_external_markdown_uses_paper_id_bucket_namespace(monkeypatch):
             assert token == "private-token"
 
         def open(self, path, mode, *, block_size):
-            assert path == "hf://buckets/owner/content/external/109743.md"
             assert mode == "rb"
             assert block_size == 0
+            if path.endswith("/_content/manifests/external/109743.json"):
+                raise FileNotFoundError(path)
+            assert path == "hf://buckets/owner/content/external/109743.md"
             return io.BytesIO(b"# External paper\n")
 
     monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
@@ -308,6 +321,8 @@ def test_bounded_markdown_read_caches_the_public_artifact(monkeypatch):
         def open(self, _path, _mode, *, block_size):
             nonlocal opens
             assert block_size == 0
+            if _path.endswith("/_content/manifests/1706.03762.json"):
+                raise FileNotFoundError(_path)
             opens += 1
             return io.BytesIO(b"# Cached paper\n")
 
@@ -332,6 +347,26 @@ def test_bounded_markdown_read_caches_the_public_artifact(monkeypatch):
 
     assert first == second == ("# Cached paper\n", False)
     assert opens == 1
+
+
+def test_bounded_markdown_read_uses_manifest_revision_over_mutable_alias(monkeypatch):
+    versioned = b"# Version selected by manifest\n"
+    files = _versioned_files(versioned)
+    files["1706/1706.03762.md"] = b"# Concurrent mutable alias\n"
+    _install_versioned_filesystem(monkeypatch, files)
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+    try:
+        result = paper_markdown_service.read_paper_markdown_bounded(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            max_bytes=1024,
+        )
+    finally:
+        paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+    assert result == (versioned.decode(), False)
 
 
 def test_versioned_markdown_chunk_reads_bounded_utf8_bytes(monkeypatch):

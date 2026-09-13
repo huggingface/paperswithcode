@@ -312,10 +312,11 @@ def read_paper_markdown_bounded(
     token: str | None,
     max_bytes: int,
 ) -> tuple[str, bool]:
-    """Read at most ``max_bytes`` from a paper Markdown object.
+    """Read at most ``max_bytes`` from a paper Markdown revision.
 
     The extra byte distinguishes an exact-size document from a truncated one
-    without downloading the rest of a private bucket object.
+    without downloading the rest of a private bucket object. Once a versioned
+    manifest exists, it is authoritative over the mutable compatibility alias.
     """
     resolved_source, normalized = normalize_markdown_paper_id(paper_id, source)
     if not bucket_id.strip():
@@ -323,8 +324,21 @@ def read_paper_markdown_bounded(
     if max_bytes < 1:
         raise ValueError("max_bytes must be positive")
 
+    filesystem = HfFileSystem(token=token)
+    try:
+        manifest = _read_markdown_manifest(
+            filesystem,
+            bucket_id=bucket_id.strip(),
+            paper_id=normalized,
+            source=resolved_source,
+        )
+    except PaperMarkdownNotFoundError:
+        bucket_key = paper_markdown_bucket_key(normalized, source=resolved_source)
+    else:
+        bucket_key = manifest.content_key
+
     raw, truncated = _read_paper_markdown_bytes(
-        paper_markdown_bucket_key(normalized, source=resolved_source),
+        bucket_key,
         bucket_id.strip(),
         token,
         max_bytes,

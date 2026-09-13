@@ -391,6 +391,7 @@ def activate_release(release: Path, environment: str) -> None:
     _ensure_permanent_port_available(environment)
     root = MCP_ENVIRONMENTS / environment
     current = _pointer(environment, "current")
+    previous = _pointer(environment, "previous")
     _atomic_pointer(release, root / "current")
     if current is not None and current != release:
         _atomic_pointer(current, root / "previous")
@@ -402,12 +403,20 @@ def activate_release(release: Path, environment: str) -> None:
     except Exception:
         if current is not None:
             _atomic_pointer(current, root / "current")
+            if previous is not None:
+                _atomic_pointer(previous, root / "previous")
+            else:
+                (root / "previous").unlink(missing_ok=True)
             _run(["systemctl", "restart", unit])
             old = validate_release(current)
             _health(MCP_PORTS[environment], str(old["package_version"]))
             _smoke(MCP_PORTS[environment], old)
         else:
             (root / "current").unlink(missing_ok=True)
+            if previous is not None:
+                _atomic_pointer(previous, root / "previous")
+            else:
+                (root / "previous").unlink(missing_ok=True)
             subprocess.run(["systemctl", "stop", unit], check=False)
         raise
 

@@ -137,6 +137,12 @@ def read_paper(
                 detail=str(error),
                 headers={"Cache-Control": "no-store"},
             ) from error
+        except ValueError as error:
+            raise HTTPException(
+                status_code=404,
+                detail="Paper Markdown was not found",
+                headers={"Cache-Control": "no-store"},
+            ) from error
         headers = {
             "Cache-Control": (
                 _VERSIONED_CHUNK_CACHE_CONTROL
