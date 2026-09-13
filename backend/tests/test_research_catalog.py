@@ -100,6 +100,137 @@ def test_paper_read_is_publicly_cached_and_reports_truncation(monkeypatch):
     assert seen["max_bytes"] == research_catalog._MARKDOWN_MAX_BYTES
 
 
+def test_paper_chunk_defaults_are_utf8_bytes_and_return_continuation_headers(
+    monkeypatch,
+):
+    seen = {}
+
+    def fake_chunk(paper_id, **kwargs):
+        seen.update(paper_id=paper_id, **kwargs)
+        return paper_markdown_service.PaperMarkdownChunk(
+            markdown="bounded α",
+            content_version="a" * 64,
+            next_offset=10,
+        )
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_chunk", fake_chunk)
+
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/research/papers/1706.03762/read?limit=12")
+
+    assert response.status_code == 200
+    assert response.text == "bounded α"
+    assert response.headers["content-type"] == "text/plain; charset=utf-8"
+    assert response.headers["x-pwc-truncated"] == "1"
+    assert response.headers["x-pwc-next-offset"] == "10"
+    assert response.headers["x-pwc-content-version"] == "a" * 64
+    assert response.headers["cache-control"] == "public, max-age=0, must-revalidate"
+    assert seen["paper_id"] == "1706.03762"
+    assert seen["offset"] == 0
+    assert seen["limit"] == 12
+    assert seen["content_version"] is None
+
+
+def test_paper_chunk_continuation_is_version_bound_and_terminal(monkeypatch):
+    seen = {}
+
+    def fake_chunk(paper_id, **kwargs):
+        seen.update(paper_id=paper_id, **kwargs)
+        return paper_markdown_service.PaperMarkdownChunk(
+            markdown="terminal",
+            content_version="b" * 64,
+            next_offset=None,
+        )
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_chunk", fake_chunk)
+
+    with TestClient(create_app()) as client:
+        response = client.get(
+            "/api/v1/research/papers/1706.03762/read",
+            params={"offset": "9", "content_version": "b" * 64},
+        )
+
+    assert response.status_code == 200
+    assert response.text == "terminal"
+    assert response.headers["x-pwc-truncated"] == "0"
+    assert "x-pwc-next-offset" not in response.headers
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    assert seen["offset"] == 9
+    assert seen["limit"] == research_catalog._MARKDOWN_MAX_BYTES
+    assert seen["content_version"] == "b" * 64
+
+
+@pytest.mark.parametrize(
+    "query",
+    [
+        "offset=-1",
+        "offset=true",
+        "offset=9223372036854775808",
+        "offset=1&offset=2",
+        "offset=1",
+        "limit=0",
+        "limit=true",
+        "limit=262145",
+        "limit=1&limit=2",
+        "content_version=bad/value",
+        "content_version=a&content_version=b",
+    ],
+)
+def test_paper_chunk_rejects_invalid_query_before_bucket_io(monkeypatch, query):
+    called = False
+
+    def fake_chunk(*_args, **_kwargs):
+        nonlocal called
+        called = True
+        raise AssertionError("must not reach storage")
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_chunk", fake_chunk)
+    with TestClient(create_app()) as client:
+        response = client.get(f"/api/v1/research/papers/1706.03762/read?{query}")
+
+    assert response.status_code == 422
+    assert response.headers["cache-control"] == "no-store"
+    assert called is False
+
+
+@pytest.mark.parametrize(
+    ("error", "status"),
+    [
+        (
+            paper_markdown_service.PaperMarkdownVersionMismatchError("restart"),
+            409,
+        ),
+        (paper_markdown_service.PaperMarkdownRangeError("invalid range"), 416),
+        (paper_markdown_service.PaperMarkdownNotFoundError("not found"), 404),
+        (paper_markdown_service.PaperMarkdownStorageError("unavailable"), 503),
+    ],
+)
+def test_paper_chunk_maps_sanitized_errors_without_cache(monkeypatch, error, status):
+    def fake_chunk(*_args, **_kwargs):
+        raise error
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_chunk", fake_chunk)
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/research/papers/1706.03762/read?offset=0")
+
+    assert response.status_code == status
+    assert response.headers["cache-control"] == "no-store"
+    assert "hf://" not in response.text
+
+
+def test_legacy_paper_read_sanitizes_storage_errors(monkeypatch):
+    def fake_read(*_args, **_kwargs):
+        raise ValueError("hf://buckets/private/secret-object")
+
+    monkeypatch.setattr(research_catalog, "read_paper_markdown_bounded", fake_read)
+    with TestClient(create_app()) as client:
+        response = client.get("/api/v1/research/papers/1706.03762/read")
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    assert "secret-object" not in response.text
+
+
 def test_bounded_markdown_read_never_requests_the_full_object(monkeypatch):
     raw = ("α" * 20).encode()
     reads: list[int] = []
