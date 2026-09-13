@@ -147,6 +147,41 @@ a job's schedule with `systemctl status pwc-cron-<job>.timer`; list all with
 Environment deployment, rollback, nginx, backup, and release layout are
 documented in [deployment.md](deployment.md).
 
+### Paper Markdown continuation and MCP health
+
+`GET /api/v1/research/papers/{paper_id}/read` without query parameters retains
+the legacy bounded response and may append its truncation notice. Supplying
+`offset`, `limit`, or `content_version` selects byte-chunk mode. Offsets and
+limits count stored UTF-8 bytes, not characters; `limit` is at most 262,144.
+The first request defaults to offset zero. Continue a nonterminal response with
+both `X-PwC-Next-Offset` and the opaque `X-PwC-Content-Version` returned by the
+server. A nonzero offset without that version is rejected.
+
+Chunk responses are `200 text/plain` with `X-PwC-Truncated`, the content version,
+and a next offset only when more bytes exist. An offset exactly at EOF is an
+empty terminal success. Invalid syntax is `422`, a stale version is `409`, an
+invalid byte boundary/range is `416`, missing Markdown is `404`, and storage
+failure is `503`; error responses are `no-store`. Unversioned first chunks must
+revalidate, while version-bound immutable chunks may be cached for one hour.
+Modern arXiv identifiers (version suffixes normalize to the stored base paper)
+and numeric external-paper IDs are supported. Do not promise historical arXiv
+versions or stored reads for legacy papers that have not been migrated.
+
+The backing objects are immutable SHA-256-addressed Markdown selected by a small
+per-paper manifest. Writers publish content before the manifest and honor the
+migration lock. Run the migration in bounded dry-run batches first; never delete
+old content objects while a one-hour continuation cursor could still reference
+them. The request path performs bounded reads and strict UTF-8 validation rather
+than downloading a whole paper.
+
+For MCP operations, start with `pwc-status --component mcp` and inspect
+`journalctl -u paperswithcode-mcp@staging.service` (or `production`). Operational
+MCP telemetry is limited to tool name, status, latency, response bytes, protocol
+label, and server version. It must not contain query text, paper IDs, cursors,
+resource URIs, raw IPs, authorization, or bodies. The upstream catalog remains a
+separate service with its own logs. Deployment, key rotation, nginx cutover,
+qualification, and rollback instructions are in [deployment.md](deployment.md).
+
 Blue/green deployments record every pointer mutation in
 `environments/<environment>/activation-journal.json`. If `pwc-status` reports
 `live-with-old-slot-draining`, do not restart or kill the old service; run

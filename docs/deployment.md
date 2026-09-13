@@ -26,6 +26,13 @@ rollback target.
 /etc/paperswithcode/{production,staging}.env
 /etc/paperswithcode/production-cron.env
 /var/lib/paperswithcode/{shared,production,staging}
+
+/srv/paperswithcode/mcp/
+  repository.git                 # huggingface/pwc-cli mirror
+  releases/<sha16>/
+  environments/{production,staging}/{current,previous}
+
+/etc/paperswithcode/mcp-{production,staging}.env
 ```
 
 Nginx resolves backend requests through `active/backend.sock` and static files
@@ -192,6 +199,81 @@ Install deployment tooling only from committed source:
 ```bash
 sudo python deploy/install_deploy_tools.py <commit>
 ```
+
+## First-party MCP component
+
+The remote MCP server is an independent immutable component even though its
+lifecycle code lives in this monorepo. Its source comes from an exact commit in
+the separate `huggingface/pwc-cli` mirror. A release archives only
+`mcp_server/` and `standalone_cli/`, installs the committed `mcp_server/uv.lock`,
+and records the source SHA, lock and artifact hashes, package and SDK versions,
+protocol matrix, health schema, and fixed catalog URLs in `manifest.json`.
+Production accepts only commits reachable from the MCP mirror's `origin/main`.
+
+Use the existing commands with an explicit component selector:
+
+```bash
+pwc-status --component mcp
+sudo pwc-deploy staging <exact-pwc-cli-sha> --component mcp
+sudo pwc-deploy staging <exact-pwc-cli-sha> --component mcp --qualify-only
+sudo pwc-deploy production <exact-main-pwc-cli-sha> --component mcp \
+  --confirm DEPLOY_PRODUCTION
+sudo pwc-rollback staging --component mcp
+sudo pwc-rollback production --component mcp --confirm ROLLBACK_PRODUCTION
+sudo pwc-cleanup --component mcp --confirm CLEAN_RELEASES
+```
+
+Site and MCP mutations share the site deployment lock. Candidate qualification
+runs as `pwc-mcp` on a temporary loopback port and must pass health, initialize,
+tool discovery, and a one-result read-only catalog call before activation. The
+permanent service is one process on loopback (`8002` production, `8003` staging),
+with `MemoryMax=768M`, `CPUQuota=75%`, `TasksMax=64`, protected system paths,
+and no database or bucket credentials. The installer requires at least 512 MiB
+of free release capacity. Reconfirm host capacity and listener ownership before
+first activation; these initial budgets are qualification limits, not sizing
+guarantees.
+
+The root-owned mode-`0640` files `mcp-production.env` and `mcp-staging.env` have
+different API URLs, Host allowlists, ports, and cursor secrets. They must contain
+`PWC_MCP_CURSOR_KEY_CURRENT`; during rotation, move the old value to
+`PWC_MCP_CURSOR_KEY_PREVIOUS`, install a fresh current value without printing
+either secret, deploy, wait longer than the one-hour cursor lifetime, then clear
+the previous value. Never load `backend/keys.env` into this service. Staging
+uses `http://127.0.0.1:8001/api/v1`; production uses
+`https://paperswithcode.co/api/v1`. A failure restores the previous pointer and
+re-smokes it. If no prior release exists, the failed unit is stopped.
+
+The public route is activated separately with `pwc-nginx`; an application or
+MCP deploy never reloads nginx. The checked-in nginx template maps browser
+`Accept: text/html` requests for `/mcp` to the documentation page, protocol
+requests to the loopback service, and `/mcp/health` to health. It strips client
+cookies and authorization and uses a content-free MCP access log. Existing
+catalog/API infrastructure has its own request logging and retention policy, so
+this is not an end-to-end no-logging claim.
+
+Before staging activation:
+
+1. Migrate canonical paper Markdown to content-addressed objects and verify a
+   version-bound byte continuation through the staging loopback API.
+2. Confirm `8003` is free, the protected staging config has the exact staging
+   API URL/allowlists, and `pwc-status --component mcp` reports no invalid
+   pointer.
+3. Qualify the exact MCP SHA. Health's protocol value must equal the protocol
+   actually negotiated by initialize; a metadata-only claim fails closed.
+4. Apply staging nginx only through `pwc-nginx`, then smoke authenticated browser
+   documentation, anonymous `/mcp/health`, initialize, discovery, and every
+   read-only capability. Exercise rate, body, concurrency, deadline, and memory
+   limits before leaving it exposed.
+5. Drill `pwc-rollback staging --component mcp` and retain the evidence.
+
+For production, require the merged application and MCP SHAs, repeat the API
+capability check, confirm `8002`, qualify the production API URL directly, deploy
+the MCP component, apply nginx with `pwc-nginx production`, and smoke `/health`,
+the site, an SPA route, an API route, browser `/mcp`, `/mcp/health`, and the MCP
+protocol. Roll back nginx immediately for routing/content-negotiation failures;
+roll back the MCP component for readiness, protocol, error-rate, latency,
+saturation, or memory regressions. The Hugging Face Space is a non-canonical
+fallback qualification target, never the URL clients should save.
 
 ## Staging sandbox-chat bridge
 

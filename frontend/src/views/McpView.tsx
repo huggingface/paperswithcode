@@ -247,7 +247,7 @@ const McpView: React.FC = () => {
           <p className="mcp-kicker">Protocol &amp; troubleshooting</p>
           <h2>Streamable HTTP</h2>
           <p>
-            Primary protocol: {health.data?.protocol ?? "2026-07-28"}. If setup fails,
+            Primary protocol: {health.data?.protocol ?? "verified during connection setup"}. If setup fails,
             confirm your client supports remote Streamable HTTP, that custom servers are
             enabled by your workspace administrator, and that you pasted the URL exactly.
           </p>
