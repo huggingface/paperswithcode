@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from types import SimpleNamespace
 import uuid
 
@@ -24,6 +25,29 @@ from backend.services.chat_executor_transport_circuit import (
 from backend.services.chat_turn_admission import ChatTurnAdmissionService
 
 NOW = datetime(2026, 9, 4, 12, tzinfo=UTC)
+
+
+def test_transport_circuit_migration_sets_environment_role_boundaries():
+    migration = (
+        Path(__file__).parents[1]
+        / "database/migrations/add_chat_executor_transport_circuit.sql"
+    ).read_text()
+    lowered = migration.lower()
+
+    assert "if current_schema() = 'staging'" in lowered
+    assert "elsif current_schema() = 'public'" in lowered
+    assert (
+        "alter table chat_executor_transport_circuits owner to pwc_staging_owner"
+        in lowered
+    )
+    assert (
+        "alter table chat_executor_transport_alerts owner to pwc_staging_owner"
+        in lowered
+    )
+    assert "grant select,insert,update,delete on" in lowered
+    assert "to pwc_staging" in lowered
+    assert "from paperswithcode_user" in lowered
+    assert "transport circuit migration requires staging or public schema" in lowered
 
 
 def test_provider_turn_reserve_prices_the_full_selected_model_envelope():

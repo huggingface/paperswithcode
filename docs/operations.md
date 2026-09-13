@@ -726,6 +726,17 @@ merged and Cursor Bugbot and required checks are clear. Production needs
 separate explicit authorization and must reuse the exact staging-qualified
 commit and artifact digests; never rebuild between environments.
 
+Before starting a staging candidate, apply the executor migrations in this
+order with PostgreSQL `search_path=staging,public`:
+`add_chat_executor_registrations.sql`, `add_chat_turn_reservations.sql`, then
+`add_chat_executor_transport_circuit.sql`. Each script is transactional,
+refuses schemas other than `staging` or `public`, assigns environment-specific
+ownership and grants, and revokes the opposite application role. Verify all
+twelve tables are owned by `pwc_staging_owner`, that `pwc_staging` has the
+declared access (the rollback audit remains insert/select only), and that
+`paperswithcode_user` has none. An application deployment never applies these
+migrations.
+
 Each service generation is addressed as `<environment>/<positive-generation>`.
 Escape that path with `systemd-escape --path` and start matching rendezvous and
 harness instances. Their only listeners are
