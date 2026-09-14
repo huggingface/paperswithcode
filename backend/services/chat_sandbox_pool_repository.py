@@ -240,7 +240,9 @@ class ChatSandboxPoolRepository:
                 self.settings.chat_system_prompt_sha256 if pi_prewarm else "generic"
             ),
             provider_adapter_contract=(
-                f"executor-v1:{self.settings.chat_executor_cell_id}"
+                hashlib.sha256(
+                    f"executor-v1:{self.settings.chat_executor_cell_id}".encode()
+                ).hexdigest()
                 if remote_executor
                 else self.settings.chat_pi_provider_adapter_contract
                 if pi_prewarm

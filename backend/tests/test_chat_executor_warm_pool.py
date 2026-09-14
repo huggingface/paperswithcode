@@ -93,8 +93,9 @@ def test_pool_compatibility_separates_legacy_and_executor_cells():
     executor = h.repository.compatibility()
     assert executor.agent_harness == "generic"
     assert executor != _Harness().repository.compatibility()
-    h.settings.chat_executor_cell_id = "replacement-cell"
+    h.settings.chat_executor_cell_id = "x" * 64
     assert h.repository.compatibility() != executor
+    assert len(h.repository.compatibility().provider_adapter_contract) == 64
     h.settings.chat_pi_prewarm_enabled = True
     assert h.repository.compatibility().agent_harness == "generic"
 
