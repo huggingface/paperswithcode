@@ -1130,6 +1130,14 @@ sudo pwc-cron status
 pwc cron health refresh_paper_embeddings --strict --json
 ```
 
+The backup script requires an affirmative boolean `private: true` from authenticated
+`hf buckets info` before dumping, immediately before uploading, and before pruning.
+An unavailable or malformed response fails the job. Newly created local dumps and
+checksums use owner-only permissions. These checks detect visibility changes at
+those boundaries; bucket access controls must also prevent unauthorized visibility
+changes between checks and after upload. A public-backup incident remains open for
+historical exposure assessment even after the bucket becomes private.
+
 `pwc-postgres-backup.timer` remains at 03:15 UTC. It runs the backup script from
 `production/current` as `pwc-cron`, dumps both `public` and `staging` with the
 read-only `pwc_backup` role, verifies the local checksum and remote object
