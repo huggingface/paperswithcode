@@ -494,7 +494,9 @@ def test_production_rejects_durable_external_provider_capacity_drift(
     _configure_durable_external_admission_resource_profile(settings)
     setattr(settings, field, invalid)
 
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation._validate_chat_resource_policy(settings)
 
 
@@ -838,7 +840,9 @@ def test_direct_openai_requires_exact_low_reasoning_warm_profile(settings_factor
     runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
     settings.chat_pi_prewarm_reasoning_effort = "high"
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
@@ -902,7 +906,9 @@ def test_direct_openai_rejects_partial_or_nonstaging_durable_qualification_profi
     _durable_external_qualification_resource_profile(settings)
     setattr(settings, field, invalid)
 
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation._validate_chat_resource_policy(settings)
 
 
@@ -1217,3 +1223,19 @@ def test_four_spare_profile_is_staging_persistent_only(
     else:
         with pytest.raises(RuntimeError, match="reviewed runtime profile"):
             runtime_validation._validate_chat_capacity_policy(settings)
+
+
+def test_four_spares_pass_capacity_and_direct_openai_resource_validation(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    _configure_durable_external_admission_resource_profile(settings)
+    settings.chat_executor_remote_transport_enabled = True
+    settings.chat_blank_pool_enabled = True
+    settings.chat_blank_pool_min = settings.chat_blank_pool_max = 4
+    settings.chat_pi_prewarm_enabled = True
+    settings.chat_default_agent_harness = "pi"
+    settings.chat_pi_prewarm_model = settings.chat_openai_luna_route
+    settings.chat_pi_prewarm_reasoning_effort = "low"
+    runtime_validation._validate_chat_capacity_policy(settings)
+    runtime_validation._validate_chat_resource_policy(settings)

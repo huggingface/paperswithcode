@@ -1281,15 +1281,13 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
             and (
                 not settings.chat_pi_prewarm_enabled
                 or not settings.chat_blank_pool_enabled
-                or settings.chat_blank_pool_min != 1
-                or settings.chat_blank_pool_max != 1
                 or settings.chat_effective_pi_prewarm_model
                 != settings.chat_openai_luna_route
                 or settings.chat_pi_prewarm_reasoning_effort != "low"
             )
         ):
             raise RuntimeError(
-                "direct OpenAI chat requires one direct-Luna low-reasoning warm blank"
+                "direct OpenAI chat requires the direct-Luna low-reasoning prewarm profile"
             )
     if settings.chat_pi_prewarm_enabled:
         if not settings.chat_blank_pool_enabled:
