@@ -36,6 +36,7 @@ const ROUTE_SUFFIX: &str = "/environment";
 const PRODUCTION_HOST: &str = "chat-executor.paperswithcode.co";
 const STAGING_HOST: &str = "chat-executor-staging.paperswithcode.co";
 const HEARTBEAT: Duration = Duration::from_secs(5);
+const CONNECT_DEADLINE: Duration = Duration::from_secs(5);
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
 const EXECUTOR_SOCKET: &str = "/run/pwc-chat-executor/executor.sock";
 const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
@@ -294,6 +295,7 @@ async fn launch(
     if admission.is_empty() || admission.len() > 2_048 {
         return Err("admission frame rejected".into());
     }
+    let daemon_started = Instant::now();
     let mut daemon = Command::new("python")
         .args(["-m", "backend.chat_sandbox_worker.executor_daemon"])
         .env_remove("PWC_CHAT_EXECUTOR_ADMISSION")
@@ -305,6 +307,10 @@ async fn launch(
     let mut peer_state = EnvironmentPeerState::new();
     let connection = async {
         wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)).await?;
+        eprintln!(
+            "executor startup stage=daemon_ready duration_ms={}",
+            daemon_started.elapsed().as_millis()
+        );
         maintain_connection(
             url,
             admission,
@@ -399,6 +405,22 @@ async fn maintain_connection(
     }
 }
 
+async fn open_websocket(
+    url: &str,
+    deadline: Duration,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    Box<dyn std::error::Error>,
+> {
+    let (socket, _) = timeout(
+        deadline,
+        connect_async_with_config(url, Some(websocket_config()), false),
+    )
+    .await
+    .map_err(|_| "rendezvous connection timed out")??;
+    Ok(socket)
+}
+
 async fn connect(
     url: &str,
     admission: &[u8],
@@ -407,8 +429,12 @@ async fn connect(
     peer_state: &mut EnvironmentPeerState,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = validate_url(url)?;
-    let (mut socket, _) =
-        connect_async_with_config(url.as_str(), Some(websocket_config()), false).await?;
+    let started = Instant::now();
+    let mut socket = open_websocket(url.as_str(), CONNECT_DEADLINE).await?;
+    eprintln!(
+        "executor startup stage=websocket_open duration_ms={}",
+        started.elapsed().as_millis()
+    );
     socket
         .send(Message::Binary(admission.to_vec().into()))
         .await?;
@@ -469,6 +495,10 @@ async fn connect(
             _ => return Err("rendezvous registration rejected".into()),
         };
 
+    eprintln!(
+        "executor startup stage=registration_ready duration_ms={}",
+        started.elapsed().as_millis()
+    );
     let mut heartbeats = interval(HEARTBEAT);
     heartbeats.tick().await;
     let mut sequence = 0_u64;
@@ -1036,6 +1066,28 @@ mod tests {
         drop(fixture);
         drop(listener);
         std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn websocket_upgrade_that_never_answers_is_bounded() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let stalled = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let result = timeout(
+            Duration::from_secs(1),
+            open_websocket(&format!("ws://{address}"), Duration::from_millis(20)),
+        )
+        .await
+        .expect("connect deadline must run");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "rendezvous connection timed out"
+        );
+        stalled.abort();
+        let _ = stalled.await;
     }
 
     struct AttachedFixture {

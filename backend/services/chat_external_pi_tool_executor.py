@@ -146,6 +146,7 @@ class ExternalPiToolWorkspaceExecutor:
         self._turn_cancelled = False
         self._binding: ExternalExecutorTurnBinding | None = None
         self._binding_lock = asyncio.Lock()
+        self._binding_failed = False
         self._operation_limit = asyncio.Semaphore(4)
         self._hold_binding = False
 
@@ -313,6 +314,11 @@ class ExternalPiToolWorkspaceExecutor:
         async with self._binding_lock:
             if self._binding is not None:
                 return self._binding
+            if self._binding_failed:
+                raise SandboxError(
+                    "executor_transport_unavailable",
+                    "The executor attachment for this turn has already failed",
+                )
             manager = self._workspace_manager()
             turn_claim = self._durable_turn_claim()
             persistent = (
@@ -364,9 +370,12 @@ class ExternalPiToolWorkspaceExecutor:
                 with executor_stage("workspace", workspace.worker_generation):
                     await channel.ensure_workspace(context)
             except asyncio.CancelledError:
+                self._binding_failed = persistent
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
             except Exception:
+                # A persistent claim is single-use, even when attachment fails.
+                self._binding_failed = persistent
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
             binding = ExternalExecutorTurnBinding(

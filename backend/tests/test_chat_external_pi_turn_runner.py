@@ -2817,3 +2817,42 @@ def test_external_pi_detached_cancel_tolerates_status_control_failure(status_err
 
     asyncio.run(runner.cancel())
     assert connector.calls == []
+
+
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_failed_persistent_attachment_does_not_allocate_again(concurrent):
+    from backend.services.chat_sandbox_provider import SandboxError
+
+    manager = FakeWorkspaceManager(FakeProvider())
+    runner = _tool_runner(FakeExecutor(), manager)
+    attachments = []
+
+    async def failed_attachment(workspace, _claim, _minimum):
+        attachments.append(workspace)
+        raise SandboxError("sandbox_executor_attachment_failed", "Attachment failed")
+
+    runner.tool_executor.channel_factory = failed_attachment
+
+    async def call(index):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": "pwd",
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def run():
+        if concurrent:
+            return await asyncio.gather(call(1), call(2))
+        return [await call(1), await call(2)]
+
+    results = asyncio.run(run())
+    assert [result["error"] for result in results] == [
+        "sandbox_executor_attachment_failed",
+        "executor_transport_unavailable",
+    ]
+    assert all(result["ok"] is False for result in results)
+    assert len(manager.acquired) == len(attachments) == len(manager.invalidated) == 1
