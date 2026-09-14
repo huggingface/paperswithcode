@@ -35,8 +35,9 @@ export function ChatConversation({
   const scrollTopBeforeToggleRef = useRef<number | null>(null);
   const editScrollAnchorRef = useRef<string | null>(null);
   const followingBottomRef = useRef(true);
-  const previousLatestUserIdRef = useRef<string | undefined>();
+  const previousUserCountRef = useRef(0);
   const userMessages = messages.filter((message) => message.role === "user");
+  const userCount = userMessages.length;
   const firstUserId = userMessages[0]?.id;
   const latestUserId = userMessages.at(-1)?.id;
 
@@ -48,10 +49,11 @@ export function ChatConversation({
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
-    if (latestUserId !== previousLatestUserIdRef.current) {
+    // Canonical reloads replace optimistic IDs without adding a new question.
+    if (userCount > previousUserCountRef.current) {
       followingBottomRef.current = true;
-      previousLatestUserIdRef.current = latestUserId;
     }
+    previousUserCountRef.current = userCount;
     if (scrollTopBeforeToggleRef.current !== null) {
       scrollElement.scrollTop = scrollTopBeforeToggleRef.current;
       scrollTopBeforeToggleRef.current = null;
@@ -71,7 +73,7 @@ export function ChatConversation({
       }
     }
     if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
-  }, [messages, latestUserId]);
+  }, [messages, userCount]);
 
   const toggleBlock = (messageId: string, blockIndex: number) => {
     scrollTopBeforeToggleRef.current = scrollRef.current?.scrollTop ?? null;
@@ -116,7 +118,10 @@ export function ChatConversation({
               onResendDraft={(nextDraft) => {
                 if (message.id !== firstUserId) editScrollAnchorRef.current = message.id;
                 const accepted = onEditAndResend(message.id, nextDraft);
-                if (accepted) setEditingMessageId(null);
+                if (accepted) {
+                  if (message.id === firstUserId) followingBottomRef.current = true;
+                  setEditingMessageId(null);
+                }
                 else editScrollAnchorRef.current = null;
                 return accepted;
               }}

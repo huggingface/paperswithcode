@@ -18,7 +18,7 @@ vi.mock("./ChatMessage", () => ({
 
 afterEach(() => vi.restoreAllMocks());
 
-function setup() {
+function setup(editAccepted = true) {
   let height = 1000;
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => height);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
@@ -37,7 +37,7 @@ function setup() {
   const props = {
     papers: {}, busy: true, paperMentionsEnabled: false, archivePending: null,
     openRouterFallbackEnabled: false, onToggleBlock: vi.fn(),
-    onEditAndResend: vi.fn().mockReturnValue(true), onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
+    onEditAndResend: vi.fn().mockReturnValue(editAccepted), onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
   };
   const view = render(<ChatConversation {...props} messages={messages} />);
   const scroller = view.container.querySelector<HTMLDivElement>(".chat-conversation")!;
@@ -81,7 +81,11 @@ describe("ChatConversation scrolling", () => {
   it("follows a newly submitted question even after scrolling up", () => {
     const chat = setup();
     chat.scrollTo(200);
-    chat.update([{ id: "next-question", role: "user", text: "Next question" }]);
+    chat.update([
+      { id: "question", role: "user" },
+      { id: "answer", role: "assistant" },
+      { id: "next-question", role: "user", text: "Next question" },
+    ]);
     expect(chat.scroller.scrollTop).toBe(800);
   });
   it("preserves position when toggling reasoning and on subsequent updates", () => {
@@ -105,6 +109,38 @@ describe("ChatConversation scrolling", () => {
     expect(chat.scroller.scrollTop).toBe(776);
     chat.scrollTo(200);
     chat.update(messages);
+    expect(chat.scroller.scrollTop).toBe(200);
+  });
+  it("preserves position when completion replaces optimistic IDs with canonical IDs", () => {
+    const chat = setup();
+    chat.scrollTo(200);
+    chat.update([
+      { id: "saved-question", role: "user", text: "Question", revision: 1 },
+      { id: "saved-answer", role: "assistant", streaming: false },
+    ], false);
+    expect(chat.scroller.scrollTop).toBe(200);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(200);
+  });
+  it("follows an accepted first-question edit even though its ID stays the same", () => {
+    const chat = setup();
+    chat.update(undefined, false);
+    chat.scrollTo(200);
+    fireEvent.click(chat.getByText("Edit question"));
+    chat.update([
+      { id: "question", role: "user", text: "Edited question", revision: 2 },
+      { id: "replacement-answer", role: "assistant", streaming: true },
+    ]);
+    expect(chat.scroller.scrollTop).toBe(1000);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(1200);
+  });
+  it("does not resume following when a first-question edit is rejected", () => {
+    const chat = setup(false);
+    chat.update(undefined, false);
+    chat.scrollTo(200);
+    fireEvent.click(chat.getByText("Edit question"));
+    chat.update();
     expect(chat.scroller.scrollTop).toBe(200);
   });
 });
