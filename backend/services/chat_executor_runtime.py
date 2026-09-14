@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.services.chat_executor_timing import executor_stage
 from backend.models.database import (
     ChatExecutorCell,
     ChatExecutorManifest,
@@ -185,15 +186,20 @@ class ChatExecutorRuntime:
     ) -> PersistentSandboxExecutorChannel:
         if minimum_remaining_seconds != 240:
             raise ValueError("Executor claim lifetime is invalid")
-        registration, manifest = await self._wait_for_registration(workspace)
-        liveness_nonce = await self._claim_liveness(registration, turn_claim.turn_id)
-        claim = await asyncio.to_thread(
-            self._claim_workspace,
-            registration,
-            turn_claim,
-            liveness_nonce,
-            minimum_remaining_seconds,
-        )
+        with executor_stage("registration", workspace.worker_generation):
+            registration, manifest = await self._wait_for_registration(workspace)
+        with executor_stage("liveness", workspace.worker_generation):
+            liveness_nonce = await self._claim_liveness(
+                registration, turn_claim.turn_id
+            )
+        with executor_stage("claim", workspace.worker_generation):
+            claim = await asyncio.to_thread(
+                self._claim_workspace,
+                registration,
+                turn_claim,
+                liveness_nonce,
+                minimum_remaining_seconds,
+            )
         channel = _RegistryBackedExecutorChannel(
             self._harness_socket(registration.shard_generation),
             session_factory=self.session_factory,
@@ -216,7 +222,8 @@ class ChatExecutorRuntime:
             environment_public_key=registration.public_noise_key,
         )
         try:
-            await channel.attach_environment(attachment)
+            with executor_stage("attachment", workspace.worker_generation):
+                await channel.attach_environment(attachment)
         except BaseException as error:
             await channel.settle("executor_transport_unavailable")
             await channel.aclose()

@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from backend.chat_sandbox_worker.executor_protocol import ProtocolError
 from backend.config import Settings
+from backend.services.chat_executor_timing import executor_stage
 from backend.services.chat_capability_service import IssuedCapability
 from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
@@ -321,19 +322,20 @@ class ExternalPiToolWorkspaceExecutor:
             acquire_for_binding = (
                 getattr(manager, "acquire_for_binding", None) if persistent else None
             )
-            if acquire_for_binding is None:
-                # Legacy admission also applies when remote transport is disabled.
-                # Executor startup requires a rendezvous bundle in either case.
-                legacy_acquire = getattr(manager, "acquire_legacy", None)
-                workspace = await (legacy_acquire or manager.acquire)(
-                    session_id=self.admission.session_id,
-                    turn_claim=turn_claim,
-                )
-            else:
-                workspace = await acquire_for_binding(
-                    session_id=self.admission.session_id,
-                    turn_claim=turn_claim,
-                )
+            with executor_stage("acquire", str(self.admission.session_id)):
+                if acquire_for_binding is None:
+                    # Legacy admission also applies when remote transport is disabled.
+                    # Executor startup requires a rendezvous bundle in either case.
+                    legacy_acquire = getattr(manager, "acquire_legacy", None)
+                    workspace = await (legacy_acquire or manager.acquire)(
+                        session_id=self.admission.session_id,
+                        turn_claim=turn_claim,
+                    )
+                else:
+                    workspace = await acquire_for_binding(
+                        session_id=self.admission.session_id,
+                        turn_claim=turn_claim,
+                    )
             try:
                 channel_factory = self.channel_factory
                 if channel_factory is None and persistent:
@@ -359,7 +361,8 @@ class ExternalPiToolWorkspaceExecutor:
                         "Secure workspace executor is unavailable",
                     )
                 context = self._context(workspace, operation_id)
-                await channel.ensure_workspace(context)
+                with executor_stage("workspace", workspace.worker_generation):
+                    await channel.ensure_workspace(context)
             except asyncio.CancelledError:
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
