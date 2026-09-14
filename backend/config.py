@@ -810,6 +810,13 @@ class Settings(BaseSettings):
     chat_gateway_url: str = Field(default="", max_length=1000)
     chat_require_auth: bool = Field(default=True)
     chat_show_reasoning: bool = Field(default=True)
+    chat_trackio_enabled: bool = Field(default=False)
+    chat_trackio_url: str = Field(
+        default="https://nielsr-pwc-chat-traces.hf.space",
+        pattern=r"^https://[a-z0-9][a-z0-9-]*\.hf\.space/?$",
+    )
+    chat_trackio_hf_token: str = Field(default="", repr=False)
+    chat_trackio_project: str = Field(default="pwc-chat", min_length=1, max_length=100)
     chat_langfuse_enabled: bool = Field(default=False)
     chat_langfuse_trace_content_access_enabled: bool = Field(default=False)
     catalog_mutations_enabled: bool = Field(default=True)

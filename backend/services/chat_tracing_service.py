@@ -1,4 +1,4 @@
-"""Langfuse tracing for the trusted side of sandboxed chat turns."""
+"""Tracing for the trusted side of sandboxed chat turns."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import os
 import re
 import uuid
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from functools import lru_cache
@@ -22,6 +22,10 @@ from langfuse.api.core.api_error import ApiError
 from pydantic import ValidationError
 
 from backend.config import Settings, get_settings
+from backend.services.chat_trackio_service import (
+    TrackioClient,
+    configured_trackio_client,
+)
 from backend.services.autonomous_cron_probe import FindingState, HealthFinding
 
 logger = logging.getLogger(__name__)
@@ -284,6 +288,15 @@ def _configured_client(settings: Settings) -> Langfuse | None:
 def configured_chat_client(settings: Settings) -> Langfuse | None:
     """Return the server-owned Langfuse client used by chat integrations."""
 
+    return _configured_client(settings)
+
+
+def configured_trace_export_client(
+    settings: Settings,
+) -> Langfuse | TrackioClient | None:
+    """Select the emission backend independently of historical Langfuse reads."""
+    if settings.chat_trackio_enabled:
+        return configured_trackio_client(settings)
     return _configured_client(settings)
 
 
@@ -928,7 +941,7 @@ class ProviderRequestTrace:
                 ),
             ).end()
         except Exception:
-            logger.exception("chat provider-request Langfuse finalization failed")
+            logger.exception("chat provider-request trace finalization failed")
 
 
 class NullProviderRequestTrace:
@@ -968,7 +981,7 @@ def start_provider_request_trace(
     if not trace_id:
         return NullProviderRequestTrace()
     try:
-        client = _configured_client(settings)
+        client = configured_trace_export_client(settings)
         if client is None:
             return NullProviderRequestTrace()
         started = datetime.now(UTC)
@@ -1005,7 +1018,7 @@ def start_provider_request_trace(
         )
         return ProviderRequestTrace(observation, started=started, metadata=metadata)
     except Exception:
-        logger.exception("chat provider-request Langfuse initialization failed")
+        logger.exception("chat provider-request trace initialization failed")
         return NullProviderRequestTrace()
 
 
@@ -1024,12 +1037,13 @@ def trace_chat_turn(
     reasoning_effort: str = "high",
     content_free: bool = False,
 ) -> Iterator[ChatTurnTrace | NullChatTurnTrace]:
-    """Create one trace per turn and one Langfuse session per conversation."""
+    """Create one trace per turn, using Trackio when explicitly enabled."""
 
+    backend = "Trackio" if settings.chat_trackio_enabled else "Langfuse"
     try:
-        client = _configured_client(settings)
+        client = configured_trace_export_client(settings)
     except Exception:
-        logger.exception("chat Langfuse client initialization failed")
+        logger.exception("chat %s client initialization failed", backend)
         client = None
     if client is None:
         yield NullChatTurnTrace()
@@ -1046,20 +1060,25 @@ def trace_chat_turn(
         }
         if content_free:
             propagation_metadata["content_policy"] = "content-free"
-        with propagate_attributes(
-            user_id=pseudonymous_user,
-            session_id=session_id,
-            metadata=propagation_metadata,
-            version=settings.release_id,
-            tags=[
-                "chat",
-                "research-assistant",
-                execution_backend,
-                *(["content-free"] if content_free else []),
-            ],
-            trace_name="answer-research-question",
-            environment=settings.environment,
-        ):
+        propagation = (
+            nullcontext()
+            if settings.chat_trackio_enabled
+            else propagate_attributes(
+                user_id=pseudonymous_user,
+                session_id=session_id,
+                metadata=propagation_metadata,
+                version=settings.release_id,
+                tags=[
+                    "chat",
+                    "research-assistant",
+                    execution_backend,
+                    *(["content-free"] if content_free else []),
+                ],
+                trace_name="answer-research-question",
+                environment=settings.environment,
+            )
+        )
+        with propagation:
             root_fields: dict[str, Any] = {
                 "trace_context": {"trace_id": trace_id},
                 "name": "answer-research-question",
@@ -1069,6 +1088,14 @@ def trace_chat_turn(
                     **({"content_policy": "content-free"} if content_free else {}),
                 },
             }
+            if settings.chat_trackio_enabled:
+                root_fields["metadata"].update(
+                    {
+                        **propagation_metadata,
+                        "session_id": session_id,
+                        "user_id": pseudonymous_user,
+                    }
+                )
             if not content_free:
                 root_fields["input"] = [{"role": "user", "content": prompt}]
             root = client.start_observation(**root_fields)
@@ -1094,17 +1121,19 @@ def trace_chat_turn(
                     trace.close()
                 except Exception:
                     logger.exception(
-                        "chat Langfuse trace finalization failed request_id=%s",
+                        "chat %s trace finalization failed request_id=%s",
+                        backend,
                         request_id,
                     )
                 logger.info(
-                    "chat Langfuse trace complete request_id=%s trace_id=%s",
+                    "chat %s trace complete request_id=%s trace_id=%s",
+                    backend,
                     request_id,
                     trace.trace_id,
                 )
     except BaseException:
         if trace is None:
-            logger.exception("chat Langfuse trace initialization failed")
+            logger.exception("chat %s trace initialization failed", backend)
             yield NullChatTurnTrace()
             return
         raise

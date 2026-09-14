@@ -45,6 +45,12 @@ RUNTIME_FAILURE_PATTERNS = {
     "langfuse_initialization_failure": "chat Langfuse trace initialization failed",
     "langfuse_finalization_failure": "chat Langfuse trace finalization failed",
     "langfuse_client_failure": "chat Langfuse client initialization failed",
+    "trackio_initialization_failure": "chat Trackio trace initialization failed",
+    "trackio_finalization_failure": "chat Trackio trace finalization failed",
+    "trackio_client_failure": "chat Trackio client initialization failed",
+    "trackio_export_failure": "chat Trackio export failed",
+    "trackio_trace_dropped": "chat Trackio trace dropped",
+    "trackio_export_rejected": "chat Trackio export rejected",
     "excalidraw_mcp_unready": "chat Excalidraw MCP registration failed",
     "durable_lifecycle_telemetry_failure": (
         "chat durable lifecycle Langfuse emission failed"
