@@ -10,7 +10,7 @@ import os
 import re
 import stat
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -859,8 +859,16 @@ def _validate_chat_capacity_policy(settings: Settings) -> None:
         if settings.chat_external_pi_admission_enabled
         else _SANDBOX_CAPACITY_POLICY
     )
-    if configured != expected:
-        raise RuntimeError("chat capacity must be the reviewed runtime profile")
+    if configured == expected:
+        return
+    if (
+        settings.environment == "staging"
+        and settings.chat_external_pi_admission_enabled
+        and settings.chat_executor_remote_transport_enabled
+        and configured == replace(expected, blank_pool_min=4, blank_pool_max=4)
+    ):
+        return
+    raise RuntimeError("chat capacity must be the reviewed runtime profile")
 
 
 def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:

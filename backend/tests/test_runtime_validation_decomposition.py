@@ -1184,3 +1184,36 @@ def test_excalidraw_worker_and_host_kill_switches_must_match(settings_factory):
 
     with pytest.raises(RuntimeError, match="switches must match"):
         runtime_validation._validate_chat_resource_policy(settings)
+
+
+@pytest.mark.parametrize(
+    "environment,remote,pool_min,pool_max,live_cap,accepted",
+    [
+        ("staging", True, 1, 1, 16, True),
+        ("staging", True, 4, 4, 16, True),
+        ("staging", False, 4, 4, 16, False),
+        ("production", True, 4, 4, 16, False),
+        ("staging", True, 3, 3, 16, False),
+        ("staging", True, 8, 8, 16, False),
+        ("staging", True, 4, 1, 16, False),
+        ("staging", True, 4, 4, 32, False),
+    ],
+)
+def test_four_spare_profile_is_staging_persistent_only(
+    environment, remote, pool_min, pool_max, live_cap, accepted
+):
+    settings = Settings(
+        environment=environment,
+        chat_external_pi_admission_enabled=True,
+        chat_executor_remote_transport_enabled=remote,
+        chat_max_concurrency=32,
+        chat_user_max_concurrency=1,
+        chat_sandbox_total_live_cap=live_cap,
+        chat_blank_pool_min=pool_min,
+        chat_blank_pool_max=pool_max,
+    )
+    if accepted:
+        runtime_validation._validate_chat_capacity_policy(settings)
+    else:
+        with pytest.raises(RuntimeError, match="reviewed runtime profile"):
+            runtime_validation._validate_chat_capacity_policy(settings)
