@@ -391,11 +391,6 @@ class ModalSandboxProviderAdapter:
                 *command,
                 app=app,
                 image=image,
-                **(
-                    {"environment_name": self.settings.chat_sandbox_modal_environment}
-                    if reuse_metadata
-                    else {}
-                ),
                 env={
                     **sandbox_environment(
                         self.settings,

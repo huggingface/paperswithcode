@@ -904,7 +904,7 @@ def test_fresh_executor_launches_use_metadata_but_create_distinct_sandboxes(
     assert len(creates) == 2
     for options in creates:
         assert options["app"] is app and options["image"] is image
-        assert options["environment_name"] == "pwc-chat-staging"
+        assert "environment_name" not in options  # Modal derives it from app.
     assert (
         creates[0]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
         != creates[1]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
