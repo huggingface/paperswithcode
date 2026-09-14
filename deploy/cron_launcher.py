@@ -114,6 +114,14 @@ def job(
 
 
 COMMANDS: dict[str, Job] = {
+    "create_eval_verification_issues": job(
+        "-m",
+        "backend.scripts.create_eval_verification_issues",
+        "--execute",
+        timeout="30m",
+        health_job="create_eval_verification_issues",
+        idempotency="canonical repository ledger, pre-POST checkpoint, paginated issue reconciliation; at most 10 posts",
+    ),
     "autonomous_cron_health": job(
         ".github/workflows/scripts/autonomous_cron_health.py",
         "--mode",

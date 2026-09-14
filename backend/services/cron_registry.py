@@ -1005,6 +1005,21 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="create_eval_verification_issues",
+        display_name="GitHub Evaluation Verification Outreach",
+        category="hourly",
+        schedule="52 * * * *",
+        script_path="backend/scripts/create_eval_verification_issues.py",
+        log_name="create_eval_verification_issues",
+        process_patterns=("backend.scripts.create_eval_verification_issues",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/create_eval_verification_issues.lock",
+        expected_runtime_minutes=30,
+        stale_after_minutes=180,
+        critical=False,
+        healthy_no_work_allowed=True,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="enqueue_hf_daily_paper_curation",
         display_name="HF Daily Paper Curation",
         category="daily",
@@ -1606,6 +1621,10 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "sync_coarena": ((SchedulePolicy.fixed(60, offset_minutes=50),), 20),
     "sync_arc_prize": ((SchedulePolicy.fixed(60, offset_minutes=10),), 20),
     "import_hf_daily_papers": ((SchedulePolicy.fixed(60),), 20),
+    "create_eval_verification_issues": (
+        (SchedulePolicy.fixed(60, offset_minutes=52),),
+        20,
+    ),
     "enqueue_hf_daily_paper_curation": (
         (SchedulePolicy.fixed(60, offset_minutes=27),),
         20,

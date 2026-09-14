@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
+import time
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
@@ -30,13 +32,22 @@ class GithubIssuePublishResult:
 
 GithubApi = Callable[[list[str], dict[str, str]], Any]
 NIELSROGGE_LOGIN = "nielsrogge"
-EXCLUDED_REPOSITORY_OWNERS = frozenset({"huggingface"})
-EXCLUDED_REPOSITORY_NAMES = frozenset({"vllm", "sglang", "llama.cpp"})
+EXCLUDED_REPOSITORY_OWNERS = frozenset(
+    {"huggingface", "tensorflow", "pytorch", "openai", "anthropic", "anthropics"}
+)
+EXCLUDED_REPOSITORY_NAMES = frozenset(
+    {"vllm", "sglang", "llama.cpp", "tensorflow", "pytorch"}
+)
+EXCLUDED_REPOSITORIES = frozenset({"google-research/google-research", "pwc-1/paper-9"})
 
 
 def _is_excluded_repository(repository: str) -> bool:
     owner, _, name = repository.lower().partition("/")
-    return owner in EXCLUDED_REPOSITORY_OWNERS or name in EXCLUDED_REPOSITORY_NAMES
+    return (
+        owner in EXCLUDED_REPOSITORY_OWNERS
+        or name in EXCLUDED_REPOSITORY_NAMES
+        or repository.lower() in EXCLUDED_REPOSITORIES
+    )
 
 
 def select_official_repository(
@@ -86,18 +97,46 @@ def github_environment(token_environment_variable: str) -> dict[str, str]:
     return env
 
 
+class GithubApiError(ValueError):
+    def __init__(self, message: str, status: int | None = None, retry_at: float = 0):
+        super().__init__(message)
+        self.status = status
+        self.retry_at = retry_at
+
+
 def gh_json(arguments: list[str], env: dict[str, str]) -> Any:
     process = subprocess.run(
-        ["gh", "api", *arguments],
+        ["gh", "api", "--include", *arguments],
         env=env,
         check=False,
         capture_output=True,
         text=True,
+        timeout=60,
     )
+    headers, _, body = process.stdout.partition("\n\n")
+    if not headers.startswith("HTTP/"):
+        body, headers = process.stdout, ""
     if process.returncode:
+        retry_after = re.search(r"(?im)^retry-after: (\d+)", headers)
+        reset = re.search(r"(?im)^x-ratelimit-reset: (\d+)", headers)
+        retry_at = max(
+            time.time() + int(retry_after[1]) if retry_after else 0,
+            int(reset[1]) if reset else 0,
+        )
         message = process.stderr.strip().splitlines()
-        raise ValueError(message[-1] if message else "GitHub API request failed")
-    return json.loads(process.stdout)
+        status = re.search(r"HTTP (\d{3})", process.stderr)
+        detail = body.strip()[:2000]
+        raise GithubApiError(
+            ": ".join(
+                filter(
+                    None,
+                    [message[-1] if message else "GitHub API request failed", detail],
+                )
+            ),
+            int(status[1]) if status else None,
+            retry_at,
+        )
+    return json.loads(body)
 
 
 def _matching_issue(
@@ -167,6 +206,8 @@ def _has_open_nielsrogge_issue(
             "-f",
             "state=open",
             "-f",
+            "creator=NielsRogge",
+            "-f",
             "per_page=100",
             "-f",
             "sort=created",
@@ -202,6 +243,8 @@ def publish_github_issue(
     if not metadata["has_issues"]:
         raise ValueError("Official repository has issues disabled")
     repository = metadata["full_name"]
+    if _is_excluded_repository(repository):
+        raise ValueError(f"Repository {repository} is excluded from outreach")
 
     if _has_open_nielsrogge_issue(repository, env, api):
         raise ValueError(

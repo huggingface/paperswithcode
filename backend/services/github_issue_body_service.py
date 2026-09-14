@@ -90,10 +90,13 @@ class GithubIssueDraft:
 
 
 def normalize_repository_url(url: str) -> str:
-    parts = [part for part in urlparse(url).path.split("/") if part]
+    parsed = urlparse(url)
+    if parsed.hostname not in {"github.com", "www.github.com"}:
+        raise ValueError(f"Invalid GitHub repository URL: {url}")
+    parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:
         raise ValueError(f"Invalid GitHub repository URL: {url}")
-    return "/".join(parts[:2])
+    return "/".join(parts[:2]).removesuffix(".git")
 
 
 def compute_placement(
@@ -313,8 +316,7 @@ def render_issue_body(
         (
             "Would it be possible to verify these results and let me know if any "
             "score, model name, benchmark protocol, or openness metadata should be "
-            "corrected? The imported rows are tied to the paper or its official "
-            "release artifacts; comparison-table baselines were not added."
+            "corrected?"
         ),
         (
             "You can also edit the task, methods, project page, and GitHub URL "

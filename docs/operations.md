@@ -874,3 +874,12 @@ behavior is not restored, roll back the exact application release with
 `pwc-rollback`. This single VPS remains an availability boundary: loss of the
 host can interrupt both local executor services even though Modal environments
 remain isolated.
+
+### Evaluation verification issues
+
+The hourly `create_eval_verification_issues` job (minute 52 UTC) requests author
+verification after native evals settle. It runs independently of daily enrichment,
+groups papers by official repository, preserves outreach exclusions, and records
+idempotent publication state outside release directories. See the
+[issue workflow](agents/issue-tracker.md#scheduled-evaluation-outreach) for limits,
+preview/status commands, retry behavior, and rollout requirements.
