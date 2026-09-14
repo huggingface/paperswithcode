@@ -191,7 +191,12 @@ def _prompt(context: dict) -> str:
             "Include source_coverage for every source_documents URL and account for every benchmark label as evaluation, already_present, benchmark_gap, not_paper_native, or not_applicable. "
             "Include evaluation_removals and validation_evidence arrays; existing-row updates, duplicate merges, and removals require exact before-state and primary-paper evidence. "
             "Add only introduced-model, paper-native results using existing exact task/dataset/metric configurations; never comparator rows. "
-            "Normalize source percentages to a configured 0-1 metric (for example 91.9 becomes 0.919), and keep only the best introduced-model lane for each configured leaderboard."
+            "For every submitted metric include score_evidence with task_id, dataset_id, metric, source_value, source_scale, source_url, and table_reference. "
+            "Copy source_value before conversion and read the exact metric scale from the leaderboards command. "
+            "A source 86.89% stays 86.89 on 0-100; it becomes 0.8689 only on 0-1. A source fraction 0.8689 becomes 86.89 on 0-100. "
+            "Use source_scale 0-100 for percentages, 0-1 for fractions, and native for other units. Never infer units from a number's magnitude. "
+            "If scale metadata conflicts with source or existing leaderboard evidence, skip and report the conflict. "
+            "Keep only the best introduced-model lane for each configured leaderboard."
         )
     else:
         rules.append(
