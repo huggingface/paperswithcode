@@ -8,7 +8,7 @@ from collections.abc import Iterator
 from contextlib import contextmanager
 from typing import Literal
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("uvicorn.error")
 Stage = Literal[
     "provider_lookup",
     "provider_create",

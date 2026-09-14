@@ -11,7 +11,7 @@ def test_stage_records_elapsed_time_and_outcome_without_exception_content(
 ):
     times = iter([10.0, 10.125])
     monkeypatch.setattr(chat_executor_timing.time, "monotonic", lambda: next(times))
-    caplog.set_level(logging.INFO, logger=chat_executor_timing.__name__)
+    caplog.set_level(logging.INFO, logger=chat_executor_timing.logger.name)
     error = RuntimeError("private command and credential")
     if failed:
         with pytest.raises(RuntimeError) as caught:
