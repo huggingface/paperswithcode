@@ -337,7 +337,7 @@ export class PiEventAdapter {
           },
         ];
       }
-      if (this.overflowRetryReady && ["stop", "toolUse"].includes(String(message.stopReason))) {
+      if (this.overflowRetryReady && ["stop", "toolUse", "length"].includes(String(message.stopReason))) {
         this.overflowPending = false;
         this.overflowRetryReady = false;
       }

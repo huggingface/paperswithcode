@@ -122,6 +122,7 @@ export class CompactionController {
           if (event.reason === "overflow") this.overflowAttempted = true;
           const prepared = protectedPreparation(event);
           const summary = await summarizeAll(prepared.text, async (chunk) => {
+            let maxTokens = 4096;
             for (;;) {
               signal.throwIfAborted();
               chunks += 1;
@@ -130,7 +131,7 @@ export class CompactionController {
                 response = await provider.runtime.completeSimple(provider.model, {
                   systemPrompt: SUMMARY_SYSTEM,
                   messages: [{ role: "user", content: chunk, timestamp: Date.now() }],
-                }, { signal, maxTokens: 4096, reasoning: "low" });
+                }, { signal, maxTokens, reasoning: "low" });
               } catch (error) {
                 signal.throwIfAborted();
                 if (this.retryUsed) throw error;
@@ -149,6 +150,9 @@ export class CompactionController {
                 return response.content.flatMap((part) => part.type === "text" ? [part.text] : []).join("\n");
               }
               if (this.retryUsed) throw new Error("Summarization failed");
+              // A clipped summary may omit constraints or evidence. Spend the
+              // single retry on more output room rather than accepting truncation.
+              if (response.stopReason === "length") maxTokens = provider.model.maxTokens;
               this.retryUsed = true;
             }
           }, signal);

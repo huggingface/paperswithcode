@@ -481,3 +481,14 @@ test("failed compaction or another overflow cannot clear the failure", () => {
     assert.equal(adapter.failed, true);
   }
 });
+
+
+test("recovered output limits clear overflow, but cancellation does not", () => {
+  for (const stopReason of ["length", "aborted"]) {
+    const adapter = new PiEventAdapter(false);
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "request_too_large" } });
+    adapter.feed({ type: "compaction_end", reason: "overflow", result: {}, willRetry: true, aborted: false });
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason, usage: {} } });
+    assert.equal(adapter.failed, stopReason === "aborted");
+  }
+});

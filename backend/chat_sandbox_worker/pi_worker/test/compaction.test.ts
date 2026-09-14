@@ -19,9 +19,9 @@ function preparation(): SessionBeforeCompactEvent {
   };
 }
 
-function hook(controller: CompactionController, complete: (model: unknown, context: unknown, options: { signal: AbortSignal }) => Promise<unknown>) {
+function hook(controller: CompactionController, complete: (model: unknown, context: unknown, options: { signal: AbortSignal; maxTokens: number }) => Promise<unknown>) {
   let handler!: (event: SessionBeforeCompactEvent) => Promise<{ cancel?: boolean; compaction?: { summary: string } }>;
-  const provider = { runtime: { completeSimple: complete }, model: {} } as unknown as Awaited<ReturnType<typeof createProvider>>;
+  const provider = { runtime: { completeSimple: complete }, model: { maxTokens: 8000 } } as unknown as Awaited<ReturnType<typeof createProvider>>;
   controller.extension(provider)({ on: (_name: string, callback: typeof handler) => { handler = callback; } } as never);
   return handler;
 }
@@ -135,3 +135,21 @@ test("a cut inside tool execution retains its user, call, and large result toget
   assert.doesNotMatch(protectedResult.text, /large-tool-evidence|paper.txt/);
   assert.throws(() => boundedGatewayPayload({ messages: event.branchEntries.slice(1) }), /request_too_large/);
 });
+
+
+for (const retryStop of ["stop", "length"] as const) {
+  test(`clipped summary retries with more output room, then handles ${retryStop}`, async () => {
+    const limits: number[] = [];
+    const controller = new CompactionController(() => {});
+    const handler = hook(controller, async (_model, _context, options) => {
+      limits.push(options.maxTokens);
+      return { stopReason: limits.length === 1 ? "length" : retryStop,
+        content: [{ type: "text", text: "Source and user constraints" }] };
+    });
+    const result = await handler(preparation());
+    assert.deepEqual(limits, [4096, 8000]);
+    if (retryStop === "stop") assert.ok(result.compaction);
+    else assert.deepEqual(result, { cancel: true }, "never save an incomplete summary");
+    assert.equal(controller.failed, retryStop === "length");
+  });
+}
