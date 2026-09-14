@@ -284,7 +284,16 @@ class DiscoveryPageService:
                 )
             )
         if task_slug and not paper_links:
-            return None
+            association = (
+                self.db.query(TaskDataset)
+                .filter(
+                    TaskDataset.dataset_id == entity.id,
+                    TaskDataset.task_id == task.id,
+                )
+                .one_or_none()
+            )
+            if association is None:
+                return None
         description = (
             entity.description
             or entity.short_description

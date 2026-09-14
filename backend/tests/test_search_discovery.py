@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import date
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -70,6 +72,38 @@ def test_robots_policies_are_environment_aware_and_end_with_newline():
     assert "Sitemap:" not in staging
     assert staging_headers["X-Robots-Tag"] == "noindex, nofollow"
     assert "X-Robots-Tag" not in production_headers
+
+
+@pytest.mark.parametrize("linked", [True, False])
+def test_empty_task_benchmark_requires_association(client, linked):
+    """A configured leaderboard can render before its first score is imported."""
+
+    def query(*, one=None, rows=()):
+        result = MagicMock()
+        for method in ("filter", "join", "order_by", "limit"):
+            getattr(result, method).return_value = result
+        result.one_or_none.return_value = one
+        result.all.return_value = rows
+        return result
+
+    db = MagicMock()
+    db.query.side_effect = [
+        query(one=SimpleNamespace(id=2590, name="MMAE", description="Audio edits")),
+        # The sidebar's bounded task list need not include the selected task.
+        query(rows=[("other-task", "Other task")]),
+        query(),
+        query(one=SimpleNamespace(id=775)),
+        query(one=object() if linked else None),
+    ]
+    client.app.dependency_overrides[get_database_session] = lambda: db
+
+    response = client.get("/benchmark/mmae?task=audio-editing")
+
+    assert response.status_code == (200 if linked else 404)
+    if linked:
+        assert "MMAE" in response.text
+        assert 'id="root"' in response.text
+        assert "Page not found" not in response.text
 
 
 def test_robots_get_and_head_are_plain_text(client):
