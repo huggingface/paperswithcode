@@ -171,6 +171,10 @@ class ExternalPiChatTurnRunner:
         primary_exception_active = True
         try:
             async for event in self._events(boundary):
+                if event.get("type") == "done":
+                    # Completion lets the stream consumer cancel the producer.
+                    # Release the retained workspace before that boundary.
+                    await self.tool_executor.settle_turn()
                 yield event
             primary_exception_active = False
         except QUALIFIED_OWNERSHIP_REJECTIONS:

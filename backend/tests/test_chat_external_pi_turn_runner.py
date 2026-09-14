@@ -611,7 +611,8 @@ def worker_status(claim):
     )
 
 
-def test_external_pi_runner_lazily_creates_executor_for_remote_read():
+@pytest.mark.parametrize("stop_after_done", [False, True])
+def test_external_pi_runner_lazily_creates_executor_for_remote_read(stop_after_done):
     settings = get_settings().model_copy(deep=True)
     settings.environment = "staging"
     settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
@@ -683,7 +684,15 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
         stream = runner.events()
         first = await anext(stream)
         acquired_before_first_event = list(workspace_manager.acquired)
-        events = [first, *[event async for event in stream]]
+        events = [first]
+        async for event in stream:
+            events.append(event)
+            if event["type"] == "done":
+                # The consumer may close as soon as completion is published.
+                assert len(workspace_manager.released) == 1
+                if stop_after_done:
+                    break
+        await stream.aclose()
         await runner.close()
         return events, acquired_before_first_event
 
