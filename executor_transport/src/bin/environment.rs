@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -269,19 +269,48 @@ async fn launch(
         .spawn()?;
     let identity = NoiseIdentity::generate()?;
     let mut peer_state = EnvironmentPeerState::new();
-    let connection = maintain_connection(
-        url,
-        admission,
-        &identity,
-        &authorization_keys,
-        &mut peer_state,
-    );
+    let connection = async {
+        wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)).await?;
+        maintain_connection(
+            url,
+            admission,
+            &identity,
+            &authorization_keys,
+            &mut peer_state,
+        )
+        .await
+    };
     let result = tokio::select! {
         result = connection => result,
         status = daemon.wait() => Err(format!("executor daemon exited: {}", status?).into()),
     };
     let _ = daemon.kill().await;
     result
+}
+
+async fn wait_for_daemon_socket(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    timeout(Duration::from_secs(15), async {
+        loop {
+            match UnixStream::connect(path).await {
+                Ok(stream) => {
+                    drop(stream);
+                    return Ok::<(), std::io::Error>(());
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "executor daemon readiness timed out")??;
+    Ok(())
 }
 
 async fn maintain_connection(
@@ -908,6 +937,25 @@ fn verification_key(
 mod tests {
     use super::*;
     use pwc_persistent_executor_transport::protocol::{AuthorizationClaims, AuthorizationSigner};
+
+    #[tokio::test]
+    async fn registration_readiness_waits_for_the_local_daemon_listener() {
+        let path = std::env::temp_dir().join(format!("pwc-daemon-ready-{}", Uuid::new_v4()));
+        let readiness = wait_for_daemon_socket(&path);
+        tokio::pin!(readiness);
+        assert!(
+            timeout(Duration::from_millis(20), &mut readiness)
+                .await
+                .is_err()
+        );
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        timeout(Duration::from_secs(1), &mut readiness)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(listener);
+        std::fs::remove_file(&path).unwrap();
+    }
 
     struct AttachedFixture {
         endpoint: PeerEndpoint,
