@@ -93,19 +93,20 @@ class ChatExecutorRuntime:
             or registration.expires_at < datetime.now(UTC) + timedelta(seconds=240)
         ):
             return False
-        try:
-            # The short-lived liveness nonce is deliberately not consumed: only
-            # a real turn may claim the workspace, with a new liveness assertion.
-            await self._claim_liveness(registration, uuid.uuid4())
-        except (OSError, EOFError, RuntimeError):
-            return False
+        # The short-lived liveness nonce is deliberately not consumed: only
+        # a real turn may claim the workspace, with a new liveness assertion.
+        # Let uncertain transport failures reach the pool's skip/retry handling.
+        await self._claim_liveness(registration, uuid.uuid4())
         return True
 
     async def wait_for_pool_ready(self, worker_generation: str) -> None:
         deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
         while time.monotonic() < deadline:
-            if await self.pool_ready(worker_generation):
-                return
+            try:
+                if await self.pool_ready(worker_generation):
+                    return
+            except (OSError, EOFError, RuntimeError):
+                pass
             await asyncio.sleep(0.05)
         raise SandboxError(
             "sandbox_executor_registration_timeout",

@@ -132,7 +132,11 @@ def test_pool_readiness_requires_exact_live_registration(monkeypatch, invalid):
         else None
     )
     monkeypatch.setattr(runtime, "_claim_liveness", liveness)
-    assert asyncio.run(runtime.pool_ready("generation")) is (invalid is None)
+    if invalid == "connection":
+        with pytest.raises(asyncio.IncompleteReadError):
+            asyncio.run(runtime.pool_ready("generation"))
+    else:
+        assert asyncio.run(runtime.pool_ready("generation")) is (invalid is None)
     assert liveness.await_count == (1 if invalid in [None, "connection"] else 0)
 
 
@@ -156,3 +160,32 @@ def test_workspace_requests_pool_only_for_persistent_transport(
     with pytest.raises(RuntimeError, match="stop at acquisition"):
         asyncio.run(action(session_id=session_id, turn_claim=TURN_CLAIM))
     assert acquire.await_args.kwargs["allow_pool"] is expected
+
+
+def test_uncertain_executor_health_skips_blank_without_terminating():
+    h = harness()
+
+    async def run():
+        assert await h.coordinator.replenish_pool() == 1
+        h.owner = False
+        sid = uuid.uuid4()
+        with h.sessions() as db, db.begin():
+            db.add(_session(sid))
+        h.coordinator.creation.executor_runtime.pool_ready.side_effect = OSError(
+            "temporary disconnect"
+        )
+        assert await h.coordinator.claim_blank(sid) is None
+        with h.sessions() as db:
+            assert db.scalar(select(ChatSandboxPool)).state == "blank_ready"
+            assert db.scalar(select(ChatSandboxComputeInterval)).terminal_at is None
+        assert not h.provider.termination_calls
+
+    asyncio.run(run())
+
+
+def test_executor_startup_retries_uncertain_probe(monkeypatch):
+    runtime = ChatExecutorRuntime(_settings(), session_factory=lambda: None)
+    probe = AsyncMock(side_effect=[OSError("temporary disconnect"), True])
+    monkeypatch.setattr(runtime, "pool_ready", probe)
+    asyncio.run(runtime.wait_for_pool_ready("generation"))
+    assert probe.await_count == 2
