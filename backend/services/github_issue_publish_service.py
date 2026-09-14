@@ -98,10 +98,22 @@ def github_environment(token_environment_variable: str) -> dict[str, str]:
 
 
 class GithubApiError(ValueError):
-    def __init__(self, message: str, status: int | None = None, retry_at: float = 0):
+    def __init__(
+        self,
+        message: str,
+        status: int | None = None,
+        retry_at: float = 0,
+        *,
+        is_rate_limited: bool = False,
+    ):
         super().__init__(message)
         self.status = status
         self.retry_at = retry_at
+        self.is_rate_limited = status == 429 or is_rate_limited
+
+    @property
+    def repository_unavailable(self) -> bool:
+        return self.status in {403, 404, 410, 451} and not self.is_rate_limited
 
 
 def gh_json(arguments: list[str], env: dict[str, str]) -> Any:
@@ -126,6 +138,19 @@ def gh_json(arguments: list[str], env: dict[str, str]) -> Any:
         message = process.stderr.strip().splitlines()
         status = re.search(r"HTTP (\d{3})", process.stderr)
         detail = body.strip()[:2000]
+        status_code = int(status[1]) if status else None
+        remaining = re.search(r"(?im)^x-ratelimit-remaining: (\d+)", headers)
+        rate_message = (process.stderr + body).lower()
+        is_rate_limited = status_code == 429 or (
+            status_code == 403
+            and (
+                retry_after is not None
+                or (remaining is not None and remaining[1] == "0")
+                or "rate limit" in rate_message
+                or "secondary-rate-limit" in rate_message
+                or "abuse detection" in rate_message
+            )
+        )
         raise GithubApiError(
             ": ".join(
                 filter(
@@ -133,8 +158,9 @@ def gh_json(arguments: list[str], env: dict[str, str]) -> Any:
                     [message[-1] if message else "GitHub API request failed", detail],
                 )
             ),
-            int(status[1]) if status else None,
-            retry_at,
+            status_code,
+            retry_at if is_rate_limited else 0,
+            is_rate_limited=is_rate_limited,
         )
     return json.loads(body)
 

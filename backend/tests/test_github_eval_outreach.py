@@ -382,3 +382,89 @@ def test_cron_outreach_contract_is_consistent():
     assert "--execute" in COMMANDS[job.id].command
     assert COMMANDS[job.id].health_job == job.id
     assert COMMANDS[job.id].timeout == "30m"
+
+
+@pytest.mark.parametrize(
+    "headers,body,limited",
+    [
+        (
+            "X-Ratelimit-Remaining: 4999\nX-Ratelimit-Reset: 9999999999",
+            "Forbidden",
+            False,
+        ),
+        (
+            "X-Ratelimit-Remaining: 0\nX-Ratelimit-Reset: 9999999999",
+            "API rate limit exceeded",
+            True,
+        ),
+        ("Retry-After: 7200", "slow down", True),
+        (
+            "X-Ratelimit-Remaining: 4999",
+            "You have exceeded a secondary rate limit",
+            True,
+        ),
+    ],
+)
+def test_permission_403_is_distinct_from_rate_limiting(
+    monkeypatch, headers, body, limited
+):
+    from backend.services.github_issue_publish_service import gh_json
+
+    response = subprocess.CompletedProcess(
+        [],
+        1,
+        f"HTTP/2.0 403 Forbidden\n{headers}\n\n{body}",
+        "gh: Forbidden (HTTP 403)",
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **kw: response)
+    with pytest.raises(GithubApiError) as caught:
+        gh_json(["repos/lab/code"], {})
+    assert caught.value.is_rate_limited is limited
+    assert caught.value.repository_unavailable is not limited
+    if not limited:
+        assert caught.value.retry_at == 0
+
+
+def test_forbidden_alias_is_cached_and_does_not_stall_other_repositories(state):
+    github = Github()
+    cohort = {
+        "a/forbidden": {2: OutreachPaper(2, "2", True)},
+        "lab/code": {1: OutreachPaper(1, "1", True)},
+    }
+    forbidden_calls = []
+
+    def api(args):
+        if args == ["repos/a/forbidden"]:
+            forbidden_calls.append(args)
+            raise GithubApiError("Resource not accessible", 403)
+        return github(args)
+
+    result = runner(state, api, cohort).run()
+    assert result["counts"]["unavailable"] == 1
+    assert result["counts"]["verified"] == 1
+    runner(state, api, cohort).run()
+    assert len(forbidden_calls) == 1
+    assert not state.get("rate_limit")
+
+
+def test_rate_limited_alias_is_not_cached_as_unavailable(state):
+    github = Github()
+
+    def api(args):
+        if args == ["repos/lab/code"]:
+            raise GithubApiError("API rate limit exceeded", 403, is_rate_limited=True)
+        return github(args)
+
+    with pytest.raises(GithubApiError):
+        runner(state, api).run()
+    assert not state.get("alias:lab/code")
+    assert not github.posts
+
+
+def test_forbidden_post_is_a_definitive_rejection_with_cooldown(state):
+    github = Github()
+    github.post_error = GithubApiError("Resource not accessible", 403)
+    assert runner(state, github).run()["counts"]["rejected"] == 1
+    assert not state.get("repo:42").get("pending")
+    runner(state, github).run()
+    assert len(github.posts) == 1

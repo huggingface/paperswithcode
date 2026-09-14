@@ -128,7 +128,7 @@ class OutreachRunner:
             try:
                 metadata = self.api([f"repos/{alias}"])
             except GithubApiError as error:
-                if error.status not in {404, 410, 451}:
+                if not error.repository_unavailable:
                     raise
                 metadata = {}
                 self.record("unavailable", alias, reason=str(error))
@@ -256,10 +256,12 @@ class OutreachRunner:
                 ]
             )
         except GithubApiError as error:
-            if error.status == 422:
+            if error.status == 422 or (
+                error.status == 403 and not error.is_rate_limited
+            ):
                 record.pop(
                     "pending"
-                )  # definitive validation rejection, no issue created
+                )  # definitive validation/permission rejection, no issue created
                 record["next_check"] = self.now() + 30 * DAY
                 record["rejection"] = str(error)
                 self.state.put(key, record)
@@ -285,7 +287,14 @@ class OutreachRunner:
                 "Evaluation outreach requires the NielsRogge GitHub account"
             )
         for key, record in self.state.pending()[: self.limit]:
-            self.reconcile_pending(key, record)
+            try:
+                self.reconcile_pending(key, record)
+            except GithubApiError as error:
+                if not error.repository_unavailable:
+                    raise
+                self.record(
+                    "needs_review", record["pending"]["repository"], reason=str(error)
+                )
         cohort = self.catalog()
         self.counts["catalog_repositories"] = len(cohort)
         if self.resolve_aliases(cohort):
@@ -306,7 +315,13 @@ class OutreachRunner:
                 if checked >= self.limit or self.counts["attempted"] >= self.max_create:
                     break
                 checked += 1
-                self.process(key, names[key], groups[key])
+                try:
+                    self.process(key, names[key], groups[key])
+                except GithubApiError as error:
+                    if not error.repository_unavailable:
+                        raise
+                    # This repository can be inaccessible without blocking other work.
+                    self.record("unavailable", names[key], reason=str(error))
             self.counts["repositories_checked"] = checked
         result = {
             "at": datetime.now(timezone.utc).isoformat(),

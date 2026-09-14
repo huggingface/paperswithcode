@@ -89,9 +89,10 @@ The durable SQLite ledger is
 `/var/lib/paperswithcode/production/cron-locks/github-eval-outreach.sqlite3`,
 outside log retention and immutable releases. Preserve it during upgrades and
 rollbacks. It records covered papers, issue URLs, retry times, and an exact
-pre-POST checkpoint. HTTP 422 rejections (including collaborators-only issue
-creation) wait 30 days; open/ineligible repositories wait a day. Other API
-failures stop the batch. Rate limits stop all work until at least the next hour
+pre-POST checkpoint. HTTP 422 validation and non-rate-limit HTTP 403 permission rejections
+(including collaborators-only issue creation) wait 30 days; open/ineligible repositories wait a day. Unavailable repository aliases are cached for a week; repository-specific
+permission failures do not stop other repositories. Other API failures stop the
+batch. Only positively identified rate limits stop all work until at least the next hour
 and honor a later `Retry-After`/reset time.
 
 An uncertain POST is reconciled with GitHub on subsequent runs; it is never

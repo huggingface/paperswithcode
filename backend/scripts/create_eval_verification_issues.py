@@ -100,7 +100,7 @@ def main() -> int:
         try:
             return gh_json(arguments, env)
         except GithubApiError as error:
-            if error.status in {403, 429}:
+            if error.is_rate_limited:
                 state.put(
                     "rate_limit",
                     {
