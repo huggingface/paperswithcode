@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -96,9 +96,21 @@ pub fn validate_peer(stream: &UnixStream, expected_uid: u32) -> Result<(), Local
 
 pub fn read_private_seed(path: &Path) -> Result<[u8; 32], LocalSocketError> {
     let metadata = std::fs::symlink_metadata(path).map_err(LocalSocketError::Io)?;
+    let systemd_directory = std::env::var_os("CREDENTIALS_DIRECTORY")
+        .and_then(|directory| std::fs::canonicalize(directory).ok());
+    let in_systemd_directory = systemd_directory.is_some()
+        && path
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            == systemd_directory;
     if !metadata.file_type().is_file()
         || metadata.file_type().is_symlink()
-        || metadata.permissions().mode() & 0o077 != 0
+        || !private_seed_permissions(
+            metadata.permissions().mode(),
+            metadata.uid(),
+            metadata.gid(),
+            in_systemd_directory,
+        )
         || metadata.len() != 32
     {
         return Err(LocalSocketError::CredentialRejected);
@@ -111,6 +123,11 @@ pub fn read_private_seed(path: &Path) -> Result<[u8; 32], LocalSocketError> {
         return Err(LocalSocketError::CredentialRejected);
     }
     Ok(seed)
+}
+
+fn private_seed_permissions(mode: u32, uid: u32, gid: u32, in_systemd_directory: bool) -> bool {
+    // systemd's protected credential mount can expose root:root 0440 files.
+    mode & 0o077 == 0 || (in_systemd_directory && uid == 0 && gid == 0 && mode & 0o777 == 0o440)
 }
 
 pub fn prepare_listener_path(path: &Path) -> Result<(), LocalSocketError> {
@@ -450,6 +467,16 @@ mod tests {
             gate.authorize(&request, 10),
             Err(LocalSocketError::AttachmentRejected)
         ));
+    }
+
+    #[test]
+    fn systemd_group_read_requires_the_exact_protected_root_form() {
+        assert!(private_seed_permissions(0o440, 0, 0, true));
+        assert!(!private_seed_permissions(0o440, 0, 0, false));
+        assert!(!private_seed_permissions(0o440, 1000, 0, true));
+        assert!(!private_seed_permissions(0o440, 0, 1000, true));
+        assert!(!private_seed_permissions(0o640, 0, 0, true));
+        assert!(!private_seed_permissions(0o444, 0, 0, true));
     }
 
     #[test]

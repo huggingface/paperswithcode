@@ -272,9 +272,17 @@ class ChatExecutorRuntime:
         descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
             metadata = os.fstat(descriptor)
+            credential_directory = os.environ.get("CREDENTIALS_DIRECTORY")
+            protected_systemd_file = (
+                credential_directory is not None
+                and path.parent.resolve() == Path(credential_directory).resolve()
+                and metadata.st_uid == 0
+                and metadata.st_gid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o440
+            )
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_mode & 0o077
+                or (metadata.st_mode & 0o077 and not protected_systemd_file)
                 or metadata.st_size != 32
                 or metadata.st_uid not in {0, os.geteuid()}
             ):
