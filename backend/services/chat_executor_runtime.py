@@ -174,9 +174,14 @@ class ChatExecutorRuntime:
         )
         try:
             await channel.attach_environment(attachment)
-        except BaseException:
+        except BaseException as error:
             await channel.settle("executor_transport_unavailable")
             await channel.aclose()
+            if isinstance(error, (OSError, EOFError)):
+                raise SandboxError(
+                    "sandbox_executor_attachment_failed",
+                    "Sandbox executor attachment failed",
+                ) from error
             raise
         return channel
 

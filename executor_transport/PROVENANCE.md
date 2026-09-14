@@ -76,6 +76,14 @@ of interoperability with the Papers With Code envelope.
   fail closed. Emergency revocation is rechecked for fresh, cached, detached,
   and previously acknowledged stream state.
 
+Fresh environment attachment verification allows at most 10 seconds of clock
+skew on the signed claim timestamps: real Modal guests were measured about
+five seconds behind the VPS. The VPS still admits each attachment only once,
+within its original two-second deadline. This bounded remote verification
+leeway can extend acceptance to 10 seconds after the signed expiry; it does
+not extend signing-key windows, bypass revocation or signature checks, or
+change generation/transcript binding. Other verification callers remain strict.
+
 Golden vectors are executable in `tests/protocol.rs`: the `PWC1` frame bytes,
 the bound-prologue SHA-256, deterministic Ed25519 authorization signature,
 version/schema downgrade cases, boundary inputs, credit edges, replay, and

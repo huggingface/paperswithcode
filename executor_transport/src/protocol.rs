@@ -663,6 +663,16 @@ impl KeyRing {
         authorization: &SignedAuthorization,
         now: u64,
     ) -> Result<(), ContentFreeError> {
+        self.verify_with_clock_skew(authorization, now, 0)
+    }
+
+    /// Clock leeway applies only to claim timestamps, never key validity or revocation.
+    pub fn verify_with_clock_skew(
+        &self,
+        authorization: &SignedAuthorization,
+        now: u64,
+        clock_skew_seconds: u64,
+    ) -> Result<(), ContentFreeError> {
         if self.revoked.contains(authorization.signer_key_id()) {
             return Err(ContentFreeError::SecurityRevoked);
         }
@@ -685,7 +695,13 @@ impl KeyRing {
         {
             return Err(ContentFreeError::AuthorizationRejected);
         }
-        if now < authorization.claims.issued_at || now > authorization.claims.expires_at {
+        if now.saturating_add(clock_skew_seconds) < authorization.claims.issued_at
+            || now
+                > authorization
+                    .claims
+                    .expires_at
+                    .saturating_add(clock_skew_seconds)
+        {
             return Err(ContentFreeError::AuthorizationExpired);
         }
         let public_key = VerifyingKey::from_bytes(&key.public_key)

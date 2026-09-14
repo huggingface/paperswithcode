@@ -42,6 +42,9 @@ const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
 // Four executing commands plus one cancellation/settlement RPC for each.
 // The daemon independently enforces the four-command execution limit.
 const MAX_DAEMON_STREAMS: usize = 8;
+// Fresh Modal guests can lag the VPS clock by several seconds. The VPS still
+// enforces the two-second, single-use attachment window before signing.
+const AUTHORIZATION_CLOCK_SKEW_SECONDS: u64 = 10;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -351,6 +354,7 @@ async fn maintain_connection(
                 tokio::time::sleep(Duration::from_millis(backoff.next_delay_ms(entropy))).await;
             }
             Err(error) => {
+                eprintln!("executor connection attempt failed: {error}");
                 recovery_attempts += 1;
                 if recovery_attempts > 3 {
                     return Err(error);
@@ -608,7 +612,11 @@ impl PeerEndpoint {
             return Err("executor peer identity rejected".into());
         }
         let authorization: SignedAuthorization = serde_json::from_slice(pending.authorization())?;
-        keys.verify(&authorization, unix_seconds()?)?;
+        keys.verify_with_clock_skew(
+            &authorization,
+            unix_seconds()?,
+            AUTHORIZATION_CLOCK_SKEW_SECONDS,
+        )?;
         let claims = &authorization.claims;
         if claims.environment_id != environment_id
             || claims.environment_generation != environment_generation
@@ -1000,10 +1008,25 @@ mod tests {
         binding: HandshakeBinding,
     }
 
+    #[test]
+    fn fresh_attachment_accepts_five_second_guest_clock_skew() {
+        attach_fixture_with_issuer_clock(3, 5).unwrap();
+        attach_fixture_with_issuer_clock(3, -5).unwrap();
+        assert!(attach_fixture_with_issuer_clock(3, 20).is_err());
+        assert!(attach_fixture_with_issuer_clock(3, -20).is_err());
+    }
+
     fn attach_fixture(
         environment_generation: u64,
     ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
-        let now = unix_seconds()?;
+        attach_fixture_with_issuer_clock(environment_generation, 0)
+    }
+
+    fn attach_fixture_with_issuer_clock(
+        environment_generation: u64,
+        issuer_offset: i64,
+    ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
+        let now = unix_seconds()?.checked_add_signed(issuer_offset).unwrap();
         let environment = NoiseIdentity::from_seed([4; 32])?;
         let harness = NoiseIdentity::from_seed([3; 32])?;
         let signer = AuthorizationSigner::from_seed("authorization-v1", [5; 32], 0, now + 60)?;
