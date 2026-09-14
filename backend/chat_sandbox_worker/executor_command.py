@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import sys
 
-from backend.chat_sandbox_worker.supervisor import _demote
+from backend.chat_sandbox_worker.process_security import _demote
 
 EXECUTOR_USER = "pwc-chat"
 DEFAULT_EXECUTOR_PIDS_MAX = 64

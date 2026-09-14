@@ -2,11 +2,8 @@
 
 from __future__ import annotations
 
-import ctypes
 import json
 import os
-import pwd
-import resource
 import secrets
 import select
 import socket
@@ -16,28 +13,13 @@ import time
 from pathlib import Path
 
 from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
+from backend.chat_sandbox_worker.process_security import (
+    PR_SET_DUMPABLE as PR_SET_DUMPABLE,
+    _demote as _demote,
+    _not_dumpable as _not_dumpable,
+)
 
 SUPERVISOR_PREFIX = b"@@PWC_SUPERVISOR_V1@@"
-PR_SET_DUMPABLE = 4
-
-
-def _not_dumpable() -> None:
-    ctypes.CDLL(None).prctl(PR_SET_DUMPABLE, 0, 0, 0, 0)
-
-
-def _demote(user: str, *, pids_max: int | None = None):
-    account = pwd.getpwnam(user)
-
-    def apply() -> None:
-        os.setgroups([])
-        os.setgid(account.pw_gid)
-        os.setuid(account.pw_uid)
-        os.umask(0o077)
-        if pids_max is not None:
-            resource.setrlimit(resource.RLIMIT_NPROC, (pids_max, pids_max))
-        _not_dumpable()
-
-    return apply
 
 
 def _safe_environment(home: str) -> dict[str, str]:
