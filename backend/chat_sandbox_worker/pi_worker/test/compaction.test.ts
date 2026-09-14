@@ -110,3 +110,28 @@ for (const mode of ["deadline", "turn-deadline", "cancel"] as const) {
     assert.equal(events.at(-1)?.outcome, mode === "cancel" ? "cancelled" : "timeout");
   });
 }
+
+
+test("a cut inside tool execution retains its user, call, and large result together", () => {
+  const event = preparation();
+  const parentId = event.branchEntries[1]!.id;
+  const timestamp = new Date().toISOString();
+  event.branchEntries.splice(2, 0,
+    { type: "message", id: "tool-call", parentId, timestamp, message: {
+      role: "assistant", api: "openai-responses", provider: "pwc-gateway", model: "test",
+      stopReason: "toolUse", timestamp: Date.now(),
+      content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "paper.txt" } }],
+      usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+    } },
+    { type: "message", id: "tool-result", parentId: "tool-call", timestamp, message: {
+      role: "toolResult", toolCallId: "read-1", toolName: "read", isError: false,
+      content: [{ type: "text", text: "large-tool-evidence 🧪".repeat(20000) }], timestamp: Date.now(),
+    } },
+  );
+  event.preparation.firstKeptEntryId = "tool-result";
+  const protectedResult = protectedPreparation(event);
+  assert.equal(protectedResult.firstKeptEntryId, parentId);
+  assert.doesNotMatch(protectedResult.text, /large-tool-evidence|paper.txt/);
+  assert.throws(() => boundedGatewayPayload({ messages: event.branchEntries.slice(1) }), /request_too_large/);
+});
