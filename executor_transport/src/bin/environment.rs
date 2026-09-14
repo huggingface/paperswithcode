@@ -34,7 +34,7 @@ use uuid::Uuid;
 const ROUTE_PREFIX: &str = "/v1/generations/";
 const ROUTE_SUFFIX: &str = "/environment";
 const PRODUCTION_HOST: &str = "chat-executor.paperswithcode.co";
-const STAGING_HOST: &str = "chat-executor.staging.paperswithcode.co";
+const STAGING_HOST: &str = "chat-executor-staging.paperswithcode.co";
 const HEARTBEAT: Duration = Duration::from_secs(5);
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
 const EXECUTOR_SOCKET: &str = "/run/pwc-chat-executor/executor.sock";

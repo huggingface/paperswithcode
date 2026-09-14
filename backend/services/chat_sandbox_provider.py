@@ -59,7 +59,7 @@ class SandboxLaunchMode(StrEnum):
 
 EXECUTOR_RENDEZVOUS_URLS = {
     "production": "wss://chat-executor.paperswithcode.co",
-    "staging": "wss://chat-executor.staging.paperswithcode.co",
+    "staging": "wss://chat-executor-staging.paperswithcode.co",
 }
 MAX_EXECUTOR_ADMISSION_BYTES = 2_048
 
@@ -424,7 +424,7 @@ class ModalSandboxProviderAdapter:
                 *(
                     ["chat-executor.paperswithcode.co"]
                     if remote_executor and self.settings.environment == "production"
-                    else ["chat-executor.staging.paperswithcode.co"]
+                    else ["chat-executor-staging.paperswithcode.co"]
                     if remote_executor
                     else []
                 ),

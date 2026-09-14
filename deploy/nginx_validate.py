@@ -194,7 +194,7 @@ def validate(production: str, staging: str) -> list[str]:
             failures.append(f"{environment} chat gateway body limit is missing")
     for config, environment, hostname in (
         (production, "production", "chat-executor.paperswithcode.co"),
-        (staging, "staging", "chat-executor.staging.paperswithcode.co"),
+        (staging, "staging", "chat-executor-staging.paperswithcode.co"),
     ):
         if f"server_name {hostname};" not in config:
             failures.append(f"{environment} executor hostname is missing")

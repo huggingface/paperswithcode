@@ -7,7 +7,7 @@ fn environment_accepts_only_the_exact_tls_hostname_and_route() {
     let binary = env!("CARGO_BIN_EXE_environment");
     for url in [
         "wss://chat-executor.paperswithcode.co/v1/generations/42/environment",
-        "wss://chat-executor.staging.paperswithcode.co/v1/generations/7/environment",
+        "wss://chat-executor-staging.paperswithcode.co/v1/generations/7/environment",
     ] {
         assert!(
             Command::new(binary)
@@ -19,6 +19,7 @@ fn environment_accepts_only_the_exact_tls_hostname_and_route() {
     }
     for url in [
         "ws://chat-executor.paperswithcode.co/v1/generations/42/environment",
+        "wss://chat-executor.staging.paperswithcode.co/v1/generations/7/environment",
         "wss://paperswithcode.co/v1/environment",
         "wss://chat-executor.paperswithcode.co/wrong",
         "wss://chat-executor.paperswithcode.co:8443/v1/generations/42/environment",

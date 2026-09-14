@@ -199,7 +199,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
         else (
             "/usr/local/bin/pwc-executor-environment",
             "--connect",
-            "wss://chat-executor.staging.paperswithcode.co/v1/generations/7/environment",
+            "wss://chat-executor-staging.paperswithcode.co/v1/generations/7/environment",
             "--admission-env",
             "PWC_CHAT_EXECUTOR_ADMISSION",
             "--authorization-env",
@@ -222,7 +222,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
     assert options["inbound_cidr_allowlist"] == []
     assert options["outbound_domain_allowlist"] == [
         "gateway.example.test",
-        *([] if legacy else ["chat-executor.staging.paperswithcode.co"]),
+        *([] if legacy else ["chat-executor-staging.paperswithcode.co"]),
     ]
 
 
