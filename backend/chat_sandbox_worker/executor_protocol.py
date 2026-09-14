@@ -10,6 +10,7 @@ import binascii
 import json
 import re
 from collections.abc import Callable
+from pathlib import PurePosixPath
 from typing import Any
 
 PROTOCOL = "sandbox-executor-v1"
@@ -29,6 +30,7 @@ MAX_EXECUTION_OUTPUT_FRAMES = MAX_EXECUTION_RESPONSE_FRAMES - 2
 # expands three raw bytes to four ASCII bytes with no further JSON expansion.
 MAX_READ_BYTES = ((MAX_FRAME_BYTES - 64 * 1024) // 4) * 3
 MAX_READ_BASE64_BYTES = 4 * ((MAX_READ_BYTES + 2) // 3)
+MAX_REMOTE_READ_BYTES = 1024 * 1024
 
 _IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}\Z")
 _TOOL_CALL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z")
@@ -36,6 +38,48 @@ _TOOL_CALL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,255}\Z")
 
 class ProtocolError(ValueError):
     """Raised when a wire frame does not satisfy the executor contract."""
+
+
+def validate_remote_exec_request(command: object, timeout_ms: object) -> None:
+    """Validate the narrower remote envelope before channel acquisition."""
+
+    _bounded_text(command, "command", MAX_COMMAND_BYTES)
+    if (
+        isinstance(timeout_ms, bool)
+        or not isinstance(timeout_ms, int)
+        or not 1 <= timeout_ms <= MAX_TIMEOUT_MS
+    ):
+        raise ProtocolError("Invalid timeout")
+
+
+def validate_remote_read_request(
+    path: object, offset: object, max_bytes: object
+) -> None:
+    """Validate one paginated remote read without shrinking the legacy wire."""
+
+    _bounded_text(path, "path", MAX_PATH_BYTES)
+    parsed = PurePosixPath(path)
+    if ".." in parsed.parts or (
+        parsed.is_absolute() and parsed.parts[:2] != ("/", "workspace")
+    ):
+        raise ProtocolError("Invalid remote path")
+    _nonnegative_integer(offset, "offset", MAX_OFFSET)
+    if (
+        isinstance(max_bytes, bool)
+        or not isinstance(max_bytes, int)
+        or not 1 <= max_bytes <= MAX_REMOTE_READ_BYTES
+    ):
+        raise ProtocolError("Invalid remote read size")
+
+
+def validate_remote_request(value: dict[str, Any]) -> None:
+    """Apply v1 remote-only limits after the legacy envelope is decoded."""
+
+    _validate_request(value)
+    if value["type"] == "exec":
+        validate_remote_exec_request(value["command"], value["timeout_ms"])
+    elif value["type"] == "read_file":
+        validate_remote_read_request(value["path"], value["offset"], value["max_bytes"])
 
 
 def _json_object(frame: bytes) -> dict[str, Any]:
@@ -172,7 +216,7 @@ def _validate_request(value: dict[str, Any]) -> None:
         _exact_fields(value, common)
         return
     operation = common | _OPERATION_IDENTITY_FIELDS
-    if kind == "ensure_workspace":
+    if kind in {"ensure_workspace", "release_workspace"}:
         _exact_fields(value, operation)
     elif kind == "exec":
         _exact_fields(
@@ -229,6 +273,7 @@ def _validate_response(value: dict[str, Any]) -> None:
         _exact_fields(value, operation | {"operation"})
         if value["operation"] not in {
             "ensure_workspace",
+            "release_workspace",
             "exec",
             "attach_execution",
             "cancel_execution",

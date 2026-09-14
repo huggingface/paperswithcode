@@ -10,8 +10,8 @@ Write concise, evidence-backed GitHub issue replies after Papers With Code catal
 ## Guardrails
 
 - If the user asks only for a draft, review, or report, do not post anything.
-- Treat an explicit request to reply, comment, or post as authorization to create the issue comment only.
-- Do not close, reopen, lock, label, assign, transfer, or mark notifications read unless the user separately asks.
+- Treat an explicit request to reply, comment, or post as authorization to create the issue comment. For the user's Papers With Code unread-notification workflow, their standing preference is to mark handled notifications read as described below; honor any request to leave them unread.
+- Do not close, reopen, lock, label, assign, or transfer issues unless the user separately asks. Marking a notification read does not change issue state.
 - Do not claim that a catalog change is live until it has been verified on the live site or API.
 - Do not expose internal database details, credentials, deployment mechanics, or debugging history in a public reply.
 - Write one tailored reply per issue. Avoid boilerplate batches that ignore the author's actual message.
@@ -129,4 +129,16 @@ After posting:
 2. Confirm the repository, issue number, posting account, complete body, direct evaluation links, and top-three badge sentence when eligible.
 3. Report the public comment URL to the user.
 
-If posting failed, report the exact failure and whether a comment was created. Preserve the notification's read/unread state unless the user explicitly asks to change it.
+If posting failed, report the exact failure and whether a comment was created. Leave failed or unresolved work unread.
+
+## 8. Mark handled notifications read
+
+In the Papers With Code unread-notification workflow, mark each reviewed, handled issue notification read after verifying the outcome. This includes a successfully verified reply that leaves no outstanding action, an already-answered discussion, and an acknowledgement or closure-only update that requires no reply. For example, the author's closure of `dmis-lab/CVRR#1` after confirming the results and receiving a reply needs only a notification update, not another comment.
+
+Read the current discussion and relevant event before deciding: closure alone does not prove that a correction or question has been resolved. Leave outstanding corrections, author-clarification questions, pending reviews, and uncertain posting failures unread, and report them. Draft-only and read-only requests do not authorize notification changes.
+
+1. Resolve the exact notification thread by its `subject.url` matching the issue's API URL. Paginate the scoped notification results; never mark the entire inbox or repository read.
+2. Recheck the thread and discussion immediately before marking it read. If new activity arrived after the reviewed snapshot, review it first.
+3. Mark that thread read with `PATCH /notifications/threads/{thread_id}` (for example, `gh api --method PATCH notifications/threads/THREAD_ID --silent`). Use the notification thread ID, not the issue number or event ID.
+4. Fetch the thread and verify `unread: false`. If it is already read, make no write. If no matching thread can be found, report that rather than claiming a successful update.
+5. Report which issues received replies separately from notifications cleared without a reply, linking the posted comments and noting any issues intentionally left unread.

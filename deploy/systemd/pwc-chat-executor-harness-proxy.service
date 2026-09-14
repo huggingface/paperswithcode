@@ -1,0 +1,16 @@
+[Unit]
+Description=Papers With Code chat executor harness proxy (default generation)
+Documentation=file:/usr/local/lib/paperswithcode-deploy/operations.md
+ConditionPathExists=/etc/paperswithcode/chat-executor/default-instance
+After=pwc-chat-executor-rendezvous.service
+Requires=pwc-chat-executor-rendezvous.service
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/paperswithcode/chat-executor/default-instance
+ExecStart=/usr/bin/systemctl start pwc-chat-executor-harness-proxy@${PWC_CHAT_EXECUTOR_DEFAULT_INSTANCE}.service
+ExecStop=/usr/bin/systemctl stop pwc-chat-executor-harness-proxy@${PWC_CHAT_EXECUTOR_DEFAULT_INSTANCE}.service
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target

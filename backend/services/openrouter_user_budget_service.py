@@ -770,10 +770,29 @@ class OpenRouterUserBudgetService:
         finally:
             if owns_client:
                 await active.aclose()
+        from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
+        from backend.services.chat_turn_admission import ChatTurnAdmissionService
+
+        turn_reservations_reconciled = 0
+        if self.settings.chat_executor_remote_transport_enabled:
+            turn_reservations_reconciled = ChatTurnAdmissionService(
+                environment=self.settings.environment,
+                spend_limit_microusd=(
+                    self.settings.chat_sandbox_application_cap_microusd
+                ),
+            ).reconcile_cost_unknown(
+                self.db,
+                cost_per_second_microusd=ChatSandboxSpendService(
+                    self.db, self.settings
+                ).cost_per_second(),
+                now=datetime.now(UTC),
+                batch_size=batch_size,
+            )
         return {
             "reconciled": reconciled,
             "examined": len(rows),
             "cursor": str(rows[-1].id) if rows else None,
+            "turn_reservations_reconciled": turn_reservations_reconciled,
         }
 
     def cleanup_retention(

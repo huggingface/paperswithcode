@@ -380,6 +380,51 @@ def test_ordinary_new_turn_does_not_reserve_external_capacity_when_global_off(
     assert calls == [("preflight", None), ("create", None)]
 
 
+def test_external_authoring_is_rejected_before_reservation_or_session_creation(
+    monkeypatch,
+):
+    settings = get_settings().model_copy(
+        update={
+            "chat_durable_turn_dispatch_enabled": True,
+            "chat_external_pi_admission_enabled": True,
+            "chat_default_agent_harness": "pi",
+            "chat_artifacts_enabled": True,
+            "chat_posterly_enabled": True,
+        }
+    )
+    calls = []
+
+    class _Coordinator:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def preflight(self, **_kwargs):
+            calls.append("preflight")
+            return SimpleNamespace(existing_job=None, reconciled_expired_count=0)
+
+        def reserve_external_capacity(self, *_args, **_kwargs):
+            pytest.fail("unsupported mode reserved external capacity")
+
+    monkeypatch.setattr(
+        chat_session_module, "ChatTurnAdmissionCoordinator", _Coordinator
+    )
+    service = ChatSessionService(_ScriptedDB(), settings)
+    service.create_session = lambda *_args, **_kwargs: pytest.fail(
+        "unsupported mode created a session"
+    )
+
+    with pytest.raises(ChatServiceError) as exc_info:
+        service.begin_turn(
+            ChatOwner("owner-1", "owner"),
+            session_id=None,
+            client_message_id="poster-request",
+            text="make a poster",
+        )
+
+    assert exc_info.value.code == "unsupported_chat_mode"
+    assert calls == ["preflight"]
+
+
 def test_qualified_existing_non_pi_session_is_rejected_before_replay(monkeypatch):
     settings = get_settings().model_copy(
         update={"chat_durable_turn_dispatch_enabled": True}
