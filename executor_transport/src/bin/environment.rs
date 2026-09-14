@@ -170,6 +170,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.as_slice() {
         [flag] if flag == "--self-test" => {
+            // Exercise the same default-provider selection as the WSS connector.
+            let _tls_config = rustls::ClientConfig::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .with_no_client_auth();
             let identity = NoiseIdentity::generate()?;
             println!(
                 "{}",
