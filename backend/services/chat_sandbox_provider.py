@@ -31,6 +31,7 @@ from backend.chat_sandbox_worker.mcp_app_registry import (
 )
 from backend.config import Settings
 from backend.services.chat_executor_timing import executor_stage
+from backend.services.chat_modal_metadata import executor_metadata
 
 ImageResolver = Callable[[str], Awaitable[object]]
 WebSocketConnector = Callable[..., Awaitable[object]]
@@ -318,11 +319,23 @@ class ModalSandboxProviderAdapter:
             raise SandboxError(
                 "gateway_unavailable", "The research gateway is not configured"
             ) from error
+        reuse_metadata = (
+            remote_executor
+            and self.image_resolver is resolve_modal_image
+            and bool(self.settings.chat_sandbox_modal_environment)
+            and self.settings.chat_modal_image_version.startswith("im-")
+        )
         with executor_stage("provider_lookup", worker_generation or "legacy"):
-            app, image = await asyncio.gather(
-                modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False),
-                self.image_resolver(self.settings.chat_modal_image_version),
-            )
+            if reuse_metadata:
+                app, image = await executor_metadata(
+                    self.settings.chat_sandbox_modal_environment,
+                    self.settings.chat_modal_image_version,
+                )
+            else:
+                app, image = await asyncio.gather(
+                    modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False),
+                    self.image_resolver(self.settings.chat_modal_image_version),
+                )
         persistent_enabled = bool(
             getattr(self.settings, "chat_persistent_worker_enabled", False)
         )
@@ -378,6 +391,11 @@ class ModalSandboxProviderAdapter:
                 *command,
                 app=app,
                 image=image,
+                **(
+                    {"environment_name": self.settings.chat_sandbox_modal_environment}
+                    if reuse_metadata
+                    else {}
+                ),
                 env={
                     **sandbox_environment(
                         self.settings,

@@ -852,3 +852,60 @@ def test_manager_injected_provider_and_public_create_shim_remain_late_bound(
         {"service": "pwc-chat"},
         "generation-a",
     )
+
+
+def test_fresh_executor_launches_use_metadata_but_create_distinct_sandboxes(
+    monkeypatch,
+):
+    app, image = object(), object()
+    creates = []
+    lookups = []
+
+    async def metadata(environment, image_id):
+        lookups.append((environment, image_id))
+        return app, image
+
+    async def create(*command, **options):
+        creates.append(options)
+        return SimpleNamespace(object_id=f"sb-{len(creates)}")
+
+    monkeypatch.setattr(chat_sandbox_provider, "executor_metadata", metadata)
+    monkeypatch.setattr(
+        chat_sandbox_provider.modal.Sandbox, "create", _AsyncCall(create)
+    )
+
+    async def run():
+        results = []
+        for index in range(2):
+            provider = ModalSandboxProviderAdapter(
+                _settings(
+                    chat_sandbox_executor_enabled=True,
+                    chat_sandbox_executor_contract_version=EXECUTOR_PROTOCOL,
+                    chat_sandbox_modal_environment="pwc-chat-staging",
+                )
+            )
+            results.append(
+                await provider.create(
+                    name=f"fresh-{index}",
+                    tags={},
+                    worker_generation=f"g-{index}",
+                    launch_mode=SandboxLaunchMode.EXECUTOR,
+                    executor_launch=ExecutorLaunchBundle(
+                        f"admission-{index}".encode(),
+                        shard_generation=7,
+                        authorization_keys_json="{}",
+                    ),
+                )
+            )
+        assert results[0].object_id != results[1].object_id
+
+    asyncio.run(run())
+    assert lookups == [("pwc-chat-staging", "im-test")] * 2
+    assert len(creates) == 2
+    for options in creates:
+        assert options["app"] is app and options["image"] is image
+        assert options["environment_name"] == "pwc-chat-staging"
+    assert (
+        creates[0]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
+        != creates[1]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
+    )
