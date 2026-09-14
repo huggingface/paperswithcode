@@ -19,9 +19,7 @@ from backend.services.chat_sandbox_acquisition_coordinator import (
     ChatSandboxAcquisitionCoordinator,
 )
 from backend.services.chat_sandbox_executor import (
-    ExecutorContext,
     ExecutorTransportError,
-    PersistentExecutorChannel,
     SandboxExecutorClient,
 )
 from backend.services.chat_sandbox_lease_lifecycle_coordinator import (
@@ -51,9 +49,6 @@ SessionFactory = Callable[[], Session]
 LifecycleObserver = Callable[[str, str | None, int], None]
 QualificationEvidenceRecorder = Callable[..., bool]
 QualificationCapacityResolver = Callable[..., int | None]
-EXECUTOR_IDLE_RETENTION_SECONDS = 5 * 60
-EXECUTOR_RETAINED_GLOBAL_CAP = 10
-MIN_EXECUTOR_CLAIM_SECONDS = 240
 
 
 @dataclass(frozen=True)
@@ -68,17 +63,6 @@ class ExternalExecutorWorkspace:
     workspace_generation: int
     claim: WorkerClaim
     acquired_monotonic: float
-
-
-@dataclass(slots=True)
-class ExternalExecutorTurnBinding:
-    """One turn's workspace and already-authorized persistent channel."""
-
-    workspace: ExternalExecutorWorkspace
-    channel: PersistentExecutorChannel
-    context: ExecutorContext
-    settlement: str = "invalidate"
-    settled: bool = False
 
 
 def _workspace_generation(worker_generation: str) -> int:
@@ -111,15 +95,9 @@ class ChatExternalExecutorWorkspaceManager:
         observe: LifecycleObserver | None = None,
         record_evidence: QualificationEvidenceRecorder | None = None,
         qualification_capacity: QualificationCapacityResolver | None = None,
-        executor_runtime: object | None = None,
     ) -> None:
         if settings.chat_workspace_snapshots_enabled:
             raise ValueError("External executor workspaces require snapshots disabled")
-        if (
-            settings.chat_sandbox_warm_seconds != EXECUTOR_IDLE_RETENTION_SECONDS
-            or settings.chat_sandbox_max_warm != EXECUTOR_RETAINED_GLOBAL_CAP
-        ):
-            raise ValueError("External executor retention contract is invalid")
         if acquisition.settings is not settings:
             raise ValueError("Workspace acquisition settings must be shared")
         if acquisition.session_factory is not session_factory:
@@ -149,7 +127,6 @@ class ChatExternalExecutorWorkspaceManager:
         self.qualification_capacity = (
             qualification_capacity or self._persisted_qualification_capacity
         )
-        self.executor_runtime = executor_runtime
 
     def _persisted_qualification_capacity(
         self,
@@ -197,26 +174,16 @@ class ChatExternalExecutorWorkspaceManager:
         )
 
         owner = SandboxSessionManager(settings, sandbox_provider=provider)
-        executor_runtime = None
-        acquisition = owner._acquisition_coordinator()
-        if settings.chat_executor_remote_transport_enabled:
-            from backend.services.chat_executor_runtime import ChatExecutorRuntime
-
-            executor_runtime = ChatExecutorRuntime(
-                settings, session_factory=owner.session_factory
-            )
-            acquisition.executor_launch_factory = executor_runtime.prepare_launch
         manager = cls(
             settings=settings,
             session_factory=owner.session_factory,
             state_repository=owner._state_repository(),
-            acquisition=acquisition,
+            acquisition=owner._acquisition_coordinator(),
             lifecycle=owner._lease_lifecycle_coordinator(),
             maintenance=owner._lease_maintenance_coordinator(),
             executor=executor,
             observe=durable_lifecycle_observer(settings),
             record_evidence=record_qualification_event_safely,
-            executor_runtime=executor_runtime,
         )
         manager._dependency_owner = owner
         return manager
@@ -227,59 +194,13 @@ class ChatExternalExecutorWorkspaceManager:
         session_id: uuid.UUID,
         turn_claim: TurnLeaseClaim,
     ) -> ExternalExecutorWorkspace:
-        return await self._acquire(
-            session_id=session_id,
-            turn_claim=turn_claim,
-            verify_executor_health=True,
-            launch_mode=SandboxLaunchMode.EXECUTOR,
-        )
-
-    async def acquire_for_binding(
-        self,
-        *,
-        session_id: uuid.UUID,
-        turn_claim: TurnLeaseClaim,
-    ) -> ExternalExecutorWorkspace:
-        """Claim lifecycle capacity without launching a legacy health relay."""
-
-        return await self._acquire(
-            session_id=session_id,
-            turn_claim=turn_claim,
-            verify_executor_health=False,
-            launch_mode=SandboxLaunchMode.EXECUTOR,
-        )
-
-    async def acquire_legacy(
-        self,
-        *,
-        session_id: uuid.UUID,
-        turn_claim: TurnLeaseClaim,
-    ) -> ExternalExecutorWorkspace:
-        """Use the pre-transport Modal relay after circuit fallback."""
-
-        return await self._acquire(
-            session_id=session_id,
-            turn_claim=turn_claim,
-            verify_executor_health=True,
-            launch_mode=SandboxLaunchMode.LEGACY_EXECUTOR,
-        )
-
-    async def _acquire(
-        self,
-        *,
-        session_id: uuid.UUID,
-        turn_claim: TurnLeaseClaim,
-        verify_executor_health: bool,
-        launch_mode: SandboxLaunchMode,
-    ) -> ExternalExecutorWorkspace:
         deadline = self.monotonic() + self.acquisition.ready_timeout_seconds
         replacement_attempts = 0
-        self._mark_executor_resource_started(turn_claim.turn_id)
         while True:
             self._require_live_turn(session_id, turn_claim)
             outcome = await self.acquisition.acquire(
                 session_id,
-                launch_mode=launch_mode,
+                launch_mode=SandboxLaunchMode.EXECUTOR,
                 allow_pool=False,
                 live_cap_resolver=lambda db: self._executor_live_cap(
                     db, session_id, turn_claim
@@ -305,19 +226,16 @@ class ChatExternalExecutorWorkspaceManager:
                 claim=claim,
                 acquired_monotonic=self.monotonic(),
             )
-            if verify_executor_health:
-                try:
-                    healthy = await self.executor.health(workspace.sandbox) == "ok"
-                except asyncio.CancelledError:
-                    await self._invalidate_preserving_primary(workspace)
-                    raise
-                except (ExecutorTransportError, ProtocolError, SandboxError):
-                    healthy = False
-                except Exception:
-                    await self._invalidate_preserving_primary(workspace)
-                    raise
-            else:
-                healthy = True
+            try:
+                healthy = await self.executor.health(workspace.sandbox) == "ok"
+            except asyncio.CancelledError:
+                await self._invalidate_preserving_primary(workspace)
+                raise
+            except (ExecutorTransportError, ProtocolError, SandboxError):
+                healthy = False
+            except Exception:
+                await self._invalidate_preserving_primary(workspace)
+                raise
             if healthy:
                 try:
                     self._require_live_turn(session_id, turn_claim)
@@ -361,8 +279,6 @@ class ChatExternalExecutorWorkspaceManager:
                 claim=workspace.claim,
                 now=self.utcnow(),
             )
-            if released:
-                self._mark_executor_resource_ended(workspace.turn_id, db=db)
         if released:
             self._observe_active_duration(workspace)
             self.observe("workspace_state", "released", 1)
@@ -382,7 +298,6 @@ class ChatExternalExecutorWorkspaceManager:
             workspace.claim,
             failure_code=failure_code,
         )
-        self._mark_executor_resource_ended(workspace.turn_id)
         self._observe_active_duration(workspace)
         self.observe("workspace_state", "invalidated", 1)
         self.record_evidence(
@@ -400,48 +315,6 @@ class ChatExternalExecutorWorkspaceManager:
             ),
         )
         self.observe("workspace_active_ms", None, elapsed_ms)
-
-    def _mark_executor_resource_started(self, turn_id: uuid.UUID) -> None:
-        if self.executor_runtime is None:
-            return
-        from backend.services.chat_turn_admission import ChatTurnAdmissionService
-
-        with self.session_factory() as db, db.begin():
-            ChatTurnAdmissionService(
-                environment=self.settings.environment,
-                spend_limit_microusd=(
-                    self.settings.chat_sandbox_application_cap_microusd
-                ),
-            ).mark_resource_started(db, turn_id=turn_id, now=self.utcnow())
-
-    def _mark_executor_resource_ended(
-        self, turn_id: uuid.UUID, *, db: Session | None = None
-    ) -> None:
-        if self.executor_runtime is None:
-            return
-        from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
-        from backend.services.chat_turn_admission import ChatTurnAdmissionService
-
-        def mark(session: Session) -> None:
-            ChatTurnAdmissionService(
-                environment=self.settings.environment,
-                spend_limit_microusd=(
-                    self.settings.chat_sandbox_application_cap_microusd
-                ),
-            ).mark_resource_ended_and_reconcile(
-                session,
-                turn_id=turn_id,
-                cost_per_second_microusd=ChatSandboxSpendService(
-                    session, self.settings
-                ).cost_per_second(),
-                now=self.utcnow(),
-            )
-
-        if db is not None:
-            mark(db)
-            return
-        with self.session_factory() as session, session.begin():
-            mark(session)
 
     async def _release_preserving_primary(
         self, workspace: ExternalExecutorWorkspace

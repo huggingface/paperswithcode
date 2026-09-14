@@ -1570,8 +1570,8 @@ def production_codex_values(
 
 def production_codex_image_values() -> dict[str, str]:
     return {
-        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86",
-        "PWC_CODEX_JOBS_IMAGE_REVISION": "7067f309c98f9ea002b812773c9a256400c740ef",
+        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c",
+        "PWC_CODEX_JOBS_IMAGE_REVISION": "556b5d14b762684586030d3018999dae392200c9",
     }
 
 

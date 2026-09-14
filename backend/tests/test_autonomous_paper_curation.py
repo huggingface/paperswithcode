@@ -66,6 +66,13 @@ from backend.services.hf_daily_curation_service import (
 from jobs import url_preflight
 
 
+PAPER_TEXT = (
+    b"# A complete research paper\n"
+    + b"We evaluate the proposed method on held-out tasks and compare the results. "
+    * 20
+)
+
+
 class _HeadResponse:
     status = 200
 
@@ -135,7 +142,7 @@ def test_preflight_reuses_complete_importer_links_but_verifies_markdown(
     def fetch(url, _limit):
         fetched.append(url)
         assert url.endswith(".md")
-        return b"# Paper\n", url
+        return PAPER_TEXT, url
 
     result = url_preflight.extract_candidates(_context(), fetch=fetch)
 
@@ -161,7 +168,7 @@ def test_eval_preflight_manifests_model_card_blog_project_and_readme(monkeypatch
 
     result = url_preflight.extract_candidates(
         context,
-        fetch=lambda url, _limit: (b"# Paper\n", url),
+        fetch=lambda url, _limit: (PAPER_TEXT, url),
     )
 
     assert {(item["kind"], item["url"]) for item in result["source_documents"]} == {
@@ -176,7 +183,7 @@ def test_eval_preflight_manifests_model_card_blog_project_and_readme(monkeypatch
     }
 
 
-def test_preflight_accepts_official_links_when_markdown_is_not_ready(
+def test_preflight_requires_paper_text_even_with_official_links(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -200,11 +207,12 @@ def test_preflight_accepts_official_links_when_markdown_is_not_ready(
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
 
-    assert result["awaiting_markdown"] is False
-    assert result["complete"] is True
+    assert result["awaiting_markdown"] is True
+    assert result["complete"] is False
     assert fetched == [
         "https://huggingface.co/api/papers/2608.00042",
         "https://huggingface.co/papers/2608.00042.md",
+        "https://arxiv.org/pdf/2608.00042",
     ]
     assert result["sources"][0]["sha256"]
 
@@ -274,7 +282,7 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
         assert token == "hf-test"
         return (
             b"Code: https://github.com/example/project\n"
-            b"Project: https://example.github.io/project\n",
+            b"Project: https://example.github.io/project\n" + PAPER_TEXT,
             "https://signed.example/markdown",
         )
 
@@ -309,7 +317,7 @@ def test_preflight_accepts_ocr_markdown_when_hf_papers_api_has_no_record(
     def fetch_ocr_markdown(arxiv_id: str, _limit: int, *, token: str):
         assert arxiv_id == "2608.00042"
         assert token == "hf-test"
-        return b"# Complete paper\n", "https://signed.example/markdown"
+        return PAPER_TEXT, "https://signed.example/markdown"
 
     context = _context(project_page=False)
     context["paper"]["repositories"] = []
@@ -339,7 +347,7 @@ def test_preflight_dead_project_page_keeps_paper_evidence(monkeypatch, project_s
                 {"projectPage": "https://example.github.io/missing"}
             ).encode(), url
         if url.endswith(".md"):
-            return b"# Complete paper\n", url
+            return PAPER_TEXT, url
         raise urllib.error.HTTPError(url, project_status, "unavailable", {}, None)
 
     context = _context(project_page=False)
@@ -362,7 +370,7 @@ def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch)
         if "/api/papers/" in url:
             return b"{}", url
         if url.endswith(".md"):
-            return b"# Complete paper\n", url
+            return PAPER_TEXT, url
         raise AssertionError("PDF is a last-resort source")
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
@@ -371,7 +379,7 @@ def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch)
     assert not any("/pdf/" in url for url in fetched)
 
 
-def test_preflight_skips_pdf_when_official_repository_is_available(
+def test_preflight_checks_pdf_when_official_repository_is_available(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -390,10 +398,13 @@ def test_preflight_skips_pdf_when_official_repository_is_available(
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
 
-    assert result["complete"] is True
-    assert result["awaiting_markdown"] is False
-    assert {error["source"] for error in result["errors"]} == {"hf_markdown"}
-    assert not any("/pdf/" in url for url in fetched)
+    assert result["complete"] is False
+    assert result["awaiting_markdown"] is True
+    assert {error["source"] for error in result["errors"]} == {
+        "hf_markdown",
+        "paper_pdf",
+    }
+    assert any("/pdf/" in url for url in fetched)
 
 
 def test_preflight_marks_missing_public_and_ocr_markdown_as_awaiting(monkeypatch):

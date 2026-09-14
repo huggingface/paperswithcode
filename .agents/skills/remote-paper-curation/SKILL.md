@@ -12,6 +12,21 @@ or edit repository files. Fetch the job-scoped paper context with:
 python jobs/curation_api.py context
 ```
 
+Read the validated `paper_markdown` or `paper_pdf` in the source manifest.
+A cached image caption, SVG title, diagram notice, empty wrapper, or successful
+HTTP response alone does not count as reading the paper. The PDF preflight
+checks only the first two pages for readable content and artifact URLs; read
+the relevant body, experiment tables, and captions yourself before curating.
+If no substantive source can be read, report the failure rather than marking
+the source inspected or URL extraction complete.
+
+For enrichment, search the existing task taxonomy for the actual contribution,
+including when the paper starts with no tasks. Accept an official artifact only
+when it belongs to this exact paper. Shared navigation links to sibling products,
+lab home pages, and website templates are not paper artifacts; a shared vendor
+or domain does not establish ownership. Preserve existing manual links and
+report questionable existing links separately.
+
 If context includes `retry_feedback`, address its exact rejection before apply.
 Re-read current rows and sources; a prior proposal is not evidence.
 
@@ -64,6 +79,14 @@ Try exact names and common spelling variants, but reject semantically different
 datasets or splits even when their names are similar. The `taxonomy` command
 searches only task and method names. Never use an empty taxonomy result to
 conclude that a benchmark or leaderboard is missing.
+
+Establish the exact benchmark version, split, task/language coverage, aggregation,
+tool setting, and metric definition before selecting the best eligible result.
+Never substitute a subset for a complete suite, an overall score for a split,
+or instruction-level accuracy for prompt-level accuracy because it is higher.
+Skip an unverified protocol match and scores known to include invalid trials;
+report the source evidence instead. A familiar baseline used as an experimental
+probe is not a model introduced by the paper.
 
 For `add-evals`, follow the conservative rules in `add-evals/SKILL.md`, but
 write a JSON payload containing `evaluations` (each has this job's

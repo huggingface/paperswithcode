@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import base64
 import re
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
-from dataclasses import dataclass
 from enum import StrEnum
 from typing import Protocol
 
@@ -54,51 +52,6 @@ _FAILURE_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 class SandboxLaunchMode(StrEnum):
     LEGACY = "legacy"
     EXECUTOR = "executor"
-    LEGACY_EXECUTOR = "legacy_executor"
-
-
-EXECUTOR_RENDEZVOUS_URLS = {
-    "production": "wss://chat-executor.paperswithcode.co",
-    "staging": "wss://chat-executor-staging.paperswithcode.co",
-}
-MAX_EXECUTOR_ADMISSION_BYTES = 2_048
-
-
-@dataclass(frozen=True, slots=True)
-class ExecutorLaunchBundle:
-    """One daemon-only, short-lived registration capability."""
-
-    admission: bytes
-    shard_generation: int
-    authorization_keys_json: str
-
-    def rendezvous_url(self, environment: str) -> str:
-        base = EXECUTOR_RENDEZVOUS_URLS.get(environment)
-        if base is None or self.shard_generation <= 0:
-            raise SandboxError(
-                "sandbox_executor_generation_invalid",
-                "Sandbox executor generation is invalid",
-            )
-        return f"{base}/v1/generations/{self.shard_generation}/environment"
-
-    def encoded_admission(self) -> str:
-        if not self.admission or len(self.admission) > MAX_EXECUTOR_ADMISSION_BYTES:
-            raise SandboxError(
-                "sandbox_executor_admission_invalid",
-                "Sandbox executor admission is invalid",
-            )
-        return base64.urlsafe_b64encode(self.admission).decode("ascii")
-
-    def authorization_keys(self) -> str:
-        if (
-            not self.authorization_keys_json
-            or len(self.authorization_keys_json.encode()) > 4_096
-        ):
-            raise SandboxError(
-                "sandbox_executor_authorization_keys_invalid",
-                "Sandbox executor authorization keys are invalid",
-            )
-        return self.authorization_keys_json
 
 
 def sanitized_failure_stage(value: object) -> str:
@@ -152,7 +105,6 @@ class SandboxProvider(Protocol):
         tags: dict[str, str],
         worker_generation: str | None = None,
         launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
-        executor_launch: ExecutorLaunchBundle | None = None,
     ) -> object: ...
 
     async def resolve(self, sandbox_id: str) -> object: ...
@@ -277,17 +229,12 @@ class ModalSandboxProviderAdapter:
         tags: dict[str, str],
         worker_generation: str | None = None,
         launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
-        executor_launch: ExecutorLaunchBundle | None = None,
     ) -> object:
         if not isinstance(launch_mode, SandboxLaunchMode):
             raise SandboxError(
                 "sandbox_launch_mode_invalid", "Sandbox launch mode is invalid"
             )
-        remote_executor = launch_mode is SandboxLaunchMode.EXECUTOR
-        executor_enabled = launch_mode in {
-            SandboxLaunchMode.EXECUTOR,
-            SandboxLaunchMode.LEGACY_EXECUTOR,
-        }
+        executor_enabled = launch_mode is SandboxLaunchMode.EXECUTOR
         if executor_enabled and not self.settings.chat_sandbox_executor_enabled:
             raise SandboxError(
                 "sandbox_executor_disabled", "Sandbox executor launch is disabled"
@@ -301,16 +248,6 @@ class ModalSandboxProviderAdapter:
                 "sandbox_executor_contract_invalid",
                 "Sandbox executor contract is invalid",
             )
-        if remote_executor and executor_launch is None:
-            raise SandboxError(
-                "sandbox_executor_admission_missing",
-                "Sandbox executor admission is unavailable",
-            )
-        rendezvous_url = (
-            executor_launch.rendezvous_url(self.settings.environment)
-            if remote_executor and executor_launch is not None
-            else None
-        )
         try:
             outbound_domains = sandbox_outbound_domains(self.settings)
         except ValueError as error:
@@ -339,17 +276,7 @@ class ModalSandboxProviderAdapter:
             )
         worker_generation = worker_generation or secrets.token_hex(16)
         command = (
-            (
-                "/usr/local/bin/pwc-executor-environment",
-                "--connect",
-                rendezvous_url,
-                "--admission-env",
-                "PWC_CHAT_EXECUTOR_ADMISSION",
-                "--authorization-env",
-                "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
-            )
-            if remote_executor
-            else ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
+            ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
             if executor_enabled
             else (
                 ("python", "-m", "backend.chat_sandbox_worker.control_daemon")
@@ -385,21 +312,9 @@ class ModalSandboxProviderAdapter:
                     {
                         "PWC_CHAT_EXECUTOR_CONTRACT_VERSION": (
                             self.settings.chat_sandbox_executor_contract_version
-                        ),
+                        )
                     }
                     if executor_enabled
-                    else {}
-                ),
-                **(
-                    {
-                        "PWC_CHAT_EXECUTOR_ADMISSION": (
-                            executor_launch.encoded_admission()
-                        ),
-                        "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS": (
-                            executor_launch.authorization_keys()
-                        ),
-                    }
-                    if remote_executor
                     else {}
                 ),
             },
@@ -419,16 +334,7 @@ class ModalSandboxProviderAdapter:
             workdir="/workspace",
             cpu=(self.settings.chat_sandbox_cpu, cpu_limit),
             memory=(self.settings.chat_sandbox_memory_mib, memory_limit),
-            outbound_domain_allowlist=[
-                *outbound_domains,
-                *(
-                    ["chat-executor.paperswithcode.co"]
-                    if remote_executor and self.settings.environment == "production"
-                    else ["chat-executor-staging.paperswithcode.co"]
-                    if remote_executor
-                    else []
-                ),
-            ],
+            outbound_domain_allowlist=outbound_domains,
             inbound_cidr_allowlist=(
                 None if persistent_enabled and not executor_enabled else []
             ),
@@ -457,12 +363,43 @@ class ModalSandboxProviderAdapter:
                 )
             ),
         )
-        if remote_executor:
-            # Only authenticated durable registration establishes executor
-            # readiness. Modal exec probes are intentionally not part of the
-            # warm path and cannot establish remote identity.
-            return sandbox
-        if not persistent_enabled and not executor_enabled:
+        if executor_enabled:
+            deadline = (
+                time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
+            )
+            while time.monotonic() < deadline:
+                try:
+                    probe = await sandbox.exec.aio(
+                        "test",
+                        "-S",
+                        str(EXECUTOR_SOCKET),
+                        timeout=5,
+                    )
+                    await probe.wait.aio()
+                    if probe.returncode == 0:
+                        if qualification_profile == "32-functional-turns":
+                            seed = await sandbox.exec.aio(
+                                "sh",
+                                "-c",
+                                "printf durable-ready > /workspace/durable-ready.txt",
+                                timeout=5,
+                            )
+                            await seed.wait.aio()
+                            if seed.returncode != 0:
+                                break
+                        return sandbox
+                except Exception:
+                    pass
+                if await self.poll(sandbox) is not None:
+                    break
+                await asyncio.sleep(0.05)
+            await sandbox.terminate.aio(
+                wait=self.settings.chat_sandbox_spend_enforcement_enabled
+            )
+            raise SandboxError(
+                "sandbox_worker_not_ready", "Sandbox executor readiness timed out"
+            )
+        if not persistent_enabled:
             return sandbox
         deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
         while time.monotonic() < deadline:
@@ -471,7 +408,6 @@ class ModalSandboxProviderAdapter:
                     sandbox,
                     persistent=True,
                     worker_generation=worker_generation,
-                    launch_mode=launch_mode,
                 ):
                     return sandbox
             except Exception:
@@ -500,10 +436,7 @@ class ModalSandboxProviderAdapter:
         worker_generation: str | None,
         launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool:
-        if launch_mode in {
-            SandboxLaunchMode.EXECUTOR,
-            SandboxLaunchMode.LEGACY_EXECUTOR,
-        }:
+        if launch_mode is SandboxLaunchMode.EXECUTOR:
             command = ("test", "-S", str(EXECUTOR_SOCKET))
         elif persistent:
             if not worker_generation:

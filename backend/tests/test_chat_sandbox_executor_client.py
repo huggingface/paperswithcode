@@ -302,7 +302,6 @@ def _context() -> ExecutorContext:
         turn_worker_id="production-green-00",
         turn_worker_generation="4",
         turn_lease_generation="9",
-        turn_deadline_unix_ms=4_000_000_000_000,
         **IDENTITY,
     )
 
@@ -354,7 +353,6 @@ def test_exec_sends_fenced_bootstrap_and_returns_validated_output():
         "turn_worker_id": "production-green-00",
         "turn_worker_generation": "4",
         "turn_lease_generation": "9",
-        "turn_deadline_unix_ms": 4_000_000_000_000,
     }
     assert decode_request(request_line) == {
         "protocol": PROTOCOL,
@@ -584,7 +582,7 @@ def test_exec_resumable_exhaustion_fails_closed_with_latest_cursor():
             )
         )
 
-    assert exc_info.value.code == "executor_transport_unavailable"
+    assert exc_info.value.code == "execution_lost"
     assert exc_info.value.execution_id == "execution-a"
     assert exc_info.value.last_sequence == 0
     assert [frame["request_id"] for frame in exc_info.value.responses] == [
@@ -595,7 +593,7 @@ def test_exec_resumable_exhaustion_fails_closed_with_latest_cursor():
     assert len(provider.calls) == 3
 
 
-def test_exec_resumable_retries_transient_not_found_then_fails_transport_unavailable():
+def test_exec_resumable_retries_transient_not_found_then_fails_execution_lost():
     request_ids = iter(["exec-request", "attach-one", "attach-two"])
 
     def response(request_id, kind, **fields):
@@ -645,7 +643,7 @@ def test_exec_resumable_retries_transient_not_found_then_fails_transport_unavail
             )
         )
 
-    assert exc_info.value.code == "executor_transport_unavailable"
+    assert exc_info.value.code == "execution_lost"
     assert len(provider.calls) == 3
 
 
@@ -1352,7 +1350,6 @@ def test_executor_client_exposes_health_ensure_attach_cancel_and_read():
             }
         ],
         [_response("acknowledged", operation="ensure_workspace")],
-        [_response("acknowledged", operation="release_workspace")],
         [
             _response("acknowledged", operation="attach_execution"),
             _response("terminal", status="completed", exit_code=0, error=None),
@@ -1379,7 +1376,6 @@ def test_executor_client_exposes_health_ensure_attach_cancel_and_read():
 
     assert asyncio.run(client.health(context.sandbox)) == "ok"
     asyncio.run(client.ensure_workspace(context))
-    asyncio.run(client.release_workspace(context))
     attached = asyncio.run(client.attach_execution(context, offset=4))
     cancelled = asyncio.run(client.cancel_execution(context))
     read = asyncio.run(
@@ -1405,7 +1401,6 @@ def test_executor_client_exposes_health_ensure_attach_cancel_and_read():
     assert request_types == [
         "health",
         "ensure_workspace",
-        "release_workspace",
         "attach_execution",
         "cancel_execution",
         "read_file",

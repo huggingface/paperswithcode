@@ -31,19 +31,12 @@ from backend.models.database import (
     ChatSession,
     ChatShare,
     ChatSharedArtifact,
-    ChatTurnReservation,
 )
-from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
-from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 from backend.services.chat_edit_service import (
     INACTIVE_STATUSES,
     PREPARING_STATUS,
     ChatEditService,
     user_message_projection_bytes,
-)
-from backend.services.chat_external_worker_capacity import (
-    UnsupportedChatMode,
-    require_ordinary_research_mode,
 )
 from backend.services.chat_local_turn_lease import ChatLocalTurnLeaseService
 from backend.services.chat_pi_transcript_service import ChatPiTranscriptService
@@ -63,10 +56,6 @@ from backend.services.chat_turn_job_repository import (
     TurnJobError,
     TurnLeaseClaim,
     TurnNotClaimable,
-)
-from backend.services.chat_turn_admission import (
-    ChatTurnAdmissionService,
-    TurnReservationError,
 )
 from backend.services.chat_turn_lifecycle import CLAIMED_STATES
 from backend.services.latex_paper_service import LatexPaperService
@@ -170,8 +159,6 @@ class TurnAdmission:
     external_worker_reservation: ExternalWorkerReservation | None = None
     attach_only: bool = False
     durable_event_sequence: int = 0
-    executor_transport: Literal["legacy", "persistent"] = "legacy"
-    executor_reservation_revision: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -1090,15 +1077,6 @@ class ChatSessionService:
         ).scalar_one_or_none()
         if existing is None:
             return _ReplayOutcome(kind="continue")
-        executor_reservation = (
-            self.db.scalar(
-                select(ChatTurnReservation).where(
-                    ChatTurnReservation.turn_id == existing.turn_id
-                )
-            )
-            if self.settings.chat_executor_remote_transport_enabled
-            else None
-        )
 
         existing_web_search_enabled = getattr(existing, "web_search_enabled", False)
         if existing_web_search_enabled != web_search_enabled:
@@ -1154,16 +1132,6 @@ class ChatSessionService:
                         and detect_poster_intent(getattr(existing, "content", ""))
                     ),
                     attach_only=True,
-                    executor_transport=(
-                        executor_reservation.transport
-                        if executor_reservation is not None
-                        else "legacy"
-                    ),
-                    executor_reservation_revision=(
-                        executor_reservation.revision
-                        if executor_reservation is not None
-                        else None
-                    ),
                 ),
             )
         assistant = self.db.execute(
@@ -1214,16 +1182,6 @@ class ChatSessionService:
                         and detect_poster_intent(existing.content)
                     ),
                     attach_only=self.settings.chat_durable_turn_dispatch_enabled,
-                    executor_transport=(
-                        executor_reservation.transport
-                        if executor_reservation is not None
-                        else "legacy"
-                    ),
-                    executor_reservation_revision=(
-                        executor_reservation.revision
-                        if executor_reservation is not None
-                        else None
-                    ),
                 ),
             )
         if (
@@ -1669,8 +1627,6 @@ class ChatSessionService:
         web_search_enabled: bool,
         reasoning_effort: str,
         poster_mode: bool,
-        executor_transport: Literal["legacy", "persistent"] = "legacy",
-        executor_reservation_revision: int | None = None,
     ) -> TurnAdmission:
         prior = plan.replacement.prior
         paper_artifacts_enabled = (
@@ -1733,8 +1689,6 @@ class ChatSessionService:
             poster_mode=poster_mode,
             paper_artifacts_enabled=paper_artifacts_enabled,
             paper_descriptor=paper_descriptor,
-            executor_transport=executor_transport,
-            executor_reservation_revision=executor_reservation_revision,
             fetchable_urls=fetchable_urls,
             external_worker_reservation=external_worker_reservation,
         )
@@ -1931,34 +1885,9 @@ class ChatSessionService:
             )
             and target_harness == "pi"
         ):
-            poster_mode = (
-                self.settings.chat_artifacts_enabled
-                and self.settings.chat_posterly_enabled
-                and detect_poster_intent(text)
-            )
-            paper_artifacts_enabled = (
-                self.settings.chat_artifacts_enabled
-                and self.settings.chat_latex_paper_enabled
-                and self.settings.chat_latex_compiler_jobs_enabled
-                and session_primary_paper_id is None
-            )
-            try:
-                require_ordinary_research_mode(
-                    poster_mode=poster_mode,
-                    paper_artifacts_enabled=paper_artifacts_enabled,
-                )
-            except UnsupportedChatMode as error:
-                raise ChatServiceError(
-                    error.code,
-                    422,
-                    "Persistent executor v1 supports ordinary research only",
-                ) from error
             try:
                 durable_preflight = durable_coordinator.reserve_external_capacity(
-                    durable_preflight,
-                    now=now,
-                    poster_mode=poster_mode,
-                    paper_artifacts_enabled=paper_artifacts_enabled,
+                    durable_preflight, now=now
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
                 raise self._durable_admission_error(error) from error
@@ -2058,42 +1987,6 @@ class ChatSessionService:
             viewer_context=viewer_context,
             paper_selection=paper_selection,
         )
-        executor_transport: Literal["legacy", "persistent"] = "legacy"
-        executor_reservation_revision: int | None = None
-        poster_mode = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_posterly_enabled
-            and detect_poster_intent(text)
-        )
-        paper_artifacts_enabled = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_latex_paper_enabled
-            and self.settings.chat_latex_compiler_jobs_enabled
-            and getattr(session, "primary_paper_id", None) is None
-        )
-        if (
-            self.settings.chat_executor_remote_transport_enabled
-            and target_harness == "pi"
-            and not poster_mode
-            and not paper_artifacts_enabled
-        ):
-            try:
-                reservation = ChatExecutorTurnAdmission(self.settings).reserve(
-                    self.db,
-                    turn_id=plan.replacement.turn_id,
-                    request_id=client_message_id,
-                    owner_id=owner.hf_user_id,
-                    model_route=plan.model_route,
-                    now=now,
-                )
-            except (TurnReservationError, RuntimeError, SQLAlchemyError) as error:
-                raise ChatServiceError(
-                    "chat_capacity",
-                    429,
-                    "Research capacity is currently occupied",
-                ) from error
-            executor_transport = reservation.transport
-            executor_reservation_revision = reservation.revision
         message = self._apply_turn_creation(
             session,
             owner,
@@ -2153,9 +2046,11 @@ class ChatSessionService:
             ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
-            poster_mode=poster_mode,
-            executor_transport=executor_transport,
-            executor_reservation_revision=executor_reservation_revision,
+            poster_mode=(
+                self.settings.chat_artifacts_enabled
+                and self.settings.chat_posterly_enabled
+                and detect_poster_intent(text)
+            ),
         )
 
     def bind_sdk_session(
@@ -2225,9 +2120,6 @@ class ChatSessionService:
             state="interrupted" if code == "interrupted" else "failed",
             failure_code=code,
         )
-        self._settle_executor_reservation(
-            admission, outcome="cancelled" if code == "interrupted" else "failed"
-        )
         self.edits.abort(session, admission, code)
 
     def complete_turn(
@@ -2267,7 +2159,6 @@ class ChatSessionService:
                 "citations_too_large", 422, "The citation projection is too large"
             )
         self._write_durable_terminal(admission, state="completed")
-        self._settle_executor_reservation(admission, outcome="completed")
         followups = [
             _normalized(value, 500) for value in followups[:5] if value.strip()
         ]
@@ -2323,9 +2214,6 @@ class ChatSessionService:
             state="interrupted" if interrupted else "failed",
             failure_code=code,
         )
-        self._settle_executor_reservation(
-            admission, outcome="cancelled" if interrupted else "failed"
-        )
         message = self.db.get(ChatMessageRecord, admission.user_message_id)
         if message:
             if self.edits.fail_preparation(session, message, code):
@@ -2371,30 +2259,6 @@ class ChatSessionService:
             state=state,
             now=_now(),
             failure_code=sanitized_code,
-        )
-
-    def _settle_executor_reservation(
-        self,
-        admission: TurnAdmission,
-        *,
-        outcome: Literal["completed", "failed", "cancelled"],
-    ) -> None:
-        revision = getattr(admission, "executor_reservation_revision", None)
-        if revision is None:
-            return
-        service = ChatTurnAdmissionService(
-            environment=self.settings.environment,
-            spend_limit_microusd=self.settings.chat_sandbox_application_cap_microusd,
-        )
-        service.settle_terminal(
-            self.db,
-            turn_id=admission.turn_id,
-            revision=revision,
-            outcome=outcome,
-            cost_per_second_microusd=ChatSandboxSpendService(
-                self.db, self.settings
-            ).cost_per_second(),
-            now=_now(),
         )
 
     def mark_transcript_degraded(

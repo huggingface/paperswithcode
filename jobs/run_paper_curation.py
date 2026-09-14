@@ -196,11 +196,18 @@ def _prompt(context: dict) -> str:
             "A source 86.89% stays 86.89 on 0-100; it becomes 0.8689 only on 0-1. A source fraction 0.8689 becomes 86.89 on 0-100. "
             "Use source_scale 0-100 for percentages, 0-1 for fractions, and native for other units. Never infer units from a number's magnitude. "
             "If scale metadata conflicts with source or existing leaderboard evidence, skip and report the conflict. "
-            "Keep only the best introduced-model lane for each configured leaderboard."
+            "Match the exact split, version, task/language coverage, aggregation, tool setting, and metric definition before comparing scores. "
+            "Never substitute a task subset for a full suite, an overall score for a split, or instruction-level accuracy for prompt-level accuracy just because it is higher. "
+            "Skip unverified protocol matches and scores known to include invalid trials; report the evidence. "
+            "Keep only the best introduced-model lane among results that match that exact leaderboard protocol."
         )
     else:
         rules.append(
-            "Use /tmp/url_candidates.json first. Review existing keyword/reference evidence, preserve manual links, and give a reason for each automated removal."
+            "Use /tmp/url_candidates.json first and read the validated paper_markdown or paper_pdf source, not an image caption or cached diagram notice. "
+            "A paper_pdf source requires reading the actual paper beyond the preflight's first-two-page URL check, including experiments when relevant. "
+            "Search the existing task taxonomy for the paper's contribution even when its current task list is empty. "
+            "Accept project links only when they belong to this exact paper, not sibling products, shared navigation, a lab home page, or a website template. "
+            "Review existing keyword/reference evidence, preserve manual links, and give a reason for each automated removal."
         )
         if scheduled:
             rules.append(
