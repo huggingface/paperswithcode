@@ -51,6 +51,7 @@ async function* reconnectChatStream(
     getSessionId: () => string | null;
     getAfterSequence: () => number;
     onSequence: (sequence: number) => void;
+    onDisconnect: () => void;
   },
 ): AsyncGenerator<ChatEvent> {
   let source = initialSource;
@@ -65,6 +66,7 @@ async function* reconnectChatStream(
       if (sawTerminalEvent || options.signal.aborted) return;
       throw new ChatTransportError();
     } catch (error) {
+      options.onDisconnect();
       const sessionId = options.getSessionId();
       if (
         options.signal.aborted
@@ -465,6 +467,9 @@ export function useChat(options: UseChatOptions) {
         const source = reconnectChatStream(initialSource, {
           signal: controller.signal,
           getSessionId: () => activeSessionIdRef.current,
+          onDisconnect: () => {
+            if (projectsActiveStream()) applyEvent({ type: "compaction_status", state: "finished" });
+          },
           getAfterSequence: () => latestSequence,
           onSequence: trackSequence,
         });

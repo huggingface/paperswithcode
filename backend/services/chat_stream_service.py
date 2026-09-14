@@ -2483,6 +2483,8 @@ class ChatStreamOrchestrator:
         return kind, payload
 
     async def _handle_projection_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
+        if self._legacy_payload(event)[0] == "_compaction_telemetry":
+            return _HandledTurnEvent()
         projected = self._project_event(event)
         if projected is None:
             return _HandledTurnEvent()

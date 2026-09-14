@@ -568,6 +568,25 @@ class ChatTurnTrace:
         if kind in {"reasoning_delta", "tool_call", "tool_call_start", "answer_delta"}:
             self._record_first_worker_delta()
             return
+        if kind == "_compaction_telemetry":
+            observation = self.root.start_observation(
+                name="context-compaction",
+                as_type="span",
+                metadata={
+                    key: event[key]
+                    for key in (
+                        "trigger",
+                        "duration_ms",
+                        "chunk_count",
+                        "tokens_before",
+                        "summary_tokens",
+                        "outcome",
+                    )
+                    if key in event
+                },
+            )
+            observation.end()
+            return
         if kind == "_execution_telemetry":
             self.generation.update(
                 metadata={

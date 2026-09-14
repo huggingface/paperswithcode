@@ -133,6 +133,12 @@ export function ChatConversation({
               msg={message}
               papers={papers}
               onToggleBlock={toggleBlock}
+              onRetryCompaction={!busy && message.id === messages.at(-1)?.id && userMessages.at(-1)
+                ? () => {
+                    const user = userMessages.at(-1)!;
+                    onEditAndResend(user.id, { text: user.text ?? "", paperMentions: user.paperMentions ?? [], ...(user.paperSelection ? { paperSelection: user.paperSelection } : {}) });
+                  }
+                : undefined}
               onArchiveOldChats={onArchiveOld}
               onArchiveOldestChats={onArchiveOldest}
               archivePending={archivePending}

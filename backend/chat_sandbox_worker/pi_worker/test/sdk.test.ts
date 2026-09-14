@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import http from "node:http";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import test from "node:test";
 import {
   createAgentSession,
@@ -7,6 +10,9 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { CompactionController } from "../src/compaction.js";
+import { PiWorker, type RunTurn } from "../src/agent.js";
+import type { PwCEvent } from "../src/events.js";
 import { createProvider } from "../src/provider.js";
 
 function openAITextResponse(text: string, sequence: number): Response {
@@ -145,8 +151,8 @@ test("leaves fitting OpenAI compaction payloads unchanged", async () => {
   }
 });
 
-test("compacts an oversized direct OpenAI session and retries successfully", async () => {
-  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+for (const protocol of ["openai-responses", "anthropic-messages"] as const) {
+test(`worker compacts oversized ${protocol} history and completes successfully`, async () => {
   const requestBodies: string[] = [];
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -155,28 +161,33 @@ test("compacts an oversized direct OpenAI session and retries successfully", asy
       const body = Buffer.concat(chunks).toString("utf8");
       requestBodies.push(body);
       const isSummary = body.includes("context summarization assistant");
-      const providerResponse = openAITextResponse(
-        isSummary ? "compact summary" : "recovered",
-        requestBodies.length,
-      );
+      const text = isSummary ? [...new Set(body.match(/EVIDENCE-[0-9]+/g) ?? [])].join(" ") || "compact summary" : "recovered";
+      const providerResponse = protocol === "openai-responses"
+        ? openAITextResponse(text, requestBodies.length) : anthropicTextResponse(text);
       response.writeHead(providerResponse.status, Object.fromEntries(providerResponse.headers));
       response.end(await providerResponse.text());
     });
   });
-  await new Promise<void>((resolve, reject) => server.listen(8765, "127.0.0.1", resolve).once("error", reject));
+  await new Promise<void>((resolve, reject) => server.listen(0, "127.0.0.1", resolve).once("error", reject));
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const direct = await createProvider("test-route", protocol, testGateway(address.port));
+  const events: PwCEvent[] = [];
+  const worker = new PiWorker((_id, event) => events.push(event));
+  const compaction = Reflect.get(worker, "compaction") as CompactionController;
   const sessionManager = SessionManager.inMemory("/workspace");
   for (let index = 0; index < 5; index += 1) {
     sessionManager.appendMessage({
       role: "user",
-      content: `history-${index}:${"x".repeat(90_000)}`,
+      content: `EVIDENCE-${index}:${"x".repeat(90_000)}`,
       timestamp: Date.now() + index * 2,
     });
     sessionManager.appendMessage({
       role: "assistant",
       content: [{ type: "text", text: "ack" }],
-      api: "openai-responses",
+      api: protocol,
       provider: "pwc-gateway",
-      model: "gpt-5.6-luna",
+      model: "test-route",
       usage: {
         input: 1,
         output: 1,
@@ -190,7 +201,7 @@ test("compacts an oversized direct OpenAI session and retries successfully", asy
     });
   }
   const settings = SettingsManager.inMemory({
-    compaction: { enabled: true, reserveTokens: 4_000, keepRecentTokens: 2_000 },
+    compaction: { enabled: true },
     retry: { enabled: false },
   });
   const loader = new DefaultResourceLoader({
@@ -203,6 +214,7 @@ test("compacts an oversized direct OpenAI session and retries successfully", asy
     noThemes: true,
     noContextFiles: true,
     systemPrompt: "PwC test prompt",
+    extensionFactories: [{ name: "pwc-compaction", factory: compaction.extension(direct) }],
   });
   await loader.reload();
   const { session } = await createAgentSession({
@@ -214,21 +226,56 @@ test("compacts an oversized direct OpenAI session and retries successfully", asy
     settingsManager: settings,
     sessionManager,
   });
+  await session.bindExtensions({ mode: "print" });
+  Reflect.set(worker, "initialize", async () => {});
+  Reflect.set(worker, "open", async () => {});
+  Reflect.set(worker, "session", session);
+  Reflect.set(worker, "manager", sessionManager);
+  Reflect.set(worker, "mirror", { append() {}, async flush() {} });
+  Reflect.set(worker, "boundAgentSession", "test-session");
+  const run: RunTurn = { request_id: "test-request", chat_session_id: "test-chat", prompt: "continue", model: "test-route", provider_protocol: protocol,
+    resume: null, web_search_enabled: false, reader_mode: false, poster_mode: false,
+    paper_artifacts_enabled: false, reasoning_effort: "low", hf_username: "test" };
   try {
-    await session.prompt("continue", { expandPromptTemplates: false });
+    await worker.run(run);
 
     const assistant = session.messages.at(-1);
-    assert.equal(requestBodies.length, 2);
+    assert.ok(requestBodies.length > 2);
+    assert.deepEqual(events.filter((e) => e.type === "error"), []);
+    assert.equal(events.filter((e) => e.type === "done").length, 1);
+    assert.deepEqual(events.filter((e) => e.type === "compaction_status").map((e) => e.state), ["started", "finished"]);
+    const saved = sessionManager.getEntries().findLast((e) => e.type === "compaction");
+    assert.ok(saved?.type === "compaction");
+    for (let i = 0; i < 4; i++) assert.match(saved.summary, new RegExp(`EVIDENCE-${i}`));
+    assert.ok(sessionManager.buildSessionContext().messages.some((m) => m.role === "user" && JSON.stringify(m.content).includes("continue")));
     assert.ok(requestBodies.every((body) => Buffer.byteLength(body, "utf8") <= 240 * 1024));
-    assert.match(requestBodies[0] ?? "", /older compaction input omitted/u);
+    assert.ok(requestBodies.every((body) => !body.includes("older compaction input omitted")));
     assert.equal(assistant?.role, "assistant");
     assert.equal(assistant?.content[0]?.type, "text");
     assert.equal(assistant?.content[0]?.text, "recovered");
+    assert.ok(events.some((e) => e.type === "usage" && e.phase === "compaction"));
+    assert.ok(events.some((e) => e.type === "_execution_telemetry" && e.compaction_recovery_outcome === "success"));
+    const directory = await mkdtemp(path.join(tmpdir(), "pwc-compaction-resume-"));
+    try {
+      const file = path.join(directory, "session.jsonl");
+      await writeFile(file, [sessionManager.getHeader(), ...sessionManager.getEntries()].map((e) => JSON.stringify(e)).join("\n") + "\n");
+      const restored = SessionManager.open(file);
+      assert.deepEqual(restored.buildSessionContext(), JSON.parse(JSON.stringify(sessionManager.buildSessionContext())));
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+    events.length = 0;
+    await worker.run({ ...run, request_id: "followup", prompt: "Continue using those sources" });
+    assert.equal(events.filter((e) => e.type === "done").length, 1);
+    assert.equal(events.filter((e) => e.type === "error").length, 0);
+    assert.equal(events.filter((e) => e.type === "compaction_status").length, 0);
   } finally {
     session.dispose();
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+}
 
 test("leaves fitting Anthropic-compatible compaction payloads unchanged", async () => {
   let requestBody = "";
@@ -265,7 +312,7 @@ test("leaves fitting Anthropic-compatible compaction payloads unchanged", async 
   }
 });
 
-test("compacts oversized Anthropic-compatible summaries before the gateway", async () => {
+test("rejects oversized summaries without silently dropping history", async () => {
   let requestBody = "";
   const server = http.createServer((request, response) => {
     const chunks: Buffer[] = [];
@@ -287,9 +334,9 @@ test("compacts oversized Anthropic-compatible summaries before the gateway", asy
       messages: [{ role: "user", content: "x".repeat(300 * 1024), timestamp: Date.now() }],
     });
 
-    assert.equal(result.stopReason, "stop");
-    assert.ok(Buffer.byteLength(requestBody, "utf8") < 240 * 1024);
-    assert.match(requestBody, /older compaction input omitted/u);
+    assert.equal(result.stopReason, "error");
+    assert.equal(requestBody, "");
+    assert.match(result.errorMessage ?? "", /request_too_large/u);
   } finally {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }

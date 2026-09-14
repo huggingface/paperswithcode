@@ -1,3 +1,4 @@
+import { CompactionStatus } from "./CompactionStatus";
 /**
  * Message rendering for the assistant chat: user bubbles plus the assistant's
  * ordered stream blocks — live/collapsed reasoning, `search_papers` tool-call
@@ -490,13 +491,14 @@ export const AssistantMessage: React.FC<{
   msg: ChatMessageType;
   papers: Record<string, ChatPaperHit>;
   onToggleBlock: (messageId: string, blockIndex: number) => void;
+  onRetryCompaction?: () => void;
   onArchiveOldChats?: () => void;
   onArchiveOldestChats?: () => void;
   archivePending?: "old" | "oldest" | null;
   hfBilling?: HfBillingGuidance | null;
   openRouterFallbackEnabled?: boolean;
   feedbackEnabled?: boolean;
-}> = ({ msg, papers, onToggleBlock, onArchiveOldChats, onArchiveOldestChats, archivePending = null, hfBilling = null, openRouterFallbackEnabled = false, feedbackEnabled = false }) => {
+}> = ({ msg, papers, onToggleBlock, onRetryCompaction, onArchiveOldChats, onArchiveOldestChats, archivePending = null, hfBilling = null, openRouterFallbackEnabled = false, feedbackEnabled = false }) => {
   const [feedback, setFeedback] = React.useState<boolean | null>(null);
   const [feedbackPending, setFeedbackPending] = React.useState(false);
   const [feedbackError, setFeedbackError] = React.useState(false);
@@ -586,7 +588,8 @@ export const AssistantMessage: React.FC<{
           />
         );
       })}
-      {isWaitingForAssistant(msg) && (
+      {msg.streaming && msg.compacting && <CompactionStatus />}
+      {!msg.compacting && isWaitingForAssistant(msg) && (
         <div className="chat-waiting" role="status" aria-live="polite">
           <span className="chat-thinking">
             {(msg.blocks?.length ?? 0) === 0 ? (msg.status ?? "Thinking…") : "Thinking…"}
@@ -594,6 +597,7 @@ export const AssistantMessage: React.FC<{
         </div>
       )}
       {msg.error && <div className="chat-error">
+        {msg.errorCode === "context_too_large" && onRetryCompaction && <button type="button" onClick={onRetryCompaction}>Retry</button>}
         <span>{msg.errorCode === "chat_disabled_interrupted"
           ? "Chat was disabled while this response was running. The partial response is saved. Please try again later."
           : msg.errorCode === "chat_session_quota_exceeded"

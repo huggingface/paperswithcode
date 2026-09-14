@@ -14,9 +14,6 @@ import { type TurnClaimFrame } from "./turn_protocol.js";
 export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
 const GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
-const COMPACTION_SYSTEM_PROMPT_PREFIX = "You are a context summarization assistant.";
-const COMPACTION_OMISSION_MARKER = "\n\n[...older compaction input omitted to fit the gateway...]\n\n";
-
 export type ProviderProtocol = "anthropic-messages" | "openai-responses";
 
 export interface GatewayContext {
@@ -27,101 +24,11 @@ export interface GatewayContext {
   turnClaim: TurnClaimFrame;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? value as Record<string, unknown>
-    : undefined;
-}
-
-function compactionText(
-  payload: unknown,
-): { payload: Record<string, unknown>; text: string; replace: (text: string) => void } | undefined {
-  const record = asRecord(payload);
-  const input = record?.input;
-  if (!record) return undefined;
-  if (Array.isArray(input)) {
-    const developer = input.map(asRecord).find((entry) => entry?.role === "developer");
-    if (
-      typeof developer?.content !== "string"
-      || !developer.content.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
-    ) return undefined;
-    const user = input.map(asRecord).find((entry) => entry?.role === "user");
-    if (!Array.isArray(user?.content)) return undefined;
-    const textPart = user.content
-      .map(asRecord)
-      .find((entry) => entry?.type === "input_text" && typeof entry.text === "string");
-    return textPart && typeof textPart.text === "string"
-      ? {
-          payload: record,
-          text: textPart.text,
-          replace: (text) => { textPart.text = text; },
-        }
-      : undefined;
-  }
-
-  const system = record.system;
-  const messages = record.messages;
-  if (!Array.isArray(system) || !Array.isArray(messages)) return undefined;
-  const systemText = system
-    .map(asRecord)
-    .find((entry) => entry?.type === "text" && typeof entry.text === "string");
-  if (
-    typeof systemText?.text !== "string"
-    || !systemText.text.startsWith(COMPACTION_SYSTEM_PROMPT_PREFIX)
-  ) return undefined;
-  const user = messages.map(asRecord).find((entry) => entry?.role === "user");
-  if (!Array.isArray(user?.content)) return undefined;
-  const textPart = user.content
-    .map(asRecord)
-    .find((entry) => entry?.type === "text" && typeof entry.text === "string");
-  return textPart && typeof textPart.text === "string"
-    ? {
-        payload: record,
-        text: textPart.text,
-        replace: (text) => { textPart.text = text; },
-      }
-    : undefined;
-}
-
-function fitCompactionPayload(payload: unknown): unknown {
-  const compaction = compactionText(payload);
-  if (!compaction) return payload;
-  let best: unknown = payload;
-  let lower = 0;
-  let upper = compaction.text.length;
-  while (lower <= upper) {
-    const retainedCharacters = Math.floor((lower + upper) / 2);
-    const headCharacters = Math.ceil(retainedCharacters / 2);
-    const tailCharacters = Math.floor(retainedCharacters / 2);
-    const candidate = structuredClone(compaction.payload);
-    const candidateCompaction = compactionText(candidate);
-    if (!candidateCompaction) return payload;
-    candidateCompaction.replace(compaction.text.slice(0, headCharacters)
-      + COMPACTION_OMISSION_MARKER
-      + compaction.text.slice(compaction.text.length - tailCharacters));
-    if (Buffer.byteLength(JSON.stringify(candidate), "utf8") < GATEWAY_PAYLOAD_LIMIT_BYTES) {
-      best = candidate;
-      lower = retainedCharacters + 1;
-    } else {
-      upper = retainedCharacters - 1;
-    }
-  }
-  return best;
-}
-
-function boundedGatewayPayload(payload: unknown): unknown {
-  let requestPayload = payload;
-  let requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
-  if (requestBytes >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
-    requestPayload = fitCompactionPayload(requestPayload);
-    requestBytes = Buffer.byteLength(JSON.stringify(requestPayload), "utf8");
-  }
-  if (requestBytes >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
-    // Pi recognizes this provider-style signal and performs its bounded
-    // compact-and-retry path before the gateway limit is reached.
+export function boundedGatewayPayload(payload: unknown): unknown {
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
     throw new Error("request_too_large: provider context requires compaction");
   }
-  return requestPayload;
+  return payload;
 }
 
 function boundedOpenAIResponsesStream(
