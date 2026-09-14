@@ -42,9 +42,37 @@ const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
 // Four executing commands plus one cancellation/settlement RPC for each.
 // The daemon independently enforces the four-command execution limit.
 const MAX_DAEMON_STREAMS: usize = 8;
-// Fresh Modal guests can lag the VPS clock by several seconds. The VPS still
-// enforces the two-second, single-use attachment window before signing.
-const AUTHORIZATION_CLOCK_SKEW_SECONDS: u64 = 10;
+// Use authenticated issuer time, never the guest wall clock. One second covers
+// timestamp rounding and transport delay; the issuer's single-use window stays 2s.
+const AUTHORIZATION_CLOCK_SKEW_SECONDS: u64 = 1;
+
+struct IssuerClock {
+    unix_ms: u64,
+    observed: Instant,
+}
+
+impl IssuerClock {
+    fn from_acknowledgement(value: &Value) -> Result<Self, Box<dyn std::error::Error>> {
+        let unix_ms = value
+            .get("issuer_time_ms")
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .ok_or("authenticated issuer time missing")?;
+        Ok(Self {
+            unix_ms,
+            observed: Instant::now(),
+        })
+    }
+
+    fn now_seconds(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        let elapsed = u64::try_from(self.observed.elapsed().as_millis())?;
+        Ok(self
+            .unix_ms
+            .checked_add(elapsed)
+            .ok_or("issuer clock overflow")?
+            / 1000)
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -410,7 +438,7 @@ async fn connect(
         _ => return Err("rendezvous handshake rejected".into()),
     };
     let mut transport = pending.finish(&response)?;
-    let (durable_registration_id, environment_generation, shard_generation) =
+    let (durable_registration_id, environment_generation, shard_generation, mut issuer_clock) =
         match timeout(RESPONSE_DEADLINE, socket.next()).await {
             Ok(Some(Ok(Message::Binary(ciphertext)))) => {
                 let acknowledgement: Value =
@@ -430,7 +458,13 @@ async fn connect(
                     .and_then(Value::as_u64)
                     .filter(|value| *value > 0)
                     .ok_or("rendezvous registration rejected")?;
-                (registration_id, environment_generation, shard_generation)
+                let issuer_clock = IssuerClock::from_acknowledgement(&acknowledgement)?;
+                (
+                    registration_id,
+                    environment_generation,
+                    shard_generation,
+                    issuer_clock,
+                )
             }
             _ => return Err("rendezvous registration rejected".into()),
         };
@@ -467,6 +501,7 @@ async fn connect(
                         let token = message.get("reconnect_token").and_then(Value::as_str)
                             .ok_or("rendezvous heartbeat rejected")?;
                         reconnect_admission = Some(URL_SAFE.decode(token)?);
+                        issuer_clock = IssuerClock::from_acknowledgement(&message)?;
                     }
                     Some("peer") => {
                         let connection_id = parse_connection_id(&message)?;
@@ -478,6 +513,7 @@ async fn connect(
                                     &frame,
                                     identity,
                                     authorization_keys,
+                                    issuer_clock.now_seconds()?,
                                     &registration.environment_id,
                                     &durable_registration_id,
                                     environment_generation,
@@ -582,6 +618,7 @@ impl PeerEndpoint {
         frame: &[u8],
         identity: &NoiseIdentity,
         keys: &KeyRing,
+        authorization_now: u64,
         environment_id: &str,
         registration_id: &str,
         environment_generation: u64,
@@ -614,7 +651,7 @@ impl PeerEndpoint {
         let authorization: SignedAuthorization = serde_json::from_slice(pending.authorization())?;
         keys.verify_with_clock_skew(
             &authorization,
-            unix_seconds()?,
+            authorization_now,
             AUTHORIZATION_CLOCK_SKEW_SECONDS,
         )?;
         let claims = &authorization.claims;
@@ -910,6 +947,7 @@ fn hex_digit(value: u8) -> Result<u8, LocalSocketError> {
     }
 }
 
+#[cfg(test)]
 fn unix_seconds() -> Result<u64, Box<dyn std::error::Error>> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -1009,22 +1047,40 @@ mod tests {
     }
 
     #[test]
-    fn fresh_attachment_accepts_five_second_guest_clock_skew() {
-        attach_fixture_with_issuer_clock(3, 5).unwrap();
-        attach_fixture_with_issuer_clock(3, -5).unwrap();
-        assert!(attach_fixture_with_issuer_clock(3, 20).is_err());
-        assert!(attach_fixture_with_issuer_clock(3, -20).is_err());
+    fn attachment_uses_issuer_time_even_when_guest_wall_clock_differs_by_an_hour() {
+        attach_fixture_with_issuer_clock(3, 3600, 0).unwrap();
+        attach_fixture_with_issuer_clock(3, -3600, 0).unwrap();
+        assert!(attach_fixture_with_issuer_clock(3, 3600, 4).is_err());
+        assert!(attach_fixture_with_issuer_clock(3, -3600, 4).is_err());
+    }
+
+    #[test]
+    fn issuer_clock_requires_authenticated_timestamp_and_advances_monotonically() {
+        for invalid in [
+            json!({}),
+            json!({"issuer_time_ms": 0}),
+            json!({"issuer_time_ms": -1}),
+        ] {
+            assert!(IssuerClock::from_acknowledgement(&invalid).is_err());
+        }
+        let mut clock =
+            IssuerClock::from_acknowledgement(&json!({"issuer_time_ms":100000})).unwrap();
+        clock.observed = Instant::now() - Duration::from_secs(5);
+        assert_eq!(clock.now_seconds().unwrap(), 105);
+        clock.unix_ms = u64::MAX;
+        assert!(clock.now_seconds().is_err());
     }
 
     fn attach_fixture(
         environment_generation: u64,
     ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
-        attach_fixture_with_issuer_clock(environment_generation, 0)
+        attach_fixture_with_issuer_clock(environment_generation, 0, 0)
     }
 
     fn attach_fixture_with_issuer_clock(
         environment_generation: u64,
         issuer_offset: i64,
+        elapsed_seconds: u64,
     ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
         let now = unix_seconds()?.checked_add_signed(issuer_offset).unwrap();
         let environment = NoiseIdentity::from_seed([4; 32])?;
@@ -1076,6 +1132,7 @@ mod tests {
             &attach,
             &environment,
             &ring,
+            now + elapsed_seconds,
             "environment-v1",
             "registration-v1",
             3,

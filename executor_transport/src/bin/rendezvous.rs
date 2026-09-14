@@ -737,6 +737,7 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
             .send(Message::Binary(
                 transport
                     .encrypt(&serde_json::to_vec(&json!({
+                        "issuer_time_ms": unix_ms()?,
                         "registration_id": registration_id,
                         "environment_generation": claims.environment_generation,
                         "shard_generation": claims.shard_generation,
@@ -793,6 +794,7 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
                             state.database.lock().await.persist_nonce(&verified).await?;
                             let acknowledgement = serde_json::to_vec(&json!({
                                 "kind": "heartbeat_ack",
+                                "issuer_time_ms": unix_ms()?,
                                 "reconnect_token": URL_SAFE.encode(reconnect_frame),
                                 "expires_at_ms": heartbeat_now + 45_000,
                             }))?;
