@@ -237,7 +237,7 @@ def test_disabled_pool_budget_status_preserves_legacy_projection_and_cost_update
         "effective_accrued_usd": pytest.approx(accrued),
         "projected_usd": pytest.approx(projected),
         "budget_usd": 1_000.0,
-        "within_budget": True,
+        "within_budget": False,
     }
     assert list(status) == [
         "billing_month",

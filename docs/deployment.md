@@ -823,6 +823,12 @@ writes only
 `/etc/paperswithcode/production-chat-prepared.env`; no service loads that file
 implicitly.
 
+Sandbox reservations, local accrued-cost estimates, pool projections, and active-turn
+estimates include Modal’s 1.75× multiplier for the pinned `eu-west` region.
+Provider-reported spend already includes billing adjustments and must not be
+multiplied again. Historical local estimates are conservative until provider
+reconciliation covers them; this change does not rewrite provider reports.
+
 Production uses the Team service user `pwc-production`, which must be
 Contributor on only `pwc-chat-production` and retain No Access on `main` and
 every other Environment. The provider-side production Environment budget is

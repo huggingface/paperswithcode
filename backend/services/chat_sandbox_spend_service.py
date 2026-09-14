@@ -20,6 +20,10 @@ from backend.models.database import (
     ChatSandboxLease,
     ChatSandboxPool,
 )
+from backend.services.chat_sandbox_pricing import (
+    CPU_MICROUSD_PER_CORE_SECOND,
+    MEMORY_MICROUSD_PER_GIB_SECOND,
+)
 from backend.services.chat_sandbox_capacity_repository import (
     CAPACITY_LOCK_NAME as CAPACITY_LOCK_NAME,  # noqa: PLC0414
 )
@@ -28,8 +32,6 @@ from backend.services.chat_sandbox_capacity_repository import (
     lock_capacity,
 )
 
-CPU_MICROUSD_PER_CORE_SECOND = Decimal("39.42")
-MEMORY_MICROUSD_PER_GIB_SECOND = Decimal("6.72")
 METERING_CLOCK_SKEW_SECONDS = 5
 
 
@@ -498,8 +500,8 @@ class ChatSandboxSpendService:
                                 )
                             )::bigint
                             * CEIL(
-                                cpu_request_millicores / 1000.0 * 39.42
-                                + memory_request_mib / 1024.0 * 6.72
+                                cpu_request_millicores / 1000.0 * :cpu_rate
+                                + memory_request_mib / 1024.0 * :memory_rate
                             )::bigint
                         ) FILTER (
                             WHERE NOT (
@@ -533,6 +535,8 @@ class ChatSandboxSpendService:
                 """
                 ),
                 {
+                    "cpu_rate": CPU_MICROUSD_PER_CORE_SECOND,
+                    "memory_rate": MEMORY_MICROUSD_PER_GIB_SECOND,
                     "coverage_end": coverage_end or cycle_start,
                     "cycle_finish": cycle_finish,
                     "cycle_start": cycle_start,

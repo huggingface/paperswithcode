@@ -122,8 +122,8 @@ def test_lifecycle_meter_uses_requests_not_burst_limits():
         )
         state = service.refresh(start + timedelta(seconds=20))
         interval = db.get(ChatSandboxComputeInterval, interval_id)
-        assert service._interval_rate(interval) == 24
-        assert state.estimated_accrued_microusd == 240
+        assert service._interval_rate(interval) == 41
+        assert state.estimated_accrued_microusd == 410
 
 
 def test_refresh_reconciles_open_interval_for_terminal_lease():
@@ -1168,3 +1168,18 @@ def test_provider_identity_is_visible_to_cleanup_without_autoflush():
         assert len(rows) == 1
         assert rows[0].id == interval_id
         assert rows[0].terminal_at is not None
+
+
+def test_pinned_region_price_is_reserved_before_provider_creation():
+    # (1 CPU * 39.42 + 2 GiB * 6.72) * 1.75 = 92.505, rounded up.
+    sessions = factory()
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings())
+        assert service.cost_per_second() == 93
+        interval_id = service.reserve_interval(
+            origin="direct", worker_generation="region"
+        )
+        interval = db.get(ChatSandboxComputeInterval, interval_id)
+        assert interval.reserved_microusd == service.reservation_amount()
+        assert interval.modal_sandbox_id is None
+        assert service._interval_rate(interval) == 93

@@ -25,8 +25,10 @@ from backend.models.database import (
     ChatSandboxPool,
 )
 
-MODAL_CPU_USD_PER_CORE_SECOND = 0.00003942
-MODAL_MEMORY_USD_PER_GIB_SECOND = 0.00000672
+from backend.services.chat_sandbox_pricing import (
+    MODAL_CPU_USD_PER_CORE_SECOND as MODAL_CPU_USD_PER_CORE_SECOND,
+    MODAL_MEMORY_USD_PER_GIB_SECOND as MODAL_MEMORY_USD_PER_GIB_SECOND,
+)
 
 
 class CapacityLocker(Protocol):
