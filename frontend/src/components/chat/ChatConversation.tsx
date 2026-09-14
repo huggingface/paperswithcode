@@ -34,6 +34,11 @@ export function ChatConversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTopBeforeToggleRef = useRef<number | null>(null);
   const editScrollAnchorRef = useRef<string | null>(null);
+  const followingBottomRef = useRef(true);
+  const previousLatestUserIdRef = useRef<string | undefined>();
+  const userMessages = messages.filter((message) => message.role === "user");
+  const firstUserId = userMessages[0]?.id;
+  const latestUserId = userMessages.at(-1)?.id;
 
   useEffect(() => {
     if (busy) setEditingMessageId(null);
@@ -43,6 +48,10 @@ export function ChatConversation({
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
+    if (latestUserId !== previousLatestUserIdRef.current) {
+      followingBottomRef.current = true;
+      previousLatestUserIdRef.current = latestUserId;
+    }
     if (scrollTopBeforeToggleRef.current !== null) {
       scrollElement.scrollTop = scrollTopBeforeToggleRef.current;
       scrollTopBeforeToggleRef.current = null;
@@ -52,26 +61,32 @@ export function ChatConversation({
       const target = Array.from(
         scrollElement.querySelectorAll<HTMLElement>("[data-message-id]"),
       ).find((element) => element.dataset.messageId === editScrollAnchorRef.current);
+      editScrollAnchorRef.current = null;
       if (target) {
         const containerRect = scrollElement.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
         scrollElement.scrollTop += targetRect.top - containerRect.top - 24;
+        followingBottomRef.current = false;
         return;
       }
     }
-    scrollElement.scrollTop = scrollElement.scrollHeight;
-  }, [messages]);
+    if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
+  }, [messages, latestUserId]);
 
-  const userMessages = messages.filter((message) => message.role === "user");
-  const firstUserId = userMessages[0]?.id;
-  const latestUserId = userMessages.at(-1)?.id;
   const toggleBlock = (messageId: string, blockIndex: number) => {
     scrollTopBeforeToggleRef.current = scrollRef.current?.scrollTop ?? null;
     onToggleBlock(messageId, blockIndex);
   };
 
   return (
-    <div className="chat-conversation" ref={scrollRef}>
+    <div
+      className="chat-conversation"
+      ref={scrollRef}
+      onScroll={(event) => {
+        const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+        followingBottomRef.current = scrollHeight - scrollTop - clientHeight <= 48;
+      }}
+    >
       <div className="chat-conversation-inner">
         {messages.length === 0 && queuedDraft?.text && <UserMessage
           id="queued-launch-preview"
