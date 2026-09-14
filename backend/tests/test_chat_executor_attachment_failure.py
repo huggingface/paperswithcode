@@ -16,6 +16,7 @@ from backend.services.chat_sandbox_provider import SandboxError
 def test_attachment_failure_settles_claim_and_keeps_cancellation(monkeypatch, error):
     runtime = ChatExecutorRuntime(
         SimpleNamespace(
+            environment="staging",
             chat_executor_harness_key_id="harness",
             chat_executor_authorization_key_id="authorization",
         ),
