@@ -1196,7 +1196,7 @@ def test_excalidraw_worker_and_host_kill_switches_must_match(settings_factory):
         ("staging", True, 3, 3, 16, False),
         ("staging", True, 8, 8, 16, False),
         ("staging", True, 4, 1, 16, False),
-        ("staging", True, 4, 4, 32, False),
+        ("staging", True, 4, 4, 15, False),
     ],
 )
 def test_four_spare_profile_is_staging_persistent_only(
