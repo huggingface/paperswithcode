@@ -36,6 +36,7 @@ export function ChatConversation({
   const editScrollAnchorRef = useRef<string | null>(null);
   const followingBottomRef = useRef(true);
   const previousUserCountRef = useRef(0);
+  const previousBusyRef = useRef(false);
   const userMessages = messages.filter((message) => message.role === "user");
   const userCount = userMessages.length;
   const firstUserId = userMessages[0]?.id;
@@ -50,10 +51,11 @@ export function ChatConversation({
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
     // Canonical reloads replace optimistic IDs without adding a new question.
-    if (userCount > previousUserCountRef.current) {
+    if (userCount > previousUserCountRef.current || (busy && !previousBusyRef.current)) {
       followingBottomRef.current = true;
     }
     previousUserCountRef.current = userCount;
+    previousBusyRef.current = busy;
     if (scrollTopBeforeToggleRef.current !== null) {
       scrollElement.scrollTop = scrollTopBeforeToggleRef.current;
       scrollTopBeforeToggleRef.current = null;
@@ -73,7 +75,7 @@ export function ChatConversation({
       }
     }
     if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
-  }, [messages, userCount]);
+  }, [messages, userCount, busy]);
 
   const toggleBlock = (messageId: string, blockIndex: number) => {
     scrollTopBeforeToggleRef.current = scrollRef.current?.scrollTop ?? null;

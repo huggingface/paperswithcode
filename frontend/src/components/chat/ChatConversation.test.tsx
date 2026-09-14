@@ -117,9 +117,9 @@ describe("ChatConversation scrolling", () => {
     chat.update([
       { id: "saved-question", role: "user", text: "Question", revision: 1 },
       { id: "saved-answer", role: "assistant", streaming: false },
-    ], false);
+    ]);
     expect(chat.scroller.scrollTop).toBe(200);
-    chat.update();
+    chat.update(undefined, false);
     expect(chat.scroller.scrollTop).toBe(200);
   });
   it("follows an accepted first-question edit even though its ID stays the same", () => {
@@ -140,6 +140,19 @@ describe("ChatConversation scrolling", () => {
     chat.update(undefined, false);
     chat.scrollTo(200);
     fireEvent.click(chat.getByText("Edit question"));
+    chat.update(undefined, false);
+    expect(chat.scroller.scrollTop).toBe(200);
+  });
+  it("restores following when a composer retry starts with the same user count", () => {
+    const chat = setup();
+    chat.update(undefined, false);
+    chat.scrollTo(200);
+    chat.update([
+      { id: "question", role: "user", text: "Retry question", revision: 2 },
+      { id: "retry-answer", role: "assistant", streaming: true },
+    ]);
+    expect(chat.scroller.scrollTop).toBe(1000);
+    chat.scrollTo(200);
     chat.update();
     expect(chat.scroller.scrollTop).toBe(200);
   });
