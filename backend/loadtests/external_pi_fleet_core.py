@@ -279,6 +279,33 @@ class PersistentTransportPoolCounts(BaseModel):
     terminated: int = Field(ge=0, le=1_000_000)
 
 
+# Frozen end-to-end targets; missing cohorts cannot be treated as passes.
+PERSISTENT_LATENCY_GATES = {
+    "cold_first_pwd": (2000, 5000),
+    "warm_ack": (500, 1000),
+    "warm_noop": (1000, 2000),
+    "pool_hit_readiness": (1000, 2000),
+    "reconnect_ready": (5000, 5000),
+    "browser_resume": (2000, 5000),
+    "cancellation_delivery": (250, 500),
+    "process_containment": (1000, 2000),
+}
+
+
+class PersistentTransportSoakReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    turns: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    duration_seconds: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_failures(self) -> PersistentTransportSoakReport:
+        if self.failed > self.turns:
+            raise ValueError("soak failure denominator is inconsistent")
+        return self
+
+
 class PersistentTransportQualificationReport(BaseModel):
     """Immutable content-free evidence emitted even when a gate fails."""
 
@@ -298,6 +325,7 @@ class PersistentTransportQualificationReport(BaseModel):
         min_length=1, max_length=64
     )
     resources: PersistentTransportResourceReport
+    soak: PersistentTransportSoakReport
     scenario_outcomes: dict[str, Literal["passed", "failed"]] = Field(
         min_length=15, max_length=15
     )
@@ -342,6 +370,18 @@ class PersistentTransportQualificationReport(BaseModel):
         )
         gates_pass = (
             not hard_failures
+            and self.soak.turns >= 320
+            and self.soak.duration_seconds >= 3600
+            and self.soak.failed * 100 <= self.soak.turns
+            and all(
+                name in self.percentiles
+                and self.percentiles[name].denominator >= 1000
+                and self.percentiles[name].accepted
+                == self.percentiles[name].denominator
+                and self.percentiles[name].p95_ms <= targets[0]
+                and self.percentiles[name].p99_ms <= targets[1]
+                for name, targets in PERSISTENT_LATENCY_GATES.items()
+            )
             and self.resources.peak_cpu_percent < 80
             and self.resources.minimum_host_mem_available_mib >= 1536
             and self.resources.operation_unacked_bytes_peak <= 65_536
