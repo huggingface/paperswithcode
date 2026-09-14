@@ -84,6 +84,12 @@ class ChatSandboxPoolAcquisitionCoordinator:
         # Release identifies the creator for audit; immutable worker and resource
         # compatibility determines whether an unassigned blank can be reused.
         with self.session_factory() as db:
+            if (
+                self.settings.chat_executor_remote_transport_enabled
+                and self.repository.lease_loader(db, chat_session_id, lock=False)
+                is not None
+            ):
+                return None
             candidates = self.repository.list_claim_candidates(
                 db,
                 compatibility,

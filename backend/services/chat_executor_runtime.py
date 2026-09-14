@@ -12,7 +12,7 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -67,8 +67,50 @@ class ChatExecutorRuntime:
         self.session_factory = session_factory
         self.registry = registry or ChatExecutorRegistry()
 
-    async def prepare_launch(self, worker_generation: str) -> ExecutorLaunchBundle:
-        return await asyncio.to_thread(self._prepare_launch, worker_generation)
+    async def prepare_launch(
+        self, worker_generation: str, *, blank_pool: bool = False
+    ) -> ExecutorLaunchBundle:
+        return await asyncio.to_thread(
+            self._prepare_launch, worker_generation, blank_pool
+        )
+
+    async def pool_ready(self, worker_generation: str) -> bool:
+        """Probe the exact authenticated route without claiming a user workspace."""
+        result = await asyncio.to_thread(
+            self._registration,
+            worker_generation,
+            executor_environment_generation(worker_generation),
+        )
+        if result is None:
+            return False
+        registration, manifest = result
+        if (
+            registration.cell_id != self.settings.chat_executor_cell_id
+            or manifest.image_digest
+            != hashlib.sha256(
+                self.settings.chat_modal_image_version.encode()
+            ).hexdigest()
+            or registration.expires_at < datetime.now(UTC) + timedelta(seconds=240)
+        ):
+            return False
+        try:
+            # The short-lived liveness nonce is deliberately not consumed: only
+            # a real turn may claim the workspace, with a new liveness assertion.
+            await self._claim_liveness(registration, uuid.uuid4())
+        except (OSError, EOFError, RuntimeError):
+            return False
+        return True
+
+    async def wait_for_pool_ready(self, worker_generation: str) -> None:
+        deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
+        while time.monotonic() < deadline:
+            if await self.pool_ready(worker_generation):
+                return
+            await asyncio.sleep(0.05)
+        raise SandboxError(
+            "sandbox_executor_registration_timeout",
+            "Blank executor registration timed out",
+        )
 
     def route_health_seconds(self, db: Session) -> float | None:
         cell = db.get(ChatExecutorCell, self.settings.chat_executor_cell_id)
@@ -143,7 +185,7 @@ class ChatExecutorRuntime:
         if minimum_remaining_seconds != 240:
             raise ValueError("Executor claim lifetime is invalid")
         registration, manifest = await self._wait_for_registration(workspace)
-        liveness_nonce = await self._claim_liveness(registration, turn_claim)
+        liveness_nonce = await self._claim_liveness(registration, turn_claim.turn_id)
         claim = await asyncio.to_thread(
             self._claim_workspace,
             registration,
@@ -197,7 +239,9 @@ class ChatExecutorRuntime:
                     db, now=datetime.now(UTC), canary_owner=str(turn_id)
                 )
 
-    def _prepare_launch(self, worker_generation: str) -> ExecutorLaunchBundle:
+    def _prepare_launch(
+        self, worker_generation: str, blank_pool: bool = False
+    ) -> ExecutorLaunchBundle:
         environment_generation = executor_environment_generation(worker_generation)
         try:
             private_key = self._private_key()
@@ -241,7 +285,7 @@ class ChatExecutorRuntime:
                     shard_database_id=shard.id,
                     shard_generation=shard.generation,
                     key_epoch=cell.key_epoch,
-                    lifecycle_class="assigned_idle",
+                    lifecycle_class="blank_pool" if blank_pool else "assigned_idle",
                     manifest=AdmissionManifest(
                         manifest_digest=manifest.digest,
                         image_digest=manifest.image_digest,
@@ -355,7 +399,7 @@ class ChatExecutorRuntime:
     async def _claim_liveness(
         self,
         registration: ChatExecutorRegistration,
-        turn_claim: TurnLeaseClaim,
+        turn_id: uuid.UUID,
     ) -> str:
         path = self._rendezvous_socket(registration.shard_generation)
         self._validate_socket(path)
@@ -367,7 +411,7 @@ class ChatExecutorRuntime:
                 "environment_id": registration.environment_id,
                 "environment_generation": registration.environment_generation,
                 "shard_generation": registration.shard_generation,
-                "turn_id": str(turn_claim.turn_id),
+                "turn_id": str(turn_id),
             },
             separators=(",", ":"),
         ).encode()

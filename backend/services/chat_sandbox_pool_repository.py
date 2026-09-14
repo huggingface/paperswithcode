@@ -208,7 +208,8 @@ class ChatSandboxPoolRepository:
         self.pool_id_factory = pool_id_factory or uuid.uuid4
 
     def compatibility(self) -> PoolCompatibility:
-        pi_prewarm = self.settings.chat_pi_prewarm_enabled
+        remote_executor = self.settings.chat_executor_remote_transport_enabled
+        pi_prewarm = self.settings.chat_pi_prewarm_enabled and not remote_executor
         return PoolCompatibility(
             image_version=self.settings.chat_modal_image_version,
             worker_contract_version=self.settings.chat_worker_contract_version,
@@ -239,7 +240,9 @@ class ChatSandboxPoolRepository:
                 self.settings.chat_system_prompt_sha256 if pi_prewarm else "generic"
             ),
             provider_adapter_contract=(
-                self.settings.chat_pi_provider_adapter_contract
+                f"executor-v1:{self.settings.chat_executor_cell_id}"
+                if remote_executor
+                else self.settings.chat_pi_provider_adapter_contract
                 if pi_prewarm
                 else "generic"
             ),

@@ -120,6 +120,14 @@ class ChatSandboxPoolMaintenanceCoordinator:
         worker_generation: str,
     ) -> object | None:
         try:
+            if self.creation.executor_runtime is not None:
+                if not await self.creation.executor_runtime.pool_ready(
+                    worker_generation
+                ):
+                    return None
+                # Resolving a handle does not run a Modal command or open a
+                # legacy worker control channel. Readiness came from rendezvous.
+                return await self.provider.resolve(sandbox_id)
             control = self.transport.blank_control(sandbox_id)
             if control is not None:
                 if control.sandbox_id != sandbox_id:

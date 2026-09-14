@@ -53,7 +53,11 @@ def test_attachment_failure_settles_claim_and_keeps_cancellation(monkeypatch, er
         else SandboxError
     )
     with pytest.raises(expected) as caught:
-        asyncio.run(runtime._attach_channel(object(), object(), 240))
+        asyncio.run(
+            runtime._attach_channel(
+                object(), SimpleNamespace(turn_id=uuid.uuid4()), 240
+            )
+        )
     if expected is SandboxError:
         assert caught.value.code == "sandbox_executor_attachment_failed"
         assert caught.value.__cause__ is error
