@@ -295,7 +295,6 @@ async fn launch(
     if admission.is_empty() || admission.len() > 2_048 {
         return Err("admission frame rejected".into());
     }
-    let daemon_started = Instant::now();
     let mut daemon = Command::new("python")
         .args(["-m", "backend.chat_sandbox_worker.executor_daemon"])
         .env_remove("PWC_CHAT_EXECUTOR_ADMISSION")
@@ -306,11 +305,6 @@ async fn launch(
     let identity = NoiseIdentity::generate()?;
     let mut peer_state = EnvironmentPeerState::new();
     let connection = async {
-        wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)).await?;
-        eprintln!(
-            "executor startup stage=daemon_ready duration_ms={}",
-            daemon_started.elapsed().as_millis()
-        );
         maintain_connection(
             url,
             admission,
@@ -405,6 +399,36 @@ async fn maintain_connection(
     }
 }
 
+type EnvironmentSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn open_ready_websocket(
+    url: &str,
+    daemon_path: &Path,
+) -> Result<EnvironmentSocket, Box<dyn std::error::Error>> {
+    let started = Instant::now();
+    let daemon_ready = async {
+        wait_for_daemon_socket(daemon_path).await?;
+        eprintln!(
+            "executor startup stage=daemon_ready duration_ms={}",
+            started.elapsed().as_millis()
+        );
+        Ok::<(), Box<dyn std::error::Error>>(())
+    };
+    let connection = async {
+        let socket = open_websocket(url, CONNECT_DEADLINE).await?;
+        eprintln!(
+            "executor startup stage=websocket_open duration_ms={}",
+            started.elapsed().as_millis()
+        );
+        Ok::<EnvironmentSocket, Box<dyn std::error::Error>>(socket)
+    };
+    // Establish TCP/TLS while the daemon boots, but send no registration or
+    // admission until both are ready. Reconnects retain the same readiness gate.
+    let ((), socket) = tokio::try_join!(daemon_ready, connection)?;
+    Ok(socket)
+}
+
 async fn open_websocket(
     url: &str,
     deadline: Duration,
@@ -430,11 +454,7 @@ async fn connect(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = validate_url(url)?;
     let started = Instant::now();
-    let mut socket = open_websocket(url.as_str(), CONNECT_DEADLINE).await?;
-    eprintln!(
-        "executor startup stage=websocket_open duration_ms={}",
-        started.elapsed().as_millis()
-    );
+    let mut socket = open_ready_websocket(url.as_str(), Path::new(EXECUTOR_SOCKET)).await?;
     socket
         .send(Message::Binary(admission.to_vec().into()))
         .await?;
@@ -1021,6 +1041,51 @@ mod tests {
     use pwc_persistent_executor_transport::protocol::{AuthorizationClaims, AuthorizationSigner};
 
     #[tokio::test]
+    async fn websocket_connects_during_daemon_boot_but_waits_before_registration() {
+        let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", tcp.local_addr().unwrap());
+        let path = std::env::temp_dir().join(format!("pwc-overlap-{}", Uuid::new_v4()));
+        let (connected, accepted) = tokio::sync::oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = tcp.accept().await.unwrap();
+            let socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            connected.send(()).unwrap();
+            socket
+        });
+        let readiness = open_ready_websocket(&url, &path);
+        tokio::pin!(readiness);
+        // The handshake must complete before the daemon socket exists.
+        timeout(Duration::from_secs(1), async {
+            tokio::select! {
+                _ = &mut readiness => panic!("ready before daemon started"),
+                result = accepted => result.unwrap(),
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            timeout(Duration::from_millis(20), &mut readiness)
+                .await
+                .is_err()
+        );
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let client = timeout(Duration::from_secs(1), &mut readiness)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut peer = server.await.unwrap();
+        // No admission frame was sent while readiness was pending.
+        assert!(
+            timeout(Duration::from_millis(20), peer.next())
+                .await
+                .is_err()
+        );
+        drop(client);
+        drop(listener);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
     async fn registration_readiness_waits_for_the_local_daemon_listener() {
         let path = std::env::temp_dir().join(format!("pwc-daemon-ready-{}", Uuid::new_v4()));
         let readiness = wait_for_daemon_socket(&path);
@@ -1065,7 +1130,7 @@ mod tests {
         );
         drop(fixture);
         drop(listener);
-        std::fs::remove_file(path).unwrap();
+        std::fs::remove_file(&path).unwrap();
     }
 
     #[tokio::test]
