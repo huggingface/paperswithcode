@@ -39,6 +39,9 @@ const HEARTBEAT: Duration = Duration::from_secs(5);
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
 const EXECUTOR_SOCKET: &str = "/run/pwc-chat-executor/executor.sock";
 const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
+// Four executing commands plus one cancellation/settlement RPC for each.
+// The daemon independently enforces the four-command execution limit.
+const MAX_DAEMON_STREAMS: usize = 8;
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -745,7 +748,10 @@ impl PeerEndpoint {
             .ok_or(LocalSocketError::FrameRejected)?
             .to_owned();
         match value.get("kind").and_then(Value::as_str) {
-            Some("open") if !self.streams.contains_key(&stream_id) && self.streams.len() < 4 => {
+            Some("open")
+                if !self.streams.contains_key(&stream_id)
+                    && self.streams.len() < MAX_DAEMON_STREAMS =>
+            {
                 let daemon = UnixStream::connect(&self.daemon_path).await?;
                 let (mut reader, writer) = daemon.into_split();
                 self.streams.insert(stream_id.clone(), writer);
@@ -955,6 +961,35 @@ mod tests {
             .unwrap();
         drop(listener);
         std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn four_executions_leave_room_for_four_control_streams() {
+        let path = std::env::temp_dir().join(format!("pwc-control-slots-{}", Uuid::new_v4()));
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let mut fixture = attach_fixture(3).unwrap();
+        fixture.endpoint.daemon_path = path.clone();
+        for index in 0..8 {
+            let frame = serde_json::to_vec(
+                &json!({"kind":"open", "stream_id":format!("operation-{index}")}),
+            )
+            .unwrap();
+            let response = fixture.endpoint.handle_message(&frame).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&response).unwrap()["kind"],
+                "opened"
+            );
+        }
+        assert!(
+            fixture
+                .endpoint
+                .handle_message(br#"{"kind":"open","stream_id":"overflow"}"#)
+                .await
+                .is_err()
+        );
+        drop(fixture);
+        drop(listener);
+        std::fs::remove_file(path).unwrap();
     }
 
     struct AttachedFixture {
