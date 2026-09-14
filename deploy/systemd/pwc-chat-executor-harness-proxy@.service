@@ -1,0 +1,54 @@
+[Unit]
+Description=Papers With Code chat executor harness proxy (%I)
+After=pwc-chat-executor-rendezvous@%i.service
+Requires=pwc-chat-executor-rendezvous@%i.service
+ConditionPathExists=/etc/paperswithcode/chat-executor/%I/harness.json
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=exec
+User=pwc-chat-executor
+Group=www-data
+SupplementaryGroups=pwc-production pwc-staging
+WorkingDirectory=/srv/paperswithcode
+RuntimeDirectory=paperswithcode/%I
+RuntimeDirectoryMode=0750
+RuntimeDirectoryPreserve=yes
+EnvironmentFile=/etc/paperswithcode/chat-executor/%I/service.env
+LoadCredential=harness-key:/etc/paperswithcode/chat-executor/%I/harness-key
+LoadCredential=authorization-key:/etc/paperswithcode/chat-executor/%I/authorization-key
+ExecStartPre=/srv/paperswithcode/chat-executor/%I/bin/harness_proxy --self-test
+ExecStart=/srv/paperswithcode/chat-executor/%I/bin/harness_proxy --unix-socket /run/paperswithcode/%I/chat-executor-harness.sock --rendezvous-socket /run/paperswithcode/%I/chat-executor-rendezvous.sock --config /etc/paperswithcode/chat-executor/%I/harness.json --harness-key-file ${CREDENTIALS_DIRECTORY}/harness-key --authorization-key-file ${CREDENTIALS_DIRECTORY}/authorization-key
+ExecStartPost=/usr/bin/test -S /run/paperswithcode/%I/chat-executor-harness.sock
+ExecStartPost=/usr/bin/chgrp ${PWC_CHAT_EXECUTOR_BACKEND_GROUP} /run/paperswithcode/%I/chat-executor-harness.sock
+Restart=on-failure
+RestartSec=2
+TimeoutStartSec=20
+TimeoutStopSec=250
+KillSignal=SIGTERM
+UMask=0007
+LimitNOFILE=4096
+TasksMax=256
+MemoryMax=536870912
+CPUQuota=200%
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/srv/paperswithcode/chat-executor/%I /etc/paperswithcode/chat-executor/%I
+RestrictAddressFamilies=AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

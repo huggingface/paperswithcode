@@ -17,6 +17,7 @@ from backend.services.chat_external_worker_capacity import (
     ExternalWorkerCapacityUnavailable,
     ExternalWorkerReservation,
     external_worker_endpoints,
+    require_ordinary_research_mode,
 )
 from backend.services.chat_durable_qualification_evidence import QualificationContext
 from backend.services.chat_turn_job_repository import (
@@ -102,7 +103,13 @@ class ChatTurnAdmissionCoordinator:
         preflight: DurableAdmissionPreflight,
         *,
         now: datetime,
+        poster_mode: bool = False,
+        paper_artifacts_enabled: bool = False,
     ) -> DurableAdmissionPreflight:
+        require_ordinary_research_mode(
+            poster_mode=poster_mode,
+            paper_artifacts_enabled=paper_artifacts_enabled,
+        )
         if preflight.existing_job is not None:
             return preflight
         try:

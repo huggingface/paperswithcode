@@ -31,6 +31,7 @@ from backend.services.chat_external_worker_registry import (
 from backend.services.chat_external_worker_capacity import (
     ExternalWorkerEndpoint,
     ExternalWorkerReservation,
+    UnsupportedChatMode,
 )
 from backend.services.chat_sandbox_executor import (
     ExecutorExecutionLost,
@@ -160,7 +161,9 @@ def test_workspace_ack_is_not_misreported_as_executor_start():
             session_id=session_id,
             durable_claim=TurnLeaseClaim(turn_id, "production-green-00", 4, 9),
         ),
-        capability=SimpleNamespace(token="capability"),
+        capability=SimpleNamespace(
+            token="capability", expires_at=datetime.now(UTC) + timedelta(minutes=4)
+        ),
         executor=Executor(),
         record_evidence=lambda **values: events.append(values) or True,
         active_context=None,
@@ -232,7 +235,9 @@ def test_executor_start_evidence_follows_successful_executor_operation():
             session_id=session_id,
             durable_claim=claim,
         ),
-        capability=SimpleNamespace(token="capability"),
+        capability=SimpleNamespace(
+            token="capability", expires_at=datetime.now(UTC) + timedelta(minutes=4)
+        ),
         provider=object(),
         executor=Executor(),
         workspace_manager=Manager(),
@@ -380,6 +385,217 @@ class LostExecutor(FakeExecutor):
             outputs=(),
             terminal={"status": "cancelled", "exit_code": None, "error": None},
         )
+
+
+@pytest.mark.parametrize("remote_enabled", [False, True])
+def test_legacy_admission_uses_legacy_workspace_without_rendezvous(remote_enabled):
+    class Manager(FakeWorkspaceManager):
+        async def acquire(self, **kwargs):
+            raise AssertionError("executor startup requires a rendezvous bundle")
+
+        async def acquire_legacy(self, *, session_id, turn_claim):
+            return await super().acquire(session_id=session_id, turn_claim=turn_claim)
+
+    manager = Manager(FakeProvider())
+    executor = FakeExecutor()
+    runner = _tool_runner(executor, manager)
+    runner.tool_executor.settings.chat_executor_remote_transport_enabled = (
+        remote_enabled
+    )
+    assert runner.tool_executor.admission.executor_transport == "legacy"
+
+    result = asyncio.run(
+        runner._tool_result(
+            {
+                "operation_id": "legacy-operation",
+                "tool_call_id": "legacy-tool",
+                "operation": "exec",
+                "command": "printf x >> marker",
+                "timeout_ms": 1000,
+            }
+        )
+    )
+
+    assert result["ok"] is True
+    assert executor.exec_calls == 1
+    assert len(manager.acquired) == 1
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
+
+
+def test_turn_binding_is_lazy_ordered_shared_bounded_and_settled_once():
+    events: list[str] = []
+
+    class Manager(FakeWorkspaceManager):
+        async def acquire_for_binding(self, *, session_id, turn_claim):
+            events.extend(("live_turn", "environment_claim"))
+            return await self.acquire(session_id=session_id, turn_claim=turn_claim)
+
+    class Channel:
+        def __init__(self):
+            self.health_calls = 0
+            self.workspace_calls = 0
+            self.exec_calls = 0
+            self.active = 0
+            self.maximum_active = 0
+            self.four_started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.closed = 0
+
+        async def health(self):
+            self.health_calls += 1
+            events.append("health")
+            return "ok"
+
+        async def ensure_workspace(self, _context):
+            self.workspace_calls += 1
+            events.append("workspace_ack")
+
+        async def exec_resumable(self, _context, *, command, timeout_ms):
+            assert timeout_ms == 1000
+            self.exec_calls += 1
+            if command == "parallel":
+                self.active += 1
+                self.maximum_active = max(self.maximum_active, self.active)
+                if self.active == 4:
+                    self.four_started.set()
+                await self.release.wait()
+                self.active -= 1
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "completed", "exit_code": 0, "error": None},
+            )
+
+        async def cancel(self, _context):
+            return True
+
+        async def aclose(self):
+            self.closed += 1
+
+    manager = Manager(FakeProvider())
+    channel = Channel()
+    runner = _tool_runner(FakeExecutor(), manager)
+
+    async def channel_factory(_workspace, _turn_claim, minimum_remaining_seconds):
+        assert minimum_remaining_seconds == 240
+        events.extend(("route", "authorization", "noise_attach", "generation"))
+        return channel
+
+    runner.tool_executor.channel_factory = channel_factory
+
+    async def tool(index: int, command: str):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": command,
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def exercise():
+        runner.tool_executor.begin_turn()
+        for index in range(10):
+            assert (await tool(index, "sequential"))["ok"] is True
+        tasks = [
+            asyncio.create_task(tool(10 + index, "parallel")) for index in range(5)
+        ]
+        await asyncio.wait_for(channel.four_started.wait(), timeout=1)
+        await asyncio.sleep(0)
+        assert channel.maximum_active == 4
+        channel.release.set()
+        assert all(result["ok"] for result in await asyncio.gather(*tasks))
+        await runner.tool_executor.settle_turn()
+        await runner.tool_executor.settle_turn()
+
+    asyncio.run(exercise())
+
+    assert events[:8] == [
+        "live_turn",
+        "environment_claim",
+        "route",
+        "authorization",
+        "noise_attach",
+        "generation",
+        "health",
+        "workspace_ack",
+    ]
+    assert len(manager.acquired) == 1
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
+    assert channel.health_calls == 1
+    assert channel.workspace_calls == 1
+    assert channel.exec_calls == 15
+    assert channel.closed == 1
+
+
+def test_turn_cancellation_reaches_four_siblings_and_blocks_the_fifth_start():
+    class BlockingExecutor(FakeExecutor):
+        def __init__(self):
+            super().__init__()
+            self.active = 0
+            self.started = asyncio.Event()
+            self.release = asyncio.Event()
+            self.cancelled: list[str] = []
+
+        async def exec_resumable(self, context, *, command, timeout_ms):
+            assert command == "parallel"
+            assert timeout_ms == 1000
+            self.active += 1
+            if self.active == 4:
+                self.started.set()
+            await self.release.wait()
+            self.active -= 1
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "cancelled", "exit_code": None, "error": None},
+            )
+
+        async def cancel_execution(self, context):
+            self.cancelled.append(context.execution_id)
+            if len(self.cancelled) == 4:
+                self.release.set()
+            return ExecutorExecutionResult(
+                outputs=(),
+                terminal={"status": "cancelled", "exit_code": None, "error": None},
+            )
+
+    executor = BlockingExecutor()
+    manager = FakeWorkspaceManager(FakeProvider())
+    runner = _tool_runner(executor, manager)
+
+    async def tool(index: int):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": "parallel",
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def exercise():
+        runner.tool_executor.begin_turn()
+        tasks = [asyncio.create_task(tool(index)) for index in range(5)]
+        await asyncio.wait_for(executor.started.wait(), timeout=1)
+        assert await runner.tool_executor.cancel_active() is True
+        results = await asyncio.gather(*tasks)
+        await runner.tool_executor.settle_turn()
+        return results
+
+    results = asyncio.run(exercise())
+
+    assert sorted(executor.cancelled) == [f"operation-{index}" for index in range(4)]
+    assert results[4] == {
+        "type": "tool_result",
+        "operation_id": "operation-4",
+        "ok": False,
+        "error": "turn_cancelled",
+    }
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
 
 
 def worker_status(claim):
@@ -1467,6 +1683,59 @@ def _tool_runner(executor, workspace_manager):
         "external-pi-1", uuid.uuid4(), 7, "release-a", "external-pi-v1"
     )
     return runner
+
+
+@pytest.mark.parametrize(
+    ("poster_mode", "paper_artifacts_enabled"),
+    [(True, False), (False, True)],
+)
+def test_external_runner_rejects_authoring_before_any_work(
+    poster_mode, paper_artifacts_enabled
+):
+    settings = get_settings().model_copy(deep=True)
+    provider = FakeProvider()
+    executor = FakeExecutor()
+    manager = FakeWorkspaceManager(provider)
+    turn_id = uuid.uuid4()
+    admission = TurnAdmission(
+        session_id=uuid.uuid4(),
+        turn_id=turn_id,
+        user_message_id=uuid.uuid4(),
+        selected_model="test",
+        model_route=settings.chat_deepseek_v4_flash_route,
+        sdk_session_id=None,
+        sdk_project_key=None,
+        agent_harness="pi",
+        execution_backend="modal_cli",
+        poster_mode=poster_mode,
+        paper_artifacts_enabled=paper_artifacts_enabled,
+        durable_claim=TurnLeaseClaim(turn_id, "api-1", 4, 9),
+    )
+
+    with pytest.raises(UnsupportedChatMode) as exc_info:
+        ExternalPiChatTurnRunner(
+            settings=settings,
+            admission=admission,
+            prompt="author",
+            request_id="unsupported-mode",
+            resume_id=None,
+            capability=IssuedCapability(
+                token="opaque-capability",
+                capability_id=None,
+                expires_at=datetime.now(UTC) + timedelta(minutes=4),
+            ),
+            hf_username="qualification",
+            provider=provider,
+            executor=executor,
+            workspace_manager=manager,
+            worker_capacity_repository=SimpleNamespace(),
+            session_factory=SessionContext,
+        )
+
+    assert exc_info.value.code == "unsupported_chat_mode"
+    assert provider.created == provider.terminated == []
+    assert executor.contexts == []
+    assert manager.acquired == manager.released == manager.invalidated == []
 
 
 def test_external_run_frame_omits_absent_paper_descriptor():

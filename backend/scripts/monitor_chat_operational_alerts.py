@@ -19,6 +19,8 @@ from backend.config import Settings, get_settings
 from backend.database.connection import db_manager
 from backend.services.chat_operational_alert_service import (
     LIFECYCLE_ALERT_NAMES,
+    claim_executor_transport_alert,
+    executor_transport_alert_event,
     lifecycle_window_alerts,
     post_operational_alert,
     provider_health,
@@ -26,6 +28,7 @@ from backend.services.chat_operational_alert_service import (
     provider_transition,
     reliability_alert_classifications,
     runtime_failure_counts,
+    settle_executor_transport_alert,
 )
 from backend.services.autonomous_cron_probe import FindingState
 from backend.services.chat_reliability_service import (
@@ -43,6 +46,7 @@ STATE_VERSION = 1
 HISTORY_LIMIT = 100
 HEALTH_RECORD = "chat-operational-alert-health.json"
 MAX_RELIABILITY_FINDINGS = 32
+EXECUTOR_ALERT_OWNER = "chat-operational-monitor"
 
 
 def empty_state() -> dict[str, Any]:
@@ -406,6 +410,12 @@ def new_event(
 
 def append_event(state: dict[str, Any], event: dict[str, Any]) -> None:
     for existing in state["events"]:
+        if existing["id"] == event["id"]:
+            return
+        if event["id"].startswith("executor-circuit:") or existing["id"].startswith(
+            "executor-circuit:"
+        ):
+            continue
         pending = (
             existing["primary_delivery_state"] != "delivered"
             and existing["fallback_delivery_state"] != "delivered"
@@ -427,6 +437,49 @@ def append_event(state: dict[str, Any], event: dict[str, Any]) -> None:
     ]
     delivered = [item for item in state["events"] if item not in pending]
     state["events"] = [*pending, *delivered[-HISTORY_LIMIT:]]
+
+
+def collect_executor_transport_events(now: datetime) -> list[dict[str, Any]]:
+    """Claim at most one content-free durable circuit event per monitor minute."""
+
+    with db_manager.session_local() as db:
+        row = claim_executor_transport_alert(db, owner=EXECUTOR_ALERT_OWNER, now=now)
+        if row is None:
+            return []
+        event = executor_transport_alert_event(
+            environment=row.environment,
+            epoch=row.epoch,
+            transition=row.transition,
+            now=row.created_at,
+        )
+        db.commit()
+        return [event]
+
+
+def settle_executor_transport_events(state: dict[str, Any], *, now: datetime) -> None:
+    """Reflect primary/fallback delivery back to the durable outbox."""
+
+    for event in state["events"]:
+        if not event["id"].startswith("executor-circuit:"):
+            continue
+        delivered = (
+            event["primary_delivery_state"] == "delivered"
+            or event["fallback_delivery_state"] == "delivered"
+        )
+        with db_manager.session_local() as db:
+            try:
+                changed = settle_executor_transport_alert(
+                    db,
+                    event_id=event["id"],
+                    owner=EXECUTOR_ALERT_OWNER,
+                    acknowledged=delivered,
+                    now=now,
+                )
+            except RuntimeError:
+                db.rollback()
+                continue
+            if changed:
+                db.commit()
 
 
 async def deliver_pending(state: dict[str, Any], settings: Settings) -> int:
@@ -601,6 +654,11 @@ def main() -> int:
         ),
     )
     events, collection_failed = collect_events(state, settings, now)
+    if settings.chat_executor_remote_transport_enabled:
+        try:
+            events.extend(collect_executor_transport_events(now))
+        except SQLAlchemyError:
+            collection_failed = True
     events.extend(
         collect_reliability_events(
             state,
@@ -619,6 +677,11 @@ def main() -> int:
     # Persist cursor and pending events before any network side effect.
     write_state(state_path, state)
     delivered = asyncio.run(deliver_pending(state, settings))
+    if settings.chat_executor_remote_transport_enabled:
+        try:
+            settle_executor_transport_events(state, now=datetime.now(UTC))
+        except SQLAlchemyError:
+            collection_failed = True
     write_state(state_path, state)
     pending = sum(
         event["primary_delivery_state"] != "delivered"

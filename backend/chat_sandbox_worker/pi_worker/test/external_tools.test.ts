@@ -68,6 +68,34 @@ test("remote tool bridge fails closed on an uncorrelated result", async () => {
   );
 });
 
+test("remote read reconstructs exact bytes across one MiB pages", async () => {
+  const contents = Buffer.concat([
+    Buffer.alloc(1024 * 1024, 0xa5),
+    Buffer.from([0, 1, 2, 255]),
+  ]);
+  const offsets: number[] = [];
+  const bridge = new RemoteToolBridge({
+    async request(frame) {
+      assert.equal(frame.operation, "read");
+      const offset = frame.offset ?? 0;
+      offsets.push(offset);
+      const data = contents.subarray(offset, offset + (frame.max_bytes ?? 0));
+      return {
+        type: "tool_result",
+        operation_id: frame.operation_id,
+        ok: true,
+        data_base64: data.toString("base64"),
+        eof: offset + data.length >= contents.length,
+      };
+    },
+  });
+
+  const reconstructed = await bridge.read("tool-pages", "/workspace/large.bin");
+
+  assert.deepEqual(reconstructed, contents);
+  assert.deepEqual(offsets, [0, 1024 * 1024]);
+});
+
 test("remote Bash preserves a failed sandbox launch result", async () => {
   const bridge = new RemoteToolBridge({
     async request(frame) {
