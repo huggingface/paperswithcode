@@ -232,6 +232,15 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    Modal's isolated, automatically reclaimed ephemeral disk; PID and memory
    ceilings remain hard qualification probes.
 
+The persistent executor endpoint is
+`wss://chat-executor-staging.paperswithcode.co/v1/generations/<generation>/environment`.
+Create `chat-executor-staging` as a **proxied** Cloudflare A record pointing to
+the origin server. The host firewall permits web traffic only from Cloudflare;
+DNS-only records cannot reach it. Keep the hostname at one subdomain level so
+Cloudflare Universal SSL covers it. Provision the matching origin certificate,
+apply the staging nginx template through `pwc-nginx`, and verify public TLS
+before qualifying the transport and enabling persistent admissions.
+
 Posterly's additive gateway contract uses one zero-assignment bridge release.
 Deploy the first gateway-29 release with `POSTERLY_ENABLED=false`; only after
 that release is both current and the rollback target accepts contract 29 may a

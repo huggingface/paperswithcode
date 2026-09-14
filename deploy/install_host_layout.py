@@ -32,6 +32,10 @@ SYSTEMD_UNITS = (
     "pwc-curation-thumbnails.timer",
     "pwc-chat-alert-monitor.service",
     "pwc-chat-alert-monitor.timer",
+    "pwc-chat-executor-rendezvous.service",
+    "pwc-chat-executor-rendezvous@.service",
+    "pwc-chat-executor-harness-proxy.service",
+    "pwc-chat-executor-harness-proxy@.service",
     "autonomous/submission-review.service",
     "autonomous/submission-review.timer",
     "autonomous/submission-review-alert.service",
@@ -120,6 +124,7 @@ def main() -> int:
         "pwc-cron",
         "pwc-cron-trending",
         "pwc-external-pi",
+        "pwc-chat-executor",
     ):
         ensure_user(user)
     subprocess.run(

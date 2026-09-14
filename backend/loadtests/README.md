@@ -365,6 +365,32 @@ command, require both exact units to be `not-found` and
 inactive, the corresponding status file absent, and its loopback port absent
 from `ss -H -ltn`. Do not continue to another pair if any proof fails.
 
+## Persistent executor release qualification
+
+`persistent-transport` is a distinct fail-closed profile; it does not replace or
+relax the existing `32-user`, `100-user`, or `capacity` profiles. Its manifest
+must validate before the controller creates workers or starts billed work. The
+manifest freezes the Task 0 preliminary-report digest, signed component and
+image digests, all R1-R6 workload denominators, the 32-turn/128-operation and
+64-offered-turn overload gates, the 1,000-client reconnect gate, the 320-turn
+60-minute soak, resource/spend ceilings, buffer hierarchy, breaker timings, and
+pre-authentication rate limits. Missing fields and changed KPIs are rejected.
+
+The implementation task only prepares this tooling. A designated publishing
+task may run it against staging after merge and artifact publication; it must
+retain every failed attempt and must not label predeclared chaos evidence as a
+release qualification. Production use requires separate explicit authorization.
+
+```bash
+uv run --env-file backend/keys.env python \
+  -m backend.scripts.qualify_external_pi_fleet \
+  --environment staging \
+  --release-id 0123456789ab-staging \
+  --profile persistent-transport \
+  --persistent-manifest /var/lib/paperswithcode/staging/persistent-executor-manifest.json \
+  --confirm RUN_EXTERNAL_PI_FLEET_QUALIFICATION
+```
+
 ## Durable external-turn 32/100 qualification tooling
 
 The tooling does **not** authorize or run a live qualification by itself. The
