@@ -130,7 +130,10 @@ def main() -> int:
         )
         log_dir.mkdir(parents=True, exist_ok=True)
         handlers.append(
-            logging.FileHandler(log_dir / "create_eval_verification_issues.log")
+            logging.FileHandler(
+                log_dir
+                / f"create_eval_verification_issues_{datetime.now(timezone.utc):%Y%m%d}.log"
+            )
         )
     logging.basicConfig(
         level=logging.INFO,
@@ -148,7 +151,7 @@ def main() -> int:
         max_create=args.max_create,
     )
     try:
-        logging.info("Starting evaluation outreach")
+        logging.info("Starting cron job: create_eval_verification_issues")
         try:
             result = runner.run()
         except (ValueError, OSError, subprocess.TimeoutExpired) as error:
@@ -159,17 +162,22 @@ def main() -> int:
                 "events": runner.events,
             }
             state.put("last_run", result)
-            logging.error("Evaluation outreach failed: %s", error)
+            logging.error("Cron job failed: evaluation outreach: %s", error)
             print(json.dumps(result, sort_keys=True))
             return 1
         print(json.dumps(result, sort_keys=True))
         if result["counts"].get("needs_review") or result["counts"].get("rate_limited"):
             logging.error(
-                "Evaluation outreach is blocked by uncertain posts or a rate-limit cooldown"
+                "Cron job failed: evaluation outreach is blocked by uncertain posts or a rate-limit cooldown"
             )
             return 1
         logging.info(
-            "Evaluation outreach completed: %s",
+            "Repositories processed: %d",
+            result["counts"].get("aliases_checked", 0)
+            + result["counts"].get("repositories_checked", 0),
+        )
+        logging.info(
+            "Cron job completed successfully: create_eval_verification_issues %s",
             json.dumps(result["counts"], sort_keys=True),
         )
         return 0
