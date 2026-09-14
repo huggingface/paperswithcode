@@ -24,10 +24,7 @@ from backend.services.chat_sandbox_lease_maintenance_coordinator import (
 )
 from backend.services.chat_sandbox_pool_coordinator import ChatSandboxPoolCoordinator
 from backend.services.chat_sandbox_pool_repository import ChatSandboxPoolRepository
-from backend.services.chat_sandbox_provider import (
-    ExecutorLaunchBundle,
-    SandboxLaunchMode,
-)
+from backend.services.chat_sandbox_provider import SandboxLaunchMode
 from backend.services.chat_sandbox_state_repository import ChatSandboxStateRepository
 from backend.services.chat_sandbox_worker_transport import ChatSandboxWorkerTransport
 from backend.tests.test_chat_sandbox_capacity_acquisition import (
@@ -157,22 +154,14 @@ def test_direct_coordinator_forwards_executor_launch_mode_to_provider():
     class RecordingProvider(_Provider):
         async def create(self, **options):
             self.launch_mode = options["launch_mode"]
-            self.executor_launch = options["executor_launch"]
             return await super().create(**options)
 
     provider = RecordingProvider(transactions=[])
     coordinator = _coordinator(settings, sessions, provider)
-    bundle = ExecutorLaunchBundle(
-        b"signed-launch", shard_generation=9, authorization_keys_json="{}"
-    )
-    coordinator.executor_launch_factory = lambda _generation: asyncio.sleep(
-        0, result=bundle
-    )
 
     asyncio.run(coordinator.acquire(session_id, launch_mode=SandboxLaunchMode.EXECUTOR))
 
     assert provider.launch_mode is SandboxLaunchMode.EXECUTOR
-    assert provider.executor_launch is bundle
 
 
 @pytest.mark.parametrize(

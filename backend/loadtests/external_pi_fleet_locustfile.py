@@ -32,10 +32,8 @@ from backend.loadtests.external_pi_fleet_core import (
     DurableWorkload,
     FleetReplica,
     FleetRunRefused,
-    PersistentTransportUserSpec,
     aggregate_durable_profile,
     build_external_pi_fleet_request,
-    build_persistent_transport_user_specs,
     classify_external_pi_fleet_response,
     route_ordinal,
     resolve_durable_profile,
@@ -73,12 +71,6 @@ class DurableUserSpec:
     workload: DurableWorkload
     arrival_delay_ms: Literal[0] = 0
     application_queue: Literal[False] = False
-
-
-def persistent_transport_user_specs() -> tuple[PersistentTransportUserSpec, ...]:
-    """Expose the dependency-free frozen assignment to the Locust adapter."""
-
-    return build_persistent_transport_user_specs()
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,63 +16,12 @@ from backend.services.chat_external_worker_capacity import (
     ChatExternalWorkerCapacityRepository,
     ExternalWorkerCapacityUnavailable,
     ExternalWorkerEndpoint,
-    UnsupportedChatMode,
     external_worker_endpoints,
-    require_ordinary_research_mode,
 )
 from backend.config import get_settings
-from backend.services.chat_turn_admission_coordinator import (
-    ChatTurnAdmissionCoordinator,
-)
 
 
 NOW = datetime(2026, 8, 30, 12, tzinfo=UTC)
-
-
-@pytest.mark.parametrize(
-    ("poster_mode", "paper_artifacts_enabled"),
-    [(True, False), (False, True), (True, True)],
-)
-def test_remote_executor_rejects_authoring_before_capacity_reservation(
-    poster_mode: bool, paper_artifacts_enabled: bool
-) -> None:
-    with pytest.raises(UnsupportedChatMode) as exc_info:
-        require_ordinary_research_mode(
-            poster_mode=poster_mode,
-            paper_artifacts_enabled=paper_artifacts_enabled,
-        )
-
-    assert exc_info.value.code == "unsupported_chat_mode"
-
-
-def test_reader_mode_remains_an_ordinary_research_turn() -> None:
-    require_ordinary_research_mode(
-        poster_mode=False,
-        paper_artifacts_enabled=False,
-    )
-
-
-def test_unsupported_mode_starts_no_external_capacity_reservation() -> None:
-    calls = []
-    capacity = SimpleNamespace(
-        reserve=lambda *_args, **_kwargs: calls.append("reserve")
-    )
-    coordinator = ChatTurnAdmissionCoordinator(
-        SimpleNamespace(),
-        get_settings(),
-        repository=SimpleNamespace(),
-        external_capacity=capacity,
-        observe=lambda *_args: None,
-    )
-
-    with pytest.raises(UnsupportedChatMode):
-        coordinator.reserve_external_capacity(
-            SimpleNamespace(existing_job=None),
-            now=NOW,
-            poster_mode=True,
-        )
-
-    assert calls == []
 
 
 @pytest.fixture

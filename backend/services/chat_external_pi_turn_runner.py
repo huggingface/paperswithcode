@@ -29,7 +29,6 @@ from backend.services.chat_external_worker_capacity import (
     ChatExternalWorkerCapacityRepository,
     ExternalWorkerEndpoint,
     external_worker_endpoints,
-    require_ordinary_research_mode,
 )
 from backend.services.chat_external_pi_shadow import (
     ExternalPiWorkerControlClient,
@@ -41,7 +40,6 @@ from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
 )
 from backend.services.chat_external_pi_tool_executor import (
-    ChannelFactory,
     ExternalPiToolWorkspaceExecutor,
 )
 from backend.services.chat_external_pi_lifecycle import ExternalPiTurnLifecycle
@@ -102,12 +100,7 @@ class ExternalPiChatTurnRunner:
         turn_state_transition: Callable[[str], Awaitable[None]] | None = None,
         observe: LifecycleObserver | None = None,
         cancel_timeout_seconds: float = 5.0,
-        channel_factory: ChannelFactory | None = None,
     ) -> None:
-        require_ordinary_research_mode(
-            poster_mode=admission.poster_mode,
-            paper_artifacts_enabled=admission.paper_artifacts_enabled,
-        )
         self.settings = settings
         self.admission = admission
         self.prompt = prompt
@@ -144,7 +137,6 @@ class ExternalPiChatTurnRunner:
             transition=lambda state: self.turn_state_transition(state),
             observe=lambda event, code, value: self.observe(event, code, value),
             record_evidence=self.record_evidence,
-            channel_factory=channel_factory,
         )
         self.lifecycle = ExternalPiTurnLifecycle(
             capability_id=self.capability_id,
@@ -167,23 +159,12 @@ class ExternalPiChatTurnRunner:
             chat_session_id=self.admission.session_id,
             recorder=self.record_evidence,
         )
-        self.tool_executor.begin_turn()
-        primary_exception_active = True
         try:
             async for event in self._events(boundary):
                 yield event
-            primary_exception_active = False
         except QUALIFIED_OWNERSHIP_REJECTIONS:
             boundary.reject()
             raise
-        finally:
-            try:
-                await self.tool_executor.settle_turn()
-            except asyncio.CancelledError:
-                raise
-            except Exception:
-                if not primary_exception_active:
-                    raise
 
     async def _events(
         self, stale_boundary: QualificationStaleFenceBoundary
@@ -610,11 +591,7 @@ class ExternalPiChatTurnRunner:
         await self.lifecycle.persist_turn_state(state)
 
     async def _cancel_executor(self, context: ExecutorContext) -> bool:
-        binding = self.tool_executor._binding
-        return await self.tool_executor.cancel_executor(
-            context,
-            channel=binding.channel if binding is not None else None,
-        )
+        return await self.tool_executor.cancel_executor(context)
 
     def _durable_turn_claim(self) -> TurnLeaseClaim:
         return self.tool_executor._durable_turn_claim()
@@ -674,14 +651,11 @@ class ExternalPiChatTurnRunner:
             return False
 
         async def cancel_executor() -> None:
-            if context is None and self.tool_executor._binding is None:
+            if context is None:
                 return
             try:
                 async with asyncio.timeout(self.cancel_timeout_seconds):
-                    if self.tool_executor._binding is not None:
-                        await self.tool_executor.cancel_active()
-                    elif context is not None:
-                        await self._cancel_executor(context)
+                    await self._cancel_executor(context)
             except TimeoutError:
                 return
 

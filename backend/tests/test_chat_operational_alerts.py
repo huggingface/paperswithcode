@@ -9,25 +9,16 @@ from types import SimpleNamespace
 
 import httpx
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.database import (
-    ChatExecutorTransportAlert,
-    ChatExecutorTransportCircuit,
-)
 from backend.scripts import monitor_chat_operational_alerts as monitor
 from backend.services.chat_operational_alert_service import (
     ProviderHealth,
-    claim_executor_transport_alert,
-    executor_transport_alert_event,
     lifecycle_window_alerts,
     operational_alert_payload,
     provider_health,
     provider_transition,
     runtime_failure_counts,
-    settle_executor_transport_alert,
 )
 from backend.services.chat_reliability_service import (
     ChatAggregateSnapshot,
@@ -541,126 +532,6 @@ def test_operational_payload_is_content_free():
     assert "prompt" not in payload
     assert "answer" not in payload
     assert "credential" not in payload
-
-
-def test_executor_transport_epoch_alert_is_content_free_and_stable():
-    now = datetime(2026, 9, 4, 12, tzinfo=UTC)
-    event = executor_transport_alert_event(
-        environment="production", epoch=7, transition="security_hold", now=now
-    )
-
-    assert event["id"] == "executor-circuit:production:7:security_hold"
-    assert event["severity"] == "critical"
-    assert event["classifications"] == {"executor_transport_security_hold": 1}
-    assert set(event) == {
-        "id",
-        "signal",
-        "severity",
-        "count",
-        "classifications",
-        "window_start",
-        "window_end",
-        "primary_delivery_state",
-        "fallback_delivery_state",
-        "primary_attempts",
-        "fallback_attempts",
-        "created_at",
-    }
-
-
-def test_executor_transport_recovery_is_a_distinct_notification():
-    now = datetime(2026, 9, 4, 12, tzinfo=UTC)
-    event = executor_transport_alert_event(
-        environment="staging", epoch=3, transition="recovered", now=now
-    )
-
-    assert event["signal"] == "chat_executor_transport_recovered"
-    assert event["severity"] == "recovery"
-
-
-def test_executor_transport_epochs_never_coalesce_in_monitor_state():
-    now = datetime(2026, 9, 4, 12, tzinfo=UTC)
-    state = monitor.empty_state()
-    for epoch in (1, 2):
-        monitor.append_event(
-            state,
-            executor_transport_alert_event(
-                environment="production", epoch=epoch, transition="open", now=now
-            ),
-        )
-
-    assert [event["id"] for event in state["events"]] == [
-        "executor-circuit:production:1:open",
-        "executor-circuit:production:2:open",
-    ]
-
-
-def test_executor_transport_alert_outbox_retries_after_one_minute_and_acks_once():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    ChatExecutorTransportCircuit.__table__.create(engine)
-    ChatExecutorTransportAlert.__table__.create(engine)
-    now = datetime(2026, 9, 4, 12, tzinfo=UTC)
-    with Session(engine, expire_on_commit=False) as db:
-        db.add(
-            ChatExecutorTransportCircuit(
-                environment="production",
-                state="open",
-                revision=1,
-                epoch=1,
-                consecutive_failures=3,
-                half_open_successes=0,
-                updated_at=now,
-            )
-        )
-        db.add(
-            ChatExecutorTransportAlert(
-                event_id="executor-circuit:production:1:open",
-                environment="production",
-                epoch=1,
-                transition="open",
-                delivery_state="pending",
-                attempts=0,
-                next_attempt_at=now,
-                created_at=now,
-            )
-        )
-        db.flush()
-
-        claimed = claim_executor_transport_alert(db, owner="monitor-a", now=now)
-        assert claimed is not None and claimed.attempts == 1
-        assert claim_executor_transport_alert(db, owner="monitor-b", now=now) is None
-        assert settle_executor_transport_alert(
-            db,
-            event_id=claimed.event_id,
-            owner="monitor-a",
-            acknowledged=False,
-            now=now,
-        )
-        assert (
-            claim_executor_transport_alert(
-                db, owner="monitor-b", now=now + timedelta(seconds=59)
-            )
-            is None
-        )
-        retried = claim_executor_transport_alert(
-            db, owner="monitor-b", now=now + timedelta(seconds=60)
-        )
-        assert retried is not None and retried.attempts == 2
-        assert settle_executor_transport_alert(
-            db,
-            event_id=retried.event_id,
-            owner="monitor-b",
-            acknowledged=True,
-            now=now + timedelta(seconds=60),
-        )
-        assert retried.acknowledged_at == now + timedelta(seconds=60)
-        assert not settle_executor_transport_alert(
-            db,
-            event_id=retried.event_id,
-            owner="monitor-b",
-            acknowledged=True,
-            now=now + timedelta(seconds=60),
-        )
 
 
 def test_pending_runtime_events_are_bounded_by_coalescing():

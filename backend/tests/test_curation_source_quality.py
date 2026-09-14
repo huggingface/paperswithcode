@@ -19,6 +19,10 @@ PAPER = (
         b"Title: https://arxiv.org/html/2609.12945/figure.png\n" + PAPER,
         b"Title: Paper\n\nMarkdown Content:\nA diagram.",
         b"<svg>" + b"x" * 1000,
+        b"Title: figure.svg\r\n\r\nMarkdown Content:\r\n" + PAPER,
+        b'<?xml version="1.0"?><svg>' + b"x" * 1000,
+        b"<!-- generated figure -->\n<svg>" + b"x" * 1000,
+        b"\xef\xbb\xbf<!-- generated page -->\n<html>" + b"x" * 1000,
     ],
 )
 def test_placeholder_is_not_paper_coverage(body):

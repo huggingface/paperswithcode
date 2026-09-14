@@ -49,7 +49,6 @@ from backend.loadtests.external_pi_fleet_core import (
     resolve_fleet_shape,
     route_ordinal,
     validate_fleet_preflight,
-    validate_persistent_transport_manifest,
 )
 from backend.services.chat_external_pi_shadow import ExternalPiWorkerStatus
 from deploy import external_pi_qualification_lifecycle as lifecycle
@@ -1244,10 +1243,6 @@ def resolve_qualification_profile(
             ("2x32", "4x16", "3x32"),
             "external-pi-capacity-qualification.json",
         ),
-        "persistent-transport": (
-            ("2x32",),
-            "external-pi-persistent-transport-fleet.json",
-        ),
     }
     try:
         return profiles[profile]
@@ -1264,23 +1259,6 @@ def qualification_exit_code(report: FleetQualificationReport) -> int:
     return 0 if report.preferred_shape is not None else 1
 
 
-def load_persistent_transport_manifest(path: Path | None) -> None:
-    """Fail closed on missing or unbounded release qualification input."""
-
-    if path is None or not path.is_file() or path.stat().st_size > 64 * 1024:
-        raise FleetRunRefused("persistent transport qualification manifest is required")
-    try:
-        manifest = validate_persistent_transport_manifest(
-            json.loads(path.read_text(encoding="utf-8"))
-        )
-        if manifest.chaos_declared:
-            raise ValueError("chaos manifest is not a release qualification")
-    except (OSError, ValueError, json.JSONDecodeError) as error:
-        raise FleetRunRefused(
-            "persistent transport qualification manifest is invalid"
-        ) from error
-
-
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--environment", choices=("staging",), required=True)
@@ -1288,11 +1266,10 @@ def main() -> int:
     parser.add_argument("--confirm", required=True)
     parser.add_argument(
         "--profile",
-        choices=("32-user", "100-user", "capacity", "persistent-transport"),
+        choices=("32-user", "100-user", "capacity"),
         default="100-user",
     )
     parser.add_argument("--report", type=Path)
-    parser.add_argument("--persistent-manifest", type=Path)
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo as the root operator")
@@ -1300,12 +1277,6 @@ def main() -> int:
         parser.error("exact fleet qualification confirmation is required")
     try:
         shape_names, report_name = resolve_qualification_profile(args.profile)
-        if args.profile == "persistent-transport":
-            load_persistent_transport_manifest(args.persistent_manifest)
-        elif args.persistent_manifest is not None:
-            raise FleetRunRefused(
-                "persistent manifest is only valid for its distinct profile"
-            )
         operator = SystemFleetOperator(release_id=args.release_id)
         report = run_fleet_controller(
             operator,
@@ -1313,8 +1284,7 @@ def main() -> int:
             report_path=args.report or REPORT_ROOT / report_name,
             report_root=REPORT_ROOT,
             shape_names=shape_names,
-            stop_on_nonpassing_shape=args.profile
-            in {"capacity", "persistent-transport"},
+            stop_on_nonpassing_shape=args.profile == "capacity",
         )
     except Exception:  # noqa: BLE001 - CLI must never emit protected details
         print("external Pi fleet qualification failed closed", file=os.sys.stderr)

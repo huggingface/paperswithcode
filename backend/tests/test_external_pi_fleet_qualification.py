@@ -54,10 +54,6 @@ from backend.loadtests.external_pi_fleet_core import (
     ModalLifecycleSnapshot,
     ModalRateEvidence,
     DurableQualificationEvidence,
-    PERSISTENT_TRANSPORT_SCENARIOS,
-    build_persistent_transport_user_specs,
-    validate_persistent_transport_manifest,
-    validate_persistent_transport_report,
 )
 from backend.loadtests.external_pi_shadow_core import (
     BaselineObservation,
@@ -99,217 +95,6 @@ _SERVER_LATENCY_P95 = {
         "first_semantic_event_ms": 520,
     },
 }
-
-
-def _persistent_transport_manifest() -> dict[str, object]:
-    return {
-        "schema_version": "persistent-executor-release-qualification-v1",
-        "status": "release_qualification",
-        "attempt_id": "a" * 64,
-        "source_commit": "b" * 40,
-        "preliminary_report_sha256": "c" * 64,
-        "signed_component_manifest_sha256": "d" * 64,
-        "modal_image_digest": "e" * 64,
-        "modal_region": "eu-west",
-        "chaos_declared": False,
-        "percentile_method": "nearest_rank",
-        "scenarios": list(PERSISTENT_TRANSPORT_SCENARIOS),
-        "concurrent_turns": 32,
-        "operations_per_turn": 4,
-        "concurrent_operations": 128,
-        "offered_turns": 64,
-        "overload_rejections": 32,
-        "loaded_clients": 1000,
-        "minimum_soak_turns": 320,
-        "minimum_soak_minutes": 60,
-        "reconnect_ready_p99_ms_max": 5000,
-        "authentication_starts_per_second_max": 250,
-        "route_health_ms_max": 5000,
-        "breaker_open_failures": 3,
-        "breaker_failure_window_seconds": 60,
-        "breaker_open_seconds": 30,
-        "breaker_close_successes": 3,
-        "drain_seconds_max": 240,
-        "alert_ack_ms_max": 60000,
-        "heartbeat_checkpoint_updates_per_second_max": 34,
-        "public_operation_output_bytes_max": 24576,
-        "public_turn_output_bytes_max": 98304,
-        "operation_unacked_bytes_max": 65536,
-        "stream_unacked_bytes_max": 262144,
-        "connection_unacked_bytes_max": 524288,
-        "command_bytes_max": 65536,
-        "path_bytes_max": 4096,
-        "bash_timeout_ms_max": 30000,
-        "remote_read_bytes_max": 1048576,
-        "preauth_frame_bytes_max": 2048,
-        "preauth_deadline_ms_max": 2000,
-        "invalid_per_source_rate": 10,
-        "invalid_per_source_burst": 20,
-        "invalid_per_shard_rate": 100,
-        "invalid_per_shard_burst": 200,
-        "host_cpu_percent_exclusive_max": 80,
-        "host_mem_available_mib_min": 1536,
-        "total_spend_microusd_max": 16250000,
-        "provider_call_max": 0,
-        "retain_unknown_spend_reservation": True,
-        "stop_on_first_failed_gate": True,
-    }
-
-
-def test_persistent_transport_profile_freezes_all_release_gates():
-    manifest = validate_persistent_transport_manifest(_persistent_transport_manifest())
-    specs = build_persistent_transport_user_specs()
-
-    assert manifest.status == "release_qualification"
-    assert len(specs) == 32
-    assert sum(spec.operation_limit for spec in specs) == 128
-    assert {spec.workload for spec in specs} == {
-        "cold_pwd",
-        "warm_commands",
-        "parallel_catalog",
-        "disconnect_resume",
-    }
-
-
-@pytest.mark.parametrize(
-    "missing",
-    [
-        "preliminary_report_sha256",
-        "modal_region",
-        "minimum_soak_turns",
-        "total_spend_microusd_max",
-        "operation_unacked_bytes_max",
-    ],
-)
-def test_persistent_transport_profile_rejects_missing_evidence(missing):
-    payload = _persistent_transport_manifest()
-    payload.pop(missing)
-
-    with pytest.raises(ValidationError):
-        validate_persistent_transport_manifest(payload)
-
-
-def test_persistent_transport_profile_cannot_weaken_a_frozen_kpi():
-    payload = _persistent_transport_manifest()
-    payload["concurrent_turns"] = 31
-
-    with pytest.raises(ValidationError):
-        validate_persistent_transport_manifest(payload)
-
-
-def _persistent_transport_report() -> dict[str, object]:
-    cohort = {
-        "offered": 32,
-        "admitted": 32,
-        "completed": 32,
-        "rejected_pre_work": 0,
-        "failed": 0,
-        "candidate_denominator": 32,
-        "failure_attribution": {},
-    }
-    return {
-        "schema_version": "persistent-executor-release-report-v1",
-        "qualification_kind": "release",
-        "status": "passed",
-        "attempt_id": "a" * 64,
-        "manifest_sha256": "b" * 64,
-        "modal_region": "eu-west",
-        "pool_counts_by_digest": {
-            "c" * 64: {
-                "active": 32,
-                "assigned_idle": 0,
-                "blank": 0,
-                "draining": 0,
-                "terminated": 0,
-            }
-        },
-        "cohorts": [
-            {"transport": "persistent", **cohort},
-            {"transport": "legacy", **cohort},
-        ],
-        "percentiles": {
-            "reconnect_ready": {
-                "denominator": 1000,
-                "accepted": 1000,
-                "p50_ms": 100,
-                "p95_ms": 500,
-                "p99_ms": 1000,
-            }
-        },
-        "resources": {
-            "peak_cpu_percent": 79.9,
-            "minimum_host_mem_available_mib": 1536,
-            "peak_rendezvous_rss_mib": 64,
-            "peak_harness_proxy_rss_mib": 64,
-            "peak_process_fds": 100,
-            "peak_postgres_connections": 20,
-            "event_loop_lag_p99_ms": 5,
-            "operation_unacked_bytes_peak": 65536,
-            "stream_unacked_bytes_peak": 262144,
-            "connection_unacked_bytes_peak": 524288,
-            "process_unacked_bytes_peak": 524288,
-            "postgres_checkpoint_updates_per_second": 34,
-            "heartbeat_receives_per_second": 200,
-        },
-        "scenario_outcomes": {
-            scenario: "passed" for scenario in PERSISTENT_TRANSPORT_SCENARIOS
-        },
-        "duplicate_executions": 0,
-        "leaked_environments": 0,
-        "breaker_openings": 0,
-        "false_global_circuit_trips": 0,
-        "reconnect_token_issued": 1000,
-        "reconnect_token_refreshed": 1000,
-        "reconnect_token_consumed": 1000,
-        "reconnect_token_replayed": 0,
-        "reconnect_token_expired": 0,
-        "reconnect_token_cleaned": 1000,
-        "cancellation_delivery_observations": 1000,
-        "process_containment_observations": 1000,
-        "settlement_count": 32,
-        "truncation_markers_missing": 0,
-        "control_frame_starvation_events": 0,
-    }
-
-
-def test_persistent_transport_report_records_required_content_free_evidence():
-    report = validate_persistent_transport_report(_persistent_transport_report())
-
-    assert report.status == "passed"
-    assert [cohort.transport for cohort in report.cohorts] == [
-        "persistent",
-        "legacy",
-    ]
-    assert report.resources.postgres_checkpoint_updates_per_second == 34
-
-
-@pytest.mark.parametrize(
-    ("path", "value"),
-    [
-        (("resources", "peak_cpu_percent"), 80),
-        (("resources", "minimum_host_mem_available_mib"), 1535),
-        (("resources", "operation_unacked_bytes_peak"), 65537),
-        (("breaker_openings",), 1),
-    ],
-)
-def test_persistent_transport_passing_report_rejects_any_gate_miss(path, value):
-    payload = _persistent_transport_report()
-    target = payload
-    for key in path[:-1]:
-        target = target[key]
-    target[path[-1]] = value
-
-    with pytest.raises(ValidationError):
-        validate_persistent_transport_report(payload)
-
-
-def test_chaos_report_cannot_be_mislabeled_as_release_qualification():
-    payload = _persistent_transport_report()
-    payload["qualification_kind"] = "chaos"
-    payload["breaker_openings"] = 1
-
-    with pytest.raises(ValidationError):
-        validate_persistent_transport_report(payload)
 
 
 def _live_qualification_evidence():
@@ -414,34 +199,13 @@ def test_capacity_qualification_profile_is_separate_and_ascending():
 
     single_shape_names, single_report_name = resolve_qualification_profile("32-user")
     shape_names, report_name = resolve_qualification_profile("capacity")
-    persistent_shapes, persistent_report = resolve_qualification_profile(
-        "persistent-transport"
-    )
 
     assert single_shape_names == ("2x32",)
     assert single_report_name == "external-pi-32-user-qualification.json"
     assert shape_names == ("2x32", "4x16", "3x32")
     assert report_name == "external-pi-capacity-qualification.json"
-    assert persistent_shapes == ("2x32",)
-    assert persistent_report == "external-pi-persistent-transport-fleet.json"
     with pytest.raises(FleetRunRefused, match="qualification profile"):
         resolve_qualification_profile("unknown")
-
-
-def test_persistent_profile_manifest_preflight_runs_before_live_operator(tmp_path):
-    from backend.scripts.qualify_external_pi_fleet import (
-        load_persistent_transport_manifest,
-    )
-
-    path = tmp_path / "manifest.json"
-    path.write_text(json.dumps(_persistent_transport_manifest()))
-    load_persistent_transport_manifest(path)
-
-    payload = _persistent_transport_manifest()
-    payload["chaos_declared"] = True
-    path.write_text(json.dumps(payload))
-    with pytest.raises(FleetRunRefused, match="manifest is invalid"):
-        load_persistent_transport_manifest(path)
 
 
 def test_durable_profiles_bind_32_mixed_turns_then_100_immediate_admissions():

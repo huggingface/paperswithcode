@@ -75,14 +75,20 @@ class _Links(HTMLParser):
 
 def validate_paper_text(body: bytes) -> None:
     """Reject successful HTTP responses that contain a figure or empty wrapper."""
-    text = body.decode("utf-8", "replace").strip()
+    text = body.decode("utf-8-sig", "replace").strip()
     title = re.search(r"^Title:\s*(.+)$", text, re.MULTILINE)
-    if title and re.search(r"\.(?:svg|png|jpe?g|webp)(?:\?\S*)?$", title[1], re.I):
+    if title and re.search(
+        r"\.(?:svg|png|jpe?g|webp)(?:\?\S*)?$", title[1].strip(), re.I
+    ):
         raise ValueError("paper endpoint returned an image caption")
     content = text.split("Markdown Content:", 1)[-1].strip()
     if len(content) < 800:
         raise ValueError("paper text is too short to establish source coverage")
-    if content.lower().startswith(("<svg", "<!doctype html", "<html")):
+    if re.match(
+        r"(?:<!--.*?-->\s*)*<(?:svg\b|html\b|!doctype\b|\?xml\b)",
+        content,
+        re.I | re.S,
+    ):
         raise ValueError("paper text is an image or HTML error page")
 
 
