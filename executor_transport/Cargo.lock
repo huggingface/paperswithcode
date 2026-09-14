@@ -935,9 +935,11 @@ dependencies = [
  "thiserror",
  "tokio",
  "tokio-postgres",
+ "tokio-rustls",
  "tokio-tungstenite",
  "url",
  "uuid",
+ "webpki-roots 1.0.9",
  "zeroize",
 ]
 

@@ -17,6 +17,7 @@ use pwc_persistent_executor_transport::protocol::{
     SignedAuthorization, VerificationKey,
 };
 use pwc_persistent_executor_transport::scheduler::ReconnectBackoff;
+use pwc_persistent_executor_transport::startup_connection::connect_when_ready;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,7 +26,6 @@ use tokio::net::unix::OwnedWriteHalf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
-use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
@@ -180,6 +180,8 @@ struct EnvironmentPeerState {
     endpoint: Option<PeerEndpoint>,
     daemon_events: mpsc::Sender<DaemonEvent>,
     daemon_receiver: mpsc::Receiver<DaemonEvent>,
+    daemon_ready: bool,
+    startup_started: Instant,
 }
 
 impl EnvironmentPeerState {
@@ -189,6 +191,8 @@ impl EnvironmentPeerState {
             endpoint: None,
             daemon_events,
             daemon_receiver,
+            daemon_ready: false,
+            startup_started: Instant::now(),
         }
     }
 }
@@ -295,7 +299,6 @@ async fn launch(
     if admission.is_empty() || admission.len() > 2_048 {
         return Err("admission frame rejected".into());
     }
-    let daemon_started = Instant::now();
     let mut daemon = Command::new("python")
         .args(["-m", "backend.chat_sandbox_worker.executor_daemon"])
         .env_remove("PWC_CHAT_EXECUTOR_ADMISSION")
@@ -306,11 +309,6 @@ async fn launch(
     let identity = NoiseIdentity::generate()?;
     let mut peer_state = EnvironmentPeerState::new();
     let connection = async {
-        wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)).await?;
-        eprintln!(
-            "executor startup stage=daemon_ready duration_ms={}",
-            daemon_started.elapsed().as_millis()
-        );
         maintain_connection(
             url,
             admission,
@@ -408,17 +406,12 @@ async fn maintain_connection(
 async fn open_websocket(
     url: &str,
     deadline: Duration,
+    ready: impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     Box<dyn std::error::Error>,
 > {
-    let (socket, _) = timeout(
-        deadline,
-        connect_async_with_config(url, Some(websocket_config()), true),
-    )
-    .await
-    .map_err(|_| "rendezvous connection timed out")??;
-    Ok(socket)
+    connect_when_ready(url, websocket_config(), deadline, ready).await
 }
 
 async fn connect(
@@ -430,9 +423,30 @@ async fn connect(
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = validate_url(url)?;
     let started = Instant::now();
-    let mut socket = open_websocket(url.as_str(), CONNECT_DEADLINE).await?;
+    let ready = async {
+        if !peer_state.daemon_ready {
+            // A failed connection attempt must not restart the daemon's
+            // startup allowance. Reconnects retain the existing ready state;
+            // launch() independently watches the daemon process for exit.
+            let remaining =
+                Duration::from_secs(15).saturating_sub(peer_state.startup_started.elapsed());
+            timeout(
+                remaining,
+                wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)),
+            )
+            .await
+            .map_err(|_| "executor daemon readiness timed out")??;
+            peer_state.daemon_ready = true;
+            eprintln!(
+                "executor startup stage=daemon_ready duration_ms={}",
+                peer_state.startup_started.elapsed().as_millis()
+            );
+        }
+        Ok(())
+    };
+    let mut socket = open_websocket(url.as_str(), CONNECT_DEADLINE, ready).await?;
     eprintln!(
-        "executor startup stage=websocket_open duration_ms={}",
+        "executor startup stage=daemon_and_websocket_ready duration_ms={}",
         started.elapsed().as_millis()
     );
     socket
@@ -496,7 +510,7 @@ async fn connect(
         };
 
     eprintln!(
-        "executor startup stage=registration_ready duration_ms={}",
+        "executor startup stage=daemon_and_registration_ready duration_ms={}",
         started.elapsed().as_millis()
     );
     let mut heartbeats = interval(HEARTBEAT);
@@ -1028,7 +1042,9 @@ mod tests {
             let (stream, _) = listener.accept().await.unwrap();
             tokio_tungstenite::accept_async(stream).await.unwrap()
         });
-        let client = open_websocket(&url, Duration::from_secs(1)).await.unwrap();
+        let client = open_websocket(&url, Duration::from_secs(1), async { Ok(()) })
+            .await
+            .unwrap();
         let tokio_tungstenite::MaybeTlsStream::Plain(tcp) = client.get_ref() else {
             panic!("test connection must use plain TCP");
         };
@@ -1095,7 +1111,11 @@ mod tests {
         });
         let result = timeout(
             Duration::from_secs(1),
-            open_websocket(&format!("ws://{address}"), Duration::from_millis(20)),
+            open_websocket(
+                &format!("ws://{address}"),
+                Duration::from_millis(20),
+                async { Ok(()) },
+            ),
         )
         .await
         .expect("connect deadline must run");

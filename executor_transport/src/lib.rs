@@ -12,3 +12,4 @@ pub mod postgres_registry;
 pub mod protocol;
 pub mod registry;
 pub mod scheduler;
+pub mod startup_connection;
