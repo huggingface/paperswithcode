@@ -11,7 +11,6 @@ import threading
 import time
 from pathlib import Path
 from textwrap import dedent
-from types import SimpleNamespace
 from typing import BinaryIO
 
 from backend.chat_sandbox_worker.executor_daemon import (
@@ -19,7 +18,6 @@ from backend.chat_sandbox_worker.executor_daemon import (
     ExecutorServer,
 )
 from backend.chat_sandbox_worker.executor_protocol import (
-    MAX_REMOTE_READ_BYTES,
     PROTOCOL,
     decode_response,
     encode_request,
@@ -62,28 +60,12 @@ class _Broker:
         return {"ok": True, "active": self.active}
 
 
-def test_default_command_launch_avoids_threaded_preexec(tmp_path: Path) -> None:
-    server = ExecutorServer(
-        socket_path=tmp_path / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=tmp_path,
-    )
-
-    assert server.command_preexec is None
-    assert server._command_argv("true")[1:] == [
-        "-m",
-        "backend.chat_sandbox_worker.executor_command",
-        "true",
-    ]
-
-
 def _operation(
     socket_path: Path,
     request: dict[str, object],
     *,
     capability: str = "synthetic-capability",
     worker_generation: str = "worker-1",
-    turn_deadline_unix_ms: int = 4_000_000_000_000,
 ) -> list[dict[str, object]]:
     bootstrap = {
         "operation": "executor_connect",
@@ -96,7 +78,6 @@ def _operation(
         "turn_worker_id": "production-green-00",
         "turn_worker_generation": "4",
         "turn_lease_generation": "9",
-        "turn_deadline_unix_ms": turn_deadline_unix_ms,
     }
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         connection.connect(str(socket_path))
@@ -124,7 +105,6 @@ def _open_operation(
         "turn_worker_id": "production-green-00",
         "turn_worker_generation": "4",
         "turn_lease_generation": "9",
-        "turn_deadline_unix_ms": 4_000_000_000_000,
     }
     connection = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     connection.connect(str(socket_path))
@@ -332,306 +312,6 @@ def test_read_is_bounded_and_descriptor_contained(tmp_path: Path) -> None:
     assert nul[1]["data_base64"] == "AA=="
     assert traversal[-1]["error"] == "invalid_workspace_path"
     assert symlink[-1]["error"] == "invalid_workspace_path"
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_read_limits_reject_before_broker_or_workspace_access(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    broker = _Broker()
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=broker,
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-    request = {
-        "protocol": PROTOCOL,
-        "type": "read_file",
-        "request_id": "request-remote-oversized",
-        **IDENTITY,
-        "path": "missing.bin",
-        "offset": 0,
-        "max_bytes": MAX_REMOTE_READ_BYTES + 1,
-    }
-
-    assert _operation(server.socket_path, request) == []
-    assert broker.requests == []
-    assert list(workspace.iterdir()) == []
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_read_maps_workspace_absolute_path_to_workspace_root(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    (workspace / "note.bin").write_bytes(b"remote-workspace")
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=_Broker(),
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-
-    responses = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "read_file",
-            "request_id": "request-remote-absolute",
-            **IDENTITY,
-            "path": "/workspace/note.bin",
-            "offset": 0,
-            "max_bytes": 1024,
-        },
-    )
-
-    assert responses[1]["type"] == "read_result"
-    assert responses[1]["data_base64"] == "cmVtb3RlLXdvcmtzcGFjZQ=="
-    assert responses[1]["eof"] is True
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_turn_binding_owns_capability_across_sequential_operations(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    broker = _Broker()
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=broker,
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-
-    ensured = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "ensure_workspace",
-            "request_id": "request-ensure-remote",
-            **IDENTITY,
-        },
-    )
-    first = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "exec",
-            "request_id": "request-first-remote",
-            **IDENTITY,
-            "command": "printf first",
-            "timeout_ms": 2_000,
-        },
-    )
-    second_identity = {
-        **IDENTITY,
-        "execution_id": "execution-2",
-        "tool_call_id": "tool-2",
-    }
-    second = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "exec",
-            "request_id": "request-second-remote",
-            **second_identity,
-            "command": "printf second",
-            "timeout_ms": 2_000,
-        },
-    )
-    released = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "release_workspace",
-            "request_id": "request-release-remote",
-            **second_identity,
-        },
-    )
-
-    assert [frame["type"] for frame in ensured] == ["acknowledged"]
-    assert first[-1]["status"] == second[-1]["status"] == "completed"
-    assert [request["operation"] for request in broker.requests] == [
-        "install",
-        "clear",
-    ]
-    assert [frame["type"] for frame in released] == ["acknowledged"]
-    assert not broker.active
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_release_is_idempotent_after_deadline_cleanup(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    broker = _Broker()
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=broker,
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-    deadline = int((time.time() + 0.1) * 1000)
-
-    ensured = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "ensure_workspace",
-            "request_id": "request-deadline-release-ensure",
-            **IDENTITY,
-        },
-        turn_deadline_unix_ms=deadline,
-    )
-    wait_until = time.monotonic() + 2
-    while broker.active and time.monotonic() < wait_until:
-        time.sleep(0.01)
-    released = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "release_workspace",
-            "request_id": "request-deadline-release",
-            **IDENTITY,
-        },
-        turn_deadline_unix_ms=deadline,
-    )
-
-    assert [frame["type"] for frame in ensured] == ["acknowledged"]
-    assert not broker.active
-    assert [frame["type"] for frame in released] == ["acknowledged"]
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_ensure_reports_refused_broker_install(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    broker_active = False
-
-    def refuse_install(payload: dict[str, object]) -> dict[str, object]:
-        nonlocal broker_active
-        if payload["operation"] == "install":
-            broker_active = True
-            return {"ok": False, "active": True}
-        broker_active = False
-        return {"ok": True, "active": False}
-
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=refuse_install,
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-
-    responses = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "ensure_workspace",
-            "request_id": "request-refused-ensure",
-            **IDENTITY,
-        },
-    )
-
-    assert [frame["type"] for frame in responses] == ["acknowledged", "terminal"]
-    assert responses[-1]["status"] == "failed"
-    assert responses[-1]["error"] == "executor_transport_unavailable"
-    assert not broker_active
-    server.shutdown()
-    thread.join(timeout=2)
-
-
-def test_remote_deadline_watchdog_cancels_without_a_connected_harness(
-    tmp_path: Path,
-) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-    broker = _Broker()
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=broker,
-        command_preexec=None,
-        remote_mode=True,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-    deadline = int((time.time() + 0.3) * 1000)
-    ensured = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "ensure_workspace",
-            "request_id": "request-deadline-ensure",
-            **IDENTITY,
-        },
-        turn_deadline_unix_ms=deadline,
-    )
-
-    started = time.monotonic()
-    result = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "exec",
-            "request_id": "request-deadline-exec",
-            **IDENTITY,
-            "command": "sleep 5",
-            "timeout_ms": 10_000,
-        },
-        turn_deadline_unix_ms=deadline,
-    )
-
-    assert [frame["type"] for frame in ensured] == ["acknowledged"]
-    assert result[-1]["status"] == "cancelled"
-    assert time.monotonic() - started < 2
-    assert [request["operation"] for request in broker.requests] == [
-        "install",
-        "clear",
-    ]
-    assert not broker.active
     server.shutdown()
     thread.join(timeout=2)
 
@@ -1635,58 +1315,6 @@ def test_lost_install_response_still_clears_mutated_broker(tmp_path: Path) -> No
     thread.join(timeout=2)
 
 
-def test_refused_install_response_still_clears_mutated_broker(tmp_path: Path) -> None:
-    workspace = tmp_path / "workspace"
-    workspace.mkdir()
-
-    class RefusedInstallBroker:
-        def __init__(self) -> None:
-            self.active = False
-            self.operations: list[object] = []
-
-        def __call__(self, payload: dict[str, object]) -> dict[str, object]:
-            self.operations.append(payload["operation"])
-            if payload["operation"] == "install":
-                self.active = True
-                return {"ok": False, "active": True}
-            if payload["operation"] == "clear":
-                self.active = False
-            return {"ok": True, "active": self.active}
-
-    broker = RefusedInstallBroker()
-    server = ExecutorServer(
-        socket_path=tmp_path / "private" / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=workspace,
-        worker_generation="worker-1",
-        broker_control=broker,
-        command_preexec=None,
-    )
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    assert server.wait_until_ready(2)
-
-    responses = _operation(
-        server.socket_path,
-        {
-            "protocol": PROTOCOL,
-            "type": "exec",
-            "request_id": "request-refused-install",
-            **IDENTITY,
-            "command": "printf bad > refused-install-side-effect",
-            "timeout_ms": 2_000,
-        },
-    )
-
-    assert responses[-1]["status"] == "failed"
-    assert responses[-1]["error"] == "execution_start_failed"
-    assert broker.operations == ["install", "clear"]
-    assert broker.active is False
-    assert not (workspace / "refused-install-side-effect").exists()
-    server.shutdown()
-    thread.join(timeout=2)
-
-
 def test_unexpected_broker_defect_propagates_after_cleanup(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1857,7 +1485,7 @@ def test_client_disconnect_during_response_is_only_a_transport_loss(
     thread.join(timeout=2)
 
 
-def test_four_commands_overlap_under_one_turn_capability(tmp_path: Path) -> None:
+def test_only_one_command_runs_at_a_time_in_the_workspace(tmp_path: Path) -> None:
     workspace = tmp_path / "workspace"
     workspace.mkdir()
     server = ExecutorServer(
@@ -1865,109 +1493,55 @@ def test_four_commands_overlap_under_one_turn_capability(tmp_path: Path) -> None
         state_path=tmp_path / "state",
         workspace_root=workspace,
         worker_generation="worker-1",
-        broker_control=(broker := _Broker()),
+        broker_control=_Broker(),
         command_preexec=None,
     )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     assert server.wait_until_ready(2)
-    results: dict[int, list[dict[str, object]]] = {}
-
-    def run(index: int) -> None:
-        identity = {
-            **IDENTITY,
-            "execution_id": f"execution-{index}",
-            "tool_call_id": f"tool-{index}",
-        }
-        command = (
-            f"touch started-{index}; "
-            "for i in 0 1 2 3; do "
-            "while [ ! -f started-$i ]; do sleep .01; done; "
-            "done; printf done"
+    first_request = {
+        "protocol": PROTOCOL,
+        "type": "exec",
+        "request_id": "request-first",
+        **IDENTITY,
+        "command": "sleep .1; printf ready > serialized-marker",
+        "timeout_ms": 2_000,
+    }
+    second_identity = {
+        **IDENTITY,
+        "turn_id": "turn-2",
+        "execution_id": "execution-2",
+        "tool_call_id": "tool-2",
+    }
+    second_request = {
+        "protocol": PROTOCOL,
+        "type": "exec",
+        "request_id": "request-second",
+        **second_identity,
+        "command": "test -f serialized-marker",
+        "timeout_ms": 2_000,
+    }
+    results: dict[str, list[dict[str, object]]] = {}
+    first_thread = threading.Thread(
+        target=lambda: results.setdefault(
+            "first", _operation(server.socket_path, first_request)
         )
-        results[index] = _operation(
-            server.socket_path,
-            {
-                "protocol": PROTOCOL,
-                "type": "exec",
-                "request_id": f"request-{index}",
-                **identity,
-                "command": command,
-                "timeout_ms": 2_000,
-            },
+    )
+    second_thread = threading.Thread(
+        target=lambda: results.setdefault(
+            "second", _operation(server.socket_path, second_request)
         )
+    )
+    first_thread.start()
+    time.sleep(0.02)
+    second_thread.start()
+    first_thread.join(timeout=2)
+    second_thread.join(timeout=2)
 
-    workers = [threading.Thread(target=run, args=(index,)) for index in range(4)]
-    for worker in workers:
-        worker.start()
-    for worker in workers:
-        worker.join(timeout=3)
-
-    assert len(results) == 4
-    assert [results[index][-1]["exit_code"] for index in range(4)] == [0] * 4
-    assert sum(request["operation"] == "install" for request in broker.requests) == 1
-    assert sum(request["operation"] == "clear" for request in broker.requests) == 1
+    assert results["first"][-1]["exit_code"] == 0
+    assert results["second"][-1]["exit_code"] == 0
     server.shutdown()
     thread.join(timeout=2)
-
-
-def test_detached_resume_boundary_accepts_29_9_and_rejects_30_1_seconds(
-    tmp_path: Path,
-) -> None:
-    now = [129.9]
-    server = ExecutorServer(
-        socket_path=tmp_path / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=tmp_path,
-        monotonic=lambda: now[0],
-    )
-    execution = SimpleNamespace(detached_at=100.0)
-
-    assert server._detached_resume_expired(execution) is False
-    now[0] = 130.1
-    assert server._detached_resume_expired(execution) is True
-
-
-def test_successful_attach_resets_detached_resume_window(
-    tmp_path: Path, monkeypatch
-) -> None:
-    server = ExecutorServer(
-        socket_path=tmp_path / "executor.sock",
-        state_path=tmp_path / "state",
-        workspace_root=tmp_path,
-        monotonic=lambda: 105.0,
-    )
-    execution = SimpleNamespace(
-        identity=dict(IDENTITY),
-        terminal=None,
-        detached_at=100.0,
-        cancel=threading.Event(),
-        process=None,
-        condition=threading.Condition(),
-    )
-    server._executions[("turn-1", "tool-1")] = execution
-    observed_detachments: list[float | None] = []
-    monkeypatch.setattr(
-        server,
-        "_stream",
-        lambda _connection, _request, active, _offset: observed_detachments.append(
-            active.detached_at
-        ),
-    )
-    connection = SimpleNamespace(sendall=lambda _payload: None)
-
-    server._attach(
-        connection,
-        {
-            "protocol": PROTOCOL,
-            "type": "attach_execution",
-            "request_id": "request-reset-detachment",
-            **IDENTITY,
-            "offset": 0,
-        },
-    )
-
-    assert observed_detachments == [None]
 
 
 def test_invalid_utf8_at_chunk_limit_still_reaches_terminal(tmp_path: Path) -> None:

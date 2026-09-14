@@ -110,7 +110,7 @@ def validate(production: str, staging: str) -> list[str]:
         )
         if not operator_block or "return 404;" not in operator_block:
             failures.append(f"{environment} does not deny public deployment operators")
-    if "8081" in staging:
+    if "8081" in staging or "proxy_set_header Upgrade" in staging:
         failures.append("staging exposes Vite/HMR")
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
@@ -192,46 +192,7 @@ def validate(production: str, staging: str) -> list[str]:
                 )
         if "client_max_body_size 512k;" not in config:
             failures.append(f"{environment} chat gateway body limit is missing")
-    for config, environment, hostname in (
-        (production, "production", "chat-executor.paperswithcode.co"),
-        (staging, "staging", "chat-executor-staging.paperswithcode.co"),
-    ):
-        if f"server_name {hostname};" not in config:
-            failures.append(f"{environment} executor hostname is missing")
-        if f"/etc/letsencrypt/live/{hostname}/fullchain.pem" not in config:
-            failures.append(f"{environment} executor TLS certificate is missing")
-        executor_server = config.split(f"server_name {hostname};", 1)[-1].split(
-            "\nserver {", 1
-        )[0]
-        if "ssl_protocols TLSv1.3;" not in executor_server:
-            failures.append(f"{environment} executor must require TLS 1.3")
-        route = (
-            'location ~ "^/v1/generations/'
-            '(?<pwc_executor_generation>[1-9][0-9]{0,19})/environment$"'
-        )
-        block = location_block(config, route)
-        for requirement in (
-            "proxy_pass http://unix:/run/paperswithcode/"
-            f"{environment}/$pwc_executor_generation/"
-            "chat-executor-rendezvous.sock:;",
-            "rewrite ^ /v1/environment break;",
-            "proxy_http_version 1.1;",
-            "proxy_set_header Upgrade $http_upgrade;",
-            'proxy_set_header Connection "upgrade";',
-            "proxy_set_header X-PWC-Network-Source $remote_addr;",
-            "proxy_read_timeout 20s;",
-            "proxy_send_timeout 20s;",
-            "proxy_buffering off;",
-        ):
-            if requirement not in block:
-                failures.append(
-                    f"{environment} executor rendezvous misses: {requirement}"
-                )
-        if config.count("proxy_set_header Upgrade") != 1:
-            failures.append(
-                f"{environment} exposes an unexpected WebSocket upgrade route"
-            )
-    if staging.count("location / {") != 2 or production.count("location / {") != 2:
+    if staging.count("location / {") != 1 or production.count("location / {") != 1:
         failures.append("ambiguous catch-all location")
     failures.extend(
         _validate_seo_routes(production, "pwc_production_backend", "production")

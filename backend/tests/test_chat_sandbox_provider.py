@@ -18,7 +18,6 @@ from backend.config import Settings
 from backend.services import chat_sandbox_provider, chat_sandbox_service
 from backend.services.chat_sandbox_provider import (
     ModalSandboxProviderAdapter,
-    ExecutorLaunchBundle,
     SandboxLaunchMode,
     SandboxError,
     sandbox_environment,
@@ -130,14 +129,23 @@ def test_create_nonpersistent_sandbox_preserves_provider_isolation_contract(
     assert options["env"]["PWC_CHAT_SHOW_REASONING"] == "true"
 
 
-@pytest.mark.parametrize("legacy", [False, True])
-def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
-    monkeypatch, legacy
-):
+def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatch):
     captured: dict[str, object] = {}
+    probes: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     class Sandbox:
         object_id = "sb-executor"
+
+        def __init__(self):
+            self.exec = _AsyncCall(self._exec)
+
+        async def _exec(self, *command, **options):
+            probes.append((command, options))
+
+            async def wait():
+                return None
+
+            return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
 
     async def lookup(*_args, **_options):
         return object()
@@ -156,12 +164,6 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
         "create",
         _AsyncCall(create),
     )
-
-    async def health(_sandbox, **options):
-        assert options["launch_mode"] is SandboxLaunchMode.LEGACY_EXECUTOR
-        captured["health_checked"] = True
-        return True
-
     provider = ModalSandboxProviderAdapter(
         _settings(
             chat_sandbox_executor_enabled=True,
@@ -170,7 +172,6 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
         image_resolver=resolve_image,
     )
 
-    monkeypatch.setattr(provider, "health", health)
     result = asyncio.run(
         provider.create(
             name="chat-executor-test",
@@ -179,50 +180,36 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
                 "qualification_profile": "32-functional-turns",
             },
             worker_generation="generation-a",
-            launch_mode=(
-                SandboxLaunchMode.LEGACY_EXECUTOR
-                if legacy
-                else SandboxLaunchMode.EXECUTOR
-            ),
-            executor_launch=None
-            if legacy
-            else ExecutorLaunchBundle(
-                b"signed-launch", shard_generation=7, authorization_keys_json="{}"
-            ),
+            launch_mode=SandboxLaunchMode.EXECUTOR,
         )
     )
 
     assert result.object_id == "sb-executor"
     assert captured["command"] == (
-        ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
-        if legacy
-        else (
-            "/usr/local/bin/pwc-executor-environment",
-            "--connect",
-            "wss://chat-executor-staging.paperswithcode.co/v1/generations/7/environment",
-            "--admission-env",
-            "PWC_CHAT_EXECUTOR_ADMISSION",
-            "--authorization-env",
-            "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
-        )
+        "python",
+        "-m",
+        "backend.chat_sandbox_worker.executor_daemon",
     )
-    assert captured.get("health_checked", False) is legacy
     options = captured["options"]
     assert options["env"]["PWC_CHAT_EXECUTOR_CONTRACT_VERSION"] == EXECUTOR_PROTOCOL
     assert options["env"]["PWC_CHAT_WORKER_GENERATION"] == "generation-a"
-    assert options["env"].get("PWC_CHAT_EXECUTOR_ADMISSION") == (
-        None if legacy else "c2lnbmVkLWxhdW5jaA=="
-    )
-    assert options["env"].get("PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS") == (
-        None if legacy else "{}"
-    )
     assert "OPENAI_API_KEY" not in options["env"]
     assert "OPENROUTER_API_KEY" not in options["env"]
     assert "HF_TOKEN" not in options["env"]
     assert options["inbound_cidr_allowlist"] == []
-    assert options["outbound_domain_allowlist"] == [
-        "gateway.example.test",
-        *([] if legacy else ["chat-executor-staging.paperswithcode.co"]),
+    assert probes == [
+        (
+            ("test", "-S", "/run/pwc-chat-executor/executor.sock"),
+            {"timeout": 5},
+        ),
+        (
+            (
+                "sh",
+                "-c",
+                "printf durable-ready > /workspace/durable-ready.txt",
+            ),
+            {"timeout": 5},
+        ),
     ]
 
 

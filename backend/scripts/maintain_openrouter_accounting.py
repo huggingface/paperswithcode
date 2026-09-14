@@ -47,9 +47,6 @@ async def run(
                 "unknown_calls_settled_at_ceiling": (
                     direct_openai.unknown_calls_settled_at_ceiling
                 ),
-                "turn_reservations_reconciled": (
-                    direct_openai.turn_reservations_reconciled
-                ),
             }
             if direct_openai is not None
             else None

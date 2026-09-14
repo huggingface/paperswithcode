@@ -70,3 +70,15 @@ def test_project_navigation_is_separated_from_paper_artifacts():
         "https://github.com/official/code",
         "https://lab.github.io/",
     ]
+
+
+@pytest.mark.parametrize(
+    "asset", ["assets/tts-elo-chinese.png", "figure.SVG", "paper.pdf"]
+)
+def test_project_assets_are_not_project_pages(asset):
+    assert (
+        url_preflight.normalize_candidate(
+            f"https://stepaudiollm.github.io/step-audio-3-gen/{asset}"
+        )
+        is None
+    )

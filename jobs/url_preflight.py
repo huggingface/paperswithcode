@@ -154,6 +154,8 @@ def normalize_candidate(raw: str, base_url: str | None = None) -> str | None:
     if not host.endswith(".github.io"):
         return None
     path = parsed.path.rstrip("/")
+    if re.search(r"\.(?:svg|png|jpe?g|webp|gif|pdf)$", path, re.I):
+        return None
     return urllib.parse.urlunsplit(("https", host, path, "", ""))
 
 

@@ -6,20 +6,13 @@ import uuid
 
 import pytest
 
-from backend.models.database import (
-    ChatOpenAIProviderCall,
-    ChatOpenRouterProviderCall,
-    ChatSession,
-    ChatTurnAdmissionBudget,
-    ChatTurnReservation,
-)
+from backend.models.database import ChatSession
 from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
 )
 from backend.services.chat_sandbox_provider import SandboxError, SandboxLaunchMode
 from backend.services.chat_sandbox_capacity_repository import LeaseDecisionChanged
 from backend.services.chat_turn_job_repository import StaleTurnClaim, TurnLeaseClaim
-from backend.services.chat_turn_admission import ChatTurnAdmissionService
 from backend.tests.test_chat_sandbox_acquisition_coordinator import _coordinator
 from backend.tests.test_chat_sandbox_capacity_acquisition import (
     _Provider,
@@ -96,14 +89,10 @@ def setup_manager(
     record=None,
     qualification_capacity=None,
     sandbox_cap=2,
-    warm_seconds=300,
-    max_warm=10,
 ):
     settings = _settings(
         chat_workspace_snapshots_enabled=False,
         chat_sandbox_total_live_cap=sandbox_cap,
-        chat_sandbox_warm_seconds=warm_seconds,
-        chat_sandbox_max_warm=max_warm,
     )
     sessions = _database()
     session_id = uuid.uuid4()
@@ -129,15 +118,6 @@ def setup_manager(
         ),
     )
     return manager, sessions, session_id, provider
-
-
-@pytest.mark.parametrize(
-    ("warm_seconds", "max_warm"),
-    [(299, 10), (300, 11)],
-)
-def test_executor_retention_contract_is_exact(warm_seconds, max_warm):
-    with pytest.raises(ValueError, match="retention contract"):
-        setup_manager(warm_seconds=warm_seconds, max_warm=max_warm)
 
 
 @pytest.mark.parametrize(
@@ -256,44 +236,6 @@ def test_workspace_lifecycle_records_exact_turn_and_session_evidence():
     ]
 
 
-def test_workspace_lifecycle_records_a_proven_resource_window():
-    manager, sessions, session_id, _provider = setup_manager()
-    engine = sessions.kw["bind"]
-    ChatTurnAdmissionBudget.__table__.create(engine)
-    ChatTurnReservation.__table__.create(engine)
-    ChatOpenRouterProviderCall.__table__.create(engine)
-    ChatOpenAIProviderCall.__table__.create(engine)
-    manager.executor_runtime = object()
-    with sessions() as db, db.begin():
-        admission = ChatTurnAdmissionService(
-            environment=manager.settings.environment,
-            spend_limit_microusd=(
-                manager.settings.chat_sandbox_application_cap_microusd
-            ),
-        )
-        admission.initialize(db, now=manager.utcnow())
-        admission.reserve(
-            db,
-            turn_id=TURN_CLAIM.turn_id,
-            request_id="workspace-resource-window",
-            owner_id="workspace-owner",
-            reserve_microusd=10_000,
-            now=manager.utcnow(),
-        )
-
-    async def exercise():
-        workspace = await manager.acquire(session_id=session_id, turn_claim=TURN_CLAIM)
-        assert await manager.release(workspace)
-
-    asyncio.run(exercise())
-
-    with sessions() as db:
-        row = db.get(ChatTurnReservation, TURN_CLAIM.turn_id)
-        assert row.resource_started_at is not None
-        assert row.resource_ended_at is not None
-        assert row.resource_ended_at >= row.resource_started_at
-
-
 def test_workspace_programming_failure_is_visible_without_invalidating_busy_claim():
     def fail_record(**_values):
         raise RuntimeError("evidence unavailable")
@@ -374,39 +316,6 @@ def test_executor_workspace_reuse_uses_executor_launch_mode_health():
 
     assert second.sandbox_id == first.sandbox_id
     assert len(provider.create_options) == 1
-
-
-def test_circuit_fallback_uses_legacy_launch_without_rendezvous_admission():
-    manager, _sessions, session_id, provider = setup_manager()
-
-    async def exercise():
-        workspace = await manager.acquire_legacy(
-            session_id=session_id, turn_claim=TURN_CLAIM
-        )
-        assert await manager.release(workspace)
-
-    asyncio.run(exercise())
-
-    assert (
-        provider.create_options[0]["launch_mode"] is SandboxLaunchMode.LEGACY_EXECUTOR
-    )
-    assert provider.create_options[0]["executor_launch"] is None
-
-
-def test_binding_acquisition_defers_health_to_the_persistent_channel():
-    health = ExecutorHealth()
-    manager, _sessions, session_id, _provider = setup_manager(health=health)
-
-    async def exercise():
-        workspace = await manager.acquire_for_binding(
-            session_id=session_id,
-            turn_claim=TURN_CLAIM,
-        )
-        assert await manager.release(workspace)
-
-    asyncio.run(exercise())
-
-    assert health.sandboxes == []
 
 
 def test_concurrent_acquisition_waits_for_existing_busy_workspace():

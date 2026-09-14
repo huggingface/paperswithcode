@@ -24,21 +24,6 @@ class ExternalWorkerCapacityUnavailable(RuntimeError):
     """No configured live worker has an unreserved protected slot."""
 
 
-class UnsupportedChatMode(RuntimeError):
-    """Remote executor v1 cannot serve an authoring turn."""
-
-    code = "unsupported_chat_mode"
-
-
-def require_ordinary_research_mode(
-    *, poster_mode: bool, paper_artifacts_enabled: bool
-) -> None:
-    if poster_mode or paper_artifacts_enabled:
-        raise UnsupportedChatMode(
-            "Persistent executor v1 supports ordinary research only"
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class ExternalWorkerEndpoint:
     endpoint_id: str
