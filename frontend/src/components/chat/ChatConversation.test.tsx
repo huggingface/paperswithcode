@@ -10,10 +10,13 @@ vi.mock("./ChatMessage", () => ({
   }) => <div data-message-id={id}>
     <button onClick={() => onResendDraft({ text: "Edited question", paperMentions: [] })}>Edit {id}</button>
   </div>,
-  AssistantMessage: ({ onToggleBlock, msg }: {
+  AssistantMessage: ({ onToggleBlock, onRetryCompaction, msg }: {
     onToggleBlock: (id: string, index: number) => void;
     msg: ChatMessage;
-  }) => <button onClick={() => onToggleBlock(msg.id, 0)}>Toggle reasoning</button>,
+    onRetryCompaction?: () => void;
+  }) => <div><button onClick={() => onToggleBlock(msg.id, 0)}>Toggle reasoning</button>
+    {onRetryCompaction && <button onClick={onRetryCompaction}>Retry</button>}
+  </div>,
 }));
 
 afterEach(() => vi.restoreAllMocks());
@@ -156,4 +159,23 @@ describe("ChatConversation scrolling", () => {
     chat.update();
     expect(chat.scroller.scrollTop).toBe(200);
   });
+});
+
+
+it("retries only the latest persisted user turn and preserves its draft", () => {
+  const onEditAndResend = vi.fn(() => true);
+  const props = {
+    papers: {}, busy: false, paperMentionsEnabled: false, archivePending: null,
+    openRouterFallbackEnabled: false, onToggleBlock: vi.fn(), onEditAndResend,
+    onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
+  };
+  const user: ChatMessage = { id: "q", role: "user", text: "Keep the citations", paperMentions: [] };
+  const assistant: ChatMessage = { id: "a", role: "assistant", errorCode: "context_too_large" };
+  const view = render(<ChatConversation {...props} messages={[user, assistant]} />);
+  expect(view.queryByText("Retry")).toBeNull();
+  view.rerender(<ChatConversation {...props} messages={[{ ...user, revision: 1 }, assistant]} />);
+  fireEvent.click(view.getByText("Retry"));
+  expect(onEditAndResend).toHaveBeenCalledWith("q", { text: "Keep the citations", paperMentions: [] });
+  view.rerender(<ChatConversation {...props} busy messages={[{ ...user, revision: 1 }, assistant]} />);
+  expect(view.queryByText("Retry")).toBeNull();
 });
