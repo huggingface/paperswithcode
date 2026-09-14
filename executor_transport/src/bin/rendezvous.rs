@@ -12,7 +12,7 @@ use pwc_persistent_executor_transport::admission::{
     AdmissionClaims, AdmissionPurpose, AdmissionSigner, AdmissionVerificationKey,
     AdmissionVerifier, LifecycleClass, MAX_PREAUTH_FRAME_BYTES, PREAUTH_DEADLINE_MS,
 };
-use pwc_persistent_executor_transport::local_socket::{validate_peer, write_frame};
+use pwc_persistent_executor_transport::local_socket::{FrameReader, validate_peer, write_frame};
 use pwc_persistent_executor_transport::noise::{
     NoiseIdentity, NoisePublicKey, PendingResponderHandshake, prologue,
 };
@@ -247,7 +247,11 @@ async fn serve(
         let allowed_harness_uid = config.allowed_harness_uid;
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = dispatch(stream, state, allowed_backend_uid, allowed_harness_uid).await;
+            if let Err(error) =
+                dispatch(stream, state, allowed_backend_uid, allowed_harness_uid).await
+            {
+                eprintln!("executor connection failed: {error}");
+            }
         });
     }
     drop(listener);
@@ -534,9 +538,10 @@ async fn handle_peer(
         events.send(event),
     )
     .await??;
+    let mut reader = FrameReader::new(MAX_LOCAL_PEER_FRAME_BYTES);
     loop {
         tokio::select! {
-            frame = read_bounded_frame(&mut stream, MAX_LOCAL_PEER_FRAME_BYTES) => {
+            frame = reader.read(&mut stream) => {
                 match frame {
                     Ok(frame) => events.send(PeerEvent::Data { connection_id, frame }).await?,
                     Err(_) => break,

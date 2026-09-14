@@ -40,6 +40,58 @@ pub enum LocalSocketError {
     Authorization(#[from] ContentFreeError),
 }
 
+/// Retains partial headers and payloads when a select branch cancels a read.
+/// Discard this reader when replacing the underlying connection.
+pub struct FrameReader {
+    limit: usize,
+    header: [u8; 4],
+    header_read: usize,
+    payload: Vec<u8>,
+    payload_read: usize,
+}
+
+impl FrameReader {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            header: [0; 4],
+            header_read: 0,
+            payload: Vec::new(),
+            payload_read: 0,
+        }
+    }
+
+    pub async fn read<R: AsyncRead + Unpin>(
+        &mut self,
+        stream: &mut R,
+    ) -> Result<Vec<u8>, LocalSocketError> {
+        while self.header_read < 4 {
+            let count = stream.read(&mut self.header[self.header_read..]).await?;
+            if count == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            }
+            self.header_read += count;
+        }
+        if self.payload.is_empty() {
+            let length = u32::from_be_bytes(self.header) as usize;
+            if length == 0 || length > self.limit {
+                return Err(LocalSocketError::FrameRejected);
+            }
+            self.payload.resize(length, 0);
+        }
+        while self.payload_read < self.payload.len() {
+            let count = stream.read(&mut self.payload[self.payload_read..]).await?;
+            if count == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            }
+            self.payload_read += count;
+        }
+        self.header_read = 0;
+        self.payload_read = 0;
+        Ok(std::mem::take(&mut self.payload))
+    }
+}
+
 pub async fn read_frame<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Vec<u8>, LocalSocketError> {
     let length = stream.read_u32().await? as usize;
     if length == 0 || length > MAX_LOCAL_FRAME_BYTES {
@@ -377,6 +429,36 @@ fn hex_digit(value: u8) -> Result<u8, LocalSocketError> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn frame_reader_survives_cancelled_header_and_payload_reads() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, mut stream) = tokio::io::duplex(64);
+        let mut reader = super::FrameReader::new(16);
+        writer.write_all(&[0, 0]).await.unwrap();
+        tokio::select! {
+            biased;
+            result = reader.read(&mut stream) => panic!("incomplete header: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(reader.header_read, 2);
+        writer.write_all(&[0, 5, b'h', b'e']).await.unwrap();
+        tokio::select! {
+            biased;
+            result = reader.read(&mut stream) => panic!("incomplete payload: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(reader.payload_read, 2);
+        writer.write_all(b"llo").await.unwrap();
+        assert_eq!(reader.read(&mut stream).await.unwrap(), b"hello");
+        super::write_frame(&mut writer, b"next").await.unwrap();
+        assert_eq!(reader.read(&mut stream).await.unwrap(), b"next");
+        writer.write_all(&17_u32.to_be_bytes()).await.unwrap();
+        assert!(matches!(
+            reader.read(&mut stream).await,
+            Err(super::LocalSocketError::FrameRejected)
+        ));
+    }
+
     use super::*;
 
     #[tokio::test]
