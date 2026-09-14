@@ -70,15 +70,36 @@ def smoke_command(environment: str, expected_release: str) -> list[str]:
     return command
 
 
+def reload_renewed_certificate(environment: str) -> None:
+    """Load an executor certificate without copying or changing nginx templates."""
+    hostname = (
+        "chat-executor.paperswithcode.co"
+        if environment == "production"
+        else "chat-executor-staging.paperswithcode.co"
+    )
+    expected = Path("/etc/letsencrypt/live") / hostname
+    lineage = os.environ.get("RENEWED_LINEAGE")
+    if lineage is None or Path(lineage) != expected:
+        raise RuntimeError("renewal hook requires the selected executor certificate")
+    release = active_release_id(environment)
+    subprocess.run(["nginx", "-t"], check=True)
+    subprocess.run(["systemctl", "reload", "nginx"], check=True)
+    subprocess.run(smoke_command(environment, release), check=True)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="pwc-nginx")
     parser.add_argument("environment", choices=SITES)
     parser.add_argument("--confirm", required=True)
+    parser.add_argument("--reload-renewed-certificate", action="store_true")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo")
     if args.confirm != CONFIRMATIONS[args.environment]:
         parser.error(f"expected --confirm {CONFIRMATIONS[args.environment]}")
+    if args.reload_renewed_certificate:
+        reload_renewed_certificate(args.environment)
+        return 0
     name = SITES[args.environment]
     source = INSTALL_ROOT / "nginx" / f"{name}.conf"
     target = Path("/etc/nginx/sites-available") / name

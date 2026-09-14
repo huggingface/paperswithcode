@@ -1174,3 +1174,31 @@ Use `uv run --env-file backend/keys.env ...` for local backend commands and
 `npm run dev` for a localhost frontend. `start_services.sh` and
 `stop_services.sh` are non-mutating retirement notices; `check_services.sh`
 delegates to `pwc-status`.
+
+### Production executor certificate renewal
+
+The executor hostname serves only ACME challenge files from
+`/var/lib/letsencrypt/pwc-executor-production/.well-known/acme-challenge/`
+plus its generation-bound WebSocket route. Other HTTPS paths return 404.
+The HTTP challenge location is served directly; other HTTP paths redirect to HTTPS.
+
+After merging and installing the reviewed deployment tools and nginx template,
+create the challenge directory (root-owned, mode 0755), apply the production
+nginx template through `pwc-nginx`, and switch the existing certificate from
+manual DNS validation to webroot validation:
+
+```bash
+sudo certbot reconfigure \
+  --cert-name chat-executor.paperswithcode.co \
+  --authenticator webroot \
+  --webroot-path /var/lib/letsencrypt/pwc-executor-production \
+  --preferred-challenges http \
+  --deploy-hook 'pwc-nginx production --confirm APPLY_NGINX_PRODUCTION --reload-renewed-certificate'
+```
+
+`reconfigure` must pass its renewal test before the parameters are saved. Confirm
+the saved renewal configuration uses `webroot` and that `certbot.timer` is enabled.
+The renewal hook requires Certbot's exact `RENEWED_LINEAGE` for the executor host,
+validates the live nginx configuration before reloading, then smoke-tests the
+active application release. It does not install a template or change release
+pointers. Remove the old DNS TXT challenge after certificate issuance.
