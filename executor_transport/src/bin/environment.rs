@@ -438,7 +438,7 @@ async fn open_websocket(
 > {
     let (socket, _) = timeout(
         deadline,
-        connect_async_with_config(url, Some(websocket_config()), false),
+        connect_async_with_config(url, Some(websocket_config()), true),
     )
     .await
     .map_err(|_| "rendezvous connection timed out")??;
@@ -1073,6 +1073,13 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
+        let tokio_tungstenite::MaybeTlsStream::Plain(tcp) = client.get_ref() else {
+            panic!("test connection must use plain TCP");
+        };
+        assert!(
+            tcp.nodelay().unwrap(),
+            "small control frames must not wait for Nagle buffering"
+        );
         let mut peer = server.await.unwrap();
         // No admission frame was sent while readiness was pending.
         assert!(
