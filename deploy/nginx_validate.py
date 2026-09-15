@@ -101,7 +101,6 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
             'if ($http_mcp_protocol_version != "") { return 418; }',
             f"if (${prefix}_stream_signal) {{ return 418; }}",
             f"if (${prefix}_html_signal = 0) {{ return 406; }}",
-            "limit_except GET HEAD",
             "try_files /index.html =404;",
             'add_header Vary "Accept, MCP-Protocol-Version" always;',
             'add_header Allow "GET, HEAD, POST, DELETE, OPTIONS" always;',

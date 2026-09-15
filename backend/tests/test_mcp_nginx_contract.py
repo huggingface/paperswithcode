@@ -28,6 +28,7 @@ def test_mcp_protocol_signals_precede_html_and_honor_q_zero():
             f"if (${prefix}_stream_signal)",
         ):
             assert block.index(protocol_check) < html_check
+        assert "limit_except" not in block
         assert f"${prefix}_stream_q0" in config
         assert f"${prefix}_html_q0" in config
         assert "text/event-stream" in config
