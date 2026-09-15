@@ -552,3 +552,91 @@ def test_actual_evaluation_changes_still_invalidate_edit_document(db):
     db.commit()
     with pytest.raises(CatalogConflictError):
         service.submit(doc, ACTOR, "stale")
+
+
+def test_agent_organization_edits_publish_with_attribution_and_rollback(db):
+    from backend.models.database import Organization, PaperOrganization
+    from backend.services.contribution_audit_service import ContributionAuditService
+
+    db.add_all(
+        [
+            Organization(id=1, name="First", slug="first"),
+            Organization(id=2, name="Second", slug="second"),
+        ]
+    )
+    db.flush()
+    db.add(
+        PaperOrganization(
+            paper_id=1,
+            organization_id=1,
+            source="manual",
+            added_by_hf_subject="original",
+            added_by_hf_username="original-user",
+        )
+    )
+    db.commit()
+    service = PaperEditService(db)
+    actor = dict(ACTOR, source="paper_token", paper_id=1)
+    ops = [{"section": "organizations", "payload": {"organization_ids": [2]}}]
+    doc = document(db, operations=ops)
+    assert (
+        service.submit(doc, actor, "org-preview", preview=True)["status"] == "preview"
+    )
+    assert db.query(PaperOrganization).one().organization_id == 1
+    result = service.submit(doc, actor, "org-publish")
+    row = db.query(PaperOrganization).one()
+    assert (row.organization_id, row.added_by_hf_subject, row.added_by_hf_username) == (
+        2,
+        ACTOR["hf_subject"],
+        ACTOR["username"],
+    )
+    assert result["after"]["sections"]["organizations"] == [{"organization_id": 2}]
+    event = db.get(CatalogMutationEvent, uuid.UUID(result["event_id"]))
+    assert ContributionAuditService(db).is_rollback_eligible(event)
+    service.rollback(event=event, actor=ADMIN, request_id="org-rollback")
+    row = db.query(PaperOrganization).one()
+    assert (row.organization_id, row.added_by_hf_subject) == (1, "original")
+    with pytest.raises(CatalogPermissionError):
+        service.submit(document(db, 2, ops), actor, "wrong-paper-org")
+    db.rollback()
+    invalid = [
+        {"section": "tasks", "payload": {"task_ids": [1]}},
+        {"section": "organizations", "payload": {"organization_ids": [999]}},
+    ]
+    with pytest.raises(CatalogValidationError):
+        service.submit(document(db, operations=invalid), actor, "invalid-org")
+    db.rollback()
+    assert db.query(PaperTask).count() == 0
+    assert db.query(PaperOrganization).one().organization_id == 1
+
+
+def test_legacy_batch_rollback_preserves_unrecorded_organization_links(db):
+    from backend.models.database import Organization, PaperOrganization
+    from backend.services.contribution_audit_service import ContributionAuditService
+
+    service = PaperEditService(db)
+    result = service.submit(document(db), ACTOR, "legacy")
+    event = db.get(CatalogMutationEvent, uuid.UUID(result["event_id"]))
+    # Reproduce pre-organization event snapshots in this isolated test database.
+    for attr in ("before_snapshot", "after_snapshot"):
+        snapshot = getattr(event, attr)
+        setattr(
+            event,
+            attr,
+            {
+                **snapshot,
+                "sections": {
+                    k: v
+                    for k, v in snapshot["sections"].items()
+                    if k != "organizations"
+                },
+            },
+        )
+    db.add(Organization(id=1, name="Later", slug="later"))
+    db.flush()
+    db.add(PaperOrganization(paper_id=1, organization_id=1, source="manual"))
+    db.commit()
+    assert ContributionAuditService(db).is_rollback_eligible(event)
+    service.rollback(event=event, actor=ADMIN, request_id="legacy-rollback")
+    assert db.query(PaperTask).count() == 0
+    assert db.query(PaperOrganization).one().organization_id == 1

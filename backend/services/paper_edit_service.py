@@ -10,6 +10,7 @@ from backend.models.database import Evaluation as DBEvaluation
 from backend.models.paper_edits import (
     ArtifactEdit,
     MethodEdit,
+    OrganizationEdit,
     PaperEditDocument,
     ProjectPageEdit,
     RepositoryEdit,
@@ -31,6 +32,7 @@ from backend.services.paper_edit_access import EDIT_SECTIONS, PaperEditAccess
 SECTION_MODELS = dict(
     tasks=TaskEdit,
     methods=MethodEdit,
+    organizations=OrganizationEdit,
     repositories=RepositoryEdit,
     project_pages=ProjectPageEdit,
     hf_artifacts=ArtifactEdit,
@@ -192,6 +194,11 @@ class PaperEditService:
                         if section == "project_pages"
                         else {}
                     )
+                    if section == "organizations":
+                        kwargs = {
+                            "manual_added_by_hf_subject": actor.get("hf_subject"),
+                            "manual_added_by_hf_username": actor.get("username"),
+                        }
                     getattr(self.papers.paper_associations, f"update_{section}")(
                         paper_id, **payload, commit=False, **kwargs
                     )
@@ -277,11 +284,17 @@ class PaperEditService:
                 "related_project_pages", []
             )
         }
-        return self.snapshot(int(event.entity_id), lock=lock, project_urls=urls)
+        current = self.snapshot(int(event.entity_id), lock=lock, project_urls=urls)
+        # Older batches did not capture organizations. Their rollback must leave
+        # those associations alone and compare only the sections they recorded.
+        current["sections"] = {
+            key: current["sections"][key] for key in event.after_snapshot["sections"]
+        }
+        return current
 
     def rollback(self, *, event, actor, request_id):
         def restore():
-            for section in sorted(EDIT_SECTIONS):
+            for section in sorted(event.before_snapshot["sections"]):
                 before = event.before_snapshot["sections"][section]
                 after = event.after_snapshot["sections"][section]
                 if before != after:

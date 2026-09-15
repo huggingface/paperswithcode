@@ -27,6 +27,10 @@ class MethodEdit(StrictModel):
     method_ids: list[int] = Field(max_length=100)
 
 
+class OrganizationEdit(StrictModel):
+    organization_ids: list[int] = Field(max_length=100)
+
+
 class RepositoryEdit(StrictModel):
     repositories: list[EditLink] = Field(max_length=100)
 
@@ -50,6 +54,7 @@ class PaperEditOperation(StrictModel):
     section: Literal[
         "tasks",
         "methods",
+        "organizations",
         "repositories",
         "project_pages",
         "hf_artifacts",

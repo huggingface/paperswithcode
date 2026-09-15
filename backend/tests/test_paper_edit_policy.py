@@ -85,7 +85,7 @@ def test_scope_and_deletion_cannot_be_bypassed(db):
         with pytest.raises(CatalogPermissionError):
             access.check_write(actor(), 1, "evaluation", operation, payload)
     with pytest.raises(CatalogPermissionError):
-        access.check_write(actor(), 1, "paper_organizations", "update", {})
+        access.check_write(actor(), 1, "organization", "update", {})
 
 
 def test_suspension_denies_cookie_and_active_token_and_does_not_revive(db):

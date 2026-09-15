@@ -19,7 +19,15 @@ from backend.services.catalog_errors import (
 DAILY_PAPERS = 20
 WRITES_PER_MINUTE = 30
 EDIT_SECTIONS = frozenset(
-    {"tasks", "methods", "repositories", "project_pages", "hf_artifacts", "source_url"}
+    {
+        "tasks",
+        "methods",
+        "organizations",
+        "repositories",
+        "project_pages",
+        "hf_artifacts",
+        "source_url",
+    }
 )
 
 

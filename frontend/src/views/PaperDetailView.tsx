@@ -786,7 +786,7 @@ const PaperDetailView: React.FC = () => {
       <PaperDetailEditors
         activeEditor={activeEditor}
         arxivId={arxivId}
-        editSubmitMode={activeEditor === "organizations" && !isAdmin ? "pending" : editSubmitMode}
+        editSubmitMode={editSubmitMode}
         evaluations={evaluations ?? []}
         isAdmin={isAdmin}
         isLinkedAuthor={isLinkedAuthor}

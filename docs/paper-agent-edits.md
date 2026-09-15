@@ -17,7 +17,8 @@ approval. All authenticated HF users can publish when direct editing is enabled.
   quota checks, authorization approval/exchange, and suspension. These locks are
   acquired before paper locks.
 - Links, existing task/method tags, and evaluation additions/corrections are
-  supported. Organization edits retain their existing proposal workflow.
+  supported. Links to existing organizations publish directly through the same
+  audited workflow; creating or rewriting organization definitions is excluded.
   Evaluation deletion and shared benchmark/metric definition edits require admins.
 - Project-page official status is currently shared in the catalog. A contributor
   cannot change it when the page is linked to another paper; linking an existing
@@ -92,3 +93,14 @@ resources, public history, and rollback.
 Frontend: `npm run typecheck`, `npm run lint`, and `npm test -- --run`.
 The companion CLI has credential/transport/command tests and a command/skill
 contract check. No frontend production build is needed for this change.
+
+Organization example (CLI 0.4.0 accepts this operation without an upgrade):
+
+```json
+{"section": "organizations", "payload": {"organization_ids": [123, 456]}}
+```
+
+This replaces all organization links for the paper. Export first and preserve
+links that should remain; an empty list removes all links. Organization IDs must
+refer to existing catalog organizations. Public history shows catalog organization
+IDs, while the private audit preserves the contributor attribution for rollback.
