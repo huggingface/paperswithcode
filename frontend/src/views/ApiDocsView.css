@@ -6,6 +6,7 @@
   margin: 40px auto;
   padding: 0 24px;
   color: var(--ink);
+  font-family: var(--sans);
 }
 .api-sidebar {
   position: sticky;
@@ -47,11 +48,12 @@
   font-size: 44px;
   line-height: 1.2;
   margin: 16px 0;
-  font-weight: 700;
+  font-weight: 600;
+  letter-spacing: -0.025em;
 }
 .api-content h2 {
-  font-size: 24px;
-  font-weight: 650;
+  font: 600 28px/1.2 var(--serif);
+  letter-spacing: -0.02em;
   margin-bottom: 16px;
 }
 .api-content h3 {
@@ -65,6 +67,20 @@
 .api-content ul {
   padding-left: 24px;
   list-style: disc;
+}
+.api-content ol {
+  padding-left: 24px;
+  list-style: decimal;
+}
+.api-content ul,
+.api-content ol {
+  margin: 8px 0 16px;
+}
+.api-content li + li {
+  margin-top: 4px;
+}
+.api-content li > p {
+  margin: 4px 0;
 }
 .api-lead {
   font-size: 19px;
@@ -81,15 +97,21 @@
 }
 .api-code {
   position: relative;
-  background: var(--bg-elevated);
-  border: 1px solid var(--hairline);
-  border-radius: 8px;
   margin: 16px 0;
+}
+.api-code,
+.api-path,
+.api-description pre {
+  background: #1e293b;
+  color: #f1f5f9;
+  border: 1px solid #475569;
+  border-radius: 8px;
 }
 .api-code pre {
   padding: 48px 18px 18px;
   overflow-x: auto;
   font-size: 13px;
+  line-height: 1.6;
 }
 .api-code button {
   position: absolute;
@@ -102,6 +124,18 @@
   border: 1px solid var(--hairline);
   border-radius: 5px;
 }
+.api-code button {
+  background: #334155;
+  color: #f1f5f9;
+  border-color: #64748b;
+}
+.api-code button:hover {
+  background: #475569;
+}
+.api-code button:focus-visible {
+  outline: 2px solid #93c5fd;
+  outline-offset: 2px;
+}
 .api-languages {
   display: flex;
   gap: 8px;
@@ -113,13 +147,14 @@
 .api-path {
   overflow-wrap: anywhere;
   font-size: 14px;
+  padding: 12px 16px;
+  font-family: var(--mono);
 }
 .api-path b {
-  color: #047857;
+  color: #6ee7b7;
   margin-right: 8px;
 }
 .api-description {
-  white-space: pre-line;
   font-size: 14px;
 }
 .api-table-wrap {
@@ -149,6 +184,7 @@
   font-size: 14px;
 }
 .api-content code {
+  font-family: var(--mono);
   font-size: 0.9em;
 }
 .api-content article {
@@ -177,5 +213,6 @@
   overflow-x: auto;
   white-space: pre;
   padding: 12px;
-  background: var(--bg-elevated);
+  margin: 16px 0;
+  font: 13px/1.6 var(--mono);
 }
