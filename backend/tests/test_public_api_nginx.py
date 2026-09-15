@@ -123,6 +123,7 @@ location = /_staging_access_check {{ return 204; }}
                     else:
                         pytest.fail("isolated nginx did not start")
                     assert ready.text == "API documentation app"
+                    assert ready.headers["cache-control"] == "no-store"
                     responses = [
                         client.get(
                             "/api/v1/papers/search?q=test&mode=keyword",
