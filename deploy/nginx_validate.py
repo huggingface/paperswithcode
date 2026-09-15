@@ -38,9 +38,7 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
     failures: list[str] = []
     prefix = f"pwc_{environment}_mcp"
     for mapping in (
-        "method_signal",
         "method_allowed",
-        "header_signal",
         "stream_present",
         "stream_q0",
         "stream_positive",
@@ -49,7 +47,6 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
         "html_q0",
         "html_positive",
         "html_signal",
-        "protocol_signal",
     ):
         if f"${prefix}_{mapping}" not in config:
             failures.append(f"{environment} MCP map is missing: {mapping}")
@@ -98,7 +95,11 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
         html_requirements = (
             f"error_page 418 = @{environment}_mcp_protocol;",
             f"if (${prefix}_method_allowed = 0) {{ return 405; }}",
-            f"if (${prefix}_protocol_signal) {{ return 418; }}",
+            "if ($request_method = POST) { return 418; }",
+            "if ($request_method = DELETE) { return 418; }",
+            "if ($request_method = OPTIONS) { return 418; }",
+            'if ($http_mcp_protocol_version != "") { return 418; }',
+            f"if (${prefix}_stream_signal) {{ return 418; }}",
             f"if (${prefix}_html_signal = 0) {{ return 406; }}",
             "limit_except GET HEAD",
             "try_files /index.html =404;",

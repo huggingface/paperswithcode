@@ -19,9 +19,15 @@ def test_mcp_protocol_signals_precede_html_and_honor_q_zero():
         prefix = f"pwc_{environment}_mcp"
         location = config.index("location = /mcp {")
         block = config[location : config.index("\n    }", location)]
-        assert block.index(f"if (${prefix}_protocol_signal)") < block.index(
-            f"if (${prefix}_html_signal = 0)"
-        )
+        html_check = block.index(f"if (${prefix}_html_signal = 0)")
+        for protocol_check in (
+            "if ($request_method = POST)",
+            "if ($request_method = DELETE)",
+            "if ($request_method = OPTIONS)",
+            'if ($http_mcp_protocol_version != "")',
+            f"if (${prefix}_stream_signal)",
+        ):
+            assert block.index(protocol_check) < html_check
         assert f"${prefix}_stream_q0" in config
         assert f"${prefix}_html_q0" in config
         assert "text/event-stream" in config
