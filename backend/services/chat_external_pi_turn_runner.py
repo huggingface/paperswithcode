@@ -198,6 +198,7 @@ class ExternalPiChatTurnRunner:
         self.external_worker_claim = worker_claim
         acknowledged_sequence = 0
         durable_sequence = 0
+        last_checkpoint_sequence = 0
         supports_durable_ack = False
         terminal_sequence: int | None = None
         terminal_acknowledged = False
@@ -211,7 +212,7 @@ class ExternalPiChatTurnRunner:
                     return
                 if (
                     terminal_sequence is not None
-                    and durable_sequence >= terminal_sequence - 1
+                    and durable_sequence >= last_checkpoint_sequence
                 ):
                     # The producer may finish before its queued terminal commits.
                     # The fenced terminal-control channel releases that retained
@@ -330,7 +331,10 @@ class ExternalPiChatTurnRunner:
                             # Old workers retain their existing protocol. New
                             # workers may release only a durably consumed prefix;
                             # otherwise their bounded terminal grace owns cleanup.
-                            if supports_durable_ack and durable_sequence < sequence - 1:
+                            if (
+                                supports_durable_ack
+                                and durable_sequence < last_checkpoint_sequence
+                            ):
                                 return
                             await socket.send(
                                 json.dumps(
@@ -344,12 +348,17 @@ class ExternalPiChatTurnRunner:
                             # Readiness proves that the trusted harness accepted
                             # the run, but it is not part of the browser SSE
                             # contract.
+                            # Live streams have no durable event journal. Keep
+                            # their existing terminal acknowledgement behavior;
+                            # only journal-backed consumers can prune progress.
                             supports_durable_ack = (
                                 event.get("durable_event_ack") is True
+                                and self.settings.chat_durable_turn_dispatch_enabled
                             )
                             acknowledged_sequence = sequence
                             continue
                         if supports_durable_ack:
+                            last_checkpoint_sequence = sequence
 
                             async def receipt(sequence: int = sequence) -> None:
                                 await acknowledge_persisted(sequence)

@@ -2863,6 +2863,7 @@ def test_failed_persistent_attachment_does_not_allocate_again(concurrent):
 def test_durable_worker_ack_requires_persistence_receipt(monkeypatch, persist):
     async def scenario():
         runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
         socket = FakeSocket(
             [
                 '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
@@ -2912,6 +2913,7 @@ def test_late_terminal_receipt_releases_worker_during_socket_cleanup(
 ):
     async def scenario():
         runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
         socket = FakeSocket(
             [
                 '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
@@ -2957,6 +2959,7 @@ def test_late_terminal_receipt_releases_worker_during_socket_cleanup(
 def test_lost_receipt_reconnects_without_duplicate_public_events(monkeypatch):
     async def scenario():
         runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
 
         class LostReceiptSocket(FakeSocket):
             async def send(self, value):
@@ -3001,5 +3004,65 @@ def test_lost_receipt_reconnects_without_duplicate_public_events(monkeypatch):
         assert sent[1]["type"] == "ack_events"
         assert sent[1]["sequence"] == 3
         assert sent[2]["type"] == "ack_terminal"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("durable", [False, True])
+@pytest.mark.parametrize("persist_before_terminal", [False, True])
+def test_terminal_ack_handles_trailing_tool_without_journal_receipt(
+    monkeypatch, durable, persist_before_terminal
+):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = durable
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"working","worker_sequence":2}',
+                '{"type":"tool_request","operation_id":"op","worker_sequence":3}',
+                '{"type":"worker_done","status":"cancelled","worker_sequence":4}',
+            ]
+        )
+        control = FakeSocket([])
+        sockets = iter([socket, control])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        monkeypatch.setattr(
+            runner,
+            "_tool_result",
+            lambda _: _async_value(
+                {
+                    "type": "tool_result",
+                    "operation_id": "op",
+                    "ok": False,
+                    "error": "turn_cancelled",
+                }
+            ),
+        )
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        assert hasattr(event, "after_persist") is durable
+        if durable and persist_before_terminal:
+            await event.after_persist()
+        with pytest.raises(StopAsyncIteration):
+            await anext(events)
+        sent = [json.loads(frame)["type"] for frame in socket.sent]
+        if durable and not persist_before_terminal:
+            assert "ack_terminal" not in sent
+            await event.after_persist()
+            assert json.loads(control.sent[0])["type"] == "ack_terminal"
+            assert json.loads(control.sent[0])["sequence"] == 4
+        else:
+            assert sent[-1] == "ack_terminal"
+            assert json.loads(socket.sent[-1])["sequence"] == 4
+        if not durable:
+            assert "ack_events" not in sent
 
     asyncio.run(scenario())
