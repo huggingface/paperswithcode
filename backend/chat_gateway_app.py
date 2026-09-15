@@ -861,8 +861,10 @@ def _authorize_pwc_mcp(
 
 @app.post("/catalog-mcp", dependencies=[Depends(_authorize_pwc_mcp)])
 async def catalog_mcp(body: McpCatalogRequest, request: Request):
+    finished = asyncio.Event()
+
     async def disconnected():
-        while not await request.is_disconnected():
+        while not finished.is_set() and not await request.is_disconnected():
             await asyncio.sleep(0.1)
 
     method = "tools/list" if body.tool is None else "tools/call"
@@ -883,6 +885,9 @@ async def catalog_mcp(body: McpCatalogRequest, request: Request):
     except PwcMcpError as error:
         raise HTTPException(status_code=502, detail=str(error)) from None
     finally:
+        # A disconnect probe may consume cancellation in its local cancel scope.
+        # Give the polling loop an independent exit condition before joining it.
+        finished.set()
         call.cancel()
         disconnect.cancel()
         await asyncio.gather(call, disconnect, return_exceptions=True)

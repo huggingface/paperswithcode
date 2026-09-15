@@ -262,3 +262,45 @@ def test_mcp_nginx_route_is_post_only_and_environment_isolated():
     assert "staging MCP gateway must be POST-only and environment-isolated" in validate(
         prod, bad
     )
+
+
+@pytest.mark.anyio
+async def test_completed_call_does_not_wait_for_disconnect_poll_that_swallows_cancel(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    import backend.chat_gateway_app as gateway
+
+    polling = asyncio.Event()
+    cancellations = 0
+
+    async def call(*_args):
+        await polling.wait()
+        return {"structuredContent": {"title": "Paper"}}
+
+    async def disconnected():
+        nonlocal cancellations
+        polling.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            cancellations += 1
+            if cancellations > 1:
+                raise
+            # Starlette's disconnect probe uses a local AnyIO cancellation scope.
+            return False
+
+    monkeypatch.setattr(gateway, "request_mcp", call)
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(pwc_mcp_client=None)),
+        is_disconnected=disconnected,
+    )
+    task = asyncio.create_task(
+        gateway.catalog_mcp(gateway.McpCatalogRequest(), request)
+    )
+    done, _ = await asyncio.wait({task}, timeout=0.3)
+    if not done:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+    assert done, "Completed MCP response was held until the client disconnected"
+    assert task.result() == {"result": {"structuredContent": {"title": "Paper"}}}
