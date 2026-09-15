@@ -45,15 +45,16 @@ class PublicReadCorsMiddleware:
             await self.app(scope, receive, send)
             return
         get_scope = {**scope, "method": "GET"}
-        selected = False
-        for route in scope["app"].routes:
-            match, _ = route.matches(get_scope)
-            if match == Match.FULL:
-                selected = getattr(route, "path", None) in {
-                    *PUBLIC_ENDPOINTS,
-                    PUBLIC_SCHEMA_PATH,
-                }
-                break
+        selected = self._is_public_route(get_scope)
+        if selected is None and scope["app"].router.redirect_slashes:
+            # Follow the router's slash redirect only when no actual route won.
+            # A real private route must never inherit a public neighbor's CORS.
+            path = scope["path"]
+            redirect_scope = {
+                **get_scope,
+                "path": path.rstrip("/") if path.endswith("/") else path + "/",
+            }
+            selected = self._is_public_route(redirect_scope)
         if not selected:
             await self.app(scope, receive, send)
             return
@@ -95,3 +96,25 @@ class PublicReadCorsMiddleware:
             await send(message)
 
         await self.app(scope, receive, cors_send)
+
+    @staticmethod
+    def _is_public_route(scope):
+        partial_match = False
+        public_paths = {*PUBLIC_ENDPOINTS, PUBLIC_SCHEMA_PATH}
+        for route in scope["app"].routes:
+            match, _ = route.matches(scope)
+            if match == Match.FULL:
+                path = getattr(route, "path", "")
+                if path in public_paths:
+                    return True
+                # An explicitly registered slashless alias must point at the
+                # same endpoint, not merely resemble a public route's URL.
+                canonical = path + "/"
+                return canonical in public_paths and any(
+                    getattr(candidate, "path", None) == canonical
+                    and candidate.endpoint is route.endpoint
+                    for candidate in scope["app"].routes
+                )
+            partial_match |= match == Match.PARTIAL
+        # Starlette returns 405 before considering slash redirects.
+        return False if partial_match else None

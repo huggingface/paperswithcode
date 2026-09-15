@@ -142,6 +142,30 @@ location = /_staging_access_check {{ return 204; }}
                     )
                     assert rejected[0].headers["retry-after"] == "2"
                     assert rejected[0].headers["access-control-allow-origin"] == "*"
+                    for origin in (
+                        "https://huggingface.co",
+                        "https://research.example",
+                    ):
+                        limited_response = client.get(
+                            "/api/v1/papers/search?q=test",
+                            headers={"Origin": origin, "Cookie": "session=synthetic"},
+                        )
+                        assert limited_response.status_code == 429
+                        assert (
+                            limited_response.headers["access-control-allow-origin"]
+                            == origin
+                        )
+                        assert (
+                            limited_response.headers["access-control-allow-credentials"]
+                            == "true"
+                        )
+                        assert (
+                            limited_response.headers["access-control-expose-headers"]
+                            == "Retry-After"
+                        )
+                        assert limited_response.headers["vary"] == "Origin"
+                        assert limited_response.headers["cache-control"] == "no-store"
+                        assert limited_response.json() == rejected[0].json()
                     assert client.get("/api/v1/papers/123").status_code == 200
                     assert client.options("/api/v1/papers/search").status_code == 200
                     assert client.post("/api/v1/papers/search").status_code == 200

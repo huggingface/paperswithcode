@@ -158,3 +158,68 @@ def test_existing_credentialed_origins_keep_their_get_and_preflight_contract():
             == "https://paperswithcode.co"
         )
         assert response.headers["access-control-allow-credentials"] == "true"
+
+
+def test_slashless_lists_have_public_cors_on_aliases_redirects_and_preflights():
+    app = FastAPI()
+
+    @app.get("/api/v1/papers")
+    @app.get("/api/v1/papers/")
+    @app.get("/api/v1/tasks/")
+    @app.get("/api/v1/datasets/")
+    @app.get("/api/v1/evaluations/")
+    def listing():
+        return {"results": []}
+
+    app.add_middleware(PublicReadCorsMiddleware)
+    client = TestClient(app)
+    for kind in ("papers", "tasks", "datasets", "evaluations"):
+        path = f"/api/v1/{kind}"
+        headers = {"Origin": "https://research.example"}
+        response = client.get(path, headers=headers, follow_redirects=False)
+        assert response.status_code == (200 if kind == "papers" else 307)
+        assert response.headers["access-control-allow-origin"] == "*"
+        assert client.get(path, headers=headers).status_code == 200
+        preflight = client.options(
+            path, headers={**headers, "Access-Control-Request-Method": "GET"}
+        )
+        assert preflight.status_code == 200
+        assert preflight.headers["access-control-allow-origin"] == "*"
+
+
+def test_private_method_match_prevents_public_slash_redirect():
+    app = FastAPI()
+
+    @app.post("/api/v1/tasks")
+    def private_write():
+        return {}
+
+    @app.get("/api/v1/tasks/")
+    def public_list():
+        return {}
+
+    app.add_middleware(PublicReadCorsMiddleware)
+    response = TestClient(app).get(
+        "/api/v1/tasks", headers={"Origin": "https://research.example"}
+    )
+    assert response.status_code == 405
+    assert "access-control-allow-origin" not in response.headers
+
+
+def test_distinct_private_get_is_not_treated_as_a_public_alias():
+    app = FastAPI()
+
+    @app.get("/api/v1/tasks")
+    def private_list():
+        return {"private": True}
+
+    @app.get("/api/v1/tasks/")
+    def public_list():
+        return {"results": []}
+
+    app.add_middleware(PublicReadCorsMiddleware)
+    response = TestClient(app).get(
+        "/api/v1/tasks", headers={"Origin": "https://research.example"}
+    )
+    assert response.status_code == 200
+    assert "access-control-allow-origin" not in response.headers

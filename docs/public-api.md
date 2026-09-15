@@ -36,7 +36,9 @@ of 50,000 pre-launch access-log lines contained 9,856 catalog IP/minute samples
 bots and scripts and does not characterize every user or expensive query.
 Follow nginx's limit-exceeded log entries and API latency after launch. Adjust
 rates and bursts together with the docs; avoid production load tests. A rejected
-request receives JSON, no-store, a two-second Retry-After, and public CORS headers.
+request receives JSON, no-store, a two-second Retry-After, and public CORS headers. The fixed, credential-independent error reflects an
+Origin header and permits credentials so existing browser clients can read the
+retry instruction; successful responses still use the application CORS policy.
 
 The application CORS middleware grants anonymous cross-origin GET access only
 to the explicitly selected operations and the public schema. It does not grant
