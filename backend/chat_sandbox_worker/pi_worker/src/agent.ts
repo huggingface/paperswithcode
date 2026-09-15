@@ -24,6 +24,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
+import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
 import { loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
@@ -126,6 +127,7 @@ export class PiWorker {
       maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
       bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
       excalidrawEnabled: this.excalidrawAvailable,
+      catalogEnabled: Boolean(this.gateway && this.remoteTools),
       posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
       posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
       posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
@@ -346,6 +348,7 @@ export class PiWorker {
       readerMode: run.reader_mode,
       posterlyEnabled: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
+      catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
       source: this.promptAsset!,
     });
@@ -365,6 +368,7 @@ export class PiWorker {
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       hfUsername: run.hf_username,
       promptProfile: "compact-pi-v1",
+      catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
     });
     let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
@@ -430,6 +434,11 @@ export class PiWorker {
           factory: createRemoteToolsExtension(this.remoteTools),
           hidden: true,
         }] : []),
+        ...(this.gateway && this.remoteTools ? [{
+          name: "pwc-catalog",
+          factory: createCatalogToolsExtension(this.gateway),
+          hidden: true,
+        }] : []),
       ],
     });
     await Promise.all([loader.reload(), mirrorInitialization]);
@@ -440,7 +449,7 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      tools: ["read", "bash", "search_web", ...(this.gateway && this.remoteTools ? CATALOG_TOOL_NAMES : []), ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,
