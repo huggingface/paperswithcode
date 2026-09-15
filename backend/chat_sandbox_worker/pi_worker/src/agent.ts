@@ -25,6 +25,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
+import { PWC_MCP_TOOL_NAMES, createPwcMcpToolsExtension, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
 import { loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
@@ -440,7 +441,7 @@ export class PiWorker {
         }] : []),
         ...(this.gateway && this.remoteTools ? [{
           name: "pwc-catalog",
-          factory: createCatalogToolsExtension(this.gateway),
+          factory: pwcMcpEnabled() ? createPwcMcpToolsExtension(this.gateway) : createCatalogToolsExtension(this.gateway),
           hidden: true,
         }] : []),
       ],
@@ -453,7 +454,7 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(this.gateway && this.remoteTools ? CATALOG_TOOL_NAMES : []), ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      tools: ["read", "bash", "search_web", ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []), ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,

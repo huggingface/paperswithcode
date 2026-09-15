@@ -11,7 +11,7 @@ import contextlib
 import logging
 import os
 import time
-from contextlib import asynccontextmanager
+from contextlib import AsyncExitStack, asynccontextmanager
 from datetime import UTC, datetime
 
 from fastapi import FastAPI, Request
@@ -352,7 +352,15 @@ async def lifespan(app: FastAPI):
         pool_startup_task = asyncio.create_task(replenish_pool_at_startup())
         maintenance_task = asyncio.create_task(maintain_sandboxes())
 
-    yield
+    async with AsyncExitStack() as gateway_stack:
+        if settings.chat_enabled and settings.chat_pwc_mcp_enabled:
+            from backend.chat_gateway_app import (
+                app as gateway_app,
+                lifespan as gateway_lifespan,
+            )
+
+            await gateway_stack.enter_async_context(gateway_lifespan(gateway_app))
+        yield
 
     if maintenance_task:
         maintenance_task.cancel()

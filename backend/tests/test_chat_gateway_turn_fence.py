@@ -182,6 +182,12 @@ def test_legacy_sandbox_scope_remains_header_free(monkeypatch):
 
 GATEWAY_CASES = [
     (
+        "pwc_mcp",
+        "/catalog-mcp",
+        {"tool": "search_papers", "arguments": {"query": "x"}},
+        {},
+    ),
+    (
         "paper_catalog",
         "/catalog",
         {"operation": "search", "arguments": {"query": "x"}},
@@ -254,6 +260,7 @@ def test_every_gateway_entry_rejects_an_external_capability_before_side_effects(
     )
     settings = get_settings().model_copy(deep=True)
     settings.chat_hf_catalog_enabled = True
+    settings.chat_pwc_mcp_enabled = True
     settings.chat_openai_direct_enabled = True
     settings.openai_api_key = "test-openai-key"
     settings.chat_openai_model = "gpt-5.6"
@@ -284,7 +291,7 @@ def _install_downstream_sentinel(monkeypatch, name, reached, db):
         reached.append(name)
         raise HTTPException(status_code=418, detail="downstream_reached")
 
-    if name == "paper_catalog":
+    if name in {"paper_catalog", "pwc_mcp"}:
         monkeypatch.setattr(gateway.ChatCapabilityService, "meter_catalog", hit)
     elif name == "web_search":
         monkeypatch.setattr(gateway.ChatCapabilityService, "meter_web_search", hit)
@@ -318,6 +325,7 @@ def test_every_gateway_entry_forwards_the_exact_claim_before_downstream_work(
     turn_id = uuid.uuid4()
     settings = get_settings().model_copy(deep=True)
     settings.chat_hf_catalog_enabled = True
+    settings.chat_pwc_mcp_enabled = True
     settings.chat_artifacts_enabled = True
     settings.chat_posterly_enabled = True
     settings.chat_latex_paper_enabled = True

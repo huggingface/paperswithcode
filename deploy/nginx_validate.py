@@ -330,6 +330,16 @@ def validate(production: str, staging: str) -> list[str]:
                 failures.append(
                     f"{environment} chat gateway {endpoint} misses {backend}"
                 )
+        mcp_block = location_block(
+            config, "location = /api/internal/chat-gateway/catalog-mcp"
+        )
+        if mcp_block and (
+            f"proxy_pass http://{backend};" not in mcp_block
+            or "limit_except POST { deny all; }" not in mcp_block
+        ):
+            failures.append(
+                f"{environment} MCP gateway must be POST-only and environment-isolated"
+            )
         for endpoint in ("messages", "responses"):
             block = location_block(
                 config, f"location = /api/internal/chat-gateway/v1/{endpoint}"

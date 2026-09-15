@@ -225,6 +225,7 @@ def node_environment(
         "PWC_EXTERNAL_PI_RELEASE_ID": resolved.release_id,
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
+        "PWC_CHAT_PWC_MCP_ENABLED": protected.get("PWC_CHAT_PWC_MCP_ENABLED", "false"),
         "PWC_EXTERNAL_PI_STATE_ROOT": state_root,
     }
 

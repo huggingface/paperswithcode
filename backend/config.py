@@ -591,6 +591,7 @@ class Settings(BaseSettings):
     # are registered; either is an immediate fail-closed kill switch.
     chat_excalidraw_enabled: bool = Field(default=False)
     chat_mcp_apps_host_enabled: bool = Field(default=False)
+    chat_pwc_mcp_enabled: bool = Field(default=False)
     # Staging-only Posterly artifact controls. Historical safe PNG cards remain
     # readable when generation flags are disabled.
     chat_artifacts_enabled: bool = Field(default=False)

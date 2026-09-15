@@ -13,6 +13,7 @@ import re
 import tempfile
 import time
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -57,6 +58,7 @@ from backend.services.chat_capability_service import (
 )
 from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_gateway_service import ChatGatewayService
+from backend.services.chat_pwc_mcp import TOOL_NAMES, PwcMcpError, request_mcp
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
     ChatHfHubService,
@@ -132,7 +134,19 @@ from backend.services.openrouter_user_budget_service import (
     opaque_owner,
 )
 
-app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    async with httpx.AsyncClient(
+        timeout=30,
+        follow_redirects=False,
+        limits=httpx.Limits(max_connections=32, max_keepalive_connections=8),
+    ) as client:
+        app.state.pwc_mcp_client = client
+        yield
+
+
+app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 logger = logging.getLogger(__name__)
 hf_telemetry_logger = logging.getLogger("uvicorn.error")
 MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
@@ -186,6 +200,12 @@ class CatalogRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     operation: str = Field(max_length=64)
     arguments: dict[str, Any]
+
+
+class McpCatalogRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    tool: str | None = Field(default=None, max_length=64)
+    arguments: dict[str, Any] = Field(default_factory=dict)
 
 
 class HfCatalogRequest(BaseModel):
@@ -791,6 +811,81 @@ def _scope(
             },
         ) from None
     return row
+
+
+def _authorize_pwc_mcp(
+    body: McpCatalogRequest,
+    authorization: Annotated[str, Header()],
+    x_pwc_session: Annotated[str, Header()],
+    x_pwc_turn: Annotated[str, Header()],
+    turn_fence: TurnFenceDependency,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+) -> None:
+    if not settings.chat_pwc_mcp_enabled:
+        raise HTTPException(status_code=503, detail="PwC MCP tools are not enabled")
+    if (
+        (body.tool is not None and body.tool not in TOOL_NAMES)
+        or (body.tool is None and body.arguments)
+        or len(json.dumps(body.arguments).encode()) > 16_384
+    ):
+        raise HTTPException(status_code=422, detail="Invalid MCP tool request")
+    capability = _scope(
+        _bearer(authorization),
+        "catalog",
+        x_pwc_session,
+        x_pwc_turn,
+        db,
+        turn_fence=turn_fence,
+    )
+    try:
+        # Filtered searches share the CLI/direct search allowance as well.
+        operation = (
+            "search"
+            if body.tool == "search_papers"
+            or (body.tool == "list_papers" and body.arguments.get("search"))
+            else "mcp_catalog"
+        )
+        ChatCapabilityService(db).meter_catalog(
+            capability,
+            operation,
+            maximum_searches=settings.chat_max_direct_search_calls,
+        )
+        db.commit()
+    except CapabilityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=429, detail="Tool execution limit reached"
+        ) from None
+
+
+@app.post("/catalog-mcp", dependencies=[Depends(_authorize_pwc_mcp)])
+async def catalog_mcp(body: McpCatalogRequest, request: Request):
+    async def disconnected():
+        while not await request.is_disconnected():
+            await asyncio.sleep(0.1)
+
+    method = "tools/list" if body.tool is None else "tools/call"
+    params = (
+        {} if body.tool is None else {"name": body.tool, "arguments": body.arguments}
+    )
+    call = asyncio.create_task(
+        request_mcp(request.app.state.pwc_mcp_client, method, params)
+    )
+    disconnect = asyncio.create_task(disconnected())
+    try:
+        done, _ = await asyncio.wait(
+            {call, disconnect}, return_when=asyncio.FIRST_COMPLETED
+        )
+        if disconnect in done:
+            raise HTTPException(status_code=499, detail="MCP request cancelled")
+        return {"result": await call}
+    except PwcMcpError as error:
+        raise HTTPException(status_code=502, detail=str(error)) from None
+    finally:
+        call.cancel()
+        disconnect.cancel()
+        await asyncio.gather(call, disconnect, return_exceptions=True)
 
 
 @app.post("/catalog")

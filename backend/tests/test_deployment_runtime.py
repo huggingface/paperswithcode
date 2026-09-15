@@ -3378,7 +3378,13 @@ def test_staging_nginx_requires_an_unbuffered_chat_stream_route():
         "gzip off;",
         "proxy_read_timeout 190s;",
     ):
-        failures = validate_nginx(production, staging.replace(directive, "", 1))
+        before, stream = staging.split("location = /api/v1/chat/stream", 1)
+        failures = validate_nginx(
+            production,
+            before
+            + "location = /api/v1/chat/stream"
+            + stream.replace(directive, "", 1),
+        )
         assert f"staging chat stream route misses: {directive}" in failures
 
 

@@ -1,4 +1,5 @@
 import path from "node:path";
+import { PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import {
   EXCALIDRAW_ELEMENTS_TOO_LARGE,
@@ -152,7 +153,7 @@ export class PolicyController {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
     }
-    const catalogTool = new Set(["pwc_search", "pwc_paper_info", "pwc_paper_list"]).has(name);
+    const catalogTool = new Set(pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : ["pwc_search", "pwc_paper_info", "pwc_paper_list"]).has(name);
     if (catalogTool && !this.options.catalogEnabled) {
       return this.deny(id, "Catalog tools are not available.");
     }
@@ -206,7 +207,7 @@ export class PolicyController {
         }
       }
     }
-    if (name === "pwc_search" || (name === "bash" && SEARCH.test(String(input.command)))) {
+    if (name === "pwc_search" || name === "pwc_search_papers" || (name === "pwc_list_papers" && Boolean(input.search)) || (name === "bash" && SEARCH.test(String(input.command)))) {
       const maximumSearches = this.paperActivated ? (this.options.paperMaximumDirectSearches ?? 8) : this.options.maximumDirectSearches;
       if (this.searches >= maximumSearches) {
         this.toolingClosed = true;
