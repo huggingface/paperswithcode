@@ -1,11 +1,28 @@
 ---
 name: reply-github-issue
-description: Apply author feedback to the Papers With Code catalog, then post and verify GitHub issue replies, especially for evaluation-verification threads and author corrections. Bulk requests such as "all unread" cover only PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated GitHub notifications unless explicitly requested. Verify changes live, link directly to highlighted evaluation rows, mention README badges for current top-three results, and avoid duplicate comments or unintended issue-state changes.
+description: Handle unread GitHub notifications for "Verify evals on Papers with Code" issues end-to-end: apply author feedback to the catalog database, verify changes live, reply to authors, mark handled notifications read, and summarize with GitHub reply links. Also handles explicitly selected PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated notifications unless explicitly requested.
 ---
 
 # Reply to a GitHub Issue
 
 Resolve author feedback through Papers With Code catalog changes, then write concise, evidence-backed GitHub issue replies. Tailor every reply to the issue and verify both the catalog state and the posted comment.
+
+## Default workflow
+
+When invoked without a specific issue or a narrower instruction, run this full
+workflow. “All unread” uses the same default:
+
+1. Paginate unread GitHub notifications and select evaluation-verification
+   issues titled “Verify evals on Papers with Code” (including equivalent
+   “Verify evals on PwC” wording). Include open and closed issues.
+2. Address the authors' concerns by making the supported catalog database
+   changes, then verify the live results. Do not merely acknowledge requests.
+3. Inform the authors in tailored issue replies describing the verified
+   changes, and verify each posted comment.
+4. Mark each fully handled notification read and verify its read status.
+   Leave blocked or unresolved work unread. This does not close the issue.
+5. Summarize to the user as a list of GitHub issue reply links, each with a
+   short description of what changed. Follow section 9 for exceptions.
 
 ## Guardrails
 
@@ -20,11 +37,12 @@ Resolve author feedback through Papers With Code catalog changes, then write con
 
 ### Select PwC catalog issues first
 
-With this skill, “all”, “all unread”, “outstanding”, and “check all issues” mean
-Papers With Code catalog issues only. Include evaluation-verification threads
-and discussions about PwC papers, benchmark scores, protocols, badges, or catalog
-metadata. Classify by the issue's actual subject and discussion, not just its
-author, repository owner, or mention of an ML paper.
+With this skill, “all”, “all unread”, “outstanding”, and “check all issues” default
+to the unread evaluation-verification notifications described above. Include
+other discussions about PwC papers, benchmark scores, protocols, badges, or
+catalog metadata when the user explicitly selects them or requests broader
+catalog coverage. Classify by the issue's actual subject and discussion, not
+just its author, repository owner, or mention of an ML paper.
 
 Exclude requests to release models or datasets on Hugging Face, submit or claim
 HF paper pages, or answer Hub storage/pricing questions. These are separate
@@ -154,7 +172,7 @@ After posting:
 
 1. Fetch the resulting comment or the issue's latest comments.
 2. Confirm the repository, issue number, posting account, complete body, direct evaluation links, and top-three badge sentence when eligible.
-3. Report the public comment URL to the user.
+3. Save the public comment URL for the final summary after notification handling.
 
 If posting failed, report the exact failure and whether a comment was created. Leave failed or unresolved work unread.
 
@@ -168,4 +186,19 @@ Read the current discussion and relevant event before deciding: closure alone do
 2. Recheck the thread and discussion immediately before marking it read. If new activity arrived after the reviewed snapshot, review it first.
 3. Mark that thread read with `PATCH /notifications/threads/{thread_id}` (for example, `gh api --method PATCH notifications/threads/THREAD_ID --silent`). Use the notification thread ID, not the issue number or event ID.
 4. Fetch the thread and verify `unread: false`. If it is already read, make no write. If no matching thread can be found, report that rather than claiming a successful update.
-5. Report which issues received replies separately from notifications cleared without a reply, linking the posted comments and noting any issues intentionally left unread.
+5. Record the verified read status for the final summary.
+
+## 9. Summarize the completed work
+
+Lead with a Markdown list of GitHub issue replies. Each item must link directly
+to the verified comment and briefly say which catalog changes were applied:
+
+```markdown
+- [owner/repository#34](https://github.com/owner/repository/issues/34#issuecomment-123): Split single-frame and video leaderboards; verified ranks; notification marked read.
+```
+
+Separately list any notifications cleared without a reply (for example,
+already-answered confirmations), and any issues left unread with their specific
+blocker. If no replies were needed, say so. Do not imply a notification was
+marked read without verifying it. Do not replace the requested reply list with
+only benchmark links, internal reports, or a general completion statement.
