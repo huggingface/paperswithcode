@@ -1195,3 +1195,63 @@ def test_suspension_blocks_new_submission_without_deleting_history(
             proposed_payload={"method_ids": [10, 11]},
         )
     assert db_session.get(PendingPaperEdit, existing.id).status == "pending"
+
+
+@pytest.mark.parametrize("substantive_change", [False, True])
+def test_evaluation_approval_ignores_only_recalculated_rank(
+    db_session, paper_fixture, monkeypatch, substantive_change
+):
+    from unittest.mock import Mock
+
+    submitted = {
+        "evaluations": [{"id": 42, "best_rank": 10, "metrics": {"Accuracy": 66.12}}]
+    }
+    current = {
+        "evaluations": [
+            {
+                "id": 42,
+                "best_rank": 11,
+                "metrics": {"Accuracy": 67 if substantive_change else 66.12},
+            }
+        ]
+    }
+    service = PendingEditService(db_session)
+    monkeypatch.setattr(service.snapshots, "paper_edit", lambda *args: submitted)
+    row = service.submit(
+        paper_id=1,
+        hf_username="alice",
+        edit_type="evaluations",
+        proposed_payload={
+            "operations": [
+                {
+                    "op": "update",
+                    "evaluation_id": 42,
+                    "data": {"metrics": {"Accuracy": "65.9"}},
+                }
+            ]
+        },
+    )
+    row.conflict_payload = {
+        "submitted_snapshot": submitted,
+        "current_snapshot": current,
+    }
+    db_session.commit()
+    monkeypatch.setattr(service.snapshots, "paper_edit", lambda *args: current)
+    monkeypatch.setattr(
+        service.snapshots, "approval_event", lambda *args, **kwargs: current
+    )
+    apply = Mock(return_value=("paper", "1"))
+    monkeypatch.setattr(service.mutations, "apply_human_review", apply)
+
+    if substantive_change:
+        with pytest.raises(PendingEditConflictError):
+            service.approve(edit_id=row.id, reviewer_username="admin")
+        apply.assert_not_called()
+        assert row.status == "pending"
+    else:
+        reviewed = service.approve(edit_id=row.id, reviewer_username="admin")
+        assert reviewed.status == "approved"
+        assert reviewed.conflict_payload is None
+        assert reviewed.current_payload == submitted
+        assert reviewed.catalog_event_id is not None
+        apply.assert_called_once()
