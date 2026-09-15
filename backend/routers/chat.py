@@ -376,6 +376,7 @@ def _admit_prepared_turn(
                 initial_model=body.initial_model,
                 replace_message_id=body.replace_message_id,
                 prior_revision=body.prior_revision,
+                retry_message_id=body.retry_message_id,
                 web_search_enabled=body.web_search_enabled,
                 reasoning_effort=body.reasoning_effort,
                 update_web_search_preference=search_is_available,

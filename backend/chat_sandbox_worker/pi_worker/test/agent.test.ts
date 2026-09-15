@@ -80,3 +80,62 @@ test("prebound first-turn retry restores an existing durable transcript", async 
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+for (const mode of ["timeout", "stop"] as const) {
+  test(`${mode} during recovery preserves saved summaries and emits one terminal outcome`, async () => {
+    const { PiWorker } = await import("../src/agent.js");
+    const { CompactionController } = await import("../src/compaction.js");
+    const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+    const events: Record<string, unknown>[] = [];
+    const worker = new PiWorker((_id, event) => events.push(event));
+    const compaction = new CompactionController((event) => events.push(event), 70);
+    Reflect.set(worker, "compaction", compaction);
+    const manager = SessionManager.inMemory("/workspace");
+    const user = manager.appendMessage({ role: "user", content: "Keep source:123", timestamp: Date.now() });
+    manager.appendCompaction("Completed edit artifact:42; source:123", user, 50_000);
+    const before = JSON.stringify(manager.getEntries());
+    let finishPrompt = () => {};
+    let prompts = 0;
+    const session = {
+      subscribe() { return () => {}; },
+      async prompt() {
+        prompts++;
+        if (prompts === 1) {
+          compaction.startRecovery();
+          await new Promise((resolve) => setTimeout(resolve, 35));
+        } else {
+          await new Promise<void>((resolve) => {
+            finishPrompt = resolve;
+            if (mode === "stop") setTimeout(() => { void worker.cancel("test"); }, 5);
+          });
+        }
+      },
+      abortCompaction() {},
+      async abort() { finishPrompt(); },
+      setActiveToolsByName() {},
+    };
+    Reflect.set(worker, "session", session);
+    Reflect.set(worker, "manager", manager);
+    Reflect.set(worker, "mirror", { append() {}, async flush() {} });
+    Reflect.set(worker, "boundAgentSession", "native");
+    Reflect.set(worker, "initialize", async () => {});
+    Reflect.set(worker, "open", async () => {});
+    const keepAlive = setInterval(() => {}, 1000);
+    try {
+      await worker.run({ request_id: "test", chat_session_id: "chat", prompt: "Continue",
+        model: "test", resume: null, web_search_enabled: false, reader_mode: false,
+        poster_mode: false, paper_artifacts_enabled: false, reasoning_effort: "max", hf_username: "test" });
+      assert.equal(prompts, 2);
+      assert.equal(JSON.stringify(manager.getEntries()), before);
+      assert.equal(events.filter((event) => event.type === "done").length, 0);
+      assert.equal(events.filter((event) => event.type === "worker_done").length, 1);
+      if (mode === "stop") {
+        assert.equal(events.filter((event) => event.type === "error").length, 0);
+        assert.equal(events.at(-1)?.status, "stopped");
+      } else {
+        assert.equal(events.filter((event) => event.type === "error").length, 1);
+        assert.equal(events.find((event) => event.type === "error")?.code, "context_too_large");
+      }
+    } finally { clearInterval(keepAlive); compaction.finish(); }
+  });
+}

@@ -597,7 +597,8 @@ export const AssistantMessage: React.FC<{
         </div>
       )}
       {msg.error && <div className="chat-error">
-        {msg.errorCode === "context_too_large" && onRetryCompaction && <button type="button" onClick={onRetryCompaction}>Retry</button>}
+        {msg.blocks?.some((block) => block.kind === "answer" && block.text.trim()) && <strong>Incomplete—response interrupted. </strong>}
+        {["context_too_large", "provider_error", "persistence_error"].includes(msg.errorCode ?? "") && onRetryCompaction && <button type="button" onClick={onRetryCompaction}>Retry</button>}
         <span>{msg.errorCode === "chat_disabled_interrupted"
           ? "Chat was disabled while this response was running. The partial response is saved. Please try again later."
           : msg.errorCode === "chat_session_quota_exceeded"

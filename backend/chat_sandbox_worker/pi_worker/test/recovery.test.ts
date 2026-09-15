@@ -167,3 +167,25 @@ test("a missing answer after both recovery prompts reports failure", async () =>
     INCOMPLETE_RESPONSE_FINALIZER_PROMPT,
   ]);
 });
+
+test("a streamed but truncated answer still requires recovery", async () => {
+  const completion = policy();
+  completion.observeAnswer();
+  completion.observeIncomplete();
+  assert.equal(completion.needsFinalAnswer(), true);
+  const result = await recoverIncompleteResponse(completion, {
+    prompt: async () => { completion.observeAnswer(); },
+    disableTools: () => {}, canContinue: () => true,
+  });
+  assert.equal(result.outcome, "recovered_after_retry");
+});
+
+test("cancellation or timeout wins even if a late answer arrives", async () => {
+  const completion = policy();
+  let running = true;
+  const result = await recoverIncompleteResponse(completion, {
+    prompt: async () => { running = false; completion.observeAnswer(); },
+    disableTools: () => assert.fail("no retry after Stop"), canContinue: () => running,
+  });
+  assert.equal(result.outcome, "aborted");
+});

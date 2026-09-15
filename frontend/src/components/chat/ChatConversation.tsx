@@ -13,6 +13,7 @@ interface ChatConversationProps {
   openRouterFallbackEnabled: boolean;
   onToggleBlock: (messageId: string, blockIndex: number) => void;
   onEditAndResend: (messageId: string, draft: ChatDraft) => boolean;
+  onRetryFromProgress?: () => boolean;
   onArchiveOld: () => void;
   onArchiveOldest: () => void;
 }
@@ -27,6 +28,7 @@ export function ChatConversation({
   openRouterFallbackEnabled,
   onToggleBlock,
   onEditAndResend,
+  onRetryFromProgress,
   onArchiveOld,
   onArchiveOldest,
 }: ChatConversationProps) {
@@ -134,10 +136,7 @@ export function ChatConversation({
               papers={papers}
               onToggleBlock={toggleBlock}
               onRetryCompaction={!busy && message.id === messages.at(-1)?.id && userMessages.at(-1)?.revision
-                ? () => {
-                    const user = userMessages.at(-1)!;
-                    onEditAndResend(user.id, { text: user.text ?? "", paperMentions: user.paperMentions ?? [], ...(user.paperSelection ? { paperSelection: user.paperSelection } : {}) });
-                  }
+                ? onRetryFromProgress
                 : undefined}
               onArchiveOldChats={onArchiveOld}
               onArchiveOldestChats={onArchiveOldest}

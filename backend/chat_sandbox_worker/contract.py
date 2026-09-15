@@ -3,8 +3,8 @@
 import hashlib
 from pathlib import Path
 
-# Adds compaction progress frames and coverage-preserving Pi summaries.
-WORKER_CONTRACT_VERSION = "106"
+# Reserves answer budgets and bounds recovery across compaction and retries.
+WORKER_CONTRACT_VERSION = "107"
 # Web search extends the catalog operation set without changing its request or
 # response framing, so it remains on the rollback-compatible gateway protocol.
 GATEWAY_CONTRACT_VERSION = 30

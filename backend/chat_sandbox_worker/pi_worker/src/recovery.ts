@@ -58,11 +58,11 @@ export async function recoverIncompleteResponse(
   if (!policy.toolingClosed) {
     attempts += 1;
     await actions.prompt(INCOMPLETE_RESPONSE_RETRY_PROMPT);
-    if (!policy.needsFinalAnswer()) {
-      return { reason, attempts, outcome: "recovered_after_retry" };
-    }
     if (!actions.canContinue()) {
       return { reason, attempts, outcome: "aborted" };
+    }
+    if (!policy.needsFinalAnswer()) {
+      return { reason, attempts, outcome: "recovered_after_retry" };
     }
   }
 

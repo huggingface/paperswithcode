@@ -578,6 +578,7 @@ class ChatTurnTrace:
                         "trigger",
                         "duration_ms",
                         "chunk_count",
+                        "failure_reason",
                         "tokens_before",
                         "summary_tokens",
                         "outcome",

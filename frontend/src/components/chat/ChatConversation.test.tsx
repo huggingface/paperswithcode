@@ -162,11 +162,12 @@ describe("ChatConversation scrolling", () => {
 });
 
 
-it("retries only the latest persisted user turn and preserves its draft", () => {
+it("continues only the latest persisted turn without rewinding research", () => {
   const onEditAndResend = vi.fn(() => true);
+  const onRetryFromProgress = vi.fn(() => true);
   const props = {
     papers: {}, busy: false, paperMentionsEnabled: false, archivePending: null,
-    openRouterFallbackEnabled: false, onToggleBlock: vi.fn(), onEditAndResend,
+    openRouterFallbackEnabled: false, onToggleBlock: vi.fn(), onEditAndResend, onRetryFromProgress,
     onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
   };
   const user: ChatMessage = { id: "q", role: "user", text: "Keep the citations", paperMentions: [] };
@@ -175,7 +176,8 @@ it("retries only the latest persisted user turn and preserves its draft", () => 
   expect(view.queryByText("Retry")).toBeNull();
   view.rerender(<ChatConversation {...props} messages={[{ ...user, revision: 1 }, assistant]} />);
   fireEvent.click(view.getByText("Retry"));
-  expect(onEditAndResend).toHaveBeenCalledWith("q", { text: "Keep the citations", paperMentions: [] });
+  expect(onRetryFromProgress).toHaveBeenCalledOnce();
+  expect(onEditAndResend).not.toHaveBeenCalled();
   view.rerender(<ChatConversation {...props} busy messages={[{ ...user, revision: 1 }, assistant]} />);
   expect(view.queryByText("Retry")).toBeNull();
 });

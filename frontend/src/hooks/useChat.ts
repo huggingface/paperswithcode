@@ -825,6 +825,26 @@ export function useChat(options: UseChatOptions) {
     });
   });
 
+  const retryFromProgress = useStableCallback(() => {
+    const snapshot = messagesRef.current.slice();
+    const latestUser = [...snapshot].reverse().find((message) => message.role === "user");
+    if (!optionsRef.current.sessionId || !latestUser?.revision || busyRef.current || pendingCapacityRef.current) return false;
+    const draft = emptyChatDraft("Continue the interrupted response from saved progress.");
+    const optimistic: ChatMessage[] = [...snapshot,
+      { id: nextId(), role: "user", text: draft.text, paperMentions: [] },
+      { id: nextId(), role: "assistant", streaming: true, blocks: [] },
+    ];
+    return run(draft, {
+      message: draft.text,
+      session_id: optionsRef.current.sessionId,
+      client_message_id: crypto.randomUUID(),
+      retry_message_id: latestUser.id,
+      ...(optionsRef.current.primaryPaperRouteId ? { primary_paper_route_id: optionsRef.current.primaryPaperRouteId } : {}),
+      web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
+      reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
+    }, optimistic, snapshot);
+  });
+
   const cancelCapacity = useCallback(() => {
     pendingCapacityRef.current = null;
     setCapacityRequest(null);
@@ -995,6 +1015,7 @@ export function useChat(options: UseChatOptions) {
     disabledRequest,
     send,
     editAndResend,
+    retryFromProgress,
     retryCapacity,
     cancelCapacity,
     dismissDisabled: () => setDisabledRequest(null),

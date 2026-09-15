@@ -43,12 +43,16 @@ export async function summarizeAll(
   for (;;) {
     const chunks = splitSummaryInput(input);
     const summaries: string[] = [];
-    for (const chunk of chunks) {
-      signal.throwIfAborted();
-      const summary = await summarize(chunk);
-      signal.throwIfAborted();
-      if (!summary.trim()) throw new Error("Empty compaction summary");
-      summaries.push(summary);
+    // Two independent chunks at a time; retain source order for the merge.
+    for (let offset = 0; offset < chunks.length; offset += 2) {
+      const batch = await Promise.all(chunks.slice(offset, offset + 2).map(async (chunk) => {
+        signal.throwIfAborted();
+        const summary = await summarize(chunk);
+        signal.throwIfAborted();
+        if (!summary.trim()) throw new Error("Empty compaction summary");
+        return summary;
+      }));
+      summaries.push(...batch);
     }
     const combined = summaries.join("\n\n");
     if (chunks.length === 1 && Buffer.byteLength(combined) <= SUMMARY_BYTES) return combined;
@@ -75,48 +79,96 @@ export function protectedPreparation(event: SessionBeforeCompactEvent) {
   const start = previous?.type === "compaction"
     ? branchEntries.findIndex((entry) => entry.id === previous.firstKeptEntryId)
     : 0;
-  if (start < 0 || cut <= start) throw new Error("Protected recent context cannot be compacted");
+  if (start < 0) throw new Error("Invalid compaction boundary");
+  if (cut <= start) {
+    // A single research turn may be larger than the context window. Compact
+    // completed exchanges, but never split an assistant call from its results.
+    const pending = new Set<string>();
+    let completedTool = false;
+    for (let i = start; i < branchEntries.length - 1; i++) {
+      const entry = branchEntries[i]!;
+      if (entry.type !== "message") continue;
+      const message = entry.message;
+      if (message.role === "assistant") {
+        for (const part of message.content) if (part.type === "toolCall") pending.add(part.id);
+      } else if (message.role === "toolResult") {
+        if (!pending.delete(message.toolCallId)) throw new Error("Unpaired tool result");
+        completedTool = true;
+      }
+      if (completedTool && pending.size === 0) cut = i + 1;
+    }
+    if (cut <= start) throw new Error("Protected recent context cannot be compacted");
+  }
+  const preservedRequest = latestUser < cut
+    ? serializeConversation(convertToLlm(sessionEntryToContextMessages(branchEntries[latestUser]!)))
+    : "";
   const messages = branchEntries.slice(start, cut)
     .filter((entry) => entry.type !== "compaction")
     .flatMap(sessionEntryToContextMessages);
-  const text = [preparation.previousSummary ?? "", serializeConversation(convertToLlm(messages))].filter(Boolean).join("\n\n");
-  return { text, firstKeptEntryId: branchEntries[cut]!.id };
+  const text = [preparation.previousSummary ?? "", convertToLlm(messages).map((message) => message.role === "toolResult"
+    ? `[Tool result ${message.toolCallId}]: ${JSON.stringify(message.content)}`
+    : serializeConversation([message])).join("\n\n")].filter(Boolean).join("\n\n");
+  return { text, firstKeptEntryId: branchEntries[cut]!.id, preservedRequest };
 }
 
 export class CompactionController {
   failed = false;
   attempted = false;
-  private remainingMs: number;
+  timedOut = false;
+  private recoveryDeadline = Infinity;
+  private recoveryTimer?: ReturnType<typeof setTimeout>;
+  private abortRun: () => void = () => {};
+  private protectedRequest = "";
   private turnDeadline = Infinity;
   private retryUsed = false;
   private overflowAttempted = false;
-  reset(remainingTurnMs = Infinity) {
+  reset(remainingTurnMs = Infinity, abortRun: () => void = () => {}, protectedRequest = "") {
+    this.finish();
     this.failed = false;
     this.attempted = false;
-    this.remainingMs = this.budgetMs;
+    this.timedOut = false;
+    this.recoveryDeadline = Infinity;
+    this.abortRun = abortRun;
+    this.protectedRequest = protectedRequest;
     this.turnDeadline = performance.now() + remainingTurnMs;
     this.retryUsed = false;
     this.overflowAttempted = false;
   }
 
   constructor(private readonly emit: (event: PwCEvent) => void, private readonly budgetMs = COMPACTION_BUDGET_MS) {
-    this.remainingMs = budgetMs;
+  }
+
+  startRecovery(): void {
+    if (this.recoveryDeadline !== Infinity) return;
+    this.recoveryDeadline = Math.min(performance.now() + this.budgetMs, this.turnDeadline);
+    this.recoveryTimer = setTimeout(() => {
+      this.timedOut = true;
+      this.failed = true;
+      this.abortRun();
+    }, Math.max(0, this.recoveryDeadline - performance.now()));
+    this.recoveryTimer.unref();
+  }
+
+  finish(): void {
+    clearTimeout(this.recoveryTimer);
   }
 
   extension(provider: Awaited<ReturnType<typeof createProvider>>): ExtensionFactory {
     return (pi) => {
       pi.on("session_before_compact", async (event) => {
         this.attempted = true;
+        this.startRecovery();
         const started = performance.now();
         let chunks = 0;
         let usage: Usage | undefined;
         let outcome = "failed";
+        let failureReason: string | undefined;
         let tokensAfter: number | undefined;
         const deadline = new AbortController();
-        const timer = setTimeout(() => deadline.abort(), Math.max(0, Math.min(this.remainingMs, this.turnDeadline - started)));
+        const timer = setTimeout(() => deadline.abort(), Math.max(0, this.recoveryDeadline - started));
         const signal = AbortSignal.any([event.signal, deadline.signal]);
         try {
-          if (this.failed || this.remainingMs <= 0 || started >= this.turnDeadline || (event.reason === "overflow" && this.overflowAttempted)) {
+          if (this.failed || started >= this.recoveryDeadline || (event.reason === "overflow" && this.overflowAttempted)) {
             throw new Error("Compaction budget exhausted");
           }
           if (event.reason === "overflow") this.overflowAttempted = true;
@@ -158,26 +210,39 @@ export class CompactionController {
           }, signal);
           tokensAfter = estimateTokens({ role: "user", content: summary, timestamp: Date.now() });
           outcome = "success";
+          // Recovery prompts are persisted as user messages by Pi. Pin the
+          // actual admitted request independently of those synthetic messages.
+          const request = this.protectedRequest || prepared.preservedRequest;
           return { compaction: {
-            summary, firstKeptEntryId: prepared.firstKeptEntryId,
+            summary: summary + (request ? `\n\n## Current user request (verbatim)\n${request}` : ""), firstKeptEntryId: prepared.firstKeptEntryId,
             tokensBefore: event.preparation.tokensBefore,
             ...(usage ? { usage } : {}),
             details: { readFiles: [...event.preparation.fileOps.read], modifiedFiles: [...event.preparation.fileOps.written, ...event.preparation.fileOps.edited] },
           } };
-        } catch {
+        } catch (error) {
+          const reasons: Record<string, string> = {
+            "Invalid compaction boundary": "invalid_boundary",
+            "Protected recent context cannot be compacted": "no_safe_boundary",
+            "Unpaired tool result": "unpaired_tool_result",
+            "Empty compaction summary": "empty_summary",
+            "Compaction did not reduce context": "non_shrinking_summary",
+            "Compaction budget exhausted": "budget_exhausted",
+            "Summarization failed": "summary_incomplete",
+          };
+          failureReason = error instanceof Error ? reasons[error.message] ?? "summary_provider_error" : "summary_provider_error";
           // Extension errors are swallowed by Pi. Explicit cancellation prevents a
           // fallback to its single-request summarizer; the worker owns the terminal.
           this.failed = true;
-          outcome = event.signal.aborted ? "cancelled" : deadline.signal.aborted ? "timeout" : "failed";
+          outcome = this.timedOut || deadline.signal.aborted ? "timeout" : event.signal.aborted ? "cancelled" : "failed";
           return { cancel: true };
         } finally {
           clearTimeout(timer);
+          deadline.abort(); // Cancel a sibling summary if its parallel chunk failed.
           const elapsed = Math.round(performance.now() - started);
-          this.remainingMs -= elapsed;
           if (usage) this.emit({ type: "usage", phase: "compaction", usage, model_usage: {},
             total_cost_usd: usage.cost.total, provider_requests: chunks });
           this.emit({ type: "_compaction_telemetry", trigger: event.reason, duration_ms: elapsed,
-            chunk_count: chunks, tokens_before: event.preparation.tokensBefore, summary_tokens: tokensAfter, outcome });
+            chunk_count: chunks, tokens_before: event.preparation.tokensBefore, summary_tokens: tokensAfter, outcome, ...(failureReason ? { failure_reason: failureReason } : {}) });
         }
       });
     };

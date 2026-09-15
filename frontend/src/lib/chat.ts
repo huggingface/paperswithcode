@@ -185,6 +185,7 @@ export interface ChatStreamRequest {
   client_message_id: string;
   initial_model?: string;
   replace_message_id?: string;
+  retry_message_id?: string;
   prior_revision?: number;
   paper_mentions?: PaperMentionWire[];
   web_search_enabled: boolean;

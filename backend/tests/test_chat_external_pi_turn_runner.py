@@ -914,6 +914,7 @@ def test_chat_stream_producer_cancels_worker_after_unexpected_failure():
     coordinator = ChatStreamOrchestrator.__new__(ChatStreamOrchestrator)
     coordinator.runner = runner
     coordinator.admission = SimpleNamespace(session_id=uuid.uuid4())
+    coordinator._cancel_requested_after_error = lambda: asyncio.sleep(0, result=False)
     queue = asyncio.Queue()
 
     asyncio.run(coordinator._produce_research(queue))

@@ -452,3 +452,50 @@ test("direct SDK streams through the pinned Anthropic-compatible provider", asyn
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("reserves the requested answer budget before sending a crowded context", async () => {
+  const direct = await createProvider("gpt-5.6-luna", "openai-responses");
+  let requests = 0;
+  const result = await direct.runtime.completeSimple(direct.model, {
+    systemPrompt: "System constraints ".repeat(3000),
+    messages: [{ role: "user", content: "Evidence ".repeat(16000), timestamp: Date.now() }],
+  }, { fetch: async () => { requests++; return openAITextResponse("should compact first", 1); } });
+  assert.equal(requests, 0, "never send a context-clamped answer allowance");
+  assert.equal(result.stopReason, "error");
+  assert.match(result.errorMessage ?? "", /request_too_large.*output_budget/);
+});
+
+test("Stop aborts native compaction and discards its unfinished summary", async () => {
+  const provider = await createProvider("test-route", "openai-responses");
+  const events: PwCEvent[] = [];
+  const controller = new CompactionController((event) => events.push(event));
+  const manager = SessionManager.inMemory("/workspace");
+  for (let i = 0; i < 4; i++) manager.appendMessage({ role: "user", content: `source:${i} ` + "evidence ".repeat(3000), timestamp: Date.now() });
+  let started!: () => void;
+  const summaryStarted = new Promise<void>((resolve) => { started = resolve; });
+  provider.runtime.completeSimple = async (_model, _context, options) => {
+    started();
+    await new Promise((_resolve, reject) => options?.signal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true }));
+    throw new Error("unreachable");
+  };
+  const settings = SettingsManager.inMemory({ compaction: { enabled: true }, retry: { enabled: false } });
+  const loader = new DefaultResourceLoader({ cwd: "/workspace", agentDir: "/tmp/pwc-stop-compaction", settingsManager: settings,
+    noExtensions: true, noSkills: true, noPromptTemplates: true, noThemes: true, noContextFiles: true,
+    extensionFactories: [{ name: "pwc-compaction", factory: controller.extension(provider) }] });
+  await loader.reload();
+  const { session } = await createAgentSession({ cwd: "/workspace", modelRuntime: provider.runtime, model: provider.model,
+    tools: [], resourceLoader: loader, settingsManager: settings, sessionManager: manager });
+  await session.bindExtensions({ mode: "print" });
+  const worker = new PiWorker(() => {});
+  Reflect.set(worker, "session", session);
+  Reflect.set(worker, "activeRequest", "stop-test");
+  const before = JSON.stringify(manager.getEntries());
+  const compact = session.compact().then(() => "saved", () => "cancelled");
+  try {
+    await summaryStarted;
+    await worker.cancel("stop-test");
+    assert.equal(await compact, "cancelled");
+    assert.equal(JSON.stringify(manager.getEntries()), before);
+    assert.equal(events.at(-1)?.outcome, "cancelled");
+  } finally { controller.finish(); session.dispose(); }
+});

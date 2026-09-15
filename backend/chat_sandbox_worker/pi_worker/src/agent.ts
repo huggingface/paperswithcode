@@ -199,9 +199,10 @@ export class PiWorker {
   }
 
   async cancel(requestId: string): Promise<void> {
-    if (requestId !== this.activeRequest || !this.session) return;
+    if (requestId !== this.activeRequest) return;
     this.cancelled = true;
-    await this.session.abort();
+    this.session?.abortCompaction();
+    await this.session?.abort();
   }
 
   async dispose(): Promise<void> {
@@ -504,13 +505,20 @@ export class PiWorker {
       : run.paper_artifacts_enabled
         ? Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600)
         : Number(process.env.PWC_CHAT_AGENT_TIMEOUT_SECONDS ?? 180);
-    this.compaction.reset(turnTimeoutSeconds * 1000);
+    this.compaction.reset(turnTimeoutSeconds * 1000, () => {
+      this.session?.abortCompaction();
+      void this.session?.abort();
+    }, run.prompt);
     this.boundChatSession ??= run.chat_session_id;
     this.failurePhase = "initialize";
     try {
       await this.initialize();
       this.emit(run.request_id, { type: "worker_ready" });
       await this.open(run);
+      if (this.cancelled) {
+        this.emit(run.request_id, { type: "worker_done", status: "stopped" });
+        return;
+      }
       if (!this.session || !this.manager || !this.mirror || !this.boundAgentSession) {
         throw new Error("Pi worker failed to initialize");
       }
@@ -521,10 +529,15 @@ export class PiWorker {
         },
       );
       let subscribeFailed = false;
+      let truncatedResponse = false;
       let pendingAdapterError: PwCEvent | undefined;
       const unsubscribe = this.session.subscribe((event) => {
         if (subscribeFailed || this.cancelled) return;
         try {
+          if (event.type === "message_end" && event.message.role === "assistant") {
+            truncatedResponse = event.message.stopReason === "length";
+            if (truncatedResponse) this.policy.observeIncomplete();
+          }
           for (const adapted of adapter.feed(event)) {
             // A terminal event must be the final semantic frame before
             // worker_done. Hold provider/adapter failures until transcript
@@ -554,15 +567,31 @@ export class PiWorker {
       try {
         await this.session.prompt(run.prompt, { expandPromptTemplates: false, source: "interactive" });
         recovery = await recoverIncompleteResponse(this.policy, {
-          prompt: (value) =>
-            this.session!.prompt(value, {
+          prompt: async (value) => {
+            this.compaction.startRecovery();
+            if (truncatedResponse) {
+              // The SDK handles context-clamped lengths automatically. A full
+              // output-limit stop also needs a changed context before retrying.
+              this.emit(run.request_id, { type: "compaction_status", state: "started" });
+              try {
+                await this.session!.compact();
+              } catch {
+                this.compaction.failed = true;
+              } finally {
+                this.emit(run.request_id, { type: "compaction_status", state: "finished" });
+              }
+              if (this.compaction.failed || this.cancelled) return;
+            }
+            await this.session!.prompt(value, {
               expandPromptTemplates: false,
               source: "extension",
-            }),
+            });
+          },
           disableTools: () => this.session!.setActiveToolsByName([]),
           canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
         });
       } finally {
+        this.compaction.finish();
         unsubscribe();
         this.failurePhase = "transcript_finalize";
         try {
@@ -581,7 +610,11 @@ export class PiWorker {
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
         return;
       }
-      if (this.compaction.failed && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
+      if (this.compaction.timedOut) {
+        pendingAdapterError = { type: "error", code: "context_too_large",
+          message: "Recovery exceeded 60 seconds. Your conversation and completed research are saved. Retry, shorten the request, or start a new conversation." };
+      }
+      if (this.compaction.failed && !this.compaction.timedOut && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
         pendingAdapterError = {
           type: "error", code: "context_too_large",
           message: "Earlier context could not be summarized. Your conversation is saved. Retry, or shorten recent messages if it remains too large.",
@@ -623,6 +656,7 @@ export class PiWorker {
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
       }
     } finally {
+      this.compaction.finish();
       this.activeRequest = undefined;
     }
   }

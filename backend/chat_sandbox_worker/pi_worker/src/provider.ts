@@ -44,7 +44,15 @@ function boundedOpenAIResponsesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        return boundedGatewayPayload(replacement ?? payload);
+        const bounded = boundedGatewayPayload(replacement ?? payload);
+        // Use the SDK's final allowance: it accounts for system text, tools,
+        // messages and its context safety margin. Never send a starved request.
+        const limit = (bounded as Record<string, unknown>)[model.api === "openai-responses" ? "max_output_tokens" : "max_tokens"];
+        const required = Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens);
+        if (typeof limit === "number" && limit < required) {
+          throw new Error(`request_too_large: insufficient_output_budget available=${limit} required=${required}`);
+        }
+        return bounded;
       },
     },
   );
@@ -63,7 +71,15 @@ function boundedAnthropicMessagesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        return boundedGatewayPayload(replacement ?? payload);
+        const bounded = boundedGatewayPayload(replacement ?? payload);
+        // Use the SDK's final allowance: it accounts for system text, tools,
+        // messages and its context safety margin. Never send a starved request.
+        const limit = (bounded as Record<string, unknown>)[model.api === "openai-responses" ? "max_output_tokens" : "max_tokens"];
+        const required = Math.min(options?.maxTokens ?? model.maxTokens, model.maxTokens);
+        if (typeof limit === "number" && limit < required) {
+          throw new Error(`request_too_large: insufficient_output_budget available=${limit} required=${required}`);
+        }
+        return bounded;
       },
     },
   );

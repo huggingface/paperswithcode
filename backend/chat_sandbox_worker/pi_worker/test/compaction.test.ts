@@ -153,3 +153,81 @@ for (const retryStop of ["stop", "length"] as const) {
     assert.equal(controller.failed, retryStop === "length");
   });
 }
+
+test("compacts completed tool exchanges within a single request and preserves that request verbatim", () => {
+  const manager = SessionManager.inMemory("/workspace");
+  const request = "Compare exact scores for paper:1234. Do not publish anything.";
+  manager.appendMessage({ role: "user", content: request, timestamp: Date.now() });
+  manager.appendMessage({ role: "assistant", api: "openai-responses", provider: "pwc-gateway", model: "test", stopReason: "toolUse", timestamp: Date.now(),
+    content: [{ type: "toolCall", id: "read-1", name: "read", arguments: { path: "paper.txt" } }],
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  manager.appendMessage({ role: "toolResult", toolCallId: "read-1", toolName: "read", isError: false,
+    content: [{ type: "text", text: "paper:1234 score=42 ".repeat(1000) + "TAIL-SOURCE=https://example.org/critical" }], timestamp: Date.now() });
+  manager.appendMessage({ role: "assistant", api: "openai-responses", provider: "pwc-gateway", model: "test", stopReason: "error", errorMessage: "request_too_large", timestamp: Date.now(), content: [],
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  const branchEntries = manager.getBranch();
+  const original = JSON.stringify(branchEntries);
+  const result = protectedPreparation({ ...preparation(), branchEntries,
+    preparation: { ...preparation().preparation, firstKeptEntryId: branchEntries[0]!.id } });
+  assert.equal(result.firstKeptEntryId, branchEntries[3]!.id);
+  assert.match(result.text, /paper:1234 score=42/);
+  assert.match(result.text, /TAIL-SOURCE=https:\/\/example.org\/critical/);
+  assert.ok(result.preservedRequest?.includes(request));
+  assert.equal(JSON.stringify(branchEntries), original);
+});
+
+test("the recovery deadline is shared with answer retries and resets only for a new turn", async () => {
+  let aborted = 0;
+  const controller = new CompactionController(() => {}, 50);
+  controller.reset(Infinity, () => { aborted++; });
+  controller.startRecovery();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  controller.startRecovery();
+  await new Promise((resolve) => setTimeout(resolve, 30));
+  assert.equal(aborted, 1);
+  assert.equal(controller.timedOut, true);
+  controller.reset(Infinity, () => { aborted++; });
+  assert.equal(controller.timedOut, false);
+  controller.startRecovery();
+  controller.finish();
+  await new Promise((resolve) => setTimeout(resolve, 60));
+  assert.equal(aborted, 1, "completed runs leave no timer behind");
+});
+
+test("partial parallel tool batches are kept intact", () => {
+  const event = preparation();
+  const manager = SessionManager.inMemory("/workspace");
+  manager.appendMessage({ role: "user", content: "Do not publish", timestamp: Date.now() });
+  manager.appendMessage({ role: "assistant", api: "openai-responses", provider: "pwc-gateway", model: "test", stopReason: "toolUse", timestamp: Date.now(),
+    content: ["one", "two"].map((id) => ({ type: "toolCall" as const, id, name: "read", arguments: { path: id } })),
+    usage: { input: 1, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 2, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } });
+  manager.appendMessage({ role: "toolResult", toolCallId: "one", toolName: "read", isError: false, content: [{ type: "text", text: "first result" }], timestamp: Date.now() });
+  event.branchEntries = manager.getBranch();
+  event.preparation.firstKeptEntryId = event.branchEntries[0]!.id;
+  assert.throws(() => protectedPreparation(event), /Protected recent/);
+});
+
+test("safe preparation failures expose a code without conversation content", async () => {
+  const events: PwCEvent[] = [];
+  const controller = new CompactionController((event) => events.push(event));
+  const event = preparation();
+  event.preparation.firstKeptEntryId = "missing";
+  const handler = hook(controller, async () => assert.fail("no summary request expected"));
+  assert.deepEqual(await handler(event), { cancel: true });
+  assert.equal(events.at(-1)?.failure_reason, "invalid_boundary");
+  assert.doesNotMatch(JSON.stringify(events), /old constraint|example.org/);
+  controller.finish();
+});
+
+test("synthetic recovery prompts cannot replace the verbatim admitted request", async () => {
+  const controller = new CompactionController(() => {});
+  const original = "Compare exact values, preserve 0.000123 and never publish.";
+  controller.reset(Infinity, () => {}, original);
+  const event = preparation();
+  const last = event.branchEntries.at(-1)!;
+  if (last.type === "message" && last.message.role === "user") last.message.content = "Your previous response ended without an answer. Continue.";
+  const handler = hook(controller, async () => ({ stopReason: "stop", content: [{ type: "text", text: "A concise summary" }] }));
+  const result = await handler(event);
+  assert.ok(result.compaction?.summary.includes(original));
+  controller.finish();
+});

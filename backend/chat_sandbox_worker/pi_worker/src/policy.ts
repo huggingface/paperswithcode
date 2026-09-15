@@ -129,6 +129,11 @@ export class PolicyController {
     if (this.toolingClosed) this.answerAfterClose = true;
   }
 
+  observeIncomplete(): void {
+    this.answerProduced = false;
+    this.answerAfterClose = false;
+  }
+
   needsFinalAnswer(): boolean {
     return this.toolingClosed ? !this.answerAfterClose : !this.answerProduced;
   }
