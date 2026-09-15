@@ -147,3 +147,58 @@ def test_saved_progress_retry_keeps_native_leaf_and_prior_failure():
     assert boundary.agent_id == "last-completed-tool"
     service._latest_user_message = lambda _: SimpleNamespace(status="complete")
     assert not service._has_unresolved_turn(session)
+
+
+def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch):
+    from datetime import timedelta
+    from backend.tests.test_chat_turn_admission_characterization import (
+        _Result,
+        _ScriptedDB,
+        _owned_service,
+        _session,
+    )
+
+    settings = get_settings().model_copy(
+        update={
+            "chat_durable_turn_dispatch_enabled": False,
+            "chat_artifacts_enabled": True,
+            "chat_posterly_enabled": True,
+            "chat_executor_remote_transport_enabled": True,
+        }
+    )
+    session = _session(
+        settings,
+        agent_harness="pi",
+        sdk_session_id="native",
+        message_count=2,
+        last_sequence=2,
+    )
+    target = SimpleNamespace(
+        id=uuid.uuid4(),
+        status="error",
+        content="Make a poster about attention",
+        effective_prompt="Make a poster about attention. Use source:123.",
+    )
+    db = _ScriptedDB(
+        execute_results=(_Result(), _Result(), _Result()),
+        scalar_results=(0, 0, 0, "saved-leaf"),
+    )
+    service = _owned_service(db, settings, session)
+    service._latest_user_message = lambda _: target
+    service._validate_saved_progress_retry = lambda *_: target
+    monkeypatch.setattr(service, "fetchable_url_seed", lambda *_args, **_kwargs: [])
+    admission = service.begin_turn(
+        ChatOwner("owner-1", "owner"),
+        session_id=session.id,
+        client_message_id="retry",
+        text="Continue from saved progress",
+        retry_message_id=target.id,
+    )
+    assert admission.poster_mode
+    assert admission.executor_transport == "legacy"
+    assert session.active_turn_expires_at - session.updated_at == timedelta(
+        seconds=settings.chat_posterly_timeout_seconds + 30
+    )
+    assert db.added[0].content == target.content
+    assert db.added[0].effective_prompt.startswith(target.effective_prompt)
+    assert "Do not repeat completed edits" in db.added[0].effective_prompt

@@ -1955,6 +1955,24 @@ class ChatSessionService:
                     "This conversation belongs to a different paper.",
                 )
 
+        if retry_message_id is not None:
+            retry_target = self._validate_saved_progress_retry(
+                session, retry_message_id
+            )
+            # Keep the original display request as well as its effective context.
+            # Mode selection, lease duration, and idempotent replays all use it.
+            text = retry_target.content
+            effective_prompt = (
+                (retry_target.effective_prompt or retry_target.content)
+                + "\n\n"
+                + (
+                    "Continue the last failed request from the saved research and completed tool results. "
+                    "Preserve the original request and constraints. Do not repeat completed edits, "
+                    "publications, or artifact creation. Verify uncertain action outcomes before proceeding. "
+                    "If the saved context cannot be recovered safely, report the failure explicitly."
+                )
+            )
+
         target_harness = (
             getattr(session, "agent_harness", "claude")
             if session is not None
@@ -2039,20 +2057,6 @@ class ChatSessionService:
         recovered_expired_lease = (
             recovered_expired_lease or recovered_durable_preflight_expiry
         )
-        if retry_message_id is not None:
-            retry_target = self._validate_saved_progress_retry(
-                session, retry_message_id
-            )
-            effective_prompt = (
-                (retry_target.effective_prompt or retry_target.content)
-                + "\n\n"
-                + (
-                    "Continue the last failed request from the saved research and completed tool results. "
-                    "Preserve the original request and constraints. Do not repeat completed edits, "
-                    "publications, or artifact creation. Verify uncertain action outcomes before proceeding. "
-                    "If the saved context cannot be recovered safely, report the failure explicitly."
-                )
-            )
         if (
             self._has_unresolved_turn(session)
             and replace_message_id is None

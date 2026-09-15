@@ -1230,7 +1230,7 @@ it("Retry continues from saved progress without replacing the failed turn or hid
   ];
   act(() => result.current.load(prior));
   act(() => { expect(result.current.retryFromProgress()).toBe(true); });
-  expect(request).toMatchObject({ retry_message_id: "failed-user", session_id: "session-1", reasoning_effort: "max", primary_paper_route_id: "1234.56789" });
+  expect(request).toMatchObject({ message: "Research", retry_message_id: "failed-user", session_id: "session-1", reasoning_effort: "max", primary_paper_route_id: "1234.56789" });
   expect(request?.replace_message_id).toBeUndefined();
   expect(result.current.messages.slice(0, 2)).toEqual(prior);
   await flushMicrotasks();

@@ -81,7 +81,7 @@ test("prebound first-turn retry restores an existing durable transcript", async 
   }
 });
 
-for (const mode of ["timeout", "stop"] as const) {
+for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject"] as const) {
   test(`${mode} during recovery preserves saved summaries and emits one terminal outcome`, async () => {
     const { PiWorker } = await import("../src/agent.js");
     const { CompactionController } = await import("../src/compaction.js");
@@ -104,9 +104,9 @@ for (const mode of ["timeout", "stop"] as const) {
           compaction.startRecovery();
           await new Promise((resolve) => setTimeout(resolve, 35));
         } else {
-          await new Promise<void>((resolve) => {
-            finishPrompt = resolve;
-            if (mode === "stop") setTimeout(() => { void worker.cancel("test"); }, 5);
+          await new Promise<void>((resolve, reject) => {
+            finishPrompt = mode.endsWith("reject") ? () => reject(new Error("aborted")) : resolve;
+            if (mode.startsWith("stop")) setTimeout(() => { void worker.cancel("test"); }, 5);
           });
         }
       },
@@ -129,7 +129,7 @@ for (const mode of ["timeout", "stop"] as const) {
       assert.equal(JSON.stringify(manager.getEntries()), before);
       assert.equal(events.filter((event) => event.type === "done").length, 0);
       assert.equal(events.filter((event) => event.type === "worker_done").length, 1);
-      if (mode === "stop") {
+      if (mode.startsWith("stop")) {
         assert.equal(events.filter((event) => event.type === "error").length, 0);
         assert.equal(events.at(-1)?.status, "stopped");
       } else {
@@ -139,3 +139,40 @@ for (const mode of ["timeout", "stop"] as const) {
     } finally { clearInterval(keepAlive); compaction.finish(); }
   });
 }
+
+
+test("a length-limited answer without tools can continue without forced compaction", async () => {
+  const { PiWorker } = await import("../src/agent.js");
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const events: Record<string, unknown>[] = [];
+  const worker = new PiWorker((_id, event) => events.push(event));
+  let listener = (_event: unknown) => {};
+  let prompts = 0;
+  let compactions = 0;
+  const session = {
+    subscribe(callback: typeof listener) { listener = callback; return () => {}; },
+    async prompt() {
+      prompts++;
+      listener({ type: "message_update", assistantMessageEvent: {
+        type: "text_delta", delta: prompts === 1 ? "Partial answer" : "Completed answer",
+      } });
+      listener({ type: "message_end", message: { role: "assistant", content: [],
+        stopReason: prompts === 1 ? "length" : "stop" } });
+    },
+    async compact() { compactions++; throw new Error("No safe compaction boundary"); },
+    setActiveToolsByName() {},
+  };
+  Reflect.set(worker, "session", session);
+  Reflect.set(worker, "manager", SessionManager.inMemory("/workspace"));
+  Reflect.set(worker, "mirror", { append() {}, async flush() {} });
+  Reflect.set(worker, "boundAgentSession", "native");
+  Reflect.set(worker, "initialize", async () => {});
+  Reflect.set(worker, "open", async () => {});
+  await worker.run({ request_id: "test", chat_session_id: "chat", prompt: "Explain this",
+    model: "test", resume: null, web_search_enabled: false, reader_mode: false,
+    poster_mode: false, paper_artifacts_enabled: false, reasoning_effort: "max", hf_username: "test" });
+  assert.equal(prompts, 2);
+  assert.equal(compactions, 0);
+  assert.equal(events.filter((event) => event.type === "error").length, 0);
+  assert.equal(events.find((event) => event.type === "done")?.finish_reason, "success");
+});

@@ -85,6 +85,8 @@ const agentDirectory = externalStateRoot
   ? path.join(externalStateRoot, "agent")
   : "/home/pwc-chat/.pi-disabled";
 
+const RECOVERY_TIMEOUT_MESSAGE = "Recovery exceeded 60 seconds. Your conversation and completed research are saved. Retry, shorten the request, or start a new conversation.";
+
 export class PiWorker {
   private session: AgentSession | undefined;
   private manager: SessionManager | undefined;
@@ -529,14 +531,12 @@ export class PiWorker {
         },
       );
       let subscribeFailed = false;
-      let truncatedResponse = false;
       let pendingAdapterError: PwCEvent | undefined;
       const unsubscribe = this.session.subscribe((event) => {
         if (subscribeFailed || this.cancelled) return;
         try {
           if (event.type === "message_end" && event.message.role === "assistant") {
-            truncatedResponse = event.message.stopReason === "length";
-            if (truncatedResponse) this.policy.observeIncomplete();
+            if (event.message.stopReason === "length") this.policy.observeIncomplete();
           }
           for (const adapted of adapter.feed(event)) {
             // A terminal event must be the final semantic frame before
@@ -569,19 +569,8 @@ export class PiWorker {
         recovery = await recoverIncompleteResponse(this.policy, {
           prompt: async (value) => {
             this.compaction.startRecovery();
-            if (truncatedResponse) {
-              // The SDK handles context-clamped lengths automatically. A full
-              // output-limit stop also needs a changed context before retrying.
-              this.emit(run.request_id, { type: "compaction_status", state: "started" });
-              try {
-                await this.session!.compact();
-              } catch {
-                this.compaction.failed = true;
-              } finally {
-                this.emit(run.request_id, { type: "compaction_status", state: "finished" });
-              }
-              if (this.compaction.failed || this.cancelled) return;
-            }
+            // The provider guard and SDK compact only when context is actually
+            // crowded. A length-limited answer may have no safe summary boundary.
             await this.session!.prompt(value, {
               expandPromptTemplates: false,
               source: "extension",
@@ -612,7 +601,7 @@ export class PiWorker {
       }
       if (this.compaction.timedOut) {
         pendingAdapterError = { type: "error", code: "context_too_large",
-          message: "Recovery exceeded 60 seconds. Your conversation and completed research are saved. Retry, shorten the request, or start a new conversation." };
+          message: RECOVERY_TIMEOUT_MESSAGE };
       }
       if (this.compaction.failed && !this.compaction.timedOut && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
         pendingAdapterError = {
@@ -650,8 +639,8 @@ export class PiWorker {
         process.stderr.write(turnFailureDiagnostic(this.failurePhase, error));
         this.emit(run.request_id, {
           type: "error",
-          code: "gateway_unavailable",
-          message: "The research run failed.",
+          code: this.compaction.timedOut ? "context_too_large" : "gateway_unavailable",
+          message: this.compaction.timedOut ? RECOVERY_TIMEOUT_MESSAGE : "The research run failed.",
         });
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
       }
