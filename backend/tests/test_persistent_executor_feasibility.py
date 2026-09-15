@@ -165,7 +165,7 @@ def _manifest() -> dict[str, object]:
                     if name == "warm_ack"
                     else 5000
                     if name.startswith("reconnect")
-                    else 2000
+                    else 5000
                     if name == "cold_first_pwd"
                     else 1000
                 ),
@@ -178,6 +178,8 @@ def _manifest() -> dict[str, object]:
                     if name == "warm_ack"
                     else 2000
                     if name == "warm_noop"
+                    else 8000
+                    if name in {"cold_first_pwd", "cold_32_way"}
                     else 5000
                 ),
                 "delivery_requirement": (
@@ -437,10 +439,10 @@ def test_cold_burst_is_not_a_second_tail_latency_profile() -> None:
     manifest = validate_manifest(_manifest())
     profiles = {profile.name: profile for profile in manifest.profiles}
 
-    assert profiles["cold_first_pwd"].p95_target_ms == 2_000
-    assert profiles["cold_first_pwd"].p99_target_ms == 5_000
+    assert profiles["cold_first_pwd"].p95_target_ms == 5_000
+    assert profiles["cold_first_pwd"].p99_target_ms == 8_000
     assert profiles["cold_32_way"].p95_target_ms is None
-    assert profiles["cold_32_way"].p99_target_ms == 5_000
+    assert profiles["cold_32_way"].p99_target_ms == 8_000
 
 
 def test_cancelled_modal_sample_terminates_and_reconciles(monkeypatch) -> None:
@@ -577,3 +579,49 @@ def test_cancelled_modal_reconnect_terminates_and_reconciles(monkeypatch) -> Non
         assert reconciliations == [("sandbox-000001", None)]
 
     asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("latency_ms,allowed_outliers", [(5_001, 50), (8_001, 10)])
+def test_revised_cold_gate_stops_only_after_tail_budget_is_exhausted(
+    latency_ms: int, allowed_outliers: int
+) -> None:
+    sample = Sample(
+        profile="cold_first_pwd",
+        index=0,
+        sandbox_id="sb-test",
+        cold_first_pwd_ms=latency_ms,
+        containment_ms=500,
+        process_exit_confirmed=True,
+        egress_revoked=True,
+        sandbox_termination_confirmed=True,
+        reservation_retained=True,
+        error=None,
+    )
+    assert not _gate_is_impossible([sample] * allowed_outliers, include_cold=True)
+    assert _gate_is_impossible([sample] * (allowed_outliers + 1), include_cold=True)
+    assert not _gate_is_impossible([sample] * 1000, include_cold=False)
+
+
+def test_revised_cold_boundary_does_not_relax_containment() -> None:
+    from dataclasses import replace
+
+    sample = Sample(
+        profile="cold_first_pwd",
+        index=0,
+        sandbox_id="sb-test",
+        cold_first_pwd_ms=5_000,
+        containment_ms=500,
+        process_exit_confirmed=True,
+        egress_revoked=True,
+        sandbox_termination_confirmed=True,
+        reservation_retained=True,
+        error=None,
+    )
+    assert not _gate_is_impossible([sample] * 1000, include_cold=True)
+    assert not _gate_is_impossible(
+        [sample] * 950 + [replace(sample, cold_first_pwd_ms=8_000)] * 50,
+        include_cold=True,
+    )
+    assert _gate_is_impossible(
+        [replace(sample, containment_ms=2_001)] * 11, include_cold=False
+    )

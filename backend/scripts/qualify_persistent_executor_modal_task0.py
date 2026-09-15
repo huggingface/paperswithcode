@@ -18,6 +18,8 @@ import modal
 
 from backend.chat_sandbox_worker.contract import CHAT_SANDBOX_REGION, MODAL_APP_NAME
 from backend.loadtests.persistent_executor_feasibility import (
+    COLD_FIRST_PWD_P95_MS,
+    COLD_FIRST_PWD_P99_MS,
     ExperimentBudget,
     nearest_rank,
     validate_manifest,
@@ -225,8 +227,9 @@ def _gate_is_impossible(samples: list[Sample], *, include_cold: bool) -> bool:
     ):
         return True
     return include_cold and (
-        sum(sample.cold_first_pwd_ms > 2000 for sample in samples) > 50
-        or sum(sample.cold_first_pwd_ms > 5000 for sample in samples) > 10
+        sum(sample.cold_first_pwd_ms > COLD_FIRST_PWD_P95_MS for sample in samples) > 50
+        or sum(sample.cold_first_pwd_ms > COLD_FIRST_PWD_P99_MS for sample in samples)
+        > 10
     )
 
 
