@@ -1,5 +1,6 @@
 """PostgreSQL integration coverage for weighted paper full-text search."""
 
+import json
 import subprocess
 from datetime import date
 from pathlib import Path
@@ -103,6 +104,9 @@ def search_engine(search_database_url):
             (MIGRATIONS / "add_author_filter_indexes.sql").read_text().split(";")
         )
         for _ in range(2):
+            connection.exec_driver_sql(
+                (MIGRATIONS / "add_author_search_vector_index.sql").read_text()
+            )
             for statement in author_index_statements:
                 if statement.strip():
                     connection.exec_driver_sql(statement)
@@ -668,6 +672,59 @@ def test_latest_filter_limit_and_stable_tie_order(session_factory):
         session.commit()
         results = search(session, "stable ranking token", limit=2)
         assert [item.id for item in results] == [str(first.id), str(second.id)]
+
+
+def test_fts_candidate_limit_preserves_citation_date_and_id_ties(session_factory):
+    with session_factory() as session:
+        for paper_id, citations, published, latest in [
+            (10, 999, date(2026, 7, 3), False),
+            (20, 9, date(2026, 7, 3), True),
+            (30, 10, None, True),
+            (41, 10, date(2026, 7, 2), True),
+            (40, 10, date(2026, 7, 2), True),
+        ]:
+            add_paper(
+                session,
+                id=paper_id,
+                title="Ranking Token",
+                citation_count=citations,
+                date_published=published,
+                is_latest_version=latest,
+            )
+        session.commit()
+        retrieval = PaperService(session)._retrieval_service()
+        for limit in (1, 2, 4):
+            assert [p.id for p in retrieval._search_papers_fts("ranking", limit)] == [
+                40,
+                41,
+                30,
+                20,
+            ][:limit]
+
+
+def test_fts_candidate_limit_deduplicates_author_and_identity_lanes(session_factory):
+    with session_factory() as session:
+        exact = add_paper(session, title="Quasar", citation_count=1)
+        exact.authors.extend([DBAuthor(name="Quasar"), DBAuthor(name="Quasar")])
+        lexical = add_paper(session, title="Other Quasar Work", citation_count=999)
+        session.commit()
+        retrieval = PaperService(session)._retrieval_service()
+        assert [p.id for p in retrieval._search_papers_fts("quasar", 2)] == [
+            exact.id,
+            lexical.id,
+        ]
+
+
+def test_author_search_index_supports_the_search_expression(search_engine):
+    with search_engine.begin() as connection:
+        connection.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = connection.execute(
+            text("""
+            EXPLAIN (FORMAT JSON) SELECT id FROM authors
+            WHERE to_tsvector('simple', name) @@ websearch_to_tsquery('simple', 'Ada Lovelace')
+        """)
+        ).scalar_one()
+        assert "idx_authors_name_search_vector" in json.dumps(plan)
 
 
 def test_blank_query_returns_without_executing_sql(session_factory):
