@@ -13,7 +13,7 @@ export interface EditableEvaluationRow {
   operation?: "create" | "update" | "delete" | "unchanged";
 }
 
-export interface EvaluationData extends Record<string, unknown> {
+interface EvaluationData extends Record<string, unknown> {
   task_id: number;
   dataset_id: number;
   model_name?: string;

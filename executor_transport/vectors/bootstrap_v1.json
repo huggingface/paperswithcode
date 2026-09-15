@@ -1,0 +1,12 @@
+{
+  "protocol": "pwc-executor-bootstrap-v1",
+  "description": "Public, non-secret Ed25519 interoperability vector for Task 0",
+  "environment_id": "env-vector",
+  "environment_generation": 7,
+  "identity_public_key_base64url": "iojj3XQJ8ZX9UtstPLpdcspnCb8dlBIb83SIAbQPb1w",
+  "registration_message_base64url": "cHdjLWV4ZWN1dG9yLWJvb3RzdHJhcC12MQBmaXJzdC1yZWdpc3RyYXRpb24AZW52LXZlY3RvcgA3ABTQGUS7TwUnIDmDwCmAne7hTUbg4cdiNNcE5uf_3T5OAIqI4910CfGV_VLbLTy6XXLKZwm_HZQSG_N0iAG0D29c",
+  "registration_signature_base64url": "6OsiNREeQ56KQpsX6iMvCkxqD0wW8uv1cgeSe8c3_XvjbZGZDM66yxczpPvGycbMaYw4M_-iQM4vv-t3aE2mAQ",
+  "recovery_challenge_base64url": "paWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaU",
+  "recovery_message_base64url": "cHdjLWV4ZWN1dG9yLWJvb3RzdHJhcC12MQBib3VuZGVkLXJlY292ZXJ5AGVudi12ZWN0b3IANwClpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpaWlpQCKiOPddAnxlf1S2y08ul1yymcJvx2UEhvzdIgBtA9vXA",
+  "recovery_signature_base64url": "8bpPS5Vd9nzQmjDbQOuGQQ-1jsIJz1bCx06_Ti9z9RBCcL30d9WOq_v83qNQsEzarSoApXzRPpIzm52AdBVEBg"
+}

@@ -394,27 +394,32 @@ class PendingEditService:
                 applied_payload = rebased_payload
                 row.conflict_payload = None
 
-        before = self.snapshots.approval_event(row.edit_type, row.paper_id)
-        try:
-            if reviewer_kind == "codex":
-                assert autonomous_context is not None
-                result_type, result_id = self.mutations.apply_autonomous(
-                    context=autonomous_context,
-                    edit_type=row.edit_type,
-                    paper_id=row.paper_id,
-                    payload=applied_payload,
-                )
-            else:
-                result_type, result_id = self.mutations.apply_human_review(
-                    row.edit_type,
-                    row.paper_id,
-                    applied_payload,
-                    actor_hf_subject=row.hf_subject,
-                    actor_username=row.hf_username,
-                )
-        except Exception as exc:
-            self._record_apply_failure(edit_id, row.edit_type, exc)
-            raise
+        is_administrative = row.edit_type in HUMAN_ONLY_EDIT_TYPES
+        result_type: str | None = None
+        result_id: str | None = None
+        before: Any = {}
+        if not is_administrative:
+            before = self.snapshots.approval_event(row.edit_type, row.paper_id)
+            try:
+                if reviewer_kind == "codex":
+                    assert autonomous_context is not None
+                    result_type, result_id = self.mutations.apply_autonomous(
+                        context=autonomous_context,
+                        edit_type=row.edit_type,
+                        paper_id=row.paper_id,
+                        payload=applied_payload,
+                    )
+                else:
+                    result_type, result_id = self.mutations.apply_human_review(
+                        row.edit_type,
+                        row.paper_id,
+                        applied_payload,
+                        actor_hf_subject=row.hf_subject,
+                        actor_username=row.hf_username,
+                    )
+            except Exception as exc:
+                self._record_apply_failure(edit_id, row.edit_type, exc)
+                raise
 
         row.status = "approved"
         row.reviewed_by = reviewer_username
@@ -426,18 +431,19 @@ class PendingEditService:
         row.applied_payload = applied_payload
         row.result_entity_type = result_type
         row.result_entity_id = result_id
-        after = self.snapshots.approval_event(
-            row.edit_type,
-            row.paper_id,
-            result_type=result_type,
-            result_id=result_id,
-        )
-        event = self._approval_event(
-            row, reviewer_username, reviewer_hf_subject, before, after
-        )
-        self.db.add(event)
-        self.db.flush()
-        row.catalog_event_id = event.id
+        if not is_administrative:
+            after = self.snapshots.approval_event(
+                row.edit_type,
+                row.paper_id,
+                result_type=result_type,
+                result_id=result_id,
+            )
+            event = self._approval_event(
+                row, reviewer_username, reviewer_hf_subject, before, after
+            )
+            self.db.add(event)
+            self.db.flush()
+            row.catalog_event_id = event.id
         row.admin_note = admin_note
         row.user_review_reason = user_review_reason
         row.reviewed_at = datetime.now(timezone.utc)

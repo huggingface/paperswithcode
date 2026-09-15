@@ -45,6 +45,11 @@ class TimerSpec:
 
 TIMERS: tuple[TimerSpec, ...] = (
     TimerSpec(
+        job="create_eval_verification_issues",
+        on_calendar=("*-*-* *:52:00",),
+        description="Request verification of settled paper-native evaluations on GitHub",
+    ),
+    TimerSpec(
         job="run_chat_synthetic_probe",
         on_calendar=("*-*-* *:*:00",),
         description="Evaluate due and triggered production synthetic chat probes",
@@ -235,11 +240,12 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Mirror thumbnails to VPS disk daily",
         after=("pwc-cron-preload-thumbnails-recent",),
     ),
-    # Six-hourly backfill.
+    # Follow the hourly paper import so trend coverage does not stay stale.
     TimerSpec(
         job="backfill_method_references",
-        on_calendar=("*-*-* 00/6:15:00",),
-        description="Backfill method reference evidence every six hours",
+        on_calendar=("*-*-* *:15:00",),
+        description="Backfill method reference evidence hourly",
+        after=("pwc-cron-import-hf-daily-papers",),
         args=(
             "--provider",
             "openalex",

@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Slot 3 is reserved for this short refresh; bulk jobs use slots 0-2.
+Environment=PWC_CRON_THROTTLE_SLOTS=4
 ExecStart=/usr/local/sbin/pwc-cron-throttled update_hot_github_trending
 NoNewPrivileges=true
 PrivateTmp=true

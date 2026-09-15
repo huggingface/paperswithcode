@@ -11,6 +11,7 @@ import signal
 import socket
 import stat
 import subprocess
+import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -30,10 +31,10 @@ from backend.chat_sandbox_worker.executor_protocol import (
     ProtocolError,
     decode_request,
     encode_response,
+    validate_remote_request,
 )
 from backend.chat_sandbox_worker.supervisor import (
     SUPERVISOR_PREFIX,
-    _demote,
     _harden_proc,
     _not_dumpable,
     _safe_environment,
@@ -55,8 +56,7 @@ READONLY_PATHS = frozenset(
 )
 MAX_CAPTURE_BYTES = 256 * 1024
 TERMINATE_GRACE_SECONDS = 0.25
-EXECUTOR_USER = "pwc-chat"
-DEFAULT_EXECUTOR_PIDS_MAX = 64
+DETACHED_RESUME_SECONDS = 30.0
 _DEFAULT = object()
 _OPERATION_FIELDS = (
     "workspace_id",
@@ -141,15 +141,6 @@ def _command_environment() -> dict[str, str]:
     return environment
 
 
-def _demote_command() -> None:
-    _demote(
-        EXECUTOR_USER,
-        pids_max=int(
-            os.environ.get("PWC_CHAT_SANDBOX_PIDS_MAX", str(DEFAULT_EXECUTOR_PIDS_MAX))
-        ),
-    )()
-
-
 @dataclass
 class _Execution:
     identity: dict[str, object]
@@ -166,6 +157,7 @@ class _Execution:
     termination_lock: threading.Lock = field(default_factory=threading.Lock)
     captured_bytes: int = 0
     persistence_failed: bool = False
+    detached_at: float | None = None
 
 
 class _ContainmentFailure(RuntimeError):
@@ -193,6 +185,9 @@ class ExecutorServer:
         terminate_grace: float = TERMINATE_GRACE_SECONDS,
         containment_proof_timeout: float = TERMINATE_GRACE_SECONDS,
         process_group_probe: Callable[[int], bool] | None = None,
+        remote_mode: bool | None = None,
+        monotonic: Callable[[], float] = time.monotonic,
+        wall_clock: Callable[[], float] = time.time,
     ) -> None:
         self.socket_path = socket_path
         self.state_path = state_path
@@ -203,9 +198,8 @@ class ExecutorServer:
         )
         self.broker_control = broker_control
         self.execution_thread_factory = execution_thread_factory
-        self.command_preexec = (
-            _demote_command if command_preexec is _DEFAULT else command_preexec
-        )
+        self._safe_demote_launcher = command_preexec is _DEFAULT
+        self.command_preexec = None if command_preexec is _DEFAULT else command_preexec
         self.capture_limit = capture_limit
         if not 1 <= read_chunk_size <= MAX_OUTPUT_CHUNK_BYTES:
             raise ValueError("Invalid executor read chunk size")
@@ -215,6 +209,14 @@ class ExecutorServer:
         self.process_group_probe = (
             process_group_probe or self._process_group_has_live_member
         )
+        configured_remote_mode = os.environ.get("PWC_CHAT_EXECUTOR_REMOTE_MODE", "0")
+        if configured_remote_mode not in {"0", "1"}:
+            raise ValueError("Invalid executor remote mode")
+        self.remote_mode = (
+            configured_remote_mode == "1" if remote_mode is None else remote_mode
+        )
+        self.monotonic = monotonic
+        self.wall_clock = wall_clock
         self._ready = threading.Event()
         self._stop = threading.Event()
         self._contained = threading.Event()
@@ -222,7 +224,13 @@ class ExecutorServer:
         self._executions: dict[tuple[str, str], _Execution] = {}
         self._workspace: tuple[str, int] | None = None
         self._lock = threading.Lock()
-        self._workspace_lock = threading.Lock()
+        self._operation_slots = threading.BoundedSemaphore(4)
+        self._broker_lock = threading.Lock()
+        self._broker_binding: tuple[object, ...] | None = None
+        self._broker_users = 0
+        self._turn_deadline_monotonic: float | None = None
+        self._turn_revoked = False
+        self._deadline_wakeup = threading.Event()
 
     def wait_until_ready(self, timeout: float) -> bool:
         return self._ready.wait(timeout)
@@ -258,6 +266,7 @@ class ExecutorServer:
 
     def shutdown(self) -> None:
         self._stop.set()
+        self._deadline_wakeup.set()
         with self._lock:
             executions = list(self._executions.values())
         for execution in executions:
@@ -288,6 +297,8 @@ class ExecutorServer:
                         else None
                     )
                     request = decode_request(request_line)
+                    if self.remote_mode:
+                        validate_remote_request(request)
                     if request["type"] != "health":
                         if bootstrap is None:
                             return
@@ -350,7 +361,10 @@ class ExecutorServer:
                 },
             )
             return
-        if operation != "ensure_workspace" and not self._bind_workspace(request):
+        if operation not in {
+            "ensure_workspace",
+            "release_workspace",
+        } and not self._bind_workspace(request):
             self._ack(connection, request)
             self._send_terminal(
                 connection,
@@ -369,7 +383,9 @@ class ExecutorServer:
         elif operation == "cancel_execution":
             self._cancel(connection, request)
         elif operation == "ensure_workspace":
-            self._ensure_workspace(connection, request)
+            self._ensure_workspace(connection, request, bootstrap)
+        elif operation == "release_workspace":
+            self._release_workspace(connection, request, bootstrap)
         elif operation == "read_file":
             self._read_file(connection, request)
 
@@ -423,6 +439,7 @@ class ExecutorServer:
             "turn_worker_id",
             "turn_worker_generation",
             "turn_lease_generation",
+            "turn_deadline_unix_ms",
         }
         if (
             not isinstance(value, dict)
@@ -430,11 +447,14 @@ class ExecutorServer:
             or value["operation"] != "executor_connect"
             or not all(
                 isinstance(value[key], str) and value[key]
-                for key in required - {"workspace_generation"}
+                for key in required - {"workspace_generation", "turn_deadline_unix_ms"}
             )
             or isinstance(value["workspace_generation"], bool)
             or not isinstance(value["workspace_generation"], int)
             or value["workspace_generation"] <= 0
+            or isinstance(value["turn_deadline_unix_ms"], bool)
+            or not isinstance(value["turn_deadline_unix_ms"], int)
+            or value["turn_deadline_unix_ms"] <= 0
         ):
             raise ProtocolError("Invalid executor bootstrap")
         return value
@@ -487,7 +507,10 @@ class ExecutorServer:
         )
 
     def _ensure_workspace(
-        self, connection: socket.socket, request: dict[str, object]
+        self,
+        connection: socket.socket,
+        request: dict[str, object],
+        bootstrap: dict[str, object],
     ) -> None:
         if not self._bind_workspace(request):
             self._ack(connection, request)
@@ -501,6 +524,41 @@ class ExecutorServer:
                 },
             )
             return
+        if self.remote_mode:
+            try:
+                self._install_turn_broker(request, bootstrap)
+            except RuntimeError:
+                self._ack(connection, request)
+                self._send_terminal(
+                    connection,
+                    request,
+                    {
+                        "status": "failed",
+                        "exit_code": None,
+                        "error": "executor_transport_unavailable",
+                    },
+                )
+                return
+        self._ack(connection, request)
+
+    def _release_workspace(
+        self,
+        connection: socket.socket,
+        request: dict[str, object],
+        bootstrap: dict[str, object],
+    ) -> None:
+        if not self.remote_mode:
+            self._ack(connection, request)
+            return
+        key = self._broker_key(request, bootstrap)
+        with self._broker_lock:
+            if self._broker_binding is None:
+                if self._broker_users:
+                    raise _ContainmentFailure
+            elif self._broker_binding != key or self._broker_users:
+                raise _ContainmentFailure
+            elif not self._clear_remote_turn_locked(key):
+                raise _ContainmentFailure
         self._ack(connection, request)
 
     def _bind_workspace(self, request: dict[str, object]) -> bool:
@@ -615,7 +673,30 @@ class ExecutorServer:
                 },
             )
             return
+        if execution.terminal is None and self._detached_resume_expired(execution):
+            execution.cancel.set()
+            process = execution.process
+            contained = process is None or self._terminate(execution)
+            self._finish(
+                execution,
+                "failed",
+                None,
+                (
+                    "executor_transport_unavailable"
+                    if contained
+                    else "process_containment_failed"
+                ),
+            )
+        elif execution.terminal is None:
+            with execution.condition:
+                execution.detached_at = None
         self._stream(connection, request, execution, int(request["offset"]))
+
+    def _detached_resume_expired(self, execution: _Execution) -> bool:
+        return (
+            execution.detached_at is not None
+            and self.monotonic() - execution.detached_at > DETACHED_RESUME_SECONDS
+        )
 
     def _cancel(self, connection: socket.socket, request: dict[str, object]) -> None:
         key = (str(request["turn_id"]), str(request["tool_call_id"]))
@@ -648,34 +729,17 @@ class ExecutorServer:
         timeout_ms: int,
         bootstrap: dict[str, object],
     ) -> None:
-        with self._workspace_lock:
+        self._operation_slots.acquire()
+        try:
             if execution.cancel.is_set():
                 self._finish(execution, "cancelled", None, None)
                 return
-            install_attempted = False
+            broker_acquired = False
             outcome: tuple[str, int | None, str | None] | None = None
             try:
                 try:
-                    install_attempted = True
-                    response = self.broker_control(
-                        {
-                            "operation": "install",
-                            "capability": bootstrap["capability"],
-                            "session_id": execution.identity["session_id"],
-                            "turn_id": execution.identity["turn_id"],
-                            "turn_worker_id": bootstrap["turn_worker_id"],
-                            "turn_worker_generation": bootstrap[
-                                "turn_worker_generation"
-                            ],
-                            "turn_lease_generation": bootstrap["turn_lease_generation"],
-                        }
-                    )
-                    if (
-                        not isinstance(response, dict)
-                        or response.get("ok") is not True
-                        or response.get("active") is not True
-                    ):
-                        raise RuntimeError("Broker did not confirm capability install")
+                    self._acquire_broker(execution, bootstrap)
+                    broker_acquired = True
                 except (OSError, RuntimeError, ValueError):
                     outcome = ("failed", None, "execution_start_failed")
                 else:
@@ -691,7 +755,7 @@ class ExecutorServer:
                             },
                         )
                         process = subprocess.Popen(
-                            ["/bin/bash", "-lc", command],
+                            self._command_argv(command),
                             cwd=self.workspace_root,
                             env=_command_environment(),
                             stdin=subprocess.DEVNULL,
@@ -726,10 +790,10 @@ class ExecutorServer:
                                 "process_containment_failed",
                             )
                 finally:
-                    cleanup_proven = not install_attempted
+                    cleanup_proven = not broker_acquired
                     try:
-                        if install_attempted:
-                            cleanup_proven = self._clear_or_prove_inactive(execution)
+                        if broker_acquired:
+                            cleanup_proven = self._release_broker(execution)
                     finally:
                         if not cleanup_proven:
                             self._contained.set()
@@ -741,14 +805,212 @@ class ExecutorServer:
                         elif outcome is None:
                             outcome = ("failed", None, "execution_lost")
                         self._finish(execution, *outcome)
+        finally:
+            self._operation_slots.release()
+
+    def _command_argv(self, command: str) -> list[str]:
+        if not self._safe_demote_launcher:
+            return ["/bin/bash", "-lc", command]
+        if os.environ.get("PWC_CHAT_NATIVE_COMMAND_LAUNCHER") == "1":
+            return [
+                "/usr/local/bin/pwc-executor-environment",
+                "--exec-command",
+                command,
+            ]
+        return [
+            sys.executable,
+            "-m",
+            "backend.chat_sandbox_worker.executor_command",
+            command,
+        ]
+
+    def _broker_key(
+        self, identity: _Execution | dict[str, object], bootstrap: dict[str, object]
+    ) -> tuple[object, ...]:
+        values = identity.identity if isinstance(identity, _Execution) else identity
+        return (
+            values["session_id"],
+            values["turn_id"],
+            bootstrap["capability"],
+            bootstrap["turn_worker_id"],
+            bootstrap["turn_worker_generation"],
+            bootstrap["turn_lease_generation"],
+            bootstrap["turn_deadline_unix_ms"],
+        )
+
+    def _install_turn_broker(
+        self, request: dict[str, object], bootstrap: dict[str, object]
+    ) -> None:
+        key = self._broker_key(request, bootstrap)
+        now_monotonic = self.monotonic()
+        deadline_monotonic = now_monotonic + (
+            int(bootstrap["turn_deadline_unix_ms"]) / 1000 - self.wall_clock()
+        )
+        if deadline_monotonic <= now_monotonic:
+            raise RuntimeError("Turn authorization is already expired")
+        with self._broker_lock:
+            if self._broker_binding == key:
+                if self._turn_revoked:
+                    raise RuntimeError("Turn authorization is revoked")
+                return
+            if self._broker_binding is not None:
+                raise RuntimeError("Broker capability binding is already active")
+            try:
+                response = self._install_broker(request, bootstrap)
+            except BaseException:
+                if not self._clear_or_prove_inactive_identity(
+                    str(request["session_id"]), str(request["turn_id"])
+                ):
+                    self._contained.set()
+                raise
+            if (
+                not isinstance(response, dict)
+                or response.get("ok") is not True
+                or response.get("active") is not True
+            ):
+                if not self._clear_or_prove_inactive_identity(
+                    str(request["session_id"]), str(request["turn_id"])
+                ):
+                    self._contained.set()
+                raise RuntimeError("Broker did not confirm capability install")
+            self._broker_binding = key
+            self._turn_deadline_monotonic = deadline_monotonic
+            self._turn_revoked = False
+            self._deadline_wakeup = threading.Event()
+        threading.Thread(
+            target=self._deadline_watchdog,
+            args=(key, deadline_monotonic, self._deadline_wakeup),
+            daemon=True,
+        ).start()
+
+    def _deadline_watchdog(
+        self,
+        key: tuple[object, ...],
+        deadline_monotonic: float,
+        wakeup: threading.Event,
+    ) -> None:
+        remaining = max(0.0, deadline_monotonic - self.monotonic())
+        if not wakeup.wait(remaining) and not self._stop.is_set():
+            self._expire_turn(key)
+
+    def _expire_turn(self, key: tuple[object, ...]) -> None:
+        with self._broker_lock:
+            if self._broker_binding != key:
+                return
+            self._turn_revoked = True
+        with self._lock:
+            executions = [
+                execution
+                for execution in self._executions.values()
+                if (
+                    execution.identity["session_id"],
+                    execution.identity["turn_id"],
+                )
+                == key[:2]
+                and execution.terminal is None
+            ]
+        contained = True
+        for execution in executions:
+            execution.cancel.set()
+            if execution.process is not None and not self._terminate(execution):
+                contained = False
+        if not contained:
+            self._contained.set()
+        with self._broker_lock:
+            if self._broker_binding == key and self._broker_users == 0:
+                self._clear_remote_turn_locked(key)
+
+    def _clear_remote_turn_locked(self, key: tuple[object, ...]) -> bool:
+        proven = self._clear_or_prove_inactive_identity(str(key[0]), str(key[1]))
+        if not proven:
+            self._contained.set()
+            return False
+        self._broker_binding = None
+        self._turn_deadline_monotonic = None
+        self._turn_revoked = False
+        self._deadline_wakeup.set()
+        return True
+
+    def _install_broker(
+        self, identity: _Execution | dict[str, object], bootstrap: dict[str, object]
+    ) -> dict[str, object]:
+        values = identity.identity if isinstance(identity, _Execution) else identity
+        return self.broker_control(
+            {
+                "operation": "install",
+                "capability": bootstrap["capability"],
+                "session_id": values["session_id"],
+                "turn_id": values["turn_id"],
+                "turn_worker_id": bootstrap["turn_worker_id"],
+                "turn_worker_generation": bootstrap["turn_worker_generation"],
+                "turn_lease_generation": bootstrap["turn_lease_generation"],
+            }
+        )
+
+    def _acquire_broker(
+        self, execution: _Execution, bootstrap: dict[str, object]
+    ) -> None:
+        key = self._broker_key(execution, bootstrap)
+        with self._broker_lock:
+            if self.remote_mode:
+                if (
+                    self._broker_binding != key
+                    or self._turn_revoked
+                    or self._turn_deadline_monotonic is None
+                    or self.monotonic() >= self._turn_deadline_monotonic
+                ):
+                    raise RuntimeError("Turn broker capability is not installed")
+                self._broker_users += 1
+                return
+            if self._broker_binding is None:
+                try:
+                    response = self._install_broker(execution, bootstrap)
+                except BaseException:
+                    if not self._clear_or_prove_inactive(execution):
+                        self._contained.set()
+                    raise
+                if (
+                    not isinstance(response, dict)
+                    or response.get("ok") is not True
+                    or response.get("active") is not True
+                ):
+                    if not self._clear_or_prove_inactive(execution):
+                        self._contained.set()
+                    raise RuntimeError("Broker did not confirm capability install")
+                self._broker_binding = key
+            elif self._broker_binding != key:
+                raise RuntimeError("Broker capability binding is already active")
+            self._broker_users += 1
+
+    def _release_broker(self, execution: _Execution) -> bool:
+        with self._broker_lock:
+            if self._broker_users <= 0 or self._broker_binding is None:
+                return False
+            self._broker_users -= 1
+            if self.remote_mode:
+                if self._turn_revoked and self._broker_users == 0:
+                    return self._clear_remote_turn_locked(self._broker_binding)
+                return True
+            if self._broker_users:
+                return True
+            proven = self._clear_or_prove_inactive(execution)
+            if proven:
+                self._broker_binding = None
+            return proven
 
     def _clear_or_prove_inactive(self, execution: _Execution) -> bool:
+        return self._clear_or_prove_inactive_identity(
+            str(execution.identity["session_id"]),
+            str(execution.identity["turn_id"]),
+        )
+
+    def _clear_or_prove_inactive_identity(self, session_id: str, turn_id: str) -> bool:
         try:
             response = self.broker_control(
                 {
                     "operation": "clear",
-                    "session_id": execution.identity["session_id"],
-                    "turn_id": execution.identity["turn_id"],
+                    "session_id": session_id,
+                    "turn_id": turn_id,
                 }
             )
             if (
@@ -969,28 +1231,36 @@ class ExecutorServer:
         after_sequence: int,
     ) -> None:
         sent = after_sequence
-        while True:
-            with execution.condition:
-                available = [
-                    event for event in execution.events if int(event["sequence"]) > sent
-                ]
-                terminal = execution.terminal
-                persistence_failed = execution.persistence_failed
-                if not available and terminal is None and not persistence_failed:
-                    execution.condition.wait(timeout=0.1)
-                    continue
-            for event in available:
-                connection.sendall(
-                    encode_response(
-                        {**self._response_base(request), "type": "output", **event}
+        try:
+            while True:
+                with execution.condition:
+                    available = [
+                        event
+                        for event in execution.events
+                        if int(event["sequence"]) > sent
+                    ]
+                    terminal = execution.terminal
+                    persistence_failed = execution.persistence_failed
+                    if not available and terminal is None and not persistence_failed:
+                        execution.condition.wait(timeout=0.1)
+                        continue
+                for event in available:
+                    connection.sendall(
+                        encode_response(
+                            {**self._response_base(request), "type": "output", **event}
+                        )
                     )
-                )
-                sent = int(event["sequence"])
-            if terminal is not None:
-                self._send_terminal(connection, request, terminal)
-                return
-            if persistence_failed:
-                return
+                    sent = int(event["sequence"])
+                if terminal is not None:
+                    self._send_terminal(connection, request, terminal)
+                    return
+                if persistence_failed:
+                    return
+        except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+            with execution.condition:
+                if execution.terminal is None and execution.detached_at is None:
+                    execution.detached_at = self.monotonic()
+            raise
 
     def _send_terminal(
         self,
@@ -1040,10 +1310,14 @@ class ExecutorServer:
     ) -> tuple[bytes, bool]:
         requested = Path(path)
         if requested.is_absolute():
-            if requested not in self.readonly_paths:
+            if requested in self.readonly_paths:
+                root = requested.parent
+                parts = (requested.name,)
+            elif self.remote_mode and requested.parts[:2] == ("/", "workspace"):
+                root = self.workspace_root
+                parts = requested.parts[2:]
+            else:
                 raise ValueError
-            root = requested.parent
-            parts = (requested.name,)
         else:
             root = self.workspace_root
             parts = requested.parts

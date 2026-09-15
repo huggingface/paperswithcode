@@ -22,7 +22,6 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.open_asr_sync_service import (
-    DEFAULT_COLUMNS,
     LEGACY_SOURCE_URL,
     MANAGED_METHODOLOGY_PREFIX,
     SPACE_APP_URL,
@@ -132,7 +131,22 @@ def test_parse_and_fetch_public_leaderboard_contract():
 
         def predict(self, query, proprietary, llm, columns, *, api_name):
             assert (query, proprietary, llm) == ("", True, False)
-            assert columns == DEFAULT_COLUMNS
+            # The current English default averages all ten datasets. Keeping
+            # the old Earnings22 name fails; omitting Monsoon changes scores.
+            assert columns == [
+                "RTFx ⬆️️",
+                "License",
+                "AMI-Cleaned",
+                "Earnings22-Cleaned-AA-chunked",
+                "Gigaspeech-Cleaned",
+                "LS Clean",
+                "LS Other",
+                "SPGISpeech",
+                "Voice Arena Monsoon",
+                "Voxpopuli-AA-Cleaned",
+                "Private (scripted)",
+                "Private (conversational)",
+            ]
             assert api_name == "/_main_table_update"
             return {
                 "datatype": ["str", "str", "markdown", "number", "number"],
@@ -174,6 +188,9 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
 
     class FakeHfApi:
         def model_info(self, model_id, **_kwargs):
+            from huggingface_hub.utils import validate_repo_id
+
+            validate_repo_id(model_id)
             return SimpleNamespace(
                 id=model_id,
                 tags=["arxiv:2605.28139"],
@@ -208,6 +225,7 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
             ingestion_service=FakeIngestionService(),
         ).discover(
             [
+                "sophea/asr-k1 (preview)",
                 "org/ARK-ASR-3B",
                 "org/Audio8-ASR-0.1B",
                 # Keep the accepted paper last: SQLite cannot serialize the
@@ -223,6 +241,7 @@ def test_discovery_indexes_only_single_tag_with_exact_ownership():
     assert discovered.hf_model_url == "https://huggingface.co/org/ARK-ASR-0.6B"
     assert discovered.num_parameters == 1_299_463_168
     assert result.indexed_papers == ["2605.28139"]
+    assert result.unavailable_models == ["sophea/asr-k1 (preview)"]
     assert result.rejected_papers == [
         "org/ARK-ASR-3B:2605.28139",
         "org/Audio8-ASR-0.1B:2605.28139",

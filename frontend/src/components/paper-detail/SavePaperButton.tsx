@@ -56,5 +56,3 @@ export const SavePaperButton: React.FC<SavePaperButtonProps> = ({ paperId }) => 
     </button>
   );
 };
-
-export default SavePaperButton;

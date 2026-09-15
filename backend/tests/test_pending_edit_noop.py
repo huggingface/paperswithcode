@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from fastapi import HTTPException
 from sqlalchemy import BigInteger, create_engine, event
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
@@ -34,8 +33,6 @@ from backend.models.database import (
     PaperCurationSchedulerState,
     PaperCurationJob,
     PendingPaperEdit,
-    TaskDataset,
-    TaskDatasetMetric,
     TrendingModelCandidate,
     UserProfile,
 )
@@ -73,6 +70,7 @@ from backend.services.autonomous_operations_repository import (
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
 )
+from backend.services.catalog_errors import CatalogConflictError
 from backend.services.curation_autonomy import curation_run_context
 from backend.services.pending_edit_service import (
     PendingEditAlreadyReviewedError,
@@ -82,6 +80,7 @@ from backend.services.pending_edit_service import (
     SubmissionRateLimitError,
     SubmissionSuspendedError,
 )
+from backend.services.pending_edit_payloads import validate_payload
 from backend.services.submission_rollback_service import SubmissionRollbackService
 
 
@@ -628,7 +627,7 @@ def test_submit_evaluations_create_succeeds(db_session, paper_fixture):
     assert row.proposed_payload["operations"][0]["op"] == "create"
 
 
-def test_adjusted_task_approval_is_atomic_audited_and_idempotent(db_session):
+def test_adjusted_task_approval_is_administrative_and_idempotent(db_session):
     service = PendingEditService(db_session)
     submitted = service.submit(
         paper_id=None,
@@ -646,12 +645,10 @@ def test_adjusted_task_approval_is_atomic_audited_and_idempotent(db_session):
     assert reviewed.status == "approved"
     assert reviewed.proposed_payload == {"name": "Original task"}
     assert reviewed.applied_payload == {"name": "Reviewed task", "keywords": "reviewed"}
-    assert reviewed.result_entity_type == "task"
-    assert (
-        db_session.get(DBTask, int(reviewed.result_entity_id)).slug == "reviewed-task"
-    )
-    event = db_session.get(CatalogMutationEvent, reviewed.catalog_event_id)
-    assert event.entity_type == "submission_created_task"
+    assert reviewed.result_entity_type is None
+    assert reviewed.result_entity_id is None
+    assert reviewed.catalog_event_id is None
+    assert db_session.query(DBTask).count() == 0
     with pytest.raises(PendingEditAlreadyReviewedError):
         service.approve(edit_id=submitted.id, reviewer_username="admin")
 
@@ -935,23 +932,19 @@ def test_codex_cli_applies_terminal_approval(db_session, tmp_path, monkeypatch):
     assert reviewed.status == "pending"
 
 
-def test_failed_taxonomy_application_leaves_submission_pending(
-    db_session, paper_fixture
-):
+def test_taxonomy_approval_does_not_apply_duplicate_name(db_session, paper_fixture):
     row = PendingEditService(db_session).submit(
         paper_id=None,
         hf_username="alice",
         edit_type="new_task",
         proposed_payload={"name": "Task A"},
     )
-    with pytest.raises(ValueError, match="already exists"):
-        PendingEditService(db_session).approve(
-            edit_id=row.id, reviewer_username="admin"
-        )
-    db_session.expire_all()
-    persisted = db_session.get(PendingPaperEdit, row.id)
-    assert persisted.status == "pending"
-    assert persisted.failure_reason
+    reviewed = PendingEditService(db_session).approve(
+        edit_id=row.id, reviewer_username="admin"
+    )
+    assert reviewed.status == "approved"
+    assert reviewed.result_entity_id is None
+    assert db_session.query(DBTask).filter(DBTask.name == "Task A").count() == 1
 
 
 def test_external_paper_approval_uses_submission_date_when_undated(
@@ -979,69 +972,68 @@ def test_external_paper_approval_uses_submission_date_when_undated(
     assert paper.date_published.isoformat() == "2026-08-04"
 
 
-def test_benchmark_metric_method_and_conference_approvals_use_canonical_tables(
-    db_session, paper_fixture
+@pytest.mark.parametrize(
+    ("edit_type", "payload", "model"),
+    [
+        ("new_task", {"name": "Suggested Task"}, DBTask),
+        (
+            "new_method",
+            {"name": "Suggested Method", "source_url": "https://example.org/method"},
+            DBMethod,
+        ),
+        (
+            "new_benchmark",
+            {
+                "benchmark": "Suggested Benchmark",
+                "task": "Uncatalogued Task",
+                "description": "A benchmark suggestion.",
+            },
+            DBDataset,
+        ),
+        (
+            "new_metric",
+            {
+                "name": "Suggested Score",
+                "description": "A score suggestion.",
+                "direction": "higher_is_better",
+                "task_id": 1,
+                "dataset_id": 1,
+            },
+            DBMetric,
+        ),
+        (
+            "new_conference",
+            {
+                "name": "Suggested Conference 2027",
+                "year": 2027,
+                "url": "https://example.org/conference-2027",
+            },
+            DBConference,
+        ),
+    ],
+)
+def test_taxonomy_approval_is_administrative_only(
+    db_session, edit_type, payload, model
 ):
     service = PendingEditService(db_session)
-    method = service.submit(
+    count_before = db_session.query(model).count()
+    submission = service.submit(
         paper_id=None,
-        hf_username="method-user",
-        edit_type="new_method",
-        proposed_payload={
-            "name": "Verified Method",
-            "source_url": "https://example.org/method",
-        },
+        hf_username="taxonomy-user",
+        edit_type=edit_type,
+        proposed_payload=payload,
     )
-    method = service.approve(edit_id=method.id, reviewer_username="admin")
-    assert db_session.get(DBMethod, int(method.result_entity_id)) is not None
+    reviewed = service.approve(edit_id=submission.id, reviewer_username="admin")
 
-    benchmark = service.submit(
-        paper_id=None,
-        hf_username="benchmark-user",
-        edit_type="new_benchmark",
-        proposed_payload={
-            "name": "Verified Benchmark",
-            "description": "A benchmark.",
-            "task_ids": [1],
-        },
-    )
-    benchmark = service.approve(edit_id=benchmark.id, reviewer_username="admin")
-    dataset_id = int(benchmark.result_entity_id)
-    assert db_session.get(DBDataset, dataset_id) is not None
-    assert db_session.get(TaskDataset, (1, dataset_id)) is not None
-
-    metric = service.submit(
-        paper_id=None,
-        hf_username="metric-user",
-        edit_type="new_metric",
-        proposed_payload={
-            "name": "Verified Score",
-            "description": "A score.",
-            "direction": "higher_is_better",
-            "task_id": 1,
-            "dataset_id": dataset_id,
-        },
-    )
-    metric = service.approve(edit_id=metric.id, reviewer_username="admin")
-    metric_id = int(metric.result_entity_id)
-    assert db_session.get(DBMetric, metric_id) is not None
-    assert db_session.get(TaskDatasetMetric, (1, dataset_id, metric_id)) is not None
-
-    conference = service.submit(
-        paper_id=None,
-        hf_username="conference-user",
-        edit_type="new_conference",
-        proposed_payload={
-            "name": "Verified Conference 2027",
-            "year": 2027,
-            "url": "https://example.org/conference-2027",
-        },
-    )
-    conference = service.approve(edit_id=conference.id, reviewer_username="admin")
-    assert db_session.get(DBConference, int(conference.result_entity_id)) is not None
+    assert reviewed.status == "approved"
+    assert reviewed.applied_payload == validate_payload(edit_type, payload)
+    assert reviewed.result_entity_type is None
+    assert reviewed.result_entity_id is None
+    assert reviewed.catalog_event_id is None
+    assert db_session.query(model).count() == count_before
 
 
-def test_benchmark_approval_with_source_paper_records_created_snapshot(
+def test_benchmark_approval_with_source_paper_is_administrative(
     db_session, paper_fixture
 ):
     submission = PendingEditService(db_session).submit(
@@ -1049,9 +1041,9 @@ def test_benchmark_approval_with_source_paper_records_created_snapshot(
         hf_username="benchmark-user",
         edit_type="new_benchmark",
         proposed_payload={
-            "name": "Paper-Scoped Benchmark",
+            "benchmark": "Paper-Scoped Benchmark",
+            "task": "Uncatalogued Task",
             "description": "A benchmark proposed from its source paper.",
-            "task_ids": [1],
         },
     )
 
@@ -1060,13 +1052,10 @@ def test_benchmark_approval_with_source_paper_records_created_snapshot(
     )
 
     assert reviewed.status == "approved"
-    assert db_session.get(DBDataset, int(reviewed.result_entity_id)) is not None
-    event = db_session.get(CatalogMutationEvent, reviewed.catalog_event_id)
-    assert event is not None
-    assert event.entity_type == "submission_created_dataset"
-    assert event.entity_id == reviewed.result_entity_id
-    assert event.after_snapshot["entity"]["id"] == int(reviewed.result_entity_id)
-    assert event.after_snapshot["task_ids"] == [1]
+    assert reviewed.paper_id == 1
+    assert reviewed.result_entity_id is None
+    assert reviewed.catalog_event_id is None
+    assert db_session.query(DBDataset).count() == 0
 
 
 def test_created_entity_rollback_is_append_only(db_session):
@@ -1074,18 +1063,22 @@ def test_created_entity_rollback_is_append_only(db_session):
     row = service.submit(
         paper_id=None,
         hf_username="alice",
-        edit_type="new_task",
-        proposed_payload={"name": "Rollback task"},
+        edit_type="new_external_paper",
+        proposed_payload={
+            "title": "Rollback paper",
+            "source_url": "https://example.org/rollback-paper",
+            "authors": [],
+        },
     )
     row = service.approve(edit_id=row.id, reviewer_username="admin")
     event = db_session.get(CatalogMutationEvent, row.catalog_event_id)
-    task_id = int(row.result_entity_id)
+    paper_id = int(row.result_entity_id)
     rollback = SubmissionRollbackService(db_session).rollback(
         event=event,
         actor={"hf_subject": "hf-admin", "username": "admin", "role": "admin"},
         request_id="test-rollback",
     )
-    assert db_session.get(DBTask, task_id) is None
+    assert db_session.get(DBPaper, paper_id) is None
     assert rollback.operation == "rollback"
     assert rollback.rollback_of_event_id == event.id
     assert db_session.get(PendingPaperEdit, row.id).status == "approved"
@@ -1098,22 +1091,25 @@ def test_created_entity_rollback_refuses_after_later_dependency(
     row = service.submit(
         paper_id=None,
         hf_username="alice",
-        edit_type="new_task",
-        proposed_payload={"name": "Now referenced"},
+        edit_type="new_external_paper",
+        proposed_payload={
+            "title": "Now referenced",
+            "source_url": "https://example.org/now-referenced",
+            "authors": [],
+        },
     )
     row = service.approve(edit_id=row.id, reviewer_username="admin")
     event = db_session.get(CatalogMutationEvent, row.catalog_event_id)
-    task_id = int(row.result_entity_id)
-    db_session.add(PaperTask(paper_id=1, task_id=task_id))
+    paper_id = int(row.result_entity_id)
+    db_session.add(PaperTask(paper_id=paper_id, task_id=1))
     db_session.commit()
-    with pytest.raises(HTTPException) as error:
+    with pytest.raises(CatalogConflictError, match="stale_catalog_version"):
         SubmissionRollbackService(db_session).rollback(
             event=event,
             actor={"hf_subject": "hf-admin", "username": "admin", "role": "admin"},
             request_id="test-conflict",
         )
-    assert error.value.status_code == 409
-    assert db_session.get(DBTask, task_id) is not None
+    assert db_session.get(DBPaper, paper_id) is not None
 
 
 def test_active_submission_limit_is_database_backed(

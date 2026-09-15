@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PdfViewer } from "@/components/pdf/PdfViewer";
@@ -32,7 +32,7 @@ function storedRatio(): number {
   return Number.isFinite(value) && value >= 45 && value <= 75 ? value : DEFAULT_RATIO;
 }
 
-export function directArxivPdfHref(value: unknown): string | null {
+function directArxivPdfHref(value: unknown): string | null {
   const href = safeExternalHref(value);
   if (!href) return null;
   const parsed = new URL(href);
@@ -91,6 +91,7 @@ export function readerToolbarResources(paper: Paper | undefined): PdfToolbarReso
 }
 
 function PaperReaderExperience() {
+  const navigate = useNavigate();
   const { paperId: rawRouteId } = useParams<{ paperId: string }>();
   const routeId = normalizePaperRouteId(rawRouteId ?? "").replace(/v\d+$/i, "");
   const query = usePaper(routeId, Boolean(routeId));
@@ -106,6 +107,7 @@ function PaperReaderExperience() {
     : directArxivPdfHref(paper?.url_pdf);
   const toolbarResources = readerToolbarResources(paper);
   const canonicalRoute = paper?.arxiv_id?.replace(/v\d+$/i, "") || routeId;
+  const closeReader = useCallback(() => navigate(`/paper/${canonicalRoute}`), [canonicalRoute, navigate]);
   const [activeSessionId, setActiveSessionId] = useState<string | undefined>(() => {
     const stored = sessionStorage.getItem(sessionKey(routeId));
     return stored || undefined;
@@ -344,6 +346,7 @@ function PaperReaderExperience() {
           paperKey={canonicalRoute}
           paperTitle={paper.title}
           paperHref={`/paper/${canonicalRoute}`}
+          onClose={closeReader}
           resources={toolbarResources}
           initialPage={initialPage}
           resizeActive={resizeActive || chatTransitionActive}

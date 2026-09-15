@@ -622,3 +622,35 @@ def test_cancelled_provider_request_trace_is_a_warning():
 
     assert observation.fields["level"] == "WARNING"
     assert observation.fields["status_message"] == "openai_stream_cancelled"
+
+
+def test_compaction_trace_keeps_operational_metadata_without_summary_content():
+    root = Observation("root")
+    trace = tracing.ChatTurnTrace(
+        root,
+        prompt="Find papers",
+        model="provider/model",
+        execution_backend="external_pi",
+    )
+    trace.record_event(
+        "_compaction_telemetry",
+        {
+            "trigger": "overflow",
+            "duration_ms": 1200,
+            "chunk_count": 4,
+            "tokens_before": 80000,
+            "summary_tokens": 3000,
+            "outcome": "success",
+            "summary": "private conversation content",
+        },
+    )
+    span = next(child for child in root.children if child.name == "context-compaction")
+    assert span.ended
+    assert span.fields["metadata"] == {
+        "trigger": "overflow",
+        "duration_ms": 1200,
+        "chunk_count": 4,
+        "tokens_before": 80000,
+        "summary_tokens": 3000,
+        "outcome": "success",
+    }

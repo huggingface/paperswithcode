@@ -59,17 +59,12 @@ beforeEach(() => {
 });
 
 describe("SuggestTaxonomyDialog", () => {
-  it("selects benchmark tasks by name while submitting their internal IDs", async () => {
+  it("submits free-text benchmark and task names without a catalog lookup", async () => {
     const user = userEvent.setup();
     renderDialog("benchmark");
 
-    expect(screen.queryByText("Intended task IDs")).not.toBeInTheDocument();
-    await user.click(screen.getByRole("combobox", { name: "Add intended task" }));
-    await user.click(await screen.findByText("Image Classification"));
-    await user.click(screen.getByRole("combobox", { name: "Add intended task" }));
-    await user.click(await screen.findByText("Object Detection"));
-
-    await user.type(screen.getByLabelText("Name"), "ImageNet Plus");
+    await user.type(screen.getByLabelText("Benchmark"), "Uncatalogued Benchmark");
+    await user.type(screen.getByLabelText("Task"), "Novel Detection Task");
     await user.type(screen.getByLabelText("Description"), "An expanded benchmark.");
     await user.click(screen.getByRole("button", { name: "Submit suggestion" }));
 
@@ -78,12 +73,13 @@ describe("SuggestTaxonomyDialog", () => {
         paper_id: 42,
         edit_type: "new_benchmark",
         proposed_payload: {
-          name: "ImageNet Plus",
+          benchmark: "Uncatalogued Benchmark",
+          task: "Novel Detection Task",
           description: "An expanded benchmark.",
-          task_ids: [9, 14],
         },
       });
     });
+    expect(listTasks).not.toHaveBeenCalled();
   });
 
   it("selects a metric leaderboard by task and benchmark names", async () => {
@@ -117,14 +113,4 @@ describe("SuggestTaxonomyDialog", () => {
     });
   });
 
-  it("distinguishes a failed task lookup from an empty task catalog", async () => {
-    listTasks.mockRejectedValue(new Error("network unavailable"));
-    const user = userEvent.setup();
-    renderDialog("benchmark");
-
-    await user.click(screen.getByRole("combobox", { name: "Add intended task" }));
-
-    expect(await screen.findByText("Could not load tasks. Try again.")).toBeInTheDocument();
-    expect(screen.queryByText("No tasks found.")).not.toBeInTheDocument();
-  });
 });

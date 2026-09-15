@@ -19,8 +19,8 @@ export function normalizePaperRouteId(routeId: string): string {
   return trimmed;
 }
 
-// Format a metric value for display: at most 2 decimal places, with fewer
-// decimals for larger magnitudes so headline numbers stay readable. Accepts
+// Preserve thousandths for fractional metrics such as AbsRel and Pass@1, with
+// fewer decimals for larger magnitudes so headline numbers stay readable. Accepts
 // strings (as returned by the evaluations API) and falls back to the raw value
 // when it isn't a finite number.
 export function formatMetricValue(v: number | string | null | undefined): string {
@@ -29,5 +29,6 @@ export function formatMetricValue(v: number | string | null | undefined): string
   if (!Number.isFinite(n)) return String(v);
   if (Math.abs(n) >= 100) return n.toFixed(0);
   if (Math.abs(n) >= 10) return n.toFixed(1);
+  if (Math.abs(n) < 1) return n.toFixed(3);
   return n.toFixed(2);
 }

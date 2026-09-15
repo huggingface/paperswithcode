@@ -21,7 +21,7 @@ import { papersApi } from "@/lib/api/papers";
 import { authUrl } from "@/lib/apiUrl";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 
-export type BucketArtifactKind = "pdf" | "model" | "dataset" | "space" | "github";
+type BucketArtifactKind = "pdf" | "model" | "dataset" | "space" | "github";
 
 export interface BucketArtifact {
   id: string;

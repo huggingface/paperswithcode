@@ -90,10 +90,13 @@ class GithubIssueDraft:
 
 
 def normalize_repository_url(url: str) -> str:
-    parts = [part for part in urlparse(url).path.split("/") if part]
+    parsed = urlparse(url)
+    if parsed.hostname not in {"github.com", "www.github.com"}:
+        raise ValueError(f"Invalid GitHub repository URL: {url}")
+    parts = [part for part in parsed.path.split("/") if part]
     if len(parts) < 2:
         raise ValueError(f"Invalid GitHub repository URL: {url}")
-    return "/".join(parts[:2])
+    return "/".join(parts[:2]).removesuffix(".git")
 
 
 def compute_placement(
@@ -313,8 +316,7 @@ def render_issue_body(
         (
             "Would it be possible to verify these results and let me know if any "
             "score, model name, benchmark protocol, or openness metadata should be "
-            "corrected? The imported rows are tied to the paper or its official "
-            "release artifacts; comparison-table baselines were not added."
+            "corrected?"
         ),
         (
             "You can also edit the task, methods, project page, and GitHub URL "
@@ -463,9 +465,15 @@ def generate_github_issue_draft(
         )
         .order_by(Repository.num_stars.desc(), Repository.url)
     ).scalars()
-    repositories = tuple(
-        dict.fromkeys(normalize_repository_url(url) for url in repository_rows)
-    )
+    github_repositories = []
+    for url in repository_rows:
+        try:
+            github_repositories.append(normalize_repository_url(url))
+        except ValueError:
+            # A paper can also have official GitLab/Bitbucket or malformed links.
+            # These are not GitHub outreach targets and do not invalidate its draft.
+            continue
+    repositories = tuple(dict.fromkeys(github_repositories))
 
     body = render_issue_body(
         route_id,

@@ -222,10 +222,10 @@ class Settings(BaseSettings):
     codex_jobs_token: str = Field(default="")
     codex_jobs_openai_api_key: str = Field(default="")
     codex_jobs_image: str = Field(
-        default="hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86"
+        default="hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"
     )
     codex_jobs_image_revision: str = Field(
-        default="7067f309c98f9ea002b812773c9a256400c740ef"
+        default="556b5d14b762684586030d3018999dae392200c9"
     )
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
     codex_jobs_timeout_seconds: int = Field(default=5400, ge=300, le=14400)
@@ -573,6 +573,16 @@ class Settings(BaseSettings):
     chat_turn_event_journal_schema_enabled: bool = Field(default=False)
     chat_turn_event_replay_grace_seconds: int = Field(default=300, ge=30, le=3600)
     chat_turn_event_cleanup_batch_size: int = Field(default=100, ge=1, le=100)
+    chat_executor_remote_transport_enabled: bool = Field(default=False)
+    chat_executor_max_parallel_operations: Literal[4] = Field(default=4)
+    chat_executor_cell_id: str = Field(default="", max_length=64)
+    chat_executor_admission_signing_key_file: str = Field(default="", max_length=1000)
+    chat_executor_admission_signing_key_id: str = Field(default="", max_length=64)
+    chat_executor_admission_key_not_before_ms: int = Field(default=0, ge=0)
+    chat_executor_admission_key_not_after_ms: int = Field(default=0, ge=0)
+    chat_executor_harness_key_id: str = Field(default="", max_length=128)
+    chat_executor_authorization_key_id: str = Field(default="", max_length=128)
+    chat_executor_authorization_keys_json: str = Field(default="", max_length=4096)
     chat_modal_image_version: str = Field(default="", max_length=255)
     chat_pwc_cli_version: str = Field(default="", max_length=64)
     chat_worker_contract_version: str = Field(default="", max_length=64)
@@ -800,6 +810,13 @@ class Settings(BaseSettings):
     chat_gateway_url: str = Field(default="", max_length=1000)
     chat_require_auth: bool = Field(default=True)
     chat_show_reasoning: bool = Field(default=True)
+    chat_trackio_enabled: bool = Field(default=False)
+    chat_trackio_url: str = Field(
+        default="https://nielsr-pwc-chat-traces.hf.space",
+        pattern=r"^https://[a-z0-9][a-z0-9-]*\.hf\.space/?$",
+    )
+    chat_trackio_hf_token: str = Field(default="", repr=False)
+    chat_trackio_project: str = Field(default="pwc-chat", min_length=1, max_length=100)
     chat_langfuse_enabled: bool = Field(default=False)
     chat_langfuse_trace_content_access_enabled: bool = Field(default=False)
     catalog_mutations_enabled: bool = Field(default=True)

@@ -3,7 +3,7 @@
 
 Usage:
   uv run --env-file backend/keys.env python backend/database/import_entity_image.py \\
-      tasks video-matting data/entity_image_seeds/tasks/video-matting.png
+      tasks video-matting /tmp/paperswithcode_entity_image_seeds/tasks/video-matting.png
 
   uv run --env-file backend/keys.env python backend/database/import_entity_image.py \\
       methods transformer /tmp/transformer.png

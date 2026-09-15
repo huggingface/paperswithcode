@@ -18,6 +18,7 @@ from backend.config import Settings
 from backend.services import chat_sandbox_provider, chat_sandbox_service
 from backend.services.chat_sandbox_provider import (
     ModalSandboxProviderAdapter,
+    ExecutorLaunchBundle,
     SandboxLaunchMode,
     SandboxError,
     sandbox_environment,
@@ -129,23 +130,14 @@ def test_create_nonpersistent_sandbox_preserves_provider_isolation_contract(
     assert options["env"]["PWC_CHAT_SHOW_REASONING"] == "true"
 
 
-def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatch):
+@pytest.mark.parametrize("legacy", [False, True])
+def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(
+    monkeypatch, legacy
+):
     captured: dict[str, object] = {}
-    probes: list[tuple[tuple[object, ...], dict[str, object]]] = []
 
     class Sandbox:
         object_id = "sb-executor"
-
-        def __init__(self):
-            self.exec = _AsyncCall(self._exec)
-
-        async def _exec(self, *command, **options):
-            probes.append((command, options))
-
-            async def wait():
-                return None
-
-            return SimpleNamespace(returncode=0, wait=_AsyncCall(wait))
 
     async def lookup(*_args, **_options):
         return object()
@@ -164,6 +156,12 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
         "create",
         _AsyncCall(create),
     )
+
+    async def health(_sandbox, **options):
+        assert options["launch_mode"] is SandboxLaunchMode.LEGACY_EXECUTOR
+        captured["health_checked"] = True
+        return True
+
     provider = ModalSandboxProviderAdapter(
         _settings(
             chat_sandbox_executor_enabled=True,
@@ -172,6 +170,7 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
         image_resolver=resolve_image,
     )
 
+    monkeypatch.setattr(provider, "health", health)
     result = asyncio.run(
         provider.create(
             name="chat-executor-test",
@@ -180,36 +179,50 @@ def test_create_executor_sandbox_uses_root_daemon_and_pinned_contract(monkeypatc
                 "qualification_profile": "32-functional-turns",
             },
             worker_generation="generation-a",
-            launch_mode=SandboxLaunchMode.EXECUTOR,
+            launch_mode=(
+                SandboxLaunchMode.LEGACY_EXECUTOR
+                if legacy
+                else SandboxLaunchMode.EXECUTOR
+            ),
+            executor_launch=None
+            if legacy
+            else ExecutorLaunchBundle(
+                b"signed-launch", shard_generation=7, authorization_keys_json="{}"
+            ),
         )
     )
 
     assert result.object_id == "sb-executor"
     assert captured["command"] == (
-        "python",
-        "-m",
-        "backend.chat_sandbox_worker.executor_daemon",
+        ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
+        if legacy
+        else (
+            "/usr/local/bin/pwc-executor-environment",
+            "--connect",
+            "wss://chat-executor-staging.paperswithcode.co/v1/generations/7/environment",
+            "--admission-env",
+            "PWC_CHAT_EXECUTOR_ADMISSION",
+            "--authorization-env",
+            "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
+        )
     )
+    assert captured.get("health_checked", False) is legacy
     options = captured["options"]
     assert options["env"]["PWC_CHAT_EXECUTOR_CONTRACT_VERSION"] == EXECUTOR_PROTOCOL
     assert options["env"]["PWC_CHAT_WORKER_GENERATION"] == "generation-a"
+    assert options["env"].get("PWC_CHAT_EXECUTOR_ADMISSION") == (
+        None if legacy else "c2lnbmVkLWxhdW5jaA=="
+    )
+    assert options["env"].get("PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS") == (
+        None if legacy else "{}"
+    )
     assert "OPENAI_API_KEY" not in options["env"]
     assert "OPENROUTER_API_KEY" not in options["env"]
     assert "HF_TOKEN" not in options["env"]
     assert options["inbound_cidr_allowlist"] == []
-    assert probes == [
-        (
-            ("test", "-S", "/run/pwc-chat-executor/executor.sock"),
-            {"timeout": 5},
-        ),
-        (
-            (
-                "sh",
-                "-c",
-                "printf durable-ready > /workspace/durable-ready.txt",
-            ),
-            {"timeout": 5},
-        ),
+    assert options["outbound_domain_allowlist"] == [
+        "gateway.example.test",
+        *([] if legacy else ["chat-executor-staging.paperswithcode.co"]),
     ]
 
 
@@ -838,4 +851,61 @@ def test_manager_injected_provider_and_public_create_shim_remain_late_bound(
         "chat-test",
         {"service": "pwc-chat"},
         "generation-a",
+    )
+
+
+def test_fresh_executor_launches_use_metadata_but_create_distinct_sandboxes(
+    monkeypatch,
+):
+    app, image = object(), object()
+    creates = []
+    lookups = []
+
+    async def metadata(environment, image_id):
+        lookups.append((environment, image_id))
+        return app, image
+
+    async def create(*command, **options):
+        creates.append(options)
+        return SimpleNamespace(object_id=f"sb-{len(creates)}")
+
+    monkeypatch.setattr(chat_sandbox_provider, "executor_metadata", metadata)
+    monkeypatch.setattr(
+        chat_sandbox_provider.modal.Sandbox, "create", _AsyncCall(create)
+    )
+
+    async def run():
+        results = []
+        for index in range(2):
+            provider = ModalSandboxProviderAdapter(
+                _settings(
+                    chat_sandbox_executor_enabled=True,
+                    chat_sandbox_executor_contract_version=EXECUTOR_PROTOCOL,
+                    chat_sandbox_modal_environment="pwc-chat-staging",
+                )
+            )
+            results.append(
+                await provider.create(
+                    name=f"fresh-{index}",
+                    tags={},
+                    worker_generation=f"g-{index}",
+                    launch_mode=SandboxLaunchMode.EXECUTOR,
+                    executor_launch=ExecutorLaunchBundle(
+                        f"admission-{index}".encode(),
+                        shard_generation=7,
+                        authorization_keys_json="{}",
+                    ),
+                )
+            )
+        assert results[0].object_id != results[1].object_id
+
+    asyncio.run(run())
+    assert lookups == [("pwc-chat-staging", "im-test")] * 2
+    assert len(creates) == 2
+    for options in creates:
+        assert options["app"] is app and options["image"] is image
+        assert "environment_name" not in options  # Modal derives it from app.
+    assert (
+        creates[0]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
+        != creates[1]["env"]["PWC_CHAT_EXECUTOR_ADMISSION"]
     )

@@ -33,18 +33,3 @@ export const preloadImage = (imageUrl: string): Promise<void> => {
   pendingPreloads.set(imageUrl, preload);
   return preload;
 };
-
-/**
- * Preloads multiple images in parallel
- * @param imageUrls - Array of image URLs to preload
- * @returns Promise that resolves when all images are loaded (or failed)
- */
-export const preloadImages = (imageUrls: string[]): Promise<void> => {
-  const validUrls = imageUrls.filter(url => url && url.trim() !== '');
-
-  if (validUrls.length === 0) {
-    return Promise.resolve();
-  }
-
-  return Promise.all(validUrls.map(preloadImage)).then(() => undefined);
-};

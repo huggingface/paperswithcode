@@ -69,19 +69,27 @@ export class RemoteToolBridge {
     const remotePath = path.startsWith(workspacePrefix)
       ? path.slice(workspacePrefix.length)
       : path;
-    const result = await this.exchange({
-      type: "tool_request",
-      operation_id: randomUUID(),
-      tool_call_id: toolCallId,
-      operation: "read",
-      path: remotePath,
-      offset: 0,
-      max_bytes: MAX_REMOTE_READ_BYTES,
-    });
-    if (!result.ok || typeof result.data_base64 !== "string") {
-      throw new Error(`remote read failed:${result.error ?? "unknown"}`);
+    const chunks: Buffer[] = [];
+    let offset = 0;
+    while (true) {
+      const result = await this.exchange({
+        type: "tool_request",
+        operation_id: randomUUID(),
+        tool_call_id: toolCallId,
+        operation: "read",
+        path: remotePath,
+        offset,
+        max_bytes: MAX_REMOTE_READ_BYTES,
+      });
+      if (!result.ok || typeof result.data_base64 !== "string") {
+        throw new Error(`remote read failed:${result.error ?? "unknown"}`);
+      }
+      const chunk = Buffer.from(result.data_base64, "base64");
+      chunks.push(chunk);
+      if (result.eof === true) return Buffer.concat(chunks);
+      if (chunk.length === 0) throw new Error("remote read made no progress");
+      offset += chunk.length;
     }
-    return Buffer.from(result.data_base64, "base64");
   }
 
   private async exchange(frame: RemoteToolRequest): Promise<RemoteToolResult> {

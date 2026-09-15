@@ -232,6 +232,15 @@ The sandbox chat bridge has additional fail-closed prerequisites:
    Modal's isolated, automatically reclaimed ephemeral disk; PID and memory
    ceilings remain hard qualification probes.
 
+The persistent executor endpoint is
+`wss://chat-executor-staging.paperswithcode.co/v1/generations/<generation>/environment`.
+Create `chat-executor-staging` as a **proxied** Cloudflare A record pointing to
+the origin server. The host firewall permits web traffic only from Cloudflare;
+DNS-only records cannot reach it. Keep the hostname at one subdomain level so
+Cloudflare Universal SSL covers it. Provision the matching origin certificate,
+apply the staging nginx template through `pwc-nginx`, and verify public TLS
+before qualifying the transport and enabling persistent admissions.
+
 Posterly's additive gateway contract uses one zero-assignment bridge release.
 Deploy the first gateway-29 release with `POSTERLY_ENABLED=false`; only after
 that release is both current and the rollback target accepts contract 29 may a
@@ -814,6 +823,12 @@ writes only
 `/etc/paperswithcode/production-chat-prepared.env`; no service loads that file
 implicitly.
 
+Sandbox reservations, local accrued-cost estimates, pool projections, and active-turn
+estimates include Modal’s 1.75× multiplier for the pinned `eu-west` region.
+Provider-reported spend already includes billing adjustments and must not be
+multiplied again. Historical local estimates are conservative until provider
+reconciliation covers them; this change does not rewrite provider reports.
+
 Production uses the Team service user `pwc-production`, which must be
 Contributor on only `pwc-chat-production` and retain No Access on `main` and
 every other Environment. The provider-side production Environment budget is
@@ -1130,6 +1145,14 @@ sudo pwc-cron status
 pwc cron health refresh_paper_embeddings --strict --json
 ```
 
+The backup script requires an affirmative boolean `private: true` from authenticated
+`hf buckets info` before dumping, immediately before uploading, and before pruning.
+An unavailable or malformed response fails the job. Newly created local dumps and
+checksums use owner-only permissions. These checks detect visibility changes at
+those boundaries; bucket access controls must also prevent unauthorized visibility
+changes between checks and after upload. A public-backup incident remains open for
+historical exposure assessment even after the bucket becomes private.
+
 `pwc-postgres-backup.timer` remains at 03:15 UTC. It runs the backup script from
 `production/current` as `pwc-cron`, dumps both `public` and `staging` with the
 read-only `pwc_backup` role, verifies the local checksum and remote object
@@ -1157,3 +1180,31 @@ Use `uv run --env-file backend/keys.env ...` for local backend commands and
 `npm run dev` for a localhost frontend. `start_services.sh` and
 `stop_services.sh` are non-mutating retirement notices; `check_services.sh`
 delegates to `pwc-status`.
+
+### Production executor certificate renewal
+
+The executor hostname serves only ACME challenge files from
+`/var/lib/letsencrypt/pwc-executor-production/.well-known/acme-challenge/`
+plus its generation-bound WebSocket route. Other HTTPS paths return 404.
+The HTTP challenge location is served directly; other HTTP paths redirect to HTTPS.
+
+After merging and installing the reviewed deployment tools and nginx template,
+create the challenge directory (root-owned, mode 0755), apply the production
+nginx template through `pwc-nginx`, and switch the existing certificate from
+manual DNS validation to webroot validation:
+
+```bash
+sudo certbot reconfigure \
+  --cert-name chat-executor.paperswithcode.co \
+  --authenticator webroot \
+  --webroot-path /var/lib/letsencrypt/pwc-executor-production \
+  --preferred-challenges http \
+  --deploy-hook 'pwc-nginx production --confirm APPLY_NGINX_PRODUCTION --reload-renewed-certificate'
+```
+
+`reconfigure` must pass its renewal test before the parameters are saved. Confirm
+the saved renewal configuration uses `webroot` and that `certbot.timer` is enabled.
+The renewal hook requires Certbot's exact `RENEWED_LINEAGE` for the executor host,
+validates the live nginx configuration before reloading, then smoke-tests the
+active application release. It does not install a template or change release
+pointers. Remove the old DNS TXT challenge after certificate issuance.

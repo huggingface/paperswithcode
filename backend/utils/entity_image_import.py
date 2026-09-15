@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Type
-
-from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
@@ -28,8 +28,8 @@ MIME_BY_SUFFIX = {
     ".svg": "image/svg+xml",
 }
 
-# Repo-root-relative seed directory for one-off imports and bulk backfill.
-IMAGE_SEED_ROOT = Path("data/entity_image_seeds")
+# Temporary seed directory for one-off imports and bulk backfill.
+IMAGE_SEED_ROOT = Path(tempfile.gettempdir()) / "paperswithcode_entity_image_seeds"
 
 
 def mime_type_for_path(image_path: Path) -> str | None:

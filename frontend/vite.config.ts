@@ -3,7 +3,7 @@ import react from "@vitejs/plugin-react-swc";
 import path from "path";
 import fs from "fs";
 
-// PLAN.md §1, §13.1: prod runs on :8080; staging runs on :8081.
+// Prod dev server runs on :8080; staging runs on :8081.
 // For DNS-backed staging, set VITE_HMR_HOST / VITE_HMR_PROTOCOL / VITE_HMR_CLIENT_PORT.
 // Without those env vars, Vite uses the browser's current origin, which keeps raw-IP
 // previews like http://167.235.148.241:8081 from reconnecting to the wrong HMR host.

@@ -92,8 +92,16 @@ class ChatSandboxPoolCoordinator:
         self.utcnow = utcnow or (lambda: datetime.now(UTC))
         self.monotonic = monotonic
 
+        executor_runtime = None
+        if settings.chat_executor_remote_transport_enabled:
+            from backend.services.chat_executor_runtime import ChatExecutorRuntime
+
+            executor_runtime = ChatExecutorRuntime(
+                settings, session_factory=session_factory
+            )
         self.policy = ChatSandboxPoolPolicy(settings)
         self.creation = ChatSandboxPoolCreationCoordinator(
+            executor_runtime=executor_runtime,
             policy=self.policy,
             session_factory=session_factory,
             repository=repository,

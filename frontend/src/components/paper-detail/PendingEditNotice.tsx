@@ -34,5 +34,3 @@ export function PendingEditNotice({ isAuthor = false }: PendingEditNoticeProps) 
     </div>
   );
 }
-
-export default PendingEditNotice;

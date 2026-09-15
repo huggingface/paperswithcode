@@ -89,7 +89,10 @@ def test_fetches_every_api_page_and_validates_reviewed_models(monkeypatch):
         {
             "intelligence_index_version": "4.1",
             "pagination": {"has_more": False, "total_pages": 2},
-            "data": [_api_row("other-model", intelligence=12.3, agentic=None)],
+            "data": [
+                _api_row("reviewed-model"),
+                _api_row("other-model", intelligence=12.3, agentic=None),
+            ],
         },
     ]
 
@@ -111,6 +114,31 @@ def test_fetches_every_api_page_and_validates_reviewed_models(monkeypatch):
     ]
     assert leaderboard.entries[0].scores == {"intelligence": 42.5, "agentic": 41.0}
     assert leaderboard.entries[1].scores == {"intelligence": 12.3}
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        {"name": "Different model"},
+        {"release_date": "2026-08-02"},
+        {"evaluations": {"artificial_analysis_intelligence_index": 1.0}},
+    ],
+)
+def test_rejects_conflicting_duplicate_models(changed):
+    first = _api_row("duplicate-model")
+
+    class Client:
+        def get(self, *args, **kwargs):
+            return _Response(
+                {
+                    "intelligence_index_version": "4.1",
+                    "pagination": {"has_more": False, "total_pages": 1},
+                    "data": [first, {**first, **changed}],
+                }
+            )
+
+    with pytest.raises(ValueError, match="conflicting model slug: duplicate-model"):
+        aa.fetch_artificial_analysis_leaderboard(api_key="secret", client=Client())
 
 
 def _session() -> Session:
@@ -473,3 +501,64 @@ def test_sync_rejects_scored_reviewed_model_without_discovered_paper(monkeypatch
             leaderboard, discovery=aa.ArtificialAnalysisDiscovery(papers={})
         )
     assert session.query(Evaluation).count() == 0
+
+
+def test_sync_refreshes_old_managed_rows_and_retires_withdrawn_scores(monkeypatch):
+    session = _session()
+    Base.metadata.create_all(
+        session.get_bind(),
+        tables=[ModelRelease.__table__, ModelProviderAlias.__table__],
+    )
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
+    session.add(
+        Paper(
+            id=7,
+            title="Existing",
+            source_url="https://example.com/existing",
+            source="external",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.flush()
+    for slug, managed in [
+        ("old-model", True),
+        ("withdrawn", True),
+        ("manual", False),
+        ("absent", True),
+    ]:
+        session.add(
+            Evaluation(
+                paper_id=7,
+                task_id=5,
+                dataset_id=581,
+                model_name=slug,
+                metrics={aa.METRIC_NAME: 1.0},
+                best_metric=aa.METRIC_NAME,
+                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                is_open=True,
+                methodology=aa.MANAGED_METHODOLOGY_PREFIX if managed else "Manual",
+            )
+        )
+    session.commit()
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "old-model", "Old Model", {"intelligence": 39.9}, date(2026, 8, 1)
+            ),
+            aa.ArtificialAnalysisEntry("withdrawn", "Withdrawn", {}, date(2026, 8, 1)),
+            aa.ArtificialAnalysisEntry("manual", "Manual", {}, date(2026, 8, 1)),
+        ],
+    )
+    stats = aa.ArtificialAnalysisSyncService(session).sync(
+        leaderboard, discovery=aa.ArtificialAnalysisDiscovery()
+    )
+    rows = {row.model_name: row for row in session.query(Evaluation).all()}
+    assert set(rows) == {"Old Model", "manual", "absent"}
+    assert rows["Old Model"].metrics == {aa.METRIC_NAME: 39.9}
+    assert rows["Old Model"].paper_id == 7
+    assert rows["Old Model"].is_open is True
+    assert rows["manual"].metrics == {aa.METRIC_NAME: 1.0}
+    assert stats.updated == 1
+    assert stats.retired == 1

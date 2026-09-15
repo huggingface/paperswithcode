@@ -51,7 +51,7 @@ export function hfLoginUrl(
   return `${endpoint}?${params.toString()}`;
 }
 
-export const HfSignInButton: React.FC<HfSignInButtonProps> = ({
+const HfSignInButton: React.FC<HfSignInButtonProps> = ({
   returnTo,
   compact = false,
   label = "Sign in",

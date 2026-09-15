@@ -21,6 +21,7 @@ The goal is to split up those tasks in the future.
 - `audio-compression` — Audio Compression
 - `voice-cloning` — Voice cloning
 - `audio-classification` — Audio Classification
+- `audio-editing` — Audio and Speech Editing
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `spoken-language-identification` — Spoken Language Identification
 
@@ -112,6 +113,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `ai-weather-forecasting` — AI Weather Forecasting
 - `anomaly-detection` — Anomaly Detection
 - `atari-games` — Atari Games
+- `audio-editing` — Audio and Speech Editing
 - `audio-classification` — Audio Classification
 - `audio-compression` — Audio Compression
 - `audio-generation` — Audio Generation

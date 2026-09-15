@@ -3,11 +3,10 @@
  *
  * Replays a canned assistant turn — reasoning → search_papers → reasoning →
  * search_papers → cited answer — with realistic pacing, emitting hits in the
- * transport shape agreed in PLAN_CHAT_ENDPOINT.md (`route_id` + bounded
- * `content` + structured `metadata`, no score). One hit is an external
- * (non-arXiv) resource with a numeric route_id to exercise that path. Delete
- * this file (and the `isChatLive()` switch in `chat.ts`) once the backend
- * ships.
+ * live transport shape (`route_id` + bounded `content` + structured
+ * `metadata`, no score). One hit is an external (non-arXiv) resource with a
+ * numeric route_id to exercise that path. Used by builds without
+ * `VITE_CHAT_LIVE=1` (see the `isChatLive()` switch in `chat.ts`).
  */
 
 import type { ChatEvent, ChatPaperHit, ChatPaperMetadata } from "@/lib/chat";

@@ -13,7 +13,6 @@ import sys
 import time
 from pathlib import Path
 
-from backend.chat_sandbox_worker.control_websocket import start_server
 from backend.chat_sandbox_worker.protocol import (
     MAX_WIRE_FRAME_BYTES,
     decode_frame,
@@ -416,6 +415,8 @@ def _serve_connections(
 
 
 def main() -> int:
+    from backend.chat_sandbox_worker.control_websocket import start_server
+
     daemon_started = time.monotonic()
     _not_dumpable()
     _harden_proc()

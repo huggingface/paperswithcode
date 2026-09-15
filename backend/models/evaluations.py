@@ -1,11 +1,23 @@
 """Dataset, benchmark, evaluation, and metric API contracts."""
 
 from datetime import date, datetime
-from typing import List, Optional, Union
+from typing import List, Literal, Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from backend.utils.public_urls import normalize_optional_public_url
+
+
+class EvaluationScoreEvidence(BaseModel):
+    """The source table cell before any leaderboard scale conversion."""
+
+    task_id: int = Field(gt=0)
+    dataset_id: int = Field(gt=0)
+    metric: str = Field(min_length=1, max_length=200)
+    source_value: float = Field(allow_inf_nan=False)
+    source_scale: Literal["0-1", "0-100", "native"]
+    source_url: str = Field(pattern=r"^https?://\S+$", max_length=2000)
+    table_reference: str = Field(min_length=1, max_length=2000)
 
 
 class BenchmarkSummary(BaseModel):

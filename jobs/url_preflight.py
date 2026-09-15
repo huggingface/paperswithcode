@@ -54,12 +54,42 @@ class _Links(HTMLParser):
     def __init__(self) -> None:
         super().__init__()
         self.urls: list[str] = []
+        self.navigation_urls: list[str] = []
+        self.navigation_depth = 0
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"nav", "header", "footer"}:
+            self.navigation_depth += 1
         if tag == "a":
             value = dict(attrs).get("href")
             if value:
-                self.urls.append(value)
+                if self.navigation_depth:
+                    self.navigation_urls.append(value)
+                else:
+                    self.urls.append(value)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"nav", "header", "footer"}:
+            self.navigation_depth = max(0, self.navigation_depth - 1)
+
+
+def validate_paper_text(body: bytes) -> None:
+    """Reject successful HTTP responses that contain a figure or empty wrapper."""
+    text = body.decode("utf-8-sig", "replace").strip()
+    title = re.search(r"^Title:\s*(.+)$", text, re.MULTILINE)
+    if title and re.search(
+        r"\.(?:svg|png|jpe?g|webp)(?:\?\S*)?$", title[1].strip(), re.I
+    ):
+        raise ValueError("paper endpoint returned an image caption")
+    content = text.split("Markdown Content:", 1)[-1].strip()
+    if len(content) < 800:
+        raise ValueError("paper text is too short to establish source coverage")
+    if re.match(
+        r"(?:<!--.*?-->\s*)*<(?:svg\b|html\b|!doctype\b|\?xml\b)",
+        content,
+        re.I | re.S,
+    ):
+        raise ValueError("paper text is an image or HTML error page")
 
 
 def _fetch(url: str, limit: int) -> tuple[bytes, str]:
@@ -130,6 +160,8 @@ def normalize_candidate(raw: str, base_url: str | None = None) -> str | None:
     if not host.endswith(".github.io"):
         return None
     path = parsed.path.rstrip("/")
+    if re.search(r"\.(?:svg|png|jpe?g|webp|gif|pdf)$", path, re.I):
+        return None
     return urllib.parse.urlunsplit(("https", host, path, "", ""))
 
 
@@ -262,6 +294,7 @@ def extract_candidates(
         try:
             url = f"https://huggingface.co/papers/{arxiv_id}.md"
             markdown, final_url = fetch(url, MAX_TEXT_BYTES)
+            validate_paper_text(markdown)
             hf_markdown_available = True
             fetched("hf_markdown", url, markdown, final_url)
             for raw in _matches(markdown.decode("utf-8", "replace")):
@@ -277,6 +310,7 @@ def extract_candidates(
                 markdown, final_url = fetch_ocr_markdown(
                     arxiv_id, MAX_TEXT_BYTES, token=token
                 )
+                validate_paper_text(markdown)
                 fetched(
                     "ocr_markdown",
                     f"hf://buckets/{OCR_MARKDOWN_BUCKET_ID}",
@@ -290,17 +324,16 @@ def extract_candidates(
             except Exception as exc:
                 errors.append({"source": "ocr_markdown", "error": type(exc).__name__})
             check_liveness()
-    if (
-        arxiv_id
-        and not hf_markdown_available
-        and not ocr_markdown_available
-        and not (has_live("github") or has_live("project_page"))
-    ):
+    paper_pdf_available = False
+    if arxiv_id and not hf_markdown_available and not ocr_markdown_available:
         try:
             url = f"https://arxiv.org/pdf/{arxiv_id}"
             pdf, final_url = fetch(url, MAX_PDF_BYTES)
-            fetched("pdf_first_two_pages", url, pdf, final_url)
             reader = PdfReader(io.BytesIO(pdf), strict=False)
+            text = "\n".join(page.extract_text() or "" for page in reader.pages[:2])
+            validate_paper_text(text.encode())
+            paper_pdf_available = True
+            fetched("paper_pdf", url, pdf, final_url)
             for page_number, page in enumerate(reader.pages[:2], start=1):
                 for raw in _matches(page.extract_text() or ""):
                     add(raw, f"pdf_page_{page_number}_text")
@@ -311,9 +344,7 @@ def extract_candidates(
                     if uri:
                         add(str(uri), f"pdf_page_{page_number}_hyperlink")
         except Exception as exc:
-            errors.append(
-                {"source": "pdf_first_two_pages", "error": type(exc).__name__}
-            )
+            errors.append({"source": "paper_pdf", "error": type(exc).__name__})
         check_liveness()
 
     if not has_live("github"):
@@ -335,12 +366,21 @@ def extract_candidates(
                 parser.feed(html.decode("utf-8", "replace"))
                 for raw in parser.urls:
                     add(raw, "project_page_html", final_url)
+                # Header Code buttons can be valid; sibling project links in
+                # shared site navigation are not evidence of paper ownership.
+                for raw in parser.navigation_urls:
+                    normalized = normalize_candidate(raw, final_url)
+                    if normalized and _kind(normalized) == "github":
+                        add(raw, "project_page_navigation", final_url)
             except Exception as exc:
                 errors.append(
                     {
                         "source": "project_page_html",
                         "url": project_url,
                         "error": type(exc).__name__,
+                        "http_status": exc.code
+                        if isinstance(exc, urllib.error.HTTPError)
+                        else None,
                     }
                 )
 
@@ -369,17 +409,26 @@ def extract_candidates(
             document("project_page", project_page.get("url"))
     for source in sources:
         if source.get("source") in {"hf_markdown", "ocr_markdown"}:
-            document("paper_markdown", source.get("url"))
+            document("paper_markdown", source.get("final_url"))
+        elif source.get("source") == "paper_pdf":
+            document("paper_pdf", source.get("url"))
 
     markdown_available = hf_markdown_available or ocr_markdown_available
+    paper_text_available = markdown_available or paper_pdf_available
     official_source_available = has_live("github") or has_live("project_page")
 
     def is_nonblocking(error: dict) -> bool:
         source = error.get("source")
+        if source == "hf_api":
+            # This endpoint only adds link metadata; paper text or verified
+            # first-party links are sufficient evidence for enrichment.
+            return paper_text_available or official_source_available
         if source in {"hf_markdown", "ocr_markdown"}:
-            return official_source_available
-        if source == "pdf_first_two_pages":
-            return markdown_available or official_source_available
+            return paper_text_available
+        if source == "paper_pdf":
+            return paper_text_available
+        if source == "project_page_html" and error.get("http_status") in {404, 410}:
+            return paper_text_available
         return False
 
     blocking_errors = [error for error in errors if not is_nonblocking(error)]
@@ -389,8 +438,8 @@ def extract_candidates(
         "paper_id": paper["id"],
         "complete": not blocking_errors,
         "markdown_available": markdown_available,
-        "awaiting_markdown": markdown_attempted
-        and not (markdown_available or official_source_available),
+        "paper_text_available": paper_text_available,
+        "awaiting_markdown": markdown_attempted and not paper_text_available,
         "candidates": list(candidates.values())[:50],
         "sources": sources[:20],
         "source_documents": source_documents[:20],

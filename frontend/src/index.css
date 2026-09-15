@@ -3,8 +3,6 @@
  * hamburger sheet, loading/error/empty states). The v2 visual system is owned by
  * `styles.css`. The two CSS files coexist; styles.css is loaded after this so its
  * tokens (--ink / --bg / --accent / --serif / --mono) take precedence.
- *
- * PLAN.md §10.
  */
 
 @tailwind base;

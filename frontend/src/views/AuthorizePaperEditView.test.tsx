@@ -19,7 +19,7 @@ function view() {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  vi.mocked(useAuth).mockReturnValue({ user: { hf_subject: "alice-id", username: "alice", is_admin: false, role: null, can_contribute: false, can_directly_edit_catalog: true }, isLoading: false, refresh: vi.fn(), logout: vi.fn() });
+  vi.mocked(useAuth).mockReturnValue({ user: { hf_subject: "alice-id", username: "alice", name: "Alice", avatar_url: null, is_admin: false, role: null, can_contribute: false, can_directly_edit_catalog: true }, isLoading: false, refresh: vi.fn(), logout: vi.fn() });
   vi.mocked(paperEditsApi.authorization).mockResolvedValue({ paper_id: 123, title: "Example paper", user_code: "ABCD1234", approved: false, expires_at: "2026-09-16T12:00:00Z" });
   vi.mocked(paperEditsApi.approve).mockResolvedValue({ status: "approved", expires_at: "2026-09-16T12:00:00Z" });
 });

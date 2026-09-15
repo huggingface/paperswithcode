@@ -4,8 +4,7 @@ External resource ingestion service.
 Creates `papers` rows with `source='external'` for vendor blog posts,
 technical reports, model release pages, and similar non-ArXiv resources.
 
-Design notes (see `.cursor/plans/external_resources_model_*.plan.md` and
-`.cursor/plans/hf_artifact_links_*.plan.md`):
+Design notes:
 
 - External rows must have a non-null `source_url`. ArXiv rows continue to
   have `source='arxiv'` and a non-null `arxiv_id`.

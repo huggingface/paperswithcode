@@ -29,7 +29,7 @@ export interface Area {
   updated_at?: string;
 }
 
-export interface AreaWithTasks {
+interface AreaWithTasks {
   id: string;
   name: string;
   description?: string;
@@ -82,14 +82,14 @@ export interface ConferenceDeadlines {
   results: Conference[];
 }
 
-export interface ConferenceTaskSummary {
+interface ConferenceTaskSummary {
   id: string;
   name: string;
   slug?: string;
   paper_count: number;
 }
 
-export interface ConferenceAreaWithTasks {
+interface ConferenceAreaWithTasks {
   id: string;
   name: string;
   description?: string;
@@ -147,7 +147,7 @@ export interface Organizations {
   results: Organization[];
 }
 
-export interface OrganizationContributionDay {
+interface OrganizationContributionDay {
   date: string;
   paper_count: number;
 }
@@ -159,7 +159,7 @@ export interface OrganizationContributions {
   results: OrganizationContributionDay[];
 }
 
-export interface OrganizationAreaWithTasks {
+interface OrganizationAreaWithTasks {
   id: string;
   name: string;
   description?: string | null;
@@ -188,14 +188,14 @@ export interface Task {
   updated_at?: string;
 }
 
-export interface TrendingTask extends Task {
+interface TrendingTask extends Task {
   recent_paper_count: number;
   baseline_paper_count: number;
   share_lift: number;
   trend_score: number;
 }
 
-export interface TaskSubtaskBenchmarks {
+interface TaskSubtaskBenchmarks {
   subtask_id: string;
   benchmarks: Dataset[];
 }
@@ -342,7 +342,7 @@ export interface MethodTrend {
   current_month_is_partial?: boolean;
 }
 
-export interface IntroducingPaper {
+interface IntroducingPaper {
   id: string;
   arxiv_id?: string | null;
   title: string;

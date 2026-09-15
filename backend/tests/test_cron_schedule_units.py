@@ -73,6 +73,20 @@ def test_method_keyword_backfill_uses_250k_capacity_with_runtime_bound():
     assert spec.args[runtime_index + 1] == "3300"
 
 
+def test_method_reference_backfill_follows_each_hourly_paper_import():
+    reference = next(
+        spec
+        for spec in cron_schedules.TIMERS
+        if spec.job == "backfill_method_references"
+    )
+
+    assert reference.on_calendar == ("*-*-* *:15:00",)
+    assert (
+        "After=pwc-cron-import-hf-daily-papers.service"
+        in generate_cron_units.render_service(reference)
+    )
+
+
 def test_every_migrated_registry_job_owns_committed_unit_pairs():
     for job in _systemd_jobs():
         pairs = job.systemd_unit_pairs

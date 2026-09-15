@@ -20,7 +20,6 @@ from backend.chat_sandbox_worker.contract import (
     POSTERLY_CHROMIUM_REVISION,
     POSTERLY_PLAYWRIGHT_VERSION,
     POSTERLY_SOURCE_COMMIT,
-    PWC_CLI_INSTALLER_SHA256,
     PWC_CLI_SOURCE_COMMIT,
     PWC_CLI_VERSION,
     RESTRICTED_HF_CLI_VERSION,
@@ -76,8 +75,13 @@ image = (
     )
     .run_commands(
         "mkdir -p /opt/pwc",
-        f"curl -fsSLo /opt/pwc/install-pwc.py https://raw.githubusercontent.com/huggingface/pwc-cli/{PWC_CLI_SOURCE_COMMIT}/standalone_cli/install.py",
-        f"echo '{PWC_CLI_INSTALLER_SHA256}  /opt/pwc/install-pwc.py' | sha256sum -c -",
+        "git init /opt/pwc/cli-source && git -C /opt/pwc/cli-source remote add origin https://github.com/huggingface/pwc-cli.git",
+        f"git -C /opt/pwc/cli-source fetch --depth 1 origin {PWC_CLI_SOURCE_COMMIT} && git -C /opt/pwc/cli-source checkout --detach FETCH_HEAD",
+        f'test "$(git -C /opt/pwc/cli-source rev-parse HEAD)" = "{PWC_CLI_SOURCE_COMMIT}"',
+        # Python is already installed; avoid unpacking a bundled interpreter on
+        # every tool call. Install the same pinned CLI without runtime deps.
+        "python -m pip install --no-deps /opt/pwc/cli-source/standalone_cli",
+        "rm -rf /opt/pwc/cli-source",
         "groupadd --system pwc-broker && useradd --system --gid pwc-broker --home-dir /var/empty/pwc-broker pwc-broker",
         "groupadd --system pwc-chat && useradd --system --gid pwc-chat --create-home --home-dir /home/pwc-chat pwc-chat",
         "mkdir -p /opt/pwc/backend/chat_sandbox_worker /workspace /home/pwc-chat/.claude /var/empty/pwc-broker",
@@ -133,7 +137,7 @@ image = (
         "PYTHONPATH=/opt/pwc python -m backend.chat_sandbox_worker.render_pi_prompt_asset /opt/pwc/pi-system-prompt.txt",
         "chmod 0644 /opt/pwc/pi-system-prompt.txt",
         "chmod -R a+rX /opt/pwc/restricted_hf_cli",
-        "chmod 0644 /opt/pwc/PWC_CLI_SKILL.md /opt/pwc/install-pwc.py",
+        "chmod 0644 /opt/pwc/PWC_CLI_SKILL.md",
         "chmod 0644 /opt/pwc/HF_CLI_SKILL.md",
         "chmod 0644 /opt/pwc/S2_CLI_SKILL.md",
         "chmod 0755 /opt/pwc/artifact_cli.py && ln -s /opt/pwc/artifact_cli.py /usr/local/bin/pwc-artifact",
@@ -143,11 +147,11 @@ image = (
         "python -m pip install --no-deps /opt/pwc/s2_cli",
         "chmod 0755 /opt/pwc/restricted-hf && ln -s /opt/pwc/restricted-hf /usr/local/bin/hf",
         "PYTHONPATH=/opt/pwc python -c 'import backend.chat_execution_policy'",
-        "PYTHONPATH=/opt/pwc python -c \"import backend.chat_sandbox_worker.executor_daemon; import backend.chat_sandbox_worker.executor_relay; from backend.chat_sandbox_worker.executor_daemon import DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER; assert EXECUTOR_USER == 'pwc-chat' and DEFAULT_EXECUTOR_PIDS_MAX == 64\"",
+        "PYTHONPATH=/opt/pwc python -c \"import backend.chat_sandbox_worker.executor_daemon; import backend.chat_sandbox_worker.executor_relay; from backend.chat_sandbox_worker.executor_command import DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER; assert EXECUTOR_USER == 'pwc-chat' and DEFAULT_EXECUTOR_PIDS_MAX == 64\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; from backend.chat_sandbox_worker.contract import RESTRICTED_HF_CLI_SHA256, restricted_hf_cli_digest; assert restricted_hf_cli_digest(Path('/opt/pwc/restricted_hf_cli/restricted_hf_cli'), Path('/opt/pwc/restricted-hf')) == RESTRICTED_HF_CLI_SHA256\"",
         "PYTHONPATH=/opt/pwc python -c \"from pathlib import Path; import hashlib; from backend.chat_sandbox_worker.contract import HF_CLI_SKILL_SHA256; assert hashlib.sha256(Path('/opt/pwc/HF_CLI_SKILL.md').read_bytes()).hexdigest() == HF_CLI_SKILL_SHA256\"",
-        f"python /opt/pwc/install-pwc.py --version {PWC_CLI_VERSION} --prefix /usr/local",
         f"pwc version | grep -F 'pwc {PWC_CLI_VERSION}'",
+        f"runuser -u pwc-chat -- pwc version | grep -F 'pwc {PWC_CLI_VERSION}'",
         "pwc --help >/dev/null",
         "pwc paper --help >/dev/null",
         "pwc paper list --help | grep -F -- '--author' >/dev/null",
@@ -200,3 +204,22 @@ image = (
         }
     )
 )
+
+
+def with_executor_binary(base_image: modal.Image, binary: Path) -> modal.Image:
+    """Add the locally locked release artifact; never build inside a sandbox."""
+    if not binary.is_file():
+        raise FileNotFoundError("Pinned executor environment binary is unavailable")
+    return (
+        base_image.add_local_file(
+            binary,
+            "/usr/local/bin/pwc-executor-environment",
+            copy=True,
+        )
+        .run_commands(
+            "chmod 0755 /usr/local/bin/pwc-executor-environment",
+            "/usr/local/bin/pwc-executor-environment --self-test >/dev/null",
+            'test "$(/usr/local/bin/pwc-executor-environment --command-launcher-version)" = "1"',
+        )
+        .env({"PWC_CHAT_NATIVE_COMMAND_LAUNCHER": "1"})
+    )

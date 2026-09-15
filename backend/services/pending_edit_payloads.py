@@ -249,6 +249,27 @@ def _validate_new_method(payload: Payload) -> Payload:
 
 
 def _validate_new_benchmark(payload: Payload) -> Payload:
+    if "benchmark" in payload or "task" in payload:
+        output = {}
+        for field in ("benchmark", "task"):
+            value = payload.get(field)
+            if not isinstance(value, str) or not value.strip():
+                raise PendingEditError(
+                    f"Benchmark '{field}' must be a non-empty string"
+                )
+            value = value.strip()
+            if len(value) > 200:
+                raise PendingEditError(
+                    f"Benchmark '{field}' must be at most 200 characters"
+                )
+            output[field] = value
+        _optional_text(payload, output, "description", 2000)
+        if "description" not in output:
+            raise PendingEditError("Benchmark 'description' is required")
+        return output
+
+    # Preserve review compatibility for submissions created before benchmark
+    # and task names became free-text administrative fields.
     output = _suggestion_base(payload)
     if "description" not in output:
         raise PendingEditError("Benchmark 'description' is required")

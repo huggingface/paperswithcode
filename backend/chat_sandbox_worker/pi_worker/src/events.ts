@@ -1,3 +1,4 @@
+import { type AssistantMessage, isContextOverflow } from "@earendil-works/pi-ai/compat";
 import { serializeExcalidrawElements } from "./mcp_app_registry.js";
 import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_command.js";
 
@@ -79,6 +80,8 @@ export class PiEventAdapter {
   private reasoningOpen = false;
   private answerStarted = false;
   private terminalFailure = false;
+  private overflowPending = false;
+  private overflowRetryReady = false;
   private readonly toolIds = new Set<string>();
   private readonly resultIds = new Set<string>();
   private readonly toolStartedAt = new Map<string, number>();
@@ -96,7 +99,7 @@ export class PiEventAdapter {
   ) {}
 
   get failed(): boolean {
-    return this.terminalFailure;
+    return this.terminalFailure || this.overflowPending;
   }
 
   private closeReasoning(): PwCEvent[] {
@@ -145,6 +148,15 @@ export class PiEventAdapter {
   feed(rawEvent: unknown): PwCEvent[] {
     const event = record(rawEvent);
     const type = event.type;
+    if (type === "compaction_start") {
+      return [...this.closeReasoning(), { type: "compaction_status", state: "started" }];
+    }
+    if (type === "compaction_end") {
+      if (event.reason === "overflow" && event.result && event.willRetry && !event.aborted) {
+        this.overflowRetryReady = true;
+      }
+      return [{ type: "compaction_status", state: "finished" }];
+    }
     if (type === "message_update") {
       const update = record(event.assistantMessageEvent);
       if (update.type === "thinking_delta") {
@@ -310,19 +322,24 @@ export class PiEventAdapter {
       // the same index, which can suppress its start, arguments, and result.
       this.contentTools.clear();
       if (message.stopReason === "error" || typeof message.errorMessage === "string") {
-        this.terminalFailure = true;
-        const contextTooLarge = typeof message.errorMessage === "string"
-          && message.errorMessage.includes("request_too_large");
+        const contextTooLarge = isContextOverflow(message as unknown as AssistantMessage);
+        if (contextTooLarge) this.overflowPending = true;
+        else this.terminalFailure = true;
+        this.overflowRetryReady = false;
         return [
           ...this.closeReasoning(),
           {
             type: "error",
             code: contextTooLarge ? "context_too_large" : "provider_error",
             message: contextTooLarge
-              ? "This conversation is too large for the selected model. Start a new chat or shorten the context."
+              ? "This conversation is too large for the selected model. Your conversation is saved. Retry or shorten the latest request."
               : "The model provider is unavailable.",
           },
         ];
+      }
+      if (this.overflowRetryReady && ["stop", "toolUse", "length"].includes(String(message.stopReason))) {
+        this.overflowPending = false;
+        this.overflowRetryReady = false;
       }
       const usage = record(message.usage);
       return [

@@ -2,13 +2,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { apiUrl } from "@/lib/apiUrl";
 
-export const EXCALIDRAW_ENDPOINT = "https://mcp.excalidraw.com/mcp";
-export const EXCALIDRAW_HOSTNAME = "mcp.excalidraw.com";
-export const EXCALIDRAW_HOST_PATH = "/api/v1/chat/mcp-apps/excalidraw";
+const EXCALIDRAW_ENDPOINT = "https://mcp.excalidraw.com/mcp";
+const EXCALIDRAW_HOSTNAME = "mcp.excalidraw.com";
+const EXCALIDRAW_HOST_PATH = "/api/v1/chat/mcp-apps/excalidraw";
 export const EXCALIDRAW_HOST_HTML_PATH = "/api/v1/chat/mcp-apps/excalidraw/html";
-export const EXCALIDRAW_RESOURCE_URI = "ui://excalidraw/mcp-app.html";
-export const EXCALIDRAW_MODEL_TOOLS = ["read_me", "create_view"] as const;
-export const EXCALIDRAW_APP_TOOLS = new Set([
+const EXCALIDRAW_RESOURCE_URI = "ui://excalidraw/mcp-app.html";
+const EXCALIDRAW_MODEL_TOOLS = ["read_me", "create_view"] as const;
+const EXCALIDRAW_APP_TOOLS = new Set([
   "export_to_excalidraw", "save_checkpoint", "read_checkpoint",
 ]);
 const MAX_APP_CALL_BYTES = 256 * 1024;
@@ -32,7 +32,7 @@ export interface McpAppProvider {
   appTools: ReadonlySet<string>;
 }
 
-export const MCP_APP_PROVIDERS: Readonly<Record<string, McpAppProvider>> = {
+const MCP_APP_PROVIDERS: Readonly<Record<string, McpAppProvider>> = {
   excalidraw: {
     id: "excalidraw", endpoint: EXCALIDRAW_ENDPOINT, hostname: EXCALIDRAW_HOSTNAME,
     resourceUri: EXCALIDRAW_RESOURCE_URI, modelTools: EXCALIDRAW_MODEL_TOOLS,
@@ -49,11 +49,11 @@ export function providerFor(value: string): McpAppProvider | undefined {
   return MCP_APP_PROVIDERS[value];
 }
 
-export function hostMcpUrl(): URL {
+function hostMcpUrl(): URL {
   return new URL(apiUrl(EXCALIDRAW_HOST_PATH), window.location.origin);
 }
 
-export function hostHtmlUrl(): URL {
+function hostHtmlUrl(): URL {
   return new URL(apiUrl(EXCALIDRAW_HOST_HTML_PATH), window.location.origin);
 }
 
@@ -137,7 +137,7 @@ export function excalidrawClient(): BoundedProviderClient {
   return providerClient;
 }
 
-export function closeMcpAppClients(): void {
+function closeMcpAppClients(): void {
   providerClient?.close();
   providerClient = undefined;
 }

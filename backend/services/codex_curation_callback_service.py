@@ -22,6 +22,7 @@ from backend.models.database import (
     ModelProviderAlias,
     ModelRelease,
     Paper,
+    PaperCurationJob,
     PaperCurationWorkflow,
     PaperHfArtifact,
     PaperMethod,
@@ -34,6 +35,10 @@ from backend.models.database import (
     TaskDataset,
     TaskDatasetMetric,
     TrendingModelCandidate,
+)
+from backend.services.evaluation_scale_service import (
+    metric_scale_bounds,
+    validate_source_score,
 )
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.autonomous_capabilities import (
@@ -110,7 +115,13 @@ def _retryable_scheduled_validation(row, exc: Exception) -> bool:
     return bool(
         getattr(row, "trigger", "admin") != "admin"
         and not prior_rejection
-        and (type(exc) is ValueError or isinstance(exc, CatalogValidationError))
+        and (
+            type(exc) is ValueError
+            or isinstance(
+                exc,
+                (CatalogValidationError, CodexCurationEvaluationsNotAllowedError),
+            )
+        )
     )
 
 
@@ -217,13 +228,37 @@ class CodexCurationCallbackService:
     def _resolution_paper_candidates(
         self, candidate: TrendingModelCandidate
     ) -> list[Paper]:
-        return self._resolution_candidates(candidate)[0]
+        candidates, allowed_ids = self._resolution_candidates(candidate)
+        return [paper for paper in candidates if paper.id in allowed_ids]
 
     def _allowed_resolution_paper_ids(
         self, candidate: TrendingModelCandidate
     ) -> set[int]:
         """Allow exact and same-family matches, never publisher-only siblings."""
         return self._resolution_candidates(candidate)[1]
+
+    def _retry_feedback(self, row) -> dict[str, Any] | None:
+        retry_id = getattr(row, "retry_of_id", None)
+        if retry_id is None:
+            return None
+        previous = self.db.get(PaperCurationJob, retry_id)
+        if (
+            previous is None
+            or previous.kind != row.kind
+            or (
+                previous.paper_id != row.paper_id
+                or previous.candidate_id != getattr(row, "candidate_id", None)
+            )
+        ):
+            return None
+        validation = previous.validation_summary or {}
+        return {
+            "job_id": str(previous.id),
+            "error": previous.error,
+            "validation_error": validation.get("error"),
+            "benchmark_gaps_rejected": validation.get("benchmark_gaps_rejected", []),
+            "instruction": "Correct this rejection using fresh context and primary sources; do not repeat the rejected proposal or bypass validation.",
+        }
 
     def context(self, row, settings: Settings) -> dict[str, Any]:
         if getattr(row, "kind", None) == "resolve-model-paper":
@@ -238,6 +273,7 @@ class CodexCurationCallbackService:
                 "job": self.job_service.serialize(row, settings).model_dump(
                     mode="json"
                 ),
+                "retry_feedback": self._retry_feedback(row),
                 "candidate": {
                     "id": str(candidate.id),
                     "repo_id": candidate.repo_id,
@@ -348,6 +384,7 @@ class CodexCurationCallbackService:
         return {
             "job": self.job_service.serialize(row, settings).model_dump(mode="json"),
             "source_candidate": source_candidate,
+            "retry_feedback": self._retry_feedback(row),
             "paper": {
                 "id": paper.id,
                 "title": paper.title,
@@ -960,7 +997,12 @@ class CodexCurationCallbackService:
             ]
             if len(leaderboard_rows) > 1:
                 raise ValueError(
-                    "Scheduled curation must keep one paper-native result per leaderboard"
+                    "Scheduled curation must keep one paper-native result per leaderboard; "
+                    f"paper {row.paper_id}, task {task_id}, dataset {dataset_id}, "
+                    f"metric {best_metric!r} already contains "
+                    f"{[(item.id, item.model_name) for item in leaderboard_rows]}. "
+                    "Omit a weaker/equal variant; replacing the current best requires "
+                    "evidence-backed removal of the superseded row."
                 )
 
     def _validate_mutation(self, row, body: ApplyMutationRequest) -> None:
@@ -980,6 +1022,7 @@ class CodexCurationCallbackService:
                 or body.evaluation_removals
                 or body.benchmark_gaps
                 or body.validation_evidence
+                or body.score_evidence
             ):
                 raise ValueError(
                     "Resolution jobs accept only model resolution payloads"
@@ -1032,14 +1075,15 @@ class CodexCurationCallbackService:
         self, row, body: ApplyMutationRequest
     ) -> None:
         """Keep one trending release's model lanes on its canonical paper."""
-        if (
-            getattr(row, "trigger", None) != "hf-trending-cron"
-            or getattr(row, "parent_workflow_id", None) is None
-        ):
+        if getattr(row, "parent_workflow_id", None) is None:
             return
         workflow = self.db.get(PaperCurationWorkflow, row.parent_workflow_id)
         if workflow is None or workflow.source_candidate_id is None:
-            raise ValueError("Trending evaluation job has no source model candidate")
+            if getattr(row, "trigger", None) == "hf-trending-cron":
+                raise ValueError(
+                    "Trending evaluation job has no source model candidate"
+                )
+            return
         candidate = self.db.get(TrendingModelCandidate, workflow.source_candidate_id)
         if candidate is None or candidate.model_release_id is None:
             raise ValueError("Trending evaluation job has no resolved model release")
@@ -1273,6 +1317,24 @@ class CodexCurationCallbackService:
             for item in body.validation_evidence
             if isinstance(item, dict) and str(item.get("evaluation_id", "")).isdigit()
         }
+        score_evidence = {
+            (entry.task_id, entry.dataset_id, entry.metric): entry
+            for entry in body.score_evidence
+        }
+        expected_score_keys = {
+            (item.task_id, item.dataset_id, metric)
+            for item in body.evaluations
+            for metric in item.metrics
+        }
+        if (
+            len(score_evidence) != len(body.score_evidence)
+            or set(score_evidence) != expected_score_keys
+        ):
+            raise ValueError(
+                "Scheduled evaluations require exactly one score_evidence entry "
+                "per task/dataset/metric with source_value, source_scale, source_url, "
+                "and table_reference; copy the original source cell before conversion"
+            )
         for item in body.evaluations:
             leaderboard = (
                 self.db.query(TaskDataset)
@@ -1318,6 +1380,11 @@ class CodexCurationCallbackService:
                 if not math.isfinite(numeric):
                     raise ValueError("Evaluation metric must be finite")
                 self._validate_metric_scale(configured[metric_name].scale, numeric)
+                validate_source_score(
+                    configured[metric_name].scale,
+                    numeric,
+                    score_evidence[(item.task_id, item.dataset_id, metric_name)],
+                )
             matches = self._matching_evaluations(item)
             if matches:
                 canonical = self._canonical_evaluation(matches)
@@ -1422,21 +1489,7 @@ class CodexCurationCallbackService:
     @staticmethod
     def _validate_metric_scale(scale: str | None, value: float) -> None:
         """Enforce explicit finite numeric ranges without guessing missing metadata."""
-        if not scale:
-            return
-        normalized = scale.strip().lower().replace(" ", "")
-        ranges = {
-            "0-1": (0.0, 1.0),
-            "[0,1]": (0.0, 1.0),
-            "fraction": (0.0, 1.0),
-            "0-100": (0.0, 100.0),
-            "[0,100]": (0.0, 100.0),
-            "percent": (0.0, 100.0),
-            "percentage": (0.0, 100.0),
-            "0-1000": (0.0, 1000.0),
-            "[0,1000]": (0.0, 1000.0),
-        }
-        bounds = ranges.get(normalized)
+        bounds = metric_scale_bounds(scale)
         if bounds is not None and not bounds[0] <= value <= bounds[1]:
             raise ValueError(
                 f"Evaluation metric value {value:g} is outside configured scale {scale}"

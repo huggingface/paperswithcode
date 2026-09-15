@@ -44,6 +44,10 @@ logger = logging.getLogger(__name__)
 _MAX_AUTOMATIC_RETRIES = 3
 
 
+class CurationRetryConflict(ValueError):
+    """A newer active workflow owns the requested paper."""
+
+
 def _dispatched_canary_workflows(
     workflows: list[PaperCurationWorkflow],
 ) -> list[PaperCurationWorkflow]:
@@ -229,12 +233,36 @@ class HFDailyCurationService:
         row = self.db.get(PaperCurationJob, job_id)
         if row is None:
             raise LookupError("Curation job not found")
-        if row.trigger != "hf-daily-cron":
-            raise ValueError("Only scheduled HF daily curation jobs may be retried")
+        if row.trigger not in {"hf-daily-cron", "hf-trending-cron"}:
+            raise ValueError(
+                "Only scheduled HF daily or trending curation jobs may be retried"
+            )
+        if getattr(row, "parent_workflow_id", None) is not None:
+            current_workflow = (
+                self.db.query(PaperCurationWorkflow)
+                .filter(
+                    PaperCurationWorkflow.paper_id == row.paper_id,
+                    PaperCurationWorkflow.id != row.parent_workflow_id,
+                    PaperCurationWorkflow.status.in_({"queued", "running", "deferred"}),
+                )
+                .first()
+            )
+            if current_workflow is not None:
+                raise CurationRetryConflict(
+                    f"Paper {row.paper_id} has active workflow {current_workflow.id}; "
+                    "continue that workflow instead of retrying its predecessor"
+                )
+        retry_scope = PaperCurationJob.retry_of_id == row.id
+        if getattr(row, "kind", None) == "resolve-model-paper":
+            retry_scope = (
+                (PaperCurationJob.candidate_id == row.candidate_id)
+                & (PaperCurationJob.kind == row.kind)
+                & (PaperCurationJob.policy_version == row.policy_version)
+            )
         active_retry = (
             self.db.query(PaperCurationJob)
             .filter(
-                PaperCurationJob.retry_of_id == row.id,
+                retry_scope,
                 PaperCurationJob.status.in_({"queued", "dispatching", "running"}),
             )
             .order_by(PaperCurationJob.created_at.desc())

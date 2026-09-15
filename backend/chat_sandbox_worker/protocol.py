@@ -32,6 +32,8 @@ class WorkerEventValidator:
         "_sdk_session",
         "_mirror_error",
         "_execution_telemetry",
+        "_compaction_telemetry",
+        "compaction_status",
         "_latency",
         "_mcp_readiness",
         "usage",
@@ -80,6 +82,11 @@ class WorkerEventValidator:
             raise ProtocolError("Duplicate terminal worker event")
         if self.terminal and kind != "worker_done":
             raise ProtocolError("Worker event followed a terminal event")
+        if kind == "compaction_status" and event.get("state") not in {
+            "started",
+            "finished",
+        }:
+            raise ProtocolError("Invalid compaction status")
         if kind in {"tool_call", "tool_call_start"}:
             tool_id = str(event.get("id") or "")
             if not tool_id or tool_id in self.tools:

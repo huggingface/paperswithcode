@@ -1005,6 +1005,21 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="create_eval_verification_issues",
+        display_name="GitHub Evaluation Verification Outreach",
+        category="hourly",
+        schedule="52 * * * *",
+        script_path="backend/scripts/create_eval_verification_issues.py",
+        log_name="create_eval_verification_issues",
+        process_patterns=("backend.scripts.create_eval_verification_issues",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/create_eval_verification_issues.lock",
+        expected_runtime_minutes=30,
+        stale_after_minutes=180,
+        critical=False,
+        healthy_no_work_allowed=True,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="enqueue_hf_daily_paper_curation",
         display_name="HF Daily Paper Curation",
         category="daily",
@@ -1079,11 +1094,24 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         critical=True,
         healthy_no_work_allowed=True,
         db_freshness_query="""
-            SELECT max(last_seen_at) AS last_write,
+            WITH candidate_metrics AS (
+                SELECT max(last_seen_at) AS last_write,
                    count(*) FILTER (WHERE status IN ('discovered','queued','resolving')) AS active,
                    count(*) FILTER (WHERE status = 'resolved') AS resolved,
                    count(*) FILTER (WHERE status = 'failed') AS failed
-            FROM trending_model_candidates
+                FROM trending_model_candidates
+            ), workflow_metrics AS (
+                SELECT count(*) FILTER (WHERE status = 'failed') AS failed_workflows,
+                       count(*) FILTER (WHERE status = 'partial') AS partial_workflows
+                FROM paper_curation_workflows AS workflow
+                WHERE workflow.status IN ('failed', 'partial') AND EXISTS (
+                    SELECT 1 FROM paper_curation_jobs AS job
+                    WHERE job.parent_workflow_id = workflow.id
+                      AND job.trigger = 'hf-trending-cron'
+                )
+            )
+            SELECT candidate_metrics.*, workflow_metrics.*
+            FROM candidate_metrics CROSS JOIN workflow_metrics
         """,
         workflow_file="cron-enqueue-hf-trending-model-curation.yml",
         workflow_jobs=("run",),
@@ -1337,7 +1365,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         id="backfill_method_references",
         display_name="Backfill Method References",
         category="backfill",
-        schedule="15 */6 * * * (every 6 hours)",
+        schedule="15 * * * * (hourly at :15 UTC)",
         script_path="backfill/backfill_method_references.py",
         log_name="backfill_method_references",
         process_patterns=("backfill_method_references",),
@@ -1593,6 +1621,10 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "sync_coarena": ((SchedulePolicy.fixed(60, offset_minutes=50),), 20),
     "sync_arc_prize": ((SchedulePolicy.fixed(60, offset_minutes=10),), 20),
     "import_hf_daily_papers": ((SchedulePolicy.fixed(60),), 20),
+    "create_eval_verification_issues": (
+        (SchedulePolicy.fixed(60, offset_minutes=52),),
+        20,
+    ),
     "enqueue_hf_daily_paper_curation": (
         (SchedulePolicy.fixed(60, offset_minutes=27),),
         20,
@@ -1619,7 +1651,7 @@ _SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
     "mirror_thumbnails_to_disk": ((SchedulePolicy.daily(5, 0),), 60),
     "link_methods_by_references": ((SchedulePolicy.weekly(6, 4, 0),), 180),
     "backfill_method_keywords": ((SchedulePolicy.daily(1, 10),), 60),
-    "backfill_method_references": ((SchedulePolicy.fixed(360, offset_minutes=15),), 60),
+    "backfill_method_references": ((SchedulePolicy.fixed(60, offset_minutes=15),), 60),
     "link_papers_by_task_keywords": ((SchedulePolicy.weekly(6, 5, 0),), 180),
 }
 
@@ -1630,6 +1662,7 @@ _OUTPUT_EVALUATORS: dict[str, str] = {
     "calculate_paper_trending_scores": "paper_trending",
     "import_hf_daily_papers": "hf_paper_import",
     "enqueue_hf_daily_paper_curation": "daily_curation",
+    "enqueue_hf_trending_model_curation": "trending_curation",
     "update_citations": "citations",
     "update_hf_artifacts": "hf_artifacts",
     "paper_markdown_backfill": "paper_markdown",

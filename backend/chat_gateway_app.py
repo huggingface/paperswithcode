@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from backend.chat_execution_policy import (
     MAX_POSTER_PROVIDER_REQUESTS,
     MAX_PROVIDER_REQUESTS,
+    MAX_PROVIDER_TURN_TOKENS,
 )
 from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
 from backend.config import Settings, get_settings
@@ -134,7 +135,6 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger(__name__)
 hf_telemetry_logger = logging.getLogger("uvicorn.error")
 MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
-MAX_PROVIDER_TURN_TOKENS = 512_000
 MAX_POSTER_PROVIDER_TURN_TOKENS = 2_000_000
 QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
 QUALIFICATION_PROVIDER_TURN_TOKENS = QUALIFICATION_PROVIDER_REQUESTS * (

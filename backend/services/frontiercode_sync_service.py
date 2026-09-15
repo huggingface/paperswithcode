@@ -156,6 +156,16 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         "GPT-5.6: Frontier intelligence that scales with your ambition",
         "2026-07-09",
     ),
+    "SWE-2": external(
+        "https://cognition.com/blog/swe-2",
+        "Introducing SWE-2: Pushing the Pareto Frontier",
+        "2026-09-10",
+        abstract=(
+            "Cognition's SWE-2 coding model is post-trained from Kimi K3, "
+            "using reinforcement learning across reasoning-effort levels "
+            "to improve coding capability and cost, and is available in Devin."
+        ),
+    ),
     "SWE-1.7": external(
         "https://cognition.com/blog/swe-1-7",
         "SWE-1.7: Frontier Intelligence at a Fraction of the Cost",

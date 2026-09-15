@@ -265,11 +265,6 @@ async def get_title_arxiv(arxiv_id: str) -> str | None:
         cleaned_title = re.sub(r"^\[[^\]]+\]\s*", "", full_title_text).strip()
         if cleaned_title:
             return cleaned_title
-        # Fallback for simpler structure if regex fails or not preferred:
-        # if ']' in full_title_text:
-        #     parts = full_title_text.split(']', 1)
-        #     if len(parts) > 1 and parts[1].strip():
-        #         return parts[1].strip()
 
     print(f"Title not found in expected locations for ArXiv ID: {arxiv_id}")
     return None

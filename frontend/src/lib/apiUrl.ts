@@ -3,8 +3,8 @@
  *
  * The production frontend served from `paperswithcode.co` calls a same-origin
  * API (the FastAPI process behind the same nginx). The Hugging Face Space
- * mirror (see `frontend/spaces/`) is built with `VITE_API_URL` pointing at the
- * production backend so it can browse the same data without shipping a backend.
+ * mirror is built with `VITE_API_URL` pointing at the production backend so it
+ * can browse the same data without shipping a backend.
  *
  * Rules:
  *  - When `VITE_API_URL` is unset, every helper returns relative paths so the

@@ -6,7 +6,7 @@ import logging
 from typing import Any
 
 from backend.config import Settings
-from backend.services.chat_tracing_service import configured_chat_client
+from backend.services.chat_tracing_service import configured_trace_export_client
 from backend.services.chat_turn_lifecycle import LIFECYCLE_CODES
 
 logger = logging.getLogger(__name__)
@@ -37,7 +37,9 @@ MAX_VALUE = 16 * 1024 * 1024
 class DurableLifecycleObserver:
     def __init__(self, settings: Settings, *, client: Any = None) -> None:
         self.settings = settings
-        self.client = client if client is not None else configured_chat_client(settings)
+        self.client = (
+            client if client is not None else configured_trace_export_client(settings)
+        )
 
     def __call__(self, event: str, code: str | None, value: int) -> None:
         if (

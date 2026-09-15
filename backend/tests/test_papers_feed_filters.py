@@ -553,18 +553,20 @@ def test_papers_endpoint_rejects_unknown_order_by(client, monkeypatch):
     ],
 )
 def test_date_published_feed_places_undated_papers_last(order_dir, expected_order):
+    observed = {}
+
     class FakeQuery:
-        def __init__(self):
-            self.order_clause = None
+        def __init__(self, order_clause=None):
+            self.order_clause = order_clause
 
         def filter(self, *args):
             return self
 
         def order_by(self, clause):
-            self.order_clause = clause
-            return self
+            return FakeQuery(clause)
 
         def count(self):
+            observed["count_order"] = self.order_clause
             return 0
 
         def offset(self, value):
@@ -574,6 +576,7 @@ def test_date_published_feed_places_undated_papers_last(order_dir, expected_orde
             return self
 
         def all(self):
+            observed["page_order"] = self.order_clause
             return []
 
     class FakeDatabase:
@@ -591,7 +594,8 @@ def test_date_published_feed_places_undated_papers_last(order_dir, expected_orde
     )
 
     assert response.results == []
-    assert str(database.query_result.order_clause) == expected_order
+    assert str(observed["page_order"]) == expected_order
+    assert observed["count_order"] is None
 
 
 def test_trending_endpoint_deduplicates_view_rows_by_paper():

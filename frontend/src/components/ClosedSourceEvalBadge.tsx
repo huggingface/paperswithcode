@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/hover-card";
 import "@/styles/evaluation-badges.css";
 
-export const ClosedSourceEvalBadge: React.FC = () => (
+const ClosedSourceEvalBadge: React.FC = () => (
   <HoverCard openDelay={120} closeDelay={120}>
     <HoverCardTrigger asChild>
       <button

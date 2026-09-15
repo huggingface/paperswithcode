@@ -15,7 +15,7 @@ export interface Repository {
   updated_at?: string;
 }
 
-export interface ProjectPage {
+interface ProjectPage {
   id: string;
   paper_id: string;
   url: string;
@@ -27,7 +27,7 @@ export interface ProjectPage {
 
 /** Compact Hugging Face artifact summary for paper cards: per-kind counts plus
  *  the most populated category and a link to it. */
-export interface HfArtifactSummary {
+interface HfArtifactSummary {
   model_count: number;
   dataset_count: number;
   space_count: number;
@@ -37,7 +37,7 @@ export interface HfArtifactSummary {
   best_url: string | null;
 }
 
-export interface BenchmarkSummary {
+interface BenchmarkSummary {
   id: string;
   name: string;
   slug?: string;
@@ -45,7 +45,7 @@ export interface BenchmarkSummary {
   introduced_year?: number;
 }
 
-export interface FrameworkSummary {
+interface FrameworkSummary {
   id: string;
   slug: string;
   name: string;
@@ -66,7 +66,7 @@ export interface LeaderboardRankSummary {
 /** Lightweight summary of a related paper (predecessor or successor)
  *  embedded in the paper detail response. Used to power the lineage banner
  *  on the paper page (e.g. DINOv2 -> DINOv3). */
-export interface RelatedPaperSummary {
+interface RelatedPaperSummary {
   id: string;
   title: string;
   arxiv_id: string | null;
@@ -172,7 +172,7 @@ export interface Author {
   paper_count: number;
 }
 
-export interface AuthorLink {
+interface AuthorLink {
   id?: string | null;
   name: string;
   hf_username?: string | null;
@@ -181,7 +181,7 @@ export interface AuthorLink {
 export type PaperOrderBy = 'trending' | 'date_published' | 'citation_count';
 export type PaperSearchMode = 'keyword' | 'semantic' | 'hybrid';
 
-export interface TrendingMetrics {
+interface TrendingMetrics {
   velocity_24h: number;
   trending_score: number;
   stars_gained_24h: number;

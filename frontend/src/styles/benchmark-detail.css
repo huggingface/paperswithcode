@@ -273,7 +273,17 @@
 }
 .bm-table {
   width: 100%;
-  border-collapse: collapse;
+  --bm-rank-width: 48px;
+  --bm-model-width: 160px;
+  --bm-parameters-width: 100px;
+  --bm-paper-width: 220px;
+  --bm-year-width: 60px;
+  --bm-metric-width: 220px;
+  --bm-harness-width: 140px;
+  min-width: calc(var(--bm-rank-width) + var(--bm-model-width) + var(--bm-parameters-width) + var(--bm-paper-width) + var(--bm-year-width) + var(--bm-metric-count) * var(--bm-metric-width) + var(--bm-harness-count) * var(--bm-harness-width));
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: var(--sans);
   font-size: 14px;
 }
@@ -296,7 +306,7 @@
   vertical-align: middle;
 }
 .bm-table tbody tr:last-child td { border-bottom: none; }
-.bm-table .col-rank { width: 64px; color: var(--ink-faint); font-family: var(--mono); font-feature-settings: "tnum"; }
+.bm-table .col-rank { color: var(--ink-faint); font-family: var(--mono); font-feature-settings: "tnum"; }
 .bm-table .col-model { font-weight: 600; color: var(--ink); }
 .bm-model-link {
   display: inline-flex;
@@ -311,8 +321,7 @@
   font-family: var(--mono);
   font-size: 12px;
   color: var(--ink-soft);
-  width: 140px;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 .bm-table .col-parameters {
   font-family: var(--mono);
@@ -401,7 +410,6 @@
   font-feature-settings: "tnum";
   font-size: 14px;
   color: var(--ink);
-  width: 86px;
   text-align: right;
   white-space: nowrap;
 }
@@ -425,6 +433,8 @@
   text-align: right;
   cursor: pointer;
   width: 100%;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 .bm-table thead th.col-value .bm-metric-header:hover {
   color: var(--ink);
@@ -453,7 +463,6 @@
 .bm-table .col-paper a:hover { text-decoration: underline; }
 .bm-table .col-code { width: 60px; text-align: center; }
 .bm-table .col-year {
-  width: 60px;
   text-align: right;
   font-family: var(--mono);
   font-size: 12px;
@@ -531,6 +540,71 @@
   font-size: 13px;
   color: var(--ink-soft);
   font-style: italic;
+}
+
+/* Keep identifying columns in view while the middle metric columns scroll. */
+.bm-table .bm-width-rank { width: var(--bm-rank-width); }
+.bm-table .bm-width-model { width: var(--bm-model-width); }
+.bm-table .bm-width-parameters { width: var(--bm-parameters-width); }
+.bm-table .bm-width-year { width: var(--bm-year-width); }
+.bm-table .bm-width-metric { width: var(--bm-metric-width); }
+.bm-table .bm-width-harness { width: var(--bm-harness-width); }
+.bm-table :is(th, td):is(.col-rank, .col-model, .col-parameters, .col-paper, .col-year) {
+  position: sticky;
+  z-index: 1;
+  background: var(--bg-elevated);
+}
+.bm-table th:is(.col-rank, .col-model, .col-parameters, .col-paper, .col-year) {
+  z-index: 2;
+  background: var(--bg-subtle);
+}
+.bm-table .col-rank { left: 0; }
+.bm-table .col-model { left: var(--bm-rank-width); overflow-wrap: anywhere; }
+.bm-table .col-parameters {
+  left: calc(var(--bm-rank-width) + var(--bm-model-width));
+}
+.bm-table .col-year { right: 0; }
+.bm-table .col-paper {
+  right: var(--bm-year-width);
+  overflow-wrap: anywhere;
+}
+.bm-table-scroll.has-horizontal-overflow .col-parameters { box-shadow: 1px 0 var(--hairline); }
+.bm-table-scroll.has-horizontal-overflow .col-paper { box-shadow: -1px 0 var(--hairline); }
+.bm-table .col-paper a {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+.bm-metric-columns-control {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 12px;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+.bm-metric-columns-toggle {
+  border: 1px solid var(--hairline-strong);
+  border-radius: 5px;
+  padding: 6px 10px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  cursor: pointer;
+}
+.bm-metric-columns-toggle:hover { background: var(--bg-subtle); }
+.bm-metric-columns-toggle:focus-visible,
+.bm-table-scroll:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 1000px) {
+  .bm-table {
+    --bm-rank-width: 36px;
+    --bm-model-width: 100px;
+    --bm-parameters-width: 80px;
+    --bm-paper-width: 140px;
+    --bm-year-width: 50px;
+    --bm-metric-width: 130px;
+  }
 }
 
 /* Highlighted leaderboard row */
@@ -624,13 +698,20 @@
     padding-right: 14px;
     padding-left: 14px;
   }
-  .bm-table-scroll {
-    margin: 0 -14px;
-    padding: 0 14px;
+  .bm-table {
+    --bm-rank-width: 24px;
+    --bm-model-width: 64px;
+    --bm-parameters-width: 48px;
+    --bm-paper-width: 76px;
+    --bm-year-width: 36px;
+    --bm-metric-width: 100px;
+    --bm-harness-width: 90px;
+    font-size: 11px;
   }
-  .bm-table { font-size: 13px; }
-  .bm-table thead th { padding: 9px 10px; }
-  .bm-table tbody td { padding: 11px 10px; }
-  .bm-table .col-model { max-width: 160px; }
-  .bm-table .col-paper { max-width: 200px; }
+  .bm-table-scroll { width: calc(100% + 28px); margin: 0 -14px; }
+  .bm-table thead th { padding: 8px 3px; font-size: 8px; letter-spacing: 0; }
+  .bm-table tbody td { padding: 10px 3px; }
+  .bm-table .col-parameters, .bm-table .col-year { font-size: 10px; }
+  .bm-table .col-value { font-size: 11px; }
+  .bm-table th.col-parameters { white-space: normal; overflow-wrap: anywhere; }
 }

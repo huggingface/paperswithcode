@@ -8,6 +8,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { CompactionController } from "./compaction.js";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
 import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
 import { createWebMcpExtension } from "./mcp.js";
@@ -92,6 +93,9 @@ export class PiWorker {
   private boundAgentSession: string | undefined;
   private activeRequest: string | undefined;
   private cancelled = false;
+  private readonly compaction = new CompactionController((event) => {
+    if (this.activeRequest) this.emit(this.activeRequest, event);
+  });
   private initialization: Promise<void> | undefined;
   private promptAsset: string | undefined;
   private prewarmedProvider: Awaited<ReturnType<typeof createProvider>> | undefined;
@@ -407,6 +411,7 @@ export class PiWorker {
       noContextFiles: true,
       systemPrompt: prompt,
       extensionFactories: [
+        { name: "pwc-compaction", factory: this.compaction.extension(provider), hidden: true },
         { name: "pwc-policy", factory: this.policyExtension!, hidden: true },
         {
           name: "pwc-mcp",
@@ -485,6 +490,12 @@ export class PiWorker {
     if (this.activeRequest) throw new Error("Pi worker already has an active turn");
     this.activeRequest = run.request_id;
     this.cancelled = false;
+    const turnTimeoutSeconds = run.poster_mode
+      ? Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600)
+      : run.paper_artifacts_enabled
+        ? Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600)
+        : Number(process.env.PWC_CHAT_AGENT_TIMEOUT_SECONDS ?? 180);
+    this.compaction.reset(turnTimeoutSeconds * 1000);
     this.boundChatSession ??= run.chat_session_id;
     this.failurePhase = "initialize";
     try {
@@ -509,8 +520,9 @@ export class PiWorker {
             // A terminal event must be the final semantic frame before
             // worker_done. Hold provider/adapter failures until transcript
             // finalization has selected the single authoritative terminal.
-            if (adapted.type === "error") pendingAdapterError = adapted;
-            else this.emit(run.request_id, adapted);
+            if (adapted.type === "error") {
+              if (!pendingAdapterError || pendingAdapterError.code === "context_too_large") pendingAdapterError = adapted;
+            } else this.emit(run.request_id, adapted);
           }
         } catch {
           subscribeFailed = true;
@@ -539,7 +551,7 @@ export class PiWorker {
               source: "extension",
             }),
           disableTools: () => this.session!.setActiveToolsByName([]),
-          canContinue: () => !adapter.failed && !this.cancelled && !subscribeFailed,
+          canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
         });
       } finally {
         unsubscribe();
@@ -560,7 +572,14 @@ export class PiWorker {
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
         return;
       }
-      if (adapter.failed || subscribeFailed) {
+      if (this.compaction.failed && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
+        pendingAdapterError = {
+          type: "error", code: "context_too_large",
+          message: "Earlier context could not be summarized. Your conversation is saved. Retry, or shorten recent messages if it remains too large.",
+        };
+      }
+      if (adapter.failed || subscribeFailed || this.compaction.failed) {
+        this.emit(run.request_id, this.executionTelemetry(recovery, true));
         this.emit(run.request_id, pendingAdapterError ?? {
           type: "error",
           code: "provider_error",
@@ -599,7 +618,7 @@ export class PiWorker {
     }
   }
 
-  private executionTelemetry(recovery: RecoverySummary): PwCEvent {
+  private executionTelemetry(recovery: RecoverySummary, failed = false): PwCEvent {
     return {
       type: "_execution_telemetry",
       tool_calls: this.policy.calls,
@@ -607,6 +626,8 @@ export class PiWorker {
       direct_search_calls: this.policy.searches,
       web_search_calls: this.policy.webSearches,
       compaction_enabled: true,
+      compaction_recovery_outcome: this.compaction.attempted
+        ? (failed || this.compaction.failed ? "failed" : "success") : "not_needed",
       execution_limit_reached: this.policy.toolingClosed,
       recovery_reason: recovery.reason,
       recovery_attempts: recovery.attempts,

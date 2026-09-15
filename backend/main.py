@@ -45,7 +45,6 @@ _STAGING_CATALOG_PREFIXES = (
     "/api/v1/organizations",
     "/api/v1/frameworks",
     "/api/v1/repositories",
-    "/api/v1/external-resources",
 )
 
 

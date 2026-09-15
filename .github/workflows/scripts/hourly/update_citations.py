@@ -29,6 +29,7 @@ import signal
 import sys
 import time
 from datetime import datetime
+from email.utils import parsedate_to_datetime
 from typing import List, Dict, Optional, Any
 import httpx
 from dataclasses import dataclass
@@ -392,9 +393,37 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         params = {"fields": "paperId,title,citationCount,year"}
 
         try:
-            self.stats["api_calls"] += 1
-
-            response = await self.client.get(url, params=params)
+            for attempt in range(3):
+                self.stats["api_calls"] += 1
+                response = await self.client.get(url, params=params)
+                if response.status_code != 429:
+                    break
+                self.stats["rate_limit_hits"] += 1
+                delay = 10.0 * (attempt + 1)
+                retry_after = response.headers.get("Retry-After")
+                if retry_after:
+                    try:
+                        delay = max(delay, float(retry_after))
+                    except ValueError:
+                        try:
+                            retry_at = parsedate_to_datetime(retry_after)
+                            delay = max(delay, retry_at.timestamp() - time.time())
+                        except (TypeError, ValueError, OverflowError):
+                            pass  # Malformed provider hint: retain bounded backoff.
+                if attempt == 2 or delay > 60 or not self._can_start_request():
+                    raise RuntimeError("Semantic Scholar rate limit; deferred")
+                if self.deadline_monotonic is not None and (
+                    self.deadline_monotonic - time.monotonic()
+                    <= delay + self.request_timeout + self.flush_reserve_seconds
+                ):
+                    self.stats["deadline_reached"] = True
+                    raise RuntimeError("Semantic Scholar retry exceeds run deadline")
+                self.logger.warning(
+                    "Rate limited for %s; retrying in %.1fs", arxiv_id, delay
+                )
+                await asyncio.sleep(delay)
+                if not self._can_start_request():
+                    raise RuntimeError("Semantic Scholar retry deferred at deadline")
 
             if response.status_code == 200:
                 self.stats["api_successes"] += 1
@@ -415,13 +444,6 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
                 self.logger.debug(f"Paper not found in Semantic Scholar: {arxiv_id}")
                 self.stats["papers_not_found"] += 1
                 return None
-
-            elif response.status_code == 429:
-                # Rate limited - for hourly jobs, just skip and continue
-                self.logger.warning(f"Rate limited for {arxiv_id}")
-                self.stats["rate_limit_hits"] += 1
-                await asyncio.sleep(self.request_delay * 2)  # Wait double time
-                raise RuntimeError("Semantic Scholar rate limit")
 
             elif response.status_code in {401, 403}:
                 self.stats["api_errors"] += 1

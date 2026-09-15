@@ -290,7 +290,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "month_start = (SELECT month_start FROM frontier)" in (
         reference_job.db_freshness_query
     )
-    assert reference_job.schedule.startswith("15 */6")
+    assert reference_job.schedule == "15 * * * * (hourly at :15 UTC)"
     assert reference_job.workflow_file == "cron-backfill-method-references.yml"
 
 
@@ -518,7 +518,7 @@ def test_systemd_adapter_reads_only_registry_units():
         type(
             "Result",
             (),
-            {"returncode": 0, "stdout": "Type=start\nState=waiting\n"},
+            {"returncode": 0, "stdout": "JobType=start\nState=waiting\n"},
         )(),
     ]
     job = _job("monitor_chat_operational_alerts")
@@ -565,7 +565,7 @@ def test_systemd_adapter_does_not_treat_a_stop_job_as_a_queued_start():
         type(
             "Result",
             (),
-            {"returncode": 0, "stdout": "Type=stop\nState=waiting\n"},
+            {"returncode": 0, "stdout": "JobType=stop\nState=waiting\n"},
         )(),
     ]
     job = _job("monitor_chat_operational_alerts")
@@ -1567,8 +1567,11 @@ def test_daily_curation_old_queue_age_is_unhealthy():
     assert "queued curation job" in evaluated["output_health"]["reason"]
 
 
-def test_daily_curation_partial_workflow_is_broken():
-    job = _job("enqueue_hf_daily_paper_curation")
+@pytest.mark.parametrize(
+    "job_id", ["enqueue_hf_daily_paper_curation", "enqueue_hf_trending_model_curation"]
+)
+def test_daily_curation_partial_workflow_is_broken(job_id):
+    job = _job(job_id)
     now = datetime.now(timezone.utc)
     with patch("backend.services.cron_health.is_process_running", return_value=False):
         evaluated = evaluate_job_health(
@@ -1578,6 +1581,21 @@ def test_daily_curation_partial_workflow_is_broken():
         )
     assert evaluated["output_health"]["status"] == "broken"
     assert "partial workflow" in evaluated["output_health"]["reason"]
+
+
+def test_trending_curation_failed_resolution_overrides_fresh_discovery():
+    now = datetime.now(timezone.utc)
+    evaluated = evaluate_job_health(
+        _job("enqueue_hf_trending_model_curation"),
+        {"status": "success_no_work", "last_run": now, "is_running": False},
+        db_metrics={"last_write": now, "failed": 2},
+        process_running=False,
+        lock_state={},
+    )
+    assert evaluated["output_health"]["status"] == "broken"
+    assert (
+        "2 model resolution candidate(s) failed" in evaluated["output_health"]["reason"]
+    )
 
 
 def test_managed_organization_snapshot_gap_degrades_output():

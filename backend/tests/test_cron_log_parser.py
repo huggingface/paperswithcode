@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
+
 from backend.services.cron_health import evaluate_job_health
 from backend.services.cron_registry import get_cron_job
 
@@ -274,3 +276,71 @@ def test_timeout_log_is_a_failure_not_a_success():
 
     assert status["status"] == "failed"
     assert "Job timed out" in status["error"]
+
+
+@pytest.mark.parametrize(
+    "outcome,expected",
+    [
+        ("success", "success"),
+        ("idle", "success_no_work"),
+        ("error", "failed"),
+        ("needs_review", "failed"),
+    ],
+)
+def test_eval_outreach_entrypoint_emits_dashboard_compatible_logs(
+    monkeypatch, tmp_path, outcome, expected
+):
+    import logging
+    from backend.scripts import create_eval_verification_issues as entrypoint
+
+    class Runner:
+        counts = {}
+        events = []
+
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def run(self):
+            if outcome == "error":
+                raise ValueError("API unavailable")
+            return {
+                "counts": {"needs_review": 1}
+                if outcome == "needs_review"
+                else {"aliases_checked": 10}
+                if outcome == "success"
+                else {},
+                "events": [],
+            }
+
+    monkeypatch.setattr(entrypoint, "OutreachRunner", Runner)
+    monkeypatch.setattr(entrypoint, "github_environment", lambda *_: {})
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["outreach", "--execute", "--state-file", str(tmp_path / "ledger.sqlite3")],
+    )
+    root = logging.getLogger()
+    monkeypatch.setattr(root, "handlers", [])
+    monkeypatch.setattr(root, "level", logging.WARNING)
+    try:
+        assert entrypoint.main() == (0 if outcome in {"success", "idle"} else 1)
+        for handler in root.handlers:
+            handler.flush()
+        helpers = _load_cron_helpers()
+        with patch.object(
+            subprocess,
+            "run",
+            return_value=subprocess.CompletedProcess([], 0, stdout=""),
+        ):
+            result = helpers.get_cron_job_status(
+                "create_eval_verification_issues", logs_dir=tmp_path
+            )
+        assert result["exists"]
+        assert result["status"] == expected
+        assert result["last_run"] is not None
+        if outcome == "success":
+            assert result["work_metrics"]["repositories_processed"] == 10
+    finally:
+        for handler in root.handlers:
+            handler.close()

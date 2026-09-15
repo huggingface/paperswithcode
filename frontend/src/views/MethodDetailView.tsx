@@ -252,15 +252,14 @@ const MethodDetailView: React.FC = () => {
               <div className="stat">
                 <span className="label">Recent mentions</span>
                 <span className="value">
-                  {trendQ.data.comparison_complete ? (
-                    <>
-                      {trendQ.data.trend_score.toFixed(1)}
-                      <small>/mo</small>
-                    </>
-                  ) : (
-                    "Pending"
-                  )}
+                  {(trendQ.data.recent_paper_count * 30 / trendQ.data.recent_days).toFixed(1)}
+                  <small>/mo</small>
                 </span>
+                {!trendQ.data.comparison_complete && (
+                  <span title="Tagging is still catching up. This rate reflects mentions found so far.">
+                    Partial coverage
+                  </span>
+                )}
               </div>
             )}
             {m.introduced_year != null && (

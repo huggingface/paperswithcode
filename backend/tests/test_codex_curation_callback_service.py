@@ -17,6 +17,7 @@ from backend.models.api import (
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
     CodexCurationEvaluationPaperMismatchError,
+    CodexCurationEvaluationsNotAllowedError,
     CodexCurationMutationClosedError,
     CodexCurationPaperNotFoundError,
     _requires_scheduled_dispatch_pause,
@@ -38,6 +39,19 @@ def _evaluation(
         best_metric="GenEval Score",
         source_url=source_url,
     )
+
+
+def _score_evidence(**overrides):
+    return {
+        "task_id": 19,
+        "dataset_id": 340,
+        "metric": "GenEval Score",
+        "source_value": 90,
+        "source_scale": "0-100",
+        "source_url": "https://arxiv.org/html/2601.00001",
+        "table_reference": "Table 1, Useful Model, overall",
+        **overrides,
+    }
 
 
 class _ResultQuery:
@@ -493,7 +507,12 @@ def test_late_evaluation_failure_rolls_back_the_whole_apply():
     assert row.applied_at is None
 
 
-def test_scheduled_validation_failure_keeps_job_open_for_one_corrected_apply():
+@pytest.mark.parametrize(
+    "error_type", [ValueError, CodexCurationEvaluationsNotAllowedError]
+)
+def test_scheduled_validation_failure_keeps_job_open_for_one_corrected_apply(
+    error_type,
+):
     row = SimpleNamespace(
         id=42,
         kind="add-evals",
@@ -511,7 +530,7 @@ def test_scheduled_validation_failure_keeps_job_open_for_one_corrected_apply():
     database = Database()
     service = _service(database, SimpleNamespace())
     service._validate_scheduled_policy = lambda *_args: (_ for _ in ()).throw(
-        ValueError("Evaluation metric value 91.9 is outside configured scale 0-1")
+        error_type("Evaluation metric value 91.9 is outside configured scale 0-1")
     )
 
     with pytest.raises(ValueError, match="outside configured scale"):
@@ -791,7 +810,22 @@ def test_scheduled_enrichment_rejects_project_page_removal_without_reason():
         )
 
 
-def test_scheduled_evaluation_accepts_configured_metric_names():
+@pytest.mark.parametrize(
+    "scale,source_value,source_scale,stored,include_evidence,error",
+    [
+        ("0-1", 90, "0-100", 0.9, True, None),
+        ("0-100", 86.89, "0-100", 0.8689, True, "Score scale mismatch"),
+        ("0-100", 98.40, "0-100", 0.984, True, "Score scale mismatch"),
+        ("0-100", 86.89, "0-100", 86.89, True, None),
+        ("0-100", 0.8689, "0-1", 86.89, True, None),
+        ("0-100", 0.4, "0-100", 0.4, True, None),
+        ("0-100", 86.89, "0-100", 0.8689, False, "score_evidence"),
+        ("0-1", 90, "0-100", 90, True, "outside configured scale"),
+    ],
+)
+def test_scheduled_evaluation_accepts_configured_metric_names(
+    scale, source_value, source_scale, stored, include_evidence, error
+):
     from backend.models.database import Evaluation, Metric, Paper, TaskDataset
 
     paper = SimpleNamespace(
@@ -801,7 +835,7 @@ def test_scheduled_evaluation_accepts_configured_metric_names():
         arxiv_id="2601.00001",
     )
     leaderboard = SimpleNamespace(supports_harness=False)
-    metric = SimpleNamespace(name="GenEval Score", scale="0-1")
+    metric = SimpleNamespace(name="GenEval Score", scale=scale)
 
     class Query:
         def __init__(self, model):
@@ -836,21 +870,25 @@ def test_scheduled_evaluation_accepts_configured_metric_names():
         trigger="hf-daily-cron",
         trace_status="preapply_stored",
     )
-    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
-        row,
-        ApplyMutationRequest(
-            evaluations=[
-                _evaluation(
-                    model_name="Useful Model",
-                    source_url="https://paperswithcode.co/paper/2601.00001",
-                )
-            ],
-            evaluation_removals=[],
-            benchmark_gaps=[],
-            validation_evidence=[],
-        ),
+    evaluation = _evaluation(model_name="Useful Model")
+    evaluation.metrics = {"GenEval Score": stored}
+    body = ApplyMutationRequest(
+        evaluations=[evaluation],
+        evaluation_removals=[],
+        benchmark_gaps=[],
+        validation_evidence=[],
+        score_evidence=[
+            _score_evidence(source_value=source_value, source_scale=source_scale)
+        ]
+        if include_evidence
+        else [],
     )
-
+    service = _service(Database(), SimpleNamespace())
+    if error:
+        with pytest.raises(ValueError, match=error):
+            service._validate_scheduled_policy(row, body)
+        return
+    result = service._validate_scheduled_policy(row, body)
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
 
 
@@ -901,6 +939,7 @@ def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
         evaluation_removals=[],
         benchmark_gaps=[],
         validation_evidence=[],
+        score_evidence=[_score_evidence()],
     )
 
     result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
@@ -914,6 +953,34 @@ def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
     assert body.evaluations[0].external_source_url == (
         "https://paperswithcode.co/paper/2601.00001"
     )
+
+
+@pytest.mark.parametrize(
+    "bad_evidence",
+    [
+        [_score_evidence(), _score_evidence()],
+        [_score_evidence(dataset_id=999)],
+    ],
+)
+def test_scheduled_score_evidence_cannot_be_duplicated_or_reused_for_another_leaderboard(
+    bad_evidence,
+):
+    paper = SimpleNamespace(source="arxiv", arxiv_id="2601.00001")
+    service = _service(SimpleNamespace(get=lambda *_: paper), SimpleNamespace())
+    service._validate_scheduled_capability_boundary = lambda *_: None
+    with pytest.raises(ValueError, match="exactly one score_evidence"):
+        service._validate_scheduled_policy(
+            SimpleNamespace(
+                trigger="hf-daily-cron",
+                kind="add-evals",
+                paper_id=42,
+                trace_status="preapply_stored",
+            ),
+            ApplyMutationRequest(
+                evaluations=[_evaluation(model_name="Useful Model")],
+                score_evidence=bad_evidence,
+            ),
+        )
 
 
 def test_scheduled_source_canonicalization_is_recorded_in_existing_row_diff():
@@ -966,6 +1033,7 @@ def test_scheduled_source_canonicalization_is_recorded_in_existing_row_diff():
     body = ApplyMutationRequest(
         evaluations=[_evaluation(model_name="Existing Model")],
         validation_evidence=[audit],
+        score_evidence=[_score_evidence()],
     )
 
     result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
@@ -1151,3 +1219,33 @@ def test_scheduled_enrichment_only_allows_existing_http_project_pages(url, accep
     else:
         with pytest.raises(ValueError, match="Project page links must use HTTPS"):
             service._validate_scheduled_policy(row, body)
+
+
+def test_retry_feedback_is_scoped_and_exposes_only_rejection_details():
+    previous = SimpleNamespace(
+        id="old",
+        kind="add-evals",
+        paper_id=42,
+        candidate_id=None,
+        error="Rejected",
+        validation_summary={
+            "error": "exact field diff required",
+            "before_state": {"private": "omit"},
+        },
+        proposal={"untrusted": "omit"},
+    )
+    db = SimpleNamespace(get=lambda *_: previous)
+    service = CodexCurationCallbackService(
+        db,
+        job_service=SimpleNamespace(),
+        evaluation_service=SimpleNamespace(),
+        association_service=SimpleNamespace(),
+    )
+    row = SimpleNamespace(retry_of_id="old", kind="add-evals", paper_id=42)
+    result = service._retry_feedback(row)
+    assert result["validation_error"] == "exact field diff required"
+    assert "proposal" not in result
+    assert "before_state" not in result
+    row.paper_id = 43
+    assert service._retry_feedback(row) is None
+    assert service._retry_feedback(SimpleNamespace()) is None

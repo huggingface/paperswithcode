@@ -7,7 +7,7 @@ import {
   type PaperPreviewData,
 } from "@/components/paper-preview/paperPreviewData";
 
-export const FauxPaperThumb: React.FC<{ seed?: number }> = ({ seed = 0 }) => (
+const FauxPaperThumb: React.FC<{ seed?: number }> = ({ seed = 0 }) => (
   <div className="paper-preview-thumb" aria-hidden="true" data-testid="faux-paper-thumb">
     <div className="paper-preview-thumb-title">
       <span />
@@ -25,7 +25,7 @@ export const FauxPaperThumb: React.FC<{ seed?: number }> = ({ seed = 0 }) => (
   </div>
 );
 
-export const PaperThumb: React.FC<{
+const PaperThumb: React.FC<{
   thumbnailUrl: string | null;
   seed: number;
 }> = ({ thumbnailUrl, seed }) => {

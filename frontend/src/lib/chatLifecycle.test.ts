@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { ChatMessage } from "./chat";
+import type { ChatEvent, ChatMessage } from "./chat";
 import { chatLifecycleReducer, initialChatLifecycle } from "./chatLifecycle";
 
 const streaming = (): ChatMessage[] => [{
@@ -301,5 +301,23 @@ describe("chatLifecycleReducer", () => {
       }),
       { kind: "answer", text: "I could not publish it.", done: false },
     ]);
+  });
+});
+
+describe("compaction progress", () => {
+  it("retains existing blocks and clears progress on finish, terminal errors, and Stop", () => {
+    const initial = chatLifecycleReducer(initialChatLifecycle(), { type: "start", messages: streaming(), sessionId: null });
+    const active = chatLifecycleReducer(initial, { type: "event", event: { type: "compaction_status", state: "started" } });
+    expect(active.messages[0].compacting).toBe(true);
+    expect(active.messages[0].blocks).toEqual(initial.messages[0].blocks);
+    const terminals: ChatEvent[] = [
+      { type: "compaction_status", state: "finished" },
+      { type: "done", finish_reason: "success", followups: [] },
+      { type: "error", code: "context_too_large", message: "Retry" },
+    ];
+    for (const event of terminals) {
+      expect(chatLifecycleReducer(active, { type: "event", event }).messages[0].compacting).toBe(false);
+    }
+    expect(chatLifecycleReducer(active, { type: "stop" }).messages[0].compacting).toBe(false);
   });
 });

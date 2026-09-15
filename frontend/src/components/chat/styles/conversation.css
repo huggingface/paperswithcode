@@ -623,3 +623,6 @@
     transform: none;
   }
 }
+
+.chat-compaction-status { flex-direction: column; align-items: flex-start; }
+.chat-compaction-explanation { margin-top: 4px; color: var(--ink-faint); font-weight: 400; }

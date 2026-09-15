@@ -79,7 +79,7 @@ export const ChatComputePanel = ({ data, loading, error }: {
   </div>;
 };
 
-export const WebSearchBudgetPanel = ({ data, loading, error }: {
+const WebSearchBudgetPanel = ({ data, loading, error }: {
   data?: ChatWebSearchBudgetStatus;
   loading: boolean;
   error: unknown;

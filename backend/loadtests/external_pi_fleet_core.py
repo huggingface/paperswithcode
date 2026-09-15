@@ -12,7 +12,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    computed_field,
+    field_validator,
+    model_validator,
+)
 
 from backend.loadtests.external_pi_shadow_core import (
     BaselineObservation,
@@ -59,9 +66,342 @@ FleetFailureCode = Literal[
     "cleanup_failed",
 ]
 
+PERSISTENT_TRANSPORT_SCENARIOS = (
+    "cold_pwd",
+    "ten_warm_commands",
+    "four_parallel_catalog_calls",
+    "sibling_failure_cancel",
+    "disconnect_resume",
+    "sse_replay",
+    "same_account_contention",
+    "spend_exhaustion",
+    "zero_pool",
+    "route_outage",
+    "attach_failure",
+    "worker_loss",
+    "blue_green",
+    "mixed_protocol_cohort",
+    "invalid_reconnect_traffic",
+)
+PersistentTransportWorkload = Literal[
+    "cold_pwd", "warm_commands", "parallel_catalog", "disconnect_resume"
+]
+PERSISTENT_TRANSPORT_WORKLOADS: tuple[PersistentTransportWorkload, ...] = (
+    "cold_pwd",
+    "warm_commands",
+    "parallel_catalog",
+    "disconnect_resume",
+)
+
 
 class FleetRunRefused(RuntimeError):
     """The requested fleet qualification violates a fail-closed contract."""
+
+
+@dataclass(frozen=True, slots=True)
+class PersistentTransportUserSpec:
+    """One of exactly 32 immediate turns, each reserving four operations."""
+
+    ordinal: int
+    workload: PersistentTransportWorkload
+    operation_limit: Literal[4] = 4
+    application_queue: Literal[False] = False
+
+
+def build_persistent_transport_user_specs() -> tuple[PersistentTransportUserSpec, ...]:
+    return tuple(
+        PersistentTransportUserSpec(
+            ordinal=ordinal,
+            workload=PERSISTENT_TRANSPORT_WORKLOADS[ordinal % 4],
+        )
+        for ordinal in range(32)
+    )
+
+
+class PersistentTransportQualificationManifest(BaseModel):
+    """Frozen release gate layered on, never substituted for, fleet profiles."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["persistent-executor-release-qualification-v1"]
+    status: Literal["release_qualification"]
+    attempt_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    source_commit: str = Field(pattern=r"^[0-9a-f]{40}$")
+    preliminary_report_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    signed_component_manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    modal_image_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    modal_region: str = Field(min_length=2, max_length=64)
+    chaos_declared: Literal[False]
+    percentile_method: Literal["nearest_rank"]
+    scenarios: tuple[str, ...] = Field(min_length=15, max_length=15)
+    concurrent_turns: Literal[32]
+    operations_per_turn: Literal[4]
+    concurrent_operations: Literal[128]
+    offered_turns: Literal[64]
+    overload_rejections: Literal[32]
+    loaded_clients: Literal[1000]
+    minimum_soak_turns: Literal[320]
+    minimum_soak_minutes: Literal[60]
+    reconnect_ready_p99_ms_max: Literal[5000]
+    authentication_starts_per_second_max: Literal[250]
+    route_health_ms_max: Literal[5000]
+    breaker_open_failures: Literal[3]
+    breaker_failure_window_seconds: Literal[60]
+    breaker_open_seconds: Literal[30]
+    breaker_close_successes: Literal[3]
+    drain_seconds_max: Literal[240]
+    alert_ack_ms_max: Literal[60000]
+    heartbeat_checkpoint_updates_per_second_max: Literal[34]
+    public_operation_output_bytes_max: Literal[24576]
+    public_turn_output_bytes_max: Literal[98304]
+    operation_unacked_bytes_max: Literal[65536]
+    stream_unacked_bytes_max: Literal[262144]
+    connection_unacked_bytes_max: Literal[524288]
+    command_bytes_max: Literal[65536]
+    path_bytes_max: Literal[4096]
+    bash_timeout_ms_max: Literal[30000]
+    remote_read_bytes_max: Literal[1048576]
+    preauth_frame_bytes_max: Literal[2048]
+    preauth_deadline_ms_max: Literal[2000]
+    invalid_per_source_rate: Literal[10]
+    invalid_per_source_burst: Literal[20]
+    invalid_per_shard_rate: Literal[100]
+    invalid_per_shard_burst: Literal[200]
+    host_cpu_percent_exclusive_max: Literal[80]
+    host_mem_available_mib_min: Literal[1536]
+    total_spend_microusd_max: int = Field(gt=0, le=16_250_000)
+    provider_call_max: Literal[0]
+    retain_unknown_spend_reservation: Literal[True]
+    stop_on_first_failed_gate: Literal[True]
+
+    @field_validator("scenarios", mode="before")
+    @classmethod
+    def freeze_scenarios(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def validate_scenarios(self) -> PersistentTransportQualificationManifest:
+        if self.scenarios != PERSISTENT_TRANSPORT_SCENARIOS:
+            raise ValueError("persistent transport qualification scenarios changed")
+        if (
+            self.concurrent_turns * self.operations_per_turn
+            != self.concurrent_operations
+        ):
+            raise ValueError("persistent transport operation capacity is inconsistent")
+        if self.offered_turns - self.concurrent_turns != self.overload_rejections:
+            raise ValueError(
+                "persistent transport overload denominator is inconsistent"
+            )
+        return self
+
+
+def validate_persistent_transport_manifest(
+    value: object,
+) -> PersistentTransportQualificationManifest:
+    """Reject incomplete release evidence before any provisioned work."""
+
+    return PersistentTransportQualificationManifest.model_validate(value)
+
+
+class PersistentTransportPercentiles(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    denominator: int = Field(gt=0, le=1_000_000)
+    accepted: int = Field(ge=0, le=1_000_000)
+    p50_ms: int = Field(ge=0, le=600_000)
+    p95_ms: int = Field(ge=0, le=600_000)
+    p99_ms: int = Field(ge=0, le=600_000)
+
+    @model_validator(mode="after")
+    def validate_order(self) -> PersistentTransportPercentiles:
+        if (
+            self.accepted > self.denominator
+            or not self.p50_ms <= self.p95_ms <= self.p99_ms
+        ):
+            raise ValueError("persistent transport percentile evidence is inconsistent")
+        return self
+
+
+class PersistentTransportCohortReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    transport: Literal["persistent", "legacy"]
+    offered: int = Field(ge=0, le=1_000_000)
+    admitted: int = Field(ge=0, le=1_000_000)
+    completed: int = Field(ge=0, le=1_000_000)
+    rejected_pre_work: int = Field(ge=0, le=1_000_000)
+    failed: int = Field(ge=0, le=1_000_000)
+    candidate_denominator: int = Field(ge=0, le=1_000_000)
+    failure_attribution: dict[str, int] = Field(max_length=64)
+
+    @model_validator(mode="after")
+    def validate_counts(self) -> PersistentTransportCohortReport:
+        if self.offered != self.admitted + self.rejected_pre_work:
+            raise ValueError("persistent transport offered denominator is inconsistent")
+        if self.admitted != self.completed + self.failed:
+            raise ValueError(
+                "persistent transport terminal denominator is inconsistent"
+            )
+        if self.candidate_denominator > self.admitted:
+            raise ValueError(
+                "persistent transport candidate denominator is inconsistent"
+            )
+        if sum(self.failure_attribution.values()) != self.failed:
+            raise ValueError("persistent transport failure attribution is inconsistent")
+        return self
+
+
+class PersistentTransportResourceReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    peak_cpu_percent: float = Field(ge=0, le=100)
+    minimum_host_mem_available_mib: int = Field(ge=0)
+    peak_rendezvous_rss_mib: int = Field(ge=0)
+    peak_harness_proxy_rss_mib: int = Field(ge=0)
+    peak_process_fds: int = Field(ge=0)
+    peak_postgres_connections: int = Field(ge=0)
+    event_loop_lag_p99_ms: float = Field(ge=0)
+    operation_unacked_bytes_peak: int = Field(ge=0)
+    stream_unacked_bytes_peak: int = Field(ge=0)
+    connection_unacked_bytes_peak: int = Field(ge=0)
+    process_unacked_bytes_peak: int = Field(ge=0)
+    postgres_checkpoint_updates_per_second: float = Field(ge=0)
+    heartbeat_receives_per_second: float = Field(ge=0)
+
+
+class PersistentTransportPoolCounts(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    active: int = Field(ge=0, le=1_000_000)
+    assigned_idle: int = Field(ge=0, le=1_000_000)
+    blank: int = Field(ge=0, le=1_000_000)
+    draining: int = Field(ge=0, le=1_000_000)
+    terminated: int = Field(ge=0, le=1_000_000)
+
+
+# Frozen end-to-end targets; missing cohorts cannot be treated as passes.
+PERSISTENT_LATENCY_GATES = {
+    "cold_first_pwd": (2000, 5000),
+    "warm_ack": (500, 1000),
+    "warm_noop": (1000, 2000),
+    "pool_hit_readiness": (1000, 2000),
+    "reconnect_ready": (5000, 5000),
+    "browser_resume": (2000, 5000),
+    "cancellation_delivery": (250, 500),
+    "process_containment": (1000, 2000),
+}
+
+
+class PersistentTransportSoakReport(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    turns: int = Field(ge=0)
+    failed: int = Field(ge=0)
+    duration_seconds: int = Field(ge=0)
+
+    @model_validator(mode="after")
+    def validate_failures(self) -> PersistentTransportSoakReport:
+        if self.failed > self.turns:
+            raise ValueError("soak failure denominator is inconsistent")
+        return self
+
+
+class PersistentTransportQualificationReport(BaseModel):
+    """Immutable content-free evidence emitted even when a gate fails."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True)
+
+    schema_version: Literal["persistent-executor-release-report-v1"]
+    qualification_kind: Literal["release", "chaos"]
+    status: Literal["passed", "failed"]
+    attempt_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    manifest_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    modal_region: str = Field(min_length=2, max_length=64)
+    pool_counts_by_digest: dict[str, PersistentTransportPoolCounts] = Field(
+        max_length=2
+    )
+    cohorts: tuple[PersistentTransportCohortReport, PersistentTransportCohortReport]
+    percentiles: dict[str, PersistentTransportPercentiles] = Field(
+        min_length=1, max_length=64
+    )
+    resources: PersistentTransportResourceReport
+    soak: PersistentTransportSoakReport
+    scenario_outcomes: dict[str, Literal["passed", "failed"]] = Field(
+        min_length=15, max_length=15
+    )
+    duplicate_executions: int = Field(ge=0)
+    leaked_environments: int = Field(ge=0)
+    breaker_openings: int = Field(ge=0)
+    false_global_circuit_trips: int = Field(ge=0)
+    reconnect_token_issued: int = Field(ge=0)
+    reconnect_token_refreshed: int = Field(ge=0)
+    reconnect_token_consumed: int = Field(ge=0)
+    reconnect_token_replayed: int = Field(ge=0)
+    reconnect_token_expired: int = Field(ge=0)
+    reconnect_token_cleaned: int = Field(ge=0)
+    cancellation_delivery_observations: int = Field(ge=0)
+    process_containment_observations: int = Field(ge=0)
+    settlement_count: int = Field(ge=0)
+    truncation_markers_missing: int = Field(ge=0)
+    control_frame_starvation_events: int = Field(ge=0)
+
+    @field_validator("cohorts", mode="before")
+    @classmethod
+    def freeze_cohorts(cls, value: object) -> object:
+        return tuple(value) if isinstance(value, list) else value
+
+    @model_validator(mode="after")
+    def validate_release_result(self) -> PersistentTransportQualificationReport:
+        if not self.pool_counts_by_digest or any(
+            not re.fullmatch(r"[0-9a-f]{64}", digest)
+            for digest in self.pool_counts_by_digest
+        ):
+            raise ValueError("persistent transport pool digest evidence is invalid")
+        if tuple(item.transport for item in self.cohorts) != ("persistent", "legacy"):
+            raise ValueError("persistent and legacy cohorts must remain separate")
+        if set(self.scenario_outcomes) != set(PERSISTENT_TRANSPORT_SCENARIOS):
+            raise ValueError("persistent transport scenario evidence is incomplete")
+        hard_failures = (
+            self.duplicate_executions
+            + self.leaked_environments
+            + self.false_global_circuit_trips
+            + self.truncation_markers_missing
+            + self.control_frame_starvation_events
+        )
+        gates_pass = (
+            not hard_failures
+            and self.soak.turns >= 320
+            and self.soak.duration_seconds >= 3600
+            and self.soak.failed * 100 <= self.soak.turns
+            and all(
+                name in self.percentiles
+                and self.percentiles[name].denominator >= 1000
+                and self.percentiles[name].accepted
+                == self.percentiles[name].denominator
+                and self.percentiles[name].p95_ms <= targets[0]
+                and self.percentiles[name].p99_ms <= targets[1]
+                for name, targets in PERSISTENT_LATENCY_GATES.items()
+            )
+            and self.resources.peak_cpu_percent < 80
+            and self.resources.minimum_host_mem_available_mib >= 1536
+            and self.resources.operation_unacked_bytes_peak <= 65_536
+            and self.resources.stream_unacked_bytes_peak <= 262_144
+            and self.resources.connection_unacked_bytes_peak <= 524_288
+            and self.resources.postgres_checkpoint_updates_per_second <= 34
+            and not any(value == "failed" for value in self.scenario_outcomes.values())
+            and (self.qualification_kind == "chaos" or self.breaker_openings == 0)
+        )
+        if self.status == "passed" and not gates_pass:
+            raise ValueError("persistent transport pass contains a failed gate")
+        if self.qualification_kind == "chaos" and self.status == "passed":
+            raise ValueError("chaos evidence cannot be labeled release-passing")
+        return self
+
+
+def validate_persistent_transport_report(
+    value: object,
+) -> PersistentTransportQualificationReport:
+    return PersistentTransportQualificationReport.model_validate(value)
 
 
 @dataclass(frozen=True, slots=True)

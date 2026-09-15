@@ -33,6 +33,7 @@ from backend.services.chat_sandbox_lease_maintenance_coordinator import (
 )
 from backend.services.chat_sandbox_pool_coordinator import ChatSandboxPoolCoordinator
 from backend.services.chat_sandbox_provider import (
+    ExecutorLaunchBundle,
     SandboxError,
     SandboxLaunchMode,
     SandboxProvider,
@@ -56,6 +57,7 @@ type AcquisitionLabel = Literal[
     "reused_session",
     "created",
 ]
+type ExecutorLaunchFactory = Callable[[str], Awaitable[ExecutorLaunchBundle]]
 type LegacyEnsureReadyResult = tuple[
     object,
     int,
@@ -170,6 +172,7 @@ class ChatSandboxAcquisitionCoordinator:
         sleeper: Sleeper = asyncio.sleep,
         creation_token_factory: TokenFactory | None = None,
         generation_factory: TokenFactory | None = None,
+        executor_launch_factory: ExecutorLaunchFactory | None = None,
     ) -> None:
         eviction = pool.lease_eviction
         lifecycle = lease_maintenance.lifecycle
@@ -249,6 +252,7 @@ class ChatSandboxAcquisitionCoordinator:
             lambda: secrets.token_urlsafe(24)
         )
         self.generation_factory = generation_factory or (lambda: secrets.token_hex(16))
+        self.executor_launch_factory = executor_launch_factory
 
     @property
     def ready_timeout_seconds(self) -> float:
@@ -300,7 +304,10 @@ class ChatSandboxAcquisitionCoordinator:
             except ChatComputeDisabled as error:
                 raise SandboxError(error.code, str(error)) from error
 
-        if allow_pool:
+        if allow_pool and (
+            (launch_mode is SandboxLaunchMode.EXECUTOR)
+            == self.settings.chat_executor_remote_transport_enabled
+        ):
             lookup_started = self.perf_counter()
             claimed = await self.pool.claim_blank(chat_session_id)
             pool_lookup_ms = round((self.perf_counter() - lookup_started) * 1000)
@@ -578,6 +585,21 @@ class ChatSandboxAcquisitionCoordinator:
                         .limit(1)
                     )
             async with asyncio.timeout(self.ready_timeout_seconds):
+                executor_launch = (
+                    await self.executor_launch_factory(claim.worker_generation)
+                    if launch_mode is SandboxLaunchMode.EXECUTOR
+                    and self.executor_launch_factory is not None
+                    else None
+                )
+                if (
+                    launch_mode is SandboxLaunchMode.EXECUTOR
+                    and self.settings.chat_executor_remote_transport_enabled
+                    and executor_launch is None
+                ):
+                    raise SandboxError(
+                        "sandbox_executor_admission_missing",
+                        "Sandbox executor admission is unavailable",
+                    )
                 sandbox = await self.provider.create(
                     name=f"chat-{chat_session_id}",
                     tags={
@@ -601,6 +623,7 @@ class ChatSandboxAcquisitionCoordinator:
                     },
                     worker_generation=claim.worker_generation,
                     launch_mode=launch_mode,
+                    executor_launch=executor_launch,
                 )
                 if claim.snapshot_id and launch_mode is SandboxLaunchMode.LEGACY:
                     try:

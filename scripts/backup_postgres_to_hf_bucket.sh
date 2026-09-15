@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# Database backups contain private user data.
+umask 077
+
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_FILE="${PWC_BACKUP_ENV_FILE:-}"
 CREDENTIAL_ENV_FILE="${PWC_BACKUP_CREDENTIAL_ENV_FILE:-}"
@@ -42,6 +45,22 @@ run_hf() {
         return
     fi
     "$HF_BIN" "$@"
+}
+
+require_private_bucket() {
+    # Reject unavailable, malformed, missing, or non-boolean privacy metadata.
+    # Never print the response: only the affirmative private flag permits upload.
+    if ! run_hf buckets info "$REMOTE_BUCKET" --format json | python3 -c '
+import json
+import sys
+try:
+    metadata = json.load(sys.stdin)
+except (ValueError, UnicodeError):
+    sys.exit(1)
+sys.exit(0 if isinstance(metadata, dict) and metadata.get("private") is True else 1)
+'; then
+        die "Backup bucket privacy could not be verified; refusing to continue"
+    fi
 }
 
 validate_keep_count() {
@@ -148,6 +167,7 @@ main() {
     REMOTE_KEEP_COUNT="$remote_keep_count"
     validate_keep_count "PWC_POSTGRES_BACKUP_LOCAL_KEEP_COUNT" "$LOCAL_KEEP_COUNT"
     validate_keep_count "PWC_POSTGRES_BACKUP_REMOTE_KEEP_COUNT" "$REMOTE_KEEP_COUNT"
+    require_command python3
     require_command pg_dump
     require_command sha256sum
     resolve_hf
@@ -158,6 +178,8 @@ main() {
         export HF_TOKEN="$PWC_HF_TOKEN"
     fi
     [[ -n "${HF_TOKEN:-}" ]] || die "PWC_POSTGRES_BACKUP_HF_TOKEN, HF_TOKEN, or PWC_HF_TOKEN is required for Hugging Face bucket uploads"
+
+    require_private_bucket
 
     mkdir -p "$BACKUP_DIR"
 
@@ -197,6 +219,7 @@ main() {
     log "Local checksum path: $checksum_path"
     log "Remote bucket path: $REMOTE_URI"
 
+    require_private_bucket
     log "Uploading dump"
     run_hf buckets cp "$dump_path" "$REMOTE_URI"
     log "Uploading checksum"
@@ -211,6 +234,7 @@ main() {
         sha256sum -c "$backup_name.sha256"
     )
 
+    require_private_bucket
     prune_local_backups
     remote_listing="$(list_remote_files)"
     prune_remote_backups "$remote_listing"

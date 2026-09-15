@@ -66,6 +66,13 @@ from backend.services.hf_daily_curation_service import (
 from jobs import url_preflight
 
 
+PAPER_TEXT = (
+    b"# A complete research paper\n"
+    + b"We evaluate the proposed method on held-out tasks and compare the results. "
+    * 20
+)
+
+
 class _HeadResponse:
     status = 200
 
@@ -135,7 +142,7 @@ def test_preflight_reuses_complete_importer_links_but_verifies_markdown(
     def fetch(url, _limit):
         fetched.append(url)
         assert url.endswith(".md")
-        return b"# Paper\n", url
+        return PAPER_TEXT, url
 
     result = url_preflight.extract_candidates(_context(), fetch=fetch)
 
@@ -161,7 +168,7 @@ def test_eval_preflight_manifests_model_card_blog_project_and_readme(monkeypatch
 
     result = url_preflight.extract_candidates(
         context,
-        fetch=lambda url, _limit: (b"# Paper\n", url),
+        fetch=lambda url, _limit: (PAPER_TEXT, url),
     )
 
     assert {(item["kind"], item["url"]) for item in result["source_documents"]} == {
@@ -176,7 +183,7 @@ def test_eval_preflight_manifests_model_card_blog_project_and_readme(monkeypatch
     }
 
 
-def test_preflight_accepts_official_links_when_markdown_is_not_ready(
+def test_preflight_requires_paper_text_even_with_official_links(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -200,11 +207,12 @@ def test_preflight_accepts_official_links_when_markdown_is_not_ready(
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
 
-    assert result["awaiting_markdown"] is False
-    assert result["complete"] is True
+    assert result["awaiting_markdown"] is True
+    assert result["complete"] is False
     assert fetched == [
         "https://huggingface.co/api/papers/2608.00042",
         "https://huggingface.co/papers/2608.00042.md",
+        "https://arxiv.org/pdf/2608.00042",
     ]
     assert result["sources"][0]["sha256"]
 
@@ -243,8 +251,10 @@ def test_preflight_uses_discovered_project_candidate_for_conditional_html(
     )
 
 
+@pytest.mark.parametrize("image_caption", [False, True])
 def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
     monkeypatch,
+    image_caption,
 ):
     monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
     monkeypatch.setattr(
@@ -259,6 +269,11 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
         if "/api/papers/" in url:
             return b"{}", url
         if url.endswith(".md"):
+            if image_caption:
+                return (
+                    b"Title: https://arxiv.org/html/2608.00042/figure.svg\n\nMarkdown Content:\nA bar chart.",
+                    url,
+                )
             raise urllib.error.HTTPError(url, 404, "not found", {}, None)
         raise AssertionError("OCR Markdown must avoid the PDF fallback")
 
@@ -267,7 +282,7 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
         assert token == "hf-test"
         return (
             b"Code: https://github.com/example/project\n"
-            b"Project: https://example.github.io/project\n",
+            b"Project: https://example.github.io/project\n" + PAPER_TEXT,
             "https://signed.example/markdown",
         )
 
@@ -286,6 +301,62 @@ def test_preflight_uses_ocr_markdown_when_public_markdown_is_unavailable(
     assert not any("/pdf/" in url for url in fetched)
 
 
+def test_preflight_accepts_ocr_markdown_when_hf_papers_api_has_no_record(
+    monkeypatch,
+):
+    monkeypatch.setenv(url_preflight.OCR_MARKDOWN_TOKEN_ENV, "hf-test")
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, _limit: int):
+        raise urllib.error.HTTPError(url, 404, "not found", {}, None)
+
+    def fetch_ocr_markdown(arxiv_id: str, _limit: int, *, token: str):
+        assert arxiv_id == "2608.00042"
+        assert token == "hf-test"
+        return PAPER_TEXT, "https://signed.example/markdown"
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    result = url_preflight.extract_candidates(
+        context,
+        fetch=fetch,
+        fetch_ocr_markdown=fetch_ocr_markdown,
+    )
+
+    assert result["complete"] is True
+    assert result["awaiting_markdown"] is False
+    assert result["markdown_available"] is True
+    assert result["errors"] == [{"source": "hf_api", "error": "HTTPError"}]
+
+
+@pytest.mark.parametrize("project_status", [404, 410, 503])
+def test_preflight_dead_project_page_keeps_paper_evidence(monkeypatch, project_status):
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *_args, **_kwargs: _HeadResponse(),
+    )
+
+    def fetch(url: str, _limit: int):
+        if "/api/papers/" in url:
+            return json.dumps(
+                {"projectPage": "https://example.github.io/missing"}
+            ).encode(), url
+        if url.endswith(".md"):
+            return PAPER_TEXT, url
+        raise urllib.error.HTTPError(url, project_status, "unavailable", {}, None)
+
+    context = _context(project_page=False)
+    context["paper"]["repositories"] = []
+    result = url_preflight.extract_candidates(context, fetch=fetch)
+    assert result["complete"] is (project_status in {404, 410})
+    assert result["errors"][0]["http_status"] == project_status
+
+
 def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch):
     monkeypatch.setattr(
         url_preflight.urllib.request,
@@ -299,7 +370,7 @@ def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch)
         if "/api/papers/" in url:
             return b"{}", url
         if url.endswith(".md"):
-            return b"# Complete paper\n", url
+            return PAPER_TEXT, url
         raise AssertionError("PDF is a last-resort source")
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
@@ -308,7 +379,7 @@ def test_preflight_does_not_fetch_pdf_when_hf_markdown_is_available(monkeypatch)
     assert not any("/pdf/" in url for url in fetched)
 
 
-def test_preflight_skips_pdf_when_official_repository_is_available(
+def test_preflight_checks_pdf_when_official_repository_is_available(
     monkeypatch,
 ):
     monkeypatch.setattr(
@@ -327,10 +398,13 @@ def test_preflight_skips_pdf_when_official_repository_is_available(
 
     result = url_preflight.extract_candidates(_context(project_page=False), fetch=fetch)
 
-    assert result["complete"] is True
-    assert result["awaiting_markdown"] is False
-    assert {error["source"] for error in result["errors"]} == {"hf_markdown"}
-    assert not any("/pdf/" in url for url in fetched)
+    assert result["complete"] is False
+    assert result["awaiting_markdown"] is True
+    assert {error["source"] for error in result["errors"]} == {
+        "hf_markdown",
+        "paper_pdf",
+    }
+    assert any("/pdf/" in url for url in fetched)
 
 
 def test_preflight_marks_missing_public_and_ocr_markdown_as_awaiting(monkeypatch):
@@ -486,11 +560,11 @@ def test_trace_json_keeps_gap_reasoning_first_with_deterministic_nested_keys():
 
 
 def test_hourly_reconciliation_requeues_markdown_ready_papers():
-    workflow = Path(
-        ".github/workflows/cron-enqueue-hf-daily-paper-curation.yml"
+    timer = Path(
+        "deploy/systemd/cron/pwc-cron-enqueue-hf-daily-paper-curation.timer"
     ).read_text()
-    assert 'cron: "27 * * * *"' in workflow
-    assert 'cron: "20 2 * * *"' not in workflow
+    assert "OnCalendar=*-*-* *:27:00" in timer
+    assert "Persistent=true" in timer
 
 
 def test_canary_gate_excludes_durable_deferred_overflow():
@@ -504,9 +578,10 @@ def test_canary_gate_excludes_durable_deferred_overflow():
     ]
 
 
-def test_scheduled_job_retry_uses_the_shared_durable_queue():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_scheduled_job_retry_uses_the_shared_durable_queue(trigger):
     job_id = uuid.uuid4()
-    row = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    row = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     serialized = {
         "id": str(uuid.uuid4()),
         "retry_of_id": str(job_id),
@@ -891,11 +966,12 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
     }
 
 
-def test_queued_operator_retry_is_prioritized_without_duplication():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_queued_operator_retry_is_prioritized_without_duplication(trigger):
     job_id = uuid.uuid4()
     row = SimpleNamespace(
         id=job_id,
-        trigger="hf-daily-cron",
+        trigger=trigger,
         status="queued",
         priority=100,
     )
@@ -1109,9 +1185,10 @@ def test_canary_dispatch_rejects_unsafe_selection_or_scheduler_state(
         ).dispatch_canary_job(row.id)
 
 
-def test_repeating_operator_retry_returns_active_child_attempt():
+@pytest.mark.parametrize("trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_repeating_operator_retry_returns_active_child_attempt(trigger):
     job_id = uuid.uuid4()
-    failed = SimpleNamespace(id=job_id, trigger="hf-daily-cron", status="failed")
+    failed = SimpleNamespace(id=job_id, trigger=trigger, status="failed")
     active = SimpleNamespace(id=uuid.uuid4(), status="running", priority=100)
 
     class Query:
@@ -2332,3 +2409,28 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
         manifest["objects"]
     )
     assert not (tmp_path / "curation-traces" / f"{row.id}.json").exists()
+
+
+def test_daily_curation_cli_reports_retry_workflow_conflict(monkeypatch, capsys):
+    job_id = uuid.uuid4()
+
+    def session():
+        yield object()
+
+    class Service:
+        def __init__(self, _db, _settings):
+            pass
+
+        def retry_scheduled_job(self, _job_id):
+            raise curation_cli.CurationRetryConflict("Paper has active workflow newer")
+
+    monkeypatch.setattr(curation_cli, "get_database_session", session)
+    monkeypatch.setattr(curation_cli, "get_settings", object)
+    monkeypatch.setattr(curation_cli, "HFDailyCurationService", Service)
+    monkeypatch.setattr(sys, "argv", ["curation", "--retry-job", str(job_id)])
+    assert curation_cli.main() == 1
+    assert json.loads(capsys.readouterr().out) == {
+        "error": "Paper has active workflow newer",
+        "job_id": str(job_id),
+        "retry_conflict": True,
+    }
