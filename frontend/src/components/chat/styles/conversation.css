@@ -6,7 +6,22 @@
   border-radius: 6px;
 }
 .chat-ghost-link:hover { color: var(--ink); background: var(--bg-subtle); }
-.chat-conversation { flex: 1; overflow-y: auto; }
+.chat-conversation-viewport { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.chat-conversation { flex: 1; min-height: 0; overflow-y: auto; }
+.chat-jump-latest {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  padding: 8px 14px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 2px 8px rgb(0 0 0 / 12%);
+  white-space: nowrap;
+  cursor: pointer;
+}
 .chat-conversation-inner { max-width: 820px; margin: 0 auto; padding: 30px 28px 40px; }
 .chat-msg { margin-bottom: 26px; }
 .chat-msg-user { display: flex; justify-content: flex-end; }

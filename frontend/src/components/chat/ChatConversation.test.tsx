@@ -73,13 +73,43 @@ describe("ChatConversation scrolling", () => {
     chat.update([{ id: "question", role: "user" }, { id: "answer", role: "assistant", streaming: false }], false);
     expect(chat.scroller.scrollTop).toBe(200);
   });
-  it("resumes following when the reader scrolls back near the bottom", () => {
+  it("resumes following only when the reader requests the latest response", () => {
     const chat = setup();
     chat.scrollTo(200);
     chat.update();
     chat.scrollTo(780);
+    expect(chat.getByRole("button", { name: "Jump to latest" })).toBeTruthy();
+    fireEvent.click(chat.getByRole("button", { name: "Jump to latest" }));
+    expect(document.activeElement).toBe(chat.scroller);
     chat.update();
     expect(chat.scroller.scrollTop).toBe(1000);
+  });
+  it("preserves even a small upward scroll during streaming", () => {
+    const chat = setup();
+    chat.scrollTo(595);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(595);
+  });
+  it("pauses on upward wheel intent before a scroll event arrives", () => {
+    const chat = setup();
+    fireEvent.wheel(chat.scroller, { deltaY: -1 });
+    // A queued programmatic scroll event at the bottom must not resume following.
+    fireEvent.scroll(chat.scroller);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(600);
+  });
+  it("pauses on upward touch intent", () => {
+    const chat = setup();
+    fireEvent.touchStart(chat.scroller, { touches: [{ clientY: 100 }] });
+    fireEvent.touchMove(chat.scroller, { touches: [{ clientY: 105 }] });
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(600);
+  });
+  it("pauses on keyboard navigation toward earlier messages", () => {
+    const chat = setup();
+    fireEvent.keyDown(chat.scroller, { key: "PageUp" });
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(600);
   });
   it("follows a newly submitted question even after scrolling up", () => {
     const chat = setup();
