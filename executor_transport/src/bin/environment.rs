@@ -197,9 +197,28 @@ impl EnvironmentPeerState {
     }
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run().await {
+fn main() {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|value| value == "--exec-command")
+    {
+        if arguments.len() != 2 {
+            std::process::exit(2);
+        }
+        let error = pwc_persistent_executor_transport::command_launcher::launch(&arguments[1]);
+        eprintln!("executor command failed: {}", error.unwrap_err());
+        std::process::exit(126);
+    }
+    if arguments.as_slice() == ["--command-launcher-version"] {
+        println!("1");
+        return;
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("executor runtime initialization failed");
+    if let Err(error) = runtime.block_on(run()) {
         eprintln!("environment failed: {error}");
         std::process::exit(1);
     }

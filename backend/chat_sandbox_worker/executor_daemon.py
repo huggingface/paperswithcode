@@ -811,6 +811,12 @@ class ExecutorServer:
     def _command_argv(self, command: str) -> list[str]:
         if not self._safe_demote_launcher:
             return ["/bin/bash", "-lc", command]
+        if os.environ.get("PWC_CHAT_NATIVE_COMMAND_LAUNCHER") == "1":
+            return [
+                "/usr/local/bin/pwc-executor-environment",
+                "--exec-command",
+                command,
+            ]
         return [
             sys.executable,
             "-m",

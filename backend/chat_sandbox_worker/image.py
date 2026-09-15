@@ -206,11 +206,16 @@ def with_executor_binary(base_image: modal.Image, binary: Path) -> modal.Image:
     """Add the locally locked release artifact; never build inside a sandbox."""
     if not binary.is_file():
         raise FileNotFoundError("Pinned executor environment binary is unavailable")
-    return base_image.add_local_file(
-        binary,
-        "/usr/local/bin/pwc-executor-environment",
-        copy=True,
-    ).run_commands(
-        "chmod 0755 /usr/local/bin/pwc-executor-environment",
-        "/usr/local/bin/pwc-executor-environment --self-test >/dev/null",
+    return (
+        base_image.add_local_file(
+            binary,
+            "/usr/local/bin/pwc-executor-environment",
+            copy=True,
+        )
+        .run_commands(
+            "chmod 0755 /usr/local/bin/pwc-executor-environment",
+            "/usr/local/bin/pwc-executor-environment --self-test >/dev/null",
+            'test "$(/usr/local/bin/pwc-executor-environment --command-launcher-version)" = "1"',
+        )
+        .env({"PWC_CHAT_NATIVE_COMMAND_LAUNCHER": "1"})
     )
