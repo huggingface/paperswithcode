@@ -670,11 +670,6 @@ def create_app() -> FastAPI:
     from backend.routers import public_api
 
     app.include_router(public_api.router)
-    app.add_middleware(
-        public_api.PublicReadCorsMiddleware,
-        allowed_origins=settings.cors_allowed_origins,
-        allow_origin_regex=settings.extra_allowed_origin_regex or None,
-    )
 
     # Must remain last: it owns the public homepage/entity HTML routes and the
     # narrow top-level organization fallback.
@@ -683,8 +678,15 @@ def create_app() -> FastAPI:
     app.include_router(discovery_pages.router, tags=["discovery_pages"])
 
     if settings.is_deployed:
-        # Admit before middleware, database dependencies, and response allocation.
+        # Admit before database dependencies and handler response allocation.
         app.add_middleware(CatalogAdmissionMiddleware)
+
+    # Browser clients must also be able to read admission rejections.
+    app.add_middleware(
+        public_api.PublicReadCorsMiddleware,
+        allowed_origins=settings.cors_allowed_origins,
+        allow_origin_regex=settings.extra_allowed_origin_regex or None,
+    )
 
     return app
 

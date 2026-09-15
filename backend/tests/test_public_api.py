@@ -223,3 +223,40 @@ def test_distinct_private_get_is_not_treated_as_a_public_alias():
     )
     assert response.status_code == 200
     assert "access-control-allow-origin" not in response.headers
+
+
+def test_deployed_admission_rejections_are_readable_by_browser_clients(monkeypatch):
+    from backend import main
+    from backend.config import Settings
+    from backend.services.catalog_admission import CatalogAdmissionMiddleware
+
+    monkeypatch.setattr(
+        main,
+        "get_settings",
+        lambda: Settings(environment="production", release_id="test-production"),
+    )
+    app = main.create_app()
+    for middleware in app.user_middleware:
+        if middleware.cls is CatalogAdmissionMiddleware:
+            middleware.kwargs["limit"] = 0
+    client = TestClient(app)
+    for origin in ("https://research.example", "https://paperswithcode.co"):
+        response = client.get("/api/v1/papers/", headers={"Origin": origin})
+        assert response.status_code == 503
+        assert response.headers["retry-after"] == "1"
+        assert response.headers["access-control-expose-headers"] == "Retry-After"
+        if origin == "https://paperswithcode.co":
+            assert response.headers["access-control-allow-origin"] == origin
+            assert response.headers["access-control-allow-credentials"] == "true"
+        else:
+            assert response.headers["access-control-allow-origin"] == "*"
+
+
+def test_cached_public_responses_vary_for_all_origin_variants():
+    client = cors_client()
+    for origin in (None, "https://research.example", "https://paperswithcode.co"):
+        headers = {"Origin": origin} if origin else {}
+        response = client.get("/api/v1/papers/123", headers=headers)
+        assert "origin" in {
+            part.strip().lower() for part in response.headers["vary"].split(",")
+        }

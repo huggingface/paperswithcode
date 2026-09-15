@@ -39,11 +39,9 @@ class PublicReadCorsMiddleware:
             return
         request = Request(scope)
         origin = request.headers.get("origin")
-        if not origin or self.existing_origins.is_allowed_origin(origin):
-            # Existing website/mirror clients may use credentialed cross-origin
-            # requests. Preserve their exact-origin CORS and preflight contract.
-            await self.app(scope, receive, send)
-            return
+        credentialed_origin = bool(
+            origin and self.existing_origins.is_allowed_origin(origin)
+        )
         get_scope = {**scope, "method": "GET"}
         selected = self._is_public_route(get_scope)
         if selected is None and scope["app"].router.redirect_slashes:
@@ -59,6 +57,11 @@ class PublicReadCorsMiddleware:
             await self.app(scope, receive, send)
             return
         if scope["method"] == "OPTIONS":
+            if not origin or credentialed_origin:
+                # Preserve the website/mirror preflight policy, including its
+                # existing allowed headers and methods.
+                await self.app(scope, receive, send)
+                return
             requested_method = request.headers.get("access-control-request-method", "")
             requested_headers = {
                 name.strip().lower()
@@ -89,10 +92,28 @@ class PublicReadCorsMiddleware:
         async def cors_send(message):
             if message["type"] == "http.response.start":
                 headers = MutableHeaders(scope=message)
-                headers["Access-Control-Allow-Origin"] = "*"
-                if "Access-Control-Allow-Credentials" in headers:
-                    del headers["Access-Control-Allow-Credentials"]
-                headers["Access-Control-Expose-Headers"] = "Retry-After"
+                # Responses differ for absent, anonymous, and credentialed
+                # origins; shared caches must retain that distinction.
+                vary = {
+                    value.strip().lower()
+                    for value in headers.get("Vary", "").split(",")
+                }
+                if "origin" not in vary:
+                    headers.add_vary_header("Origin")
+                if not origin:
+                    await send(message)
+                    return
+                if credentialed_origin:
+                    headers["Access-Control-Allow-Origin"] = origin
+                    headers["Access-Control-Allow-Credentials"] = "true"
+                else:
+                    headers["Access-Control-Allow-Origin"] = "*"
+                    if "Access-Control-Allow-Credentials" in headers:
+                        del headers["Access-Control-Allow-Credentials"]
+                exposed = headers.get("Access-Control-Expose-Headers", "")
+                headers["Access-Control-Expose-Headers"] = (
+                    f"{exposed}, Retry-After" if exposed else "Retry-After"
+                )
             await send(message)
 
         await self.app(scope, receive, cors_send)
