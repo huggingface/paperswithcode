@@ -93,5 +93,6 @@ def test_staging_internal_mcp_api_bridge_is_loopback_only():
     assert "limit_except GET HEAD" in bridge
     assert "proxy_pass http://pwc_staging_backend;" in bridge
     assert "auth_request" not in bridge
-    assert "location ^~ / {" in bridge
+    assert "location ~ ^/ {" in bridge
     assert "return 404;" in bridge
+    assert bridge.index('location ~ "^/api/v1/') < bridge.index("location ~ ^/ {")

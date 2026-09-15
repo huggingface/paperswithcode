@@ -237,13 +237,21 @@ def validate(production: str, staging: str) -> list[str]:
             "proxy_set_header Host staging.paperswithcode.co;",
             'proxy_set_header Cookie "";',
             'proxy_set_header Authorization "";',
-            "location ^~ / {",
+            "location ~ ^/ {",
             "return 404;",
         ):
             if requirement not in bridge:
                 failures.append(f"staging MCP API bridge misses: {requirement}")
         if "auth_request" in bridge or "listen 0.0.0.0" in bridge:
             failures.append("staging MCP API bridge is not loopback-only")
+        catalog_location = 'location ~ "^/api/v1/'
+        catch_all_location = "location ~ ^/ {"
+        if (
+            catalog_location in bridge
+            and catch_all_location in bridge
+            and bridge.index(catch_all_location) < bridge.index(catalog_location)
+        ):
+            failures.append("staging MCP API bridge catch-all shadows catalog routes")
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
         not access_block
