@@ -8,6 +8,7 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { fitPaperContext } from "./paper_context_budget.js";
 import { CompactionController } from "./compaction.js";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
 import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
@@ -523,6 +524,14 @@ export class PiWorker {
       }
       if (!this.session || !this.manager || !this.mirror || !this.boundAgentSession) {
         throw new Error("Pi worker failed to initialize");
+      }
+      if (this.session.model) {
+        run = { ...run, prompt: fitPaperContext(run.prompt, {
+          model: this.session.model,
+          systemPrompt: this.session.systemPrompt,
+          tools: this.session.agent.state.tools,
+        }) };
+        this.compaction.setProtectedRequest(run.prompt);
       }
       const adapter = new PiEventAdapter(
         reasoningIsVisible(process.env.PWC_CHAT_SHOW_REASONING),

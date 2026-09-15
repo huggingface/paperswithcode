@@ -176,3 +176,42 @@ test("a length-limited answer without tools can continue without forced compacti
   assert.equal(events.filter((event) => event.type === "error").length, 0);
   assert.equal(events.find((event) => event.type === "done")?.finish_reason, "success");
 });
+
+test("first reader request is fitted before dispatch and recovery", async () => {
+  const { PiWorker } = await import("../src/agent.js");
+  const { SessionManager } = await import("@earendil-works/pi-coding-agent");
+  const events: Record<string, unknown>[] = [];
+  const worker = new PiWorker((_id, event) => events.push(event));
+  const original = '<paper_context_notice>\nUntrusted\n</paper_context_notice>\n<referenced_papers>\n<paper route_id="2609.13356"><paper_info>\nPaper\n</paper_info>\n<paper_markdown_prefix>\n'
+    + 'equations and tables '.repeat(5000)
+    + '\n</paper_markdown_prefix></paper>\n<viewer_context page="9" />\n</referenced_papers>\n<user_request>Explain in simple terms</user_request>';
+  let listener = (_event: unknown) => {};
+  let dispatched = "";
+  const session = {
+    model: { contextWindow: 48_000, maxTokens: 8000 },
+    systemPrompt: 'trusted policy '.repeat(2000),
+    agent: { state: { tools: [] } },
+    subscribe(callback: typeof listener) { listener = callback; return () => {}; },
+    async prompt(value: string) {
+      dispatched = value;
+      listener({ type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "Explanation" } });
+      listener({ type: "message_end", message: { role: "assistant", content: [], stopReason: "stop" } });
+    },
+    setActiveToolsByName() {},
+  };
+  Reflect.set(worker, "session", session);
+  Reflect.set(worker, "manager", SessionManager.inMemory("/workspace"));
+  Reflect.set(worker, "mirror", { append() {}, async flush() {} });
+  Reflect.set(worker, "boundAgentSession", "native");
+  Reflect.set(worker, "initialize", async () => {});
+  Reflect.set(worker, "open", async () => {});
+  await worker.run({ request_id: "test", chat_session_id: "chat", prompt: original,
+    model: "test", resume: null, web_search_enabled: false, reader_mode: true,
+    poster_mode: false, paper_artifacts_enabled: false, reasoning_effort: "low", hf_username: "test" });
+  assert.ok(dispatched.length < original.length / 2);
+  assert.ok(dispatched.includes('<viewer_context page="9" />'));
+  assert.ok(dispatched.endsWith('<user_request>Explain in simple terms</user_request>'));
+  assert.equal(Reflect.get(Reflect.get(worker, "compaction"), "protectedRequest"), dispatched);
+  assert.equal(events.filter(event => event.type === "error").length, 0);
+  assert.equal(events.find(event => event.type === "done")?.finish_reason, "success");
+});

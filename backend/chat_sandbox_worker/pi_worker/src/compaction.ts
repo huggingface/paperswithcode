@@ -138,6 +138,10 @@ export class CompactionController {
   constructor(private readonly emit: (event: PwCEvent) => void, private readonly budgetMs = COMPACTION_BUDGET_MS) {
   }
 
+  setProtectedRequest(prompt: string): void {
+    this.protectedRequest = prompt;
+  }
+
   startRecovery(): void {
     if (this.recoveryDeadline !== Infinity) return;
     this.recoveryDeadline = Math.min(performance.now() + this.budgetMs, this.turnDeadline);
