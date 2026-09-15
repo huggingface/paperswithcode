@@ -818,3 +818,16 @@ describe("AssistantMessage", () => {
     expect(screen.getByRole("button", { name: "Fullscreen" })).toBeVisible();
   });
 });
+
+it("marks a partial failed response incomplete and offers recovery", () => {
+  const retry = vi.fn();
+  render(<MemoryRouter><AssistantMessage
+    msg={{ id: "partial", role: "assistant", error: "Recovery timed out", errorCode: "context_too_large",
+      blocks: [{ kind: "answer", text: "Useful partial findings", done: true }] }}
+    papers={{}} onToggleBlock={() => {}} onRetryCompaction={retry}
+  /></MemoryRouter>);
+  expect(screen.getByText("Useful partial findings")).toBeVisible();
+  expect(screen.getByText(/Incomplete—response interrupted/)).toBeVisible();
+  fireEvent.click(screen.getByRole("button", { name: "Retry" }));
+  expect(retry).toHaveBeenCalledOnce();
+});

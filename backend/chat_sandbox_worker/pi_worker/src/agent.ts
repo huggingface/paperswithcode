@@ -8,6 +8,8 @@ import {
   SessionManager,
   SettingsManager,
 } from "@earendil-works/pi-coding-agent";
+import { fitPaperContext } from "./paper_context_budget.js";
+import { CompactionController } from "./compaction.js";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
 import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
 import { createWebMcpExtension } from "./mcp.js";
@@ -23,6 +25,7 @@ import { PolicyController, pwcExtension } from "./policy.js";
 import { createProvider, thinkingLevel, type ProviderProtocol } from "./provider.js";
 import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
+import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
 import { loadPromptAsset, renderPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
@@ -83,6 +86,8 @@ const agentDirectory = externalStateRoot
   ? path.join(externalStateRoot, "agent")
   : "/home/pwc-chat/.pi-disabled";
 
+const RECOVERY_TIMEOUT_MESSAGE = "Recovery exceeded 60 seconds. Your conversation and completed research are saved. Retry, shorten the request, or start a new conversation.";
+
 export class PiWorker {
   private session: AgentSession | undefined;
   private manager: SessionManager | undefined;
@@ -92,6 +97,9 @@ export class PiWorker {
   private boundAgentSession: string | undefined;
   private activeRequest: string | undefined;
   private cancelled = false;
+  private readonly compaction = new CompactionController((event) => {
+    if (this.activeRequest) this.emit(this.activeRequest, event);
+  });
   private initialization: Promise<void> | undefined;
   private promptAsset: string | undefined;
   private prewarmedProvider: Awaited<ReturnType<typeof createProvider>> | undefined;
@@ -122,6 +130,7 @@ export class PiWorker {
       maximumTurnOutputBytes: Number(process.env.PWC_CHAT_TURN_TOOL_OUTPUT_MAX_BYTES ?? 98304),
       bashTimeoutSeconds: Number(process.env.PWC_CHAT_BASH_TIMEOUT_SECONDS ?? 30),
       excalidrawEnabled: this.excalidrawAvailable,
+      catalogEnabled: Boolean(this.gateway && this.remoteTools),
       posterlyMaximumCalls: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_CALLS ?? 40),
       posterlyMaximumRounds: Number(process.env.PWC_CHAT_POSTERLY_MAX_TOOL_ROUNDS ?? 20),
       posterlyMaximumResultBytes: Number(process.env.PWC_CHAT_POSTERLY_TOOL_RESULT_MAX_BYTES ?? 196608),
@@ -193,9 +202,10 @@ export class PiWorker {
   }
 
   async cancel(requestId: string): Promise<void> {
-    if (requestId !== this.activeRequest || !this.session) return;
+    if (requestId !== this.activeRequest) return;
     this.cancelled = true;
-    await this.session.abort();
+    this.session?.abortCompaction();
+    await this.session?.abort();
   }
 
   async dispose(): Promise<void> {
@@ -342,6 +352,7 @@ export class PiWorker {
       readerMode: run.reader_mode,
       posterlyEnabled: run.poster_mode,
       paperArtifactsEnabled: run.paper_artifacts_enabled,
+      catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
       source: this.promptAsset!,
     });
@@ -361,6 +372,7 @@ export class PiWorker {
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       hfUsername: run.hf_username,
       promptProfile: "compact-pi-v1",
+      catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
     });
     let mirrorInitialization: Promise<void> = Promise.resolve();
     if (!this.mirror) {
@@ -407,6 +419,7 @@ export class PiWorker {
       noContextFiles: true,
       systemPrompt: prompt,
       extensionFactories: [
+        { name: "pwc-compaction", factory: this.compaction.extension(provider), hidden: true },
         { name: "pwc-policy", factory: this.policyExtension!, hidden: true },
         {
           name: "pwc-mcp",
@@ -425,6 +438,11 @@ export class PiWorker {
           factory: createRemoteToolsExtension(this.remoteTools),
           hidden: true,
         }] : []),
+        ...(this.gateway && this.remoteTools ? [{
+          name: "pwc-catalog",
+          factory: createCatalogToolsExtension(this.gateway),
+          hidden: true,
+        }] : []),
       ],
     });
     await Promise.all([loader.reload(), mirrorInitialization]);
@@ -435,7 +453,7 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      tools: ["read", "bash", "search_web", ...(this.gateway && this.remoteTools ? CATALOG_TOOL_NAMES : []), ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,
@@ -485,14 +503,35 @@ export class PiWorker {
     if (this.activeRequest) throw new Error("Pi worker already has an active turn");
     this.activeRequest = run.request_id;
     this.cancelled = false;
+    const turnTimeoutSeconds = run.poster_mode
+      ? Number(process.env.PWC_CHAT_POSTERLY_TIMEOUT_SECONDS ?? 600)
+      : run.paper_artifacts_enabled
+        ? Number(process.env.PWC_CHAT_LATEX_PAPER_TIMEOUT_SECONDS ?? 600)
+        : Number(process.env.PWC_CHAT_AGENT_TIMEOUT_SECONDS ?? 180);
+    this.compaction.reset(turnTimeoutSeconds * 1000, () => {
+      this.session?.abortCompaction();
+      void this.session?.abort();
+    }, run.prompt);
     this.boundChatSession ??= run.chat_session_id;
     this.failurePhase = "initialize";
     try {
       await this.initialize();
       this.emit(run.request_id, { type: "worker_ready" });
       await this.open(run);
+      if (this.cancelled) {
+        this.emit(run.request_id, { type: "worker_done", status: "stopped" });
+        return;
+      }
       if (!this.session || !this.manager || !this.mirror || !this.boundAgentSession) {
         throw new Error("Pi worker failed to initialize");
+      }
+      if (this.session.model) {
+        run = { ...run, prompt: fitPaperContext(run.prompt, {
+          model: this.session.model,
+          systemPrompt: this.session.systemPrompt,
+          tools: this.session.agent.state.tools,
+        }) };
+        this.compaction.setProtectedRequest(run.prompt);
       }
       const adapter = new PiEventAdapter(
         reasoningIsVisible(process.env.PWC_CHAT_SHOW_REASONING),
@@ -505,12 +544,16 @@ export class PiWorker {
       const unsubscribe = this.session.subscribe((event) => {
         if (subscribeFailed || this.cancelled) return;
         try {
+          if (event.type === "message_end" && event.message.role === "assistant") {
+            if (event.message.stopReason === "length") this.policy.observeIncomplete();
+          }
           for (const adapted of adapter.feed(event)) {
             // A terminal event must be the final semantic frame before
             // worker_done. Hold provider/adapter failures until transcript
             // finalization has selected the single authoritative terminal.
-            if (adapted.type === "error") pendingAdapterError = adapted;
-            else this.emit(run.request_id, adapted);
+            if (adapted.type === "error") {
+              if (!pendingAdapterError || pendingAdapterError.code === "context_too_large") pendingAdapterError = adapted;
+            } else this.emit(run.request_id, adapted);
           }
         } catch {
           subscribeFailed = true;
@@ -533,15 +576,20 @@ export class PiWorker {
       try {
         await this.session.prompt(run.prompt, { expandPromptTemplates: false, source: "interactive" });
         recovery = await recoverIncompleteResponse(this.policy, {
-          prompt: (value) =>
-            this.session!.prompt(value, {
+          prompt: async (value) => {
+            this.compaction.startRecovery();
+            // The provider guard and SDK compact only when context is actually
+            // crowded. A length-limited answer may have no safe summary boundary.
+            await this.session!.prompt(value, {
               expandPromptTemplates: false,
               source: "extension",
-            }),
+            });
+          },
           disableTools: () => this.session!.setActiveToolsByName([]),
-          canContinue: () => !adapter.failed && !this.cancelled && !subscribeFailed,
+          canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
         });
       } finally {
+        this.compaction.finish();
         unsubscribe();
         this.failurePhase = "transcript_finalize";
         try {
@@ -560,7 +608,18 @@ export class PiWorker {
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
         return;
       }
-      if (adapter.failed || subscribeFailed) {
+      if (this.compaction.timedOut) {
+        pendingAdapterError = { type: "error", code: "context_too_large",
+          message: RECOVERY_TIMEOUT_MESSAGE };
+      }
+      if (this.compaction.failed && !this.compaction.timedOut && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
+        pendingAdapterError = {
+          type: "error", code: "context_too_large",
+          message: "Earlier context could not be summarized. Your conversation is saved. Retry, or shorten recent messages if it remains too large.",
+        };
+      }
+      if (adapter.failed || subscribeFailed || this.compaction.failed) {
+        this.emit(run.request_id, this.executionTelemetry(recovery, true));
         this.emit(run.request_id, pendingAdapterError ?? {
           type: "error",
           code: "provider_error",
@@ -589,17 +648,18 @@ export class PiWorker {
         process.stderr.write(turnFailureDiagnostic(this.failurePhase, error));
         this.emit(run.request_id, {
           type: "error",
-          code: "gateway_unavailable",
-          message: "The research run failed.",
+          code: this.compaction.timedOut ? "context_too_large" : "gateway_unavailable",
+          message: this.compaction.timedOut ? RECOVERY_TIMEOUT_MESSAGE : "The research run failed.",
         });
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
       }
     } finally {
+      this.compaction.finish();
       this.activeRequest = undefined;
     }
   }
 
-  private executionTelemetry(recovery: RecoverySummary): PwCEvent {
+  private executionTelemetry(recovery: RecoverySummary, failed = false): PwCEvent {
     return {
       type: "_execution_telemetry",
       tool_calls: this.policy.calls,
@@ -607,6 +667,8 @@ export class PiWorker {
       direct_search_calls: this.policy.searches,
       web_search_calls: this.policy.webSearches,
       compaction_enabled: true,
+      compaction_recovery_outcome: this.compaction.attempted
+        ? (failed || this.compaction.failed ? "failed" : "success") : "not_needed",
       execution_limit_reached: this.policy.toolingClosed,
       recovery_reason: recovery.reason,
       recovery_attempts: recovery.attempts,

@@ -170,9 +170,56 @@ def require_catalog_mutator(
     request: Request,
     admin_token: Optional[str] = Depends(admin_token_header),
 ) -> dict:
-    """Contributor cookie or existing admin cookie/API-token workflow."""
+    """Retain the configured contributor/admin boundary for shared catalog writes."""
+    return _require_mutator(request, admin_token, paper_edit=False)
 
+
+def require_paper_mutator(
+    request: Request,
+    admin_token: Optional[str] = Depends(admin_token_header),
+) -> dict:
+    """Authenticate paper editors; the mutation service enforces scope and quotas."""
+    return _require_mutator(request, admin_token, paper_edit=True)
+
+
+def _require_mutator(
+    request: Request, admin_token: Optional[str], *, paper_edit: bool
+) -> dict:
+    authorization = request.headers.get("Authorization", "")
+    if authorization:
+        if not paper_edit:
+            raise HTTPException(
+                status_code=403,
+                detail="Paper credentials cannot edit shared catalog definitions",
+            )
+        # Credentials scoped to papers never fall back to a broader cookie or
+        # admin identity when invalid.
+        from backend.database.connection import get_database_session
+        from backend.services.paper_edit_access import PaperEditAccess
+
+        if not authorization.startswith("Bearer ") or not can_directly_edit_catalog(
+            "contributor"
+        ):
+            raise HTTPException(status_code=403, detail="Paper editing is unavailable")
+        sessions = get_database_session()
+        db = next(sessions)
+        try:
+            return PaperEditAccess(db).authenticate(authorization[7:])
+        finally:
+            sessions.close()
     actor = _session_actor(request)
+    if paper_edit and actor is None and can_directly_edit_catalog("contributor"):
+        from backend.routers.auth import decode_request_session
+
+        payload = decode_request_session(request)
+        if payload and payload.get("sub") and payload.get("username"):
+            actor = {
+                "source": "cookie",
+                "hf_subject": payload["sub"],
+                "username": payload["username"],
+                "role": "contributor",
+                "session_iat": payload.get("iat"),
+            }
     if actor:
         if actor["role"] == "contributor" and not can_directly_edit_catalog(
             "contributor"
@@ -217,7 +264,7 @@ def require_fresh_catalog_mutator(
 
 
 def ensure_fresh_contributor_actor(actor: dict) -> None:
-    if actor["role"] == "admin":
+    if actor["role"] == "admin" or actor.get("source") == "paper_token":
         return
     issued_at = actor.get("session_iat")
     now = datetime.now(timezone.utc).timestamp()
@@ -233,7 +280,7 @@ def ensure_fresh_contributor_actor(actor: dict) -> None:
 
 def catalog_mutation_context(
     request: Request,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     expected_version: Optional[str] = Header(default=None, alias="If-Match"),
 ) -> dict:
@@ -263,7 +310,7 @@ def fresh_catalog_mutation_context(
 
 def evaluation_mutation_context(
     request: Request,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
     expected_version: Optional[str] = Header(default=None, alias="If-Match"),
 ) -> dict:

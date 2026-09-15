@@ -15,7 +15,10 @@ FINALIZER_MIN_REMAINING_SECONDS = 10.0
 MAX_FETCHABLE_URLS = 256
 MAX_FETCHABLE_URL_SEED_BYTES = 32 * 1024
 MAX_PROVIDER_REQUESTS = 16
-MAX_PROVIDER_TURN_TOKENS = 512_000
+# Allow a full long-context call plus bounded compaction and retry.
+MAX_PROVIDER_TURN_TOKENS = 4_000_000
+# JSON transport allowance for million-token text contexts; not a token count.
+MAX_PROVIDER_REQUEST_BYTES = 8 * 1024 * 1024
 MAX_POSTER_PROVIDER_REQUESTS = 24
 ANSWER_NOW_REASON = (
     "Research is complete. Answer now using the evidence already gathered."

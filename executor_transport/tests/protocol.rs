@@ -613,3 +613,40 @@ fn full_data_windows_never_consume_reserved_control_capacity() {
     credits.release_control(MAX_CONTROL_PAYLOAD).unwrap();
     credits.reserve_control(FrameKind::Terminal, 1).unwrap();
 }
+
+#[test]
+fn attachment_clock_leeway_is_bounded_and_preserves_security_checks() {
+    let signer = signer(3, "issuer-current", NOW - DAY, NOW + DAY);
+    let mut claims = claims(7, digest(7), "harness-current");
+    claims.expires_at = NOW + 2;
+    let signed = signer.sign(claims).unwrap();
+    let mut ring = KeyRing::new(signer.verification_key(), None).unwrap();
+    assert_eq!(
+        ring.verify(&signed, NOW - 5),
+        Err(ContentFreeError::AuthorizationExpired)
+    );
+    for now in [NOW - 10, NOW - 5, NOW, NOW + 5, NOW + 12] {
+        ring.verify_with_clock_skew(&signed, now, 10).unwrap();
+    }
+    for now in [NOW - 11, NOW + 13] {
+        assert_eq!(
+            ring.verify_with_clock_skew(&signed, now, 10),
+            Err(ContentFreeError::AuthorizationExpired)
+        );
+    }
+    assert_eq!(
+        ring.verify_with_clock_skew(&signed, NOW + DAY + 1, 10),
+        Err(ContentFreeError::KeyExpired)
+    );
+    let mut changed = signed.clone();
+    changed.claims.environment_generation += 1;
+    assert_eq!(
+        ring.verify_with_clock_skew(&changed, NOW - 5, 10),
+        Err(ContentFreeError::AuthorizationRejected)
+    );
+    ring.revoke("issuer-current");
+    assert_eq!(
+        ring.verify_with_clock_skew(&signed, NOW - 5, 10),
+        Err(ContentFreeError::SecurityRevoked)
+    );
+}

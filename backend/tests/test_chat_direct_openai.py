@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 import inspect
 import uuid
+from decimal import Decimal, ROUND_CEILING
 from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 
 import backend.chat_gateway_app as gateway_app
@@ -207,8 +207,8 @@ def test_direct_openai_pricing_uses_per_million_rates_and_fails_stale():
         cache_write_tokens=100_000,
         output_tokens=1_000_000,
     )
-    # 800k ordinary input + 100k cache read + 100k cache write + 1m output.
-    assert actual_usage_microusd(settings, usage) == 1_387_000
+    # Long context: 2x input (including cache categories), 1.5x output.
+    assert actual_usage_microusd(settings, usage) == 2_174_000
     assert (
         safe_maximum_microusd(
             settings,
@@ -228,7 +228,7 @@ def test_direct_openai_pricing_uses_per_million_rates_and_fails_stale():
 def test_direct_openai_accepts_broker_sized_payload_without_reserving_bytes_as_tokens():
     settings = _settings()
 
-    assert MAX_REQUEST_BYTES == 512 * 1024
+    assert MAX_REQUEST_BYTES == 8 * 1024 * 1024
     maximum = safe_maximum_microusd(
         settings,
         OpenAIRequestBounds(
@@ -249,17 +249,34 @@ def test_direct_openai_accepts_broker_sized_payload_without_reserving_bytes_as_t
     assert maximum == token_bounded
 
 
-def test_direct_openai_billing_bound_matches_pi_model_context_contract():
-    provider_source = (
-        Path(__file__).resolve().parents[1]
-        / "chat_sandbox_worker"
-        / "pi_worker"
-        / "src"
-        / "provider.ts"
-    ).read_text()
-
-    formatted_context_window = f"{MAX_BILLABLE_INPUT_TOKENS:_}"
-    assert f"? {formatted_context_window} : 200_000" in provider_source
+@pytest.mark.parametrize(
+    "input_tokens,multiplier", [(272_000, 1), (272_001, 2), (1_000_000, 2)]
+)
+def test_long_context_accounting_and_reservations(input_tokens, multiplier):
+    settings = _settings()
+    usage = ExtractedOpenAIUsage(
+        input_tokens=input_tokens,
+        output_tokens=1000,
+        cached_input_tokens=0,
+        cache_write_tokens=0,
+    )
+    actual = actual_usage_microusd(settings, usage)
+    expected_input = int(
+        (Decimal(input_tokens) * Decimal("0.2") * multiplier).to_integral_value(
+            rounding=ROUND_CEILING
+        )
+    )
+    assert actual == expected_input + (1800 if multiplier == 2 else 1200)
+    assert (
+        safe_maximum_microusd(
+            settings,
+            OpenAIRequestBounds(
+                request_bytes=input_tokens * 4, maximum_output_tokens=1000
+            ),
+            now=datetime(2026, 8, 20, tzinfo=UTC),
+        )
+        >= actual
+    )
 
 
 @pytest.mark.parametrize(

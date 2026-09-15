@@ -12,7 +12,7 @@ use pwc_persistent_executor_transport::admission::{
     AdmissionClaims, AdmissionPurpose, AdmissionSigner, AdmissionVerificationKey,
     AdmissionVerifier, LifecycleClass, MAX_PREAUTH_FRAME_BYTES, PREAUTH_DEADLINE_MS,
 };
-use pwc_persistent_executor_transport::local_socket::{validate_peer, write_frame};
+use pwc_persistent_executor_transport::local_socket::{FrameReader, validate_peer, write_frame};
 use pwc_persistent_executor_transport::noise::{
     NoiseIdentity, NoisePublicKey, PendingResponderHandshake, prologue,
 };
@@ -247,7 +247,11 @@ async fn serve(
         let allowed_harness_uid = config.allowed_harness_uid;
         tokio::spawn(async move {
             let _permit = permit;
-            let _ = dispatch(stream, state, allowed_backend_uid, allowed_harness_uid).await;
+            if let Err(error) =
+                dispatch(stream, state, allowed_backend_uid, allowed_harness_uid).await
+            {
+                eprintln!("executor connection failed: {error}");
+            }
         });
     }
     drop(listener);
@@ -262,11 +266,20 @@ async fn dispatch(
     allowed_backend_uid: u32,
     allowed_harness_uid: u32,
 ) -> Result<(), ConnectionError> {
-    let mut prefix = [0_u8; 4];
-    timeout(Duration::from_millis(PREAUTH_DEADLINE_MS), async {
-        let result: Result<(), std::io::Error> = loop {
+    let prefix = peek_protocol_prefix(&stream).await?;
+    if &prefix == b"GET " {
+        handle_environment(stream, state).await
+    } else {
+        handle_local(stream, state, allowed_backend_uid, allowed_harness_uid).await
+    }
+}
+
+async fn peek_protocol_prefix(stream: &UnixStream) -> Result<[u8; 4], ConnectionError> {
+    Ok(timeout(Duration::from_millis(PREAUTH_DEADLINE_MS), async {
+        let mut prefix = [0_u8; 4];
+        loop {
             stream.readable().await?;
-            match stream.try_io(tokio::io::Interest::READABLE, || {
+            let result = stream.try_io(tokio::io::Interest::READABLE, || {
                 let read = unsafe {
                     libc::recv(
                         stream.as_raw_fd(),
@@ -277,24 +290,26 @@ async fn dispatch(
                 };
                 if read < 0 {
                     Err(std::io::Error::last_os_error())
+                } else if read == 0 {
+                    Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof))
                 } else if read < prefix.len() as isize {
                     Err(std::io::Error::from(std::io::ErrorKind::WouldBlock))
                 } else {
                     Ok(())
                 }
-            }) {
-                Ok(result) => break Ok(result),
-                Err(_) => continue,
+            });
+            match result {
+                Ok(()) => return Ok::<_, std::io::Error>(prefix),
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    // Peeking leaves partial bytes readable. Yield so a partial
+                    // or abandoned prefix cannot starve the server or deadline.
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
+                Err(error) => return Err(error),
             }
-        };
-        result
+        }
     })
-    .await??;
-    if &prefix == b"GET " {
-        handle_environment(stream, state).await
-    } else {
-        handle_local(stream, state, allowed_backend_uid, allowed_harness_uid).await
-    }
+    .await??)
 }
 
 async fn handle_local(
@@ -534,9 +549,10 @@ async fn handle_peer(
         events.send(event),
     )
     .await??;
+    let mut reader = FrameReader::new(MAX_LOCAL_PEER_FRAME_BYTES);
     loop {
         tokio::select! {
-            frame = read_bounded_frame(&mut stream, MAX_LOCAL_PEER_FRAME_BYTES) => {
+            frame = reader.read(&mut stream) => {
                 match frame {
                     Ok(frame) => events.send(PeerEvent::Data { connection_id, frame }).await?,
                     Err(_) => break,
@@ -721,6 +737,7 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
             .send(Message::Binary(
                 transport
                     .encrypt(&serde_json::to_vec(&json!({
+                        "issuer_time_ms": unix_ms()?,
                         "registration_id": registration_id,
                         "environment_generation": claims.environment_generation,
                         "shard_generation": claims.shard_generation,
@@ -777,6 +794,7 @@ async fn handle_environment(stream: UnixStream, state: Arc<State>) -> Result<(),
                             state.database.lock().await.persist_nonce(&verified).await?;
                             let acknowledgement = serde_json::to_vec(&json!({
                                 "kind": "heartbeat_ack",
+                                "issuer_time_ms": unix_ms()?,
                                 "reconnect_token": URL_SAFE.encode(reconnect_frame),
                                 "expires_at_ms": heartbeat_now + 45_000,
                             }))?;
@@ -962,5 +980,45 @@ fn validate_upgrade(
         Ok(response)
     } else {
         Err(http_error())
+    }
+}
+
+#[cfg(test)]
+mod prefix_tests {
+    use super::*;
+    use tokio::io::AsyncWriteExt;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn closed_connection_returns_eof() {
+        let (reader, writer) = UnixStream::pair().unwrap();
+        drop(writer);
+        let error = peek_protocol_prefix(&reader).await.unwrap_err();
+        assert_eq!(
+            error.downcast_ref::<std::io::Error>().unwrap().kind(),
+            std::io::ErrorKind::UnexpectedEof
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn fragmented_prefix_yields_and_preserves_bytes() {
+        let (mut reader, mut writer) = UnixStream::pair().unwrap();
+        writer.write_all(b"GE").await.unwrap();
+        let writer_task = tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            writer.write_all(b"T ").await.unwrap();
+        });
+        assert_eq!(peek_protocol_prefix(&reader).await.unwrap(), *b"GET ");
+        let mut bytes = [0; 4];
+        reader.read_exact(&mut bytes).await.unwrap();
+        assert_eq!(bytes, *b"GET ");
+        writer_task.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn abandoned_partial_prefix_is_bounded() {
+        let (reader, mut writer) = UnixStream::pair().unwrap();
+        writer.write_all(b"G").await.unwrap();
+        drop(writer);
+        assert!(peek_protocol_prefix(&reader).await.is_err());
     }
 }

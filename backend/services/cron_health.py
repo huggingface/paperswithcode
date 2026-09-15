@@ -745,11 +745,11 @@ def _read_systemd_pair(timer_unit: str, service_unit: str) -> Optional[Dict[str,
     if timer is None or service is None:
         return None
     service_job = (
-        _systemd_show(service["Job"], "Type,State") if service.get("Job") else None
+        _systemd_show(service["Job"], "JobType,State") if service.get("Job") else None
     )
     service_start_queued = bool(
         service_job
-        and service_job.get("Type") == "start"
+        and service_job.get("JobType") == "start"
         and service_job.get("State") in {"waiting", "running"}
     )
     return {

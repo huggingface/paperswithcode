@@ -36,6 +36,10 @@ from backend.models.database import (
     TaskDatasetMetric,
     TrendingModelCandidate,
 )
+from backend.services.evaluation_scale_service import (
+    metric_scale_bounds,
+    validate_source_score,
+)
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.autonomous_capabilities import (
     CAPABILITY_RESOURCE_KINDS,
@@ -1018,6 +1022,7 @@ class CodexCurationCallbackService:
                 or body.evaluation_removals
                 or body.benchmark_gaps
                 or body.validation_evidence
+                or body.score_evidence
             ):
                 raise ValueError(
                     "Resolution jobs accept only model resolution payloads"
@@ -1312,6 +1317,24 @@ class CodexCurationCallbackService:
             for item in body.validation_evidence
             if isinstance(item, dict) and str(item.get("evaluation_id", "")).isdigit()
         }
+        score_evidence = {
+            (entry.task_id, entry.dataset_id, entry.metric): entry
+            for entry in body.score_evidence
+        }
+        expected_score_keys = {
+            (item.task_id, item.dataset_id, metric)
+            for item in body.evaluations
+            for metric in item.metrics
+        }
+        if (
+            len(score_evidence) != len(body.score_evidence)
+            or set(score_evidence) != expected_score_keys
+        ):
+            raise ValueError(
+                "Scheduled evaluations require exactly one score_evidence entry "
+                "per task/dataset/metric with source_value, source_scale, source_url, "
+                "and table_reference; copy the original source cell before conversion"
+            )
         for item in body.evaluations:
             leaderboard = (
                 self.db.query(TaskDataset)
@@ -1357,6 +1380,11 @@ class CodexCurationCallbackService:
                 if not math.isfinite(numeric):
                     raise ValueError("Evaluation metric must be finite")
                 self._validate_metric_scale(configured[metric_name].scale, numeric)
+                validate_source_score(
+                    configured[metric_name].scale,
+                    numeric,
+                    score_evidence[(item.task_id, item.dataset_id, metric_name)],
+                )
             matches = self._matching_evaluations(item)
             if matches:
                 canonical = self._canonical_evaluation(matches)
@@ -1461,21 +1489,7 @@ class CodexCurationCallbackService:
     @staticmethod
     def _validate_metric_scale(scale: str | None, value: float) -> None:
         """Enforce explicit finite numeric ranges without guessing missing metadata."""
-        if not scale:
-            return
-        normalized = scale.strip().lower().replace(" ", "")
-        ranges = {
-            "0-1": (0.0, 1.0),
-            "[0,1]": (0.0, 1.0),
-            "fraction": (0.0, 1.0),
-            "0-100": (0.0, 100.0),
-            "[0,100]": (0.0, 100.0),
-            "percent": (0.0, 100.0),
-            "percentage": (0.0, 100.0),
-            "0-1000": (0.0, 1000.0),
-            "[0,1000]": (0.0, 1000.0),
-        }
-        bounds = ranges.get(normalized)
+        bounds = metric_scale_bounds(scale)
         if bounds is not None and not bounds[0] <= value <= bounds[1]:
             raise ValueError(
                 f"Evaluation metric value {value:g} is outside configured scale {scale}"

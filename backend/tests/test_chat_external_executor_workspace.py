@@ -387,7 +387,9 @@ def test_circuit_fallback_uses_legacy_launch_without_rendezvous_admission():
 
     asyncio.run(exercise())
 
-    assert provider.create_options[0]["launch_mode"] is SandboxLaunchMode.LEGACY
+    assert (
+        provider.create_options[0]["launch_mode"] is SandboxLaunchMode.LEGACY_EXECUTOR
+    )
     assert provider.create_options[0]["executor_launch"] is None
 
 

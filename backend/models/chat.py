@@ -148,6 +148,7 @@ class ChatRequest(BaseModel):
     ]
     initial_model: str | None = None
     replace_message_id: uuid.UUID | None = None
+    retry_message_id: uuid.UUID | None = None
     prior_revision: int | None = Field(default=None, ge=1)
     web_search_enabled: bool = False
     reasoning_effort: ReasoningEffort | None = None
@@ -170,6 +171,12 @@ class ChatRequest(BaseModel):
         if (self.replace_message_id is None) != (self.prior_revision is None):
             raise ValueError(
                 "Replacement message and revision must be supplied together"
+            )
+        if self.retry_message_id is not None and (
+            self.session_id is None or self.replace_message_id is not None
+        ):
+            raise ValueError(
+                "Retry requires an existing session and cannot replace a message"
             )
         previous_end = -1
         distinct: set[str] = set()

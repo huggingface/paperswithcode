@@ -518,7 +518,7 @@ def test_systemd_adapter_reads_only_registry_units():
         type(
             "Result",
             (),
-            {"returncode": 0, "stdout": "Type=start\nState=waiting\n"},
+            {"returncode": 0, "stdout": "JobType=start\nState=waiting\n"},
         )(),
     ]
     job = _job("monitor_chat_operational_alerts")
@@ -565,7 +565,7 @@ def test_systemd_adapter_does_not_treat_a_stop_job_as_a_queued_start():
         type(
             "Result",
             (),
-            {"returncode": 0, "stdout": "Type=stop\nState=waiting\n"},
+            {"returncode": 0, "stdout": "JobType=stop\nState=waiting\n"},
         )(),
     ]
     job = _job("monitor_chat_operational_alerts")

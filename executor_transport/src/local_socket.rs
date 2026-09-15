@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 use std::fs::File;
 use std::io::Read;
-use std::os::unix::fs::{FileTypeExt, PermissionsExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::Path;
 
 use serde::{Deserialize, Serialize};
@@ -38,6 +38,58 @@ pub enum LocalSocketError {
     Io(#[from] std::io::Error),
     #[error("authorization rejected")]
     Authorization(#[from] ContentFreeError),
+}
+
+/// Retains partial headers and payloads when a select branch cancels a read.
+/// Discard this reader when replacing the underlying connection.
+pub struct FrameReader {
+    limit: usize,
+    header: [u8; 4],
+    header_read: usize,
+    payload: Vec<u8>,
+    payload_read: usize,
+}
+
+impl FrameReader {
+    pub fn new(limit: usize) -> Self {
+        Self {
+            limit,
+            header: [0; 4],
+            header_read: 0,
+            payload: Vec::new(),
+            payload_read: 0,
+        }
+    }
+
+    pub async fn read<R: AsyncRead + Unpin>(
+        &mut self,
+        stream: &mut R,
+    ) -> Result<Vec<u8>, LocalSocketError> {
+        while self.header_read < 4 {
+            let count = stream.read(&mut self.header[self.header_read..]).await?;
+            if count == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            }
+            self.header_read += count;
+        }
+        if self.payload.is_empty() {
+            let length = u32::from_be_bytes(self.header) as usize;
+            if length == 0 || length > self.limit {
+                return Err(LocalSocketError::FrameRejected);
+            }
+            self.payload.resize(length, 0);
+        }
+        while self.payload_read < self.payload.len() {
+            let count = stream.read(&mut self.payload[self.payload_read..]).await?;
+            if count == 0 {
+                return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof).into());
+            }
+            self.payload_read += count;
+        }
+        self.header_read = 0;
+        self.payload_read = 0;
+        Ok(std::mem::take(&mut self.payload))
+    }
 }
 
 pub async fn read_frame<R: AsyncRead + Unpin>(stream: &mut R) -> Result<Vec<u8>, LocalSocketError> {
@@ -96,9 +148,21 @@ pub fn validate_peer(stream: &UnixStream, expected_uid: u32) -> Result<(), Local
 
 pub fn read_private_seed(path: &Path) -> Result<[u8; 32], LocalSocketError> {
     let metadata = std::fs::symlink_metadata(path).map_err(LocalSocketError::Io)?;
+    let systemd_directory = std::env::var_os("CREDENTIALS_DIRECTORY")
+        .and_then(|directory| std::fs::canonicalize(directory).ok());
+    let in_systemd_directory = systemd_directory.is_some()
+        && path
+            .parent()
+            .and_then(|parent| std::fs::canonicalize(parent).ok())
+            == systemd_directory;
     if !metadata.file_type().is_file()
         || metadata.file_type().is_symlink()
-        || metadata.permissions().mode() & 0o077 != 0
+        || !private_seed_permissions(
+            metadata.permissions().mode(),
+            metadata.uid(),
+            metadata.gid(),
+            in_systemd_directory,
+        )
         || metadata.len() != 32
     {
         return Err(LocalSocketError::CredentialRejected);
@@ -111,6 +175,11 @@ pub fn read_private_seed(path: &Path) -> Result<[u8; 32], LocalSocketError> {
         return Err(LocalSocketError::CredentialRejected);
     }
     Ok(seed)
+}
+
+fn private_seed_permissions(mode: u32, uid: u32, gid: u32, in_systemd_directory: bool) -> bool {
+    // systemd's protected credential mount can expose root:root 0440 files.
+    mode & 0o077 == 0 || (in_systemd_directory && uid == 0 && gid == 0 && mode & 0o777 == 0o440)
 }
 
 pub fn prepare_listener_path(path: &Path) -> Result<(), LocalSocketError> {
@@ -360,6 +429,36 @@ fn hex_digit(value: u8) -> Result<u8, LocalSocketError> {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test]
+    async fn frame_reader_survives_cancelled_header_and_payload_reads() {
+        use tokio::io::AsyncWriteExt;
+        let (mut writer, mut stream) = tokio::io::duplex(64);
+        let mut reader = super::FrameReader::new(16);
+        writer.write_all(&[0, 0]).await.unwrap();
+        tokio::select! {
+            biased;
+            result = reader.read(&mut stream) => panic!("incomplete header: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(reader.header_read, 2);
+        writer.write_all(&[0, 5, b'h', b'e']).await.unwrap();
+        tokio::select! {
+            biased;
+            result = reader.read(&mut stream) => panic!("incomplete payload: {result:?}"),
+            _ = tokio::task::yield_now() => {}
+        }
+        assert_eq!(reader.payload_read, 2);
+        writer.write_all(b"llo").await.unwrap();
+        assert_eq!(reader.read(&mut stream).await.unwrap(), b"hello");
+        super::write_frame(&mut writer, b"next").await.unwrap();
+        assert_eq!(reader.read(&mut stream).await.unwrap(), b"next");
+        writer.write_all(&17_u32.to_be_bytes()).await.unwrap();
+        assert!(matches!(
+            reader.read(&mut stream).await,
+            Err(super::LocalSocketError::FrameRejected)
+        ));
+    }
+
     use super::*;
 
     #[tokio::test]
@@ -450,6 +549,16 @@ mod tests {
             gate.authorize(&request, 10),
             Err(LocalSocketError::AttachmentRejected)
         ));
+    }
+
+    #[test]
+    fn systemd_group_read_requires_the_exact_protected_root_form() {
+        assert!(private_seed_permissions(0o440, 0, 0, true));
+        assert!(!private_seed_permissions(0o440, 0, 0, false));
+        assert!(!private_seed_permissions(0o440, 1000, 0, true));
+        assert!(!private_seed_permissions(0o440, 0, 1000, true));
+        assert!(!private_seed_permissions(0o640, 0, 0, true));
+        assert!(!private_seed_permissions(0o444, 0, 0, true));
     }
 
     #[test]

@@ -1358,17 +1358,51 @@ class ChatSessionService:
         session.active_turn_expires_at = None
         return True
 
+    def _latest_user_message(self, session: ChatSession) -> ChatMessageRecord | None:
+        return self.db.execute(
+            select(ChatMessageRecord)
+            .where(
+                ChatMessageRecord.session_id == session.id,
+                ChatMessageRecord.role == "user",
+                ChatMessageRecord.status.notin_(INACTIVE_STATUSES),
+            )
+            .order_by(ChatMessageRecord.sequence.desc())
+            .limit(1)
+        ).scalar_one_or_none()
+
     def _has_unresolved_turn(self, session: ChatSession) -> bool:
-        return (
-            self.db.execute(
-                select(ChatMessageRecord.id).where(
-                    ChatMessageRecord.session_id == session.id,
-                    ChatMessageRecord.role == "user",
-                    ChatMessageRecord.status.in_(["interrupted", "error"]),
-                )
-            ).first()
-            is not None
+        # A continuation preserves earlier failures as history. Only the latest
+        # user turn can require recovery; completed continuations unblock chat.
+        latest = self._latest_user_message(session)
+        return latest is not None and latest.status in {"interrupted", "error"}
+
+    def _validate_saved_progress_retry(
+        self, session: ChatSession, message_id: uuid.UUID
+    ) -> ChatMessageRecord:
+        latest = self._latest_user_message(session)
+        if (
+            latest is None
+            or latest.id != message_id
+            or latest.status not in {"error", "interrupted"}
+            or session.agent_harness != "pi"
+            or not session.sdk_session_id
+        ):
+            raise ChatServiceError(
+                "invalid_retry", 409, "Only the latest failed turn can be continued"
+            )
+        leaf = self.db.scalar(
+            select(ChatPiSession.current_leaf_id).where(
+                ChatPiSession.chat_session_id == session.id,
+                ChatPiSession.agent_session_id == session.sdk_session_id,
+            )
         )
+        if not leaf:
+            raise ChatServiceError(
+                "retry_history_unavailable",
+                409,
+                "Saved research is unavailable; edit the request or start a new conversation",
+            )
+        return latest
 
     def _load_owner_storage_bytes(self, owner: ChatOwner) -> int:
         return (
@@ -1755,11 +1789,20 @@ class ChatSessionService:
         initial_model: str | None = None,
         replace_message_id: uuid.UUID | None = None,
         prior_revision: int | None = None,
+        retry_message_id: uuid.UUID | None = None,
         web_search_enabled: bool = False,
         reasoning_effort: str | None = None,
         update_web_search_preference: bool = True,
         qualification: QualificationContext | None = None,
     ) -> TurnAdmission:
+        if retry_message_id is not None and (
+            session_id is None or replace_message_id is not None
+        ):
+            raise ChatServiceError(
+                "invalid_retry",
+                409,
+                "Retry requires an existing session without replacement",
+            )
         durable_coordinator: ChatTurnAdmissionCoordinator | None = None
         durable_preflight: DurableAdmissionPreflight | None = None
         session: ChatSession | None = None
@@ -1912,6 +1955,28 @@ class ChatSessionService:
                     "This conversation belongs to a different paper.",
                 )
 
+        recovered_retry_expiry = False
+        if retry_message_id is not None:
+            assert session is not None
+            stale = self._load_expired_active_message(session, now)
+            recovered_retry_expiry = self._apply_expired_active_turn(session, stale)
+            retry_target = self._validate_saved_progress_retry(
+                session, retry_message_id
+            )
+            # Keep the original display request as well as its effective context.
+            # Mode selection, lease duration, and idempotent replays all use it.
+            text = retry_target.content
+            effective_prompt = (
+                (retry_target.effective_prompt or retry_target.content)
+                + "\n\n"
+                + (
+                    "Continue the last failed request from the saved research and completed tool results. "
+                    "Preserve the original request and constraints. Do not repeat completed edits, "
+                    "publications, or artifact creation. Verify uncertain action outcomes before proceeding. "
+                    "If the saved context cannot be recovered safely, report the failure explicitly."
+                )
+            )
+
         target_harness = (
             getattr(session, "agent_harness", "claude")
             if session is not None
@@ -1994,9 +2059,15 @@ class ChatSessionService:
         stale = self._load_expired_active_message(session, now)
         recovered_expired_lease = self._apply_expired_active_turn(session, stale)
         recovered_expired_lease = (
-            recovered_expired_lease or recovered_durable_preflight_expiry
+            recovered_expired_lease
+            or recovered_durable_preflight_expiry
+            or recovered_retry_expiry
         )
-        if self._has_unresolved_turn(session) and replace_message_id is None:
+        if (
+            self._has_unresolved_turn(session)
+            and replace_message_id is None
+            and retry_message_id is None
+        ):
             raise ChatServiceError(
                 "turn_requires_retry",
                 409,

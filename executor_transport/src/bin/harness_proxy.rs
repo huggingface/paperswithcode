@@ -7,9 +7,9 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD;
 use pwc_persistent_executor_transport::local_socket::{
-    AttachmentGate, AttachmentRequest, LocalSocketError, PeerMessageDecoder, encode_peer_message,
-    prepare_listener_path, read_frame, read_private_seed, validate_peer, validate_socket_path,
-    write_frame,
+    AttachmentGate, AttachmentRequest, FrameReader, LocalSocketError, MAX_LOCAL_FRAME_BYTES,
+    PeerMessageDecoder, encode_peer_message, prepare_listener_path, read_frame, read_private_seed,
+    validate_peer, validate_socket_path, write_frame,
 };
 use pwc_persistent_executor_transport::noise::{InitiatorHandshake, NoiseIdentity, NoiseTransport};
 use pwc_persistent_executor_transport::protocol::{
@@ -388,10 +388,12 @@ async fn handle(
     )
     .await?;
 
+    let mut local_reader = FrameReader::new(MAX_LOCAL_FRAME_BYTES);
+    let mut peer_reader = FrameReader::new(MAX_LOCAL_FRAME_BYTES);
     let mut open_streams = HashSet::new();
     loop {
         tokio::select! {
-            frame = read_frame(&mut local) => {
+            frame = local_reader.read(&mut local) => {
                 let frame = match frame {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -419,11 +421,12 @@ async fn handle(
                             connection_id,
                             &mut encrypted_peer,
                         ).await?;
+                        peer_reader = FrameReader::new(MAX_LOCAL_FRAME_BYTES);
                         break;
                     }
                 }
             }
-            frame = read_frame(&mut peer) => {
+            frame = peer_reader.read(&mut peer) => {
                 let frame = match frame {
                     Ok(frame) => frame,
                     Err(_) => {
@@ -437,6 +440,7 @@ async fn handle(
                             connection_id,
                             &mut encrypted_peer,
                         ).await?;
+                        peer_reader = FrameReader::new(MAX_LOCAL_FRAME_BYTES);
                         continue;
                     }
                 };
@@ -457,6 +461,7 @@ async fn handle(
                             connection_id,
                             &mut encrypted_peer,
                         ).await?;
+                        peer_reader = FrameReader::new(MAX_LOCAL_FRAME_BYTES);
                         break;
                     }
                 }

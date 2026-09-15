@@ -87,6 +87,7 @@ export type ChatEvent =
       provider_execution?: boolean;
     }
   | { type: "workspace_ready" }
+  | { type: "compaction_status"; state: "started" | "finished" }
   | {
       type: "lifecycle";
       phase: "preparing_workspace" | "starting_agent" | "connecting_model";
@@ -184,6 +185,7 @@ export interface ChatStreamRequest {
   client_message_id: string;
   initial_model?: string;
   replace_message_id?: string;
+  retry_message_id?: string;
   prior_revision?: number;
   paper_mentions?: PaperMentionWire[];
   web_search_enabled: boolean;
@@ -325,6 +327,7 @@ export interface ChatMessage {
   /** Assistant messages: ordered stream blocks. */
   blocks?: ChatBlock[];
   streaming?: boolean;
+  compacting?: boolean;
   followups?: string[];
   /** From the `done` event; anything other than "success" is surfaced. */
   finishReason?: string;

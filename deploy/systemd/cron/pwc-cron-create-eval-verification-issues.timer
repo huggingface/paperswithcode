@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Request verification of settled paper-native evaluations on GitHub
+
+[Timer]
+OnCalendar=*-*-* *:52:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-create-eval-verification-issues.service
+
+[Install]
+WantedBy=timers.target

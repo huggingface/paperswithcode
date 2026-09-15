@@ -42,6 +42,7 @@ CONTROL_SOCKET = Path("/var/empty/pwc-broker/control.sock")
 CAPABILITY_DRAIN_QUIET_SECONDS = 0.5
 CAPABILITY_DRAIN_TIMEOUT_SECONDS = 20.0
 GATEWAY_CONNECTION_POOL_SIZE = 4
+MODEL_REQUEST_MAX_BYTES = 8 * 1024 * 1024
 GATEWAY_CONNECTION_MAX_IDLE_SECONDS = 30.0
 HF_OPERATIONS = frozenset(
     {
@@ -472,6 +473,8 @@ class Handler(BaseHTTPRequestHandler):
             )
             return
         maximum_body = 3 * 1024 * 1024 if path == "/paper" else 512 * 1024
+        if path in {"/v1/messages", "/v1/responses"}:
+            maximum_body = MODEL_REQUEST_MAX_BYTES
         length = min(declared_length, maximum_body)
         body = self.rfile.read(length)
         if declared_length != length:
@@ -846,7 +849,10 @@ class OriginHandler(BaseHTTPRequestHandler):
         ):
             self.send_error(403)
             return
-        length = min(int(self.headers.get("Content-Length", "0")), 512 * 1024)
+        length = int(self.headers.get("Content-Length", "0"))
+        if not 0 < length <= MODEL_REQUEST_MAX_BYTES:
+            self.send_error(413)
+            return
         body = self.rfile.read(length)
         active = STATE.begin_request()
         connection = GATEWAY_CONNECTIONS.acquire()

@@ -20,12 +20,12 @@ vi.mock("@/hooks/useDebounce", () => ({ useDebounce: (value: string) => value })
 
 const Location = () => <div data-testid="location">{useLocation().pathname}{useLocation().search}</div>;
 
-function renderOverlay() {
+function renderOverlay(onClose = vi.fn()) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/"]}>
-        <SearchOverlay open onClose={vi.fn()} />
+        <SearchOverlay open onClose={onClose} />
         <Routes>
           <Route path="*" element={<Location />} />
         </Routes>
@@ -38,6 +38,28 @@ describe("SearchOverlay paper handoff", () => {
   beforeEach(() => {
     searchPapers.mockReset();
     searchPapers.mockResolvedValue({ results: [], next_page: 2, previous_page: null });
+  });
+
+  it("consumes Escape before an earlier page shortcut and removes its handler on unmount", () => {
+    const closePage = vi.fn();
+    const pageKeydown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && !event.defaultPrevented) closePage();
+    };
+    window.addEventListener("keydown", pageKeydown);
+    try {
+      const closeOverlay = vi.fn();
+      const view = renderOverlay(closeOverlay);
+      fireEvent.keyDown(screen.getByPlaceholderText(/Search papers/), { key: "Escape" });
+      expect(closeOverlay).toHaveBeenCalledOnce();
+      expect(closePage).not.toHaveBeenCalled();
+
+      view.unmount();
+      fireEvent.keyDown(window, { key: "Escape" });
+      expect(closeOverlay).toHaveBeenCalledOnce();
+      expect(closePage).toHaveBeenCalledOnce();
+    } finally {
+      window.removeEventListener("keydown", pageKeydown);
+    }
   });
 
   it("keeps Enter assigned to the assistant", async () => {

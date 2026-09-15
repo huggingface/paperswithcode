@@ -1965,3 +1965,43 @@ def test_interrupted_candidate_recovery_trusts_validated_pointers_in_production(
     assert calls == [
         ("production", "green", "candidate", frozenset({old.name, older.name}))
     ]
+
+
+def test_certificate_reload_rejects_another_lineage(monkeypatch):
+    monkeypatch.setenv("RENEWED_LINEAGE", "/etc/letsencrypt/live/paperswithcode.co")
+    with pytest.raises(RuntimeError, match="selected executor certificate"):
+        nginx_tool_module.reload_renewed_certificate("production")
+
+
+def test_certificate_reload_validates_before_reload_and_smokes(monkeypatch):
+    monkeypatch.setenv(
+        "RENEWED_LINEAGE", "/etc/letsencrypt/live/chat-executor.paperswithcode.co"
+    )
+    monkeypatch.setattr(nginx_tool_module, "active_release_id", lambda _: "release")
+    calls = []
+    monkeypatch.setattr(
+        nginx_tool_module.subprocess, "run", lambda args, **kwargs: calls.append(args)
+    )
+    nginx_tool_module.reload_renewed_certificate("production")
+    assert calls == [
+        ["nginx", "-t"],
+        ["systemctl", "reload", "nginx"],
+        nginx_tool_module.smoke_command("production", "release"),
+    ]
+
+
+def test_invalid_nginx_configuration_prevents_certificate_reload(monkeypatch):
+    monkeypatch.setenv(
+        "RENEWED_LINEAGE", "/etc/letsencrypt/live/chat-executor.paperswithcode.co"
+    )
+    monkeypatch.setattr(nginx_tool_module, "active_release_id", lambda _: "release")
+    calls = []
+
+    def run(args, **kwargs):
+        calls.append(args)
+        raise subprocess.CalledProcessError(1, args)
+
+    monkeypatch.setattr(nginx_tool_module.subprocess, "run", run)
+    with pytest.raises(subprocess.CalledProcessError):
+        nginx_tool_module.reload_renewed_certificate("production")
+    assert calls == [["nginx", "-t"]]

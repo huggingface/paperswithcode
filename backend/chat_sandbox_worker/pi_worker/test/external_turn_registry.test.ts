@@ -250,3 +250,74 @@ test("terminal acknowledgement and grace expiry release retained state", async (
   assert.equal(expired.size, 0);
   assert.equal(disposals, 2);
 });
+
+test("tiny deltas batch before sequencing and preserve boundaries", () => {
+  const transport = new RecordingTransport();
+  const run = new ExternalTurnRegistry().start("request-1", claim, transport);
+  for (let i = 0; i < 10_000; i++) run.emit("request-1", { type: "answer_delta", text: "x" });
+  run.emit("request-1", { type: "reasoning_start" });
+  run.emit("request-1", { type: "reasoning_delta", text: "why" });
+  run.emit("request-1", { type: "worker_done", status: "complete" });
+  assert.equal(transport.frames.filter(f => f.type === "answer_delta").map(f => f.text).join(""), "x".repeat(10_000));
+  assert.ok(transport.frames.length < 20);
+  assert.deepEqual(transport.frames.slice(-3).map(f => f.type), ["reasoning_start", "reasoning_delta", "worker_done"]);
+  assert.deepEqual(transport.frames.map(f => f.worker_sequence), transport.frames.map((_, i) => i + 1));
+});
+
+test("durable acknowledgements free capacity and fence expired cursors", () => {
+  const transport = new RecordingTransport();
+  const run = new ExternalTurnRegistry({ maximumEvents: 5 }).start("request-1", claim, transport);
+  for (let sequence = 1; sequence <= 5000; sequence++) {
+    run.append({ type: "answer_delta", text: "x" });
+    run.acknowledgeEvents(sequence);
+    run.acknowledgeEvents(sequence);
+  }
+  run.append({ type: "answer_delta", text: "retained" });
+  assert.equal(transport.frames.length, 5001);
+  assert.throws(() => run.acknowledgeEvents(5002), TurnProtocolError);
+  run.detach(transport);
+  assert.throws(() => run.attach(new RecordingTransport(), claim, 4999), TurnProtocolError);
+  assert.deepEqual(run.attach(new RecordingTransport(), claim, 5000).map(f => f.text), ["retained"]);
+});
+
+test("batch timer delivers a short delta", async () => {
+  const transport = new RecordingTransport();
+  const run = new ExternalTurnRegistry().start("request-1", claim, transport);
+  run.emit("request-1", { type: "answer_delta", text: "hello" });
+  await new Promise(resolve => setTimeout(resolve, 60));
+  assert.equal(transport.frames[0]?.text, "hello");
+});
+
+test("pending text flushes before tool dispatch and cancellation", async () => {
+  const transport = new RecordingTransport();
+  const run = new ExternalTurnRegistry().start("request-1", claim, transport);
+  run.emit("request-1", { type: "answer_delta", text: "before tool" });
+  const pending = run.channel.request({ type: "tool_request", operation_id: "op", tool_call_id: "tool", operation: "read", path: "/workspace/a", offset: 0, max_bytes: 100 });
+  assert.deepEqual(transport.frames.map(f => f.type), ["answer_delta", "tool_request"]);
+  run.resolveTool({ type: "tool_result", operation_id: "op", ok: true, data_base64: "", eof: true });
+  await pending;
+  run.emit("request-1", { type: "answer_delta", text: "before cancel" });
+  let cancellations = 0;
+  run.setCancelWorker(async () => {
+    cancellations++;
+    assert.equal(transport.frames.at(-1)?.text, "before cancel");
+  });
+  await run.cancel();
+  await run.cancel();
+  assert.equal(cancellations, 1);
+  run.emit("request-1", { type: "worker_done", status: "complete" });
+  const size = transport.frames.length;
+  run.emit("request-1", { type: "answer_delta", text: "ignored" });
+  await new Promise(resolve => setTimeout(resolve, 40));
+  assert.equal(transport.frames.length, size);
+});
+
+test("pruning releases byte capacity and unacknowledged transport success retains replay", () => {
+  const transport = new RecordingTransport();
+  const run = new ExternalTurnRegistry({ maximumBytes: 2200 }).start("request-1", claim, transport);
+  run.append({ type: "answer_delta", text: "x".repeat(900) });
+  run.acknowledgeEvents(1);
+  run.append({ type: "answer_delta", text: "y".repeat(900) });
+  run.detach(transport);
+  assert.deepEqual(run.attach(new RecordingTransport(), claim, 1).map(f => f.worker_sequence), [2]);
+});

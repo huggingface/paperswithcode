@@ -12,6 +12,21 @@ or edit repository files. Fetch the job-scoped paper context with:
 python jobs/curation_api.py context
 ```
 
+Read the validated `paper_markdown` or `paper_pdf` in the source manifest.
+A cached image caption, SVG title, diagram notice, empty wrapper, or successful
+HTTP response alone does not count as reading the paper. The PDF preflight
+checks only the first two pages for readable content and artifact URLs; read
+the relevant body, experiment tables, and captions yourself before curating.
+If no substantive source can be read, report the failure rather than marking
+the source inspected or URL extraction complete.
+
+For enrichment, search the existing task taxonomy for the actual contribution,
+including when the paper starts with no tasks. Accept an official artifact only
+when it belongs to this exact paper. Shared navigation links to sibling products,
+lab home pages, and website templates are not paper artifacts; a shared vendor
+or domain does not establish ownership. Preserve existing manual links and
+report questionable existing links separately.
+
 If context includes `retry_feedback`, address its exact rejection before apply.
 Re-read current rows and sources; a prior proposal is not evidence.
 
@@ -37,10 +52,41 @@ python jobs/curation_api.py leaderboards "GenEval"
 
 This returns the authorized task and dataset IDs, configured metrics, ranking
 direction, canonical scale, harness support, and recent values for scale checks.
+Use the exact returned metric scale, not a general normalization convention.
+For each submitted metric, include one `score_evidence` entry keyed by
+`task_id`, `dataset_id`, and `metric`, with the original `source_value`,
+`source_scale` (`0-100` for percentages, `0-1` for fractions, `native` for
+other units), primary `source_url`, and `table_reference` identifying the
+table, model row, column, and protocol. For example:
+
+```json
+{"task_id": 11, "dataset_id": 792, "metric": "Success Rate",
+ "source_value": 86.89, "source_scale": "0-100",
+ "source_url": "https://arxiv.org/html/2609.12641",
+ "table_reference": "Table II, ImageWAM LIT, Overall, zero-shot LIBERO-Plus"}
+```
+
+That percentage must remain `86.89` on a `0-100` leaderboard. Convert it to
+`0.8689` only if the exact configured metric uses `0-1`. Conversely, convert
+a source fraction to percent when the leaderboard uses `0-100`. Preserve
+native units for non-rate metrics; do not guess conversions from magnitude.
+The server checks source-to-stored conversion and rejects missing evidence
+or a mismatch, including fractions that happen to fit inside 0–100 bounds.
+If metadata conflicts with source or existing leaderboard evidence, skip the
+result and report the conflict instead of choosing a scale arbitrarily.
+
 Try exact names and common spelling variants, but reject semantically different
 datasets or splits even when their names are similar. The `taxonomy` command
 searches only task and method names. Never use an empty taxonomy result to
 conclude that a benchmark or leaderboard is missing.
+
+Establish the exact benchmark version, split, task/language coverage, aggregation,
+tool setting, and metric definition before selecting the best eligible result.
+Never substitute a subset for a complete suite, an overall score for a split,
+or instruction-level accuracy for prompt-level accuracy because it is higher.
+Skip an unverified protocol match and scores known to include invalid trials;
+report the source evidence instead. A familiar baseline used as an experimental
+probe is not a model introduced by the paper.
 
 For `add-evals`, follow the conservative rules in `add-evals/SKILL.md`, but
 write a JSON payload containing `evaluations` (each has this job's

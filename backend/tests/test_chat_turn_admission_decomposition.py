@@ -434,7 +434,7 @@ def _pre_persistence_case(name: str):
                 _Result(one=None),
                 _Result(),
                 _Result(),
-                _Result(rows=(uuid.uuid4(),)),
+                _Result(one=SimpleNamespace(status="error")),
             ),
             scalar_results=(0, 0),
         )

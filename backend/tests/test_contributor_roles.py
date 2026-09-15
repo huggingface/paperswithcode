@@ -270,7 +270,7 @@ def test_all_catalog_write_routes_receive_catalog_mutator_dependency():
     }
     for path in approved_paper_paths:
         assert "catalog_mutation_context" in routes[("PUT", path)]
-        assert "require_catalog_mutator" in routes[("PUT", path)]
+        assert "require_paper_mutator" in routes[("PUT", path)]
 
     catalog_routes = {
         ("POST", "/api/v1/project-pages/"): "require_catalog_mutator",
@@ -314,7 +314,7 @@ def test_all_catalog_write_routes_receive_catalog_mutator_dependency():
         ("DELETE", "/api/v1/evaluations/{evaluation_id}"),
     }:
         assert "evaluation_mutation_context" in routes[(method, path)]
-        assert "require_catalog_mutator" in routes[(method, path)]
+        assert "require_paper_mutator" in routes[(method, path)]
 
 
 def test_representative_excluded_boundaries_remain_admin_only():
@@ -353,3 +353,31 @@ def test_chat_spend_dashboard_route_is_admin_only():
         route for route in router.routes if route.path == "/chat/admin/sandbox-spend"
     )
     assert "require_admin" in _dependency_names(route)
+
+
+def test_public_paper_editor_cannot_mutate_shared_catalog(monkeypatch):
+    configure(monkeypatch, settings(), {"sub": "public-user", "username": "alice"})
+    assert auth_utils.require_paper_mutator(request(), None)["role"] == "contributor"
+    with pytest.raises(HTTPException) as error:
+        auth_utils.require_catalog_mutator(request(), None)
+    assert error.value.status_code == 401
+
+
+@pytest.mark.parametrize("subject", ["contributor-sub", "admin-sub"])
+def test_configured_catalog_roles_still_work(monkeypatch, subject):
+    configure(monkeypatch, settings(), {"sub": subject, "username": "alice"})
+    assert auth_utils.require_catalog_mutator(request(), None)["hf_subject"] == subject
+
+
+def test_paper_bearer_never_falls_back_to_catalog_admin(monkeypatch):
+    configure(
+        monkeypatch,
+        settings(admin_api_token="admin-secret"),
+        {"sub": "admin-sub", "username": "admin"},
+    )
+    with pytest.raises(HTTPException) as error:
+        auth_utils.require_catalog_mutator(
+            request_with_headers((b"authorization", b"Bearer paper-token")),
+            "admin-secret",
+        )
+    assert error.value.status_code == 403

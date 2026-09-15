@@ -117,6 +117,10 @@ function reduceEvent(
       };
     case "session_title_done":
       return { ...state, title: event.title };
+    case "compaction_status":
+      return { ...state, messages: patchLast(state.messages, (message) => ({
+        ...message, compacting: Boolean(message.streaming && event.state === "started"),
+      })) };
     case "reasoning_start":
       return {
         ...state,
@@ -358,6 +362,7 @@ function reduceEvent(
         messages: patchLast(state.messages, (message) => ({
           ...message,
           streaming: false,
+          compacting: false,
           followups: event.followups,
           finishReason: event.finish_reason,
           citations: event.citations,
@@ -377,6 +382,7 @@ function reduceEvent(
         messages: patchLast(state.messages, (message) => ({
           ...message,
           streaming: false,
+          compacting: false,
           error: event.message,
           errorCode: event.code,
           blocks: (message.blocks ?? []).map((block) => (
@@ -406,7 +412,7 @@ function stopMessages(messages: ChatMessage[]): ChatMessage[] {
       if (block.kind === "answer") return [{ ...block, done: true }];
       return [block];
     });
-    return { ...message, blocks, streaming: false, finishReason: "stopped" };
+    return { ...message, blocks, streaming: false, compacting: false, finishReason: "stopped" };
   });
 }
 
@@ -450,7 +456,7 @@ export function chatLifecycleReducer(
         ...state,
         phase: "idle",
         messages: patchLast(state.messages, (message) => (
-          message.streaming ? { ...message, streaming: false } : message
+          message.streaming ? { ...message, streaming: false, compacting: false } : message
         )),
       };
     case "stop":

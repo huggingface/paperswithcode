@@ -49,6 +49,7 @@ if (!useHashRouter && typeof window !== "undefined") {
 // Lazy-load route components so visitors only download the chunks for the
 // pages they actually navigate to. Saves ~150-200 KB gzipped on first paint
 // for visitors landing on a single route.
+const AuthorizePaperEditView = React.lazy(() => import("@/views/AuthorizePaperEditView"));
 const FeedView = React.lazy(() => import("@/views/FeedView"));
 const ChatView = React.lazy(() => import("@/views/ChatView"));
 const SharedChatView = React.lazy(() => import("@/views/SharedChatView"));
@@ -296,6 +297,7 @@ const Shell: React.FC = () => {
             <Route path="/orgs/:orgSlug/:taskSlug" element={<OrganizationTaskView />} />
             <Route path="/authors/:authorId" element={<AuthorDetailView />} />
             <Route path="/benchmark/:datasetSlug" element={<BenchmarkDetailView />} />
+            <Route path="/authorize-paper-edit/:authorizationId" element={<AuthorizePaperEditView />} />
             <Route path="/submit" element={<SubmitView />} />
             <Route path="/saved" element={<AuthGatedRoute element={<SavedPapersView />} />} />
             <Route path="/settings" element={<SettingsView />} />

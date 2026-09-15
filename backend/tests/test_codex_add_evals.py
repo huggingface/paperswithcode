@@ -88,10 +88,10 @@ def test_release_manifest_pins_remote_worker_revision(tmp_path):
 def test_remote_job_uses_immutable_curator_image():
     settings = get_settings()
     assert settings.codex_jobs_image == (
-        "hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86"
+        "hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"
     )
     assert settings.codex_jobs_image_revision == (
-        "7067f309c98f9ea002b812773c9a256400c740ef"
+        "556b5d14b762684586030d3018999dae392200c9"
     )
     assert settings.codex_jobs_namespace == ""
     assert CURATOR_COMMAND == "exec python3 /runner/run_paper_curation.py"
@@ -379,7 +379,7 @@ def test_remote_add_evals_requires_configured_leaderboard_search():
 
     assert "only after running the `leaderboards` command for every" in normalized_skill
     assert "Never use an empty taxonomy result" in normalized_skill
-    assert "for every benchmark found in the source" in normalized_runner
+    assert "for every benchmark found across those sources" in normalized_runner
     assert "taxonomy command returns only tasks and methods" in normalized_runner
 
 

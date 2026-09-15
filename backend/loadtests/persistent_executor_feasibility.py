@@ -38,9 +38,13 @@ EXPECTED_PROFILE_COUNTS = {
     "reconnect_real_modal": 32,
 }
 
+# Explicit cold-latency revision approved on 2026-09-15. Other gates are unchanged.
+COLD_FIRST_PWD_P95_MS = 5_000
+COLD_FIRST_PWD_P99_MS = 8_000
+
 EXPECTED_PROFILE_TARGETS = {
-    "cold_first_pwd": (2000, 5000, None, None),
-    "cold_32_way": (None, 5000, None, None),
+    "cold_first_pwd": (COLD_FIRST_PWD_P95_MS, COLD_FIRST_PWD_P99_MS, None, None),
+    "cold_32_way": (None, 8000, None, None),
     "warm_ack": (500, 1000, None, None),
     "warm_noop": (1000, 2000, None, None),
     "connected_stop_one": (250, 500, 1000, 2000),

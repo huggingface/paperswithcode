@@ -772,7 +772,7 @@ class PaperService:
                     query = query.order_by(asc(order_column).nullslast())
 
             # Get total count
-            total_count = query.count()
+            total_count = query.order_by(None).count()
 
             # Apply pagination
             offset = (page - 1) * page_size

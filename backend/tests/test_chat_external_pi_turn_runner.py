@@ -387,6 +387,42 @@ class LostExecutor(FakeExecutor):
         )
 
 
+@pytest.mark.parametrize("remote_enabled", [False, True])
+def test_legacy_admission_uses_legacy_workspace_without_rendezvous(remote_enabled):
+    class Manager(FakeWorkspaceManager):
+        async def acquire(self, **kwargs):
+            raise AssertionError("executor startup requires a rendezvous bundle")
+
+        async def acquire_legacy(self, *, session_id, turn_claim):
+            return await super().acquire(session_id=session_id, turn_claim=turn_claim)
+
+    manager = Manager(FakeProvider())
+    executor = FakeExecutor()
+    runner = _tool_runner(executor, manager)
+    runner.tool_executor.settings.chat_executor_remote_transport_enabled = (
+        remote_enabled
+    )
+    assert runner.tool_executor.admission.executor_transport == "legacy"
+
+    result = asyncio.run(
+        runner._tool_result(
+            {
+                "operation_id": "legacy-operation",
+                "tool_call_id": "legacy-tool",
+                "operation": "exec",
+                "command": "printf x >> marker",
+                "timeout_ms": 1000,
+            }
+        )
+    )
+
+    assert result["ok"] is True
+    assert executor.exec_calls == 1
+    assert len(manager.acquired) == 1
+    assert len(manager.released) == 1
+    assert manager.invalidated == []
+
+
 def test_turn_binding_is_lazy_ordered_shared_bounded_and_settled_once():
     events: list[str] = []
 
@@ -575,7 +611,8 @@ def worker_status(claim):
     )
 
 
-def test_external_pi_runner_lazily_creates_executor_for_remote_read():
+@pytest.mark.parametrize("stop_after_done", [False, True])
+def test_external_pi_runner_lazily_creates_executor_for_remote_read(stop_after_done):
     settings = get_settings().model_copy(deep=True)
     settings.environment = "staging"
     settings.chat_external_pi_worker_url = "http://127.0.0.1:8766"
@@ -647,7 +684,15 @@ def test_external_pi_runner_lazily_creates_executor_for_remote_read():
         stream = runner.events()
         first = await anext(stream)
         acquired_before_first_event = list(workspace_manager.acquired)
-        events = [first, *[event async for event in stream]]
+        events = [first]
+        async for event in stream:
+            events.append(event)
+            if event["type"] == "done":
+                # The consumer may close as soon as completion is published.
+                assert len(workspace_manager.released) == 1
+                if stop_after_done:
+                    break
+        await stream.aclose()
         await runner.close()
         return events, acquired_before_first_event
 
@@ -869,6 +914,7 @@ def test_chat_stream_producer_cancels_worker_after_unexpected_failure():
     coordinator = ChatStreamOrchestrator.__new__(ChatStreamOrchestrator)
     coordinator.runner = runner
     coordinator.admission = SimpleNamespace(session_id=uuid.uuid4())
+    coordinator._cancel_requested_after_error = lambda: asyncio.sleep(0, result=False)
     queue = asyncio.Queue()
 
     asyncio.run(coordinator._produce_research(queue))
@@ -2772,3 +2818,251 @@ def test_external_pi_detached_cancel_tolerates_status_control_failure(status_err
 
     asyncio.run(runner.cancel())
     assert connector.calls == []
+
+
+@pytest.mark.parametrize("concurrent", [False, True])
+def test_failed_persistent_attachment_does_not_allocate_again(concurrent):
+    from backend.services.chat_sandbox_provider import SandboxError
+
+    manager = FakeWorkspaceManager(FakeProvider())
+    runner = _tool_runner(FakeExecutor(), manager)
+    attachments = []
+
+    async def failed_attachment(workspace, _claim, _minimum):
+        attachments.append(workspace)
+        raise SandboxError("sandbox_executor_attachment_failed", "Attachment failed")
+
+    runner.tool_executor.channel_factory = failed_attachment
+
+    async def call(index):
+        return await runner._tool_result(
+            {
+                "operation_id": f"operation-{index}",
+                "tool_call_id": f"tool-{index}",
+                "operation": "exec",
+                "command": "pwd",
+                "timeout_ms": 1000,
+            }
+        )
+
+    async def run():
+        if concurrent:
+            return await asyncio.gather(call(1), call(2))
+        return [await call(1), await call(2)]
+
+    results = asyncio.run(run())
+    assert [result["error"] for result in results] == [
+        "sandbox_executor_attachment_failed",
+        "executor_transport_unavailable",
+    ]
+    assert all(result["ok"] is False for result in results)
+    assert len(manager.acquired) == len(attachments) == len(manager.invalidated) == 1
+
+
+@pytest.mark.parametrize("persist", [False, True])
+def test_durable_worker_ack_requires_persistence_receipt(monkeypatch, persist):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                '{"type":"worker_done","status":"complete","worker_sequence":3}',
+            ]
+        )
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        control = FakeSocket([])
+        sockets = iter([socket, control])
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        assert json.loads(json.dumps(event)) == {
+            "type": "answer_delta",
+            "text": "hello",
+        }
+        assert [json.loads(frame)["type"] for frame in socket.sent] == ["run_turn"]
+        if persist:
+            await event.after_persist()
+            assert json.loads(socket.sent[-1])["type"] == "ack_events"
+            assert json.loads(socket.sent[-1])["sequence"] == 2
+        with pytest.raises(StopAsyncIteration):
+            await anext(events)
+        assert [json.loads(frame)["type"] for frame in socket.sent] == (
+            ["run_turn", "ack_events", "ack_terminal"] if persist else ["run_turn"]
+        )
+        # Delayed persistence after socket closure is harmless.
+        await event.after_persist()
+        assert [json.loads(frame)["type"] for frame in control.sent] == (
+            [] if persist else ["ack_terminal"]
+        )
+        await event.after_persist()  # duplicate receipts do not open another socket
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("closing", [False, True])
+def test_late_terminal_receipt_releases_worker_during_socket_cleanup(
+    monkeypatch, closing
+):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"done","finish_reason":"success","worker_sequence":2}',
+                '{"type":"worker_done","status":"complete","worker_sequence":3}',
+            ]
+        )
+        control = FakeSocket([])
+        entered_cleanup = asyncio.Event()
+        release_cleanup = asyncio.Event()
+
+        class ClosingContext(SocketContext):
+            async def __aexit__(self, *_args):
+                entered_cleanup.set()
+                await release_cleanup.wait()
+
+        contexts = iter([ClosingContext(socket), SocketContext(control)])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(runner, "_external_worker_socket", lambda _: next(contexts))
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        finish = asyncio.create_task(anext(events))
+        await entered_cleanup.wait()
+        if not closing:
+            release_cleanup.set()
+            with pytest.raises(StopAsyncIteration):
+                await finish
+        await event.after_persist()
+        assert [json.loads(frame)["type"] for frame in control.sent] == ["ack_terminal"]
+        assert json.loads(control.sent[0])["sequence"] == 3
+        release_cleanup.set()
+        if closing:
+            with pytest.raises(StopAsyncIteration):
+                await finish
+
+    asyncio.run(scenario())
+
+
+def test_lost_receipt_reconnects_without_duplicate_public_events(monkeypatch):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = True
+
+        class LostReceiptSocket(FakeSocket):
+            async def send(self, value):
+                await super().send(value)
+                if json.loads(value)["type"] == "ack_events":
+                    raise OSError("receipt lost")
+
+        first = LostReceiptSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                OSError("connection lost"),
+            ]
+        )
+        second = FakeSocket(
+            [
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                '{"type":"done","finish_reason":"success","worker_sequence":3}',
+                '{"type":"worker_done","status":"complete","worker_sequence":4}',
+            ]
+        )
+        sockets = iter([first, second])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(
+            runner, "_require_same_external_worker_claim", lambda _: _async_value(None)
+        )
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        events = []
+        async for event in runner._events(SimpleNamespace(reject=lambda: None)):
+            events.append(event["type"])
+            await event.after_persist()
+        assert events == ["answer_delta", "done"]
+        sent = [json.loads(frame) for frame in second.sent]
+        assert sent[0]["type"] == "attach_turn"
+        assert sent[0]["afterSequence"] == 2
+        assert sent[1]["type"] == "ack_events"
+        assert sent[1]["sequence"] == 3
+        assert sent[2]["type"] == "ack_terminal"
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("durable", [False, True])
+@pytest.mark.parametrize("persist_before_terminal", [False, True])
+def test_terminal_ack_handles_trailing_tool_without_journal_receipt(
+    monkeypatch, durable, persist_before_terminal
+):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        runner.settings.chat_durable_turn_dispatch_enabled = durable
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"working","worker_sequence":2}',
+                '{"type":"tool_request","operation_id":"op","worker_sequence":3}',
+                '{"type":"worker_done","status":"cancelled","worker_sequence":4}',
+            ]
+        )
+        control = FakeSocket([])
+        sockets = iter([socket, control])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        monkeypatch.setattr(
+            runner,
+            "_tool_result",
+            lambda _: _async_value(
+                {
+                    "type": "tool_result",
+                    "operation_id": "op",
+                    "ok": False,
+                    "error": "turn_cancelled",
+                }
+            ),
+        )
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        assert hasattr(event, "after_persist") is durable
+        if durable and persist_before_terminal:
+            await event.after_persist()
+        with pytest.raises(StopAsyncIteration):
+            await anext(events)
+        sent = [json.loads(frame)["type"] for frame in socket.sent]
+        if durable and not persist_before_terminal:
+            assert "ack_terminal" not in sent
+            await event.after_persist()
+            assert json.loads(control.sent[0])["type"] == "ack_terminal"
+            assert json.loads(control.sent[0])["sequence"] == 4
+        else:
+            assert sent[-1] == "ack_terminal"
+            assert json.loads(socket.sent[-1])["sequence"] == 4
+        if not durable:
+            assert "ack_events" not in sent
+
+    asyncio.run(scenario())

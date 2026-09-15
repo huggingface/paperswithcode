@@ -55,6 +55,7 @@ from backend.loadtests.external_pi_fleet_core import (
     ModalRateEvidence,
     DurableQualificationEvidence,
     PERSISTENT_TRANSPORT_SCENARIOS,
+    PERSISTENT_LATENCY_GATES,
     build_persistent_transport_user_specs,
     validate_persistent_transport_manifest,
     validate_persistent_transport_report,
@@ -228,14 +229,16 @@ def _persistent_transport_report() -> dict[str, object]:
             {"transport": "legacy", **cohort},
         ],
         "percentiles": {
-            "reconnect_ready": {
+            name: {
                 "denominator": 1000,
                 "accepted": 1000,
                 "p50_ms": 100,
-                "p95_ms": 500,
-                "p99_ms": 1000,
+                "p95_ms": targets[0],
+                "p99_ms": targets[1],
             }
+            for name, targets in PERSISTENT_LATENCY_GATES.items()
         },
+        "soak": {"turns": 320, "failed": 0, "duration_seconds": 3600},
         "resources": {
             "peak_cpu_percent": 79.9,
             "minimum_host_mem_available_mib": 1536,
@@ -4188,3 +4191,65 @@ def test_controller_aborts_round_when_concurrent_resource_sampler_errors(
     retained = json.loads(report_path.read_text(encoding="utf-8"))
     assert retained["report_type"] == "recovery"
     assert retained["cleanup_complete"] is True
+
+
+@pytest.mark.parametrize("metric", tuple(PERSISTENT_LATENCY_GATES))
+@pytest.mark.parametrize("invalid", ["missing", "too_few", "failed", "p99"])
+def test_persistent_pass_requires_every_measured_latency_gate(metric, invalid):
+    payload = _persistent_transport_report()
+    if invalid == "missing":
+        del payload["percentiles"][metric]
+    else:
+        row = payload["percentiles"][metric]
+        if invalid == "too_few":
+            row.update(denominator=999, accepted=999)
+        elif invalid == "failed":
+            row["accepted"] = 999
+        else:
+            row["p99_ms"] += 1
+    with pytest.raises(ValidationError):
+        validate_persistent_transport_report(payload)
+    payload["status"] = "failed"
+    validate_persistent_transport_report(payload)
+
+
+@pytest.mark.parametrize(
+    "field,value", [("turns", 319), ("duration_seconds", 3599), ("failed", 4)]
+)
+def test_persistent_pass_requires_soak_duration_volume_and_reliability(field, value):
+    payload = _persistent_transport_report()
+    payload["soak"][field] = value
+    with pytest.raises(ValidationError):
+        validate_persistent_transport_report(payload)
+
+
+def test_persistent_cli_never_substitutes_legacy_fleet_workload(monkeypatch, tmp_path):
+    import sys
+    from backend.scripts import qualify_external_pi_fleet as cli
+
+    manifest = tmp_path / "manifest.json"
+    manifest.write_text(json.dumps(_persistent_transport_manifest()))
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "qualify",
+            "--environment",
+            "staging",
+            "--release-id",
+            "candidate",
+            "--confirm",
+            cli.CONFIRMATION,
+            "--profile",
+            "persistent-transport",
+            "--persistent-manifest",
+            str(manifest),
+        ],
+    )
+    monkeypatch.setattr(cli.os, "geteuid", lambda: 0)
+    invoked = []
+    monkeypatch.setattr(
+        cli, "SystemFleetOperator", lambda **kwargs: invoked.append(kwargs)
+    )
+    assert cli.main() == 1
+    assert invoked == []

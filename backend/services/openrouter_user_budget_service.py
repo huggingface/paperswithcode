@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 
 from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
 from backend.config import Settings
+from backend.chat_execution_policy import MAX_PROVIDER_REQUEST_BYTES
 from backend.models.database import (
     ChatOpenRouterCredentialAudit,
     ChatOpenRouterMonthlyUsage,
@@ -28,7 +29,7 @@ from backend.models.database import (
 
 logger = logging.getLogger(__name__)
 MICROUSD_PER_USD = Decimal("1000000")
-MAX_REQUEST_BYTES = 512 * 1024
+MAX_REQUEST_BYTES = MAX_PROVIDER_REQUEST_BYTES
 MAX_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
 PUBLIC_SUPPORT_URL = "https://github.com/huggingface/paperswithcode-feedback"
 

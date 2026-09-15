@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
@@ -187,6 +187,8 @@ describe("BenchmarkDetailView parameter filters", () => {
 
     expect(await screen.findByText("Parameter metadata unavailable")).toBeInTheDocument();
     expect(screen.queryByText(/Parameters known for/)).not.toBeInTheDocument();
+    expect(screen.getByRole("columnheader", { name: "Parameters" })).toBeInTheDocument();
+    expect(screen.getByLabelText("Parameters unknown")).toBeInTheDocument();
   });
 });
 
@@ -242,5 +244,39 @@ describe("BenchmarkDetailView metric deep links", () => {
     expect(await screen.findByTestId("location")).toHaveTextContent(
       "?task=test-task&metric=R%401",
     );
+  });
+});
+
+
+describe("BenchmarkDetailView metric columns", () => {
+  it("expands all metrics and collapses to the current selection while retaining identifying columns", async () => {
+    setup();
+    const metrics = ["Content", "Emotion", "Style", "Prosody", "Paralinguistic", "Acoustic", "Compositional"]
+      .map((name) => `SpeechEditBench ${name} Joint Success`);
+    vi.mocked(catalogApi.leaderboardMetrics).mockResolvedValue(metrics.map((metric, i) => ({
+      metric_id: String(i), metric_name: metric, metric_direction: "higher_is_better",
+    })));
+    vi.mocked(evaluationsApi.byDataset).mockResolvedValue([
+      evaluation({ best_metric: metrics[0], metrics: Object.fromEntries(metrics.map((m, i) => [m, i + 10])) }),
+    ]);
+    renderView("/datasets/test-benchmark?task=test-task");
+
+    const table = await screen.findByRole("table");
+    const headers = () => within(table).getAllByRole("columnheader").map((cell) => cell.textContent);
+    expect(headers()).toEqual(["Rank", "Model", "Parameters", `${metrics[0]} ↑`, "Paper", "Year"]);
+    fireEvent.click(screen.getByRole("button", { name: "Show more metrics (6)" }));
+    expect(headers()).toHaveLength(12);
+    expect(screen.getByRole("button", { name: "Show selected metric only" })).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(within(table).getByRole("button", { name: metrics[6] }));
+    fireEvent.click(screen.getByRole("button", { name: "Show selected metric only" }));
+    expect(headers()).toEqual(["Rank", "Model", "Parameters", `${metrics[6]} ↑`, "Paper", "Year"]);
+    expect(screen.getByRole("region", { name: "Leaderboard metrics" })).toHaveAttribute("tabindex", "0");
+  });
+
+  it("does not show an expansion control for a single metric", async () => {
+    setup();
+    renderView();
+    await screen.findByRole("table");
+    expect(screen.queryByRole("button", { name: /Show more metrics/ })).not.toBeInTheDocument();
   });
 });

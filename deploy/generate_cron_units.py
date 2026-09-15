@@ -36,6 +36,11 @@ def render_service(spec: TimerSpec) -> str:
         "[Service]",
         "Type=oneshot",
     ]
+    if spec.unit == "pwc-cron-update-hot-github-trending":
+        lines += [
+            "# Slot 3 is reserved for this short refresh; bulk jobs use slots 0-2.",
+            "Environment=PWC_CRON_THROTTLE_SLOTS=4",
+        ]
     for argv in spec.invocations:
         lines.append(f"ExecStart={THROTTLED} " + " ".join(argv))
     lines += [

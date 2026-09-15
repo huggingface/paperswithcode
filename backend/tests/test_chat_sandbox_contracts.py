@@ -210,6 +210,39 @@ def test_broker_allows_only_native_responses_path_for_direct_openai(monkeypatch)
     assert request.error == 404
 
 
+@pytest.mark.parametrize("path", ["/v1/messages", "/v1/responses"])
+def test_broker_forwards_large_model_requests_and_rejects_over_limit(monkeypatch, path):
+    broker = _import_broker(monkeypatch)
+    body = b'{"input":"' + b"evidence " * 100_000 + b'"}'
+
+    class Request:
+        forwarded = None
+        error = None
+
+        def _forward(self, path, body, **kwargs):
+            self.forwarded = body
+
+        def send_error(self, status):
+            self.error = status
+
+    request = Request()
+    request.path = path
+    request.headers = {
+        "Content-Length": str(len(body)),
+        "Content-Type": "application/json",
+    }
+    request.rfile = BytesIO(body)
+    broker.Handler.do_POST(request)
+    assert request.forwarded == body
+    assert request.error is None
+    request.forwarded = None
+    request.headers["Content-Length"] = str(broker.MODEL_REQUEST_MAX_BYTES + 1)
+    request.rfile = BytesIO(b"")
+    broker.Handler.do_POST(request)
+    assert request.forwarded is None
+    assert request.error == 413
+
+
 def test_broker_certificates_outlive_the_persistent_sandbox(monkeypatch, tmp_path):
     broker = _import_broker(monkeypatch)
     ca_path = tmp_path / "pwc-webfetch-ca.pem"
@@ -3571,13 +3604,16 @@ def test_image_makes_copied_worker_readable_and_installs_skill():
     ) in source
     assert '"chmod -R a+rX /opt/pwc/backend"' in source
     assert '"chmod -R a+rX /opt/pwc/restricted_hf_cli"' in source
-    assert '"chmod 0644 /opt/pwc/PWC_CLI_SKILL.md /opt/pwc/install-pwc.py"' in source
+    assert '"chmod 0644 /opt/pwc/PWC_CLI_SKILL.md"' in source
     assert "PWC_CLI_SOURCE_COMMIT" in source
-    assert "PWC_CLI_INSTALLER_SHA256" in source
-    assert "raw.githubusercontent.com/huggingface/pwc-cli/" in source
-    assert "sha256sum -c -" in source
+    assert "https://github.com/huggingface/pwc-cli.git" in source
+    assert "cli-source rev-parse HEAD" in source
+    assert (
+        '"python -m pip install --no-deps /opt/pwc/cli-source/standalone_cli"' in source
+    )
+    assert "runuser -u pwc-chat -- pwc version" in source
     assert source.index('"mkdir -p /opt/pwc"') < source.index(
-        "raw.githubusercontent.com/huggingface/pwc-cli/"
+        "https://github.com/huggingface/pwc-cli.git"
     )
     assert '"runuser -u pwc-chat -- hf --help >/dev/null"' in source
     assert '"python -m pip install --no-deps /opt/pwc/s2_cli"' in source
@@ -3589,6 +3625,10 @@ def test_image_makes_copied_worker_readable_and_installs_skill():
     assert '"websockets==16.0"' in source
     assert "import backend.chat_sandbox_worker.executor_daemon" in source
     assert "import backend.chat_sandbox_worker.executor_relay" in source
+    assert (
+        "from backend.chat_sandbox_worker.executor_command import "
+        "DEFAULT_EXECUTOR_PIDS_MAX, EXECUTOR_USER"
+    ) in source
     assert "EXECUTOR_USER == 'pwc-chat'" in source
     assert "DEFAULT_EXECUTOR_PIDS_MAX == 64" in source
 

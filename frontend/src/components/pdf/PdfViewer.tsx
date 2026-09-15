@@ -25,6 +25,7 @@ interface PdfViewerProps {
   onPaperSelection?: (selection: PaperSelectionDraft) => void;
   onPaperSelectionError?: (message: string) => void;
   onPageChange?: (page: number) => void;
+  onClose?: () => void;
   loadErrorMessage?: string;
   chrome?: "reader" | "canvas";
 }
@@ -155,6 +156,7 @@ export function PdfViewer({
   onPaperSelection,
   onPaperSelectionError,
   onPageChange,
+  onClose,
   loadErrorMessage,
   chrome = "reader",
 }: PdfViewerProps) {
@@ -348,17 +350,21 @@ export function PdfViewer({
 
   useEffect(() => {
     const keydown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "f") {
         event.preventDefault();
         setSearchOpen(true);
       } else if (event.key === "Escape" && searchOpen) {
         event.preventDefault();
         closeSearch();
+      } else if (event.key === "Escape" && !event.repeat && onClose) {
+        event.preventDefault();
+        onClose();
       }
     };
     window.addEventListener("keydown", keydown);
     return () => window.removeEventListener("keydown", keydown);
-  }, [closeSearch, searchOpen]);
+  }, [closeSearch, onClose, searchOpen]);
 
   useEffect(() => {
     const pdf = documentRef.current;

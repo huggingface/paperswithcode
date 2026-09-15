@@ -12,7 +12,7 @@ import stat
 import time
 import uuid
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
@@ -20,6 +20,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.services.chat_executor_timing import executor_stage
 from backend.models.database import (
     ChatExecutorCell,
     ChatExecutorManifest,
@@ -67,8 +68,51 @@ class ChatExecutorRuntime:
         self.session_factory = session_factory
         self.registry = registry or ChatExecutorRegistry()
 
-    async def prepare_launch(self, worker_generation: str) -> ExecutorLaunchBundle:
-        return await asyncio.to_thread(self._prepare_launch, worker_generation)
+    async def prepare_launch(
+        self, worker_generation: str, *, blank_pool: bool = False
+    ) -> ExecutorLaunchBundle:
+        return await asyncio.to_thread(
+            self._prepare_launch, worker_generation, blank_pool
+        )
+
+    async def pool_ready(self, worker_generation: str) -> bool:
+        """Probe the exact authenticated route without claiming a user workspace."""
+        result = await asyncio.to_thread(
+            self._registration,
+            worker_generation,
+            executor_environment_generation(worker_generation),
+        )
+        if result is None:
+            return False
+        registration, manifest = result
+        if (
+            registration.cell_id != self.settings.chat_executor_cell_id
+            or manifest.image_digest
+            != hashlib.sha256(
+                self.settings.chat_modal_image_version.encode()
+            ).hexdigest()
+            or registration.expires_at < datetime.now(UTC) + timedelta(seconds=240)
+        ):
+            return False
+        # The short-lived liveness nonce is deliberately not consumed: only
+        # a real turn may claim the workspace, with a new liveness assertion.
+        # Let uncertain transport failures reach the pool's skip/retry handling.
+        await self._claim_liveness(registration, uuid.uuid4())
+        return True
+
+    async def wait_for_pool_ready(self, worker_generation: str) -> None:
+        deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
+        while time.monotonic() < deadline:
+            try:
+                if await self.pool_ready(worker_generation):
+                    return
+            except (OSError, EOFError, RuntimeError):
+                pass
+            await asyncio.sleep(0.05)
+        raise SandboxError(
+            "sandbox_executor_registration_timeout",
+            "Blank executor registration timed out",
+        )
 
     def route_health_seconds(self, db: Session) -> float | None:
         cell = db.get(ChatExecutorCell, self.settings.chat_executor_cell_id)
@@ -142,15 +186,20 @@ class ChatExecutorRuntime:
     ) -> PersistentSandboxExecutorChannel:
         if minimum_remaining_seconds != 240:
             raise ValueError("Executor claim lifetime is invalid")
-        registration, manifest = await self._wait_for_registration(workspace)
-        liveness_nonce = await self._claim_liveness(registration, turn_claim)
-        claim = await asyncio.to_thread(
-            self._claim_workspace,
-            registration,
-            turn_claim,
-            liveness_nonce,
-            minimum_remaining_seconds,
-        )
+        with executor_stage("registration", workspace.worker_generation):
+            registration, manifest = await self._wait_for_registration(workspace)
+        with executor_stage("liveness", workspace.worker_generation):
+            liveness_nonce = await self._claim_liveness(
+                registration, turn_claim.turn_id
+            )
+        with executor_stage("claim", workspace.worker_generation):
+            claim = await asyncio.to_thread(
+                self._claim_workspace,
+                registration,
+                turn_claim,
+                liveness_nonce,
+                minimum_remaining_seconds,
+            )
         channel = _RegistryBackedExecutorChannel(
             self._harness_socket(registration.shard_generation),
             session_factory=self.session_factory,
@@ -173,10 +222,16 @@ class ChatExecutorRuntime:
             environment_public_key=registration.public_noise_key,
         )
         try:
-            await channel.attach_environment(attachment)
-        except BaseException:
+            with executor_stage("attachment", workspace.worker_generation):
+                await channel.attach_environment(attachment)
+        except BaseException as error:
             await channel.settle("executor_transport_unavailable")
             await channel.aclose()
+            if isinstance(error, (OSError, EOFError)):
+                raise SandboxError(
+                    "sandbox_executor_attachment_failed",
+                    "Sandbox executor attachment failed",
+                ) from error
             raise
         return channel
 
@@ -192,7 +247,9 @@ class ChatExecutorRuntime:
                     db, now=datetime.now(UTC), canary_owner=str(turn_id)
                 )
 
-    def _prepare_launch(self, worker_generation: str) -> ExecutorLaunchBundle:
+    def _prepare_launch(
+        self, worker_generation: str, blank_pool: bool = False
+    ) -> ExecutorLaunchBundle:
         environment_generation = executor_environment_generation(worker_generation)
         try:
             private_key = self._private_key()
@@ -236,7 +293,7 @@ class ChatExecutorRuntime:
                     shard_database_id=shard.id,
                     shard_generation=shard.generation,
                     key_epoch=cell.key_epoch,
-                    lifecycle_class="assigned_idle",
+                    lifecycle_class="blank_pool" if blank_pool else "assigned_idle",
                     manifest=AdmissionManifest(
                         manifest_digest=manifest.digest,
                         image_digest=manifest.image_digest,
@@ -272,9 +329,17 @@ class ChatExecutorRuntime:
         descriptor = os.open(path, os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW)
         try:
             metadata = os.fstat(descriptor)
+            credential_directory = os.environ.get("CREDENTIALS_DIRECTORY")
+            protected_systemd_file = (
+                credential_directory is not None
+                and path.parent.resolve() == Path(credential_directory).resolve()
+                and metadata.st_uid == 0
+                and metadata.st_gid == 0
+                and stat.S_IMODE(metadata.st_mode) == 0o440
+            )
             if (
                 not stat.S_ISREG(metadata.st_mode)
-                or metadata.st_mode & 0o077
+                or (metadata.st_mode & 0o077 and not protected_systemd_file)
                 or metadata.st_size != 32
                 or metadata.st_uid not in {0, os.geteuid()}
             ):
@@ -342,7 +407,7 @@ class ChatExecutorRuntime:
     async def _claim_liveness(
         self,
         registration: ChatExecutorRegistration,
-        turn_claim: TurnLeaseClaim,
+        turn_id: uuid.UUID,
     ) -> str:
         path = self._rendezvous_socket(registration.shard_generation)
         self._validate_socket(path)
@@ -354,7 +419,7 @@ class ChatExecutorRuntime:
                 "environment_id": registration.environment_id,
                 "environment_generation": registration.environment_generation,
                 "shard_generation": registration.shard_generation,
-                "turn_id": str(turn_claim.turn_id),
+                "turn_id": str(turn_id),
             },
             separators=(",", ":"),
         ).encode()

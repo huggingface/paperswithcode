@@ -554,6 +554,9 @@ def test_cancelled_terminal_waits_for_transaction_without_orphan_or_duplicate(
 def test_orchestrator_cancellation_during_terminal_cleanup_is_exactly_once(
     monkeypatch, terminal_path
 ):
+    monkeypatch.setattr(
+        chat_stream_service, "_durable_turn_cancelled", lambda *_: False
+    )
     admission = _admission()
     claim = TurnLeaseClaim(admission.turn_id, "local-runner:abc", 7, 1)
     settings = get_settings().model_copy(

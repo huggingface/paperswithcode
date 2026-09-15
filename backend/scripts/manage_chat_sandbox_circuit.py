@@ -96,6 +96,27 @@ def reviewed_policy_transition_allowed(state, settings: Settings) -> bool:
 def reviewed_higher_caps_allowed(state, settings: Settings) -> bool:
     """Accept only higher application guardrails below unchanged provider caps."""
 
+    if (
+        settings.environment == "staging"
+        and settings.chat_sandbox_provider_mode == "starter_workspace"
+        and settings.chat_sandbox_modal_workspace == "nielsrogge"
+        and state.policy_attestation
+        == "modal-workspace-nielsrogge-250-staging-starter-v1"
+        and settings.chat_sandbox_budget_attestation
+        == "modal-workspace-nielsrogge-250-staging-starter-app105-v2"
+        and state.warning_microusd
+        == settings.chat_sandbox_warning_microusd
+        == 75_000_000
+        and state.application_cap_microusd == 100_000_000
+        and settings.chat_sandbox_application_cap_microusd == 105_000_000
+        and state.environment_cap_microusd
+        == settings.chat_sandbox_environment_cap_microusd
+        == 0
+        and state.workspace_cap_microusd
+        == settings.chat_sandbox_workspace_cap_microusd
+        == 250_000_000
+    ):
+        return True
     return bool(
         settings.chat_sandbox_budget_attestation != state.policy_attestation
         and settings.chat_sandbox_application_cap_microusd
@@ -224,8 +245,8 @@ def main() -> None:
                 failure = "effective spend is at or above the active cap"
             elif changes_caps and not reviewed_higher_caps_allowed(state, settings):
                 failure = (
-                    "higher caps require higher warning/application caps, unchanged "
-                    "provider caps, and a new attestation"
+                    "higher caps require a reviewed warning/application transition, "
+                    "unchanged provider caps, and a new attestation"
                 )
             elif changes_provider_cap and (
                 settings.chat_sandbox_warning_microusd != state.warning_microusd

@@ -36,4 +36,40 @@ CREATE TABLE IF NOT EXISTS chat_executor_transport_alerts (
     CHECK ((delivery_state = 'claimed') = (claim_owner IS NOT NULL AND claim_expires_at IS NOT NULL))
 );
 
+DO $$
+BEGIN
+    IF current_schema() = 'staging' THEN
+        IF to_regrole('pwc_staging') IS NULL OR to_regrole('pwc_staging_owner') IS NULL THEN
+            RAISE EXCEPTION 'staging transport circuit migration requires pwc_staging roles';
+        END IF;
+        ALTER TABLE chat_executor_transport_circuits OWNER TO pwc_staging_owner;
+        ALTER TABLE chat_executor_transport_alerts OWNER TO pwc_staging_owner;
+        GRANT SELECT,INSERT,UPDATE,DELETE ON
+            chat_executor_transport_circuits,chat_executor_transport_alerts
+            TO pwc_staging;
+        IF to_regrole('paperswithcode_user') IS NOT NULL THEN
+            REVOKE ALL ON
+                chat_executor_transport_circuits,chat_executor_transport_alerts
+                FROM paperswithcode_user;
+        END IF;
+    ELSIF current_schema() = 'public' THEN
+        IF to_regrole('paperswithcode_user') IS NULL THEN
+            RAISE EXCEPTION 'production transport circuit migration requires paperswithcode_user';
+        END IF;
+        ALTER TABLE chat_executor_transport_circuits OWNER TO paperswithcode_user;
+        ALTER TABLE chat_executor_transport_alerts OWNER TO paperswithcode_user;
+        GRANT SELECT,INSERT,UPDATE,DELETE ON
+            chat_executor_transport_circuits,chat_executor_transport_alerts
+            TO paperswithcode_user;
+        IF to_regrole('pwc_staging') IS NOT NULL THEN
+            REVOKE ALL ON
+                chat_executor_transport_circuits,chat_executor_transport_alerts
+                FROM pwc_staging;
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'transport circuit migration requires staging or public schema';
+    END IF;
+END;
+$$;
+
 COMMIT;

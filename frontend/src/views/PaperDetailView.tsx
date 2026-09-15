@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+import { PaperAgentEdits } from "@/components/paper-detail/PaperAgentEdits";
 import { PaperDetailEditors } from "@/components/paper-detail/PaperDetailEditors";
 import { PaperResultsSection } from "@/components/paper-detail/PaperResultsSection";
 import { PaperResourceSidebar } from "@/components/paper-detail/PaperResourceSidebar";
@@ -56,11 +57,6 @@ function formatLongDate(iso: string | null | undefined): string {
   } catch {
     return "—";
   }
-}
-
-function formatStars(n: number): string {
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`;
-  return String(n);
 }
 
 function formatResourceLinkLabel(url: string, fallback: string): string {
@@ -312,7 +308,6 @@ const PaperDetailView: React.FC = () => {
     hasIntroducedItems,
     hasLineageItems,
     hfArtifactViewer,
-    hfPaperExists,
     introducedBenchmarks,
     introducedFrameworks,
     introducedMethods,
@@ -321,7 +316,6 @@ const PaperDetailView: React.FC = () => {
     paperSourceLabel,
     predecessorPapers,
     projectPages,
-    repoSummary,
     safeAbstractUrl,
     safeConferenceUrl,
     safePdfUrl,
@@ -482,46 +476,6 @@ const PaperDetailView: React.FC = () => {
                 </a>
               </EditableActionButton>
             )}
-            {hfArtifactViewer.paperHref && hfPaperExists && (
-              <a
-                className="bm-action-btn"
-                href={hfArtifactViewer.paperHref}
-                target="_blank"
-                rel="noopener noreferrer"
-                aria-label="View on Hugging Face"
-              >
-                View on <span aria-hidden="true">🤗</span>
-              </a>
-            )}
-            {repoSummary.githubUrl && (
-              <EditableActionButton
-                showEdit
-                onEdit={() => openEdit("repositories")}
-                editAriaLabel="Edit code repositories"
-              >
-                <a
-                  className="action-btn-segment action-btn-main"
-                  href={repoSummary.githubUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  <Icon name="github" size={12} /> Code
-                  {repoSummary.github != null && (
-                    <span style={{ opacity: 0.7, marginLeft: 4 }}>· {formatStars(repoSummary.github)} ★</span>
-                  )}
-                </a>
-              </EditableActionButton>
-            )}
-            {!repoSummary.githubUrl ? (
-              <button
-                type="button"
-                className="action-btn"
-                onClick={() => openEdit("repositories")}
-                title="Add GitHub repository"
-              >
-                <Icon name="github" size={12} /> Add code
-              </button>
-            ) : null}
             {projectPages.length === 1 ? (
               <EditableActionButton
                 showEdit
@@ -624,6 +578,7 @@ const PaperDetailView: React.FC = () => {
             >
               Edit organizations
             </button>
+            <PaperAgentEdits paperId={Number(paper.id)} isAdmin={isAdmin} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
                 paperId={Number(paper.id)}

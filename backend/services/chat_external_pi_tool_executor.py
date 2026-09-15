@@ -10,6 +10,7 @@ from typing import Any, Literal
 
 from backend.chat_sandbox_worker.executor_protocol import ProtocolError
 from backend.config import Settings
+from backend.services.chat_executor_timing import executor_stage
 from backend.services.chat_capability_service import IssuedCapability
 from backend.services.chat_external_executor_workspace import (
     ChatExternalExecutorWorkspaceManager,
@@ -145,6 +146,7 @@ class ExternalPiToolWorkspaceExecutor:
         self._turn_cancelled = False
         self._binding: ExternalExecutorTurnBinding | None = None
         self._binding_lock = asyncio.Lock()
+        self._binding_failed = False
         self._operation_limit = asyncio.Semaphore(4)
         self._hold_binding = False
 
@@ -312,6 +314,11 @@ class ExternalPiToolWorkspaceExecutor:
         async with self._binding_lock:
             if self._binding is not None:
                 return self._binding
+            if self._binding_failed:
+                raise SandboxError(
+                    "executor_transport_unavailable",
+                    "The executor attachment for this turn has already failed",
+                )
             manager = self._workspace_manager()
             turn_claim = self._durable_turn_claim()
             persistent = (
@@ -321,21 +328,20 @@ class ExternalPiToolWorkspaceExecutor:
             acquire_for_binding = (
                 getattr(manager, "acquire_for_binding", None) if persistent else None
             )
-            if acquire_for_binding is None:
-                legacy_acquire = (
-                    getattr(manager, "acquire_legacy", None)
-                    if self.settings.chat_executor_remote_transport_enabled
-                    else None
-                )
-                workspace = await (legacy_acquire or manager.acquire)(
-                    session_id=self.admission.session_id,
-                    turn_claim=turn_claim,
-                )
-            else:
-                workspace = await acquire_for_binding(
-                    session_id=self.admission.session_id,
-                    turn_claim=turn_claim,
-                )
+            with executor_stage("acquire", str(self.admission.session_id)):
+                if acquire_for_binding is None:
+                    # Legacy admission also applies when remote transport is disabled.
+                    # Executor startup requires a rendezvous bundle in either case.
+                    legacy_acquire = getattr(manager, "acquire_legacy", None)
+                    workspace = await (legacy_acquire or manager.acquire)(
+                        session_id=self.admission.session_id,
+                        turn_claim=turn_claim,
+                    )
+                else:
+                    workspace = await acquire_for_binding(
+                        session_id=self.admission.session_id,
+                        turn_claim=turn_claim,
+                    )
             try:
                 channel_factory = self.channel_factory
                 if channel_factory is None and persistent:
@@ -361,11 +367,15 @@ class ExternalPiToolWorkspaceExecutor:
                         "Secure workspace executor is unavailable",
                     )
                 context = self._context(workspace, operation_id)
-                await channel.ensure_workspace(context)
+                with executor_stage("workspace", workspace.worker_generation):
+                    await channel.ensure_workspace(context)
             except asyncio.CancelledError:
+                self._binding_failed = persistent
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
             except Exception:
+                # A persistent claim is single-use, even when attachment fails.
+                self._binding_failed = persistent
                 await self._invalidate(workspace, primary_exception_active=True)
                 raise
             binding = ExternalExecutorTurnBinding(

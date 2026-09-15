@@ -494,7 +494,9 @@ def test_production_rejects_durable_external_provider_capacity_drift(
     _configure_durable_external_admission_resource_profile(settings)
     setattr(settings, field, invalid)
 
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation._validate_chat_resource_policy(settings)
 
 
@@ -838,7 +840,9 @@ def test_direct_openai_requires_exact_low_reasoning_warm_profile(settings_factor
     runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
     settings.chat_pi_prewarm_reasoning_effort = "high"
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
@@ -902,7 +906,9 @@ def test_direct_openai_rejects_partial_or_nonstaging_durable_qualification_profi
     _durable_external_qualification_resource_profile(settings)
     setattr(settings, field, invalid)
 
-    with pytest.raises(RuntimeError, match="one direct-Luna low-reasoning warm blank"):
+    with pytest.raises(
+        RuntimeError, match="the direct-Luna low-reasoning prewarm profile"
+    ):
         runtime_validation._validate_chat_resource_policy(settings)
 
 
@@ -1184,3 +1190,52 @@ def test_excalidraw_worker_and_host_kill_switches_must_match(settings_factory):
 
     with pytest.raises(RuntimeError, match="switches must match"):
         runtime_validation._validate_chat_resource_policy(settings)
+
+
+@pytest.mark.parametrize(
+    "environment,remote,pool_min,pool_max,live_cap,accepted",
+    [
+        ("staging", True, 1, 1, 16, True),
+        ("staging", True, 4, 4, 16, True),
+        ("staging", False, 4, 4, 16, False),
+        ("production", True, 4, 4, 16, False),
+        ("staging", True, 3, 3, 16, False),
+        ("staging", True, 8, 8, 16, False),
+        ("staging", True, 4, 1, 16, False),
+        ("staging", True, 4, 4, 15, False),
+    ],
+)
+def test_four_spare_profile_is_staging_persistent_only(
+    environment, remote, pool_min, pool_max, live_cap, accepted
+):
+    settings = Settings(
+        environment=environment,
+        chat_external_pi_admission_enabled=True,
+        chat_executor_remote_transport_enabled=remote,
+        chat_max_concurrency=32,
+        chat_user_max_concurrency=1,
+        chat_sandbox_total_live_cap=live_cap,
+        chat_blank_pool_min=pool_min,
+        chat_blank_pool_max=pool_max,
+    )
+    if accepted:
+        runtime_validation._validate_chat_capacity_policy(settings)
+    else:
+        with pytest.raises(RuntimeError, match="reviewed runtime profile"):
+            runtime_validation._validate_chat_capacity_policy(settings)
+
+
+def test_four_spares_pass_capacity_and_direct_openai_resource_validation(
+    settings_factory,
+):
+    settings, _release = settings_factory("staging")
+    _configure_durable_external_admission_resource_profile(settings)
+    settings.chat_executor_remote_transport_enabled = True
+    settings.chat_blank_pool_enabled = True
+    settings.chat_blank_pool_min = settings.chat_blank_pool_max = 4
+    settings.chat_pi_prewarm_enabled = True
+    settings.chat_default_agent_harness = "pi"
+    settings.chat_pi_prewarm_model = settings.chat_openai_luna_route
+    settings.chat_pi_prewarm_reasoning_effort = "low"
+    runtime_validation._validate_chat_capacity_policy(settings)
+    runtime_validation._validate_chat_resource_policy(settings)

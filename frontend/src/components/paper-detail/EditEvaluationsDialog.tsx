@@ -670,7 +670,8 @@ export function EditEvaluationsDialog({
                             size="sm"
                             onClick={() => handleDeleteEvaluation(index)}
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                            title="Delete row"
+                            title={evaluation.id && !isAdmin ? "Only administrators can delete published results" : "Remove row"}
+                            disabled={Boolean(evaluation.id) && !isAdmin}
                           >
                             <Trash2 className="w-4 h-4" />
                           </Button>

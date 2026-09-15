@@ -388,3 +388,14 @@ def test_migration_pins_capacity_spend_and_owner_guards():
     assert "operation_limit = 128" in migration
     assert "uq_chat_turn_reservations_active_owner" in migration
     assert "reserved_microusd" in migration
+    lowered = migration.lower()
+    assert "if current_schema() = 'staging'" in lowered
+    assert "elsif current_schema() = 'public'" in lowered
+    assert (
+        "alter table chat_turn_admission_budgets owner to pwc_staging_owner" in lowered
+    )
+    assert "alter table chat_turn_reservations owner to pwc_staging_owner" in lowered
+    assert "grant select,insert,update,delete on" in lowered
+    assert "to pwc_staging" in lowered
+    assert "from paperswithcode_user" in lowered
+    assert "turn reservation migration requires staging or public schema" in lowered

@@ -31,6 +31,7 @@ from backend.chat_execution_policy import (
     MAX_POSTER_PROVIDER_REQUESTS,
     MAX_PROVIDER_REQUESTS,
     MAX_PROVIDER_TURN_TOKENS,
+    MAX_PROVIDER_REQUEST_BYTES,
 )
 from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
 from backend.config import Settings, get_settings
@@ -135,7 +136,7 @@ app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 logger = logging.getLogger(__name__)
 hf_telemetry_logger = logging.getLogger("uvicorn.error")
 MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
-MAX_POSTER_PROVIDER_TURN_TOKENS = 2_000_000
+MAX_POSTER_PROVIDER_TURN_TOKENS = 8_000_000
 QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
 QUALIFICATION_PROVIDER_TURN_TOKENS = QUALIFICATION_PROVIDER_REQUESTS * (
     MAX_OPENAI_REQUEST_BYTES // 4 + MAX_PROVIDER_OUTPUT_TOKENS
@@ -1776,7 +1777,7 @@ async def messages(
         raise HTTPException(status_code=403, detail="Capability rejected") from None
     token = _bearer(authorization)
     raw = await request.body()
-    if len(raw) > 512 * 1024:
+    if len(raw) > MAX_PROVIDER_REQUEST_BYTES:
         raise HTTPException(status_code=413, detail="Model request is too large")
     try:
         payload = json.loads(raw)
@@ -1829,7 +1830,7 @@ async def messages(
         except ValueError:
             raise HTTPException(status_code=403, detail="Capability rejected")
         raw = json.dumps(payload, separators=(",", ":")).encode()
-        if len(raw) > 512 * 1024:
+        if len(raw) > MAX_PROVIDER_REQUEST_BYTES:
             raise HTTPException(status_code=413, detail="Model request is too large")
     provider_url, provider_token, provider_bill_to = _provider_target(row, settings, db)
     capability_id = row.id

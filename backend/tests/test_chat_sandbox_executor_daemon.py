@@ -62,7 +62,10 @@ class _Broker:
         return {"ok": True, "active": self.active}
 
 
-def test_default_command_launch_avoids_threaded_preexec(tmp_path: Path) -> None:
+def test_default_command_launch_avoids_threaded_preexec(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.delenv("PWC_CHAT_NATIVE_COMMAND_LAUNCHER", raising=False)
     server = ExecutorServer(
         socket_path=tmp_path / "executor.sock",
         state_path=tmp_path / "state",
@@ -74,6 +77,17 @@ def test_default_command_launch_avoids_threaded_preexec(tmp_path: Path) -> None:
         "-m",
         "backend.chat_sandbox_worker.executor_command",
         "true",
+    ]
+
+
+def test_native_command_launch_keeps_separate_process_boundary(tmp_path, monkeypatch):
+    monkeypatch.setenv("PWC_CHAT_NATIVE_COMMAND_LAUNCHER", "1")
+    server = ExecutorServer(state_path=tmp_path / "state", workspace_root=tmp_path)
+    assert server.command_preexec is None
+    assert server._command_argv("printf '%s' '$HOME'") == [
+        "/usr/local/bin/pwc-executor-environment",
+        "--exec-command",
+        "printf '%s' '$HOME'",
     ]
 
 

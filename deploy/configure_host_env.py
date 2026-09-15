@@ -66,6 +66,10 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "MODAL_ENVIRONMENT",
     "PWC_CHAT_DEFAULT_BACKEND",
     "PWC_CHAT_LANGFUSE_ENABLED",
+    "PWC_CHAT_TRACKIO_ENABLED",
+    "PWC_CHAT_TRACKIO_URL",
+    "PWC_CHAT_TRACKIO_PROJECT",
+    "PWC_CHAT_TRACKIO_HF_TOKEN",
     "PWC_CHAT_MAX_CONCURRENCY",
     "PWC_CHAT_ALTERNATIVE_MODEL",
     "PWC_CHAT_ALTERNATIVE_MODEL_ENABLED",
@@ -1570,8 +1574,8 @@ def production_codex_values(
 
 def production_codex_image_values() -> dict[str, str]:
     return {
-        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-c0e97b88ca86",
-        "PWC_CODEX_JOBS_IMAGE_REVISION": "7067f309c98f9ea002b812773c9a256400c740ef",
+        "PWC_CODEX_JOBS_IMAGE": "hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c",
+        "PWC_CODEX_JOBS_IMAGE_REVISION": "556b5d14b762684586030d3018999dae392200c9",
     }
 
 

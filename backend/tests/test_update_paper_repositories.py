@@ -1,7 +1,7 @@
 """Tests for paper-association repository deduplication."""
 
 import pytest
-from sqlalchemy import BigInteger, create_engine
+from sqlalchemy import BigInteger, create_engine, create_mock_engine, inspect
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
@@ -200,3 +200,23 @@ def test_first_repository_association_is_official_by_default(db_session):
 
     link = db_session.query(PaperRepository).filter(PaperRepository.paper_id == 2).one()
     assert link.is_official is True
+
+
+def test_date_order_index_keeps_sqlite_schema_creation_compatible(db_session):
+    index_name = "idx_papers_date_published_desc_nulls_last"
+    assert index_name not in {
+        index["name"] for index in inspect(db_session.bind).get_indexes("papers")
+    }
+
+    statements = []
+    postgres = create_mock_engine(
+        "postgresql://",
+        lambda statement, *args, **kwargs: statements.append(
+            str(statement.compile(dialect=postgres.dialect))
+        ),
+    )
+    DBPaper.__table__.create(postgres)
+    assert (
+        f"CREATE INDEX {index_name} ON papers (date_published DESC NULLS LAST)"
+        in statements
+    )

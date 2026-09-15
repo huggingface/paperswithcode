@@ -20,9 +20,10 @@ The goal is to split up those tasks in the future.
 - `speaker-verification` — Speaker Verification
 - `audio-compression` — Audio Compression
 - `voice-cloning` — Voice cloning
+- `speaker-diarization` — Speaker Diarization
 - `audio-classification` — Audio Classification
+- `audio-editing` — Audio and Speech Editing
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
-- `spoken-language-identification` — Spoken Language Identification
 
 ### General
 
@@ -31,13 +32,13 @@ The goal is to split up those tasks in the future.
 - `reasoning` — Reasoning
 - `agents` — Agents
 - `math` — Mathematics
-- `world-models` — World Models
-- `embedding-models` — Embedding models
-- `robotics` — Robotics
 - `pseudo-labelling` — Pseudo Labelling
+- `world-models` — World Models
+- `robotics` — Robotics
+- `embedding-models` — Embedding models
 - `remote-sensing` — Remote Sensing
+- `anomaly-detection` — Anomaly Detection
 - `coding-agents` — Coding Agents
-- `ocr` — OCR
 
 ### Language
 
@@ -69,15 +70,15 @@ The goal is to split up those tasks in the future.
 - `video-generation` — Video generation
 - `video-understanding` — Video Understanding
 - `video-classification` — Video classification
-- `video-editing` — Video Editing
 - `video-segmentation` — Video segmentation
+- `video-editing` — Video Editing
 - `object-tracking` — Object Tracking
 - `video-compression` — Video Compression
 - `video-frame-interpolation` — Video frame interpolation
 - `video-super-resolution` — Video super-resolution
 - `video-restoration` — Video Restoration
-- `video-matting` — Video Matting
 - `cross-view-object-correspondence` — Cross-view object correspondence
+- `video-matting` — Video Matting
 
 ### Vision
 
@@ -112,6 +113,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `ai-weather-forecasting` — AI Weather Forecasting
 - `anomaly-detection` — Anomaly Detection
 - `atari-games` — Atari Games
+- `audio-editing` — Audio and Speech Editing
 - `audio-classification` — Audio Classification
 - `audio-compression` — Audio Compression
 - `audio-generation` — Audio Generation
@@ -203,6 +205,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `semi-supervised-image-classification` — Semi-Supervised Image Classification
 - `sequential-recommendation` — Sequential Recommendation
 - `session-based-recommendation` — Session-Based Recommendation
+- `speaker-diarization` — Speaker Diarization
 - `speaker-verification` — Speaker Verification
 - `speech-enhancement` — Speech Enhancement
 - `spoken-language-identification` — Spoken Language Identification
@@ -231,6 +234,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `video-temporal-grounding` — Video Temporal Grounding
 - `video-understanding` — Video Understanding
 - `visual-grounding` — Visual Grounding
+- `visual-place-recognition` — Visual Place Recognition
 - `voice-cloning` — Voice cloning
 - `world-knowledge` — World Knowledge
 - `world-models` — World Models

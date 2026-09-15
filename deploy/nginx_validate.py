@@ -297,11 +297,19 @@ def validate(production: str, staging: str) -> list[str]:
                 failures.append(
                     f"{environment} chat gateway {endpoint} misses {backend}"
                 )
+        for endpoint in ("messages", "responses"):
+            block = location_block(
+                config, f"location = /api/internal/chat-gateway/v1/{endpoint}"
+            )
+            if "client_max_body_size 8m;" not in block:
+                failures.append(
+                    f"{environment} model gateway {endpoint} body limit is missing"
+                )
         if "client_max_body_size 512k;" not in config:
             failures.append(f"{environment} chat gateway body limit is missing")
     for config, environment, hostname in (
         (production, "production", "chat-executor.paperswithcode.co"),
-        (staging, "staging", "chat-executor.staging.paperswithcode.co"),
+        (staging, "staging", "chat-executor-staging.paperswithcode.co"),
     ):
         if f"server_name {hostname};" not in config:
             failures.append(f"{environment} executor hostname is missing")

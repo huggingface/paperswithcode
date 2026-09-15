@@ -304,7 +304,10 @@ class ChatSandboxAcquisitionCoordinator:
             except ChatComputeDisabled as error:
                 raise SandboxError(error.code, str(error)) from error
 
-        if allow_pool:
+        if allow_pool and (
+            (launch_mode is SandboxLaunchMode.EXECUTOR)
+            == self.settings.chat_executor_remote_transport_enabled
+        ):
             lookup_started = self.perf_counter()
             claimed = await self.pool.claim_blank(chat_session_id)
             pool_lookup_ms = round((self.perf_counter() - lookup_started) * 1000)

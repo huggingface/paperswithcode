@@ -1,5 +1,5 @@
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use base64::Engine;
@@ -17,6 +17,7 @@ use pwc_persistent_executor_transport::protocol::{
     SignedAuthorization, VerificationKey,
 };
 use pwc_persistent_executor_transport::scheduler::ReconnectBackoff;
+use pwc_persistent_executor_transport::startup_connection::connect_when_ready;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -25,7 +26,6 @@ use tokio::net::unix::OwnedWriteHalf;
 use tokio::process::Command;
 use tokio::sync::mpsc;
 use tokio::time::{interval, timeout};
-use tokio_tungstenite::connect_async_with_config;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::protocol::WebSocketConfig;
 use url::Url;
@@ -34,11 +34,46 @@ use uuid::Uuid;
 const ROUTE_PREFIX: &str = "/v1/generations/";
 const ROUTE_SUFFIX: &str = "/environment";
 const PRODUCTION_HOST: &str = "chat-executor.paperswithcode.co";
-const STAGING_HOST: &str = "chat-executor.staging.paperswithcode.co";
+const STAGING_HOST: &str = "chat-executor-staging.paperswithcode.co";
 const HEARTBEAT: Duration = Duration::from_secs(5);
+const CONNECT_DEADLINE: Duration = Duration::from_secs(5);
 const RESPONSE_DEADLINE: Duration = Duration::from_secs(15);
 const EXECUTOR_SOCKET: &str = "/run/pwc-chat-executor/executor.sock";
 const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
+// Four executing commands plus one cancellation/settlement RPC for each.
+// The daemon independently enforces the four-command execution limit.
+const MAX_DAEMON_STREAMS: usize = 8;
+// Use authenticated issuer time, never the guest wall clock. One second covers
+// timestamp rounding and transport delay; the issuer's single-use window stays 2s.
+const AUTHORIZATION_CLOCK_SKEW_SECONDS: u64 = 1;
+
+struct IssuerClock {
+    unix_ms: u64,
+    observed: Instant,
+}
+
+impl IssuerClock {
+    fn from_acknowledgement(value: &Value) -> Result<Self, Box<dyn std::error::Error>> {
+        let unix_ms = value
+            .get("issuer_time_ms")
+            .and_then(Value::as_u64)
+            .filter(|value| *value > 0)
+            .ok_or("authenticated issuer time missing")?;
+        Ok(Self {
+            unix_ms,
+            observed: Instant::now(),
+        })
+    }
+
+    fn now_seconds(&self) -> Result<u64, Box<dyn std::error::Error>> {
+        let elapsed = u64::try_from(self.observed.elapsed().as_millis())?;
+        Ok(self
+            .unix_ms
+            .checked_add(elapsed)
+            .ok_or("issuer clock overflow")?
+            / 1000)
+    }
+}
 
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -145,6 +180,8 @@ struct EnvironmentPeerState {
     endpoint: Option<PeerEndpoint>,
     daemon_events: mpsc::Sender<DaemonEvent>,
     daemon_receiver: mpsc::Receiver<DaemonEvent>,
+    daemon_ready: bool,
+    startup_started: Instant,
 }
 
 impl EnvironmentPeerState {
@@ -154,13 +191,34 @@ impl EnvironmentPeerState {
             endpoint: None,
             daemon_events,
             daemon_receiver,
+            daemon_ready: false,
+            startup_started: Instant::now(),
         }
     }
 }
 
-#[tokio::main]
-async fn main() {
-    if let Err(error) = run().await {
+fn main() {
+    let arguments: Vec<_> = std::env::args_os().skip(1).collect();
+    if arguments
+        .first()
+        .is_some_and(|value| value == "--exec-command")
+    {
+        if arguments.len() != 2 {
+            std::process::exit(2);
+        }
+        let error = pwc_persistent_executor_transport::command_launcher::launch(&arguments[1]);
+        eprintln!("executor command failed: {}", error.unwrap_err());
+        std::process::exit(126);
+    }
+    if arguments.as_slice() == ["--command-launcher-version"] {
+        println!("1");
+        return;
+    }
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("executor runtime initialization failed");
+    if let Err(error) = runtime.block_on(run()) {
         eprintln!("environment failed: {error}");
         std::process::exit(1);
     }
@@ -170,6 +228,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     let arguments: Vec<String> = std::env::args().skip(1).collect();
     match arguments.as_slice() {
         [flag] if flag == "--self-test" => {
+            // Exercise the same default-provider selection as the WSS connector.
+            let _tls_config = rustls::ClientConfig::builder()
+                .with_root_certificates(rustls::RootCertStore::empty())
+                .with_no_client_auth();
             let identity = NoiseIdentity::generate()?;
             println!(
                 "{}",
@@ -265,19 +327,47 @@ async fn launch(
         .spawn()?;
     let identity = NoiseIdentity::generate()?;
     let mut peer_state = EnvironmentPeerState::new();
-    let connection = maintain_connection(
-        url,
-        admission,
-        &identity,
-        &authorization_keys,
-        &mut peer_state,
-    );
+    let connection = async {
+        maintain_connection(
+            url,
+            admission,
+            &identity,
+            &authorization_keys,
+            &mut peer_state,
+        )
+        .await
+    };
     let result = tokio::select! {
         result = connection => result,
         status = daemon.wait() => Err(format!("executor daemon exited: {}", status?).into()),
     };
     let _ = daemon.kill().await;
     result
+}
+
+async fn wait_for_daemon_socket(path: &Path) -> Result<(), Box<dyn std::error::Error>> {
+    timeout(Duration::from_secs(15), async {
+        loop {
+            match UnixStream::connect(path).await {
+                Ok(stream) => {
+                    drop(stream);
+                    return Ok::<(), std::io::Error>(());
+                }
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+                    ) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    })
+    .await
+    .map_err(|_| "executor daemon readiness timed out")??;
+    Ok(())
 }
 
 async fn maintain_connection(
@@ -315,6 +405,7 @@ async fn maintain_connection(
                 tokio::time::sleep(Duration::from_millis(backoff.next_delay_ms(entropy))).await;
             }
             Err(error) => {
+                eprintln!("executor connection attempt failed: {error}");
                 recovery_attempts += 1;
                 if recovery_attempts > 3 {
                     return Err(error);
@@ -331,6 +422,17 @@ async fn maintain_connection(
     }
 }
 
+async fn open_websocket(
+    url: &str,
+    deadline: Duration,
+    ready: impl std::future::Future<Output = Result<(), Box<dyn std::error::Error>>>,
+) -> Result<
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
+    Box<dyn std::error::Error>,
+> {
+    connect_when_ready(url, websocket_config(), deadline, ready).await
+}
+
 async fn connect(
     url: &str,
     admission: &[u8],
@@ -339,8 +441,33 @@ async fn connect(
     peer_state: &mut EnvironmentPeerState,
 ) -> Result<Vec<u8>, Box<dyn std::error::Error>> {
     let url = validate_url(url)?;
-    let (mut socket, _) =
-        connect_async_with_config(url.as_str(), Some(websocket_config()), false).await?;
+    let started = Instant::now();
+    let ready = async {
+        if !peer_state.daemon_ready {
+            // A failed connection attempt must not restart the daemon's
+            // startup allowance. Reconnects retain the existing ready state;
+            // launch() independently watches the daemon process for exit.
+            let remaining =
+                Duration::from_secs(15).saturating_sub(peer_state.startup_started.elapsed());
+            timeout(
+                remaining,
+                wait_for_daemon_socket(Path::new(EXECUTOR_SOCKET)),
+            )
+            .await
+            .map_err(|_| "executor daemon readiness timed out")??;
+            peer_state.daemon_ready = true;
+            eprintln!(
+                "executor startup stage=daemon_ready duration_ms={}",
+                peer_state.startup_started.elapsed().as_millis()
+            );
+        }
+        Ok(())
+    };
+    let mut socket = open_websocket(url.as_str(), CONNECT_DEADLINE, ready).await?;
+    eprintln!(
+        "executor startup stage=daemon_and_websocket_ready duration_ms={}",
+        started.elapsed().as_millis()
+    );
     socket
         .send(Message::Binary(admission.to_vec().into()))
         .await?;
@@ -370,7 +497,7 @@ async fn connect(
         _ => return Err("rendezvous handshake rejected".into()),
     };
     let mut transport = pending.finish(&response)?;
-    let (durable_registration_id, environment_generation, shard_generation) =
+    let (durable_registration_id, environment_generation, shard_generation, mut issuer_clock) =
         match timeout(RESPONSE_DEADLINE, socket.next()).await {
             Ok(Some(Ok(Message::Binary(ciphertext)))) => {
                 let acknowledgement: Value =
@@ -390,11 +517,21 @@ async fn connect(
                     .and_then(Value::as_u64)
                     .filter(|value| *value > 0)
                     .ok_or("rendezvous registration rejected")?;
-                (registration_id, environment_generation, shard_generation)
+                let issuer_clock = IssuerClock::from_acknowledgement(&acknowledgement)?;
+                (
+                    registration_id,
+                    environment_generation,
+                    shard_generation,
+                    issuer_clock,
+                )
             }
             _ => return Err("rendezvous registration rejected".into()),
         };
 
+    eprintln!(
+        "executor startup stage=daemon_and_registration_ready duration_ms={}",
+        started.elapsed().as_millis()
+    );
     let mut heartbeats = interval(HEARTBEAT);
     heartbeats.tick().await;
     let mut sequence = 0_u64;
@@ -427,6 +564,7 @@ async fn connect(
                         let token = message.get("reconnect_token").and_then(Value::as_str)
                             .ok_or("rendezvous heartbeat rejected")?;
                         reconnect_admission = Some(URL_SAFE.decode(token)?);
+                        issuer_clock = IssuerClock::from_acknowledgement(&message)?;
                     }
                     Some("peer") => {
                         let connection_id = parse_connection_id(&message)?;
@@ -438,6 +576,7 @@ async fn connect(
                                     &frame,
                                     identity,
                                     authorization_keys,
+                                    issuer_clock.now_seconds()?,
                                     &registration.environment_id,
                                     &durable_registration_id,
                                     environment_generation,
@@ -542,6 +681,7 @@ impl PeerEndpoint {
         frame: &[u8],
         identity: &NoiseIdentity,
         keys: &KeyRing,
+        authorization_now: u64,
         environment_id: &str,
         registration_id: &str,
         environment_generation: u64,
@@ -572,7 +712,11 @@ impl PeerEndpoint {
             return Err("executor peer identity rejected".into());
         }
         let authorization: SignedAuthorization = serde_json::from_slice(pending.authorization())?;
-        keys.verify(&authorization, unix_seconds()?)?;
+        keys.verify_with_clock_skew(
+            &authorization,
+            authorization_now,
+            AUTHORIZATION_CLOCK_SKEW_SECONDS,
+        )?;
         let claims = &authorization.claims;
         if claims.environment_id != environment_id
             || claims.environment_generation != environment_generation
@@ -712,7 +856,10 @@ impl PeerEndpoint {
             .ok_or(LocalSocketError::FrameRejected)?
             .to_owned();
         match value.get("kind").and_then(Value::as_str) {
-            Some("open") if !self.streams.contains_key(&stream_id) && self.streams.len() < 4 => {
+            Some("open")
+                if !self.streams.contains_key(&stream_id)
+                    && self.streams.len() < MAX_DAEMON_STREAMS =>
+            {
                 let daemon = UnixStream::connect(&self.daemon_path).await?;
                 let (mut reader, writer) = daemon.into_split();
                 self.streams.insert(stream_id.clone(), writer);
@@ -863,6 +1010,7 @@ fn hex_digit(value: u8) -> Result<u8, LocalSocketError> {
     }
 }
 
+#[cfg(test)]
 fn unix_seconds() -> Result<u64, Box<dyn std::error::Error>> {
     Ok(std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)?
@@ -905,6 +1053,99 @@ mod tests {
     use super::*;
     use pwc_persistent_executor_transport::protocol::{AuthorizationClaims, AuthorizationSigner};
 
+    #[tokio::test]
+    async fn control_connection_disables_nagle_buffering() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            tokio_tungstenite::accept_async(stream).await.unwrap()
+        });
+        let client = open_websocket(&url, Duration::from_secs(1), async { Ok(()) })
+            .await
+            .unwrap();
+        let tokio_tungstenite::MaybeTlsStream::Plain(tcp) = client.get_ref() else {
+            panic!("test connection must use plain TCP");
+        };
+        assert!(tcp.nodelay().unwrap());
+        drop(client);
+        drop(server.await.unwrap());
+    }
+
+    #[tokio::test]
+    async fn registration_readiness_waits_for_the_local_daemon_listener() {
+        let path = std::env::temp_dir().join(format!("pwc-daemon-ready-{}", Uuid::new_v4()));
+        let readiness = wait_for_daemon_socket(&path);
+        tokio::pin!(readiness);
+        assert!(
+            timeout(Duration::from_millis(20), &mut readiness)
+                .await
+                .is_err()
+        );
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        timeout(Duration::from_secs(1), &mut readiness)
+            .await
+            .unwrap()
+            .unwrap();
+        drop(listener);
+        std::fs::remove_file(&path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn four_executions_leave_room_for_four_control_streams() {
+        let path = std::env::temp_dir().join(format!("pwc-control-slots-{}", Uuid::new_v4()));
+        let listener = tokio::net::UnixListener::bind(&path).unwrap();
+        let mut fixture = attach_fixture(3).unwrap();
+        fixture.endpoint.daemon_path = path.clone();
+        for index in 0..8 {
+            let frame = serde_json::to_vec(
+                &json!({"kind":"open", "stream_id":format!("operation-{index}")}),
+            )
+            .unwrap();
+            let response = fixture.endpoint.handle_message(&frame).await.unwrap();
+            assert_eq!(
+                serde_json::from_slice::<Value>(&response).unwrap()["kind"],
+                "opened"
+            );
+        }
+        assert!(
+            fixture
+                .endpoint
+                .handle_message(br#"{"kind":"open","stream_id":"overflow"}"#)
+                .await
+                .is_err()
+        );
+        drop(fixture);
+        drop(listener);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn websocket_upgrade_that_never_answers_is_bounded() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let stalled = tokio::spawn(async move {
+            let (_socket, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+        });
+        let result = timeout(
+            Duration::from_secs(1),
+            open_websocket(
+                &format!("ws://{address}"),
+                Duration::from_millis(20),
+                async { Ok(()) },
+            ),
+        )
+        .await
+        .expect("connect deadline must run");
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "rendezvous connection timed out"
+        );
+        stalled.abort();
+        let _ = stalled.await;
+    }
+
     struct AttachedFixture {
         endpoint: PeerEndpoint,
         transport: NoiseTransport,
@@ -913,10 +1154,43 @@ mod tests {
         binding: HandshakeBinding,
     }
 
+    #[test]
+    fn attachment_uses_issuer_time_even_when_guest_wall_clock_differs_by_an_hour() {
+        attach_fixture_with_issuer_clock(3, 3600, 0).unwrap();
+        attach_fixture_with_issuer_clock(3, -3600, 0).unwrap();
+        assert!(attach_fixture_with_issuer_clock(3, 3600, 4).is_err());
+        assert!(attach_fixture_with_issuer_clock(3, -3600, 4).is_err());
+    }
+
+    #[test]
+    fn issuer_clock_requires_authenticated_timestamp_and_advances_monotonically() {
+        for invalid in [
+            json!({}),
+            json!({"issuer_time_ms": 0}),
+            json!({"issuer_time_ms": -1}),
+        ] {
+            assert!(IssuerClock::from_acknowledgement(&invalid).is_err());
+        }
+        let mut clock =
+            IssuerClock::from_acknowledgement(&json!({"issuer_time_ms":100000})).unwrap();
+        clock.observed = Instant::now() - Duration::from_secs(5);
+        assert_eq!(clock.now_seconds().unwrap(), 105);
+        clock.unix_ms = u64::MAX;
+        assert!(clock.now_seconds().is_err());
+    }
+
     fn attach_fixture(
         environment_generation: u64,
     ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
-        let now = unix_seconds()?;
+        attach_fixture_with_issuer_clock(environment_generation, 0, 0)
+    }
+
+    fn attach_fixture_with_issuer_clock(
+        environment_generation: u64,
+        issuer_offset: i64,
+        elapsed_seconds: u64,
+    ) -> Result<AttachedFixture, Box<dyn std::error::Error>> {
+        let now = unix_seconds()?.checked_add_signed(issuer_offset).unwrap();
         let environment = NoiseIdentity::from_seed([4; 32])?;
         let harness = NoiseIdentity::from_seed([3; 32])?;
         let signer = AuthorizationSigner::from_seed("authorization-v1", [5; 32], 0, now + 60)?;
@@ -966,6 +1240,7 @@ mod tests {
             &attach,
             &environment,
             &ring,
+            now + elapsed_seconds,
             "environment-v1",
             "registration-v1",
             3,

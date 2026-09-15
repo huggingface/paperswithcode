@@ -248,3 +248,46 @@ def test_pwc_cli_requires_explicit_publish_confirmation():
         ]
     )
     assert args.confirm == "PUBLISH"
+
+
+def test_generate_draft_keeps_github_targets_with_mixed_official_remotes(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from backend.services import github_issue_body_service as service
+
+    paper = SimpleNamespace(id=1, title="Mixed official code")
+    row = (
+        SimpleNamespace(
+            id=7,
+            paper_id=1,
+            task_id=2,
+            dataset_id=3,
+            model_name="Model",
+            best_metric=None,
+            metrics={"Accuracy": 99},
+        ),
+        SimpleNamespace(name="Task", slug="task"),
+        SimpleNamespace(name="Benchmark", slug="benchmark"),
+    )
+    monkeypatch.setattr(service, "resolve_paper", lambda *args: (paper, "2601.00001"))
+    db = Mock()
+    db.execute.side_effect = [
+        Mock(**{"all.return_value": [row]}),
+        Mock(**{"all.return_value": [row]}),
+        Mock(**{"scalars.return_value": []}),
+        Mock(
+            **{
+                "scalars.return_value": [
+                    "https://gitlab.com/lab/code",
+                    "https://github.com/lab/code.git",
+                    "https://bitbucket.org/lab/code",
+                    "https://github.com/lab/code",
+                    "invalid",
+                ]
+            }
+        ),
+    ]
+    result = service.generate_github_issue_draft(db, "1")
+    assert result.official_repositories == ("lab/code",)
+    assert result.native_evaluation_count == 1
+    assert "paper/2601.00001#results" in result.body

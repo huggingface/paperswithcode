@@ -73,6 +73,7 @@ export interface PolicyOptions {
   maximumTurnOutputBytes: number;
   bashTimeoutSeconds: number;
   excalidrawEnabled?: boolean;
+  catalogEnabled?: boolean;
   posterlyMaximumCalls?: number;
   posterlyMaximumRounds?: number;
   posterlyMaximumResultBytes?: number;
@@ -128,6 +129,11 @@ export class PolicyController {
     if (this.toolingClosed) this.answerAfterClose = true;
   }
 
+  observeIncomplete(): void {
+    this.answerProduced = false;
+    this.answerAfterClose = false;
+  }
+
   needsFinalAnswer(): boolean {
     return this.toolingClosed ? !this.answerAfterClose : !this.answerProduced;
   }
@@ -146,7 +152,11 @@ export class PolicyController {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
     }
-    if (!new Set(["bash", "read", "search_web", "read_me", "create_view"]).has(name)) {
+    const catalogTool = new Set(["pwc_search", "pwc_paper_info", "pwc_paper_list"]).has(name);
+    if (catalogTool && !this.options.catalogEnabled) {
+      return this.deny(id, "Catalog tools are not available.");
+    }
+    if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view"]).has(name)) {
       return this.deny(id, "That tool is not available.");
     }
     if ((name === "read_me" || name === "create_view") && !this.options.excalidrawEnabled) {
@@ -195,14 +205,14 @@ export class PolicyController {
           this.paperCommandIds.set(id, paperCommand.receiptOperation);
         }
       }
-      if (SEARCH.test(command)) {
-        const maximumSearches = this.paperActivated ? (this.options.paperMaximumDirectSearches ?? 8) : this.options.maximumDirectSearches;
-        if (this.searches >= maximumSearches) {
-          this.toolingClosed = true;
-          return this.deny(id, ANSWER_NOW);
-        }
-        this.searches += 1;
+    }
+    if (name === "pwc_search" || (name === "bash" && SEARCH.test(String(input.command)))) {
+      const maximumSearches = this.paperActivated ? (this.options.paperMaximumDirectSearches ?? 8) : this.options.maximumDirectSearches;
+      if (this.searches >= maximumSearches) {
+        this.toolingClosed = true;
+        return this.deny(id, ANSWER_NOW);
       }
+      this.searches += 1;
     }
     if (name === "search_web") {
       const query = input.query;

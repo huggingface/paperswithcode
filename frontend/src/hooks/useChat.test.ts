@@ -116,6 +116,7 @@ const flushMicrotasks = async () => {
 const renderChat = (
   sessionId: string | null = "session-1",
   webSearchEnabled = false,
+  paperRoute?: string,
 ) => {
   const onSessionId = vi.fn();
   const onSettled = vi.fn();
@@ -124,6 +125,7 @@ const renderChat = (
     sessionId,
     initialModel: "zai-org/GLM-5.2",
     webSearchEnabled,
+    ...(paperRoute ? { primaryPaperRouteId: paperRoute, reasoningEffort: "max" as const } : {}),
     onSessionId,
     onTitle: vi.fn(),
     onSettled,
@@ -1211,4 +1213,25 @@ describe("useChat smooth stream presentation", () => {
       expect.objectContaining({ kind: "answer", text: "Hidden answer", done: true }),
     ]);
   });
+});
+
+it("Retry continues from saved progress without replacing the failed turn or hiding partial text", async () => {
+  let request: ChatStreamRequest | undefined;
+  streamChatMock.mockImplementation((next: ChatStreamRequest) => {
+    request = next;
+    return stream({ type: "stream_start", request_id: "retry", session_id: "session-1" },
+      { type: "done", finish_reason: "success" })();
+  });
+  const { result } = renderChat("session-1", false, "1234.56789");
+  const prior: ChatMessage[] = [
+    { id: "failed-user", role: "user", text: "Research", revision: 1, status: "error" },
+    { id: "partial", role: "assistant", error: "Context full", errorCode: "context_too_large",
+      blocks: [{ kind: "answer", text: "Completed research", done: true }] },
+  ];
+  act(() => result.current.load(prior));
+  act(() => { expect(result.current.retryFromProgress()).toBe(true); });
+  expect(request).toMatchObject({ message: "Research", retry_message_id: "failed-user", session_id: "session-1", reasoning_effort: "max", primary_paper_route_id: "1234.56789" });
+  expect(request?.replace_message_id).toBeUndefined();
+  expect(result.current.messages.slice(0, 2)).toEqual(prior);
+  await flushMicrotasks();
 });

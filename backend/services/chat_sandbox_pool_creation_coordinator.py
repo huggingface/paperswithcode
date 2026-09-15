@@ -9,6 +9,10 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from backend.services.chat_executor_runtime import ChatExecutorRuntime
 
 from sqlalchemy.orm import Session
 
@@ -26,7 +30,11 @@ from backend.services.chat_sandbox_pool_repository import (
     PoolTerminationClaim,
     PoolTerminationFinishOutcome,
 )
-from backend.services.chat_sandbox_provider import SandboxError, SandboxProvider
+from backend.services.chat_sandbox_provider import (
+    SandboxError,
+    SandboxLaunchMode,
+    SandboxProvider,
+)
 from backend.services.chat_sandbox_spend_service import (
     ChatComputeDisabled,
     ChatSandboxSpendService,
@@ -84,7 +92,7 @@ class StartedBlank:
     reservation: PoolStartReservation
     sandbox: object
     sandbox_id: str
-    control: SessionControl
+    control: SessionControl | None
     provider_create_ms: int
     backend_control_connect_ms: int
     startup_metrics: BlankStartupMetrics | None
@@ -116,7 +124,9 @@ class ChatSandboxPoolCreationCoordinator:
         spend_factory: SpendFactory,
         utcnow: UtcClock,
         monotonic: MonotonicClock,
+        executor_runtime: ChatExecutorRuntime | None = None,
     ):
+        self.executor_runtime = executor_runtime
         self.policy = policy
         self.settings = policy.settings
         self.session_factory = session_factory
@@ -242,7 +252,17 @@ class ChatSandboxPoolCreationCoordinator:
         control: SessionControl | None = None
         try:
             provider_started = self.monotonic()
+            launch_args = {}
+            if self.executor_runtime is not None:
+                launch_args = {
+                    "launch_mode": SandboxLaunchMode.EXECUTOR,
+                    "executor_launch": await self.executor_runtime.prepare_launch(
+                        reservation.worker_generation,
+                        blank_pool=True,
+                    ),
+                }
             sandbox = await self.provider.create(
+                **launch_args,
                 name=f"chat-blank-{reservation.pool_id}",
                 tags=self._provider_tags(reservation),
                 worker_generation=reservation.worker_generation,
@@ -250,6 +270,21 @@ class ChatSandboxPoolCreationCoordinator:
             provider_create_ms = round((self.monotonic() - provider_started) * 1000)
             sandbox_id: str = sandbox.object_id
             control_started = self.monotonic()
+            if self.executor_runtime is not None:
+                await self.executor_runtime.wait_for_pool_ready(
+                    reservation.worker_generation
+                )
+                return StartedBlank(
+                    reservation=reservation,
+                    sandbox=sandbox,
+                    sandbox_id=sandbox_id,
+                    control=None,
+                    provider_create_ms=provider_create_ms,
+                    backend_control_connect_ms=round(
+                        (self.monotonic() - control_started) * 1000
+                    ),
+                    startup_metrics=None,
+                )
             control = await self.transport.open_persistent_control(
                 sandbox,
                 reservation.worker_generation,
@@ -583,6 +618,8 @@ class ChatSandboxPoolCreationCoordinator:
         self.transport.schedule_close(control)
 
     def _drop_registered_start_control(self, started: StartedBlank) -> None:
+        if started.control is None:
+            return
         self.transport.drop_blank_control(
             started.sandbox_id,
             expected=started.control,

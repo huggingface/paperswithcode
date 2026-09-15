@@ -2,6 +2,8 @@
 -- Rollback audit rows remain in the normal PostgreSQL backup and restore path.
 -- Privileged database administration is outside this v1 tamper-resistance boundary.
 
+BEGIN;
+
 CREATE TABLE IF NOT EXISTS chat_executor_manifests (
     digest varchar(64) PRIMARY KEY,
     parent_digest varchar(64) REFERENCES chat_executor_manifests(digest),
@@ -284,7 +286,7 @@ BEGIN
                 chat_executor_key_revocations,chat_executor_rollback_audits
                 FROM paperswithcode_user;
         END IF;
-    ELSE
+    ELSIF current_schema() = 'public' THEN
         IF to_regrole('paperswithcode_user') IS NULL THEN
             RAISE EXCEPTION 'production executor migration requires paperswithcode_user';
         END IF;
@@ -305,6 +307,10 @@ BEGIN
                 chat_executor_key_revocations,chat_executor_rollback_audits
                 FROM pwc_staging;
         END IF;
+    ELSE
+        RAISE EXCEPTION 'executor registry migration requires staging or public schema';
     END IF;
 END;
 $$;
+
+COMMIT;

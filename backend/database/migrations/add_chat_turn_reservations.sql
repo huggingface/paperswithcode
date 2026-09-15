@@ -81,4 +81,38 @@ CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_turn_reservations_active_owner
 CREATE INDEX IF NOT EXISTS idx_chat_turn_reservations_state
     ON chat_turn_reservations(environment, state);
 
+DO $$
+BEGIN
+    IF current_schema() = 'staging' THEN
+        IF to_regrole('pwc_staging') IS NULL OR to_regrole('pwc_staging_owner') IS NULL THEN
+            RAISE EXCEPTION 'staging turn reservation migration requires pwc_staging roles';
+        END IF;
+        ALTER TABLE chat_turn_admission_budgets OWNER TO pwc_staging_owner;
+        ALTER TABLE chat_turn_reservations OWNER TO pwc_staging_owner;
+        GRANT SELECT,INSERT,UPDATE,DELETE ON
+            chat_turn_admission_budgets,chat_turn_reservations TO pwc_staging;
+        IF to_regrole('paperswithcode_user') IS NOT NULL THEN
+            REVOKE ALL ON
+                chat_turn_admission_budgets,chat_turn_reservations
+                FROM paperswithcode_user;
+        END IF;
+    ELSIF current_schema() = 'public' THEN
+        IF to_regrole('paperswithcode_user') IS NULL THEN
+            RAISE EXCEPTION 'production turn reservation migration requires paperswithcode_user';
+        END IF;
+        ALTER TABLE chat_turn_admission_budgets OWNER TO paperswithcode_user;
+        ALTER TABLE chat_turn_reservations OWNER TO paperswithcode_user;
+        GRANT SELECT,INSERT,UPDATE,DELETE ON
+            chat_turn_admission_budgets,chat_turn_reservations TO paperswithcode_user;
+        IF to_regrole('pwc_staging') IS NOT NULL THEN
+            REVOKE ALL ON
+                chat_turn_admission_budgets,chat_turn_reservations
+                FROM pwc_staging;
+        END IF;
+    ELSE
+        RAISE EXCEPTION 'turn reservation migration requires staging or public schema';
+    END IF;
+END;
+$$;
+
 COMMIT;

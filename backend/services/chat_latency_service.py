@@ -17,6 +17,10 @@ from backend.models.database import (
     ChatTurnJob,
     ChatTurnLatency,
 )
+from backend.services.chat_sandbox_pricing import (
+    MODAL_CPU_USD_PER_CORE_SECOND as MODAL_CPU_USD_PER_CORE_SECOND,
+    MODAL_MEMORY_USD_PER_GIB_SECOND as MODAL_MEMORY_USD_PER_GIB_SECOND,
+)
 from backend.services.chat_sandbox_provider import (
     ATTEMPT_KINDS,
     sanitized_failure_class,
@@ -28,8 +32,6 @@ RETENTION_DAYS = 30
 MAX_DURATION_MS = 3_600_000
 DEFAULT_CLEANUP_BATCH_SIZE = 500
 MAX_CLEANUP_BATCH_SIZE = 5_000
-MODAL_CPU_USD_PER_CORE_SECOND = 0.00003942
-MODAL_MEMORY_USD_PER_GIB_SECOND = 0.00000672
 ACTIVE_SPEND_ALERT_FLOOR_USD = 50.0
 ACTIVE_SPEND_LOOKBACK_DAYS = 7
 ACTIVE_SPEND_BASELINE_DAYS = 30

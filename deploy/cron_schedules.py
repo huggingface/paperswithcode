@@ -45,6 +45,11 @@ class TimerSpec:
 
 TIMERS: tuple[TimerSpec, ...] = (
     TimerSpec(
+        job="create_eval_verification_issues",
+        on_calendar=("*-*-* *:52:00",),
+        description="Request verification of settled paper-native evaluations on GitHub",
+    ),
+    TimerSpec(
         job="run_chat_synthetic_probe",
         on_calendar=("*-*-* *:*:00",),
         description="Evaluate due and triggered production synthetic chat probes",

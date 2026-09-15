@@ -731,6 +731,7 @@ export const ChatExperience: React.FC<ChatExperienceProps> = ({
             openRouterFallbackEnabled={openRouterFallbackEnabled}
             onToggleBlock={chat.toggleBlock}
             onEditAndResend={chat.editAndResend}
+            onRetryFromProgress={chat.retryFromProgress}
             onArchiveOld={() => void archive.archiveOld()}
             onArchiveOldest={() => void archive.archiveOldest()}
           />

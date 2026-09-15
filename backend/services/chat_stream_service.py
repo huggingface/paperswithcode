@@ -29,7 +29,12 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from backend.config import Settings
 from backend.database.connection import db_manager
-from backend.models.database import ChatArtifact, ChatArtifactVersion, ChatSession
+from backend.models.database import (
+    ChatArtifact,
+    ChatArtifactVersion,
+    ChatSession,
+    ChatTurnJob,
+)
 from backend.services.chat_capability_service import ChatCapabilityService
 from backend.services.chat_citation_service import (
     PaperCitationCandidate,
@@ -236,6 +241,9 @@ class ChatStreamFrame:
 
     event: str | None
     payload: dict[str, Any] = field(default_factory=dict)
+    after_persist: Callable[[], Awaitable[None]] | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @classmethod
     def heartbeat(cls) -> ChatStreamFrame:
@@ -1213,6 +1221,29 @@ def _heartbeat_local_turn(settings: Settings, admission: TurnAdmission) -> None:
             raise
 
 
+def _durable_turn_cancelled(admission: TurnAdmission) -> bool:
+    """Check only this turn when a concurrent Stop invalidated its lease."""
+    with db_manager.session_local() as db:
+        job = db.scalar(
+            select(ChatTurnJob).where(
+                ChatTurnJob.turn_id == admission.turn_id,
+                ChatTurnJob.chat_session_id == admission.session_id,
+            )
+        )
+        return job is not None and (
+            job.state == "cancelling"
+            or (
+                job.state == "interrupted"
+                and job.failure_code
+                in {
+                    "cancelled",
+                    "worker_cancelled",
+                    "cancel_control_missing",
+                }
+            )
+        )
+
+
 def _start_local_turn(settings: Settings, admission: TurnAdmission) -> None:
     if admission.durable_claim is None:
         raise RuntimeError("Durable turn claim is missing")
@@ -1903,6 +1934,9 @@ class ChatStreamOrchestrator:
             await self._finalize_disconnect(InterruptionReason(interruption_reason))
             raise
         except Exception as exc:
+            if await self._cancel_requested_after_error():
+                yield await self._finalize_cancellation(cancel_runner=False)
+                return
             logger.warning(
                 "chat stream persistence failed session_id=%s error=%s",
                 self.admission.session_id,
@@ -2181,8 +2215,16 @@ class ChatStreamOrchestrator:
                 }
             )
         except SandboxError as exc:
-            await queue.put({"type": "error", "message": str(exc), "code": exc.code})
+            if await self._cancel_requested_after_error():
+                await queue.put({"type": "_cancelled"})
+            else:
+                await queue.put(
+                    {"type": "error", "message": str(exc), "code": exc.code}
+                )
         except Exception as exc:
+            if await self._cancel_requested_after_error():
+                await queue.put({"type": "_cancelled"})
+                return
             assert self.runner is not None
             with contextlib.suppress(Exception):
                 await self.runner.cancel()
@@ -2483,6 +2525,8 @@ class ChatStreamOrchestrator:
         return kind, payload
 
     async def _handle_projection_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
+        if self._legacy_payload(event)[0] == "_compaction_telemetry":
+            return _HandledTurnEvent()
         projected = self._project_event(event)
         if projected is None:
             return _HandledTurnEvent()
@@ -2602,6 +2646,9 @@ class ChatStreamOrchestrator:
             self.lifecycle.research_finished
             and (not self.lifecycle.title_requested or self.lifecycle.title_finished)
         ):
+            if self._detached_cancel_requested:
+                yield await self._finalize_cancellation(cancel_runner=False)
+                return
             self._assert_durable_lease()
             if await self._legacy_cancel_requested():
                 yield await self._finish_legacy_cancel()
@@ -2620,6 +2667,7 @@ class ChatStreamOrchestrator:
                 self.interruption_reason = "client_disconnect"
                 raise asyncio.CancelledError
 
+            after_persist = getattr(raw_event, "after_persist", None)
             if isinstance(raw_event, dict):
                 serialized = dict(raw_event)
                 legacy = dict(serialized)
@@ -2632,12 +2680,19 @@ class ChatStreamOrchestrator:
                 kind, legacy = self._legacy_payload(typed_event)
                 self.tool_timing.apply(kind, legacy)
                 typed_event = from_legacy_event({"type": kind, **legacy})
+            if self._detached_cancel_requested:
+                yield await self._finalize_cancellation(cancel_runner=False)
+                return
             self.trace.record_event(kind, legacy)
 
             handled = await self._dispatch_event(typed_event)
             if handled.frame is not None:
-                yield handled.frame
+                yield replace(handled.frame, after_persist=after_persist)
                 last_write = time.monotonic()
+            elif after_persist is not None:
+                # Ordered receipt for internal events; the coordinator first
+                # commits any preceding public frames.
+                yield ChatStreamFrame(event=None, after_persist=after_persist)
 
         if self.research_task:
             with contextlib.suppress(asyncio.CancelledError):
@@ -2882,6 +2937,19 @@ class ChatStreamOrchestrator:
             return "cancel_timeout"
         except Exception:
             return "cancel_failed"
+
+    async def _cancel_requested_after_error(self) -> bool:
+        if self._detached_cancel_requested:
+            return True
+        if not self.settings.chat_durable_turn_dispatch_enabled:
+            return await self._legacy_cancel_requested(force=True)
+        try:
+            cancelled = await asyncio.to_thread(_durable_turn_cancelled, self.admission)
+        except SQLAlchemyError:
+            # Preserve the original failure if cancellation cannot be established.
+            return False
+        self._detached_cancel_requested = cancelled
+        return cancelled
 
     async def _legacy_cancel_requested(self, *, force: bool = False) -> bool:
         if self.settings.chat_durable_turn_dispatch_enabled:

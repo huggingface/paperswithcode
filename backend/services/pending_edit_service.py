@@ -57,6 +57,19 @@ MEMBERSHIP_EDIT_FIELDS = {
 }
 
 
+def _conflict_snapshot(edit_type: str, snapshot: dict[str, Any]) -> dict[str, Any]:
+    """Exclude automatically recalculated ranks from evaluation conflicts."""
+    if edit_type != "evaluations":
+        return snapshot
+    return {
+        **snapshot,
+        "evaluations": [
+            {key: value for key, value in evaluation.items() if key != "best_rank"}
+            for evaluation in snapshot.get("evaluations", [])
+        ],
+    }
+
+
 def _rebase_membership_payload(
     edit_type: str,
     submitted_snapshot: dict[str, Any],
@@ -375,7 +388,9 @@ class PendingEditService:
             applied_payload["date_published"] = row.created_at.date().isoformat()
         if row.paper_id is not None:
             current = self.snapshots.paper_edit(row.paper_id, row.edit_type)
-            if current != (row.current_payload or {}):
+            if _conflict_snapshot(row.edit_type, current) != _conflict_snapshot(
+                row.edit_type, row.current_payload or {}
+            ):
                 rebased_payload = _rebase_membership_payload(
                     row.edit_type,
                     row.current_payload or {},
@@ -392,7 +407,7 @@ class PendingEditService:
                         "Canonical state changed after submission"
                     )
                 applied_payload = rebased_payload
-                row.conflict_payload = None
+            row.conflict_payload = None
 
         is_administrative = row.edit_type in HUMAN_ONLY_EDIT_TYPES
         result_type: str | None = None

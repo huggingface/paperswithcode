@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 import { AssistantMessage, UserMessage } from "./ChatMessage";
 import type { ChatDraft, ChatMessage, ChatPaperHit } from "@/lib/chat";
@@ -13,6 +13,7 @@ interface ChatConversationProps {
   openRouterFallbackEnabled: boolean;
   onToggleBlock: (messageId: string, blockIndex: number) => void;
   onEditAndResend: (messageId: string, draft: ChatDraft) => boolean;
+  onRetryFromProgress?: () => boolean;
   onArchiveOld: () => void;
   onArchiveOldest: () => void;
 }
@@ -27,6 +28,7 @@ export function ChatConversation({
   openRouterFallbackEnabled,
   onToggleBlock,
   onEditAndResend,
+  onRetryFromProgress,
   onArchiveOld,
   onArchiveOldest,
 }: ChatConversationProps) {
@@ -34,6 +36,19 @@ export function ChatConversation({
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTopBeforeToggleRef = useRef<number | null>(null);
   const editScrollAnchorRef = useRef<string | null>(null);
+  const followingBottomRef = useRef(true);
+  const [followingBottom, setFollowingBottom] = useState(true);
+  const touchYRef = useRef<number | null>(null);
+  const followBottom = useCallback((follow: boolean) => {
+    followingBottomRef.current = follow;
+    setFollowingBottom(follow);
+  }, []);
+  const previousUserCountRef = useRef(0);
+  const previousBusyRef = useRef(false);
+  const userMessages = messages.filter((message) => message.role === "user");
+  const userCount = userMessages.length;
+  const firstUserId = userMessages[0]?.id;
+  const latestUserId = userMessages.at(-1)?.id;
 
   useEffect(() => {
     if (busy) setEditingMessageId(null);
@@ -43,6 +58,12 @@ export function ChatConversation({
   useLayoutEffect(() => {
     const scrollElement = scrollRef.current;
     if (!scrollElement) return;
+    // Canonical reloads replace optimistic IDs without adding a new question.
+    if (userCount > previousUserCountRef.current || (busy && !previousBusyRef.current)) {
+      followBottom(true);
+    }
+    previousUserCountRef.current = userCount;
+    previousBusyRef.current = busy;
     if (scrollTopBeforeToggleRef.current !== null) {
       scrollElement.scrollTop = scrollTopBeforeToggleRef.current;
       scrollTopBeforeToggleRef.current = null;
@@ -52,26 +73,53 @@ export function ChatConversation({
       const target = Array.from(
         scrollElement.querySelectorAll<HTMLElement>("[data-message-id]"),
       ).find((element) => element.dataset.messageId === editScrollAnchorRef.current);
+      editScrollAnchorRef.current = null;
       if (target) {
         const containerRect = scrollElement.getBoundingClientRect();
         const targetRect = target.getBoundingClientRect();
         scrollElement.scrollTop += targetRect.top - containerRect.top - 24;
+        followBottom(false);
         return;
       }
     }
-    scrollElement.scrollTop = scrollElement.scrollHeight;
-  }, [messages]);
+    if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
+  }, [messages, userCount, busy, followBottom]);
 
-  const userMessages = messages.filter((message) => message.role === "user");
-  const firstUserId = userMessages[0]?.id;
-  const latestUserId = userMessages.at(-1)?.id;
   const toggleBlock = (messageId: string, blockIndex: number) => {
     scrollTopBeforeToggleRef.current = scrollRef.current?.scrollTop ?? null;
     onToggleBlock(messageId, blockIndex);
   };
 
   return (
-    <div className="chat-conversation" ref={scrollRef}>
+    <div className="chat-conversation-viewport">
+    <div
+      className="chat-conversation"
+      ref={scrollRef}
+      tabIndex={0}
+      role="region"
+      aria-label="Conversation"
+      onWheel={(event) => {
+        if (event.deltaY < 0) followBottom(false);
+      }}
+      onTouchStart={(event) => { touchYRef.current = event.touches[0]?.clientY ?? null; }}
+      onTouchMove={(event) => {
+        const y = event.touches[0]?.clientY;
+        if (y !== undefined && touchYRef.current !== null && y > touchYRef.current) followBottom(false);
+        touchYRef.current = y ?? null;
+      }}
+      onKeyDown={(event) => {
+        if (event.target !== event.currentTarget) return;
+        if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) {
+          followBottom(false);
+        }
+      }}
+      onScroll={(event) => {
+        const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+        // Scrolling away also covers scrollbar dragging. Only explicit actions
+        // resume following, so delayed scroll events cannot undo upward intent.
+        if (scrollHeight - scrollTop - clientHeight > 1) followBottom(false);
+      }}
+    >
       <div className="chat-conversation-inner">
         {messages.length === 0 && queuedDraft?.text && <UserMessage
           id="queued-launch-preview"
@@ -101,7 +149,10 @@ export function ChatConversation({
               onResendDraft={(nextDraft) => {
                 if (message.id !== firstUserId) editScrollAnchorRef.current = message.id;
                 const accepted = onEditAndResend(message.id, nextDraft);
-                if (accepted) setEditingMessageId(null);
+                if (accepted) {
+                  if (message.id === firstUserId) followBottom(true);
+                  setEditingMessageId(null);
+                }
                 else editScrollAnchorRef.current = null;
                 return accepted;
               }}
@@ -111,6 +162,9 @@ export function ChatConversation({
               msg={message}
               papers={papers}
               onToggleBlock={toggleBlock}
+              onRetryCompaction={!busy && message.id === messages.at(-1)?.id && userMessages.at(-1)?.revision
+                ? onRetryFromProgress
+                : undefined}
               onArchiveOldChats={onArchiveOld}
               onArchiveOldestChats={onArchiveOldest}
               archivePending={archivePending}
@@ -119,6 +173,19 @@ export function ChatConversation({
               feedbackEnabled
             />)}
       </div>
+    </div>
+    {!followingBottom && <button
+      type="button"
+      className="chat-jump-latest"
+      onClick={() => {
+        followBottom(true);
+        const scroller = scrollRef.current;
+        if (scroller) {
+          scroller.focus({ preventScroll: true });
+          scroller.scrollTop = scroller.scrollHeight;
+        }
+      }}
+    >Jump to latest</button>}
     </div>
   );
 }

@@ -30,6 +30,8 @@ from backend.chat_sandbox_worker.mcp_app_registry import (
     sandbox_outbound_domains,
 )
 from backend.config import Settings
+from backend.services.chat_executor_timing import executor_stage
+from backend.services.chat_modal_metadata import executor_metadata
 
 ImageResolver = Callable[[str], Awaitable[object]]
 WebSocketConnector = Callable[..., Awaitable[object]]
@@ -54,11 +56,12 @@ _FAILURE_CLASS = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,127}$")
 class SandboxLaunchMode(StrEnum):
     LEGACY = "legacy"
     EXECUTOR = "executor"
+    LEGACY_EXECUTOR = "legacy_executor"
 
 
 EXECUTOR_RENDEZVOUS_URLS = {
     "production": "wss://chat-executor.paperswithcode.co",
-    "staging": "wss://chat-executor.staging.paperswithcode.co",
+    "staging": "wss://chat-executor-staging.paperswithcode.co",
 }
 MAX_EXECUTOR_ADMISSION_BYTES = 2_048
 
@@ -282,7 +285,11 @@ class ModalSandboxProviderAdapter:
             raise SandboxError(
                 "sandbox_launch_mode_invalid", "Sandbox launch mode is invalid"
             )
-        executor_enabled = launch_mode is SandboxLaunchMode.EXECUTOR
+        remote_executor = launch_mode is SandboxLaunchMode.EXECUTOR
+        executor_enabled = launch_mode in {
+            SandboxLaunchMode.EXECUTOR,
+            SandboxLaunchMode.LEGACY_EXECUTOR,
+        }
         if executor_enabled and not self.settings.chat_sandbox_executor_enabled:
             raise SandboxError(
                 "sandbox_executor_disabled", "Sandbox executor launch is disabled"
@@ -296,14 +303,14 @@ class ModalSandboxProviderAdapter:
                 "sandbox_executor_contract_invalid",
                 "Sandbox executor contract is invalid",
             )
-        if executor_enabled and executor_launch is None:
+        if remote_executor and executor_launch is None:
             raise SandboxError(
                 "sandbox_executor_admission_missing",
                 "Sandbox executor admission is unavailable",
             )
         rendezvous_url = (
             executor_launch.rendezvous_url(self.settings.environment)
-            if executor_enabled and executor_launch is not None
+            if remote_executor and executor_launch is not None
             else None
         )
         try:
@@ -312,15 +319,34 @@ class ModalSandboxProviderAdapter:
             raise SandboxError(
                 "gateway_unavailable", "The research gateway is not configured"
             ) from error
-        app, image = await asyncio.gather(
-            modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False),
-            self.image_resolver(self.settings.chat_modal_image_version),
+        reuse_metadata = (
+            remote_executor
+            and self.image_resolver is resolve_modal_image
+            and bool(self.settings.chat_sandbox_modal_environment)
+            and self.settings.chat_modal_image_version.startswith("im-")
         )
+        with executor_stage("provider_lookup", worker_generation or "legacy"):
+            if reuse_metadata:
+                app, image = await executor_metadata(
+                    self.settings.chat_sandbox_modal_environment,
+                    self.settings.chat_modal_image_version,
+                )
+            else:
+                app, image = await asyncio.gather(
+                    modal.App.lookup.aio(MODAL_APP_NAME, create_if_missing=False),
+                    self.image_resolver(self.settings.chat_modal_image_version),
+                )
         persistent_enabled = bool(
             getattr(self.settings, "chat_persistent_worker_enabled", False)
         )
         qualification_profile = tags.get("qualification_profile")
-        if qualification_profile == "32-functional-turns":
+        if qualification_profile == "persistent-cold":
+            from backend.services.durable_external_qualification_contract import (
+                COLD_QUALIFICATION_SANDBOX_LIFETIME_SECONDS,
+            )
+
+            sandbox_lifetime_seconds = COLD_QUALIFICATION_SANDBOX_LIFETIME_SECONDS
+        elif qualification_profile == "32-functional-turns":
             from backend.services.durable_external_qualification_contract import (
                 DURABLE_QUALIFICATION_SANDBOX_LIFETIME_SECONDS,
             )
@@ -343,6 +369,8 @@ class ModalSandboxProviderAdapter:
                 "--authorization-env",
                 "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS",
             )
+            if remote_executor
+            else ("python", "-m", "backend.chat_sandbox_worker.executor_daemon")
             if executor_enabled
             else (
                 ("python", "-m", "backend.chat_sandbox_worker.control_daemon")
@@ -364,92 +392,100 @@ class ModalSandboxProviderAdapter:
             raise SandboxError(
                 "sandbox_resource_invalid", "Memory limit is below request"
             )
-        sandbox = await modal.Sandbox.create.aio(
-            *command,
-            app=app,
-            image=image,
-            env={
-                **sandbox_environment(
-                    self.settings,
-                    pi_prewarm=tags.get("pool") == "blank",
-                ),
-                "PWC_CHAT_WORKER_GENERATION": worker_generation,
-                **(
-                    {
-                        "PWC_CHAT_EXECUTOR_CONTRACT_VERSION": (
-                            self.settings.chat_sandbox_executor_contract_version
-                        ),
-                        "PWC_CHAT_EXECUTOR_ADMISSION": (
-                            executor_launch.encoded_admission()
-                        ),
-                        "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS": (
-                            executor_launch.authorization_keys()
-                        ),
-                    }
-                    if executor_enabled
-                    else {}
-                ),
-            },
-            name=name,
-            tags=tags,
-            region=CHAT_SANDBOX_REGION,
-            timeout=sandbox_lifetime_seconds,
-            idle_timeout=(
-                sandbox_lifetime_seconds
-                if qualification_profile == "32-functional-turns"
-                else (
-                    self.settings.chat_persistent_sandbox_lifetime_seconds
-                    if persistent_enabled
-                    else max(60, self.settings.chat_sandbox_warm_seconds)
-                )
-            ),
-            workdir="/workspace",
-            cpu=(self.settings.chat_sandbox_cpu, cpu_limit),
-            memory=(self.settings.chat_sandbox_memory_mib, memory_limit),
-            outbound_domain_allowlist=[
-                *outbound_domains,
-                *(
-                    ["chat-executor.paperswithcode.co"]
-                    if executor_enabled and self.settings.environment == "production"
-                    else ["chat-executor.staging.paperswithcode.co"]
-                    if executor_enabled
-                    else []
-                ),
-            ],
-            inbound_cidr_allowlist=(
-                None if persistent_enabled and not executor_enabled else []
-            ),
-            encrypted_ports=[],
-            unencrypted_ports=[],
-            include_oidc_identity_token=False,
-            readiness_probe=modal.sandbox.Probe.with_exec(
-                *(
-                    (
-                        "python",
-                        "-m",
-                        "backend.chat_sandbox_worker.relay",
-                        "--ping",
-                        worker_generation,
-                    )
-                    if persistent_enabled and not executor_enabled
-                    else (
-                        (
-                            "test",
-                            "-S",
-                            "/run/pwc-chat-executor/executor.sock",
-                        )
+        with executor_stage("provider_create", worker_generation):
+            sandbox = await modal.Sandbox.create.aio(
+                *command,
+                app=app,
+                image=image,
+                env={
+                    **sandbox_environment(
+                        self.settings,
+                        pi_prewarm=tags.get("pool") == "blank",
+                    ),
+                    "PWC_CHAT_WORKER_GENERATION": worker_generation,
+                    **(
+                        {
+                            "PWC_CHAT_EXECUTOR_CONTRACT_VERSION": (
+                                self.settings.chat_sandbox_executor_contract_version
+                            ),
+                        }
                         if executor_enabled
-                        else ("test", "-x", "/usr/local/bin/pwc")
+                        else {}
+                    ),
+                    **(
+                        {
+                            "PWC_CHAT_EXECUTOR_ADMISSION": (
+                                executor_launch.encoded_admission()
+                            ),
+                            "PWC_CHAT_EXECUTOR_AUTHORIZATION_KEYS": (
+                                executor_launch.authorization_keys()
+                            ),
+                        }
+                        if remote_executor
+                        else {}
+                    ),
+                },
+                name=name,
+                tags=tags,
+                region=CHAT_SANDBOX_REGION,
+                timeout=sandbox_lifetime_seconds,
+                idle_timeout=(
+                    sandbox_lifetime_seconds
+                    if qualification_profile
+                    in {"32-functional-turns", "persistent-cold"}
+                    else (
+                        self.settings.chat_persistent_sandbox_lifetime_seconds
+                        if persistent_enabled
+                        else max(60, self.settings.chat_sandbox_warm_seconds)
                     )
-                )
-            ),
-        )
-        if executor_enabled:
+                ),
+                workdir="/workspace",
+                cpu=(self.settings.chat_sandbox_cpu, cpu_limit),
+                memory=(self.settings.chat_sandbox_memory_mib, memory_limit),
+                outbound_domain_allowlist=[
+                    *outbound_domains,
+                    *(
+                        ["chat-executor.paperswithcode.co"]
+                        if remote_executor and self.settings.environment == "production"
+                        else ["chat-executor-staging.paperswithcode.co"]
+                        if remote_executor
+                        else []
+                    ),
+                ],
+                inbound_cidr_allowlist=(
+                    None if persistent_enabled and not executor_enabled else []
+                ),
+                encrypted_ports=[],
+                unencrypted_ports=[],
+                include_oidc_identity_token=False,
+                readiness_probe=modal.sandbox.Probe.with_exec(
+                    *(
+                        (
+                            "python",
+                            "-m",
+                            "backend.chat_sandbox_worker.relay",
+                            "--ping",
+                            worker_generation,
+                        )
+                        if persistent_enabled and not executor_enabled
+                        else (
+                            (
+                                "test",
+                                "-S",
+                                "/run/pwc-chat-executor/executor.sock",
+                            )
+                            if executor_enabled
+                            else ("test", "-x", "/usr/local/bin/pwc")
+                        )
+                    )
+                ),
+            )
+        if remote_executor:
             # Only authenticated durable registration establishes executor
             # readiness. Modal exec probes are intentionally not part of the
             # warm path and cannot establish remote identity.
             return sandbox
-        if not persistent_enabled:
+        if not persistent_enabled and not executor_enabled:
             return sandbox
         deadline = time.monotonic() + self.settings.chat_worker_ready_timeout_seconds
         while time.monotonic() < deadline:
@@ -458,6 +494,7 @@ class ModalSandboxProviderAdapter:
                     sandbox,
                     persistent=True,
                     worker_generation=worker_generation,
+                    launch_mode=launch_mode,
                 ):
                     return sandbox
             except Exception:
@@ -486,7 +523,10 @@ class ModalSandboxProviderAdapter:
         worker_generation: str | None,
         launch_mode: SandboxLaunchMode = SandboxLaunchMode.LEGACY,
     ) -> bool:
-        if launch_mode is SandboxLaunchMode.EXECUTOR:
+        if launch_mode in {
+            SandboxLaunchMode.EXECUTOR,
+            SandboxLaunchMode.LEGACY_EXECUTOR,
+        }:
             command = ("test", "-S", str(EXECUTOR_SOCKET))
         elif persistent:
             if not worker_generation:

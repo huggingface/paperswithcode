@@ -4,6 +4,8 @@ import {
   useQueryClient,
 } from "@tanstack/react-query";
 
+import { PaperEditDigest } from "./PaperEditDigest";
+import { paperEditsApi } from "@/lib/api/paperEdits";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { catalogApi } from "@/lib/api/catalog";
@@ -26,8 +28,15 @@ export const CatalogAuditPanel = () => {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog-audit"] }),
   });
 
+  const suspension = useMutation({
+    mutationFn: ({ subject, suspended }: { subject: string; suspended: boolean }) => paperEditsApi.suspend(subject, suspended),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["catalog-audit"] }),
+  });
+
   return (
     <div className="space-y-4">
+      <PaperEditDigest />
+      {(rollback.error || suspension.error) && <p role="alert">{(rollback.error || suspension.error)?.message}</p>}
       <Card>
         <CardHeader className="flex-row items-center justify-between">
           <CardTitle>Catalog mutation audit</CardTitle>
@@ -72,6 +81,9 @@ export const CatalogAuditPanel = () => {
                   {JSON.stringify({ before: event.before, after: event.after }, null, 2)}
                 </pre>
               </details>
+              {event.actor_role === "contributor" && event.actor_hf_subject && <Button className="mt-3 mr-2" variant="outline" size="sm" disabled={suspension.isPending} onClick={() => suspension.mutate({ subject: event.actor_hf_subject!, suspended: !event.editing_suspended })}>
+                {event.editing_suspended ? "Restore editing access" : "Suspend editing access"}
+              </Button>}
               {!event.rollback_of_event_id && (
                 <Button
                   className="mt-3"

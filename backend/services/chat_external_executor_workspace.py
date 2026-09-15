@@ -261,7 +261,7 @@ class ChatExternalExecutorWorkspaceManager:
             session_id=session_id,
             turn_claim=turn_claim,
             verify_executor_health=True,
-            launch_mode=SandboxLaunchMode.LEGACY,
+            launch_mode=SandboxLaunchMode.LEGACY_EXECUTOR,
         )
 
     async def _acquire(
@@ -280,7 +280,10 @@ class ChatExternalExecutorWorkspaceManager:
             outcome = await self.acquisition.acquire(
                 session_id,
                 launch_mode=launch_mode,
-                allow_pool=False,
+                allow_pool=(
+                    launch_mode is SandboxLaunchMode.EXECUTOR
+                    and self.settings.chat_executor_remote_transport_enabled
+                ),
                 live_cap_resolver=lambda db: self._executor_live_cap(
                     db, session_id, turn_claim
                 ),

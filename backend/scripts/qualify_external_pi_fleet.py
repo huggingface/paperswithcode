@@ -1302,6 +1302,10 @@ def main() -> int:
         shape_names, report_name = resolve_qualification_profile(args.profile)
         if args.profile == "persistent-transport":
             load_persistent_transport_manifest(args.persistent_manifest)
+            raise FleetRunRefused(
+                "persistent transport requires its scenario runner; "
+                "the legacy fleet workload cannot qualify this transport"
+            )
         elif args.persistent_manifest is not None:
             raise FleetRunRefused(
                 "persistent manifest is only valid for its distinct profile"

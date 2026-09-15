@@ -388,7 +388,7 @@ test("preserves a safe oversized-context classification", () => {
     [{
       type: "error",
       code: "context_too_large",
-      message: "This conversation is too large for the selected model. Start a new chat or shorten the context.",
+      message: "This conversation is too large for the selected model. Your conversation is saved. Retry or shorten the latest request.",
     }],
   );
   assert.equal(adapter.failed, true);
@@ -454,4 +454,41 @@ test("reasoning-only tool markup requires a final answer", () => {
     assistantMessageEvent: { type: "text_delta", delta: "Recovered answer" },
   });
   assert.equal(completion.needsFinalAnswer(), false);
+});
+
+test("overflow stays pending until a compacted retry actually succeeds", () => {
+  const adapter = new PiEventAdapter(false);
+  const fail = (errorMessage: string) => adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage } });
+  fail("request_too_large");
+  assert.equal(adapter.failed, true);
+  adapter.feed({ type: "compaction_end", reason: "overflow", result: {}, willRetry: true, aborted: false });
+  assert.equal(adapter.failed, true);
+  adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: {} } });
+  assert.equal(adapter.failed, false);
+  fail("provider unavailable");
+  fail("request_too_large");
+  adapter.feed({ type: "compaction_end", reason: "overflow", result: {}, willRetry: true, aborted: false });
+  adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: {} } });
+  assert.equal(adapter.failed, true, "unrelated errors must survive overflow recovery");
+});
+
+test("failed compaction or another overflow cannot clear the failure", () => {
+  for (const end of [{ aborted: true }, { errorMessage: "failed" }, { result: {}, willRetry: false }]) {
+    const adapter = new PiEventAdapter(false);
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "request_too_large" } });
+    adapter.feed({ type: "compaction_end", reason: "overflow", ...end });
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "stop", usage: {} } });
+    assert.equal(adapter.failed, true);
+  }
+});
+
+
+test("recovered output limits clear overflow, but cancellation does not", () => {
+  for (const stopReason of ["length", "aborted"]) {
+    const adapter = new PiEventAdapter(false);
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason: "error", errorMessage: "request_too_large" } });
+    adapter.feed({ type: "compaction_end", reason: "overflow", result: {}, willRetry: true, aborted: false });
+    adapter.feed({ type: "message_end", message: { role: "assistant", stopReason, usage: {} } });
+    assert.equal(adapter.failed, stopReason === "aborted");
+  }
 });

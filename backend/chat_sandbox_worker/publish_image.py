@@ -34,6 +34,8 @@ def main() -> int:
             "build",
             "--locked",
             "--release",
+            "--target",
+            "x86_64-unknown-linux-musl",
             "--manifest-path",
             str(REPOSITORY / "executor_transport/Cargo.toml"),
             "--bin",
@@ -43,7 +45,7 @@ def main() -> int:
         env={**os.environ, "CARGO_TARGET_DIR": str(target_dir)},
         check=True,
     )
-    environment_binary = target_dir / "release/environment"
+    environment_binary = target_dir / "x86_64-unknown-linux-musl/release/environment"
     release_image = with_executor_binary(image, environment_binary)
     modal.App.lookup(MODAL_APP_NAME, create_if_missing=True)
     with app.run():

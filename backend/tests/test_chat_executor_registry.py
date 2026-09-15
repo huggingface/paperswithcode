@@ -390,6 +390,11 @@ def test_migration_is_metadata_only_and_audit_is_append_only():
     assert "pg_column_size(public_noise_key) <= 4096" in lowered
     assert "normal postgresql backup" in lowered
     assert "privileged database administration" in lowered
+    assert lowered.startswith("-- persistent executor v1")
+    assert "begin;" in lowered
+    assert "elsif current_schema() = 'public'" in lowered
+    assert "executor registry migration requires staging or public schema" in lowered
+    assert lowered.rstrip().endswith("commit;")
 
 
 def test_atomic_claim_rejects_second_turn_and_stale_generation(db):

@@ -241,6 +241,7 @@ class PaperAssociationService:
         project_pages: list[dict[str, Any]],
         *,
         commit: bool = True,
+        paper_scoped: bool = False,
     ) -> Paper | DBPaper:
         try:
             paper = self._paper(paper_id)
@@ -257,11 +258,26 @@ class PaperAssociationService:
                 project_page = (
                     self.db.query(DBProjectPage)
                     .filter(DBProjectPage.url == url)
+                    .with_for_update()
                     .first()
                 )
                 if project_page is not None:
-                    if is_official and not project_page.is_official:
-                        project_page.is_official = True
+                    if (is_official and not project_page.is_official) or (
+                        paper_scoped and is_official != project_page.is_official
+                    ):
+                        if (
+                            paper_scoped
+                            and self.db.query(DBPaperProjectPage)
+                            .filter(
+                                DBPaperProjectPage.project_page_id == project_page.id,
+                                DBPaperProjectPage.paper_id != paper_id,
+                            )
+                            .first()
+                        ):
+                            raise CatalogValidationError(
+                                "Changing official status on a shared project page requires an administrator"
+                            )
+                        project_page.is_official = is_official
                 else:
                     project_page = DBProjectPage(
                         url=url,
