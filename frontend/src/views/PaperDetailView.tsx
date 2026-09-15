@@ -523,6 +523,16 @@ const PaperDetailView: React.FC = () => {
                 </DropdownMenu>
               </EditableActionButton>
             ) : null}
+            {projectPages.length === 0 && isSignedIn ? (
+              <button
+                type="button"
+                className="action-btn"
+                onClick={() => openEdit("project-pages")}
+                title="Add project page"
+              >
+                <Icon name="globe" size={12} /> Add project page
+              </button>
+            ) : null}
             {safeConferenceUrl && (
               <a className="action-btn" href={safeConferenceUrl} target="_blank" rel="noopener noreferrer">
                 <Icon name="external" size={12} /> Conference
@@ -561,6 +571,13 @@ const PaperDetailView: React.FC = () => {
                 {o.name}
               </Link>
             ))}
+            <button
+              type="button"
+              className="action-btn"
+              onClick={() => openEdit("organizations")}
+            >
+              Edit organizations
+            </button>
             <PaperAgentEdits paperId={Number(paper.id)} isAdmin={isAdmin} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
