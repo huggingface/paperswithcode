@@ -67,10 +67,10 @@ test("large model windows still respect the gateway envelope", () => {
 });
 
 
-test("million-token window preserves a long reader paper that failed at 48K", () => {
+test("272K window preserves a long reader paper that failed at 48K", () => {
   const original = prompt(paper("paper evidence ".repeat(8000)));
   assert.ok(fitPaperContext(original, budget).length < original.length);
-  assert.equal(fitPaperContext(original, { ...budget, model: { contextWindow: 1_000_000, maxTokens: 8000 } }), original);
+  assert.equal(fitPaperContext(original, { ...budget, model: { contextWindow: 272_000, maxTokens: 8000 } }), original);
 });
 
 

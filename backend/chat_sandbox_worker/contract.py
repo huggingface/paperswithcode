@@ -3,7 +3,7 @@
 import hashlib
 from pathlib import Path
 
-# Fits automatic paper evidence and enables million-token Luna/GLM contexts.
+# Fits automatic paper evidence and uses 272K Luna/GLM working windows.
 WORKER_CONTRACT_VERSION = "109"
 # Web search extends the catalog operation set without changing its request or
 # response framing, so it remains on the rollback-compatible gateway protocol.

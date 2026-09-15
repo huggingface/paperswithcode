@@ -15,15 +15,16 @@ export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
 export const GATEWAY_PAYLOAD_LIMIT_BYTES = 7 * 1024 * 1024;
 
-// Verified model capacities exceed 1M. Keep a common working window for these
-// routes, without assuming that every future model supports long context.
+// Use the short-context working window for Luna and GLM. Their larger model
+// capacity does not require sending larger requests by default.
 export function modelContextWindow(modelId: string, api: ProviderProtocol): number {
   const model = modelId.split(":")[0]!.split("@")[0]!;
-  if (["gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 1_000_000;
+  if (["gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 272_000;
   return api === "openai-responses" ? 48_000 : 200_000;
 }
 export function gatewayPayloadLimit(contextWindow: number): number {
-  return contextWindow >= 1_000_000 ? GATEWAY_PAYLOAD_LIMIT_BYTES : 240 * 1024;
+  if (contextWindow >= 1_000_000) return GATEWAY_PAYLOAD_LIMIT_BYTES;
+  return contextWindow >= 272_000 ? 2 * 1024 * 1024 : 240 * 1024;
 }
 
 export type ProviderProtocol = "anthropic-messages" | "openai-responses";

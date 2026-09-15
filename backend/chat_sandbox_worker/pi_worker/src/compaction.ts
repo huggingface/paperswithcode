@@ -212,7 +212,7 @@ export class CompactionController {
               if (response.stopReason === "length") maxTokens = provider.model.maxTokens;
               this.retryUsed = true;
             }
-          }, signal, provider.model.contextWindow >= 1_000_000 ? 768 * 1024 : CHUNK_BYTES);
+          }, signal, Math.min(768 * 1024, Math.max(CHUNK_BYTES, provider.model.contextWindow - 32_000)));
           tokensAfter = estimateTokens({ role: "user", content: summary, timestamp: Date.now() });
           outcome = "success";
           // Recovery prompts are persisted as user messages by Pi. Pin the

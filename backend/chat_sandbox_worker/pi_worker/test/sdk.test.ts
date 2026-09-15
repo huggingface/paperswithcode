@@ -88,12 +88,12 @@ test("registers direct OpenAI with the native Responses base path", async () => 
   assert.equal(rollback.model.contextWindow, 200_000);
 });
 
-test("advertises a million-token working window for Luna and GLM", async () => {
+test("advertises a 272K working window for Luna and GLM", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
 
-  assert.equal(direct.model.contextWindow, 1_000_000);
+  assert.equal(direct.model.contextWindow, 272_000);
   const glm = await createProvider("zai-org/GLM-5.3-Flash:baseten");
-  assert.equal(glm.model.contextWindow, 1_000_000);
+  assert.equal(glm.model.contextWindow, 272_000);
   assert.equal(direct.model.maxTokens, 8_000);
 });
 
@@ -181,7 +181,7 @@ test(`worker compacts oversized ${protocol} history and completes successfully`,
   for (let index = 0; index < 5; index += 1) {
     sessionManager.appendMessage({
       role: "user",
-      content: `EVIDENCE-${index}:${"x".repeat(index < 4 ? 2 * 1024 * 1024 : 90_000)}`,
+      content: `EVIDENCE-${index}:${"x".repeat(index < 4 ? 600_000 : 90_000)}`,
       timestamp: Date.now() + index * 2,
     });
     sessionManager.appendMessage({
@@ -257,7 +257,7 @@ test(`worker compacts oversized ${protocol} history and completes successfully`,
     assert.ok(saved?.type === "compaction");
     for (let i = 0; i < 4; i++) assert.match(saved.summary, new RegExp(`EVIDENCE-${i}`));
     assert.ok(sessionManager.buildSessionContext().messages.some((m) => m.role === "user" && JSON.stringify(m.content).includes("continue")));
-    assert.ok(requestBodies.every((body) => Buffer.byteLength(body, "utf8") < 7 * 1024 * 1024));
+    assert.ok(requestBodies.every((body) => Buffer.byteLength(body, "utf8") < 2 * 1024 * 1024));
     assert.ok(requestBodies.every((body) => !body.includes("older compaction input omitted")));
     assert.equal(assistant?.role, "assistant");
     assert.equal(assistant?.content[0]?.type, "text");
@@ -467,7 +467,7 @@ test("reserves the requested answer budget before sending a crowded context", as
   let requests = 0;
   const result = await direct.runtime.completeSimple(direct.model, {
     systemPrompt: "System constraints ".repeat(3000),
-    messages: [{ role: "user", content: "Evidence ".repeat(440000), timestamp: Date.now() }],
+    messages: [{ role: "user", content: "Evidence ".repeat(115000), timestamp: Date.now() }],
   }, { fetch: async () => { requests++; return openAITextResponse("should compact first", 1); } });
   assert.equal(requests, 0, "never send a context-clamped answer allowance");
   assert.equal(result.stopReason, "error");
