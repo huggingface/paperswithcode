@@ -618,13 +618,7 @@ const PaperDetailView: React.FC = () => {
                 {o.name}
               </Link>
             ))}
-            <button
-              type="button"
-              className="action-btn"
-              onClick={() => openEdit("organizations")}
-            >
-              Edit organizations
-            </button>
+            <PaperAgentEdits paperId={Number(paper.id)} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
                 paperId={Number(paper.id)}
@@ -753,7 +747,6 @@ const PaperDetailView: React.FC = () => {
             </div>
           )}
 
-          <PaperAgentEdits paperId={Number(paper.id)} />
           <PaperMetadataSections
             canEdit
             onEditMethods={() => openEdit("methods")}
