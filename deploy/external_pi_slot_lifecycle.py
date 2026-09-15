@@ -798,12 +798,14 @@ SELECT json_build_object(
 
 
 def sync_worker_environment(environment: str) -> None:
-    """Publish only the worker token to the dedicated protected environment."""
-    token = _protected_environment_values(environment).get(
-        "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", ""
-    )
+    """Publish the worker token and reviewed non-secret tool configuration."""
+    protected = _protected_environment_values(environment)
+    token = protected.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
     if len(token) < 32 or "\n" in token or "\r" in token:
         raise ValueError("external Pi worker token is missing or invalid")
+    mcp_enabled = protected.get("PWC_CHAT_PWC_MCP_ENABLED", "false")
+    if mcp_enabled not in {"true", "false"}:
+        raise ValueError("external Pi MCP flag must be true or false")
     worker_config = (
         WORKER_CONFIG
         if environment == "staging"
@@ -815,6 +817,7 @@ def sync_worker_environment(environment: str) -> None:
         with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             os.fchmod(handle.fileno(), 0o640)
             handle.write(f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={token}\n")
+            handle.write(f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled}\n")
         os.chown(temporary, 0, grp.getgrnam(WORKER_USER).gr_gid)
         os.replace(temporary, worker_config)
     except OSError:

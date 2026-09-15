@@ -2569,13 +2569,15 @@ def test_stop_slot_cleans_exact_orphan_with_authenticated_zero_session_proof(
     ] in commands
 
 
-def test_dedicated_worker_environment_contains_only_the_token(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+@pytest.mark.parametrize("mcp_enabled", [None, "false", "true"])
+def test_dedicated_worker_environment_contains_only_token_and_tool_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, mcp_enabled: str | None
 ):
     (tmp_path / "staging.env").write_text(
         "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=" + "t" * 32 + "\n"
         "PWC_DB_PASSWORD=must-not-leak\n"
         "PWC_OPENAI_API_KEY=must-not-leak\n"
+        + (f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled}\n" if mcp_enabled else "")
     )
     worker_environment = tmp_path / "external-pi-worker.env"
     monkeypatch.setattr(lifecycle, "CONFIG_ROOT", tmp_path)
@@ -2593,7 +2595,10 @@ def test_dedicated_worker_environment_contains_only_the_token(
     lifecycle.sync_worker_environment("staging")
 
     assert worker_environment.read_text() == (
-        "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=" + "t" * 32 + "\n"
+        "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN="
+        + "t" * 32
+        + "\n"
+        + f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled or 'false'}\n"
     )
     assert worker_environment.stat().st_mode & 0o777 == 0o640
     assert ownership == [(0, 1234)]
