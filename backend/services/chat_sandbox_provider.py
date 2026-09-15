@@ -340,7 +340,13 @@ class ModalSandboxProviderAdapter:
             getattr(self.settings, "chat_persistent_worker_enabled", False)
         )
         qualification_profile = tags.get("qualification_profile")
-        if qualification_profile == "32-functional-turns":
+        if qualification_profile == "persistent-cold":
+            from backend.services.durable_external_qualification_contract import (
+                COLD_QUALIFICATION_SANDBOX_LIFETIME_SECONDS,
+            )
+
+            sandbox_lifetime_seconds = COLD_QUALIFICATION_SANDBOX_LIFETIME_SECONDS
+        elif qualification_profile == "32-functional-turns":
             from backend.services.durable_external_qualification_contract import (
                 DURABLE_QUALIFICATION_SANDBOX_LIFETIME_SECONDS,
             )
@@ -425,7 +431,8 @@ class ModalSandboxProviderAdapter:
                 timeout=sandbox_lifetime_seconds,
                 idle_timeout=(
                     sandbox_lifetime_seconds
-                    if qualification_profile == "32-functional-turns"
+                    if qualification_profile
+                    in {"32-functional-turns", "persistent-cold"}
                     else (
                         self.settings.chat_persistent_sandbox_lifetime_seconds
                         if persistent_enabled

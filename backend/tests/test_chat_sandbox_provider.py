@@ -51,6 +51,7 @@ def _settings(**overrides) -> Settings:
     ("tags", "expected_lifetime"),
     (
         ({"service": "pwc-chat"}, 3600),
+        ({"qualification_profile": "persistent-cold"}, 240),
         (
             {
                 "service": "pwc-chat",
