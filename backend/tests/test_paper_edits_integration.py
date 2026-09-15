@@ -312,7 +312,15 @@ def test_http_browser_consent_and_scoped_bearer_flow(db, monkeypatch):
     from fastapi.testclient import TestClient
     from backend.config import Settings
     from backend.database import connection
-    from backend.routers import auth, paper_edits
+    from backend.routers import (
+        auth,
+        paper_edits,
+        datasets,
+        tasks,
+        methods,
+        organizations,
+        repositories,
+    )
     from backend.routers.catalog_error_handlers import register_catalog_error_handlers
     from backend.utils import auth as auth_utils
     from backend.utils.csrf import cookie_request_passes_csrf
@@ -331,6 +339,17 @@ def test_http_browser_consent_and_scoped_bearer_flow(db, monkeypatch):
     app = FastAPI()
     app.include_router(paper_edits.router, prefix="/api/v1")
     app.include_router(auth.router, prefix="/api/v1")
+    for module in (datasets, tasks, methods, organizations, repositories):
+        app.include_router(module.router, prefix="/api/v1")
+    shared_writes = [
+        ("POST", "/api/v1/datasets/"),
+        ("PUT", "/api/v1/datasets/1"),
+        ("POST", "/api/v1/tasks/"),
+        ("POST", "/api/v1/methods/1/keywords"),
+        ("POST", "/api/v1/organizations/sync"),
+        ("POST", "/api/v1/project-pages/"),
+        ("DELETE", "/api/v1/project-pages/1"),
+    ]
     register_catalog_error_handlers(app)
     app.dependency_overrides[connection.get_database_session] = session
     monkeypatch.setattr(connection, "get_database_session", session)
@@ -353,6 +372,18 @@ def test_http_browser_consent_and_scoped_bearer_flow(db, monkeypatch):
         )
         browser.cookies.set(auth.session_cookie_name(), cookie)
         assert browser.get("/api/v1/auth/me").json()["can_directly_edit_catalog"]
+        for method, shared_path in shared_writes:
+            assert (
+                browser.request(
+                    method,
+                    shared_path,
+                    json={},
+                    headers={
+                        "Origin": "https://paperswithcode.co",
+                    },
+                ).status_code
+                == 401
+            )
         assert browser.post(path).status_code == 403  # no same-origin header
         assert (
             browser.post(
@@ -366,6 +397,13 @@ def test_http_browser_consent_and_scoped_bearer_flow(db, monkeypatch):
             json={"device_code": data["device_code"]},
         ).json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
+        for method, shared_path in shared_writes:
+            assert (
+                browser.request(
+                    method, shared_path, json={}, headers=headers
+                ).status_code
+                == 403
+            )
         exported = browser.get("/api/v1/papers/1/edit-document", headers=headers)
         assert exported.status_code == 200
         doc = exported.json()

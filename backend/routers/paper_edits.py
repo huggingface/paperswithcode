@@ -11,7 +11,7 @@ from backend.services.paper_edit_access import PaperEditAccess, token_hash
 from backend.utils.client_ip import get_client_ip
 from backend.services.paper_edit_authorization import PaperEditAuthorizationService
 from backend.services.paper_edit_service import PaperEditService
-from backend.utils.auth import can_directly_edit_catalog, require_catalog_mutator
+from backend.utils.auth import can_directly_edit_catalog, require_paper_mutator
 
 router = APIRouter()
 
@@ -67,7 +67,7 @@ def authorization_details(
 )
 def approve_authorization(
     authorization_id: uuid.UUID,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     return PaperEditAuthorizationService(db).approve(authorization_id, actor)
@@ -75,7 +75,7 @@ def approve_authorization(
 
 @router.post("/paper-edit-logout", status_code=204)
 def revoke_authorization(
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     if actor.get("source") != "paper_token":
@@ -87,7 +87,7 @@ def revoke_authorization(
 def edit_document(
     paper_id: int,
     response: Response,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     response.headers["Cache-Control"] = "no-store"
@@ -102,7 +102,7 @@ def preview_edits(
     paper_id: int,
     body: PaperEditDocument,
     request: Request,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     if body.paper_id != paper_id:
@@ -117,7 +117,7 @@ def submit_edits(
     paper_id: int,
     body: PaperEditDocument,
     request: Request,
-    actor: dict = Depends(require_catalog_mutator),
+    actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     if body.paper_id != paper_id:

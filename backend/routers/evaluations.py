@@ -24,7 +24,7 @@ from backend.database.connection import get_database_session
 from backend.utils.auth import (
     evaluation_mutation_context,
     require_admin,
-    require_catalog_mutator,
+    require_paper_mutator,
 )
 from backend.utils.exceptions import DatabaseError
 
@@ -108,7 +108,7 @@ def batch_evaluations(
 @router.get("/curation-state")
 def evaluation_collection_state(
     paper_id: int,
-    _actor: dict = Depends(require_catalog_mutator),
+    _actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     return EvaluationCurationService(db).collection_state(paper_id)
@@ -117,7 +117,7 @@ def evaluation_collection_state(
 @router.get("/{evaluation_id}/curation-state")
 def evaluation_curation_state(
     evaluation_id: int,
-    _actor: dict = Depends(require_catalog_mutator),
+    _actor: dict = Depends(require_paper_mutator),
     db: Session = Depends(get_database_session),
 ):
     return EvaluationCurationService(db).state(evaluation_id)

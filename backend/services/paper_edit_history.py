@@ -42,11 +42,16 @@ def public_snapshot(entity_type, snapshot):
         }
         return {key: value for key, value in snapshot.items() if key in fields}
     value = snapshot.get("value")
+    if entity_type == "paper_tasks":
+        return [{"task_id": row["task_id"]} for row in value or []]
     if entity_type == "paper_methods":
-        return (value or {}).get("links", [])
+        return [
+            {"method_id": row["method_id"]} for row in (value or {}).get("links", [])
+        ]
     if entity_type == "paper_hf_artifacts":
         return {
-            key: value.get(key, []) for key in ("hf_models", "hf_datasets", "hf_spaces")
+            key: (value or {}).get(key, [])
+            for key in ("hf_models", "hf_datasets", "hf_spaces")
         }
     if entity_type == "paper_organizations":
         return [{"organization_id": row["organization_id"]} for row in value or []]
