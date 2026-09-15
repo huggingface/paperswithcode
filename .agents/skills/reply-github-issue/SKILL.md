@@ -1,16 +1,16 @@
 ---
 name: reply-github-issue
-description: Draft, post, and verify replies to GitHub issues about Papers With Code catalog curation, especially evaluation-verification threads and author corrections. Bulk requests such as "all unread" cover only PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated GitHub notifications unless explicitly requested. Resolve live catalog state first, link directly to highlighted evaluation rows, mention README badges for current top-three results, and avoid duplicate comments or unintended issue-state changes.
+description: Apply author feedback to the Papers With Code catalog, then post and verify GitHub issue replies, especially for evaluation-verification threads and author corrections. Bulk requests such as "all unread" cover only PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated GitHub notifications unless explicitly requested. Verify changes live, link directly to highlighted evaluation rows, mention README badges for current top-three results, and avoid duplicate comments or unintended issue-state changes.
 ---
 
 # Reply to a GitHub Issue
 
-Write concise, evidence-backed GitHub issue replies after Papers With Code catalog work. Tailor every reply to the issue and verify both the catalog state and the posted comment.
+Resolve author feedback through Papers With Code catalog changes, then write concise, evidence-backed GitHub issue replies. Tailor every reply to the issue and verify both the catalog state and the posted comment.
 
 ## Guardrails
 
-- If the user asks only for a draft, review, or report, do not post anything.
-- Treat an explicit request to reply, comment, or post as authorization to create the issue comment. For the user's Papers With Code unread-notification workflow, their standing preference is to mark handled notifications read as described below; honor any request to leave them unread.
+- If the user asks only for a draft, review, or report, do not change the catalog or post anything.
+- An actionable request to handle or reply to an in-scope issue includes applying the author-requested catalog corrections and posting the verified outcome. Do not ask for permission again for that routine curation. Honor explicit limits such as "reply only" or "no catalog changes". For the user's Papers With Code unread-notification workflow, their standing preference is to mark handled notifications read as described below; honor any request to leave them unread.
 - Do not close, reopen, lock, label, assign, or transfer issues unless the user separately asks. Marking a notification read does not change issue state.
 - Do not claim that a catalog change is live until it has been verified on the live site or API.
 - Do not expose internal database details, credentials, deployment mechanics, or debugging history in a public reply.
@@ -50,7 +50,9 @@ establish the complete in-scope set before replying:
 3. For each issue, fetch the latest comment. It needs a reply only if that
    comment is from an author or maintainer and no equivalent NielsRogge reply
    follows it. Exclude bot-only comments and ordinary acknowledgements that
-   would create a thank-you loop.
+   would create a thank-you loop. A prior acknowledgement or promise to fix
+   something does not resolve outstanding catalog work: complete that work
+   and report the verified outcome without repeating the acknowledgement.
 4. Report the resolved PwC target count before posting, with a brief count of
    excluded unrelated notifications when applicable. Keep a separate list of
    issues that request catalog changes; acknowledge those only after resolving
@@ -61,12 +63,15 @@ for example `is:issue is:open author:NielsRogge "Verify evals on Papers with
 Code"`, then repeat with `is:closed`. Prefer a paginated GraphQL search that
 returns each issue’s last comment, or explicitly paginate the REST search.
 
-## 2. Resolve the issue and the result
+## 2. Apply the feedback and verify the result
 
 1. Read the issue body and all current comments. Identify the repository, issue number, author name or handle, requested correction, and any claims that need acknowledgment.
 2. Inspect the current Papers With Code paper and evaluation records. Record the paper identifier, evaluation ID, dataset slug, task slug, model, metric, value, and current rank for every row discussed.
-3. Confirm exactly what changed. Distinguish additions, corrections, removals, preserved historical results, and cases where no catalog change was needed.
-4. Re-read the latest issue comments immediately before posting. If an equivalent reply is already present, do not post a duplicate.
+3. Turn each actionable author request into a catalog change and apply it before replying. Check the paper, official artifacts, and existing catalog to establish the affected records and intended protocol. Use the relevant curation skill: `verify-evals` for score/protocol corrections and removals, `add-benchmark` for benchmark or leaderboard separation, `add-evals` for missing results, and `enrich-paper` for links or metadata. Read `docs/database.md` before database access and follow repository data-workflow rules.
+4. Complete every independent correction supported by the evidence. For example, when an author requests separating single-frame and video-based Human3.6M results, inspect the affected rows, create or update the appropriate leaderboard groups, move the applicable results, and verify the resulting ranks. Do not stop at agreeing that a split would be useful. Investigate claims of empty repositories and correct code-availability metadata where warranted; do not automatically delete valid paper-reported scores just because code is unavailable.
+5. When a request is ambiguous, conflicts with source evidence, or cannot be completed with available access, investigate first and ask only for the specific missing detail. Complete the unblocked corrections before asking. State the concrete blocker and leave unresolved work unread; do not substitute a generic acknowledgement or promise for available catalog work.
+6. Verify the changed records through the live site or API, including leaderboard membership, scores, ranks, links, and openness metadata as applicable. Confirm exactly what changed. Distinguish additions, corrections, removals, preserved historical results, and cases where no catalog change was needed. Recheck badge eligibility after any rank changes.
+7. Re-read the latest issue comments immediately before posting. If an equivalent reply reporting the completed outcome is already present, do not post a duplicate.
 
 Use the connected GitHub integration first for issue metadata, comments, and posting. Use `gh` only when the integration cannot perform the required operation. Do not blindly retry an uncertain posting failure; fetch the issue comments first to determine whether the comment was created.
 
