@@ -90,6 +90,38 @@ def test_descriptor_records_locked_contract_and_artifacts(tmp_path):
     assert descriptor["artifact_sha256"]["mcp_server/uv.lock"]
 
 
+def test_prepare_release_repairs_existing_release_traversal(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_release, "MCP_ROOT", tmp_path)
+    monkeypatch.setattr(mcp_release, "MCP_RELEASES", tmp_path / "releases")
+    release = _release(tmp_path)
+    release.chmod(0o700)
+
+    assert mcp_release.prepare_release(SHA) == release
+    assert release.stat().st_mode & 0o777 == 0o755
+
+
+def test_prepare_release_makes_new_release_traversable(tmp_path, monkeypatch):
+    releases = tmp_path / "releases"
+    monkeypatch.setattr(mcp_release, "MCP_ROOT", tmp_path)
+    monkeypatch.setattr(mcp_release, "MCP_RELEASES", releases)
+    monkeypatch.setattr(mcp_release, "_extract", lambda *args: None)
+    monkeypatch.setattr(mcp_release, "_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mcp_release,
+        "_descriptor",
+        lambda *args: {"git_sha": SHA},
+    )
+    monkeypatch.setattr(
+        mcp_release,
+        "validate_release",
+        lambda release: json.loads((release / "manifest.json").read_text()),
+    )
+
+    release = mcp_release.prepare_release(SHA)
+
+    assert release.stat().st_mode & 0o777 == 0o755
+
+
 def test_environment_pointers_are_independent_and_atomic(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
     production = _release(tmp_path, "a" * 16)

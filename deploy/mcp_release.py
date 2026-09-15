@@ -239,6 +239,7 @@ def prepare_release(sha: str) -> Path:
         manifest = validate_release(release)
         if manifest["git_sha"] != sha:
             raise McpReleaseError("MCP release ID collides with another commit")
+        release.chmod(0o755)
         return release
     temporary = Path(tempfile.mkdtemp(prefix=f".{sha[:16]}-", dir=MCP_RELEASES))
     try:
@@ -257,6 +258,7 @@ def prepare_release(sha: str) -> Path:
         (temporary / "manifest.json").write_text(
             json.dumps(manifest, indent=2, sort_keys=True) + "\n"
         )
+        temporary.chmod(0o755)
         os.replace(temporary, release)
     except Exception:
         shutil.rmtree(temporary, ignore_errors=True)
