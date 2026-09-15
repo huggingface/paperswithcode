@@ -321,3 +321,21 @@ describe("compaction progress", () => {
     expect(chatLifecycleReducer(active, { type: "stop" }).messages[0].compacting).toBe(false);
   });
 });
+
+it("uses finalized citation text immediately on completion", () => {
+  const started = chatLifecycleReducer(initialChatLifecycle(), {
+    type: "start", sessionId: null, messages: streaming(),
+  });
+  const answered = chatLifecycleReducer(started, {
+    type: "event", event: { type: "answer_delta", text: "[Paper](paper:123)" },
+  });
+  const completed = chatLifecycleReducer(answered, {
+    type: "event", event: { type: "done", blocks: [
+      { kind: "answer", text: "[Paper](paper:2406.09246)", done: true, citations: [] },
+    ] },
+  });
+  expect(completed.messages[0].blocks).toEqual([
+    { kind: "answer", text: "[Paper](paper:2406.09246)", done: true, citations: [] },
+  ]);
+  expect(answered.messages[0].blocks?.[0]).toMatchObject({ text: "[Paper](paper:123)" });
+});

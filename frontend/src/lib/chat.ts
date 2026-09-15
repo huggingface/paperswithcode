@@ -173,7 +173,7 @@ export type ChatEvent =
   | { type: "sandbox_start"; session_id: string }
   | { type: "sandbox_ready"; session_id: string; cold_start_ms: number }
   | { type: "answer_delta"; text: string }
-  | { type: "done"; followups?: string[]; finish_reason?: string; citations?: ChatCitation[] }
+  | { type: "done"; blocks?: ChatBlock[]; followups?: string[]; finish_reason?: string; citations?: ChatCitation[] }
   | { type: "error"; message: string; code?: string }
   | { type: "session_title_start" }
   | { type: "session_title_delta"; text: string }
