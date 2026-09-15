@@ -132,13 +132,14 @@ class _VirtualWriter:
             raise ValueError("Executor local stream payload is empty")
         payload = bytes(self._pending)
         self._pending.clear()
-        await self._relay._channel._send(
+        await self._relay._channel._send_stream_data(
+            self._relay,
             {
                 "kind": "data",
                 "stream_id": self._relay.stream_id,
                 "payload": base64.b64encode(payload).decode("ascii"),
                 "eof": self._eof,
-            }
+            },
         )
 
 
@@ -172,6 +173,7 @@ class _VirtualRelay:
         self.stream_id = stream_id
         self._incoming: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue()
         self._closed = asyncio.Event()
+        self._open_deadline = 0.0
         self.stdin = _VirtualWriter(self)
         self.stdout = _VirtualStdout(self)
         self.wait = _Wait(self)
@@ -182,6 +184,16 @@ class _VirtualRelay:
             self._finish()
 
     def _finish(self, error: BaseException | None = None) -> None:
+        opened = self._channel._open_pending.pop(self.stream_id, None)
+        if opened is not None:
+            if not opened.done():
+                opened.set_exception(
+                    error or ConnectionError("Executor stream closed before opening")
+                )
+            if not opened.cancelled():
+                # A relay can close before its caller reaches flush. Observe the
+                # exception here; an existing waiter still receives the same error.
+                opened.exception()
         if self._closed.is_set():
             return
         if error is not None:
@@ -334,15 +346,38 @@ class PersistentSandboxExecutorChannel:
         self._open_pending[stream_id] = opened
         try:
             await self._send({"kind": "open", "stream_id": stream_id})
-            async with asyncio.timeout(2):
-                await opened
+            relay._open_deadline = loop.time() + 2
             return relay
-        except BaseException:
+        except BaseException as error:
             self._streams.pop(stream_id, None)
-            relay._finish()
+            relay._finish(error)
+            raise
+
+    async def _send_stream_data(
+        self, relay: _VirtualRelay, frame: dict[str, object]
+    ) -> None:
+        opened = self._open_pending.get(relay.stream_id)
+        try:
+            if relay._closed.is_set():
+                raise ConnectionError("Executor virtual stream is closed")
+            if opened is not None:
+                if opened.done():
+                    opened.result()
+                elif asyncio.get_running_loop().time() >= relay._open_deadline:
+                    raise TimeoutError("Executor stream opening timed out")
+            # Open and data retain their wire order. Send before awaiting opened
+            # to avoid an extra RTT; ExecutorClient has already marked payload
+            # delivery attempted, so failures recover by execution ID, not replay.
+            await self._send(frame)
+            if opened is not None:
+                async with asyncio.timeout_at(relay._open_deadline):
+                    await opened
+        except BaseException as error:
+            self._streams.pop(relay.stream_id, None)
+            relay._finish(error)
             raise
         finally:
-            self._open_pending.pop(stream_id, None)
+            self._open_pending.pop(relay.stream_id, None)
 
     async def _send(self, frame: dict[str, object]) -> None:
         writer = self._writer
@@ -389,7 +424,16 @@ class PersistentSandboxExecutorChannel:
             if future is None:
                 raise ValueError("Executor harness opened an unknown stream")
             if not future.done():
-                future.set_result(None)
+                relay = self._streams[stream_id]
+                if (
+                    relay._open_deadline
+                    and asyncio.get_running_loop().time() > relay._open_deadline
+                ):
+                    future.set_exception(
+                        TimeoutError("Executor stream opening timed out")
+                    )
+                else:
+                    future.set_result(None)
             return
         relay = self._streams.get(stream_id)
         if relay is None:
