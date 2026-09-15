@@ -149,7 +149,8 @@ def test_saved_progress_retry_keeps_native_leaf_and_prior_failure():
     assert not service._has_unresolved_turn(session)
 
 
-def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch):
+@pytest.mark.parametrize("expired", [False, True])
+def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch, expired):
     from datetime import timedelta
     from backend.tests.test_chat_turn_admission_characterization import (
         _Result,
@@ -175,17 +176,24 @@ def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch):
     )
     target = SimpleNamespace(
         id=uuid.uuid4(),
-        status="error",
+        status="generating" if expired else "error",
         content="Make a poster about attention",
         effective_prompt="Make a poster about attention. Use source:123.",
     )
+    if expired:
+        session.active_turn_id = uuid.uuid4()
+        session.active_turn_expires_at = session.updated_at - timedelta(seconds=1)
     db = _ScriptedDB(
-        execute_results=(_Result(), _Result(), _Result()),
-        scalar_results=(0, 0, 0, "saved-leaf"),
+        execute_results=(
+            _Result(),
+            *([_Result(one=target)] if expired else []),
+            _Result(),
+            _Result(),
+        ),
+        scalar_results=("saved-leaf", 0, 0, 0, "saved-leaf"),
     )
     service = _owned_service(db, settings, session)
     service._latest_user_message = lambda _: target
-    service._validate_saved_progress_retry = lambda *_: target
     monkeypatch.setattr(service, "fetchable_url_seed", lambda *_args, **_kwargs: [])
     admission = service.begin_turn(
         ChatOwner("owner-1", "owner"),
@@ -195,6 +203,7 @@ def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch):
         retry_message_id=target.id,
     )
     assert admission.poster_mode
+    assert target.status == ("interrupted" if expired else "error")
     assert admission.executor_transport == "legacy"
     assert session.active_turn_expires_at - session.updated_at == timedelta(
         seconds=settings.chat_posterly_timeout_seconds + 30

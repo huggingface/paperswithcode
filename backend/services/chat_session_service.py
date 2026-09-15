@@ -1955,7 +1955,11 @@ class ChatSessionService:
                     "This conversation belongs to a different paper.",
                 )
 
+        recovered_retry_expiry = False
         if retry_message_id is not None:
+            assert session is not None
+            stale = self._load_expired_active_message(session, now)
+            recovered_retry_expiry = self._apply_expired_active_turn(session, stale)
             retry_target = self._validate_saved_progress_retry(
                 session, retry_message_id
             )
@@ -2055,7 +2059,9 @@ class ChatSessionService:
         stale = self._load_expired_active_message(session, now)
         recovered_expired_lease = self._apply_expired_active_turn(session, stale)
         recovered_expired_lease = (
-            recovered_expired_lease or recovered_durable_preflight_expiry
+            recovered_expired_lease
+            or recovered_durable_preflight_expiry
+            or recovered_retry_expiry
         )
         if (
             self._has_unresolved_turn(session)
