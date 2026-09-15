@@ -168,11 +168,16 @@ def test_failure_is_durable_and_never_retried(tmp_path, stage):
         asyncio.run(fixture.collect())
 
 
-def test_termination_ack_without_terminal_poll_retains_reservation(tmp_path):
+def test_termination_ack_without_terminal_poll_retains_reservation(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        "backend.loadtests.persistent_executor_cold.CLEANUP_TIMEOUT_SECONDS", 0.01
+    )
     fixture = Fixture(tmp_path)
     fixture.poll_result = None
     row = asyncio.run(fixture.collect())
-    assert row.cleanup_error == "sandbox:RuntimeError"
+    assert row.cleanup_error == "sandbox:TimeoutError"
     assert not row.terminal_confirmed
     assert "settled" not in fixture.events
 
@@ -391,7 +396,10 @@ def test_preflight_rejection_launches_nothing(tmp_path):
     assert read_observations(fixture.journal.directory) == []
 
 
-def test_cleanup_failure_stops_all_new_admission(tmp_path):
+def test_cleanup_failure_stops_all_new_admission(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        "backend.loadtests.persistent_executor_cold.CLEANUP_TIMEOUT_SECONDS", 0.01
+    )
     from backend.loadtests.persistent_executor_cold import collect_cold_stage
 
     fixture = Fixture(tmp_path)
@@ -455,3 +463,18 @@ def test_cold_errors_occupy_tail_without_changing_frozen_percentile_gate():
     assert cold_stage_result(rows)["latency_gates_passed"]
     rows[10] = replace(rows[10], elapsed_ms=None, error="CommandFailed")
     assert not cold_stage_result(rows)["latency_gates_passed"]
+
+
+def test_termination_waits_for_provider_exit_before_settling(tmp_path):
+    fixture = Fixture(tmp_path)
+    responses = iter([None, 137])
+
+    async def eventual_poll(box):
+        fixture.event("poll")
+        return next(responses)
+
+    fixture.poll = eventual_poll
+    row = asyncio.run(fixture.collect())
+    assert row.terminal_confirmed and row.cleanup_error is None
+    assert fixture.events.count("terminate") == 1
+    assert fixture.events[-3:] == ["poll", "poll", "settled"]

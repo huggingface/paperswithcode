@@ -39,6 +39,7 @@ COLD_SAMPLE_COUNTS = {"cold_first_pwd": 1000, "cold_32_way": 32}
 SANDBOX_LIFETIME_SECONDS = COLD_QUALIFICATION_SANDBOX_LIFETIME_SECONDS
 SANDBOX_RATE_MICROUSD = 93
 OPERATING_RESERVE_MICROUSD = 1_250_000
+CLEANUP_TIMEOUT_SECONDS = 30
 COLD_RESERVATION_MICROUSD = (
     sum(COLD_SAMPLE_COUNTS.values()) * SANDBOX_LIFETIME_SECONDS * SANDBOX_RATE_MICROUSD
     + OPERATING_RESERVE_MICROUSD
@@ -337,10 +338,11 @@ async def collect_cold_observation(
                 row = replace(row, cleanup_error="channel:" + type(error).__name__)
         if box is not None:
             try:
-                async with asyncio.timeout(30):
-                    terminated = await provider.terminate(box.object_id, box)
-                    if not terminated or await provider.poll(box) is None:
+                async with asyncio.timeout(CLEANUP_TIMEOUT_SECONDS):
+                    if not await provider.terminate(box.object_id, box):
                         raise RuntimeError("provider termination is unconfirmed")
+                    while await provider.poll(box) is None:
+                        await asyncio.sleep(0.1)
                 spend.terminated(box.object_id)
                 row = replace(row, terminal_confirmed=True)
             except Exception as error:
