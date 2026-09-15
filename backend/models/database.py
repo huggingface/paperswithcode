@@ -226,6 +226,10 @@ class Paper(Base):
         Index("idx_papers_arxiv_id", "arxiv_id"),
         Index("idx_papers_source", "source"),
         Index("idx_papers_date_published", "date_published"),
+        Index(
+            "idx_papers_date_published_desc_nulls_last",
+            date_published.desc().nullslast(),
+        ),
         Index("idx_papers_conference", "conference"),
         Index("idx_papers_title_search", "title"),  # For text search
         Index("idx_papers_latest_version", "is_latest_version"),
