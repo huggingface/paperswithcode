@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
@@ -32,12 +32,6 @@ import {
 import "@/styles/benchmark-detail.css";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 import { slugify } from "@/lib/slug";
-
-/** Cap how many metric columns we render in the leaderboard at once. The
- *  View dropdown still lists every configured metric — picking one outside
- *  the visible set promotes it to `activeMetric`, which guarantees the sort
- *  column is always shown (see `visibleMetrics` below). */
-const MAX_METRIC_COLUMNS = 5;
 
 function extractSourcePaperRouteId(paperUrl?: string | null): string | null {
   if (!paperUrl) return null;
@@ -81,6 +75,9 @@ const BenchmarkDetailView: React.FC = () => {
   const didScrollToHighlight = useRef(false);
   const chartCardRef = useRef<HTMLDivElement | null>(null);
   const leaderboardCardRef = useRef<HTMLDivElement | null>(null);
+  const [expandedMetricScope, setExpandedMetricScope] = useState<string | null>(null);
+  const metricScope = `${datasetSlug}:${taskSlugFromQuery || ""}`;
+  const showMoreMetrics = expandedMetricScope === metricScope;
 
   // Fetching the dataset with `include_paper=true` collapses the previous
   // dataset → paper waterfall into a single round trip.
@@ -291,13 +288,11 @@ const BenchmarkDetailView: React.FC = () => {
     return [activeMetric, ...allowedMetrics.filter((m) => m !== activeMetric)];
   }, [allowedMetrics, activeMetric]);
 
-  // Subset of `orderedMetrics` actually rendered as table columns, capped at
-  // `MAX_METRIC_COLUMNS`. Since `activeMetric` leads, the active/default
-  // metric is always shown first and never hidden by the cap.
+  // The selected metric stays visible when additional columns are collapsed.
   const visibleMetrics = useMemo(() => {
     if (orderedMetrics.length === 0) return activeMetric ? [activeMetric] : [];
-    return orderedMetrics.slice(0, MAX_METRIC_COLUMNS);
-  }, [orderedMetrics, activeMetric]);
+    return showMoreMetrics ? orderedMetrics : orderedMetrics.slice(0, 1);
+  }, [orderedMetrics, activeMetric, showMoreMetrics]);
 
   const { points: chartPoints, sota, sotaModel } = useMemo(
     () => computeSeries(displayedLeaderboardEvals, activeMetric, arrow),
@@ -784,14 +779,42 @@ const BenchmarkDetailView: React.FC = () => {
               </div>
             ) : <div className="no-results">No evaluations submitted yet.</div>
           ) : (
-            <div className="bm-table-scroll">
-            <table className="bm-table">
+            <>
+            {orderedMetrics.length > 1 && (
+              <div className="bm-metric-columns-control">
+                <button
+                  type="button"
+                  className="bm-metric-columns-toggle"
+                  aria-expanded={showMoreMetrics}
+                  aria-controls="benchmark-leaderboard"
+                  onClick={() => setExpandedMetricScope(showMoreMetrics ? null : metricScope)}
+                >
+                  {showMoreMetrics ? "Show selected metric only" : `Show more metrics (${orderedMetrics.length - 1})`}
+                </button>
+                {showMoreMetrics && <span>Scroll metrics horizontally; model and paper details stay visible.</span>}
+              </div>
+            )}
+            <div className="bm-table-scroll" role="region" aria-label="Leaderboard metrics" tabIndex={0}>
+            <table
+              id="benchmark-leaderboard"
+              className="bm-table"
+              style={{ "--bm-metric-count": visibleMetrics.length, "--bm-harness-count": showHarness ? 1 : 0 } as React.CSSProperties}
+            >
+              <colgroup>
+                <col className="bm-width-rank" />
+                <col className="bm-width-model" />
+                <col className="bm-width-parameters" />
+                {showHarness && <col className="bm-width-harness" />}
+                {visibleMetrics.map((m) => <col key={m} className="bm-width-metric" />)}
+                <col />
+                <col className="bm-width-year" />
+              </colgroup>
               <thead>
                 <tr>
                   <th className="col-rank">Rank</th>
                   <th className="col-model">Model</th>
+                  <th className="col-parameters">Parameters</th>
                   {showHarness && <th className="col-harness">Harness</th>}
-                  {hasParameterMetadata && <th className="col-parameters">Parameters</th>}
                   {visibleMetrics.map((m) => {
                     const isActive = m === activeMetric;
                     return (
@@ -865,17 +888,15 @@ const BenchmarkDetailView: React.FC = () => {
                             <ExternalSourceEvalBadge sourceUrl={e.source_url || e.external_source_url || e.result_url} />
                           )}
                         </td>
+                        <td
+                          className="col-parameters"
+                          title={e.parameterCount === null ? undefined : e.parameterCount.toLocaleString("en-US")}
+                          aria-label={e.parameterCount === null ? "Parameters unknown" : `${e.parameterCount.toLocaleString("en-US")} parameters`}
+                        >
+                          {e.parameterCount === null ? "—" : formatParameterCount(e.parameterCount)}
+                        </td>
                         {showHarness && (
                           <td className="col-harness">{e.harness || "—"}</td>
-                        )}
-                        {hasParameterMetadata && (
-                          <td
-                            className="col-parameters"
-                            title={e.parameterCount === null ? undefined : e.parameterCount.toLocaleString("en-US")}
-                            aria-label={e.parameterCount === null ? "Parameters unknown" : `${e.parameterCount.toLocaleString("en-US")} parameters`}
-                          >
-                            {e.parameterCount === null ? "—" : formatParameterCount(e.parameterCount)}
-                          </td>
                         )}
                         {visibleMetrics.map((m) => {
                           const isActive = m === activeMetric;
@@ -893,7 +914,7 @@ const BenchmarkDetailView: React.FC = () => {
                         })}
                         <td className="col-paper">
                           {paperRouteId ? (
-                            <Link to={`/paper/${paperRouteId}`}>
+                            <Link to={`/paper/${paperRouteId}`} title={e.paper_title || paperLabel || undefined}>
                               {renderBenchmarkPaperTitle(e.paper_title, paperLabel)}
                             </Link>
                           ) : (
@@ -908,6 +929,7 @@ const BenchmarkDetailView: React.FC = () => {
               </tbody>
             </table>
             </div>
+            </>
           )}
         </div>
       </div>
