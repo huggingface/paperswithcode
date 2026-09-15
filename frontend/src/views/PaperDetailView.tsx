@@ -561,7 +561,7 @@ const PaperDetailView: React.FC = () => {
                 {o.name}
               </Link>
             ))}
-            <PaperAgentEdits paperId={Number(paper.id)} />
+            <PaperAgentEdits paperId={Number(paper.id)} isAdmin={isAdmin} />
             {isAdmin && isCodexEnrichPaperEnabled() && (
               <CodexEnrichPaperDialog
                 paperId={Number(paper.id)}
