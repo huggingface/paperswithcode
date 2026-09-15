@@ -478,3 +478,96 @@ def test_termination_waits_for_provider_exit_before_settling(tmp_path):
     assert row.terminal_confirmed and row.cleanup_error is None
     assert fixture.events.count("terminate") == 1
     assert fixture.events[-3:] == ["poll", "poll", "settled"]
+
+
+@pytest.mark.parametrize("transition", ["reserve", "created", "terminated", "save"])
+def test_blocking_transitions_leave_the_event_loop_responsive(
+    tmp_path, monkeypatch, transition
+):
+    import threading
+
+    fixture = Fixture(tmp_path)
+    observation = fixture.journal.admit("cold_first_pwd", 0)
+    target = fixture.journal if transition == "save" else fixture
+    original = getattr(target, transition)
+    entered, released = threading.Event(), threading.Event()
+
+    def blocking(*args):
+        entered.set()
+        assert released.wait(1), "event loop could not release the blocking operation"
+        return original(*args)
+
+    monkeypatch.setattr(target, transition, blocking)
+
+    async def run():
+        task = asyncio.create_task(
+            collect_cold_observation(
+                observation=observation,
+                journal=fixture.journal,
+                runtime=fixture,
+                provider=fixture,
+                spend=fixture,
+                verify_sandbox=fixture.verify,
+            )
+        )
+        assert await asyncio.to_thread(entered.wait, 1)
+        released.set()
+        row = await task
+        assert row.error is None and row.cleanup_error is None
+        assert row.completed and row.terminal_confirmed
+
+    asyncio.run(run())
+
+
+def test_cancelled_database_transition_finishes_before_provider_cleanup(
+    tmp_path, monkeypatch
+):
+    import threading
+
+    fixture = Fixture(tmp_path)
+    entered, released = threading.Event(), threading.Event()
+    created = fixture.created
+
+    def committing(*args):
+        entered.set()
+        assert released.wait(1)
+        created(*args)
+
+    monkeypatch.setattr(fixture, "created", committing)
+
+    async def run():
+        task = asyncio.create_task(fixture.collect())
+        assert await asyncio.to_thread(entered.wait, 1)
+        task.cancel()
+        await asyncio.sleep(0)
+        assert "terminate" not in fixture.events
+        released.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert fixture.events.index("created") < fixture.events.index("terminate")
+        (row,) = read_observations(fixture.journal.directory)
+        assert not row.completed and row.terminal_confirmed
+
+    asyncio.run(run())
+
+
+def test_concurrent_duplicate_observation_launches_only_once(tmp_path):
+    fixture = Fixture(tmp_path)
+    observation = fixture.journal.admit("cold_first_pwd", 0)
+
+    async def collect():
+        return await collect_cold_observation(
+            observation=observation,
+            journal=fixture.journal,
+            runtime=fixture,
+            provider=fixture,
+            spend=fixture,
+            verify_sandbox=fixture.verify,
+        )
+
+    async def run():
+        results = await asyncio.gather(collect(), collect(), return_exceptions=True)
+        assert sum(isinstance(result, ValueError) for result in results) == 1
+        assert fixture.events.count("create") == 1
+
+    asyncio.run(run())

@@ -13,12 +13,13 @@ import math
 import os
 import re
 import time
+import threading
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from types import SimpleNamespace
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeVar
 
 from backend.loadtests.persistent_executor_feasibility import (
     COLD_FIRST_PWD_P95_MS,
@@ -45,6 +46,19 @@ COLD_RESERVATION_MICROUSD = (
     + OPERATING_RESERVE_MICROUSD
 )
 Profile = Literal["cold_first_pwd", "cold_32_way"]
+T = TypeVar("T")
+
+
+async def _blocking_transition(function: Callable[..., T], *args: object) -> T:
+    """Keep database/fsync work off the loop; drain it before cancellation cleanup."""
+    task = asyncio.create_task(asyncio.to_thread(function, *args))
+    try:
+        return await asyncio.shield(task)
+    except asyncio.CancelledError:
+        # Cancelling an await does not stop its thread. Do not race provider
+        # cleanup against a still-committing reservation or journal update.
+        await asyncio.gather(task, return_exceptions=True)
+        raise
 
 
 class SpendLedger(Protocol):
@@ -93,6 +107,7 @@ class ColdJournal:
         self.image_id = image_id
         self._admitted: set[tuple[str, int]] = set()
         self._started: set[tuple[str, int]] = set()
+        self._start_lock = threading.Lock()
         self._write(
             "manifest.json",
             {
@@ -138,13 +153,16 @@ class ColdJournal:
         return observation
 
     def begin(self, observation: ColdObservation) -> None:
-        identity = (observation.profile, observation.index)
-        if identity not in self._admitted or identity in self._started:
-            raise ValueError("observation must be admitted exactly once")
-        path = self.directory / f"{observation.profile}-{observation.index:04d}.json"
-        if json.loads(path.read_text()) != asdict(observation):
-            raise ValueError("observation differs from durable admission")
-        self._started.add(identity)
+        with self._start_lock:
+            identity = (observation.profile, observation.index)
+            if identity not in self._admitted or identity in self._started:
+                raise ValueError("observation must be admitted exactly once")
+            path = (
+                self.directory / f"{observation.profile}-{observation.index:04d}.json"
+            )
+            if json.loads(path.read_text()) != asdict(observation):
+                raise ValueError("observation differs from durable admission")
+            self._started.add(identity)
 
     def save_result(self, result: dict) -> None:
         self._write("result.json", result)
@@ -270,13 +288,15 @@ async def collect_cold_observation(
     for settings in (runtime.settings, provider.settings):
         if any(getattr(settings, key) != value for key, value in expected.items()):
             raise ValueError("runtime/provider differs from frozen cold shape or image")
-    journal.begin(observation)
+    await _blocking_transition(journal.begin, observation)
     box = channel = None
     row = observation
     try:
-        reservation_id = spend.reserve(row.worker_generation)
+        reservation_id = await _blocking_transition(
+            spend.reserve, row.worker_generation
+        )
         row = replace(row, reservation_id=reservation_id)
-        journal.save(row)
+        await _blocking_transition(journal.save, row)
         started = clock()
         async with asyncio.timeout(SANDBOX_LIFETIME_SECONDS):
             launch = await runtime.prepare_launch(row.worker_generation)
@@ -293,8 +313,8 @@ async def collect_cold_observation(
                 executor_launch=launch,
             )
             row = replace(row, sandbox_id=box.object_id)
-            journal.save(row)
-            spend.created(reservation_id, box.object_id)
+            await _blocking_transition(journal.save, row)
+            await _blocking_transition(spend.created, reservation_id, box.object_id)
             verify_sandbox(box.object_id)
             turn_id, workspace_id = uuid.uuid4(), uuid.uuid4()
             channel = await runtime.attach_channel(
@@ -343,14 +363,14 @@ async def collect_cold_observation(
                         raise RuntimeError("provider termination is unconfirmed")
                     while await provider.poll(box) is None:
                         await asyncio.sleep(0.1)
-                spend.terminated(box.object_id)
+                await _blocking_transition(spend.terminated, box.object_id)
                 row = replace(row, terminal_confirmed=True)
             except Exception as error:
                 row = replace(row, cleanup_error="sandbox:" + type(error).__name__)
         # Unknown creation results retain their reservation for reconciliation.
-        journal.save(row)
+        await _blocking_transition(journal.save, row)
     row = replace(row, completed=True)
-    journal.save(row)
+    await _blocking_transition(journal.save, row)
     return row
 
 
@@ -374,9 +394,11 @@ async def collect_cold_stage(
         width = 32 if profile == "cold_32_way" else 4
         for offset in range(0, count, width):
             await preflight(width)
-            admitted = [
-                journal.admit(profile, i) for i in range(offset, offset + width)
-            ]
+            admitted = await _blocking_transition(
+                lambda: [
+                    journal.admit(profile, i) for i in range(offset, offset + width)
+                ]
+            )
             # Admission files are durable before any member starts its clock.
             results = await asyncio.gather(
                 *(
@@ -396,13 +418,15 @@ async def collect_cold_stage(
             errors = [result for result in results if isinstance(result, BaseException)]
             if errors:
                 raise BaseExceptionGroup("cold collection interrupted", errors)
-            rows = read_observations(journal.directory)
+            rows = await _blocking_transition(read_observations, journal.directory)
             if cold_gate_impossible(rows) or any(
                 row.cleanup_error or not row.terminal_confirmed for row in rows
             ):
                 result = cold_stage_result(rows)
-                journal.save_result(result)
+                await _blocking_transition(journal.save_result, result)
                 return result
-    result = cold_stage_result(read_observations(journal.directory))
-    journal.save_result(result)
+    result = cold_stage_result(
+        await _blocking_transition(read_observations, journal.directory)
+    )
+    await _blocking_transition(journal.save_result, result)
     return result
