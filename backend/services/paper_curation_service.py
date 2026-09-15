@@ -326,7 +326,10 @@ class PaperCurationService:
                 paper_id, payload["repositories"], commit=False
             ),
             "project_pages": lambda: self.paper_associations.update_project_pages(
-                paper_id, payload["project_pages"], commit=False
+                paper_id,
+                payload["project_pages"],
+                commit=False,
+                paper_scoped=actor["role"] != "admin",
             ),
             "hf_artifacts": lambda: self.paper_associations.update_hf_artifacts(
                 paper_id,
@@ -389,93 +392,82 @@ class PaperCurationService:
             return not old.issubset(new)
         return False
 
+    def restore_snapshot(self, event) -> None:
+        section = event.entity_type.removeprefix("paper_")
+        paper_id = int(event.entity_id)
+        before = event.before_snapshot or {}
+        value = before.get("value")
+        if section in {"tasks", "organizations"}:
+            key = "task_id" if section == "tasks" else "organization_id"
+            payload = {f"{key}s": [row[key] for row in value or []]}
+        elif section == "methods":
+            payload = {
+                "method_ids": [
+                    row["method_id"] for row in (value or {}).get("links", [])
+                ]
+            }
+        elif section in {"repositories", "project_pages"}:
+            payload = {
+                section: [
+                    {"url": row["url"], "is_official": row["is_official"]}
+                    for row in value or []
+                ]
+            }
+        elif section == "hf_artifacts":
+            payload = {
+                key: (value or {}).get(key, [])
+                for key in ("hf_models", "hf_datasets", "hf_spaces")
+            }
+        else:
+            payload = {"source_url": (value or {}).get("source_url")}
+
+        callbacks = {
+            "tasks": lambda: self.paper_associations.update_tasks(
+                paper_id, payload["task_ids"], commit=False
+            ),
+            "methods": lambda: self.paper_associations.update_methods(
+                paper_id, payload["method_ids"], commit=False
+            ),
+            "organizations": lambda: self.paper_associations.update_organizations(
+                paper_id, payload["organization_ids"], commit=False
+            ),
+            "repositories": lambda: self.paper_associations.update_repositories(
+                paper_id, payload["repositories"], commit=False
+            ),
+            "project_pages": lambda: self.paper_associations.update_project_pages(
+                paper_id, payload["project_pages"], commit=False
+            ),
+            "hf_artifacts": lambda: self.paper_associations.update_hf_artifacts(
+                paper_id,
+                payload["hf_models"],
+                payload["hf_datasets"],
+                payload["hf_spaces"],
+                commit=False,
+            ),
+            "source_url": lambda: self._restore_source_url(paper_id, value or {}),
+        }
+        callbacks[section]()
+        if section in {"tasks", "organizations"}:
+            self._restore_relationship_sources(paper_id, section, value or [])
+        if section == "methods":
+            self._restore_method_metadata(paper_id, value or {})
+        if section == "hf_artifacts":
+            paper = self.db.get(DBPaper, paper_id)
+            if paper is not None:
+                paper.hf_artifacts_scanned_at = _datetime_value(
+                    (value or {}).get("hf_artifacts_scanned_at")
+                )
+        self._restore_global_entities(
+            section,
+            before=event.before_snapshot or {},
+            after=event.after_snapshot or {},
+        )
+
     def rollback(
         self, *, event: CatalogMutationEvent, actor: dict, request_id: str
     ) -> CatalogMutationEvent:
         section = event.entity_type.removeprefix("paper_")
         paper_id = int(event.entity_id)
-        before = event.before_snapshot or {}
-        value = before.get("value")
-        payloads = {
-            "tasks": {"task_ids": [row["task_id"] for row in (value or [])]},
-            "methods": {
-                "method_ids": [
-                    row["method_id"] for row in (value or {}).get("links", [])
-                ]
-            },
-            "organizations": {
-                "organization_ids": [row["organization_id"] for row in (value or [])]
-            },
-            "repositories": {
-                "repositories": [
-                    {
-                        "url": row["url"],
-                        "is_official": row["is_official"],
-                    }
-                    for row in (value or [])
-                ]
-            },
-            "project_pages": {
-                "project_pages": [
-                    {
-                        "url": row["url"],
-                        "is_official": row["is_official"],
-                    }
-                    for row in (value or [])
-                ]
-            },
-            "hf_artifacts": {
-                "hf_models": (value or {}).get("hf_models", []),
-                "hf_datasets": (value or {}).get("hf_datasets", []),
-                "hf_spaces": (value or {}).get("hf_spaces", []),
-            },
-            "source_url": {"source_url": (value or {}).get("source_url")},
-        }
-        payload = payloads[section]
-
-        def restore() -> None:
-            callbacks = {
-                "tasks": lambda: self.paper_associations.update_tasks(
-                    paper_id, payload["task_ids"], commit=False
-                ),
-                "methods": lambda: self.paper_associations.update_methods(
-                    paper_id, payload["method_ids"], commit=False
-                ),
-                "organizations": lambda: self.paper_associations.update_organizations(
-                    paper_id, payload["organization_ids"], commit=False
-                ),
-                "repositories": lambda: self.paper_associations.update_repositories(
-                    paper_id, payload["repositories"], commit=False
-                ),
-                "project_pages": lambda: self.paper_associations.update_project_pages(
-                    paper_id, payload["project_pages"], commit=False
-                ),
-                "hf_artifacts": lambda: self.paper_associations.update_hf_artifacts(
-                    paper_id,
-                    payload["hf_models"],
-                    payload["hf_datasets"],
-                    payload["hf_spaces"],
-                    commit=False,
-                ),
-                "source_url": lambda: self._restore_source_url(paper_id, value or {}),
-            }
-            callbacks[section]()
-            if section in {"tasks", "organizations"}:
-                self._restore_relationship_sources(paper_id, section, value or [])
-            if section == "methods":
-                self._restore_method_metadata(paper_id, value or {})
-            if section == "hf_artifacts":
-                paper = self.db.get(DBPaper, paper_id)
-                if paper is not None:
-                    paper.hf_artifacts_scanned_at = _datetime_value(
-                        (value or {}).get("hf_artifacts_scanned_at")
-                    )
-            self._restore_global_entities(
-                section,
-                before=event.before_snapshot or {},
-                after=event.after_snapshot or {},
-            )
-
         related_project_urls = (
             sorted(
                 {
@@ -519,7 +511,7 @@ class PaperCurationService:
                 related_project_urls=related_project_urls,
                 related_hf_keys=related_hf_keys,
             ),
-            apply=restore,
+            apply=lambda: self.restore_snapshot(event),
             request_id=request_id,
             rollback_of_event_id=event.id,
         )

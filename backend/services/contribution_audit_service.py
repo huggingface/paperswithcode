@@ -6,7 +6,7 @@ import uuid
 
 from sqlalchemy.orm import Session
 
-from backend.models.database import CatalogMutationEvent
+from backend.models.database import CatalogMutationEvent, PaperEditAccount
 from backend.services.catalog_mutation_service import (
     CatalogMutationService,
     canonical_hash,
@@ -49,7 +49,25 @@ class ContributionAuditService:
             )
             .all()
         }
+        subjects = {row.actor_hf_subject for row in events_by_id.values()}
+        suspended = (
+            {
+                row.hf_subject
+                for row in self.db.query(PaperEditAccount)
+                .filter(
+                    PaperEditAccount.hf_subject.in_(subjects),
+                    PaperEditAccount.suspended,
+                )
+                .all()
+            }
+            if subjects
+            else set()
+        )
         for item in page["events"]:
+            event = events_by_id[item["id"]]
+            item["actor_hf_subject"] = event.actor_hf_subject
+            item["editing_suspended"] = event.actor_hf_subject in suspended
+            item["paper_id"] = event.paper_id
             item["rollback_eligible"] = self.is_rollback_eligible(
                 events_by_id[item["id"]]
             )
@@ -60,7 +78,11 @@ class ContributionAuditService:
         if event.operation == "rollback":
             return False
         try:
-            if event.entity_type.startswith("paper_"):
+            if event.entity_type == "paper_edit_batch":
+                from backend.services.paper_edit_service import PaperEditService
+
+                current = PaperEditService(self.db).rollback_snapshot(event)
+            elif event.entity_type.startswith("paper_"):
                 section = event.entity_type.removeprefix("paper_")
                 current = PaperCurationService(self.db).snapshot(
                     int(event.entity_id), section
@@ -100,7 +122,13 @@ class ContributionAuditService:
             raise ContributionAuditRollbackError(
                 "Rollback events cannot be rolled back"
             )
-        if event.entity_type == "evaluation":
+        if event.entity_type == "paper_edit_batch":
+            from backend.services.paper_edit_service import PaperEditService
+
+            rollback = PaperEditService(self.db).rollback(
+                event=event, actor=actor, request_id=request_id
+            )
+        elif event.entity_type == "evaluation":
             rollback = EvaluationCurationService(self.db).rollback(
                 event=event, actor=actor, request_id=request_id
             )

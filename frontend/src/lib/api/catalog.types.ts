@@ -1,4 +1,7 @@
 export interface CatalogMutationEvent {
+  actor_hf_subject?: string;
+  editing_suspended?: boolean;
+  paper_id?: number | null;
   id: string;
   actor_username: string | null;
   actor_role: "admin" | "contributor";

@@ -1465,6 +1465,7 @@ class CatalogMutationEvent(Base):
     operation: Mapped[str] = mapped_column(String(32), nullable=False)
     entity_type: Mapped[str] = mapped_column(String(64), nullable=False)
     entity_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    paper_id: Mapped[Optional[int]] = mapped_column(BigInteger, index=True)
     before_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB)
     after_snapshot: Mapped[Optional[dict]] = mapped_column(JSONB)
     request_id: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -5546,3 +5547,38 @@ for _table, _operation, _trigger in (
             f"BEGIN SELECT RAISE(ABORT, '{_table.name} is append-only'); END"
         ).execute_if(dialect="sqlite"),
     )
+
+
+class PaperEditAccount(Base):
+    """Shared suspension state; account locks serialize limits and suspension."""
+
+    __tablename__ = "paper_edit_accounts"
+    hf_subject: Mapped[str] = mapped_column(String(255), primary_key=True)
+    suspended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    updated_by: Mapped[Optional[str]] = mapped_column(String(255))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PaperEditAuthorization(Base):
+    """Short-lived device authorization. Only hashes of secrets are persisted."""
+
+    __tablename__ = "paper_edit_authorizations"
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    paper_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    client_key: Mapped[Optional[str]] = mapped_column(String(64))
+    device_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
+    token_hash: Mapped[Optional[str]] = mapped_column(String(64), unique=True)
+    hf_subject: Mapped[Optional[str]] = mapped_column(String(255), index=True)
+    username: Mapped[Optional[str]] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))

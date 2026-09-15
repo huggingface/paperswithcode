@@ -17,6 +17,7 @@ from starlette.requests import Request
 
 from backend.config import Settings
 from backend.models.database import (
+    PaperEditAccount,
     CatalogAuditReadProgress,
     CatalogMutationEvent,
     CatalogMutationIdempotency,
@@ -50,6 +51,8 @@ ADMIN = {
 def _event(**overrides):
     values = {
         "id": uuid.uuid4(),
+        "actor_hf_subject": "contributor-subject",
+        "paper_id": 7,
         "operation": "update",
         "entity_type": "paper_tasks",
         "entity_id": "7",
@@ -69,18 +72,24 @@ def test_admin_audit_page_enriches_events_in_page_order(monkeypatch):
     calls = []
 
     class Query:
-        def filter(self, _condition):
+        def filter(self, *_conditions):
             calls.append(("filter",))
             return self
 
         def all(self):
             calls.append(("all",))
-            return [second, first]
+            return (
+                []
+                if getattr(self, "model", None) is PaperEditAccount
+                else [second, first]
+            )
 
     class Database:
         def query(self, model):
             calls.append(("query", model))
-            return Query()
+            query = Query()
+            query.model = model
+            return query
 
     class MutationService:
         def __init__(self, db):
@@ -111,8 +120,20 @@ def test_admin_audit_page_enriches_events_in_page_order(monkeypatch):
     assert result is page
     assert result == {
         "events": [
-            {"id": str(first.id), "rollback_eligible": True},
-            {"id": str(second.id), "rollback_eligible": False},
+            {
+                "id": str(first.id),
+                "rollback_eligible": True,
+                "actor_hf_subject": "contributor-subject",
+                "editing_suspended": False,
+                "paper_id": 7,
+            },
+            {
+                "id": str(second.id),
+                "rollback_eligible": False,
+                "actor_hf_subject": "contributor-subject",
+                "editing_suspended": False,
+                "paper_id": 7,
+            },
         ],
         "next_cursor": "next-page",
         "unread_contributor_count": 4,
@@ -121,6 +142,9 @@ def test_admin_audit_page_enriches_events_in_page_order(monkeypatch):
         ("mutation-service", db),
         ("list", None, "cursor", 12),
         ("query", CatalogMutationEvent),
+        ("filter",),
+        ("all",),
+        ("query", PaperEditAccount),
         ("filter",),
         ("all",),
         ("eligible", first),
@@ -630,6 +654,7 @@ def test_admin_audit_routes_and_authorization_dependencies_are_unchanged():
 def audit_db(monkeypatch):
     engine = create_engine("sqlite://", poolclass=StaticPool)
     for model in (
+        PaperEditAccount,
         Metric,
         TaskDatasetMetric,
         CatalogMutationEvent,
@@ -684,6 +709,9 @@ def test_admin_page_and_acknowledgement_preserve_persisted_read_progress(audit_d
         {
             "id": str(event.id),
             "actor_username": "contributor",
+            "actor_hf_subject": "contributor-subject",
+            "editing_suspended": False,
+            "paper_id": None,
             "actor_role": "contributor",
             "operation": "create",
             "entity_type": "submission_created_metric",
@@ -752,14 +780,15 @@ def test_stale_submission_rollback_writes_nothing(audit_db):
     metric.description = "changed after the audited event"
     audit_db.commit()
 
-    with pytest.raises(HTTPException) as error:
+    from backend.services.catalog_errors import CatalogConflictError
+
+    with pytest.raises(CatalogConflictError) as error:
         ContributionAuditService(audit_db).rollback_event(
             event_id=original.id,
             actor=ADMIN,
             request_id="rollback-request",
         )
 
-    assert error.value.status_code == 409
     assert set(error.value.detail) == {"code", "current_version"}
     assert error.value.detail["code"] == "stale_catalog_version"
     assert audit_db.get(Metric, 11).description == "changed after the audited event"

@@ -28,6 +28,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
+import { PaperAgentEdits } from "@/components/paper-detail/PaperAgentEdits";
 import { PaperDetailEditors } from "@/components/paper-detail/PaperDetailEditors";
 import { PaperResultsSection } from "@/components/paper-detail/PaperResultsSection";
 import { PaperResourceSidebar } from "@/components/paper-detail/PaperResourceSidebar";
@@ -761,6 +762,7 @@ const PaperDetailView: React.FC = () => {
             </div>
           )}
 
+          <PaperAgentEdits paperId={Number(paper.id)} />
           <PaperMetadataSections
             canEdit={canEditPaper}
             onEditMethods={() => openEdit("methods")}
@@ -800,7 +802,7 @@ const PaperDetailView: React.FC = () => {
       <PaperDetailEditors
         activeEditor={activeEditor}
         arxivId={arxivId}
-        editSubmitMode={editSubmitMode}
+        editSubmitMode={activeEditor === "organizations" && !isAdmin ? "pending" : editSubmitMode}
         evaluations={evaluations ?? []}
         isAdmin={isAdmin}
         isLinkedAuthor={isLinkedAuthor}

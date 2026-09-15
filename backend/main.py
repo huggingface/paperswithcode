@@ -502,6 +502,7 @@ def create_app() -> FastAPI:
         metrics,
         organizations,
         paper_assets,
+        paper_edits,
         paper_pages,
         papers,
         pending_edits,
@@ -529,6 +530,7 @@ def create_app() -> FastAPI:
         inference_billing.router, prefix="/api/v1", tags=["inference-billing"]
     )
     app.include_router(pending_edits.router, prefix="/api/v1", tags=["pending_edits"])
+    app.include_router(paper_edits.router, prefix="/api/v1", tags=["paper-edits"])
     app.include_router(papers.router, prefix="/api/v1", tags=["papers"])
     app.include_router(research_catalog.router, prefix="/api/v1", tags=["research"])
     # External-resource ingestion endpoints share the `/papers` prefix because

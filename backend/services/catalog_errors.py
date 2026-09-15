@@ -32,3 +32,11 @@ class CatalogValidationError(CatalogError, ValueError):
 
 class CatalogPersistenceError(CatalogError):
     """Raised when catalog persistence cannot complete."""
+
+
+class CatalogPermissionError(CatalogError):
+    """The actor lacks permission for this catalog operation."""
+
+
+class CatalogRateLimitError(CatalogError):
+    """The account has exhausted its publication allowance."""

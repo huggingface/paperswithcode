@@ -710,5 +710,5 @@ def me(request: Request):
         is_admin=role == "admin",
         role=role,
         can_contribute=role in {"admin", "contributor"},
-        can_directly_edit_catalog=can_directly_edit_catalog(role),
+        can_directly_edit_catalog=can_directly_edit_catalog(role or "contributor"),
     )

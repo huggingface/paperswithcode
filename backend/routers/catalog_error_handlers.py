@@ -8,6 +8,8 @@ from starlette.types import ExceptionHandler
 
 from backend.services.catalog_errors import (
     CatalogConflictError,
+    CatalogPermissionError,
+    CatalogRateLimitError,
     CatalogNotFoundError,
     CatalogPersistenceError,
     CatalogValidationError,
@@ -39,6 +41,8 @@ async def _catalog_persistence_error_response(
 
 def register_catalog_error_handlers(app: FastAPI) -> None:
     """Register the public HTTP contracts for catalog domain errors."""
+    app.add_exception_handler(CatalogPermissionError, _catalog_error_response(403))
+    app.add_exception_handler(CatalogRateLimitError, _catalog_error_response(429))
     app.add_exception_handler(
         CatalogNotFoundError, _catalog_error_response(status_code=404)
     )

@@ -70,6 +70,29 @@ class CatalogMutationService:
         version_snapshot: Callable[[], Any] | None = None,
         rollback_of_event_id: uuid.UUID | None = None,
     ) -> tuple[Any, CatalogMutationEvent, bool]:
+        from backend.services.paper_edit_access import PaperEditAccess
+        from backend.models.database import Evaluation
+
+        paper_id = None
+        if entity_type.startswith("paper_"):
+            paper_id = int(entity_id)
+        elif entity_type == "evaluation":
+            if entity_id.startswith("paper:"):
+                paper_id = int(entity_id.split(":", 1)[1])
+            else:
+                row = self.db.get(Evaluation, int(entity_id))
+                paper_id = int(row.paper_id) if row else None
+        access = PaperEditAccess(self.db)
+        if paper_id is not None:
+            access.check_write(
+                actor, paper_id, entity_type, operation, request_payload, limits=False
+            )
+        elif actor.get("source") == "paper_token":
+            from backend.services.catalog_errors import CatalogPermissionError
+
+            raise CatalogPermissionError(
+                "Paper authorization cannot mutate this resource"
+            )
         before = json_safe(snapshot())
         current_version = canonical_hash(
             json_safe(version_snapshot()) if version_snapshot else before
@@ -106,10 +129,18 @@ class CatalogMutationService:
                 {"code": "stale_catalog_version", "current_version": current_version}
             )
 
+        if paper_id is not None:
+            access.check_write(actor, paper_id, entity_type, operation, request_payload)
         try:
             apply()
             self.db.flush()
             after = json_safe(snapshot())
+            # A long-running batch may cross an expiry or UTC quota boundary.
+            # Recheck before recording and committing its publication.
+            if paper_id is not None:
+                access.check_write(
+                    actor, paper_id, entity_type, operation, request_payload
+                )
             event = CatalogMutationEvent(
                 actor_hf_subject=actor["hf_subject"],
                 actor_username=actor.get("username"),
@@ -117,6 +148,7 @@ class CatalogMutationService:
                 operation=operation,
                 entity_type=entity_type,
                 entity_id=entity_id,
+                paper_id=paper_id,
                 before_snapshot=before,
                 after_snapshot=after,
                 request_id=request_id,
