@@ -1,0 +1,35 @@
+name: Public API feedback
+description: Report an API bug or request a feature for the public beta.
+title: "[API] "
+body:
+  - type: markdown
+    attributes:
+      value: "Please omit credentials, cookies, personal data, and private application code."
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Feedback type
+      options:
+        - Bug report
+        - Feature request
+        - Documentation
+    validations:
+      required: true
+  - type: textarea
+    id: request
+    attributes:
+      label: Endpoint and reproducible request
+      description: Include a minimal curl command, or describe the proposed capability.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      description: For bugs, include the HTTP status, response, and approximate UTC time.

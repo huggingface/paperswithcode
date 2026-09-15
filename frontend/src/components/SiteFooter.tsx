@@ -9,6 +9,7 @@ const SiteFooter = () => {
     <footer className="site-footer">
       <div className="site-footer-inner">
         <span>© {new Date().getFullYear()} Hugging Face</span>
+        <Link to="/docs/api">API</Link>
         <Link to="/mcp">MCP</Link>
         <Link to="/privacy">Privacy</Link>
         <a

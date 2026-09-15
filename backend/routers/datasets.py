@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
+from backend.models.public_api import DatasetTasks, LeaderboardMetrics
 from backend.models.evaluations import (
     Dataset,
     DatasetCreateRequest,
@@ -178,7 +179,7 @@ def get_dataset(
     )
 
 
-@router.get("/{dataset_id}/tasks/")
+@router.get("/{dataset_id}/tasks/", response_model=DatasetTasks)
 def get_dataset_tasks(
     dataset_id: str,
     db: Session = Depends(get_database_session),
@@ -339,7 +340,7 @@ def update_dataset(
 # Leaderboard-Metric Management Endpoints (New: task-dataset-metric triples)
 
 
-@router.get("/{dataset_id}/tasks/{task_id}/metrics", response_model=dict)
+@router.get("/{dataset_id}/tasks/{task_id}/metrics", response_model=LeaderboardMetrics)
 def get_leaderboard_metrics(
     dataset_id: str,
     task_id: str,

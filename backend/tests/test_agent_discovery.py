@@ -30,7 +30,7 @@ def test_api_catalog_is_an_rfc_9727_linkset():
                 "anchor": "https://paperswithcode.co/api/v1/papers/",
                 "service-desc": [
                     {
-                        "href": "https://paperswithcode.co/openapi.json",
+                        "href": "https://paperswithcode.co/api/v1/openapi.json",
                         "type": "application/json",
                     }
                 ],

@@ -34,7 +34,8 @@ def api_documentation() -> HTMLResponse:
 <h1>Papers With Code API</h1>
 <p>The public catalog API is available under <code>/api/v1/</code>.</p>
 <ul>
-<li><a href="/openapi.json">OpenAPI description</a></li>
+<li><a href="/api/v1/openapi.json">Public beta OpenAPI description</a></li>
+<li><a href="/openapi.json">Full application OpenAPI description</a></li>
 <li><a href="/.well-known/api-catalog">API catalog</a></li>
 <li><a href="/.well-known/openid-configuration">OIDC discovery</a></li>
 <li><a href="/health">Service health</a></li>
@@ -65,7 +66,7 @@ def api_catalog() -> JSONResponse:
                     "anchor": f"{_ORIGIN}/api/v1/papers/",
                     "service-desc": [
                         {
-                            "href": f"{_ORIGIN}/openapi.json",
+                            "href": f"{_ORIGIN}/api/v1/openapi.json",
                             "type": "application/json",
                         }
                     ],
