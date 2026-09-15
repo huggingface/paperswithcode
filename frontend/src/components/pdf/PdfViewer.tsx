@@ -164,6 +164,7 @@ export function PdfViewer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
+  const internalLinkNavigation = useRef<(page: number) => void>(() => {});
   const searchGeneration = useRef(0);
   const recenterAfterZoom = useRef(false);
   const pinchDelta = useRef(0);
@@ -409,6 +410,12 @@ export function PdfViewer({
     scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start" });
     setCurrentPage(bounded);
   };
+  // React-PDF retains its initial onItemClick callback. Forward through a ref so
+  // links use the loaded page count and current reader callbacks. Our wrappers
+  // exist even when the destination Page is unmounted by lazy rendering.
+  useLayoutEffect(() => {
+    internalLinkNavigation.current = jumpToPage;
+  });
   const navigateMatch = (direction: 1 | -1) => {
     if (!matches.length) return;
     const next = (activeMatch + direction + matches.length) % matches.length;
@@ -471,6 +478,7 @@ export function PdfViewer({
         }}
         onLoadError={(loadError) => setError(loadErrorMessage || pdfErrorMessage(loadError))}
         externalLinkTarget="_blank"
+        onItemClick={({ pageNumber }) => internalLinkNavigation.current(pageNumber)}
       >
         <div
           ref={pagesRef}

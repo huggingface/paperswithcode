@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let observedWidth = 800;
 let resizeCallback: ResizeObserverCallback | undefined;
+let intersecting = true;
 const reactPdf = vi.hoisted(() => ({ documentOptions: [] as unknown[] }));
 
 vi.mock("@/lib/pdf", () => ({
@@ -25,15 +26,20 @@ vi.mock("./PdfToolbar", () => ({
 }));
 
 vi.mock("react-pdf", () => ({
-    Document: ({ children, onLoadSuccess, onLoadError, options }: {
+    Document: ({ children, onLoadSuccess, onLoadError, onItemClick, options }: {
       children: React.ReactNode;
       onLoadSuccess: (pdf: { numPages: number }) => void;
       onLoadError: (error: Error) => void;
+      onItemClick?: (item: { pageNumber: number; pageIndex: number }) => void;
       options?: unknown;
     }) => {
+      // Match React-PDF's LinkService, which retains the first callback.
+      const initialItemClick = React.useRef(onItemClick);
       reactPdf.documentOptions.push(options);
       return <div>
         <button onClick={() => onLoadSuccess({ numPages: 1 })}>Load PDF</button>
+        <button onClick={() => onLoadSuccess({ numPages: 13 })}>Load long PDF</button>
+        <button onClick={() => initialItemClick.current?.({ pageNumber: 13, pageIndex: 12 })}>Citation link</button>
         <button onClick={() => onLoadError(new Error("network response was 404"))}>Fail PDF</button>
         {children}
       </div>;
@@ -61,6 +67,7 @@ describe("highlightPdfText", () => {
 describe("PdfViewer resize rendering", () => {
   beforeEach(() => {
     observedWidth = 800;
+    intersecting = true;
     resizeCallback = undefined;
     reactPdf.documentOptions.length = 0;
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
@@ -72,7 +79,7 @@ describe("PdfViewer resize rendering", () => {
       value: class {
         constructor(private readonly callback: IntersectionObserverCallback) {}
         observe(element: Element) {
-          this.callback([{ isIntersecting: true, target: element } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
+          this.callback([{ isIntersecting: intersecting, target: element } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
         }
         disconnect() {}
         unobserve() {}
@@ -91,6 +98,37 @@ describe("PdfViewer resize rendering", () => {
         unobserve() {}
       },
     });
+  });
+
+  it("navigates internal links to unmounted destination pages using current callbacks", () => {
+    intersecting = false;
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
+      configurable: true,
+      value: scrollIntoView,
+    });
+    const onPageChange = vi.fn();
+    const props = {
+      url: "https://arxiv.org/pdf/2511.09554",
+      paperKey: "2511.09554",
+      paperTitle: "RF-DETR",
+      paperHref: "/paper/2511.09554",
+      onPageChange,
+    };
+    const view = render(<PdfViewer {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    const destination = view.container.querySelector('[data-page="13"]');
+    expect(destination).toBeInTheDocument();
+    expect(destination?.querySelector('[data-testid="pdf-page"]')).toBeNull();
+
+    const updatedPageChange = vi.fn();
+    view.rerender(<PdfViewer {...props} onPageChange={updatedPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Citation link" }));
+
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(destination);
+    expect(updatedPageChange).toHaveBeenCalledWith(13);
+    expect(onPageChange).not.toHaveBeenCalled();
   });
 
   it("keeps the rendered pages and live scale after divider dragging ends", async () => {
