@@ -31,7 +31,7 @@ MCP_CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswith
 MCP_PORTS = {"production": 8002, "staging": 8003}
 MCP_API_URLS = {
     "production": "https://paperswithcode.co/api/v1",
-    "staging": "http://127.0.0.1:8001/api/v1",
+    "staging": "http://127.0.0.1:8011/api/v1",
 }
 MCP_RETAIN_RELEASES = 3
 MCP_MIN_FREE_BYTES = int(os.environ.get("PWC_MCP_MIN_FREE_BYTES", str(512 * 1024**2)))

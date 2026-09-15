@@ -116,6 +116,54 @@ def install_external_pi_hosts(path: Path) -> None:
     path.chmod(0o644)
 
 
+def ensure_mcp_config(
+    path: Path, *, port: int, api_url: str, allowed_hosts: str
+) -> None:
+    """Create or reconcile non-secret MCP settings without rotating cursor keys."""
+    values: dict[str, str] = {}
+    if path.exists():
+        for raw_line in path.read_text(encoding="utf-8").splitlines():
+            line = raw_line.strip()
+            if not line or line.startswith("#"):
+                continue
+            if "=" not in line:
+                raise RuntimeError(f"invalid MCP configuration line in {path}")
+            key, value = line.split("=", 1)
+            if key in values:
+                raise RuntimeError(f"duplicate MCP configuration key in {path}: {key}")
+            values[key] = value
+        if not values.get("PWC_MCP_CURSOR_KEY_CURRENT"):
+            raise RuntimeError(f"existing MCP configuration has no cursor key: {path}")
+    else:
+        values["PWC_MCP_CURSOR_KEY_CURRENT"] = secrets.token_urlsafe(32)
+        values["PWC_MCP_CURSOR_KEY_PREVIOUS"] = ""
+
+    managed = {
+        "PORT": str(port),
+        "PWC_MCP_PORT": str(port),
+        "PWC_API_URL": api_url,
+        "PWC_MCP_ALLOWED_HOSTS": allowed_hosts,
+        "PWC_MCP_ALLOWED_ORIGINS": "https://chatgpt.com,https://claude.ai",
+    }
+    values.update(managed)
+    values.setdefault("PWC_MCP_CURSOR_KEY_PREVIOUS", "")
+    order = [
+        *managed,
+        "PWC_MCP_CURSOR_KEY_CURRENT",
+        "PWC_MCP_CURSOR_KEY_PREVIOUS",
+    ]
+    order.extend(sorted(set(values) - set(order)))
+    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
+    temporary.write_text(
+        "".join(f"{key}={values[key]}\n" for key in order), encoding="utf-8"
+    )
+    temporary.chmod(0o600)
+    try:
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("run through sudo")
@@ -150,20 +198,20 @@ def main() -> int:
     ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
     for environment, port, api_url in (
         ("production", 8002, "https://paperswithcode.co/api/v1"),
-        ("staging", 8003, "http://127.0.0.1:8001/api/v1"),
+        ("staging", 8003, "http://127.0.0.1:8011/api/v1"),
     ):
         mcp_config = CONFIG_ROOT / f"mcp-{environment}.env"
-        if not mcp_config.exists():
-            mcp_config.write_text(
-                f"PORT={port}\n"
-                f"PWC_MCP_PORT={port}\n"
-                f"PWC_API_URL={api_url}\n"
-                f"PWC_MCP_ALLOWED_HOSTS={'paperswithcode.co' if environment == 'production' else 'staging.paperswithcode.co'},localhost:*,127.0.0.1:*\n"
-                "PWC_MCP_ALLOWED_ORIGINS=https://chatgpt.com,https://claude.ai\n"
-                f"PWC_MCP_CURSOR_KEY_CURRENT={secrets.token_urlsafe(32)}\n"
-                "PWC_MCP_CURSOR_KEY_PREVIOUS=\n",
-                encoding="utf-8",
+        ensure_mcp_config(
+            mcp_config,
+            port=port,
+            api_url=api_url,
+            allowed_hosts=(
+                "paperswithcode.co"
+                if environment == "production"
+                else "staging.paperswithcode.co"
             )
+            + ",localhost:*,127.0.0.1:*",
+        )
         os.chown(mcp_config, 0, grp.getgrnam("pwc-mcp").gr_gid)
         mcp_config.chmod(0o640)
     for worker_environment in (

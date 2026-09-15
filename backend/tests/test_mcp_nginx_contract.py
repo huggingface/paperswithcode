@@ -80,3 +80,18 @@ def test_mcp_access_log_excludes_identifiers_and_request_content():
             assert forbidden not in line
         for allowed in ("$status", "$body_bytes_sent", "$request_time"):
             assert allowed in line
+
+
+def test_staging_internal_mcp_api_bridge_is_loopback_only():
+    assert "listen 127.0.0.1:8011;" in STAGING
+    marker = STAGING.index("server_name pwc-staging-mcp-api;")
+    bridge_start = STAGING.rfind("server {", 0, marker)
+    bridge_end = STAGING.index("\n}\n\nmap ", bridge_start)
+    bridge = STAGING[bridge_start:bridge_end]
+    assert "listen 127.0.0.1:8011;" in bridge
+    assert 'location ~ "^/api/v1/(papers' in bridge
+    assert "limit_except GET HEAD" in bridge
+    assert "proxy_pass http://pwc_staging_backend;" in bridge
+    assert "auth_request" not in bridge
+    assert "location ^~ / {" in bridge
+    assert "return 404;" in bridge

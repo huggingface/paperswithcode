@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from deploy import cli, mcp_release, smoke_test
+from deploy import cli, install_host_layout, mcp_release, smoke_test
 
 
 SHA = "a" * 40
@@ -46,7 +46,7 @@ def test_mcp_paths_are_separate_from_site_releases():
     assert mcp_release.MCP_REPOSITORY == mcp_release.MCP_ROOT / "repository.git"
     assert mcp_release.MCP_RELEASES == mcp_release.MCP_ROOT / "releases"
     assert mcp_release.MCP_PORTS == {"production": 8002, "staging": 8003}
-    assert mcp_release.MCP_API_URLS["staging"].startswith("http://127.0.0.1:8001/")
+    assert mcp_release.MCP_API_URLS["staging"].startswith("http://127.0.0.1:8011/")
 
 
 def test_resolve_sha_fetches_and_enforces_production_ancestry(monkeypatch):
@@ -134,7 +134,7 @@ def test_qualify_uses_unprivileged_user_distinct_config_and_temporary_port(
     command = observed["command"]
     assert command[:4] == ["/usr/sbin/runuser", "-u", "pwc-mcp", "--"]
     assert "PORT=18123" in command
-    assert "PWC_API_URL=http://127.0.0.1:8001/api/v1" in command
+    assert "PWC_API_URL=http://127.0.0.1:8011/api/v1" in command
     assert observed["environment"]["TOKEN"] == "private"
     assert observed["terminated"] is True
 
@@ -398,3 +398,26 @@ def test_installer_includes_mcp_unit_and_separate_repository():
     assert '"paperswithcode-mcp@.service"' in tools
     assert "https://github.com/huggingface/pwc-cli.git" in host_layout
     assert '"pwc-mcp"' in host_layout
+
+
+def test_mcp_config_reconciles_staging_api_without_rotating_cursor_key(tmp_path):
+    config = tmp_path / "mcp-staging.env"
+    config.write_text(
+        "PORT=8003\n"
+        "PWC_MCP_PORT=8003\n"
+        "PWC_API_URL=http://127.0.0.1:8001/api/v1\n"
+        "PWC_MCP_CURSOR_KEY_CURRENT=keep-this-secret\n"
+        "PWC_MCP_CURSOR_KEY_PREVIOUS=\n"
+    )
+
+    install_host_layout.ensure_mcp_config(
+        config,
+        port=8003,
+        api_url="http://127.0.0.1:8011/api/v1",
+        allowed_hosts="staging.paperswithcode.co,localhost:*,127.0.0.1:*",
+    )
+
+    values = dict(line.split("=", 1) for line in config.read_text().splitlines())
+    assert values["PWC_API_URL"] == "http://127.0.0.1:8011/api/v1"
+    assert values["PWC_MCP_CURSOR_KEY_CURRENT"] == "keep-this-secret"
+    assert config.stat().st_mode & 0o777 == 0o600

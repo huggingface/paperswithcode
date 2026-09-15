@@ -219,6 +219,31 @@ def validate(production: str, staging: str) -> list[str]:
             failures.append(f"{environment} does not deny public deployment operators")
     if "8081" in staging:
         failures.append("staging exposes Vite/HMR")
+    bridge_server = staging.split("server_name pwc-staging-mcp-api;", 1)
+    if len(bridge_server) != 2:
+        failures.append("staging MCP API bridge is missing")
+    else:
+        marker = staging.index("server_name pwc-staging-mcp-api;")
+        bridge = staging[staging.rfind("server {", 0, marker) :].split(
+            "\n}\n\nmap ", 1
+        )[0]
+        for requirement in (
+            "listen 127.0.0.1:8011;",
+            "allow 127.0.0.1;",
+            "deny all;",
+            'location ~ "^/api/v1/(papers(?:/|$)|research/papers/|tasks(?:/|$)|methods(?:/|$)|datasets(?:/|$))"',
+            "limit_except GET HEAD",
+            "proxy_pass http://pwc_staging_backend;",
+            "proxy_set_header Host staging.paperswithcode.co;",
+            'proxy_set_header Cookie "";',
+            'proxy_set_header Authorization "";',
+            "location ^~ / {",
+            "return 404;",
+        ):
+            if requirement not in bridge:
+                failures.append(f"staging MCP API bridge misses: {requirement}")
+        if "auth_request" in bridge or "listen 0.0.0.0" in bridge:
+            failures.append("staging MCP API bridge is not loopback-only")
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
         not access_block

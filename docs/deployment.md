@@ -239,7 +239,8 @@ different API URLs, Host allowlists, ports, and cursor secrets. They must contai
 `PWC_MCP_CURSOR_KEY_PREVIOUS`, install a fresh current value without printing
 either secret, deploy, wait longer than the one-hour cursor lifetime, then clear
 the previous value. Never load `backend/keys.env` into this service. Staging
-uses `http://127.0.0.1:8001/api/v1`; production uses
+uses the nginx loopback-only blue/green bridge at
+`http://127.0.0.1:8011/api/v1`; production uses
 `https://paperswithcode.co/api/v1`. A failure restores the previous pointer and
 re-smokes it. If no prior release exists, the failed unit is stopped.
 
