@@ -100,7 +100,7 @@ describe("PdfViewer resize rendering", () => {
     });
   });
 
-  it("navigates internal links to unmounted destination pages using current callbacks", () => {
+  it("navigates to unmounted pages and persists the visible page after scrolling settles", async () => {
     intersecting = false;
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", {
@@ -127,7 +127,16 @@ describe("PdfViewer resize rendering", () => {
 
     expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "smooth" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(destination);
-    expect(updatedPageChange).toHaveBeenCalledWith(13);
+    expect(updatedPageChange).not.toHaveBeenCalled();
+    view.container.querySelectorAll<HTMLElement>("[data-page]").forEach((element) => {
+      vi.spyOn(element, "getBoundingClientRect").mockReturnValue({
+        top: element === destination ? 0 : -1000,
+        bottom: element === destination ? 900 : -100,
+      } as DOMRect);
+    });
+    fireEvent.scroll(screen.getByRole("region", { name: "Paper PDF" }));
+    expect(updatedPageChange).not.toHaveBeenCalled();
+    await waitFor(() => expect(updatedPageChange).toHaveBeenCalledWith(13));
     expect(onPageChange).not.toHaveBeenCalled();
   });
 

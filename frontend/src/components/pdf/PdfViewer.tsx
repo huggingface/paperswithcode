@@ -322,7 +322,9 @@ export function PdfViewer({
     const element = scrollRef.current;
     if (!element || !pages) return;
     let frame = 0;
+    let settleTimer = 0;
     const update = () => {
+      window.clearTimeout(settleTimer);
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const center = element.getBoundingClientRect().top + element.clientHeight / 2;
@@ -341,10 +343,20 @@ export function PdfViewer({
         if (bestPage !== page) setCurrentPage(bestPage);
       });
     };
-    element.addEventListener("scroll", update, { passive: true });
+    // Persist the visible page after scrolling settles, including browsers
+    // without scrollend support. Intermediate animation pages are not reading positions.
+    const scheduleUpdate = () => {
+      cancelAnimationFrame(frame);
+      window.clearTimeout(settleTimer);
+      settleTimer = window.setTimeout(update, 150);
+    };
+    element.addEventListener("scroll", scheduleUpdate, { passive: true });
+    element.addEventListener("scrollend", update);
     update();
     return () => {
-      element.removeEventListener("scroll", update);
+      element.removeEventListener("scroll", scheduleUpdate);
+      element.removeEventListener("scrollend", update);
+      window.clearTimeout(settleTimer);
       cancelAnimationFrame(frame);
     };
   }, [page, pageWidth, pages, setCurrentPage]);
@@ -409,7 +421,7 @@ export function PdfViewer({
     const bounded = Math.max(1, Math.min(pages || 1, next));
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
     scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start", behavior });
-    setCurrentPage(bounded);
+    if (behavior === "instant") setCurrentPage(bounded);
   };
   // React-PDF retains its initial onItemClick callback. Forward through a ref so
   // links use the loaded page count and current reader callbacks. Our wrappers
