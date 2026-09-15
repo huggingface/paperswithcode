@@ -217,6 +217,9 @@ class BucketContentStore:
             f"_jobs/status/{entry_paper_key(entry)}.json" for entry in entries
         ]
         output_keys = [str(entry["output_key"]) for entry in entries]
+        manifest_keys = [
+            markdown_manifest_key(entry_paper_key(entry)) for entry in entries
+        ]
         pdf_keys = [str(entry["pdf_key"]) for entry in entries if entry.get("pdf_key")]
         existing = self.existing(
             [
@@ -225,6 +228,7 @@ class BucketContentStore:
                 progress_key,
                 *status_keys,
                 *output_keys,
+                *manifest_keys,
                 *pdf_keys,
             ]
         )
@@ -235,7 +239,12 @@ class BucketContentStore:
             for entry in entries
             if entry.get("replace_invalid_sha256")
         }
-        preserved_outputs = existing.intersection(output_keys) - self.repairs.keys()
+        current_outputs = {
+            str(entry["output_key"])
+            for entry in entries
+            if markdown_manifest_key(entry_paper_key(entry)) in existing
+        }
+        preserved_outputs = existing.intersection(current_outputs) - self.repairs.keys()
         for key in preserved_outputs:
             # process() only needs existence to preserve a canonical object.
             atomic_write(self.content_root / key, b"")
@@ -786,6 +795,51 @@ def publish(
     }
 
 
+def publish_existing_markdown(
+    entry: dict[str, object], content_root: Path
+) -> dict[str, object]:
+    """Complete an interrupted versioned publication from its canonical alias."""
+    if (content_root / MARKDOWN_MIGRATION_LOCK_KEY).exists():
+        raise ValueError("markdown_migration_locked")
+    output = content_root / str(entry["output_key"])
+    markdown = output.read_bytes()
+    if not markdown or len(markdown) > 64 * 1024 * 1024:
+        raise ValueError("invalid_markdown_size")
+    try:
+        markdown.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise ValueError("invalid_markdown_utf8") from error
+    paper_key = entry_paper_key(entry)
+    content_sha256 = hashlib.sha256(markdown).hexdigest()
+    content_key = markdown_content_key(content_sha256)
+    immutable_output = content_root / content_key
+    if immutable_output.exists() and immutable_output.read_bytes() != markdown:
+        raise ValueError(f"immutable_asset_conflict:{content_key}")
+    if not immutable_output.exists():
+        atomic_write(immutable_output, markdown)
+    if immutable_output.read_bytes() != markdown:
+        raise ValueError("markdown_version_verification_failed")
+    manifest_key = markdown_manifest_key(paper_key)
+    manifest = markdown_manifest(entry, content_sha256, len(markdown))
+    atomic_write(
+        content_root / manifest_key,
+        (json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n").encode(),
+    )
+    return {
+        "paper_key": paper_key,
+        "paper_id": entry.get("paper_id"),
+        "source": entry.get("source", "arxiv"),
+        "arxiv_id": entry.get("arxiv_id"),
+        "status": "succeeded",
+        "image_count": 0,
+        "asset_keys": [],
+        "markdown_sha256": content_sha256,
+        "markdown_size_bytes": len(markdown),
+        "markdown_content_key": content_key,
+        "markdown_manifest_key": manifest_key,
+    }
+
+
 def process(
     entry: dict[str, object],
     content_root: Path,
@@ -793,8 +847,6 @@ def process(
     *,
     allow_missing_images: bool = False,
 ) -> dict:
-    from pypdf import PdfReader
-
     started = time.monotonic()
     paper_key = entry_paper_key(entry)
     version = str(entry["version"])
@@ -802,6 +854,8 @@ def process(
     if output.exists() and entry.get("replace_invalid_sha256"):
         validate_repair_original(entry, output.read_bytes())
     elif output.exists():
+        if not (content_root / markdown_manifest_key(paper_key)).exists():
+            return publish_existing_markdown(entry, content_root)
         return {
             "paper_key": paper_key,
             "paper_id": entry.get("paper_id"),
@@ -809,6 +863,8 @@ def process(
             "arxiv_id": entry.get("arxiv_id"),
             "status": "already_exists",
         }
+
+    from pypdf import PdfReader
 
     paper_dir = run_root / paper_key
     archived_pdf = (
@@ -885,7 +941,12 @@ def classify_failure(error: Exception, attempt_count: int) -> tuple[str, bool]:
     elif message.startswith("missing_extracted_image:"):
         error_class, retryable = "missing_extracted_image", True
     elif message.startswith(
-        ("asset_verification_failed:", "markdown_verification_failed")
+        (
+            "asset_verification_failed:",
+            "markdown_verification_failed",
+            "markdown_version_verification_failed",
+            "markdown_migration_locked",
+        )
     ):
         error_class, retryable = "artifact_verification_io", True
     elif message.startswith("immutable_asset_conflict:"):

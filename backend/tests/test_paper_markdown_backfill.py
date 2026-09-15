@@ -598,6 +598,29 @@ def test_worker_publishes_content_addressed_markdown_and_manifest(tmp_path):
     }
 
 
+def test_worker_repairs_missing_version_manifest_from_existing_alias(tmp_path):
+    entry = {
+        "arxiv_id": "2607.00001",
+        "version": "v1",
+        "title": "Versioned paper",
+        "output_key": "2607/2607.00001.md",
+    }
+    canonical = (
+        b"Title: Versioned paper\n\nMarkdown Content:\n\n"
+        + b"Existing canonical content. " * 8
+    )
+    output = tmp_path / entry["output_key"]
+    output.parent.mkdir(parents=True)
+    output.write_bytes(canonical)
+
+    result = WORKER.process(entry, tmp_path, tmp_path / "run")
+
+    assert result["status"] == "succeeded"
+    assert (tmp_path / result["markdown_content_key"]).read_bytes() == canonical
+    manifest = json.loads((tmp_path / result["markdown_manifest_key"]).read_text())
+    assert manifest["content_sha256"] == hashlib.sha256(canonical).hexdigest()
+
+
 def test_worker_rejects_invalid_content_versions_and_paper_keys():
     with pytest.raises(ValueError, match="invalid_markdown_content_version"):
         WORKER.markdown_content_key("../not-a-digest")
@@ -696,6 +719,38 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
         remote["_jobs/progress/backfill-20260824T120000-12345678/00000.json"]
     )
     assert progress["status"] == "completed"
+
+
+def test_bucket_prepare_downloads_alias_when_version_manifest_is_missing(
+    tmp_path, monkeypatch
+):
+    entry = {
+        "arxiv_id": "2608.00001",
+        "version": "v1",
+        "title": "Interrupted publication",
+        "output_key": "2608/2608.00001.md",
+    }
+    output_key = entry["output_key"]
+    canonical = b"canonical markdown"
+    remote = {output_key: canonical}
+
+    def bucket_bridge(_token, request):
+        if request["operation"] == "existing":
+            return {"paths": [key for key in request["keys"] if key in remote]}
+        if request["operation"] == "download":
+            for key, destination_value in request["files"]:
+                destination = Path(destination_value)
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                destination.write_bytes(remote[key])
+            return {}
+        raise AssertionError(f"unexpected bridge operation: {request['operation']}")
+
+    monkeypatch.setattr(WORKER, "run_bucket_bridge", bucket_bridge)
+    store = WORKER.BucketContentStore("test/paper-markdown", "secret", tmp_path)
+
+    store.prepare("_jobs/manifests/run/00000.jsonl", [entry])
+
+    assert (tmp_path / output_key).read_bytes() == canonical
 
 
 def test_arxiv_identity_and_markdown_key():
@@ -1907,6 +1962,19 @@ def test_worker_failure_classification_and_forced_cleanup():
     assert WORKER.classify_failure(
         subprocess.TimeoutExpired("chandra", WORKER.CHANDRA_TIMEOUT_SECONDS), 1
     ) == ("chandra_timeout", True)
+
+    for message in (
+        "markdown_version_verification_failed",
+        "markdown_migration_locked",
+    ):
+        assert WORKER.classify_failure(ValueError(message), 1) == (
+            "artifact_verification_io",
+            True,
+        )
+        assert WORKER.classify_failure(ValueError(message), WORKER.MAX_ATTEMPTS) == (
+            "artifact_verification_io",
+            False,
+        )
 
     class StubbornProcess:
         def __init__(self):
