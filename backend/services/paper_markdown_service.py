@@ -597,6 +597,10 @@ def _read_paper_markdown_bytes(
         with filesystem.open(path, "rb", block_size=0) as handle:
             raw = handle.read(max_bytes + 1)
     except (EntryNotFoundError, FileNotFoundError) as error:
+        if bucket_key.startswith("_content/sha256/"):
+            raise PaperMarkdownStorageError(
+                "The immutable Paper Markdown revision is unavailable"
+            ) from error
         raise ValueError(
             f"Markdown for paper {bucket_key.removesuffix('.md')} "
             f"was not found in {path}"

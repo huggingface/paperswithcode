@@ -358,6 +358,23 @@ def test_mcp_smoke_checks_health_discovery_and_read_only_tool(monkeypatch):
     )
 
 
+def test_mcp_exchange_accepts_sse_jsonrpc(monkeypatch):
+    monkeypatch.setattr(
+        smoke_test,
+        "request",
+        lambda *args, **kwargs: (
+            200,
+            {"Content-Type": "text/event-stream; charset=utf-8"},
+            b': keepalive\n\nevent: message\ndata: {"jsonrpc":"2.0","id":7,'
+            b'"result":{"tools":[]}}\n\n',
+        ),
+    )
+
+    assert smoke_test._mcp_exchange("http://127.0.0.1:9999", 7, "tools/list", {}) == {
+        "tools": []
+    }
+
+
 def test_systemd_unit_is_hardened_and_single_process():
     unit = (Path("deploy/systemd") / "paperswithcode-mcp@.service").read_text()
     for expected in (

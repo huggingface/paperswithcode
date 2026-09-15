@@ -315,6 +315,27 @@ def request(
         return exc.code, dict(exc.headers), exc.read()
 
 
+def _mcp_response_payload(body: bytes, headers: dict[str, str]) -> object:
+    content_type = next(
+        (value for name, value in headers.items() if name.casefold() == "content-type"),
+        "",
+    )
+    if content_type.partition(";")[0].strip().casefold() != "text/event-stream":
+        return json.loads(body)
+
+    text = body.decode("utf-8")
+    for event in re.split(r"\r?\n\r?\n", text):
+        data = []
+        for line in event.splitlines():
+            if not line.startswith("data:"):
+                continue
+            value = line[5:]
+            data.append(value[1:] if value.startswith(" ") else value)
+        if data:
+            return json.loads("\n".join(data))
+    raise ValueError("SSE response did not contain a data event")
+
+
 def _mcp_exchange(
     base_url: str,
     request_id: int,
@@ -333,7 +354,7 @@ def _mcp_exchange(
         headers["Mcp-Method"] = method
     if mcp_name:
         headers["Mcp-Name"] = mcp_name
-    status, _, body = request(
+    status, response_headers, body = request(
         urljoin(base_url.rstrip("/") + "/", "mcp"),
         method="POST",
         data=json.dumps(
@@ -348,7 +369,10 @@ def _mcp_exchange(
     )
     if status != 200:
         raise ValueError(f"{method} returned HTTP {status}")
-    payload = json.loads(body)
+    try:
+        payload = _mcp_response_payload(body, response_headers)
+    except ValueError as error:
+        raise ValueError(f"{method} returned an invalid JSON-RPC response") from error
     if not isinstance(payload, dict) or payload.get("id") != request_id:
         raise ValueError(f"{method} returned an invalid JSON-RPC response")
     if payload.get("error") is not None or not isinstance(payload.get("result"), dict):

@@ -392,6 +392,26 @@ def test_bounded_markdown_read_uses_manifest_revision_over_mutable_alias(monkeyp
     assert result == (versioned.decode(), False)
 
 
+def test_bounded_markdown_read_treats_missing_manifest_revision_as_storage_error(
+    monkeypatch,
+):
+    files = _versioned_files(b"# Revision not visible yet\n")
+    content_key = next(key for key in files if key.startswith("_content/sha256/"))
+    del files[content_key]
+    _install_versioned_filesystem(monkeypatch, files)
+
+    with pytest.raises(
+        paper_markdown_service.PaperMarkdownStorageError,
+        match="immutable Paper Markdown revision is unavailable",
+    ):
+        paper_markdown_service.read_paper_markdown_bounded(
+            "1706.03762",
+            bucket_id="owner/content",
+            token="private-token",
+            max_bytes=1024,
+        )
+
+
 def test_bounded_markdown_read_uses_stale_resolution_during_manifest_outage(
     monkeypatch,
 ):
