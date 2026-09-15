@@ -1468,3 +1468,171 @@ def test_expired_reconciler_progresses_past_full_poison_window_across_restarts()
     ]
     assert healthy_states == ["interrupted", "interrupted"]
     assert poison_state == "running"
+
+
+@pytest.mark.parametrize("internal_receipt", [False, True])
+def test_worker_receipt_follows_committed_journal(internal_receipt):
+    async def scenario():
+        harness = Harness()
+        receipts = []
+
+        async def receipt():
+            # A separate session sees the committed row before worker pruning.
+            with harness.sessions() as db:
+                receipts.append(
+                    [
+                        frame.event
+                        for frame in harness.journal.read_after(
+                            db, turn_id=harness.turn.turn_id, after_sequence=0, limit=10
+                        )
+                    ]
+                )
+
+        async def source():
+            yield ChatStreamFrame(
+                "answer_delta",
+                {"text": "saved"},
+                after_persist=None if internal_receipt else receipt,
+            )
+            assert receipts == []
+            if internal_receipt:
+                yield ChatStreamFrame(None, after_persist=receipt)
+            yield ChatStreamFrame("done", {"finish_reason": "success"})
+
+        stream = await harness.coordinator.start(turn=harness.turn, source=source())
+        await stream.source_task
+        assert len(receipts) == 1
+        assert receipts[0][0] == "answer_delta"
+
+    asyncio.run(scenario())
+
+
+def test_failed_journal_never_acknowledges_worker():
+    async def scenario():
+        harness = Harness()
+        harness.journal.MAX_FRAME_BYTES = 1
+        receipts = []
+
+        async def receipt():
+            receipts.append(True)
+
+        async def source():
+            yield ChatStreamFrame(
+                "answer_delta", {"text": "unsaved"}, after_persist=receipt
+            )
+
+        stream = await harness.coordinator.start(turn=harness.turn, source=source())
+        await stream.source_task
+        assert receipts == []
+        assert harness.terminal_calls == [("failed", "event_journal_exhausted")]
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("internal", [False, True])
+def test_worker_checkpoint_survives_queue_projection_and_journal(monkeypatch, internal):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from backend.services.chat_scope_guardrail_service import BoundedRawEventQueue
+    from backend.services.chat_worker_event_checkpoint import CheckpointedWorkerEvent
+
+    async def scenario():
+        harness = Harness()
+        admission = TurnAdmission(
+            session_id=uuid.uuid4(),
+            turn_id=harness.turn.turn_id,
+            user_message_id=uuid.uuid4(),
+            selected_model="model",
+            model_route="route",
+            sdk_session_id=None,
+            sdk_project_key=None,
+            durable_claim=harness.claim,
+        )
+        orchestrator = ChatStreamOrchestrator(
+            settings=get_settings(),
+            owner=ChatOwner("owner", "owner"),
+            admission=admission,
+            prompt="hello",
+            request_id="request",
+            title_token=None,
+            is_disconnected=lambda: asyncio.sleep(0, result=False),
+            release_admission=lambda: asyncio.sleep(0),
+        )
+        monkeypatch.setattr(orchestrator, "_assert_durable_lease", lambda: None)
+        monkeypatch.setattr(
+            orchestrator,
+            "_legacy_cancel_requested",
+            lambda: asyncio.sleep(0, result=False),
+        )
+
+        async def dispatch(event):
+            orchestrator.lifecycle = replace(
+                orchestrator.lifecycle, research_finished=True
+            )
+            return SimpleNamespace(
+                frame=None
+                if internal
+                else ChatStreamFrame("answer_delta", {"text": "saved"})
+            )
+
+        monkeypatch.setattr(orchestrator, "_dispatch_event", dispatch)
+        receipts = []
+
+        async def receipt():
+            with harness.sessions() as db:
+                receipts.append(
+                    [
+                        frame.event
+                        for frame in harness.journal.read_after(
+                            db, turn_id=harness.turn.turn_id, after_sequence=0, limit=10
+                        )
+                    ]
+                )
+
+        queue = BoundedRawEventQueue(max_events=4, max_bytes=4096)
+        raw = CheckpointedWorkerEvent(
+            {"type": "answer_delta", "text": "saved"}, receipt
+        )
+        await queue.put(raw)
+        assert receipts == []
+
+        async def source():
+            yield ChatStreamFrame("stream_start", {})
+            async for frame in orchestrator._consume(queue):
+                assert "after_persist" not in frame.payload
+                yield frame
+            yield ChatStreamFrame("done", {"finish_reason": "success"})
+
+        stream = await harness.coordinator.start(turn=harness.turn, source=source())
+        await stream.source_task
+        assert len(receipts) == 1
+        assert receipts[0] == (
+            ["stream_start"] if internal else ["stream_start", "answer_delta", "done"]
+        )
+
+    asyncio.run(scenario())
+
+
+def test_journal_transaction_failure_withholds_worker_receipt():
+    async def scenario():
+        harness = Harness()
+        receipts = []
+        failure = OperationalError("commit failed", {}, Exception("offline"))
+
+        async def receipt():
+            receipts.append(True)
+
+        async def source():
+            yield ChatStreamFrame(
+                "answer_delta", {"text": "unsaved"}, after_persist=receipt
+            )
+            harness.transaction_error = failure
+            yield ChatStreamFrame("done", {"finish_reason": "success"})
+
+        stream = await harness.coordinator.start(turn=harness.turn, source=source())
+        with pytest.raises(OperationalError):
+            await stream.source_task
+        assert receipts == []
+
+    asyncio.run(scenario())

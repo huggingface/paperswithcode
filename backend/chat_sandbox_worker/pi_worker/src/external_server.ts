@@ -11,6 +11,7 @@ import { ExternalTurnRegistry } from "./external_turn_registry.js";
 import {
   type ExternalRunTurn,
   parseAcknowledgeTerminal,
+  parseAcknowledgeEvents,
   parseAttachTurn,
   parseCancelTurn,
   parseRunTurn,
@@ -305,6 +306,18 @@ export function createExternalWorkerServer(options: ExternalWorkerServerOptions)
         } catch (error) {
           if (!(error instanceof TurnProtocolError)) throw error;
           reject(1008, "invalid_cancel");
+        }
+        return;
+      }
+      if (frame.type === "ack_events") {
+        try {
+          const acknowledgement = parseAcknowledgeEvents(frame, retained?.claim);
+          const target = turns.require(acknowledgement.request_id, acknowledgement.turnClaim);
+          if (retained !== target) throw new TurnProtocolError("Unknown Pi turn");
+          target.acknowledgeEvents(acknowledgement.sequence);
+        } catch (error) {
+          if (!(error instanceof TurnProtocolError)) throw error;
+          reject(1008, "invalid_event_ack");
         }
         return;
       }

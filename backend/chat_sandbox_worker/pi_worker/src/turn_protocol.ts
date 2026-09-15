@@ -146,6 +146,18 @@ export function parseAcknowledgeTerminal(
   return { ...frame, turnClaim } as unknown as AcknowledgeTerminal;
 }
 
+export function parseAcknowledgeEvents(
+  value: unknown,
+  expectedClaim?: TurnClaimFrame,
+): Omit<AcknowledgeTerminal, "type"> & { type: "ack_events" } {
+  if (!value || typeof value !== "object" || Array.isArray(value)
+    || (value as Record<string, unknown>).type !== "ack_events") {
+    throw new TurnProtocolError("Invalid Pi event acknowledgement");
+  }
+  const parsed = parseAcknowledgeTerminal({ ...value, type: "ack_terminal" }, expectedClaim);
+  return { ...parsed, type: "ack_events" };
+}
+
 export function parseRunTurn(value: unknown, external: true): ExternalRunTurn;
 export function parseRunTurn(value: unknown, external?: false): RunTurn;
 export function parseRunTurn(value: unknown, external = false): RunTurn | ExternalRunTurn {

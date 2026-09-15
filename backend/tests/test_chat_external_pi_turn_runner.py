@@ -2857,3 +2857,149 @@ def test_failed_persistent_attachment_does_not_allocate_again(concurrent):
     ]
     assert all(result["ok"] is False for result in results)
     assert len(manager.acquired) == len(attachments) == len(manager.invalidated) == 1
+
+
+@pytest.mark.parametrize("persist", [False, True])
+def test_durable_worker_ack_requires_persistence_receipt(monkeypatch, persist):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                '{"type":"worker_done","status":"complete","worker_sequence":3}',
+            ]
+        )
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        control = FakeSocket([])
+        sockets = iter([socket, control])
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        assert json.loads(json.dumps(event)) == {
+            "type": "answer_delta",
+            "text": "hello",
+        }
+        assert [json.loads(frame)["type"] for frame in socket.sent] == ["run_turn"]
+        if persist:
+            await event.after_persist()
+            assert json.loads(socket.sent[-1])["type"] == "ack_events"
+            assert json.loads(socket.sent[-1])["sequence"] == 2
+        with pytest.raises(StopAsyncIteration):
+            await anext(events)
+        assert [json.loads(frame)["type"] for frame in socket.sent] == (
+            ["run_turn", "ack_events", "ack_terminal"] if persist else ["run_turn"]
+        )
+        # Delayed persistence after socket closure is harmless.
+        await event.after_persist()
+        assert [json.loads(frame)["type"] for frame in control.sent] == (
+            [] if persist else ["ack_terminal"]
+        )
+        await event.after_persist()  # duplicate receipts do not open another socket
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("closing", [False, True])
+def test_late_terminal_receipt_releases_worker_during_socket_cleanup(
+    monkeypatch, closing
+):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+        socket = FakeSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"done","finish_reason":"success","worker_sequence":2}',
+                '{"type":"worker_done","status":"complete","worker_sequence":3}',
+            ]
+        )
+        control = FakeSocket([])
+        entered_cleanup = asyncio.Event()
+        release_cleanup = asyncio.Event()
+
+        class ClosingContext(SocketContext):
+            async def __aexit__(self, *_args):
+                entered_cleanup.set()
+                await release_cleanup.wait()
+
+        contexts = iter([ClosingContext(socket), SocketContext(control)])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(runner, "_external_worker_socket", lambda _: next(contexts))
+        events = runner._events(SimpleNamespace(reject=lambda: None))
+        event = await anext(events)
+        finish = asyncio.create_task(anext(events))
+        await entered_cleanup.wait()
+        if not closing:
+            release_cleanup.set()
+            with pytest.raises(StopAsyncIteration):
+                await finish
+        await event.after_persist()
+        assert [json.loads(frame)["type"] for frame in control.sent] == ["ack_terminal"]
+        assert json.loads(control.sent[0])["sequence"] == 3
+        release_cleanup.set()
+        if closing:
+            with pytest.raises(StopAsyncIteration):
+                await finish
+
+    asyncio.run(scenario())
+
+
+def test_lost_receipt_reconnects_without_duplicate_public_events(monkeypatch):
+    async def scenario():
+        runner = _tool_runner(FakeExecutor(), FakeWorkspaceManager(FakeProvider()))
+
+        class LostReceiptSocket(FakeSocket):
+            async def send(self, value):
+                await super().send(value)
+                if json.loads(value)["type"] == "ack_events":
+                    raise OSError("receipt lost")
+
+        first = LostReceiptSocket(
+            [
+                '{"type":"worker_ready","durable_event_ack":true,"worker_sequence":1}',
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                OSError("connection lost"),
+            ]
+        )
+        second = FakeSocket(
+            [
+                '{"type":"answer_delta","text":"hello","worker_sequence":2}',
+                '{"type":"done","finish_reason":"success","worker_sequence":3}',
+                '{"type":"worker_done","status":"complete","worker_sequence":4}',
+            ]
+        )
+        sockets = iter([first, second])
+        monkeypatch.setattr(
+            runner,
+            "_select_worker_claim",
+            lambda: _async_value(runner.external_worker_claim),
+        )
+        monkeypatch.setattr(
+            runner, "_require_same_external_worker_claim", lambda _: _async_value(None)
+        )
+        monkeypatch.setattr(
+            runner, "_external_worker_socket", lambda _: SocketContext(next(sockets))
+        )
+        events = []
+        async for event in runner._events(SimpleNamespace(reject=lambda: None)):
+            events.append(event["type"])
+            await event.after_persist()
+        assert events == ["answer_delta", "done"]
+        sent = [json.loads(frame) for frame in second.sent]
+        assert sent[0]["type"] == "attach_turn"
+        assert sent[0]["afterSequence"] == 2
+        assert sent[1]["type"] == "ack_events"
+        assert sent[1]["sequence"] == 3
+        assert sent[2]["type"] == "ack_terminal"
+
+    asyncio.run(scenario())

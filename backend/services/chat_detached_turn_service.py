@@ -363,7 +363,7 @@ class DetachedTurnCoordinator:
     async def _pump(self, handle: DetachedTurnHandle) -> None:
         terminal_seen = False
         terminal_durable = False
-        pending: list[UnsequencedJournalEvent] = []
+        pending: list[ChatStreamFrame] = []
         pending_bytes = 0
         batch_started_at = 0.0
         next_event: asyncio.Task[ChatStreamFrame] | None = None
@@ -399,10 +399,13 @@ class DetachedTurnCoordinator:
                     terminal_durable = True
                     break
                 if event.event is None:
+                    if event.after_persist is not None:
+                        if pending:
+                            await self._append_batch(handle, pending)
+                            pending = []
+                            pending_bytes = 0
+                        await event.after_persist()
                     continue
-                unsequenced = UnsequencedJournalEvent(
-                    event=event.event, payload=event.payload
-                )
                 event_bytes = len(
                     json.dumps(
                         {"event": event.event, "payload": event.payload},
@@ -417,7 +420,7 @@ class DetachedTurnCoordinator:
                     pending_bytes = 0
                 if not pending:
                     batch_started_at = asyncio.get_running_loop().time()
-                pending.append(unsequenced)
+                pending.append(event)
                 pending_bytes += event_bytes
                 terminal = self._terminal_for(event)
                 if terminal is None and pending_bytes < self._batch_max_bytes:
@@ -476,7 +479,7 @@ class DetachedTurnCoordinator:
     async def _append_batch(
         self,
         handle: DetachedTurnHandle,
-        events: Sequence[UnsequencedJournalEvent],
+        events: Sequence[ChatStreamFrame],
         *,
         publish: bool = True,
     ) -> Sequence[JournalFrame]:
@@ -484,10 +487,19 @@ class DetachedTurnCoordinator:
             lambda db: self._journal.append(
                 db,
                 claim=handle.claim,
-                events=events,
+                events=[
+                    UnsequencedJournalEvent(event=event.event, payload=event.payload)
+                    for event in events
+                    if event.event is not None
+                ],
                 now=self._clock(),
             )
         )
+        # The transaction has committed. Socket sends and queue admission never
+        # authorize worker replay pruning.
+        for event in events:
+            if event.after_persist is not None:
+                await event.after_persist()
         self._observe("journal_events", None, len(frames))
         self._observe(
             "journal_bytes",

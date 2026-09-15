@@ -59,6 +59,8 @@ from backend.services.chat_qualification_stale_boundary import (
     QualificationStaleFenceBoundary,
 )
 
+from backend.services.chat_worker_event_checkpoint import CheckpointedWorkerEvent
+
 MAX_EXTERNAL_TURN_FRAME_BYTES = 2 * 1024 * 1024 + 256 * 1024
 type LifecycleObserver = Callable[[str, str | None, int], None]
 logger = logging.getLogger("uvicorn.error")
@@ -195,6 +197,47 @@ class ExternalPiChatTurnRunner:
         worker_claim = await self._select_worker_claim()
         self.external_worker_claim = worker_claim
         acknowledged_sequence = 0
+        durable_sequence = 0
+        supports_durable_ack = False
+        terminal_sequence: int | None = None
+        terminal_acknowledged = False
+
+        async def acknowledge_persisted(sequence: int) -> None:
+            nonlocal durable_sequence, terminal_acknowledged
+            durable_sequence = max(durable_sequence, sequence)
+            socket = self.socket
+            try:
+                if terminal_acknowledged:
+                    return
+                if (
+                    terminal_sequence is not None
+                    and durable_sequence >= terminal_sequence - 1
+                ):
+                    # The producer may finish before its queued terminal commits.
+                    # The fenced terminal-control channel releases that retained
+                    # run without keeping the producer alive during persistence.
+                    async with asyncio.timeout(2):
+                        async with self._external_worker_socket(
+                            worker_claim
+                        ) as control:
+                            await control.send(
+                                json.dumps(
+                                    self._terminal_ack_frame(terminal_sequence),
+                                    separators=(",", ":"),
+                                )
+                            )
+                    terminal_acknowledged = True
+                elif socket is not None:
+                    frame = {
+                        **self._terminal_ack_frame(durable_sequence),
+                        "type": "ack_events",
+                    }
+                    await socket.send(json.dumps(frame, separators=(",", ":")))
+            except (OSError, TimeoutError, WebSocketException):
+                # Lost receipts retain replay frames. Later cumulative receipts
+                # retry progress; terminal grace bounds failed terminal cleanup.
+                pass
+
         seen_sequence = 0
         started = False
         tool_results: dict[str, dict[str, object]] = {}
@@ -283,20 +326,37 @@ class ExternalPiChatTurnRunner:
                             pending_tool = (sequence, operation_id)
                             continue
                         if event.get("type") == "worker_done":
+                            terminal_sequence = sequence
+                            # Old workers retain their existing protocol. New
+                            # workers may release only a durably consumed prefix;
+                            # otherwise their bounded terminal grace owns cleanup.
+                            if supports_durable_ack and durable_sequence < sequence - 1:
+                                return
                             await socket.send(
                                 json.dumps(
                                     self._terminal_ack_frame(sequence),
                                     separators=(",", ":"),
                                 )
                             )
+                            terminal_acknowledged = True
                             return
                         if event.get("type") == "worker_ready":
                             # Readiness proves that the trusted harness accepted
                             # the run, but it is not part of the browser SSE
                             # contract.
+                            supports_durable_ack = (
+                                event.get("durable_event_ack") is True
+                            )
                             acknowledged_sequence = sequence
                             continue
-                        yield event
+                        if supports_durable_ack:
+
+                            async def receipt(sequence: int = sequence) -> None:
+                                await acknowledge_persisted(sequence)
+
+                            yield CheckpointedWorkerEvent(event, receipt)
+                        else:
+                            yield event
                         acknowledged_sequence = sequence
                     raise OSError("External Pi transport ended before terminal")
             except (OSError, TimeoutError, WebSocketException) as error:

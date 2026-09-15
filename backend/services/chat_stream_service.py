@@ -241,6 +241,9 @@ class ChatStreamFrame:
 
     event: str | None
     payload: dict[str, Any] = field(default_factory=dict)
+    after_persist: Callable[[], Awaitable[None]] | None = field(
+        default=None, compare=False, repr=False
+    )
 
     @classmethod
     def heartbeat(cls) -> ChatStreamFrame:
@@ -2664,6 +2667,7 @@ class ChatStreamOrchestrator:
                 self.interruption_reason = "client_disconnect"
                 raise asyncio.CancelledError
 
+            after_persist = getattr(raw_event, "after_persist", None)
             if isinstance(raw_event, dict):
                 serialized = dict(raw_event)
                 legacy = dict(serialized)
@@ -2683,8 +2687,12 @@ class ChatStreamOrchestrator:
 
             handled = await self._dispatch_event(typed_event)
             if handled.frame is not None:
-                yield handled.frame
+                yield replace(handled.frame, after_persist=after_persist)
                 last_write = time.monotonic()
+            elif after_persist is not None:
+                # Ordered receipt for internal events; the coordinator first
+                # commits any preceding public frames.
+                yield ChatStreamFrame(event=None, after_persist=after_persist)
 
         if self.research_task:
             with contextlib.suppress(asyncio.CancelledError):

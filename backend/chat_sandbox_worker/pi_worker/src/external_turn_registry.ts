@@ -37,6 +37,10 @@ export class ExternalTurnRun {
   readonly channel: RemoteToolChannel;
   private transport: ExternalTurnTransport | undefined;
   private sequence = 0;
+  private acknowledgedSequence = 0;
+  private pendingDelta: PwCEvent | undefined;
+  private pendingDeltaBytes = 0;
+  private deltaTimer: NodeJS.Timeout | undefined;
   private bufferedBytes = 0;
   private readonly frames: SequencedTurnFrame[] = [];
   private readonly pendingTools = new Map<string, {
@@ -73,10 +77,53 @@ export class ExternalTurnRun {
   }
 
   emit = (_requestId: string, event: PwCEvent): void => {
-    this.append(event);
+    if (this.released || this.terminalSequence !== undefined) return;
+    if ((event.type === "answer_delta" || event.type === "reasoning_delta")
+      && typeof event.text === "string" && Object.keys(event).length === 2) {
+      const bytes = Buffer.byteLength(event.text);
+      if (this.pendingDelta && (this.pendingDelta.type !== event.type
+        || this.pendingDeltaBytes + bytes > 4096)) this.flushDelta();
+      if (this.terminalSequence !== undefined) return;
+      if (bytes > 4096) { this.append(event); return; }
+      if (this.pendingDelta) this.pendingDelta.text = String(this.pendingDelta.text) + event.text;
+      else {
+        this.pendingDelta = { ...event };
+        this.deltaTimer = setTimeout(() => this.flushDelta(), 25);
+        this.deltaTimer.unref();
+      }
+      this.pendingDeltaBytes += bytes;
+      return;
+    }
+    this.append(event.type === "worker_ready" ? { ...event, durable_event_ack: true } : event);
   };
 
+  private flushDelta(): void {
+    if (this.deltaTimer) clearTimeout(this.deltaTimer);
+    this.deltaTimer = undefined;
+    const pending = this.pendingDelta;
+    this.pendingDelta = undefined;
+    this.pendingDeltaBytes = 0;
+    if (pending) this.append(pending);
+  }
+
+  acknowledgeEvents(sequence: number): void {
+    if (!Number.isSafeInteger(sequence) || sequence < 1 || sequence > this.sequence
+      || (this.terminalSequence !== undefined && sequence >= this.terminalSequence)) {
+      throw new TurnProtocolError("Invalid Pi durable event acknowledgement");
+    }
+    if (sequence <= this.acknowledgedSequence) return;
+    this.acknowledgedSequence = sequence;
+    let count = 0;
+    for (const frame of this.frames) {
+      if (frame.worker_sequence > sequence) break;
+      this.bufferedBytes -= Buffer.byteLength(JSON.stringify(frame));
+      count++;
+    }
+    this.frames.splice(0, count);
+  }
+
   append(frame: PwCEvent | RemoteToolRequest): SequencedTurnFrame {
+    this.flushDelta();
     if (this.terminalSequence !== undefined) {
       return this.frames[this.frames.length - 1]!;
     }
@@ -104,6 +151,9 @@ export class ExternalTurnRun {
   ): SequencedTurnFrame[] {
     if (!claimsEqual(this.claim, claim)) throw new TurnProtocolError("Stale Pi turn claim");
     if (this.transport) throw new TurnProtocolError("Pi turn already has a transport");
+    if (afterSequence < this.acknowledgedSequence) {
+      throw new TurnProtocolError("Pi turn cursor precedes retained events");
+    }
     if (afterSequence > this.sequence) {
       throw new TurnProtocolError("Pi turn cursor is ahead of the run");
     }
@@ -130,6 +180,7 @@ export class ExternalTurnRun {
   }
 
   async cancel(): Promise<void> {
+    this.flushDelta();
     if (!this.cancellation) {
       this.cancellation = this.cancelWorker?.() ?? Promise.resolve();
     }
@@ -216,6 +267,9 @@ export class ExternalTurnRun {
   private dispose(): void {
     if (this.released) return;
     this.released = true;
+    if (this.deltaTimer) clearTimeout(this.deltaTimer);
+    this.pendingDelta = undefined;
+    this.pendingDeltaBytes = 0;
     if (this.terminalTimer) clearTimeout(this.terminalTimer);
     for (const pending of this.pendingTools.values()) {
       pending.reject(new TurnProtocolError("Pi turn is terminal"));

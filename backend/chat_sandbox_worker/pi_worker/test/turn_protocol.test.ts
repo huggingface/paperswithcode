@@ -72,3 +72,15 @@ test("rejects a server-prebound agent session on a resumed turn", () => {
     agent_harness: "pi",
   }));
 });
+
+test("durable event acknowledgements validate sequence and fence claim", async () => {
+  const { parseAcknowledgeEvents } = await import("../src/turn_protocol.js");
+  const turnClaim = { turnId: "turn", workerId: "worker", workerGeneration: 1, leaseGeneration: 2 };
+  const frame = { v: 1, type: "ack_events", request_id: "request", turnClaim, sequence: 12 };
+  assert.equal(parseAcknowledgeEvents(frame, turnClaim).sequence, 12);
+  for (const sequence of [0, -1, 1.5, true, "12", Number.MAX_SAFE_INTEGER + 1]) {
+    assert.throws(() => parseAcknowledgeEvents({ ...frame, sequence }, turnClaim));
+  }
+  assert.throws(() => parseAcknowledgeEvents({ ...frame, extra: true }, turnClaim));
+  assert.throws(() => parseAcknowledgeEvents(frame, { ...turnClaim, leaseGeneration: 3 }));
+});
