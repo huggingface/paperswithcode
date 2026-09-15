@@ -35,10 +35,15 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
     if (!open) return;
     inputRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        e.stopPropagation();
+        onClose();
+      }
     };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    // Consume Escape before keyboard shortcuts in the page beneath the overlay.
+    window.addEventListener("keydown", onKey, true);
+    return () => window.removeEventListener("keydown", onKey, true);
   }, [open, onClose]);
 
   const papersQ = useQuery({
