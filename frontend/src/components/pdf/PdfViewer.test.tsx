@@ -140,6 +140,19 @@ describe("PdfViewer resize rendering", () => {
     expect(onPageChange).not.toHaveBeenCalled();
   });
 
+  it("advances repeated Next clicks while a smooth scroll is still running", () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    const onPageChange = vi.fn();
+    const view = render(<PdfViewer url="/sample.pdf" paperKey="test" paperTitle="Test" paperHref="/" chrome="canvas" onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Next page" }));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(view.container.querySelector('[data-page="3"]'));
+    expect(screen.getByText("Page 3 of 13")).toBeInTheDocument();
+    expect(onPageChange).not.toHaveBeenCalled();
+  });
+
   it("keeps the rendered pages and live scale after divider dragging ends", async () => {
     const view = render(<PdfViewer
       url="https://arxiv.org/pdf/1706.03762"

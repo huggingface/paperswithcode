@@ -177,6 +177,7 @@ export function PdfViewer({
   const [retry, setRetry] = useState(0);
   const [pages, setPages] = useState(0);
   const [page, setPage] = useState(initialPage);
+  const [navigationPage, setNavigationPage] = useState<number>();
   const [fitWidth, setFitWidth] = useState(700);
   const [zoom, setZoom] = useState(1);
   const [error, setError] = useState("");
@@ -216,6 +217,7 @@ export function PdfViewer({
     pinchDelta.current = 0;
     setPages(0);
     setPage(initialPage);
+    setNavigationPage(undefined);
     setZoom(1);
     renderedZoom.current = 1;
     liveZoom.current = 1;
@@ -323,7 +325,7 @@ export function PdfViewer({
     if (!element || !pages) return;
     let frame = 0;
     let settleTimer = 0;
-    const update = () => {
+    const update = (settled = false) => {
       window.clearTimeout(settleTimer);
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
@@ -340,6 +342,7 @@ export function PdfViewer({
             bestPage = Number(candidate.dataset.page);
           }
         });
+        if (settled) setNavigationPage(undefined);
         if (bestPage !== page) setCurrentPage(bestPage);
       });
     };
@@ -348,14 +351,15 @@ export function PdfViewer({
     const scheduleUpdate = () => {
       cancelAnimationFrame(frame);
       window.clearTimeout(settleTimer);
-      settleTimer = window.setTimeout(update, 150);
+      settleTimer = window.setTimeout(() => update(true), 150);
     };
+    const finishScroll = () => update(true);
     element.addEventListener("scroll", scheduleUpdate, { passive: true });
-    element.addEventListener("scrollend", update);
+    element.addEventListener("scrollend", finishScroll);
     update();
     return () => {
       element.removeEventListener("scroll", scheduleUpdate);
-      element.removeEventListener("scrollend", update);
+      element.removeEventListener("scrollend", finishScroll);
       window.clearTimeout(settleTimer);
       cancelAnimationFrame(frame);
     };
@@ -420,6 +424,7 @@ export function PdfViewer({
   const jumpToPage = (next: number) => {
     const bounded = Math.max(1, Math.min(pages || 1, next));
     const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    setNavigationPage(behavior === "smooth" ? bounded : undefined);
     scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start", behavior });
     if (behavior === "instant") setCurrentPage(bounded);
   };
@@ -440,7 +445,7 @@ export function PdfViewer({
   return <div ref={rootRef} className="pdf-viewer">
     {chrome === "canvas" ? <CanvasPdfToolbar
       downloadUrl={downloadUrl}
-      page={page}
+      page={navigationPage ?? page}
       pages={pages}
       zoomPercent={Math.round(zoom * 100)}
       onPage={jumpToPage}
@@ -451,7 +456,7 @@ export function PdfViewer({
       paperTitle={paperTitle}
       paperHref={paperHref}
       resources={resources}
-      page={page}
+      page={navigationPage ?? page}
       pages={pages}
       zoomPercent={Math.round(zoom * 100)}
       searchOpen={searchOpen}
