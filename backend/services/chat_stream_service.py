@@ -1565,7 +1565,6 @@ class ChatStreamOrchestrator:
         self.principal_hash = hashlib.sha256(owner.hf_user_id.encode()).hexdigest()[:12]
         self.started = time.perf_counter()
         self.projection = ChatTurnProjection()
-        self._finalized_projection: tuple[str, list[dict[str, Any]]] | None = None
         self.store = PostgresSDKSessionStore()
         self.research_task: asyncio.Task | None = None
         self.title_task: asyncio.Task | None = None
@@ -2623,7 +2622,6 @@ class ChatStreamOrchestrator:
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected
-        await asyncio.to_thread(self._prepare_completion_projection)
         payload["citations"] = self.projection.citations
         completion = from_legacy_event({"type": "done", **payload})
         assert isinstance(completion, CompletionEvent)
@@ -2828,12 +2826,6 @@ class ChatStreamOrchestrator:
             },
         )
 
-    def _prepare_completion_projection(self) -> None:
-        # The durable journal publishes done before terminal persistence runs.
-        # Resolve citations first so live clients receive the same metadata as reloads.
-        with db_manager.session_local() as db:
-            self._finalize_projection(db, ChatSessionService(db, self.settings))
-
     def _complete_turn(self, event: dict[str, Any]) -> None:
         with db_manager.session_local() as db:
             service = ChatSessionService(db, self.settings)
@@ -2877,8 +2869,6 @@ class ChatStreamOrchestrator:
     def _finalize_projection(
         self, db, service: ChatSessionService
     ) -> tuple[str, list[dict[str, Any]]]:
-        if self._finalized_projection is not None:
-            return self._finalized_projection
         history = service.citation_history(
             self.admission.session_id,
             before_sequence=getattr(
@@ -2902,7 +2892,6 @@ class ChatStreamOrchestrator:
             metrics.get("external_papers", 0),
             metrics.get("compliance_rate", 1.0),
         )
-        self._finalized_projection = finalized
         return finalized
 
     async def _reconcile_mirror(self) -> None:
