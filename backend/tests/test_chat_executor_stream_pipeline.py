@@ -248,3 +248,54 @@ def test_late_ack_is_rejected_even_while_payload_drain_is_blocked(tmp_path):
             await channel.aclose()
 
     asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("acknowledge", [False, True])
+def test_ack_deadline_runs_during_payload_backpressure(tmp_path, acknowledge):
+    async def exercise():
+        channel = PersistentSandboxExecutorChannel(tmp_path / "unused.sock")
+        channel._attachment = object()
+        sending = asyncio.Event()
+        drain = asyncio.Event()
+        cancelled = asyncio.Event()
+
+        async def send(frame):
+            if frame["kind"] == "data":
+                sending.set()
+                try:
+                    await drain.wait()
+                except asyncio.CancelledError:
+                    cancelled.set()
+                    raise
+
+        channel._send = send
+        relay = await channel._open_stream()
+        relay._open_deadline = asyncio.get_running_loop().time() + 0.1
+        relay.stdin.write(b"request")
+        task = asyncio.create_task(relay.stdin.flush())
+        try:
+            await asyncio.wait_for(sending.wait(), 1)
+            if acknowledge:
+                await channel._dispatch(
+                    {"kind": "opened", "stream_id": relay.stream_id}
+                )
+                await asyncio.sleep(0.15)
+                assert not task.done() and not cancelled.is_set()
+                drain.set()
+                await task
+                await channel._dispatch(
+                    {"kind": "closed", "stream_id": relay.stream_id}
+                )
+            else:
+                with pytest.raises(TimeoutError):
+                    await asyncio.wait_for(task, 1)
+                assert cancelled.is_set()
+            assert not channel._streams and not channel._open_pending
+            assert relay._opening_timeout is None
+        finally:
+            if not task.done():
+                task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+            await channel.aclose()
+
+    asyncio.run(exercise())

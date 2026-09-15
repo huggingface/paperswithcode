@@ -174,6 +174,7 @@ class _VirtualRelay:
         self._incoming: asyncio.Queue[bytes | BaseException | None] = asyncio.Queue()
         self._closed = asyncio.Event()
         self._open_deadline = 0.0
+        self._opening_timeout: asyncio.Timeout | None = None
         self.stdin = _VirtualWriter(self)
         self.stdout = _VirtualStdout(self)
         self.wait = _Wait(self)
@@ -368,15 +369,19 @@ class PersistentSandboxExecutorChannel:
             # Open and data retain their wire order. Send before awaiting opened
             # to avoid an extra RTT; ExecutorClient has already marked payload
             # delivery attempted, so failures recover by execution ID, not replay.
-            await self._send(frame)
-            if opened is not None:
-                async with asyncio.timeout_at(relay._open_deadline):
+            if opened is not None and not opened.done():
+                async with asyncio.timeout_at(relay._open_deadline) as opening_timeout:
+                    relay._opening_timeout = opening_timeout
+                    await self._send(frame)
                     await opened
+            else:
+                await self._send(frame)
         except BaseException as error:
             self._streams.pop(relay.stream_id, None)
             relay._finish(error)
             raise
         finally:
+            relay._opening_timeout = None
             self._open_pending.pop(relay.stream_id, None)
 
     async def _send(self, frame: dict[str, object]) -> None:
@@ -427,13 +432,17 @@ class PersistentSandboxExecutorChannel:
                 relay = self._streams[stream_id]
                 if (
                     relay._open_deadline
-                    and asyncio.get_running_loop().time() > relay._open_deadline
+                    and asyncio.get_running_loop().time() >= relay._open_deadline
                 ):
                     future.set_exception(
                         TimeoutError("Executor stream opening timed out")
                     )
                 else:
                     future.set_result(None)
+                    if relay._opening_timeout is not None:
+                        # The deadline bounds acknowledgement, not a payload
+                        # write that is still draining after an on-time ACK.
+                        relay._opening_timeout.reschedule(None)
             return
         relay = self._streams.get(stream_id)
         if relay is None:
