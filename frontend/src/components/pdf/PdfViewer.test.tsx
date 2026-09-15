@@ -125,7 +125,7 @@ describe("PdfViewer resize rendering", () => {
     view.rerender(<PdfViewer {...props} onPageChange={updatedPageChange} />);
     fireEvent.click(screen.getByRole("button", { name: "Citation link" }));
 
-    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start" });
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: "start", behavior: "smooth" });
     expect(scrollIntoView.mock.contexts.at(-1)).toBe(destination);
     expect(updatedPageChange).toHaveBeenCalledWith(13);
     expect(onPageChange).not.toHaveBeenCalled();

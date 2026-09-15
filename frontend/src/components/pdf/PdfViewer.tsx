@@ -407,7 +407,8 @@ export function PdfViewer({
 
   const jumpToPage = (next: number) => {
     const bounded = Math.max(1, Math.min(pages || 1, next));
-    scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start" });
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start", behavior });
     setCurrentPage(bounded);
   };
   // React-PDF retains its initial onItemClick callback. Forward through a ref so
