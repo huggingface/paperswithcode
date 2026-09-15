@@ -154,6 +154,12 @@ _STARTER_SANDBOX_SPEND_POLICY = SandboxSpendPolicy(
     environment_cap_microusd=0,
     workspace_cap_microusd=250_000_000,
 )
+_STAGING_STARTER_105_SPEND_POLICY = SandboxSpendPolicy(
+    warning_microusd=75_000_000,
+    application_cap_microusd=105_000_000,
+    environment_cap_microusd=0,
+    workspace_cap_microusd=250_000_000,
+)
 _TEAM_SANDBOX_SPEND_POLICIES = {
     "v1": SandboxSpendPolicy(
         warning_microusd=75_000_000,
@@ -895,6 +901,12 @@ def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
     else:
         team_policy_version = None
         expected_spend = _STARTER_SANDBOX_SPEND_POLICY
+        if (
+            settings.environment == "staging"
+            and settings.chat_sandbox_modal_workspace == "nielsrogge"
+            and configured_spend == _STAGING_STARTER_105_SPEND_POLICY
+        ):
+            expected_spend = _STAGING_STARTER_105_SPEND_POLICY
     if configured_spend != expected_spend:
         if settings.chat_sandbox_provider_mode == "starter_workspace":
             raise RuntimeError(
@@ -922,9 +934,14 @@ def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
             f"{settings.environment}-{policy_suffix}"
         )
     else:
+        starter_suffix = (
+            "starter-app105-v2"
+            if expected_spend == _STAGING_STARTER_105_SPEND_POLICY
+            else "starter-v1"
+        )
         expected_attestation = (
             f"modal-workspace-{settings.chat_sandbox_modal_workspace}-250-"
-            f"{settings.environment}-starter-v1"
+            f"{settings.environment}-{starter_suffix}"
         )
     if settings.chat_sandbox_budget_attestation != expected_attestation:
         raise RuntimeError(
