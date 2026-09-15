@@ -19,6 +19,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.config import get_settings
+from backend.services.catalog_admission import CatalogAdmissionMiddleware
 from backend.services.deployment_lifecycle import (
     DeploymentAccountingMiddleware,
     deployment_lifecycle,
@@ -210,6 +211,17 @@ async def lifespan(app: FastAPI):
         async def reconcile_title_budget() -> None:
             await asyncio.to_thread(reconcile_stale_title_calls, settings)
 
+        async def reconcile_openai_accounting() -> None:
+            from backend.services.chat_openai_usage_reconciler import (
+                ChatOpenAIUsageReconciler,
+            )
+
+            def run():
+                with db_manager.session_local() as db:
+                    ChatOpenAIUsageReconciler(db, settings).run_once(batch_size=100)
+
+            await asyncio.to_thread(run)
+
         async def replenish_pool_at_startup() -> None:
             if not deployment_lifecycle.owns_active_slot():
                 return
@@ -245,6 +257,8 @@ async def lifespan(app: FastAPI):
                 ]
                 if settings.chat_external_pi_admission_enabled:
                     operations.append(reconcile_expired_detached_turns)
+                if settings.chat_openai_direct_enabled:
+                    operations.append(reconcile_openai_accounting)
                 if settings.chat_durable_turn_dispatch_enabled:
                     operations.append(cleanup_terminal_turn_journals)
                 today = datetime.now(UTC).date()
@@ -667,6 +681,10 @@ def create_app() -> FastAPI:
     from backend.routers import discovery_pages
 
     app.include_router(discovery_pages.router, tags=["discovery_pages"])
+
+    if settings.is_deployed:
+        # Admit before middleware, database dependencies, and response allocation.
+        app.add_middleware(CatalogAdmissionMiddleware)
 
     return app
 

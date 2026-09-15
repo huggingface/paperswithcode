@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 
-from sqlalchemy import case, func, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
@@ -18,6 +18,7 @@ from backend.models.database import (
     ChatOpenAIProviderCall,
     ChatQualificationScope,
     ChatTurnLatency,
+    ChatTurnJob,
 )
 from backend.services.durable_external_qualification_contract import (
     DURABLE_QUALIFICATION_OPENAI_GLOBAL_CONCURRENCY,
@@ -594,12 +595,25 @@ class ChatOpenAIBudgetService:
         stale_before = current - timedelta(
             minutes=self.settings.chat_openai_reconciliation_stale_minutes
         )
+        terminal_turn = (
+            select(ChatTurnJob.turn_id)
+            .where(
+                ChatTurnJob.turn_id == ChatOpenAIProviderCall.turn_id,
+                ChatTurnJob.state.in_(("completed", "failed", "interrupted")),
+                # Allow in-flight provider settlement to finish before recovery.
+                ChatTurnJob.terminal_at < current - timedelta(minutes=1),
+            )
+            .exists()
+        )
         rows = list(
             self.db.scalars(
                 select(ChatOpenAIProviderCall)
                 .where(
                     ChatOpenAIProviderCall.state == "dispatched",
-                    ChatOpenAIProviderCall.updated_at < stale_before,
+                    ChatOpenAIProviderCall.environment == self.settings.environment,
+                    or_(
+                        ChatOpenAIProviderCall.updated_at < stale_before, terminal_turn
+                    ),
                 )
                 .order_by(ChatOpenAIProviderCall.updated_at)
                 .limit(batch_size)

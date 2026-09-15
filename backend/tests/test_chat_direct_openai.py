@@ -4,7 +4,7 @@ import asyncio
 import inspect
 import uuid
 from decimal import Decimal, ROUND_CEILING
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 
 import backend.chat_gateway_app as gateway_app
@@ -16,7 +16,11 @@ from sqlalchemy.orm import Session
 
 from backend.chat_gateway_app import _safe_openai_request_id, _trusted_openai_payload
 from backend.config import Settings
-from backend.models.database import ChatOpenAIMonthlyUsage, ChatOpenAIProviderCall
+from backend.models.database import (
+    ChatOpenAIMonthlyUsage,
+    ChatOpenAIProviderCall,
+    ChatTurnJob,
+)
 from backend.services.chat_capability_service import ChatCapabilityService
 from backend.services.chat_openai_budget_service import (
     MAX_BILLABLE_INPUT_TOKENS,
@@ -442,10 +446,25 @@ def test_stale_unknown_reconciliation_is_bounded_truthful_and_idempotent():
         assert aggregate.unknown_cost_calls == 0
 
 
-def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement():
+@pytest.mark.parametrize(
+    "age_minutes,turn_state,terminal_age_seconds,expected",
+    [
+        (16, None, None, 1),
+        (2, "interrupted", 90, 1),
+        (2, "failed", 90, 1),
+        (2, "completed", 90, 1),
+        (2, "running", None, 0),
+        (2, "interrupted", 10, 0),
+    ],
+)
+def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement(
+    age_minutes, turn_state, terminal_age_seconds, expected
+):
     engine = create_engine("sqlite://")
     ChatOpenAIMonthlyUsage.__table__.create(engine)
     ChatOpenAIProviderCall.__table__.create(engine)
+    ChatTurnJob.__table__.create(engine)
+    turn_id = uuid.uuid4()
     now = datetime(2026, 8, 20, 12, tzinfo=UTC)
     with Session(engine) as db:
         db.add(
@@ -463,7 +482,7 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement():
         db.add(
             ChatOpenAIProviderCall(
                 id=uuid.uuid4(),
-                turn_id=uuid.uuid4(),
+                turn_id=turn_id,
                 call_sequence=1,
                 owner_id="owner",
                 environment="staging",
@@ -480,14 +499,41 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement():
                 updated_at=now,
             )
         )
+        later = now + timedelta(minutes=age_minutes)
+        if turn_state:
+            db.add(
+                ChatTurnJob(
+                    turn_id=turn_id,
+                    chat_session_id=uuid.uuid4(),
+                    hf_user_id="owner",
+                    request_id=str(uuid.uuid4()),
+                    revision=1,
+                    dispatch_class="local",
+                    dispatch_route="local",
+                    state=turn_state,
+                    worker_id="worker",
+                    worker_generation=1,
+                    lease_generation=1,
+                    app_release_id="test",
+                    worker_contract_version="test",
+                    admitted_at=now,
+                    lease_expires_at=later if turn_state == "running" else None,
+                    terminal_at=(
+                        later - timedelta(seconds=terminal_age_seconds)
+                        if terminal_age_seconds is not None
+                        else None
+                    ),
+                )
+            )
         db.commit()
         service = ChatOpenAIBudgetService(db, _settings())
-        later = datetime(2026, 8, 20, 12, 16, tzinfo=UTC)
-        assert service.mark_stale_dispatched_unknown(now=later) == 1
+        assert service.mark_stale_dispatched_unknown(now=later) == expected
         db.commit()
         assert service.mark_stale_dispatched_unknown(now=later) == 0
         aggregate = db.get(ChatOpenAIMonthlyUsage, ("owner", now.date().replace(day=1)))
-        assert aggregate.unknown_cost_calls == 1
+        assert aggregate.unknown_cost_calls == expected
+        assert aggregate.reserved_microusd == 50_000
+        assert aggregate.spent_microusd == 0
 
 
 def test_qualification_provider_limit_covers_two_tools_and_final_answer():
