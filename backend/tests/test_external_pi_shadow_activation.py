@@ -151,7 +151,10 @@ def test_temporary_qualification_uses_explicit_replica_identity(tmp_path: Path):
     assert observed == ["staging-blue-00", "staging-blue-00"]
 
 
-def test_guard_enables_only_shadow_lifecycle_and_preserves_token(tmp_path: Path):
+@pytest.mark.parametrize("mcp_flag", ["", "PWC_CHAT_PWC_MCP_ENABLED=true\n"])
+def test_guard_enables_only_shadow_lifecycle_and_preserves_token(
+    tmp_path: Path, mcp_flag: str
+):
     _release(tmp_path)
     config = tmp_path / "config"
     config.mkdir()
@@ -164,7 +167,7 @@ def test_guard_enables_only_shadow_lifecycle_and_preserves_token(tmp_path: Path)
         "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=true\n"
     )
     worker = config / "external-pi-worker.env"
-    worker.write_text(f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n")
+    worker.write_text(f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n" + mcp_flag)
     worker.chmod(0o640)
     report = tmp_path / "report.json"
     refreshed = []
@@ -244,6 +247,7 @@ def test_guard_enables_only_shadow_lifecycle_and_preserves_token(tmp_path: Path)
         line.split("=", 1) for line in staging.read_text().splitlines() if "=" in line
     )
     assert result == {"release_id": "release-a", "enabled": True}
+    assert mcp_flag in worker.read_text()
     assert refreshed == ["a" * 40]
     lifecycle_events = [
         "temporary-stop",
@@ -273,7 +277,9 @@ def test_guard_enables_only_shadow_lifecycle_and_preserves_token(tmp_path: Path)
         "PWC_CHAT_LAZY_WORKSPACE_ENABLED",
     ):
         assert values[key] == "false"
-    assert worker.read_text() == (f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n")
+    assert worker.read_text() == (
+        f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n" + mcp_flag
+    )
     assert stat.S_IMODE(worker.stat().st_mode) == 0o640
 
 
@@ -526,7 +532,10 @@ def test_temporary_qualification_pre_stop_failure_still_runs_final_cleanup(
     assert events == ["stop", "stop"]
 
 
-def test_disable_drains_active_units_before_flags_false_and_refresh(tmp_path: Path):
+@pytest.mark.parametrize("mcp_flag", ["", "PWC_CHAT_PWC_MCP_ENABLED=true\n"])
+def test_disable_drains_active_units_before_flags_false_and_refresh(
+    tmp_path: Path, mcp_flag: str
+):
     _release(tmp_path)
     config = tmp_path / "config"
     config.mkdir()
@@ -537,7 +546,7 @@ def test_disable_drains_active_units_before_flags_false_and_refresh(tmp_path: Pa
         f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n"
     )
     (config / "external-pi-worker.env").write_text(
-        f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n"
+        f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={'t' * 32}\n" + mcp_flag
     )
     units = {"worker": "active", "supervisor": "active"}
     events = []
@@ -567,6 +576,7 @@ def test_disable_drains_active_units_before_flags_false_and_refresh(tmp_path: Pa
     )
 
     assert result == {"release_id": "release-a", "enabled": False}
+    assert mcp_flag in (config / "external-pi-worker.env").read_text()
     assert events == ["proven-stop", "refresh"]
     assert units == {"worker": "inactive", "supervisor": "inactive"}
 

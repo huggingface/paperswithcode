@@ -171,16 +171,26 @@ def _atomic_write(path: Path, content: bytes, mode: int) -> None:
             os.unlink(temporary)
 
 
-def _ensure_token_only_environment(path: Path, token: str) -> None:
+def _validate_worker_environment(values: dict[str, str]) -> None:
+    if set(values) - {TOKEN_KEY, "PWC_CHAT_PWC_MCP_ENABLED"}:
+        raise ShadowActivationError(
+            "external Pi worker environment has unapproved keys"
+        )
+    if values.get("PWC_CHAT_PWC_MCP_ENABLED", "false") not in {"true", "false"}:
+        raise ShadowActivationError("external Pi MCP flag must be true or false")
+
+
+def _ensure_worker_environment(path: Path, token: str) -> None:
     existing = _read_env(path)
-    if set(existing) - {TOKEN_KEY}:
-        raise ShadowActivationError("external Pi worker environment is not token-only")
+    _validate_worker_environment(existing)
     existing_token = existing.get(TOKEN_KEY)
     if existing_token and existing_token != token:
         raise ShadowActivationError("external Pi worker token environments disagree")
     if len(token) < 32 or any(character in token for character in "\r\n\0"):
         raise ShadowActivationError("external Pi worker token is invalid")
-    _atomic_write(path, f"{TOKEN_KEY}={token}\n".encode(), 0o640)
+    existing[TOKEN_KEY] = token
+    content = "".join(f"{key}={value}\n" for key, value in sorted(existing.items()))
+    _atomic_write(path, content.encode(), 0o640)
 
 
 @contextlib.contextmanager
@@ -466,8 +476,7 @@ def apply_staging_shadow_activation(
     if enabled and set(lifecycle_values.values()) != {"false"}:
         raise ShadowActivationError("bootstrap requires shadow lifecycle flags false")
     worker_values = _read_env(worker_path)
-    if set(worker_values) - {TOKEN_KEY}:
-        raise ShadowActivationError("external Pi worker environment is not token-only")
+    _validate_worker_environment(worker_values)
     staging_token = values.get(TOKEN_KEY, "")
     worker_token = worker_values.get(TOKEN_KEY, "")
     if staging_token and worker_token and staging_token != worker_token:
@@ -488,7 +497,7 @@ def apply_staging_shadow_activation(
                 )
             deactivate(current_release_id, git_sha)
             proven_stopped = True
-        _ensure_token_only_environment(worker_path, token)
+        _ensure_worker_environment(worker_path, token)
         _atomic_write(staging_path, rendered.encode(), 0o640)
         if enabled:
             if qualify is None:
@@ -537,7 +546,7 @@ def apply_staging_shadow_activation(
                     f"{key}={value}\n" for key, value in sorted(values.items())
                 )
                 _atomic_write(staging_path, rendered.encode(), 0o640)
-                _ensure_token_only_environment(worker_path, token)
+                _ensure_worker_environment(worker_path, token)
                 try:
                     refresh(git_sha)
                 except BaseException as refresh_error:
@@ -559,7 +568,7 @@ def apply_staging_shadow_activation(
             ) from error
         if proven_stopped:
             _atomic_write(staging_path, rendered.encode(), 0o640)
-            _ensure_token_only_environment(worker_path, token)
+            _ensure_worker_environment(worker_path, token)
             if isinstance(error, Exception):
                 raise ShadowActivationError(
                     "external Pi units were proven stopped; flags remain disabled "
