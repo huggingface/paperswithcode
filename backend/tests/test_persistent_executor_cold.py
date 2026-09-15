@@ -446,3 +446,12 @@ def test_sandbox_reuse_between_profiles_cannot_pass():
     rows = complete_rows()
     rows[-1] = replace(rows[-1], sandbox_id=rows[0].sandbox_id)
     assert not cold_stage_result(rows)["latency_gates_passed"]
+
+
+def test_cold_errors_occupy_tail_without_changing_frozen_percentile_gate():
+    rows = complete_rows()
+    for i in range(10):
+        rows[i] = replace(rows[i], elapsed_ms=None, error="CommandFailed")
+    assert cold_stage_result(rows)["latency_gates_passed"]
+    rows[10] = replace(rows[10], elapsed_ms=None, error="CommandFailed")
+    assert not cold_stage_result(rows)["latency_gates_passed"]

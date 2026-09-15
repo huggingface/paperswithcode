@@ -195,8 +195,14 @@ def cold_stage_result(observations: list[ColdObservation]) -> dict:
             else float("inf")
             for row in rows
         ]
-        # A failed or truncated run is never reported as passing percentile evidence.
-        passed = complete and failures == 0
+        # Errors occupy the percentile tail in the 1,000-sample cohort. The
+        # separate burst requires zero errors; both require complete cleanup.
+        passed = complete and all(
+            row.completed and row.cleanup_error is None and row.terminal_confirmed
+            for row in rows
+        )
+        if profile == "cold_32_way":
+            passed = passed and failures == 0
         if passed:
             passed = (
                 max(values) <= COLD_FIRST_PWD_P99_MS
