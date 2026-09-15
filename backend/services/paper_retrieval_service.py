@@ -932,6 +932,8 @@ class PaperRetrievalService:
 
         identity_candidates = select(
             DBPaper.id.label("paper_id"),
+            DBPaper.citation_count.label("citation_count"),
+            DBPaper.date_published.label("date_published"),
             case((arxiv_match, 0), else_=1).label("identity_tier"),
             lexical_rank.label("lexical_rank"),
         ).where(
@@ -941,6 +943,8 @@ class PaperRetrievalService:
         )
         lexical_candidates = select(
             DBPaper.id.label("paper_id"),
+            DBPaper.citation_count.label("citation_count"),
+            DBPaper.date_published.label("date_published"),
             func.cast(2, DBPaper.id.type).label("identity_tier"),
             lexical_rank.label("lexical_rank"),
         ).where(
@@ -954,6 +958,8 @@ class PaperRetrievalService:
         author_candidates = (
             select(
                 PaperAuthor.paper_id.label("paper_id"),
+                DBPaper.citation_count.label("citation_count"),
+                DBPaper.date_published.label("date_published"),
                 case((normalized_author == normalized_title, 1), else_=2).label(
                     "identity_tier"
                 ),
@@ -973,10 +979,30 @@ class PaperRetrievalService:
         ranked_candidates = (
             select(
                 candidates.c.paper_id,
+                candidates.c.citation_count,
+                candidates.c.date_published,
                 func.min(candidates.c.identity_tier).label("identity_tier"),
                 func.max(candidates.c.lexical_rank).label("lexical_rank"),
             )
-            .group_by(candidates.c.paper_id)
+            .group_by(
+                candidates.c.paper_id,
+                candidates.c.citation_count,
+                candidates.c.date_published,
+            )
+            .subquery()
+        )
+        # Rank narrow candidate rows before fetching full paper records. The
+        # citation/date tie-breakers are identical in every lane for a paper.
+        ranked_candidates = (
+            select(ranked_candidates)
+            .order_by(
+                ranked_candidates.c.identity_tier.asc(),
+                ranked_candidates.c.lexical_rank.desc(),
+                ranked_candidates.c.citation_count.desc(),
+                ranked_candidates.c.date_published.desc().nullslast(),
+                ranked_candidates.c.paper_id.asc(),
+            )
+            .limit(limit)
             .subquery()
         )
 
@@ -990,7 +1016,6 @@ class PaperRetrievalService:
                 DBPaper.date_published.desc().nullslast(),
                 DBPaper.id.asc(),
             )
-            .limit(limit)
             .all()
         )
 
