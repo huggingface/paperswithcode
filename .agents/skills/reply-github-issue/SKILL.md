@@ -1,6 +1,6 @@
 ---
 name: reply-github-issue
-description: Handle unread GitHub notifications for "Verify evals on Papers with Code" issues end-to-end: apply author feedback to the catalog database, verify changes live, reply to authors, mark handled notifications read, and summarize with GitHub reply links. Also handles explicitly selected PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated notifications unless explicitly requested.
+description: Handle unread GitHub notifications for "Verify evals on Papers with Code" issues end-to-end. Apply author feedback to the catalog database, verify changes live, reply to authors, mark handled notifications read, and summarize with GitHub reply links. Also handles explicitly selected PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated notifications unless explicitly requested.
 ---
 
 # Reply to a GitHub Issue
