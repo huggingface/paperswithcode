@@ -55,6 +55,11 @@ def public_snapshot(entity_type, snapshot):
         }
     if entity_type == "paper_organizations":
         return [{"organization_id": row["organization_id"]} for row in value or []]
+    if entity_type in {"paper_repositories", "paper_project_pages"}:
+        return [
+            {"url": row["url"], "is_official": row["is_official"]}
+            for row in value or []
+        ]
     return value
 
 

@@ -79,9 +79,15 @@ class ContributionAuditService:
             return False
         try:
             if event.entity_type == "paper_edit_batch":
-                from backend.services.paper_edit_service import PaperEditService
+                from backend.services.paper_edit_service import (
+                    PaperEditService,
+                    version_snapshot,
+                )
 
                 current = PaperEditService(self.db).rollback_snapshot(event)
+                return canonical_hash(version_snapshot(current)) == canonical_hash(
+                    version_snapshot(event.after_snapshot)
+                )
             elif event.entity_type.startswith("paper_"):
                 section = event.entity_type.removeprefix("paper_")
                 current = PaperCurationService(self.db).snapshot(

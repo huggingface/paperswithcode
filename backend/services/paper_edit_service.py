@@ -38,6 +38,21 @@ SECTION_MODELS = dict(
 )
 
 
+def version_snapshot(snapshot: dict) -> dict:
+    """Compare editable state while retaining full audit snapshots for restoration."""
+    return {
+        **snapshot,
+        "evaluations": [
+            {
+                key: value
+                for key, value in row.items()
+                if key not in {"best_rank", "created_at", "updated_at"}
+            }
+            for row in snapshot["evaluations"]
+        ],
+    }
+
+
 class PaperEditService:
     def __init__(self, db: Session):
         self.db = db
@@ -67,7 +82,7 @@ class PaperEditService:
         return {
             "schema_version": "v1",
             "paper_id": paper_id,
-            "version": canonical_hash(current),
+            "version": canonical_hash(version_snapshot(current)),
             "idempotency_key": str(uuid.uuid4()),
             "operations": [],
             "current": public_snapshot("paper_edit_batch", current),
@@ -212,7 +227,10 @@ class PaperEditService:
                 actor, document.paper_id, "paper_edit_batch", "batch", {}, limits=False
             )
             before = self.snapshot(document.paper_id, lock=True, project_urls=urls)
-            if canonical_hash(self.snapshot(document.paper_id)) != document.version:
+            if (
+                canonical_hash(version_snapshot(self.snapshot(document.paper_id)))
+                != document.version
+            ):
                 raise CatalogConflictError(
                     "Paper changed; export again and reconcile your edits"
                 )
@@ -239,7 +257,7 @@ class PaperEditService:
             snapshot=lambda: self.snapshot(
                 document.paper_id, lock=True, project_urls=urls
             ),
-            version_snapshot=lambda: self.snapshot(document.paper_id),
+            version_snapshot=lambda: version_snapshot(self.snapshot(document.paper_id)),
             apply=lambda: self.apply(document.paper_id, operations, actor),
             request_id=request_id,
         )
@@ -300,7 +318,8 @@ class PaperEditService:
             entity_id=event.entity_id,
             request_payload={"rollback_of": str(event.id)},
             idempotency_key=f"rollback:{event.id}",
-            expected_version=canonical_hash(event.after_snapshot),
+            expected_version=canonical_hash(version_snapshot(event.after_snapshot)),
+            version_snapshot=lambda: version_snapshot(self.rollback_snapshot(event)),
             snapshot=lambda: self.rollback_snapshot(event, lock=True),
             apply=restore,
             request_id=request_id,

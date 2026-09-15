@@ -495,3 +495,60 @@ def test_expiry_during_application_rolls_back_before_publication(db, monkeypatch
         service.submit(document(db), actor, "expired-before-commit")
     assert db.query(PaperTask).count() == 0
     assert db.query(CatalogMutationEvent).count() == 0
+
+
+def test_other_paper_rank_changes_do_not_invalidate_edits_or_rollback(db):
+    from backend.services.contribution_audit_service import ContributionAuditService
+
+    service = PaperEditService(db)
+
+    def evaluation(score):
+        return [
+            {
+                "section": "evaluations",
+                "payload": {
+                    "task_id": 1,
+                    "dataset_id": 1,
+                    "model_name": "Test",
+                    "metrics": {"Accuracy": score},
+                    "best_metric": "Accuracy",
+                },
+            }
+        ]
+
+    service.submit(document(db, operations=evaluation(90)), ACTOR, "original")
+    doc = document(db)
+    service.submit(document(db, 2, evaluation(95)), ACTOR, "other-paper")
+    row = db.query(Evaluation).filter(Evaluation.paper_id == 1).one()
+    assert row.best_rank == 2
+    row.updated_at = datetime.now(UTC) + timedelta(seconds=1)
+    db.commit()
+    assert service.export(1)["version"] == doc.version
+    assert service.submit(doc, ACTOR, "preview", preview=True)["status"] == "preview"
+    published = service.submit(doc, ACTOR, "publish")
+    event = db.get(CatalogMutationEvent, uuid.UUID(published["event_id"]))
+    service.submit(document(db, 3, evaluation(99)), ACTOR, "another-paper")
+    assert ContributionAuditService(db).is_rollback_eligible(event)
+    service.rollback(event=event, actor=ADMIN, request_id="rollback")
+    assert db.query(PaperTask).filter(PaperTask.paper_id == 1).count() == 0
+    assert db.query(Evaluation).filter(Evaluation.paper_id == 1).one().best_rank == 3
+
+
+def test_actual_evaluation_changes_still_invalidate_edit_document(db):
+    service = PaperEditService(db)
+    db.add(
+        Evaluation(
+            paper_id=1,
+            task_id=1,
+            dataset_id=1,
+            model_name="Old",
+            metrics={"Accuracy": 90},
+        )
+    )
+    db.commit()
+    doc = document(db)
+    row = db.query(Evaluation).one()
+    row.metrics = {"Accuracy": 95}
+    db.commit()
+    with pytest.raises(CatalogConflictError):
+        service.submit(doc, ACTOR, "stale")
