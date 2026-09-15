@@ -12,6 +12,7 @@
 .mcp-endpoint-card .mcp-copy { position: absolute; right: 16px; bottom: 16px; }
 .mcp-copy { flex-shrink: 0; justify-content: center; min-height: 34px; }
 .mcp-copy:focus-visible, .mcp-client-tabs button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mcp-client-tabs button:focus-visible { outline-offset: -2px; }
 .mcp-section { padding: 32px 0; border-bottom: 1px solid var(--hairline); }
 .mcp-section-heading { max-width: 720px; margin-bottom: 24px; }
 .mcp-section-heading h2, .mcp-notes h2 { margin-top: 7px; font: 500 28px/1.15 var(--serif); letter-spacing: -.02em; }
