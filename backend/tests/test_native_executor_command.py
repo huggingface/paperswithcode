@@ -29,7 +29,10 @@ def native_root(tmp_path_factory):
         ("/bin/bash", "/bin/bash"),
     ):
         shutil.copy2(source, root / destination.lstrip("/"))
-        dependencies = subprocess.check_output(["ldd", source], text=True)
+        result = subprocess.run(["ldd", source], capture_output=True, text=True)
+        if result.returncode:
+            assert "not a dynamic executable" in result.stderr, result.stderr
+        dependencies = result.stdout
         for library in re.findall(r"(/[\w/+.\-]+)", dependencies):
             target = root / library.lstrip("/")
             target.parent.mkdir(parents=True, exist_ok=True)
