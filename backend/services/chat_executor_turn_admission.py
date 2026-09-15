@@ -49,10 +49,12 @@ def maximum_provider_turn_microusd(
             OpenAIRequestBounds(request_bytes=1, maximum_output_tokens=1),
             now=now,
         )
+        # Gateway metering estimates input as JSON bytes / 4; reserve up to
+        # four actual tokens per metered token, including long-context rates.
         rate = max(
-            settings.chat_openai_input_microusd_per_million_tokens,
-            settings.chat_openai_cache_write_microusd_per_million_tokens,
-            settings.chat_openai_output_microusd_per_million_tokens,
+            settings.chat_openai_input_microusd_per_million_tokens * 8,
+            settings.chat_openai_cache_write_microusd_per_million_tokens * 8,
+            settings.chat_openai_output_microusd_per_million_tokens * Decimal("1.5"),
         )
         return int(
             (

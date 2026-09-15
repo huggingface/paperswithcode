@@ -61,10 +61,10 @@ test("protected preparation excludes recent and latest user exchanges from summa
 });
 
 test("byte guard rejects the exact boundary and accepts one byte below", () => {
-  for (const bytes of [240 * 1024 - 1, 240 * 1024]) {
+  for (const bytes of [7 * 1024 * 1024 - 1, 7 * 1024 * 1024]) {
     const payload = "x".repeat(bytes - 2);
     assert.equal(Buffer.byteLength(JSON.stringify(payload)), bytes);
-    if (bytes < 240 * 1024) assert.equal(boundedGatewayPayload(payload), payload);
+    if (bytes < 7 * 1024 * 1024) assert.equal(boundedGatewayPayload(payload), payload);
     else assert.throws(() => boundedGatewayPayload(payload), /request_too_large/);
   }
 });
@@ -133,7 +133,7 @@ test("a cut inside tool execution retains its user, call, and large result toget
   const protectedResult = protectedPreparation(event);
   assert.equal(protectedResult.firstKeptEntryId, parentId);
   assert.doesNotMatch(protectedResult.text, /large-tool-evidence|paper.txt/);
-  assert.throws(() => boundedGatewayPayload({ messages: event.branchEntries.slice(1) }), /request_too_large/);
+  assert.throws(() => boundedGatewayPayload({ messages: event.branchEntries.slice(1) }, 240 * 1024), /request_too_large/);
 });
 
 

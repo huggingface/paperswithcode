@@ -1,7 +1,8 @@
 import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 
+import { gatewayPayloadLimit } from "./provider.js";
+
 const INPUT_MARGIN_TOKENS = 8000;
-const CONTEXT_BYTES = 192 * 1024;
 const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Use pwc paper read with the paper route ID to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
 
 interface PaperBudget {
@@ -59,7 +60,7 @@ export function fitPaperContext(prompt: string, budget: PaperBudget): string {
     const estimated = Math.ceil((Buffer.byteLength(fixed) + ordinaryBytes) / 3)
       + candidate.evidenceBytes + budget.model.maxTokens + INPUT_MARGIN_TOKENS;
     const bytes = Buffer.byteLength(JSON.stringify({ ...context, prompt: candidate.prompt }));
-    return estimated <= budget.model.contextWindow && bytes <= CONTEXT_BYTES;
+    return estimated <= budget.model.contextWindow && bytes <= gatewayPayloadLimit(budget.model.contextWindow) * 0.8;
   };
   if (fits({ prompt, evidenceBytes: total })) return prompt;
   let low = 0;

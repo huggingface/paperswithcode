@@ -13,7 +13,19 @@ import { type TurnClaimFrame } from "./turn_protocol.js";
 
 export const PROVIDER_ID = "pwc-gateway";
 export const PLACEHOLDER_KEY = "sandbox-placeholder-not-a-credential";
-const GATEWAY_PAYLOAD_LIMIT_BYTES = 240 * 1024;
+export const GATEWAY_PAYLOAD_LIMIT_BYTES = 7 * 1024 * 1024;
+
+// Verified model capacities exceed 1M. Keep a common working window for these
+// routes, without assuming that every future model supports long context.
+export function modelContextWindow(modelId: string, api: ProviderProtocol): number {
+  const model = modelId.split(":")[0]!.split("@")[0]!;
+  if (["gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 1_000_000;
+  return api === "openai-responses" ? 48_000 : 200_000;
+}
+export function gatewayPayloadLimit(contextWindow: number): number {
+  return contextWindow >= 1_000_000 ? GATEWAY_PAYLOAD_LIMIT_BYTES : 240 * 1024;
+}
+
 export type ProviderProtocol = "anthropic-messages" | "openai-responses";
 
 export interface GatewayContext {
@@ -24,8 +36,8 @@ export interface GatewayContext {
   turnClaim: TurnClaimFrame;
 }
 
-export function boundedGatewayPayload(payload: unknown): unknown {
-  if (Buffer.byteLength(JSON.stringify(payload), "utf8") >= GATEWAY_PAYLOAD_LIMIT_BYTES) {
+export function boundedGatewayPayload(payload: unknown, limit = GATEWAY_PAYLOAD_LIMIT_BYTES): unknown {
+  if (Buffer.byteLength(JSON.stringify(payload), "utf8") >= limit) {
     throw new Error("request_too_large: provider context requires compaction");
   }
   return payload;
@@ -44,7 +56,7 @@ function boundedOpenAIResponsesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        const bounded = boundedGatewayPayload(replacement ?? payload);
+        const bounded = boundedGatewayPayload(replacement ?? payload, gatewayPayloadLimit(model.contextWindow));
         // Use the SDK's final allowance: it accounts for system text, tools,
         // messages and its context safety margin. Never send a starved request.
         const limit = (bounded as Record<string, unknown>)[model.api === "openai-responses" ? "max_output_tokens" : "max_tokens"];
@@ -71,7 +83,7 @@ function boundedAnthropicMessagesStream(
       ...options,
       onPayload: async (payload, payloadModel) => {
         const replacement = await callerPayload?.(payload, payloadModel);
-        const bounded = boundedGatewayPayload(replacement ?? payload);
+        const bounded = boundedGatewayPayload(replacement ?? payload, gatewayPayloadLimit(model.contextWindow));
         // Use the SDK's final allowance: it accounts for system text, tools,
         // messages and its context safety margin. Never send a starved request.
         const limit = (bounded as Record<string, unknown>)[model.api === "openai-responses" ? "max_output_tokens" : "max_tokens"];
@@ -146,7 +158,7 @@ export async function createProvider(
         },
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-        contextWindow: api === "openai-responses" ? 48_000 : 200_000,
+        contextWindow: modelContextWindow(modelId, api),
         maxTokens: 8000,
         compat: api === "anthropic-messages"
           ? {

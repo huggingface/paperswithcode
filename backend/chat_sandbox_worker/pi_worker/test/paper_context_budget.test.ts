@@ -61,7 +61,21 @@ test("irreducible user and system context is never silently deleted", () => {
 });
 
 test("large model windows still respect the gateway envelope", () => {
-  const original = prompt(paper('\\"'.repeat(150_000)));
-  const fitted = fitPaperContext(original, { ...budget, model: { contextWindow: 1_000_000, maxTokens: 8000 } });
+  const original = prompt(paper('\\"'.repeat(2_000_000)));
+  const fitted = fitPaperContext(original, { ...budget, model: { contextWindow: 10_000_000, maxTokens: 8000 } });
+  assert.ok(Buffer.byteLength(JSON.stringify({ systemPrompt: budget.systemPrompt, tools: [], prompt: fitted })) <= 6 * 1024 * 1024);
+});
+
+
+test("million-token window preserves a long reader paper that failed at 48K", () => {
+  const original = prompt(paper("paper evidence ".repeat(8000)));
+  assert.ok(fitPaperContext(original, budget).length < original.length);
+  assert.equal(fitPaperContext(original, { ...budget, model: { contextWindow: 1_000_000, maxTokens: 8000 } }), original);
+});
+
+
+test("smaller models still fit escaped evidence below their smaller gateway limit", () => {
+  const original = prompt(paper('\\"'.repeat(90_000)));
+  const fitted = fitPaperContext(original, { ...budget, model: { contextWindow: 200_000, maxTokens: 8000 } });
   assert.ok(Buffer.byteLength(JSON.stringify({ systemPrompt: budget.systemPrompt, tools: [], prompt: fitted })) <= 192 * 1024);
 });

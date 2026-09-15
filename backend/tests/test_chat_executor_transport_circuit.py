@@ -56,7 +56,7 @@ def test_provider_turn_reserve_prices_the_full_selected_model_envelope():
         maximum_provider_turn_microusd(
             settings, model_route=settings.chat_luna_route, now=NOW
         )
-        == 4_768_000
+        == 36_160_000
     )
 
     direct = Settings(
@@ -68,7 +68,7 @@ def test_provider_turn_reserve_prices_the_full_selected_model_envelope():
         maximum_provider_turn_microusd(
             direct, model_route=direct.chat_openai_luna_route, now=NOW
         )
-        == 614_400
+        == 8_000_000
     )
 
 

@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
+from backend.chat_execution_policy import MAX_PROVIDER_REQUEST_BYTES
 from backend.models.database import (
     ChatOpenAIMonthlyUsage,
     ChatOpenAIProviderCall,
@@ -25,11 +26,16 @@ from backend.services.durable_external_qualification_contract import (
 from backend.services.chat_openai_usage_extractor import ExtractedOpenAIUsage
 from backend.services.openrouter_user_budget_service import usd_to_microusd, utc_month
 
-# Match the sandbox broker's request envelope. Billing reservations are bounded
-# separately by the model's advertised context window; serialized JSON bytes are
-# not a token count and can safely be larger without reserving long-context rates.
-MAX_REQUEST_BYTES = 512 * 1024
-MAX_BILLABLE_INPUT_TOKENS = 48_000
+# GPT-5.6 Luna: https://developers.openai.com/api/docs/models/gpt-5.6-luna
+MAX_REQUEST_BYTES = MAX_PROVIDER_REQUEST_BYTES
+MAX_BILLABLE_INPUT_TOKENS = 1_050_000
+LONG_CONTEXT_INPUT_THRESHOLD = 272_000
+
+
+def long_context_rates(input_tokens: int) -> tuple[Decimal, Decimal]:
+    if input_tokens > LONG_CONTEXT_INPUT_THRESHOLD:
+        return Decimal(2), Decimal("1.5")
+    return Decimal(1), Decimal(1)
 
 
 class OpenAIBudgetError(RuntimeError):
@@ -68,7 +74,7 @@ def _rate(settings: Settings, name: str) -> int:
     return value
 
 
-def _priced_microusd(tokens: int, rate_per_million: int) -> int:
+def _priced_microusd(tokens: int, rate_per_million: int | Decimal) -> int:
     return int(
         (
             Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
@@ -99,9 +105,13 @@ def safe_maximum_microusd(
         _rate(settings, "chat_openai_cache_write_microusd_per_million_tokens"),
     )
     maximum_input_tokens = min(bounds.request_bytes, MAX_BILLABLE_INPUT_TOKENS)
-    return _priced_microusd(maximum_input_tokens, input_rate) + _priced_microusd(
+    input_multiplier, output_multiplier = long_context_rates(maximum_input_tokens)
+    return _priced_microusd(
+        maximum_input_tokens, input_rate * input_multiplier
+    ) + _priced_microusd(
         bounds.maximum_output_tokens,
-        _rate(settings, "chat_openai_output_microusd_per_million_tokens"),
+        _rate(settings, "chat_openai_output_microusd_per_million_tokens")
+        * output_multiplier,
     )
 
 
@@ -116,23 +126,28 @@ def actual_usage_microusd(
     if cached + cache_write > usage.input_tokens:
         raise OpenAIAccountingInvariantError("OpenAI input usage details exceed total")
     ordinary = usage.input_tokens - cached - cache_write
+    input_multiplier, output_multiplier = long_context_rates(usage.input_tokens)
     return sum(
         (
             _priced_microusd(
                 ordinary,
-                _rate(settings, "chat_openai_input_microusd_per_million_tokens"),
+                _rate(settings, "chat_openai_input_microusd_per_million_tokens")
+                * input_multiplier,
             ),
             _priced_microusd(
                 cached,
-                _rate(settings, "chat_openai_cached_input_microusd_per_million_tokens"),
+                _rate(settings, "chat_openai_cached_input_microusd_per_million_tokens")
+                * input_multiplier,
             ),
             _priced_microusd(
                 cache_write,
-                _rate(settings, "chat_openai_cache_write_microusd_per_million_tokens"),
+                _rate(settings, "chat_openai_cache_write_microusd_per_million_tokens")
+                * input_multiplier,
             ),
             _priced_microusd(
                 usage.output_tokens,
-                _rate(settings, "chat_openai_output_microusd_per_million_tokens"),
+                _rate(settings, "chat_openai_output_microusd_per_million_tokens")
+                * output_multiplier,
             ),
         )
     )
