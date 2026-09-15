@@ -32,7 +32,7 @@ def main() -> None:
             "127.0.0.1",
             "--port",
             str(MCP_PORTS[sys.argv[1]]),
-            "--proxy-headers",
+            "--no-proxy-headers",
             "--no-access-log",
         ],
         os.environ.copy(),

@@ -18,6 +18,8 @@ def _release(root: Path, name: str = "aaaaaaaaaaaaaaaa") -> Path:
     executable = project / ".venv/bin/pwc-mcp"
     executable.parent.mkdir(parents=True)
     executable.write_text("#!/bin/sh\n")
+    interpreter = project / ".venv/bin/python"
+    interpreter.write_text("#!/bin/sh\n")
     (project / "uv.lock").write_text("locked\n")
     manifest = {
         "schema_version": 1,
@@ -37,6 +39,7 @@ def _release(root: Path, name: str = "aaaaaaaaaaaaaaaa") -> Path:
         project / "pyproject.toml"
     )
     executable.chmod(0o755)
+    interpreter.chmod(0o755)
     manifest["source_tree_sha256"] = mcp_release._source_tree_sha256(release)
     (release / "manifest.json").write_text(json.dumps(manifest))
     return release
@@ -98,6 +101,19 @@ def test_prepare_release_repairs_existing_release_traversal(tmp_path, monkeypatc
 
     assert mcp_release.prepare_release(SHA) == release
     assert release.stat().st_mode & 0o777 == 0o755
+
+
+def test_validate_release_rejects_nonportable_runtime_interpreter(tmp_path):
+    release = _release(tmp_path)
+    interpreter = release / "mcp_server/.venv/bin/python"
+    managed = tmp_path / "managed-python"
+    managed.write_text("#!/bin/sh\n")
+    managed.chmod(0o755)
+    interpreter.unlink()
+    interpreter.symlink_to(managed)
+
+    with pytest.raises(mcp_release.McpReleaseError, match="manifest is invalid"):
+        mcp_release.validate_release(release)
 
 
 def test_prepare_release_makes_new_release_traversable(tmp_path, monkeypatch):
@@ -185,7 +201,7 @@ def test_qualify_uses_unprivileged_user_distinct_config_and_temporary_port(
         "127.0.0.1",
         "--port",
         "18123",
-        "--proxy-headers",
+        "--no-proxy-headers",
         "--no-access-log",
     ]
     assert observed["environment"]["TOKEN"] == "private"
@@ -234,7 +250,7 @@ def test_launcher_runs_installed_module_with_virtualenv_python(tmp_path, monkeyp
         "127.0.0.1",
         "--port",
         "8003",
-        "--proxy-headers",
+        "--no-proxy-headers",
         "--no-access-log",
     ]
 

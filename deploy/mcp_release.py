@@ -207,6 +207,11 @@ def validate_release(release: Path | None) -> dict[str, object]:
     except (OSError, json.JSONDecodeError) as error:
         raise McpReleaseError("MCP release manifest is invalid") from error
     artifacts = manifest.get("artifact_sha256") if isinstance(manifest, dict) else None
+    interpreter = release / "mcp_server/.venv/bin/python"
+    try:
+        resolved_interpreter = interpreter.resolve(strict=True)
+    except OSError:
+        resolved_interpreter = None
     if (
         not isinstance(manifest, dict)
         or manifest.get("schema_version") != 1
@@ -216,6 +221,15 @@ def validate_release(release: Path | None) -> dict[str, object]:
         or manifest.get("source_tree_sha256") != _source_tree_sha256(release)
         or not (release / "mcp_server/.venv/bin/pwc-mcp").is_file()
         or not os.access(release / "mcp_server/.venv/bin/pwc-mcp", os.X_OK)
+        or not interpreter.is_file()
+        or not os.access(interpreter, os.X_OK)
+        or (
+            interpreter.is_symlink()
+            and (
+                resolved_interpreter is None
+                or not resolved_interpreter.is_relative_to(Path("/usr/bin"))
+            )
+        )
         or not isinstance(artifacts, dict)
         or artifacts.get("mcp_server/pyproject.toml")
         != _sha256(release / "mcp_server/pyproject.toml")
@@ -371,7 +385,7 @@ def qualify_release(release: Path, environment: str) -> None:
         "127.0.0.1",
         "--port",
         str(port),
-        "--proxy-headers",
+        "--no-proxy-headers",
         "--no-access-log",
     ]
     environment_values = os.environ.copy()
