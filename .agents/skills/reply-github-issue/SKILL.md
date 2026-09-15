@@ -1,6 +1,6 @@
 ---
 name: reply-github-issue
-description: Draft, post, and verify replies to GitHub issues about Papers With Code catalog curation, especially evaluation-verification threads and author corrections. Use whenever the user asks to reply, follow up, thank an author, report catalog fixes, or respond on a "Verify evals on Papers with Code" issue. Resolve live catalog state first, link directly to highlighted evaluation rows, mention README badges for current top-three results, and avoid duplicate comments or unintended issue-state changes.
+description: Draft, post, and verify replies to GitHub issues about Papers With Code catalog curation, especially evaluation-verification threads and author corrections. Bulk requests such as "all unread" cover only PwC catalog issues. Exclude Hugging Face artifact-hosting outreach and unrelated GitHub notifications unless explicitly requested. Resolve live catalog state first, link directly to highlighted evaluation rows, mention README badges for current top-three results, and avoid duplicate comments or unintended issue-state changes.
 ---
 
 # Reply to a GitHub Issue
@@ -18,11 +18,32 @@ Write concise, evidence-backed GitHub issue replies after Papers With Code catal
 
 ## 1. Audit the requested scope before replying in bulk
 
-For a named issue, proceed directly to resolution. For a batch, or when the
-user says “all”, “outstanding”, or “check all issues”, establish the complete
-set before replying:
+### Select PwC catalog issues first
 
-1. Search both `is:open` and `is:closed` issues. A closed issue can still
+With this skill, “all”, “all unread”, “outstanding”, and “check all issues” mean
+Papers With Code catalog issues only. Include evaluation-verification threads
+and discussions about PwC papers, benchmark scores, protocols, badges, or catalog
+metadata. Classify by the issue's actual subject and discussion, not just its
+author, repository owner, or mention of an ML paper.
+
+Exclude requests to release models or datasets on Hugging Face, submit or claim
+HF paper pages, or answer Hub storage/pricing questions. These are separate
+outreach even when NielsRogge opened them. For example, “Verify evals on Papers
+with Code” is in scope; “Release SyntheticDoc on Hugging Face” and “Release
+artifacts (model, PanTrack dataset) on Hugging Face” are not. Exclude unrelated
+issues and pull-request notifications as well. Expand beyond PwC catalog work
+only when the user explicitly requests it.
+
+For “unread”, paginate unread notifications first and retain only in-scope issue
+threads, including both open and closed issues. Do not expand that request to
+read issues or the entire verification campaign. Apply any subsequent issue
+search within the selected scope. Leave excluded notifications untouched,
+including their read/unread state.
+
+For a named in-scope issue, proceed directly to resolution. For a batch,
+establish the complete in-scope set before replying:
+
+1. Include both `is:open` and `is:closed` issues in scoped searches. A closed issue can still
    accept a comment; never change its state just to reply.
 2. Paginate through every result. Do not treat the first search page, a
    relevance-ranked result, or a comment-count filter as complete coverage.
@@ -30,7 +51,8 @@ set before replying:
    comment is from an author or maintainer and no equivalent NielsRogge reply
    follows it. Exclude bot-only comments and ordinary acknowledgements that
    would create a thank-you loop.
-4. Report the resolved target count before posting. Keep a separate list of
+4. Report the resolved PwC target count before posting, with a brief count of
+   excluded unrelated notifications when applicable. Keep a separate list of
    issues that request catalog changes; acknowledge those only after resolving
    the catalog state, rather than claiming a correction is live.
 
@@ -133,7 +155,7 @@ If posting failed, report the exact failure and whether a comment was created. L
 
 ## 8. Mark handled notifications read
 
-In the Papers With Code unread-notification workflow, mark each reviewed, handled issue notification read after verifying the outcome. This includes a successfully verified reply that leaves no outstanding action, an already-answered discussion, and an acknowledgement or closure-only update that requires no reply. For example, the author's closure of `dmis-lab/CVRR#1` after confirming the results and receiving a reply needs only a notification update, not another comment.
+In the Papers With Code unread-notification workflow, mark each in-scope, reviewed, handled issue notification read after verifying the outcome. The scope filter in section 1 applies before any notification mutation; excluded outreach stays untouched. This includes a successfully verified reply that leaves no outstanding action, an already-answered discussion, and an acknowledgement or closure-only update that requires no reply. For example, the author's closure of `dmis-lab/CVRR#1` after confirming the results and receiving a reply needs only a notification update, not another comment.
 
 Read the current discussion and relevant event before deciding: closure alone does not prove that a correction or question has been resolved. Leave outstanding corrections, author-clarification questions, pending reviews, and uncertain posting failures unread, and report them. Draft-only and read-only requests do not authorize notification changes.
 
