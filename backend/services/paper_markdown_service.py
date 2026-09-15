@@ -555,7 +555,12 @@ def read_paper_markdown_chunk(
 
     path = f"hf://buckets/{bucket_id.strip()}/{manifest.content_key}"
     try:
-        with filesystem.open(path, "rb", block_size=0) as handle:
+        with filesystem.open(
+            path,
+            "rb",
+            block_size=limit + 4,
+            cache_type="none",
+        ) as handle:
             handle.seek(offset)
             raw = handle.read(min(limit + 4, manifest.size_bytes - offset))
     except (EntryNotFoundError, FileNotFoundError) as error:

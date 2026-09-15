@@ -42,7 +42,7 @@ def _versioned_files(data: bytes, paper_key: str = "1706.03762") -> dict[str, by
 
 
 def _install_versioned_filesystem(monkeypatch, files: dict[str, bytes]):
-    operations: list[tuple[str, int]] = []
+    operations: list[tuple[str, object]] = []
 
     class TrackedFile(io.BytesIO):
         def seek(self, offset, whence=0):
@@ -57,14 +57,19 @@ def _install_versioned_filesystem(monkeypatch, files: dict[str, bytes]):
         def __init__(self, *, token):
             assert token == "private-token"
 
-        def open(self, path, mode, *, block_size):
+        def open(self, path, mode, *, block_size, cache_type=None):
             assert mode == "rb"
-            assert block_size == 0
             prefix = "hf://buckets/owner/content/"
             assert path.startswith(prefix)
             key = path.removeprefix(prefix)
             if key not in files:
                 raise FileNotFoundError(key)
+            if key.startswith("_content/manifests/"):
+                assert block_size == 0
+                assert cache_type is None
+            else:
+                operations.append(("open_block_size", block_size))
+                operations.append(("cache_type", cache_type))
             return TrackedFile(files[key])
 
     monkeypatch.setattr(paper_markdown_service, "HfFileSystem", FakeFileSystem)
@@ -487,6 +492,8 @@ def test_versioned_markdown_chunk_reads_bounded_utf8_bytes(monkeypatch):
     assert second.markdown == "🙂z"
     assert second.next_offset is None
     assert second.truncated is False
+    assert ("open_block_size", 8) in operations
+    assert ("cache_type", "none") in operations
     assert ("read", 8) in operations
     assert ("seek", 3) in operations
 
