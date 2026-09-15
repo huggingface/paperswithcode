@@ -95,7 +95,7 @@ const CopyControl = ({ value, label }: { value: string; label: string }) => {
     window.setTimeout(() => setCopied(false), 1_500);
   };
   return (
-    <button className="mcp-copy" type="button" onClick={() => void copy()} aria-label={label}>
+    <button className="action-btn mcp-copy" type="button" onClick={() => void copy()} aria-label={label}>
       {copied ? <Check size={16} aria-hidden /> : <Copy size={16} aria-hidden />}
       {copied ? "Copied" : "Copy"}
     </button>
@@ -119,8 +119,8 @@ const McpView: React.FC = () => {
     <article className="page mcp-page">
       <header className="mcp-hero">
         <div>
-          <p className="mcp-kicker">Model Context Protocol</p>
-          <h1>Use Papers With Code in your AI assistant</h1>
+          <p className="sidebar-label mcp-kicker">Model Context Protocol</p>
+          <h1 className="feed-title">Use Papers With Code in your AI assistant</h1>
           <p className="mcp-lede">
             Search research, inspect methods and benchmarks, and read complete papers
             through one anonymous, read-only MCP connection.
@@ -140,7 +140,7 @@ const McpView: React.FC = () => {
 
       <section className="mcp-section" aria-labelledby="mcp-connect">
         <div className="mcp-section-heading">
-          <p>Connect</p>
+          <p className="sidebar-label">Connect</p>
           <h2 id="mcp-connect">One URL, your preferred client</h2>
           <span>Setup matrix reviewed September 13, 2026; staging qualification pending.</span>
         </div>
@@ -175,7 +175,7 @@ const McpView: React.FC = () => {
 
       <section className="mcp-section" aria-labelledby="mcp-capabilities">
         <div className="mcp-section-heading">
-          <p>Capabilities</p>
+          <p className="sidebar-label">Capabilities</p>
           <h2 id="mcp-capabilities">Research context, structured for assistants</h2>
         </div>
         <div className="mcp-capability-grid">
@@ -195,7 +195,7 @@ const McpView: React.FC = () => {
 
       <section className="mcp-section" aria-labelledby="mcp-tools">
         <div className="mcp-section-heading">
-          <p>Catalogue</p>
+          <p className="sidebar-label">Catalogue</p>
           <h2 id="mcp-tools">Ten focused, read-only tools</h2>
         </div>
         <div className="mcp-tool-grid">
@@ -214,7 +214,7 @@ const McpView: React.FC = () => {
 
       <section className="mcp-section" aria-labelledby="mcp-prompts">
         <div className="mcp-section-heading">
-          <p>Try asking</p>
+          <p className="sidebar-label">Try asking</p>
           <h2 id="mcp-prompts">Prompts that start useful research</h2>
         </div>
         <div className="mcp-prompt-list">
@@ -229,7 +229,7 @@ const McpView: React.FC = () => {
 
       <section className="mcp-section mcp-notes" aria-labelledby="mcp-limits">
         <div>
-          <p className="mcp-kicker">Limits &amp; privacy</p>
+          <p className="sidebar-label mcp-kicker">Limits &amp; privacy</p>
           <h2 id="mcp-limits">Public by design</h2>
           <p>
             No account, API key, or write access. Fair-use limits are 60 total requests
@@ -244,7 +244,7 @@ const McpView: React.FC = () => {
           </p>
         </div>
         <div>
-          <p className="mcp-kicker">Protocol &amp; troubleshooting</p>
+          <p className="sidebar-label mcp-kicker">Protocol &amp; troubleshooting</p>
           <h2>Streamable HTTP</h2>
           <p>
             Primary protocol: {health.data?.protocol ?? "verified during connection setup"}. If setup fails,
