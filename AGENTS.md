@@ -10,6 +10,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   this checkout is production-adjacent release source, not a runtime directory.
 - During development, do not stop services, kill processes, rebuild or repoint
   the production frontend, reload nginx, or otherwise mutate live runtime state.
+- Run development nginx instances and config checks as an unprivileged user,
+  with explicitly isolated temporary directories, logs, PID, and lock files.
+  Never run a root-owned test instance using nginx's default paths: it can
+  change production directory ownership even with a separate port, config, or
+  `-p` prefix. Follow [the safe nginx test example](docs/development-guide.md#isolated-nginx-tests).
 - Preserve public API, route, CLI, and persisted-data contracts. Compatibility is
   optional only for clearly unshipped internal work.
 - Keep logic simple and readable; avoid broad defensive `try`/`except` blocks.
