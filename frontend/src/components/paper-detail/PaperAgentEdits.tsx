@@ -1,8 +1,9 @@
 import { useState } from "react";
-import { Check, Copy, History } from "lucide-react";
+import { Check, History } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { AgentLogos } from "./AgentLogos";
 import { paperEditsApi } from "@/lib/api/paperEdits";
 
 export function PaperAgentEdits({ paperId }: { paperId: number }) {
@@ -12,10 +13,10 @@ export function PaperAgentEdits({ paperId }: { paperId: number }) {
   const history = useInfiniteQuery({ queryKey: ["paper-edit-history", paperId], queryFn: ({ pageParam }) => paperEditsApi.history(paperId, pageParam), initialPageParam: undefined as string | undefined, getNextPageParam: page => page.next_cursor ?? undefined, enabled: open });
   const prompt = `Help me edit https://paperswithcode.co/paper/${paperId} using the public pwc CLI from https://github.com/huggingface/pwc-cli. Install or update the CLI following its README, then run pwc skills add to load its instructions. Run pwc auth login --paper ${paperId}; I will authorize this paper in my browser. Export with pwc paper edit export ${paperId} --output edits.json, make explicit operations for the corrections I request, and preview before submitting. For organization changes, use an organizations operation with payload {"organization_ids": [existing organization IDs]}; this replaces the paper’s organization links and publishes directly. Use existing organizations, benchmark and metric definitions, preserve unrelated entries, and cite source URLs where available. Never print or copy credentials. Ask me what to change if I have not specified it.`;
   return <>
-    <button type="button" className="action-btn" title="Copy a prompt to edit this paper with your coding agent" onClick={async () => {
+    <button type="button" className="action-btn" title="Copy an edit prompt for Claude, Codex, Cursor, or OpenCode" onClick={async () => {
       try { await navigator.clipboard.writeText(prompt); setCopied(true); setCopyError(false); }
       catch { setCopyError(true); }
-    }}>{copied ? <Check size={12} /> : <Copy size={12} />}{copied ? "Prompt copied" : "Edit with your agent"}</button>
+    }}>{copied && <Check size={12} />}{copied ? "Prompt copied" : "Edit with your agent"}<AgentLogos /></button>
     <button type="button" className="action-btn" onClick={() => setOpen(true)}><History size={12} /> View edit history</button>
     <Dialog open={copyError} onOpenChange={setCopyError}>
       <DialogContent>
