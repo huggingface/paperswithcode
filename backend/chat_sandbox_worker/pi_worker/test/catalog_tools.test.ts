@@ -37,6 +37,30 @@ test("gateway denial is returned without retry or reflecting sensitive error bod
   assert.equal(calls, 1);
 });
 
+test("unused filters are omitted while explicit false and meaningful filters survive", async () => {
+  await requestCatalog(gateway, "paper_list", {
+    page: null, page_size: 1, order_by: "date_published", task: "", method: null,
+    start_date: null, end_date: null, all_versions: false, organization: "Google",
+  }, undefined, async (_url, init) => {
+    assert.deepEqual(JSON.parse(String(init?.body)), { operation: "paper_list", arguments: {
+      page_size: 1, order_by: "date_published", all_versions: false, organization: "Google",
+    } });
+    return Response.json({ result: { papers: [] } });
+  });
+});
+
+test("every optional catalog field accepts null for strict provider schemas", () => {
+  const registered: { parameters: { required?: string[]; properties: Record<string, { anyOf?: { type?: string }[] }> } }[] = [];
+  createCatalogToolsExtension(gateway)({ registerTool(tool: typeof registered[number]) { registered.push(tool); } } as never);
+  for (const { parameters } of registered) {
+    for (const [name, schema] of Object.entries(parameters.properties)) {
+      if (!parameters.required?.includes(name)) {
+        assert.ok(schema.anyOf?.some(branch => branch.type === "null"), name);
+      }
+    }
+  }
+});
+
 test("catalog reads stop and cancel the stream at the byte bound", async () => {
   let cancelled = false;
   const response = new Response(new ReadableStream({
