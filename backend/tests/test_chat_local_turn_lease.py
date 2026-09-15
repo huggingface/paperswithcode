@@ -196,14 +196,7 @@ def test_durable_done_waits_for_detached_terminal_callback(monkeypatch):
     terminal = asyncio.run(exercise())
 
     assert terminal.event == "done"
-    assert persisted == [
-        {
-            "followups": [],
-            "finish_reason": "success",
-            "citations": [],
-            "blocks": [{"kind": "answer", "text": "", "done": True, "citations": []}],
-        }
-    ]
+    assert persisted == [{"followups": [], "finish_reason": "success", "citations": []}]
     assert orchestrator.lifecycle.terminal is TurnTerminalState.COMPLETED
     assert isinstance(orchestrator.terminal_persistence.completion, CompletionEvent)
 
@@ -239,24 +232,10 @@ def test_durable_consumer_accepts_typed_events_without_changing_stream_contract(
     assert [(frame.event, frame.payload) for frame in frames] == [
         (
             "done",
-            {
-                "followups": [],
-                "finish_reason": "success",
-                "citations": [],
-                "blocks": [
-                    {"kind": "answer", "text": "", "done": True, "citations": []}
-                ],
-            },
+            {"followups": [], "finish_reason": "success", "citations": []},
         )
     ]
-    assert persisted == [
-        {
-            "followups": [],
-            "finish_reason": "success",
-            "citations": [],
-            "blocks": [{"kind": "answer", "text": "", "done": True, "citations": []}],
-        }
-    ]
+    assert persisted == [{"followups": [], "finish_reason": "success", "citations": []}]
     assert orchestrator.lifecycle.terminal is TurnTerminalState.COMPLETED
     assert isinstance(orchestrator.terminal_persistence.completion, CompletionEvent)
 

@@ -366,14 +366,12 @@ function reduceEvent(
           followups: event.followups,
           finishReason: event.finish_reason,
           citations: event.citations,
-          blocks: (event.blocks ?? message.blocks ?? []).map((block) => (
+          blocks: (message.blocks ?? []).map((block) => (
             block.kind === "answer"
               ? { ...block, done: true }
-              : block.kind === "reasoning"
+              : block.kind === "reasoning" && block.active
                 ? { ...block, active: false, open: false }
-                : block.kind === "tool"
-                  ? { ...block, open: message.blocks?.some((old) => old.kind === "tool" && old.id === block.id && old.open) ?? false }
-                  : block
+                : block
           )),
         })),
       };

@@ -1178,7 +1178,6 @@ class AnswerDeltaEvent(_StrictEvent):
 
 class DoneEvent(_StrictEvent):
     type: Literal["done"]
-    blocks: list[DisplayBlock] | None = None
     followups: list[str] = Field(default_factory=list)
     finish_reason: FinishReason | Literal["stopped"] = "success"
     citations: list[CitationSnapshot] = Field(default_factory=list, max_length=20)

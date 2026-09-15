@@ -418,11 +418,12 @@ def test_completion_resolves_citations_before_publishing_and_reuses_snapshot(
         **payload,
     }
     assert payload["citations"][0]["route_id"] == "2406.09246"
-    assert payload["blocks"][0]["text"] == "[Paper](paper:2406.09246)"
+    finalized_blocks = orchestrator.projection.completed_blocks()
+    assert finalized_blocks[0]["text"] == "[Paper](paper:2406.09246)"
     if durable:
         assert captured == []  # Journaling still precedes terminal persistence.
         orchestrator._complete_turn(payload)
     assert captured == [
-        ("[Paper](paper:2406.09246)", payload["citations"], payload["blocks"])
+        ("[Paper](paper:2406.09246)", payload["citations"], finalized_blocks)
     ]
     assert len(resolutions) == 1

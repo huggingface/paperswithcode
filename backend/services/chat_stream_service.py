@@ -2625,7 +2625,6 @@ class ChatStreamOrchestrator:
         _kind, payload = projected
         await asyncio.to_thread(self._prepare_completion_projection)
         payload["citations"] = self.projection.citations
-        payload["blocks"] = self.projection.completed_blocks()
         completion = from_legacy_event({"type": "done", **payload})
         assert isinstance(completion, CompletionEvent)
         if self.settings.chat_durable_turn_dispatch_enabled:
