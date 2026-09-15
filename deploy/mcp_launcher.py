@@ -7,9 +7,9 @@ import os
 import sys
 
 try:
-    from deploy.mcp_release import MCP_ENVIRONMENTS, validate_release
+    from deploy.mcp_release import MCP_ENVIRONMENTS, MCP_PORTS, validate_release
 except ModuleNotFoundError:
-    from mcp_release import MCP_ENVIRONMENTS, validate_release
+    from mcp_release import MCP_ENVIRONMENTS, MCP_PORTS, validate_release
 
 
 def main() -> None:
@@ -18,9 +18,25 @@ def main() -> None:
     release = (MCP_ENVIRONMENTS / sys.argv[1] / "current").resolve(strict=True)
     validate_release(release)
     project = release / "mcp_server"
-    executable = project / ".venv/bin/pwc-mcp"
+    executable = project / ".venv/bin/python"
     os.chdir(project)
-    os.execve(executable, [str(executable)], os.environ.copy())
+    os.execve(
+        executable,
+        [
+            str(executable),
+            "-m",
+            "uvicorn",
+            "pwc_mcp.app:create_app",
+            "--factory",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(MCP_PORTS[sys.argv[1]]),
+            "--proxy-headers",
+            "--no-access-log",
+        ],
+        os.environ.copy(),
+    )
 
 
 if __name__ == "__main__":

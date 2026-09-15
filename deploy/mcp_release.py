@@ -250,6 +250,10 @@ def prepare_release(sha: str) -> Path:
                 "sync",
                 "--locked",
                 "--no-dev",
+                "--no-editable",
+                "--python",
+                "/usr/bin/python3",
+                "--no-managed-python",
                 "--project",
                 str(temporary / "mcp_server"),
             ]
@@ -358,7 +362,17 @@ def qualify_release(release: Path, environment: str) -> None:
         "PWC_MCP_HOST=127.0.0.1",
         f"PWC_MCP_PORT={port}",
         f"PWC_API_URL={MCP_API_URLS[environment]}",
-        str(release / "mcp_server/.venv/bin/pwc-mcp"),
+        str(release / "mcp_server/.venv/bin/python"),
+        "-m",
+        "uvicorn",
+        "pwc_mcp.app:create_app",
+        "--factory",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        str(port),
+        "--proxy-headers",
+        "--no-access-log",
     ]
     environment_values = os.environ.copy()
     for raw_line in config.read_text().splitlines():
