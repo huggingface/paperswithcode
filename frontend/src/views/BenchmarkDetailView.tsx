@@ -75,6 +75,22 @@ const BenchmarkDetailView: React.FC = () => {
   const didScrollToHighlight = useRef(false);
   const chartCardRef = useRef<HTMLDivElement | null>(null);
   const leaderboardCardRef = useRef<HTMLDivElement | null>(null);
+  const [tableScrollElement, setTableScrollElement] = useState<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!tableScrollElement) return;
+    const updateOverflow = () => {
+      tableScrollElement.classList.toggle(
+        "has-horizontal-overflow",
+        tableScrollElement.scrollWidth > tableScrollElement.clientWidth,
+      );
+    };
+    const observer = new ResizeObserver(updateOverflow);
+    observer.observe(tableScrollElement);
+    // Metric expansion changes the table width without resizing its wrapper.
+    if (tableScrollElement.firstElementChild) observer.observe(tableScrollElement.firstElementChild);
+    updateOverflow();
+    return () => observer.disconnect();
+  }, [tableScrollElement]);
   const [expandedMetricScope, setExpandedMetricScope] = useState<string | null>(null);
   const metricScope = `${datasetSlug}:${taskSlugFromQuery || ""}`;
   const showMoreMetrics = expandedMetricScope === metricScope;
@@ -794,7 +810,7 @@ const BenchmarkDetailView: React.FC = () => {
                 {showMoreMetrics && <span>Scroll metrics horizontally; model and paper details stay visible.</span>}
               </div>
             )}
-            <div className="bm-table-scroll" role="region" aria-label="Leaderboard metrics" tabIndex={0}>
+            <div ref={setTableScrollElement} className="bm-table-scroll" role="region" aria-label="Leaderboard metrics" tabIndex={0}>
             <table
               id="benchmark-leaderboard"
               className="bm-table"

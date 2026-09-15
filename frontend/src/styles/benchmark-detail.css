@@ -562,14 +562,14 @@
 .bm-table .col-model { left: var(--bm-rank-width); overflow-wrap: anywhere; }
 .bm-table .col-parameters {
   left: calc(var(--bm-rank-width) + var(--bm-model-width));
-  box-shadow: 1px 0 var(--hairline);
 }
 .bm-table .col-year { right: 0; }
 .bm-table .col-paper {
   right: var(--bm-year-width);
   overflow-wrap: anywhere;
-  box-shadow: -1px 0 var(--hairline);
 }
+.bm-table-scroll.has-horizontal-overflow .col-parameters { box-shadow: 1px 0 var(--hairline); }
+.bm-table-scroll.has-horizontal-overflow .col-paper { box-shadow: -1px 0 var(--hairline); }
 .bm-table .col-paper a {
   display: -webkit-box;
   -webkit-box-orient: vertical;
