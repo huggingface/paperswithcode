@@ -58,7 +58,13 @@ from backend.services.chat_capability_service import (
 )
 from backend.services.catalog_errors import CatalogNotFoundError
 from backend.services.chat_gateway_service import ChatGatewayService
-from backend.services.chat_pwc_mcp import TOOL_NAMES, PwcMcpError, request_mcp
+from backend.services.chat_pwc_mcp import (
+    ENDPOINT,
+    TOOL_NAMES,
+    PwcMcpError,
+    endpoint_for,
+    request_mcp,
+)
 from backend.services.chat_hf_hub_service import (
     ChatHfHubError,
     ChatHfHubService,
@@ -143,6 +149,7 @@ async def lifespan(app: FastAPI):
         limits=httpx.Limits(max_connections=32, max_keepalive_connections=8),
     ) as client:
         app.state.pwc_mcp_client = client
+        app.state.pwc_mcp_endpoint = endpoint_for(get_settings().environment)
         yield
 
 
@@ -872,7 +879,12 @@ async def catalog_mcp(body: McpCatalogRequest, request: Request):
         {} if body.tool is None else {"name": body.tool, "arguments": body.arguments}
     )
     call = asyncio.create_task(
-        request_mcp(request.app.state.pwc_mcp_client, method, params)
+        request_mcp(
+            request.app.state.pwc_mcp_client,
+            method,
+            params,
+            getattr(request.app.state, "pwc_mcp_endpoint", ENDPOINT),
+        )
     )
     disconnect = asyncio.create_task(disconnected())
     try:

@@ -468,6 +468,15 @@ export class PiWorker {
     });
     await created.session.bindExtensions({ mode: "print" });
     created.extensionsResult.runtime.refreshTools();
+    if (this.gateway && this.remoteTools && pwcMcpEnabled()) {
+      // Catalog research depends on these tools alone; never continue without them.
+      const active = new Set(created.session.getActiveToolNames());
+      const missing = PWC_MCP_TOOL_NAMES.filter((name) => !active.has(name));
+      if (missing.length) {
+        const reasons = created.extensionsResult.errors.map((item) => item.error).join("; ");
+        throw new Error(`PwC MCP tools are unavailable (${missing.length} of ${PWC_MCP_TOOL_NAMES.length} missing)${reasons ? `: ${reasons}` : ""}`);
+      }
+    }
     this.mcpReadiness = assessExcalidrawReadiness({
       enabled: this.excalidrawAvailable,
       connectionMode: "lazy",

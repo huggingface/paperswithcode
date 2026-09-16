@@ -10,17 +10,34 @@ from typing import Any
 import httpx
 
 ENDPOINT = "https://paperswithcode.co/mcp"
+# Each environment talks to its own MCP component (deploy/mcp_release.py ports);
+# staging must exercise the staging release rather than production's.
+ENDPOINTS = {
+    "production": ENDPOINT,
+    "staging": "http://127.0.0.1:8003/mcp",
+}
 MAX_RESPONSE_BYTES = 1024 * 1024
+# One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13).
 TOOL_NAMES = frozenset(
     {
         "search_papers",
         "get_paper_info",
         "list_papers",
         "read_paper",
+        "list_recent_papers",
+        "list_trending_papers",
         "get_related_papers",
         "get_paper_lineage",
         "get_task",
+        "list_tasks",
         "get_method",
+        "list_methods",
+        "get_conference",
+        "list_conferences",
+        "get_organization",
+        "list_organizations",
+        "get_framework",
+        "list_frameworks",
         "list_benchmarks",
         "get_benchmark",
     }
@@ -35,8 +52,16 @@ class PwcMcpError(Exception):
     """Sanitized upstream failure; never includes request or response contents."""
 
 
+def endpoint_for(environment: str) -> str:
+    """Return the MCP endpoint of one environment; unknown names use production."""
+    return ENDPOINTS.get(environment, ENDPOINT)
+
+
 async def request_mcp(
-    client: httpx.AsyncClient, method: str, params: dict[str, Any]
+    client: httpx.AsyncClient,
+    method: str,
+    params: dict[str, Any],
+    endpoint: str = ENDPOINT,
 ) -> dict[str, Any]:
     request_id = str(uuid.uuid4())
     payload = {
@@ -49,7 +74,7 @@ async def request_mcp(
         async with asyncio.timeout(30):
             async with client.stream(
                 "POST",
-                ENDPOINT,
+                endpoint,
                 json=payload,
                 headers={"Accept": "application/json", "Accept-Encoding": "identity"},
             ) as response:
