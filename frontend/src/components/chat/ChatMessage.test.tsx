@@ -726,6 +726,26 @@ describe("AssistantMessage", () => {
     expect(container.querySelectorAll(".chat-caret")).toHaveLength(0);
   });
 
+  it.each([
+    ["pwc_get_task", { task: "object-detection" }, "task=object-detection"],
+    ["pwc_get_benchmark", { benchmark: "coco-val2017", limit: 15, is_open: null }, "benchmark=coco-val2017 · limit=15"],
+    ["pwc_get_paper_info", { paper: "2511.09554" }, "paper=2511.09554"],
+    ["pwc_search_papers", { query: "real-time object detection", has_official_implementation: false, page: 0, published_after: "" }, "query=real-time object detection · has_official_implementation=false · page=0"],
+  ])("shows %s arguments while the tool card is collapsed", (name, args, summary) => {
+    renderAssistant({
+      id: "assistant-1", role: "assistant", streaming: false,
+      blocks: [{
+        kind: "tool", schema_version: 2, id: "tool-1", name, args,
+        status: "success", open: false, took_ms: 195,
+      }],
+    });
+    const bar = screen.getByRole("button", { name: new RegExp(name) });
+    expect(bar).toHaveAttribute("aria-expanded", "false");
+    expect(bar).toHaveTextContent(summary);
+    expect(screen.getByTitle(summary)).toBeInTheDocument();
+    expect(screen.queryByText("arguments")).not.toBeInTheDocument();
+  });
+
   it("shows progressive safe arguments while a tool is still running", () => {
     renderAssistant({
       id: "assistant-1",

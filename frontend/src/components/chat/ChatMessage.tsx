@@ -176,6 +176,12 @@ const ToolBlockView: React.FC<{
     : typeof block.args.file_path === "string"
       ? block.args.file_path
       : query;
+  const argumentSummary = block.name.startsWith("pwc_")
+    ? Object.entries(block.args)
+      .filter(([, value]) => value !== null && value !== undefined && value !== "")
+      .map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`)
+      .join(" · ")
+    : generic ? command : `("${query}")`;
   const output = block.content?.map((item) => item.text).join("") ?? "";
   const statusText = streamingArguments
     ? "streaming arguments…"
@@ -195,7 +201,7 @@ const ToolBlockView: React.FC<{
         <span className="chat-tool-head-left">
           {running ? <Spinner /> : <SearchIcon />}
           <code className="chat-tool-name">{block.name}</code>
-          <span className="chat-tool-query">{generic ? command : `("${query}")`}</span>
+          <span className="chat-tool-query" title={argumentSummary}>{argumentSummary}</span>
         </span>
         <span className="chat-tool-head-right">
           <span className="chat-tool-status">{statusText}</span>
