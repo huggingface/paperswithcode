@@ -9,6 +9,7 @@ from backend.services.chat_pwc_mcp import (
     META,
     TOOL_NAMES,
     PwcMcpError,
+    client_identity,
     endpoint_for,
     request_mcp,
 )
@@ -313,8 +314,9 @@ async def test_completed_call_does_not_wait_for_disconnect_poll_that_swallows_ca
     assert task.result() == {"result": {"structuredContent": {"title": "Paper"}}}
 
 
-def test_each_environment_uses_its_own_mcp_component():
-    assert endpoint_for("production") == ENDPOINT == "https://paperswithcode.co/mcp"
+def test_each_environment_uses_its_own_loopback_mcp_component():
+    assert ENDPOINT == "https://paperswithcode.co/mcp"
+    assert endpoint_for("production") == "http://127.0.0.1:8002/mcp"
     assert endpoint_for("staging") == "http://127.0.0.1:8003/mcp"
     assert endpoint_for("development") == ENDPOINT
     assert len(TOOL_NAMES) == 20
@@ -336,3 +338,26 @@ async def test_request_mcp_targets_the_selected_endpoint():
     async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
         await request_mcp(client, "tools/call", {}, endpoint_for("staging"))
     assert urls == ["http://127.0.0.1:8003/mcp"]
+
+
+@pytest.mark.anyio
+async def test_requests_carry_an_opaque_per_session_rate_limit_identity():
+    seen = []
+
+    def respond(request):
+        seen.append(request.headers.get("X-PwC-MCP-Client"))
+        payload = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={"jsonrpc": "2.0", "id": payload["id"], "result": {"content": []}},
+        )
+
+    identity = client_identity("6d3c9c6e-0000-4000-8000-000000000001")
+    assert identity.startswith("chat-") and len(identity) == 37
+    assert "6d3c9c6e" not in identity
+    assert identity == client_identity("6d3c9c6e-0000-4000-8000-000000000001")
+    assert identity != client_identity("6d3c9c6e-0000-4000-8000-000000000002")
+    async with httpx.AsyncClient(transport=httpx.MockTransport(respond)) as client:
+        await request_mcp(client, "tools/call", {}, endpoint_for("staging"), identity)
+        await request_mcp(client, "tools/call", {}, endpoint_for("staging"))
+    assert seen == [identity, None]

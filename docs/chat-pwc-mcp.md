@@ -17,6 +17,14 @@ for their artifact work; before a trusted paper receipt activates paper limits,
 Bash accepts only `pwc-paper` commands and Read only the approved guides.
 Legacy Bash/CLI catalog calls retain their contract when the flag is false.
 
+The gateway connects to its environment's MCP component on loopback
+(`127.0.0.1:8002` production, `:8003` staging) and sends
+`X-PwC-MCP-Client: chat-<sha256 prefix of the chat session ID>`. The MCP server
+honours that header only on a direct loopback connection without
+`X-Forwarded-For`, so each chat session receives its own request, semantic, and
+concurrency budget instead of every chat user sharing the gateway's address.
+nginx strips the header from proxied public traffic.
+
 Pi calls the authenticated gateway's `/catalog-mcp` route. Before discovery or
 execution, the gateway checks the capability and durable turn claim; it commits
 search metering before making an upstream request. Searches and filtered list

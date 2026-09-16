@@ -62,6 +62,7 @@ from backend.services.chat_pwc_mcp import (
     ENDPOINT,
     TOOL_NAMES,
     PwcMcpError,
+    client_identity,
     endpoint_for,
     request_mcp,
 )
@@ -866,6 +867,11 @@ def _authorize_pwc_mcp(
         ) from None
 
 
+def _session_header(request: Request) -> str:
+    headers = getattr(request, "headers", None)
+    return headers.get("x-pwc-session", "") if headers is not None else ""
+
+
 @app.post("/catalog-mcp", dependencies=[Depends(_authorize_pwc_mcp)])
 async def catalog_mcp(body: McpCatalogRequest, request: Request):
     finished = asyncio.Event()
@@ -884,6 +890,7 @@ async def catalog_mcp(body: McpCatalogRequest, request: Request):
             method,
             params,
             getattr(request.app.state, "pwc_mcp_endpoint", ENDPOINT),
+            client_identity(_session_header(request)),
         )
     )
     disconnect = asyncio.create_task(disconnected())

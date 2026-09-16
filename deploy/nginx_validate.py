@@ -65,6 +65,7 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
         "proxy_set_header X-Forwarded-For $remote_addr;",
         'proxy_set_header Cookie "";',
         'proxy_set_header Authorization "";',
+        'proxy_set_header X-PwC-MCP-Client "";',
         "proxy_buffering off;",
         "proxy_cache off;",
         "client_max_body_size 2m;",
