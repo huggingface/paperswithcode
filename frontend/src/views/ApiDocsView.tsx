@@ -27,12 +27,12 @@ function Code({ value }: { value: string }) {
   }
   return (
     <div className="api-code">
-      <button onClick={copy} aria-live="polite">
-        {status}
-      </button>
       <pre>
         <code>{value}</code>
       </pre>
+      <button onClick={copy} aria-live="polite">
+        {status}
+      </button>
     </div>
   );
 }

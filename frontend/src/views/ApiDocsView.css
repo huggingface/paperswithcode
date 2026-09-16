@@ -96,7 +96,10 @@
   font-weight: 600;
 }
 .api-code {
-  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px;
   margin: 16px 0;
 }
 .api-code,
@@ -108,15 +111,17 @@
   border-radius: 8px;
 }
 .api-code pre {
-  padding: 48px 18px 18px;
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  padding: 5px 0;
   overflow-x: auto;
   font-size: 13px;
   line-height: 1.6;
 }
 .api-code button {
-  position: absolute;
-  top: 8px;
-  right: 10px;
+  flex-shrink: 0;
+  max-width: 40%;
   font-size: 12px;
 }
 .api-content button {
