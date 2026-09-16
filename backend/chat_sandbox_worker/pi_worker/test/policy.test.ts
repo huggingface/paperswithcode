@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { PolicyController } from "../src/policy.js";
+import { MCP_ONLY, PolicyController } from "../src/policy.js";
 
 function policy(): PolicyController {
   return new PolicyController({
@@ -214,4 +214,46 @@ test("does not activate lazy paper limits from a failed pwc-paper receipt", () =
   );
 
   assert.equal(value.paperActivated, false);
+});
+
+
+test("MCP research turns deny Bash and Read except paper authoring commands and guides", () => {
+  const original = process.env.PWC_CHAT_PWC_MCP_ENABLED;
+  process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
+  const options = {
+    maximumCalls: 8, maximumRounds: 8, maximumDirectSearches: 2, maximumWebSearches: 1,
+    maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5, catalogEnabled: true,
+  };
+  try {
+    const value = new PolicyController(options);
+    value.reset(false, "prompt");
+    assert.equal(value.mcpOnlyResearch(), true);
+    assert.equal(value.authorize("a", "bash", { command: "pwc search test" }), MCP_ONLY);
+    assert.equal(value.authorize("b", "bash", { command: "s2 search test" }), MCP_ONLY);
+    assert.equal(value.authorize("c", "read", { path: "/workspace/notes.md" }), MCP_ONLY);
+    assert.equal(value.authorize("d", "read", { path: "/opt/pwc/PAPER_AUTHORING.md" }), undefined);
+    assert.equal(value.authorize("e", "pwc_get_benchmark", { benchmark: "coco", max_parameters: "4B" }), undefined);
+    assert.equal(value.authorize("f", "pwc_list_conferences", { year: 2025 }), undefined);
+    assert.equal(value.searches, 0);
+    assert.equal(value.calls, 3);
+
+    const command: Record<string, unknown> = { command: "pwc-paper begin-edit" };
+    assert.equal(value.authorize("paper", "bash", command), undefined);
+    value.finish("paper", '@@PWC_PAPER@@{"operation":"begin-edit","activated":true,"paper":{}}');
+    assert.equal(value.mcpOnlyResearch(), false);
+    assert.equal(value.authorize("g", "bash", { command: "ls /workspace/paper" }), undefined);
+
+    const poster = new PolicyController(options);
+    poster.reset(false, "prompt", true);
+    assert.equal(poster.mcpOnlyResearch(), false);
+    assert.equal(poster.authorize("p", "bash", { command: "ls /workspace" }), undefined);
+
+    const legacy = new PolicyController({ ...options, catalogEnabled: false });
+    legacy.reset(false, "prompt");
+    assert.equal(legacy.mcpOnlyResearch(), false);
+    assert.equal(legacy.authorize("l", "bash", { command: "pwc search x" }), undefined);
+  } finally {
+    if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
+    else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
+  }
 });

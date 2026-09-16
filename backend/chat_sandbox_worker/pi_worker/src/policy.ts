@@ -11,6 +11,8 @@ import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_comman
 
 const ANSWER_NOW =
   "Execution limit reached. Do not call more tools. Answer now from the evidence already gathered.";
+const MCP_ONLY =
+  "Bash and Read are not available for research in this chat. Use the registered PwC MCP tools for catalog evidence, or answer from the evidence already gathered.";
 const SEARCH = /(?:^|[;&|()\n]\s*)(?:pwc|s2)\s+search(?:\s|$)/iu;
 const ANSI = /(?:\u001b\][^\u0007]*(?:\u0007|\u001b\\)|\u001b\[[0-?]*[ -/]*[@-~])/gu;
 const INLINED_CLI_GUIDES = new Set([
@@ -139,6 +141,11 @@ export class PolicyController {
     return this.toolingClosed ? !this.answerAfterClose : !this.answerProduced;
   }
 
+  /** Catalog research turns rely on PwC MCP tools alone; no sandbox, CLI, or shell. */
+  mcpOnlyResearch(): boolean {
+    return pwcMcpEnabled() && Boolean(this.options.catalogEnabled) && !this.posterMode && !this.paperActivated;
+  }
+
   private deny(id: string, reason: string): string {
     this.active.delete(id);
     return reason;
@@ -159,6 +166,16 @@ export class PolicyController {
     }
     if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view"]).has(name)) {
       return this.deny(id, "That tool is not available.");
+    }
+    if (this.mcpOnlyResearch() && (name === "bash" || name === "read")) {
+      // Catalog research runs entirely through the PwC MCP tools. The sandbox
+      // stays reachable only for poster and paper authoring work.
+      const command = typeof input.command === "string" ? input.command : "";
+      const requested = typeof input.path === "string" ? input.path : "";
+      const authoring = name === "bash"
+        ? Boolean(parsePwcPaperCommand(command))
+        : READABLE_GUIDES.has(path.resolve("/workspace", requested));
+      if (!authoring) return this.deny(id, MCP_ONLY);
     }
     if ((name === "read_me" || name === "create_view") && !this.options.excalidrawEnabled) {
       return this.deny(id, "Diagram tools are not available.");
@@ -275,4 +292,4 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
   };
 }
 
-export { ANSWER_NOW };
+export { ANSWER_NOW, MCP_ONLY };

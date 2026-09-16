@@ -2,9 +2,14 @@ import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
 import type { TSchema } from "typebox";
 import { gatewayHeaders, type GatewayContext } from "./provider.js";
 
+// One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13).
 export const PWC_MCP_TOOLS = [
   "search_papers", "get_paper_info", "list_papers", "read_paper",
-  "get_related_papers", "get_paper_lineage", "get_task", "get_method",
+  "list_recent_papers", "list_trending_papers",
+  "get_related_papers", "get_paper_lineage",
+  "get_task", "list_tasks", "get_method", "list_methods",
+  "get_conference", "list_conferences", "get_organization", "list_organizations",
+  "get_framework", "list_frameworks",
   "list_benchmarks", "get_benchmark",
 ] as const;
 export const PWC_MCP_TOOL_NAMES = PWC_MCP_TOOLS.map(name => `pwc_${name}`);

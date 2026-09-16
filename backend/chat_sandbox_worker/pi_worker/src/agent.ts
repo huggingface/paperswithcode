@@ -454,7 +454,13 @@ export class PiWorker {
       modelRuntime: provider.runtime,
       model: provider.model,
       thinkingLevel: thinkingLevel(run.reasoning_effort),
-      tools: ["read", "bash", "search_web", ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []), ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : [])],
+      // MCP research turns have no sandbox tools; poster and paper authoring keep them.
+      tools: [
+        ...(this.gateway && this.remoteTools && pwcMcpEnabled() && !run.poster_mode && run.paper_artifacts_enabled !== true ? [] : ["read", "bash"]),
+        "search_web",
+        ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []),
+        ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : []),
+      ],
       excludeTools: ["edit", "write", "grep", "find", "ls", "ask_question"],
       resourceLoader: loader,
       settingsManager: settings,

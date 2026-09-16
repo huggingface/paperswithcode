@@ -67,7 +67,8 @@ test("MCP tools preserve shared search, call, and output budgets", async () => {
     assert.equal(p.authorize("a", "pwc_list_papers", { search: "VLA" }), undefined);
     const result = p.finish("a", "x".repeat(500));
     assert.ok(Buffer.byteLength(result.content[0]!.text) <= 100);
-    assert.match(p.authorize("b", "bash", { command: "pwc search x" }) ?? "", /Answer now/iu);
+    assert.match(p.authorize("b", "bash", { command: "pwc search x" }) ?? "", /not available for research/iu);
+    assert.match(p.authorize("c", "pwc_search_papers", { query: "VLA" }) ?? "", /Answer now/iu);
     const { renderPrompt } = await import("../src/prompt.js");
     const prompt = await renderPrompt({ model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false,
       catalogToolsEnabled: true, mcpSkill: "Pinned MCP skill", source: "The available tools for a normal research turn are Bash, Read, and search_web." });
