@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MCP_ONLY, PolicyController, REPEATED_FAILURE } from "../src/policy.js";
+import { canonicalJson, MCP_ONLY, PolicyController, REPEATED_FAILURE } from "../src/policy.js";
 
 function policy(): PolicyController {
   return new PolicyController({
@@ -273,6 +273,12 @@ test("an identical catalog call that already failed is refused for the rest of t
     assert.equal(value.authorize("b", "pwc_get_task", { task: "language-modelling" }), REPEATED_FAILURE);
     assert.equal(value.authorize("c", "pwc_get_task", { task: "language-modeling" }), undefined);
     value.finish("c", "ok");
+    // Nested arguments participate in the fingerprint at every depth.
+    assert.equal(value.authorize("n1", "pwc_get_benchmark", { benchmark: "mmlu", minimum_metrics: { Accuracy: 80 } }), undefined);
+    value.finish("n1", "PwC MCP tool error: unknown metric", true);
+    assert.equal(value.authorize("n2", "pwc_get_benchmark", { benchmark: "mmlu", minimum_metrics: { BLEU: 80 } }), undefined);
+    assert.equal(value.authorize("n3", "pwc_get_benchmark", { minimum_metrics: { Accuracy: 80 }, benchmark: "mmlu" }), REPEATED_FAILURE);
+    assert.equal(canonicalJson({ b: [ { z: 1, a: 2 } ], a: undefined }), '{"b":[{"a":2,"z":1}]}');
     assert.equal(value.authorize("d", "pwc_get_task", { task: "language-modeling" }), undefined);
     value.reset(false, "prompt");
     assert.equal(value.authorize("e", "pwc_get_task", { task: "language-modelling" }), undefined);

@@ -48,6 +48,18 @@ function isPaperActivation(value: string, expectedOperation: PaperReceiptOperati
   }
 }
 
+/** Deterministic JSON with keys sorted at every depth, so equal arguments share one key. */
+export function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map((item) => canonicalJson(item)).join(",")}]`;
+  if (value && typeof value === "object") {
+    const entries = Object.entries(value as Record<string, unknown>)
+      .filter(([, item]) => item !== undefined)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    return `{${entries.map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`).join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
 function inside(candidate: string, root: string): boolean {
   const relative = path.relative(root, path.resolve(candidate));
   return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
@@ -171,7 +183,7 @@ export class PolicyController {
       return this.deny(id, "Catalog tools are not available.");
     }
     if (catalogTool) {
-      const key = `${name}:${JSON.stringify(input, Object.keys(input).sort())}`;
+      const key = `${name}:${canonicalJson(input)}`;
       if (this.failedCalls.has(key)) return this.deny(id, REPEATED_FAILURE);
       this.callKeys.set(id, key);
     }

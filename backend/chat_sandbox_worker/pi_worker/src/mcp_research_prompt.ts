@@ -1,5 +1,5 @@
 // PWC_MCP_SKILL.md is vendored unchanged from huggingface/pwc-cli
-// mcp_server/SKILL.md at a3ff54283d8263716c6c3c865e918feb712cc30f (PR #13).
+// mcp_server/SKILL.md at 2aad8107ab64 (main, squash of PR #13).
 import { PWC_MCP_TOOLS } from "./pwc_mcp_tools.js";
 
 export interface McpResearchPromptOptions {
