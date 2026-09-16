@@ -55,8 +55,20 @@ export async function requestPwcMcp(
   try { payload = JSON.parse(Buffer.concat(chunks, size).toString("utf8")); }
   catch { throw new Error("PwC MCP returned invalid JSON."); }
   if (!object(payload) || !object(payload.result)) throw new Error("PwC MCP returned an invalid response.");
-  if (payload.result.isError === true) throw new Error("PwC MCP could not complete that tool request.");
+  if (payload.result.isError === true) throw new Error(mcpToolErrorMessage(payload.result));
   return payload.result;
+}
+
+const MAX_ERROR_CHARS = 400;
+
+/** The first-party server returns sanitized, actionable errors (for example a closest-match hint). */
+export function mcpToolErrorMessage(result: ObjectValue): string {
+  const first = Array.isArray(result.content) ? result.content[0] : undefined;
+  const text = object(first) && typeof first.text === "string"
+    ? first.text.replace(/^Error executing tool [a-z_]+: /u, "").replace(/[\u0000-\u001f\u007f]+/gu, " ").trim()
+    : "";
+  if (!text) return "PwC MCP could not complete that tool request.";
+  return `PwC MCP tool error: ${text.slice(0, MAX_ERROR_CHARS)}. Correct the arguments or use another tool; do not repeat the identical call.`;
 }
 
 /** Keep server-owned schemas while accepting null for optional strict-model fields. */

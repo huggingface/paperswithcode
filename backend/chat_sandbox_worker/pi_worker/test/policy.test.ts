@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { MCP_ONLY, PolicyController } from "../src/policy.js";
+import { MCP_ONLY, PolicyController, REPEATED_FAILURE } from "../src/policy.js";
 
 function policy(): PolicyController {
   return new PolicyController({
@@ -252,6 +252,30 @@ test("MCP research turns deny Bash and Read except paper authoring commands and 
     legacy.reset(false, "prompt");
     assert.equal(legacy.mcpOnlyResearch(), false);
     assert.equal(legacy.authorize("l", "bash", { command: "pwc search x" }), undefined);
+  } finally {
+    if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
+    else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
+  }
+});
+
+
+test("an identical catalog call that already failed is refused for the rest of the turn", () => {
+  const original = process.env.PWC_CHAT_PWC_MCP_ENABLED;
+  process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
+  try {
+    const value = new PolicyController({
+      maximumCalls: 8, maximumRounds: 8, maximumDirectSearches: 2, maximumWebSearches: 1,
+      maximumResultBytes: 1024, maximumTurnOutputBytes: 4096, bashTimeoutSeconds: 5, catalogEnabled: true,
+    });
+    value.reset(false, "prompt");
+    assert.equal(value.authorize("a", "pwc_get_task", { task: "language-modelling" }), undefined);
+    value.finish("a", "PwC MCP tool error: Task not found", true);
+    assert.equal(value.authorize("b", "pwc_get_task", { task: "language-modelling" }), REPEATED_FAILURE);
+    assert.equal(value.authorize("c", "pwc_get_task", { task: "language-modeling" }), undefined);
+    value.finish("c", "ok");
+    assert.equal(value.authorize("d", "pwc_get_task", { task: "language-modeling" }), undefined);
+    value.reset(false, "prompt");
+    assert.equal(value.authorize("e", "pwc_get_task", { task: "language-modelling" }), undefined);
   } finally {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;

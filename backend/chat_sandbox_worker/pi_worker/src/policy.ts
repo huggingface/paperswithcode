@@ -11,6 +11,8 @@ import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_comman
 
 const ANSWER_NOW =
   "Execution limit reached. Do not call more tools. Answer now from the evidence already gathered.";
+const REPEATED_FAILURE =
+  "That exact tool call already failed in this turn. Change the arguments (for example the task slug or paper ID from the indexes or a closest-match hint) or use a different tool.";
 const MCP_ONLY =
   "Bash and Read are not available for research in this chat. Use the registered PwC MCP tools for catalog evidence, or answer from the evidence already gathered.";
 const SEARCH = /(?:^|[;&|()\n]\s*)(?:pwc|s2)\s+search(?:\s|$)/iu;
@@ -105,6 +107,8 @@ export class PolicyController {
   paperActivated = false;
   private active = new Set<string>();
   private paperCommandIds = new Map<string, PaperReceiptOperation>();
+  private callKeys = new Map<string, string>();
+  private failedCalls = new Set<string>();
 
   constructor(readonly options: PolicyOptions) {}
 
@@ -125,6 +129,8 @@ export class PolicyController {
     this.answerAfterClose = false;
     this.active.clear();
     this.paperCommandIds.clear();
+    this.callKeys.clear();
+    this.failedCalls.clear();
   }
 
   observeAnswer(): void {
@@ -163,6 +169,11 @@ export class PolicyController {
     const catalogTool = new Set(pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : ["pwc_search", "pwc_paper_info", "pwc_paper_list"]).has(name);
     if (catalogTool && !this.options.catalogEnabled) {
       return this.deny(id, "Catalog tools are not available.");
+    }
+    if (catalogTool) {
+      const key = `${name}:${JSON.stringify(input, Object.keys(input).sort())}`;
+      if (this.failedCalls.has(key)) return this.deny(id, REPEATED_FAILURE);
+      this.callKeys.set(id, key);
     }
     if (!catalogTool && !new Set(["bash", "read", "search_web", "read_me", "create_view"]).has(name)) {
       return this.deny(id, "That tool is not available.");
@@ -253,6 +264,9 @@ export class PolicyController {
     isError = false,
   ): { content: Array<{ type: "text"; text: string }>; isError?: boolean } {
     this.active.delete(id);
+    const key = this.callKeys.get(id);
+    this.callKeys.delete(id);
+    if (isError && key) this.failedCalls.add(key);
     const raw = Array.isArray(content)
       ? content
           .map((part) =>
@@ -292,4 +306,4 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
   };
 }
 
-export { ANSWER_NOW, MCP_ONLY };
+export { ANSWER_NOW, MCP_ONLY, REPEATED_FAILURE };

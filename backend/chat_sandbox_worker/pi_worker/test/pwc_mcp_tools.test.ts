@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPwcMcpToolsExtension, nullableOptionalFields, PWC_MCP_TOOLS, PWC_MCP_TOOL_NAMES, requestPwcMcp } from "../src/pwc_mcp_tools.js";
+import { createPwcMcpToolsExtension, mcpToolErrorMessage, nullableOptionalFields, PWC_MCP_TOOLS, PWC_MCP_TOOL_NAMES, requestPwcMcp } from "../src/pwc_mcp_tools.js";
 import { gatewayHeaders, type GatewayContext } from "../src/provider.js";
 const gateway: GatewayContext = { url: "https://gateway.example/private", capability: "private-test-token", sessionId: "s", turnId: "t", turnClaim: { turnId: "t", workerId: "w", workerGeneration: "1", leaseGeneration: "2" } };
 
@@ -30,14 +30,18 @@ test("optional fields accept null and required server fields remain required", (
   assert.deepEqual(schema.properties.cursor.anyOf[1], { type: "null" });
 });
 
-test("denial and MCP errors do not retry or expose error bodies", async () => {
+test("denials hide HTTP bodies while first-party tool errors stay actionable", async () => {
   let calls = 0;
   await assert.rejects(requestPwcMcp(gateway, "read_paper", {}, undefined, async () => {
     calls++; return new Response("secret-token", { status: 403 });
   }), /^Error: PwC MCP request failed \(403\)\.$/u);
   assert.equal(calls, 1);
+  await assert.rejects(requestPwcMcp(gateway, "get_task", {}, undefined, async () =>
+    Response.json({ result: { isError: true, content: [{ text: "Error executing tool get_task: Task not found: language-modelling; closest results: Language Modeling" }] } })),
+  /^Error: PwC MCP tool error: Task not found: language-modelling; closest results: Language Modeling\. Correct the arguments/u);
   await assert.rejects(requestPwcMcp(gateway, "read_paper", {}, undefined, async () =>
-    Response.json({ result: { isError: true, content: [{ text: "secret" }] } })), /could not complete/u);
+    Response.json({ result: { isError: true, content: [] } })), /could not complete/u);
+  assert.equal(mcpToolErrorMessage({ content: [{ text: `x${"y".repeat(1000)}` }] }).length < 520, true);
 });
 
 test("oversize streams are cancelled and abort signal reaches fetch", async () => {
