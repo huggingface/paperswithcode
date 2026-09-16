@@ -85,13 +85,47 @@ returns each issue’s last comment, or explicitly paginate the REST search.
 
 1. Read the issue body and all current comments. Identify the repository, issue number, author name or handle, requested correction, and any claims that need acknowledgment.
 2. Inspect the current Papers With Code paper and evaluation records. Record the paper identifier, evaluation ID, dataset slug, task slug, model, metric, value, and current rank for every row discussed.
-3. Turn each actionable author request into a catalog change and apply it before replying. Check the paper, official artifacts, and existing catalog to establish the affected records and intended protocol. Use the relevant curation skill: `verify-evals` for score/protocol corrections and removals, `add-benchmark` for benchmark or leaderboard separation, `add-evals` for missing results, and `enrich-paper` for links or metadata. Read `docs/database.md` before database access and follow repository data-workflow rules.
+3. Resolve each actionable author request with a catalog change that supports meaningful comparisons, following the benchmark-scope rules below. Apply supported corrections before replying; author feedback does not require accepting the author's proposed catalog structure verbatim. Check the paper, official artifacts, and existing catalog to establish the affected records and intended protocol. Use the relevant curation skill: `verify-evals` for score/protocol corrections and removals, `add-benchmark` for justified benchmark or leaderboard separation, `add-evals` for missing results, and `enrich-paper` for links or metadata. Read `docs/database.md` before database access and follow repository data-workflow rules.
 4. Complete every independent correction supported by the evidence. For example, when an author requests separating single-frame and video-based Human3.6M results, inspect the affected rows, create or update the appropriate leaderboard groups, move the applicable results, and verify the resulting ranks. Do not stop at agreeing that a split would be useful. Investigate claims of empty repositories and correct code-availability metadata where warranted; do not automatically delete valid paper-reported scores just because code is unavailable.
 5. When a request is ambiguous, conflicts with source evidence, or cannot be completed with available access, investigate first and ask only for the specific missing detail. Complete the unblocked corrections before asking. State the concrete blocker and leave unresolved work unread; do not substitute a generic acknowledgement or promise for available catalog work.
 6. Verify the changed records through the live site or API, including leaderboard membership, scores, ranks, links, and openness metadata as applicable. Confirm exactly what changed. Distinguish additions, corrections, removals, preserved historical results, and cases where no catalog change was needed. Recheck badge eligibility after any rank changes.
 7. Re-read the latest issue comments immediately before posting. If an equivalent reply reporting the completed outcome is already present, do not post a duplicate.
 
 Use the connected GitHub integration first for issue metadata, comments, and posting. Use `gh` only when the integration cannot perform the required operation. Do not blindly retry an uncertain posting failure; fetch the issue comments first to determine whether the comment was created.
+
+### Keep benchmarks useful across papers
+
+Balance comparability with catalog usability. Do not create a benchmark for
+every paper-specific subset, implementation, or evaluation setting just to keep
+one incompatible result ranked. A correct score does not automatically belong
+on a leaderboard.
+
+- Prefer an existing benchmark when its actual split, metric, and protocol
+  match. Record incidental implementation details in methodology; a disclaimer
+  cannot make materially incompatible results comparable.
+- Create or split a leaderboard only for a reusable distinction supported by
+  evidence: for example, multiple independent papers/results that can share
+  the same contract, or an established community benchmark/protocol with a
+  credible comparison pool. Record that evidence before creating it. Do not
+  populate it with unrelated comparison-table baselines to manufacture coverage.
+- A single currently indexed result is not an absolute veto for an established
+  benchmark. However, a custom subset/pipeline used only by one paper is not
+  enough justification, and hypothetical future submissions alone are not
+  evidence of reuse. Avoid paper/model names in benchmark definitions unless
+  the work actually introduces a reusable benchmark.
+- When a score cannot fit an existing leaderboard and no reusable grouping is
+  justified, remove the incompatible evaluation from the ranking through the
+  supported curation workflow. Preserve its source and rationale in the audit
+  record, keep the paper itself, and explain the removal to the author. If the
+  catalog supports a genuinely unranked result, that is also an option; do not
+  invent an unsupported storage convention. Do not leave it in a mixed ranking
+  or create a singleton leaderboard merely to retain a score or badge.
+
+For example, separating Human3.6M single-frame and video methods across many
+papers is useful. Creating “7-Scenes seq-01 / ABot-Recon–LingBot protocol” solely
+for ABot-Recon's one result overfits the catalog. Unless independent comparable
+results or an established shared protocol justify that grouping, exclude the
+score from the incompatible ranking and tell the author why.
 
 ## 3. Link directly to highlighted evaluation rows
 
@@ -107,7 +141,7 @@ For example:
 https://paperswithcode.co/benchmark/imagenet-256x256?task=image-generation&eval=21566
 ```
 
-The query order should be `task` followed by `eval`. Use a descriptive Markdown label such as the benchmark and model name. If several rows matter, link each relevant row directly. A paper-page link may supplement these links, but must not replace an evaluation-specific link when the evaluation ID is available.
+The query order should be `task` followed by `eval`. Use a descriptive Markdown label such as the benchmark and model name. If several rows matter, link each relevant row directly. A paper-page link may supplement these links, but must not replace an evaluation-specific link for a surviving row when its evaluation ID is available. For a removed evaluation, link the paper or affected benchmark and explain the removal; do not publish a highlight link to a deleted row.
 
 ## 4. Invite authors to copy top-three badges
 
