@@ -231,7 +231,7 @@ def validate(production: str, staging: str) -> list[str]:
             "listen 127.0.0.1:8011;",
             "allow 127.0.0.1;",
             "deny all;",
-            'location ~ "^/api/v1/(papers(?:/|$)|research/papers/|tasks(?:/|$)|methods(?:/|$)|datasets(?:/|$))"',
+            'location ~ "^/api/v1/(papers(?:/|$)|research/papers/|tasks(?:/|$)|methods(?:/|$)|datasets(?:/|$)|areas(?:/|$)|conferences(?:/|$)|organizations(?:/|$)|frameworks(?:/|$)|evaluations(?:/|$))"',
             "limit_except GET HEAD",
             "proxy_pass http://pwc_staging_backend;",
             "proxy_set_header Host staging.paperswithcode.co;",
