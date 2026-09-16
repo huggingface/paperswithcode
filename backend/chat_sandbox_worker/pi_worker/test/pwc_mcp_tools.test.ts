@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { createPwcMcpToolsExtension, mcpToolErrorMessage, nullableOptionalFields, PWC_MCP_TOOLS, PWC_MCP_TOOL_NAMES, requestPwcMcp } from "../src/pwc_mcp_tools.js";
+import { createPwcMcpToolsExtension, MAX_CONCURRENT_MCP_REQUESTS, mcpToolErrorMessage, RequestGate, nullableOptionalFields, PWC_MCP_TOOLS, PWC_MCP_TOOL_NAMES, requestPwcMcp } from "../src/pwc_mcp_tools.js";
 import { gatewayHeaders, type GatewayContext } from "../src/provider.js";
 const gateway: GatewayContext = { url: "https://gateway.example/private", capability: "private-test-token", sessionId: "s", turnId: "t", turnClaim: { turnId: "t", workerId: "w", workerGeneration: "1", leaseGeneration: "2" } };
 
@@ -81,4 +81,48 @@ test("MCP tools preserve shared search, call, and output budgets", async () => {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = original;
   }
+});
+
+
+test("parallel MCP tool calls are queued below the server's per-client concurrency limit", async () => {
+  assert.equal(MAX_CONCURRENT_MCP_REQUESTS, 3);
+  const registered: any[] = [];
+  let inFlight = 0; let peak = 0;
+  const pending: Array<() => void> = [];
+  await createPwcMcpToolsExtension(gateway, async (_url, init) => {
+    const body = JSON.parse(String(init?.body));
+    if (!body.tool) {
+      return Response.json({ result: { tools: PWC_MCP_TOOLS.map(name => ({
+        name, description: "d", annotations: { readOnlyHint: true }, inputSchema: { type: "object", properties: {} },
+      })) } });
+    }
+    inFlight++; peak = Math.max(peak, inFlight);
+    await new Promise<void>((resolve) => pending.push(resolve));
+    inFlight--;
+    return Response.json({ result: { structuredContent: { ok: true } } });
+  }, new RequestGate(3))({ registerTool: (tool: any) => registered.push(tool) } as never);
+  const tool = registered.find((item) => item.name === "pwc_get_benchmark");
+  const calls = Array.from({ length: 5 }, (_, index) => tool.execute(`id-${index}`, { benchmark: `b${index}` }));
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  assert.equal(peak, 3);
+  assert.equal(pending.length, 3);
+  pending.splice(0).forEach((resolve) => resolve());
+  await new Promise((resolve) => setTimeout(resolve, 20));
+  pending.splice(0).forEach((resolve) => resolve());
+  const results = await Promise.all(calls);
+  assert.equal(results.length, 5);
+  assert.equal(peak, 3);
+  assert.equal(inFlight, 0);
+});
+
+test("a queued MCP call aborts cleanly without occupying a slot", async () => {
+  const gate = new RequestGate(1);
+  const release = await gate.acquire();
+  const controller = new AbortController();
+  const waiting = gate.acquire(controller.signal);
+  controller.abort();
+  await assert.rejects(waiting, { name: "AbortError" });
+  release();
+  const next = await gate.acquire();
+  next();
 });
