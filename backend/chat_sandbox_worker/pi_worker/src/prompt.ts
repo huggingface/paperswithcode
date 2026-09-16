@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import { renderMcpResearchPrompt } from "./mcp_research_prompt.js";
 
@@ -74,8 +75,10 @@ export async function renderPrompt(options: {
   taskCatalog?: string;
   assetPath?: string;
   source?: string;
+  mcpSkill?: string;
 }): Promise<string> {
-  const source = options.source ?? await loadPromptAsset(options.assetPath);
+  const assetPath = options.assetPath ?? process.env.PWC_EXTERNAL_PI_PROMPT_PATH ?? "/opt/pwc/pi-system-prompt.txt";
+  const source = options.source ?? await loadPromptAsset(assetPath);
   const date = new Date().toISOString().slice(0, 10);
   const catalogSource = options.taskCatalog === undefined
     ? source
@@ -88,7 +91,7 @@ export async function renderPrompt(options: {
     )
     : catalogSource;
   const researchSource = options.catalogToolsEnabled && pwcMcpEnabled()
-    ? renderMcpResearchPrompt(toolSource)
+    ? renderMcpResearchPrompt(toolSource, options.mcpSkill ?? await readFile(join(dirname(assetPath), "PWC_MCP_SKILL.md"), "utf8"))
     : toolSource;
   const rendered = researchSource
     .replace(DATE_SENTINEL, date)

@@ -1,3 +1,7 @@
+// PWC_MCP_SKILL.md is vendored unchanged from huggingface/pwc-cli
+// mcp_server/SKILL.md at 9129bbfbcd19aa1d7113788dc0f0c7b0f05a3514 (PR #11).
+import { PWC_MCP_TOOLS } from "./pwc_mcp_tools.js";
+
 /** Render the research workflow for MCP without the conflicting PwC CLI guide. */
 const MCP_RESEARCH_USAGE = `<catalog_usage>
 Use the registered PwC MCP tools for catalog research. Do not run the pwc CLI through Bash or read its CLI skill. These catalog tools work without a sandbox. A Bash/executor failure does not mean the MCP catalog is unavailable.
@@ -6,7 +10,7 @@ For best, top, leading, or SOTA models for a task, first call pwc_get_task with 
 
 Use the task and method indexes below to resolve names and acronyms. Verify a method with pwc_get_method. A missing exact task lookup is not proof that the entire field is absent: try a suitable parent or nearby canonical task from the index, and search task-scoped benchmarks.
 
-Use pwc_search_papers for paper discovery, pwc_list_papers for filtered listings, pwc_get_paper_info for metadata and links, pwc_read_paper for paper text, pwc_get_related_papers for related work, and pwc_get_paper_lineage for lineage. Use exact returned paper IDs after discovery. Registered tool schemas define valid arguments and limits; do not copy CLI flags into them. Follow next_cursor when reading more paper text, respecting output truncation and the existing tool budget.
+Follow the appended PwC MCP skill for tool selection and research workflows. Use exact returned paper IDs after discovery. Registered tool schemas define valid arguments and limits; do not copy CLI flags into them. Follow next_cursor when reading more paper text, respecting output truncation and the existing tool budget.
 
 Start named model-family research with PwC even for closed models. Resolve the exact family, check publication dates and official release sources, and verify recent releases with pwc_list_papers using organization and date ordering where appropriate. Do not select an older report merely because it has more citations.
 
@@ -25,8 +29,9 @@ const COMMAND_TO_TOOL: readonly [string, string][] = [
   ["pwc search", "pwc_search_papers"],
 ];
 
-export function renderMcpResearchPrompt(source: string): string {
-  return source
+export function renderMcpResearchPrompt(source: string, skill: string): string {
+  const adaptedSkill = skill.replace(new RegExp(`\\b(${PWC_MCP_TOOLS.join("|")})\\b`, "gu"), name => `pwc_${name}`);
+  const rendered = source
     .replace(/<cli_usage>[\s\S]*?<\/cli_usage>/u, MCP_RESEARCH_USAGE)
     .replace(/\n# pwc CLI skill\n[\s\S]*?(?=\n# s2 CLI skill\n)/u, "\n")
     .replace(/You run inside a secure, disposable sandbox[^\n]+/u,
@@ -36,4 +41,5 @@ export function renderMcpResearchPrompt(source: string): string {
       const mapped = COMMAND_TO_TOOL.find(([prefix]) => text === prefix || text.startsWith(`${prefix} `));
       return mapped ? `\`${mapped[1]}\`` : "the registered PwC MCP tools";
     });
+  return `${rendered}\n\n# PwC MCP skill\n\n${adaptedSkill}\n\nApplication policy: Use the registered PwC MCP tools for catalog research. Unsupported CLI-only catalog capabilities are unavailable in this chat; do not invoke the pwc CLI as a fallback. Existing per-turn budgets and output limits still apply.\n`;
 }

@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { PWC_MCP_TOOLS } from "../src/pwc_mcp_tools.js";
+
+const skill = readFileSync(new URL("../../PWC_MCP_SKILL.md", import.meta.url), "utf8");
 import { renderMcpResearchPrompt } from "../src/mcp_research_prompt.js";
 import { renderPrompt } from "../src/prompt.js";
 
@@ -17,9 +24,15 @@ Anonymous only. Never authenticate.
 `;
 
 test("MCP research replaces CLI-first workflows and retains other tools and limits", () => {
-  const rendered = renderMcpResearchPrompt(source);
+  const rendered = renderMcpResearchPrompt(source, skill);
   assert.doesNotMatch(rendered, /<cli_usage>|# pwc CLI skill|`pwc\s|Run pwc search/u);
   for (const tool of ["pwc_get_task", "pwc_list_benchmarks", "pwc_get_benchmark", "pwc_list_papers", "pwc_get_paper_info"]) assert.ok(rendered.includes(tool));
+  assert.match(rendered, /# PwC MCP skill/u);
+  for (const tool of PWC_MCP_TOOLS) assert.ok(rendered.includes(`pwc_${tool}`));
+  assert.match(rendered, /next_cursor/u);
+  assert.match(rendered, /60 total requests/u);
+  assert.match(rendered, /authors/u);
+  assert.match(rendered, /do not invoke the pwc CLI as a fallback/u);
   assert.match(rendered, /12 tool calls, 4 searches/u);
   assert.match(rendered, /Use s2 refs for references/u);
   assert.match(rendered, /Anonymous only. Never authenticate/u);
@@ -29,7 +42,7 @@ test("MCP research replaces CLI-first workflows and retains other tools and limi
 test("only enabled MCP catalog turns replace the legacy workflow", async () => {
   const old = process.env.PWC_CHAT_PWC_MCP_ENABLED;
   try {
-    const options = { source, model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false };
+    const options = { source, mcpSkill: skill, model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false };
     process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
     const enabled = await renderPrompt({ ...options, catalogToolsEnabled: true });
     assert.doesNotMatch(enabled, /<cli_usage>|# pwc CLI skill/u);
@@ -41,5 +54,26 @@ test("only enabled MCP catalog turns replace the legacy workflow", async () => {
   } finally {
     if (old === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
     else process.env.PWC_CHAT_PWC_MCP_ENABLED = old;
+  }
+});
+
+
+test("MCP turns load the packaged skill beside the canonical prompt asset", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "pwc-mcp-skill-"));
+  const old = process.env.PWC_CHAT_PWC_MCP_ENABLED;
+  try {
+    process.env.PWC_CHAT_PWC_MCP_ENABLED = "true";
+    const assetPath = join(directory, "pi-system-prompt.txt");
+    await writeFile(assetPath, source);
+    await writeFile(join(directory, "PWC_MCP_SKILL.md"), skill);
+    const rendered = await renderPrompt({ assetPath, model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false, catalogToolsEnabled: true });
+    assert.match(rendered, /# PwC MCP skill/u);
+    assert.match(rendered, /pwc_read_paper/u);
+    assert.doesNotMatch(rendered, /# pwc CLI skill/u);
+    for (const tool of PWC_MCP_TOOLS) assert.ok(rendered.includes(`pwc_${tool}(`));
+  } finally {
+    if (old === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;
+    else process.env.PWC_CHAT_PWC_MCP_ENABLED = old;
+    await rm(directory, { recursive: true, force: true });
   }
 });

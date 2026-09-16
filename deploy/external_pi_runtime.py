@@ -54,6 +54,7 @@ PROMPT_INPUTS = (
     Path("backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md"),
     Path("backend/chat_sandbox_worker/PAPER_AUTHORING.md"),
     Path("backend/chat_sandbox_worker/PWC_CLI_SKILL.md"),
+    Path("backend/chat_sandbox_worker/PWC_MCP_SKILL.md"),
     Path("backend/chat_sandbox_worker/HF_CLI_SKILL.md"),
     Path("backend/chat_sandbox_worker/S2_CLI_SKILL.md"),
     Path("backend/chat_sandbox_worker/TASK_CATALOG.md"),

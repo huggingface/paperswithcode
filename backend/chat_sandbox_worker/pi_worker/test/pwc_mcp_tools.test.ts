@@ -70,7 +70,7 @@ test("MCP tools preserve shared search, call, and output budgets", async () => {
     assert.match(p.authorize("b", "bash", { command: "pwc search x" }) ?? "", /Answer now/iu);
     const { renderPrompt } = await import("../src/prompt.js");
     const prompt = await renderPrompt({ model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false,
-      catalogToolsEnabled: true, source: "The available tools for a normal research turn are Bash, Read, and search_web." });
+      catalogToolsEnabled: true, mcpSkill: "Pinned MCP skill", source: "The available tools for a normal research turn are Bash, Read, and search_web." });
     assert.ok(prompt.includes("pwc_read_paper") && prompt.includes("pwc_search_papers"));
   } finally {
     if (original === undefined) delete process.env.PWC_CHAT_PWC_MCP_ENABLED;

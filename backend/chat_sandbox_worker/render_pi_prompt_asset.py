@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 from datetime import date
 from pathlib import Path
 
@@ -26,6 +27,10 @@ def main() -> None:
         paper_artifacts_enabled=True,
     )
     args.output.write_text(value, encoding="utf-8")
+    shutil.copyfile(
+        Path(__file__).with_name("PWC_MCP_SKILL.md"),
+        args.output.with_name("PWC_MCP_SKILL.md"),
+    )
 
 
 if __name__ == "__main__":

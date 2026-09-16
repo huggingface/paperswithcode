@@ -36,6 +36,7 @@ PROMPT_INPUTS = (
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING.md",
     "backend/chat_sandbox_worker/PWC_CLI_SKILL.md",
+    "backend/chat_sandbox_worker/PWC_MCP_SKILL.md",
     "backend/chat_sandbox_worker/HF_CLI_SKILL.md",
     "backend/chat_sandbox_worker/S2_CLI_SKILL.md",
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
@@ -141,6 +142,7 @@ def test_external_pi_identity_is_stable_and_changes_with_every_input(tmp_path: P
         "backend/chat_sandbox_worker/pi_worker/src/external_http_main.ts",
         "backend/chat_sandbox_worker/pi_worker/test/external_http_main.test.ts",
         "backend/chat_sandbox_worker/PWC_CLI_SKILL.md",
+        "backend/chat_sandbox_worker/PWC_MCP_SKILL.md",
     ):
         path = release / relative
         original = path.read_text(encoding="utf-8")
