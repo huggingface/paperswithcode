@@ -53,7 +53,12 @@ def issues(api, repository: str, *, state: str = "all", creator: str | None = No
         page += 1
 
 
-def site_issues(api, repository: str):
+# GitHub allows 30 authenticated search requests per minute; pacing every
+# search call at this interval keeps a full 50-repository pass under that cap.
+SEARCH_PACE_SECONDS = 2
+
+
+def site_issues(api, repository: str, *, sleep=time.sleep):
     """Yield issues in ``repository`` whose body links a Papers with Code paper.
 
     Repository-wide ``/issues`` listings reject page-based pagination on large
@@ -62,6 +67,7 @@ def site_issues(api, repository: str):
     """
     page = 1
     while True:
+        sleep(SEARCH_PACE_SECONDS)
         batch = api(
             [
                 "search/issues",
@@ -223,7 +229,7 @@ class OutreachRunner:
             self.record("open_issue", repository)
             return
         covered = set(record.get("covered", []))
-        for issue in site_issues(self.api, repository):
+        for issue in site_issues(self.api, repository, sleep=self.sleep):
             covered.update(
                 paper.id
                 for paper in uncovered

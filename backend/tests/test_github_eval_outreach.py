@@ -3,7 +3,11 @@ import subprocess
 import pytest
 
 from backend.services.github_eval_outreach_catalog import OutreachPaper
-from backend.services.github_eval_outreach_service import OutreachRunner, matches_paper
+from backend.services.github_eval_outreach_service import (
+    OutreachRunner,
+    SEARCH_PACE_SECONDS,
+    matches_paper,
+)
 from backend.services.github_eval_outreach_state import OutreachState
 from backend.services.github_issue_body_service import (
     GithubIssueDraft,
@@ -161,6 +165,30 @@ def test_closed_arxiv_url_among_many_unrelated_issues_blocks_via_search(state):
         call[0] == "repos/lab/code/issues" and "creator=NielsRogge" not in call
         for call in github.calls
     )
+
+
+def test_site_issue_search_is_paced_under_the_search_rate_limit(state):
+    github = Github()
+    github.rows = [
+        {
+            "state": "closed",
+            "body": "https://paperswithcode.co/paper/2601.00001v1#results",
+        }
+    ]
+    sleeps = []
+    cohort = {"lab/code": {1: OutreachPaper(1, "2601.00001v2", True)}}
+    result = OutreachRunner(
+        state,
+        github,
+        lambda: cohort,
+        draft,
+        sleep=sleeps.append,
+        now=lambda: 1_000_000,
+    ).run()
+    assert result["counts"]["already_contacted"] == 1
+    searches = sum(call[0] == "search/issues" for call in github.calls)
+    assert searches == 1
+    assert sleeps.count(SEARCH_PACE_SECONDS) == searches
 
 
 def test_site_issue_search_paginates_past_one_hundred_matches(state):
