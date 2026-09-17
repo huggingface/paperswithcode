@@ -863,6 +863,7 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
     job.budget_affordable_jobs = 0
     job.retryable_papers_blocked_by_budget = 0
     job.paid_authorization_required = False
+    job.stalled_scheduling_jobs = 0
     job.paid_canary = False
     job.probe_volume = False
     job.recover_mount_failures = False
@@ -2261,6 +2262,73 @@ def test_live_repair_fallback_prioritizes_missing_work_and_respects_mode(
         == expected_missing
     )
     assert papers[1]["arxiv_id"] not in [item["arxiv_id"] for item in candidates]
+
+
+def _scheduling_job(job_id: str, *, age: timedelta, mode: str = "backfill"):
+    return SimpleNamespace(
+        id=job_id,
+        status=SimpleNamespace(
+            stage="SCHEDULING", message="Waiting for requested hardware"
+        ),
+        labels={"app": "pwc-paper-markdown", "mode": mode},
+        created_at=datetime.now(UTC) - age,
+    )
+
+
+def test_stalled_scheduling_jobs_are_cancelled_and_freed_from_slot_accounting():
+    job = _scheduler(execute=True, confirm=True, full=True)
+    job.api = Mock()
+    stalled = _scheduling_job("stalled", age=timedelta(hours=9))
+    stalled_live = _scheduling_job("stalled-live", age=timedelta(hours=9), mode="live")
+    fresh = _scheduling_job("fresh", age=timedelta(minutes=5))
+    running = _remote_job("running", stage="RUNNING", message=None)
+    foreign = SimpleNamespace(
+        id="foreign",
+        status=SimpleNamespace(stage="SCHEDULING", message=None),
+        labels={"app": "other"},
+        created_at=datetime.now(UTC) - timedelta(days=1),
+    )
+    kept = job._reap_stalled_scheduling(
+        [stalled, stalled_live, fresh, running, foreign]
+    )
+    assert [item.id for item in kept] == ["fresh", "running", "foreign"]
+    assert job.stalled_scheduling_jobs == 2
+    assert sorted(
+        call.kwargs["job_id"] for call in job.api.cancel_job.call_args_list
+    ) == ["stalled", "stalled-live"]
+    assert all(
+        call.kwargs["namespace"] == "test-owner"
+        for call in job.api.cancel_job.call_args_list
+    )
+
+
+def test_dry_run_reports_stalled_scheduling_jobs_without_cancelling():
+    job = _scheduler(execute=False, confirm=False, full=True)
+    job.api = Mock()
+    stalled = _scheduling_job("stalled", age=timedelta(hours=2))
+    # The dry run previews the execute plan (slot freed) but never cancels.
+    assert job._reap_stalled_scheduling([stalled]) == []
+    assert job.stalled_scheduling_jobs == 1
+    job.api.cancel_job.assert_not_called()
+
+
+def test_launch_reaps_stalled_scheduling_before_counting_active_slots():
+    job = _scheduler(execute=True, confirm=True, full=True)
+    job.api = Mock()
+    job._remote_jobs = Mock(
+        return_value=[_scheduling_job("stalled", age=timedelta(hours=9))]
+    )
+    seen = {}
+
+    def budget(desired, jobs):
+        seen["desired"], seen["jobs"] = desired, jobs
+        return {"affordable_jobs": 0}
+
+    job._budget_decision = budget
+    assert job._launch([]) == []
+    job.api.cancel_job.assert_called_once()
+    assert seen["desired"] == 0
+    assert seen["jobs"] == []
 
 
 def test_repair_dispatch_waits_for_existing_remote_worker():

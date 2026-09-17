@@ -34,6 +34,11 @@ from scripts.utils.cron_helpers import CronJobBase
 
 ARXIV_ID = re.compile(r"^(?P<base>\d{4}\.\d{4,5})(?:v\d+)?$")
 ACTIVE_STAGES = {"PENDING", "RUNNING", "STARTING", "QUEUED", "SCHEDULING"}
+# A job still SCHEDULING ("waiting for requested hardware") this long is not
+# going to start; it only pins one of the few concurrency slots.  On
+# 2026-09-17 three such jobs held every backfill and live slot for nine hours
+# and admission reported desired=0 all day.
+SCHEDULING_STALL = timedelta(minutes=90)
 SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -249,6 +254,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         self.budget_affordable_jobs = 0
         self.retryable_papers_blocked_by_budget = 0
         self.paid_authorization_required = False
+        self.stalled_scheduling_jobs = 0
         self.api = HfApi(token=self.settings.hf_token or None)
         self.filesystem = HfFileSystem(token=self.settings.hf_token or None)
 
@@ -388,6 +394,42 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 token=self.settings.hf_token or None,
             )
         )
+
+    def _reap_stalled_scheduling(self, jobs: list[object]) -> list[object]:
+        """Cancel our jobs stuck in SCHEDULING past SCHEDULING_STALL.
+
+        Returns the remaining jobs so slot accounting does not count a job
+        that will never leave the hardware queue.  Dry runs only report.
+        """
+        now = datetime.now(UTC)
+        kept: list[object] = []
+        for job in jobs:
+            created = getattr(job, "created_at", None)
+            if isinstance(created, datetime) and created.tzinfo is None:
+                created = created.replace(tzinfo=UTC)
+            stalled = (
+                job_stage(job) == "SCHEDULING"
+                and job_labels(job).get("app") == "pwc-paper-markdown"
+                and isinstance(created, datetime)
+                and now - created >= SCHEDULING_STALL
+            )
+            if not stalled:
+                kept.append(job)
+                continue
+            self.stalled_scheduling_jobs += 1
+            job_id = str(getattr(job, "id", ""))
+            if self.should_execute:
+                self.api.cancel_job(
+                    job_id=job_id, namespace=self.settings.paper_markdown_hf_namespace
+                )
+            self.logger.warning(
+                "paper Markdown job %s %s after %s in SCHEDULING (%s)",
+                job_id,
+                "cancelled" if self.should_execute else "would be cancelled",
+                now - created,
+                job_stage_message(job) or "no status message",
+            )
+        return kept
 
     def _active_jobs(self, jobs: list[object]) -> list[object]:
         return [
@@ -783,7 +825,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         *,
         additional_active_job_ids: set[str] | None = None,
     ) -> list[dict[str, str]]:
-        remote_jobs = self._remote_jobs()
+        remote_jobs = self._reap_stalled_scheduling(self._remote_jobs())
         active = self._active_jobs(remote_jobs)
         if active and any(item.get("replace_invalid_sha256") for item in candidates):
             self.logger.warning(
@@ -1209,6 +1251,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             "ocr_candidates": len(candidates),
             "retry_only": self.retry_only,
             "jobs_planned_or_launched": len(launched),
+            "stalled_scheduling_jobs": self.stalled_scheduling_jobs,
             "desired_jobs": self.budget_desired_jobs,
             "affordable_jobs": self.budget_affordable_jobs,
             "papers_planned_or_launched": sum(int(item["papers"]) for item in launched),
