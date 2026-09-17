@@ -33,16 +33,16 @@ describe("McpView", () => {
         JSON.stringify({
           status: "ok",
           service: "pwc-mcp",
-          version: "0.2.0",
-          protocol: "2026-07-28",
+          version: "0.2.1",
+          protocol: "2025-11-25",
         }),
         { status: 200 },
       ),
     );
     renderView();
 
-    await waitFor(() => expect(screen.getByText(/Operational · v0.2.0/)).toBeInTheDocument());
-    expect(screen.getByText(/Primary protocol: 2026-07-28/)).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText(/Operational · v0.2.1/)).toBeInTheDocument());
+    expect(screen.getByText(/Primary protocol: 2025-11-25/)).toBeInTheDocument();
   });
 
   it("documents every agreed tool and resource", () => {
@@ -54,14 +54,21 @@ describe("McpView", () => {
       "list_papers",
       "get_paper_info",
       "read_paper",
+      "list_recent_papers",
       "get_related_papers",
-      "get_trending_papers",
+      "list_trending_papers",
       "get_paper_evaluations",
       "get_paper_lineage",
       "get_task",
       "list_tasks",
       "get_method",
       "list_methods",
+      "get_conference",
+      "list_conferences",
+      "get_organization",
+      "list_organizations",
+      "get_framework",
+      "list_frameworks",
       "list_benchmarks",
       "get_benchmark",
     ]) {
