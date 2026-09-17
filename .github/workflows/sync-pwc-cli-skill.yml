@@ -9,18 +9,20 @@ concurrency:
   group: sync-chat-cli-skill
   cancel-in-progress: false
 
-permissions:
-  contents: write
+
+permissions: {}
 
 jobs:
   sync:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     env:
       UPSTREAM_REPOSITORY: huggingface/pwc-cli
       UPSTREAM_PATH: standalone_cli/SKILL.md
       DESTINATION: backend/chat_sandbox_worker/PWC_CLI_SKILL.md
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: main
 
