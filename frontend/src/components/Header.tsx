@@ -29,9 +29,9 @@ interface HeaderProps {
 
 const FEEDBACK_URL =
   "https://github.com/huggingface/paperswithcode-feedback/issues";
-const PWC_CLI_URL = "https://github.com/huggingface/pwc-cli";
-const PWC_CLI_ANNOUNCEMENT_DISMISSED_KEY =
-  "pwc:announcement:pwc-cli:v1:dismissed";
+const PWC_MCP_URL = "https://github.com/huggingface/pwc-cli#mcp-server";
+const PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY =
+  "pwc:announcement:pwc-mcp:v1:dismissed";
 
 type HeaderNavLink = {
   to: string;
@@ -73,8 +73,8 @@ const SearchShortcutHint: React.FC = () => {
 
 const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [showCliAnnouncement, setShowCliAnnouncement] = React.useState(
-    () => localStorage.getItem(PWC_CLI_ANNOUNCEMENT_DISMISSED_KEY) !== "1",
+  const [showMcpAnnouncement, setShowMcpAnnouncement] = React.useState(
+    () => localStorage.getItem(PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY) !== "1",
   );
   const navRef = React.useRef<HTMLElement>(null);
   const navIndicatorRef = React.useRef<HTMLSpanElement>(null);
@@ -194,19 +194,20 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
             <HeaderIcon name={mobileOpen ? "close" : "menu"} size={14} />
           </button>
         </div>
-        {!isReaderRoute && showCliAnnouncement && (
+        {!isReaderRoute && showMcpAnnouncement && (
           <div className="site-announcement" role="status">
-            <span>New: Papers with Code CLI and Skill now </span>
-            <a href={PWC_CLI_URL} target="_blank" rel="noreferrer">
-              available
+            <span>New: Papers with Code </span>
+            <a href={PWC_MCP_URL} target="_blank" rel="noreferrer">
+              MCP
             </a>
+            <span> now available</span>
             <button
               type="button"
               className="site-announcement-close"
               aria-label="Dismiss announcement"
               onClick={() => {
-                localStorage.setItem(PWC_CLI_ANNOUNCEMENT_DISMISSED_KEY, "1");
-                setShowCliAnnouncement(false);
+                localStorage.setItem(PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY, "1");
+                setShowMcpAnnouncement(false);
               }}
             >
               <HeaderIcon name="close" size={11} />

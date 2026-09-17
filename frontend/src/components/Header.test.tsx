@@ -55,8 +55,11 @@ describe("Header navigation", () => {
     expect(desktopLinks[2]).toHaveAccessibleName("Browse state-of-the-art");
     expect(within(desktopLinks[1]).getByText("New")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "New: Papers with Code CLI and Skill now available",
+      "New: Papers with Code MCP now available",
     );
+    expect(
+      within(screen.getByRole("status")).getByRole("link", { name: "MCP" }),
+    ).toHaveAttribute("href", "https://github.com/huggingface/pwc-cli#mcp-server");
     expect(within(screen.getByRole("status")).queryByRole("link", { name: "chat" }))
       .not.toBeInTheDocument();
 
@@ -101,7 +104,7 @@ describe("Header navigation", () => {
     expect(container.querySelectorAll(".nav-indicator")).toHaveLength(1);
   });
 
-  it("hides the CLI announcement on PDF reader routes", () => {
+  it("hides the MCP announcement on PDF reader routes", () => {
     render(
       <MemoryRouter initialEntries={["/pdf/2606.03748"]}>
         <Header onOpenSearch={vi.fn()} />
@@ -111,7 +114,7 @@ describe("Header navigation", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("remembers when the CLI announcement is dismissed", async () => {
+  it("remembers when the MCP announcement is dismissed", async () => {
     const user = userEvent.setup();
     const firstRender = render(
       <MemoryRouter>
