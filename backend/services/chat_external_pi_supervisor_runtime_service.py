@@ -16,7 +16,28 @@ from backend.services.chat_external_pi_supervisor import (
     ChatExternalPiSupervisor,
     ExternalPiWorkerDrainIncomplete,
 )
-from backend.services.chat_external_worker_registry import ExternalWorkerClaim
+from backend.services.chat_external_worker_registry import (
+    ExternalWorkerClaim,
+    StaleWorkerClaim,
+    WorkerLeaseUnavailable,
+)
+
+LifecycleEvent = Literal["registered", "heartbeat", "lease_lost", "drained"]
+
+# Conditions worth retrying inside the registration window: the worker endpoint
+# or the database is unreachable, or the durable registry still shows a live
+# lease from a previous claim that has yet to run out.
+_REGISTRATION_RETRY_ERRORS = (
+    ExternalPiWorkerUnavailable,
+    WorkerLeaseUnavailable,
+    OperationalError,
+)
+# A heartbeat that never reached the worker or the database. The claim may
+# still be good, so keep trying until the local lease window runs out.
+_HEARTBEAT_TRANSPORT_ERRORS = (ExternalPiWorkerUnavailable, OperationalError)
+# The registry rejected the claim itself: a newer generation fenced it or the
+# durable lease already expired. It must never be heartbeated again.
+_HEARTBEAT_FENCED_ERRORS = (StaleWorkerClaim, WorkerLeaseUnavailable)
 
 
 class StopWaiter(Protocol):
@@ -30,7 +51,7 @@ class Sleeper(Protocol):
 class LifecycleObserver(Protocol):
     def __call__(
         self,
-        event: Literal["registered", "heartbeat", "drained"],
+        event: LifecycleEvent,
         claim: ExternalWorkerClaim,
         heartbeats: int,
     ) -> None: ...
@@ -48,7 +69,7 @@ class ExternalPiSupervisorStartupTimeout(RuntimeError):
 
 
 class ExternalPiSupervisorLeaseLost(RuntimeError):
-    """The supervisor could not renew its lease before it expired."""
+    """The lease expired and a replacement claim could not be established."""
 
 
 class ExternalPiSupervisorDrainTimeout(RuntimeError):
@@ -91,18 +112,19 @@ class ChatExternalPiSupervisorRuntime:
             ) from error
         await self.sleep(min(self.drain_poll_seconds, remaining))
 
-    async def run(self) -> ExternalPiSupervisorRunResult:
+    async def _register(self) -> ExternalWorkerClaim | None:
+        """Claim the worker, retrying transient failures within the startup window.
+
+        Returns ``None`` when a stop was requested before the claim succeeded.
+        """
         started_at = self.monotonic()
         while True:
             registration_now = self.now()
             try:
-                claim: ExternalWorkerClaim = await self._transaction(
+                return await self._transaction(
                     lambda db: self.supervisor.register(db, now=registration_now)
                 )
-                if self.observe is not None:
-                    self.observe("registered", claim, 0)
-                break
-            except (ExternalPiWorkerUnavailable, OperationalError) as error:
+            except _REGISTRATION_RETRY_ERRORS as error:
                 remaining = self.startup_timeout_seconds - (
                     self.monotonic() - started_at
                 )
@@ -113,27 +135,56 @@ class ChatExternalPiSupervisorRuntime:
                 if await self.wait_for_stop(
                     min(self.heartbeat_interval_seconds, remaining)
                 ):
-                    return ExternalPiSupervisorRunResult(0, 0, False)
+                    return None
 
+    async def _reregister(
+        self, lost: ExternalWorkerClaim, heartbeats: int
+    ) -> ExternalWorkerClaim | None:
+        """Replace a claim whose lease can no longer be proven.
+
+        Whether the local lease window ran out (an event loop stalled by a
+        starved host) or the registry fenced the claim, the old claim must
+        never be heartbeated again. Exiting the process used to enforce that,
+        at the price of a systemd restart, an unroutable worker in between,
+        and a crash loop whenever the restart itself failed. Take a fresh claim
+        in-process through the same fenced registration a restart would run:
+        a lease the registry still considers live is renewed under the same
+        generation, an expired one advances the generation and fences the old
+        owner.
+        """
+        if self.observe is not None:
+            self.observe("lease_lost", lost, heartbeats)
+        try:
+            return await self._register()
+        except ExternalPiSupervisorStartupTimeout as error:
+            raise ExternalPiSupervisorLeaseLost(
+                "External Pi worker lease expired and could not be re-established"
+            ) from error
+
+    async def _heartbeat_until_stop_or_lease_loss(
+        self, claim: ExternalWorkerClaim, heartbeats: int
+    ) -> tuple[Literal["stop", "lease_lost"], int]:
+        """Renew the claim until a stop is requested or its lease cannot be kept.
+
+        Returns the outcome and the cumulative heartbeat count.
+        """
         last_heartbeat_at = self.monotonic()
-        heartbeats = 0
-
         while True:
             lease_remaining = self.supervisor.lease_seconds - (
                 self.monotonic() - last_heartbeat_at
             )
             if lease_remaining <= 0:
-                raise ExternalPiSupervisorLeaseLost("External Pi worker lease expired")
+                return "lease_lost", heartbeats
             if await self.wait_for_stop(
                 min(self.heartbeat_interval_seconds, lease_remaining)
             ):
-                break
+                return "stop", heartbeats
             heartbeat_started_at = self.monotonic()
             if (
                 heartbeat_started_at - last_heartbeat_at
                 >= self.supervisor.lease_seconds
             ):
-                raise ExternalPiSupervisorLeaseLost("External Pi worker lease expired")
+                return "lease_lost", heartbeats
             heartbeat_now = self.now()
             try:
                 await self._transaction(
@@ -143,18 +194,36 @@ class ChatExternalPiSupervisorRuntime:
                         now=heartbeat_now,
                     )
                 )
-                last_heartbeat_at = heartbeat_started_at
-                heartbeats += 1
-                if self.observe is not None:
-                    self.observe("heartbeat", claim, heartbeats)
-            except (ExternalPiWorkerUnavailable, OperationalError) as error:
+            except _HEARTBEAT_FENCED_ERRORS:
+                return "lease_lost", heartbeats
+            except _HEARTBEAT_TRANSPORT_ERRORS:
                 if (
                     self.monotonic() - last_heartbeat_at
                     >= self.supervisor.lease_seconds
                 ):
-                    raise ExternalPiSupervisorLeaseLost(
-                        "External Pi worker lease could not be renewed"
-                    ) from error
+                    return "lease_lost", heartbeats
+                continue
+            last_heartbeat_at = heartbeat_started_at
+            heartbeats += 1
+            if self.observe is not None:
+                self.observe("heartbeat", claim, heartbeats)
+
+    async def run(self) -> ExternalPiSupervisorRunResult:
+        registrations = 0
+        heartbeats = 0
+        claim = await self._register()
+        while claim is not None:
+            registrations += 1
+            if self.observe is not None:
+                self.observe("registered", claim, heartbeats)
+            outcome, heartbeats = await self._heartbeat_until_stop_or_lease_loss(
+                claim, heartbeats
+            )
+            if outcome == "stop":
+                break
+            claim = await self._reregister(claim, heartbeats)
+        if claim is None:
+            return ExternalPiSupervisorRunResult(registrations, heartbeats, False)
 
         drain_deadline = self.monotonic() + self.supervisor.drain_seconds
         while True:
@@ -188,7 +257,7 @@ class ChatExternalPiSupervisorRuntime:
         if self.observe is not None:
             self.observe("drained", claim, heartbeats)
         return ExternalPiSupervisorRunResult(
-            registrations=1,
+            registrations=registrations,
             heartbeats=heartbeats,
             drained=True,
         )

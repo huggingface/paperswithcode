@@ -7,13 +7,15 @@ import json
 import os
 import signal
 from pathlib import Path
-from typing import Literal
 
 import httpx
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
 from backend.scripts.run_external_pi_supervisor import build_runtime
+from backend.services.chat_external_pi_supervisor_runtime_service import (
+    LifecycleEvent,
+)
 from backend.services.chat_external_worker_registry import ExternalWorkerClaim
 
 
@@ -57,17 +59,25 @@ async def run() -> None:
         return True
 
     def observe(
-        event: Literal["registered", "heartbeat", "drained"],
+        event: LifecycleEvent,
         claim: ExternalWorkerClaim,
         heartbeats: int,
     ) -> None:
+        # A lost lease sends the runtime back through registration, so report
+        # the same transitional state as a fresh start until a new claim lands.
+        if event == "lease_lost":
+            worker_state = "starting"
+        elif event == "drained":
+            worker_state = "offline"
+        else:
+            worker_state = "ready"
         state.update(
             {
                 "authenticated": True,
-                "registered": True,
+                "registered": event != "lease_lost",
                 "generation": claim.generation,
                 "heartbeats": heartbeats,
-                "state": "offline" if event == "drained" else "ready",
+                "state": worker_state,
                 "drained": event == "drained",
             }
         )

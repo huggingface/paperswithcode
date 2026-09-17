@@ -15,8 +15,23 @@ from backend.services.chat_external_pi_supervisor import ExternalPiWorkerDrainIn
 from backend.services.chat_external_pi_supervisor_runtime_service import (
     ChatExternalPiSupervisorRuntime,
     ExternalPiSupervisorLeaseLost,
+    ExternalPiSupervisorRunResult,
 )
-from backend.services.chat_external_worker_registry import ExternalWorkerClaim
+from backend.services.chat_external_worker_registry import (
+    ExternalWorkerClaim,
+    StaleWorkerClaim,
+    WorkerLeaseUnavailable,
+)
+
+
+def _claim(generation=3):
+    return ExternalWorkerClaim(
+        "worker-1",
+        uuid.UUID("10000000-0000-4000-8000-000000000001"),
+        generation,
+        "release-a",
+        "external-pi-v1",
+    )
 
 
 def _status(*, state="ready", active=0, generation=None):
@@ -220,40 +235,54 @@ def test_successful_slow_registration_starts_a_fresh_lease_window():
     supervisor.heartbeat.assert_awaited_once()
 
 
-def test_runtime_fails_closed_when_heartbeat_outage_consumes_the_lease():
-    claim = ExternalWorkerClaim(
-        "worker-1",
-        uuid.UUID("10000000-0000-4000-8000-000000000001"),
-        3,
-        "release-a",
-        "external-pi-v1",
-    )
-    supervisor = Mock(lease_seconds=15)
-    supervisor.register = AsyncMock(return_value=claim)
+def test_runtime_reregisters_when_a_heartbeat_outage_consumes_the_lease():
+    claim = _claim(3)
+    renewed = _claim(4)
+    supervisor = Mock(lease_seconds=15, drain_seconds=60)
+    supervisor.register = AsyncMock(side_effect=[claim, renewed])
     supervisor.heartbeat = AsyncMock(side_effect=ExternalPiWorkerUnavailable("offline"))
-    supervisor.begin_drain = AsyncMock()
+    supervisor.begin_drain = AsyncMock(return_value=_status(state="draining"))
+    supervisor.finish_drain = AsyncMock(return_value=None)
+    clock = [0.0]
 
     @contextmanager
     def session_factory():
         yield Mock()
 
+    async def wait_for_stop(seconds):
+        clock[0] += seconds
+        return supervisor.register.await_count == 2
+
+    observe = Mock()
     runtime = ChatExternalPiSupervisorRuntime(
         supervisor=supervisor,
         session_factory=session_factory,
         now=lambda: datetime(2026, 8, 26, 12, tzinfo=UTC),
-        monotonic=Mock(side_effect=(0, 0, 5, 10, 15)),
-        wait_for_stop=AsyncMock(return_value=False),
+        monotonic=lambda: clock[0],
+        wait_for_stop=wait_for_stop,
         sleep=AsyncMock(),
         heartbeat_interval_seconds=5,
         startup_timeout_seconds=30,
         drain_poll_seconds=1,
+        observe=observe,
     )
 
-    with pytest.raises(ExternalPiSupervisorLeaseLost):
-        asyncio.run(runtime.run())
+    result = asyncio.run(runtime.run())
 
-    supervisor.register.assert_awaited_once()
-    supervisor.begin_drain.assert_not_awaited()
+    assert result == ExternalPiSupervisorRunResult(
+        registrations=2, heartbeats=0, drained=True
+    )
+    # Two failed heartbeats consumed the 15 s lease and the third would have
+    # started at the deadline, so the loop gave up on the first claim and took
+    # a new one instead of exiting.
+    assert supervisor.heartbeat.await_count == 2
+    assert observe.call_args_list == [
+        (("registered", claim, 0),),
+        (("lease_lost", claim, 0),),
+        (("registered", renewed, 0),),
+        (("drained", renewed, 0),),
+    ]
+    assert supervisor.begin_drain.await_args.kwargs["claim"] is renewed
 
 
 def test_runtime_polls_an_incomplete_drain_until_the_worker_is_idle():
@@ -335,17 +364,15 @@ def test_runtime_retries_an_idempotent_drain_request_after_transport_failure():
     runtime.sleep.assert_awaited_once_with(1)
 
 
-def test_runtime_counts_slow_successful_heartbeats_against_the_durable_lease():
-    claim = ExternalWorkerClaim(
-        "worker-1",
-        uuid.UUID("10000000-0000-4000-8000-000000000001"),
-        3,
-        "release-a",
-        "external-pi-v1",
-    )
+def test_runtime_fails_closed_when_reregistration_outlives_the_startup_window():
+    claim = _claim(3)
     supervisor = Mock(lease_seconds=15)
-    supervisor.register = AsyncMock(return_value=claim)
     clock = [0.0]
+
+    async def register(*_args, **_kwargs):
+        if supervisor.register.await_count == 1:
+            return claim
+        raise ExternalPiWorkerUnavailable("offline")
 
     async def heartbeat(*_args, **_kwargs):
         if supervisor.heartbeat.await_count == 1:
@@ -354,7 +381,9 @@ def test_runtime_counts_slow_successful_heartbeats_against_the_durable_lease():
         clock[0] += 2
         raise ExternalPiWorkerUnavailable("offline")
 
+    supervisor.register = AsyncMock(side_effect=register)
     supervisor.heartbeat = AsyncMock(side_effect=heartbeat)
+    supervisor.begin_drain = AsyncMock()
 
     @contextmanager
     def session_factory():
@@ -379,19 +408,26 @@ def test_runtime_counts_slow_successful_heartbeats_against_the_durable_lease():
     with pytest.raises(ExternalPiSupervisorLeaseLost):
         asyncio.run(runtime.run())
 
+    # A slow successful heartbeat still counts against the durable lease: the
+    # second one finished 16 s after the first started, so the claim was lost.
     assert supervisor.heartbeat.await_count == 2
+    # Re-registration then retried for the whole startup window before the
+    # runtime failed closed.
+    assert supervisor.register.await_count > 2
+    assert clock[0] >= 21 + 30
+    supervisor.begin_drain.assert_not_awaited()
 
 
 def test_runtime_does_not_start_a_heartbeat_at_the_lease_deadline():
-    claim = ExternalWorkerClaim(
-        "worker-1",
-        uuid.UUID("10000000-0000-4000-8000-000000000001"),
-        3,
-        "release-a",
-        "external-pi-v1",
-    )
+    claim = _claim(3)
     supervisor = Mock(lease_seconds=15)
-    supervisor.register = AsyncMock(return_value=claim)
+
+    async def register(*_args, **_kwargs):
+        if supervisor.register.await_count == 1:
+            return claim
+        raise ExternalPiWorkerUnavailable("offline")
+
+    supervisor.register = AsyncMock(side_effect=register)
     supervisor.heartbeat = AsyncMock()
     clock = [0.0]
 
@@ -419,3 +455,109 @@ def test_runtime_does_not_start_a_heartbeat_at_the_lease_deadline():
         asyncio.run(runtime.run())
 
     supervisor.heartbeat.assert_not_awaited()
+
+
+def test_runtime_reregisters_in_process_after_a_stall_outlives_the_lease():
+    claim = _claim(3)
+    renewed = _claim(4)
+    supervisor = Mock(lease_seconds=15, drain_seconds=60)
+    supervisor.register = AsyncMock(side_effect=[claim, renewed])
+    supervisor.heartbeat = AsyncMock()
+    supervisor.begin_drain = AsyncMock(return_value=_status(state="draining"))
+    supervisor.finish_drain = AsyncMock(return_value=None)
+    clock = [0.0]
+    waits = [0]
+
+    @contextmanager
+    def session_factory():
+        yield Mock()
+
+    async def wait_for_stop(seconds):
+        waits[0] += 1
+        if waits[0] == 1:
+            # A starved host parks the event loop for far longer than the lease.
+            clock[0] += 40
+            return False
+        clock[0] += seconds
+        return True
+
+    observe = Mock()
+    runtime = ChatExternalPiSupervisorRuntime(
+        supervisor=supervisor,
+        session_factory=session_factory,
+        now=lambda: datetime(2026, 8, 26, 12, tzinfo=UTC),
+        monotonic=lambda: clock[0],
+        wait_for_stop=wait_for_stop,
+        sleep=AsyncMock(),
+        heartbeat_interval_seconds=5,
+        startup_timeout_seconds=30,
+        drain_poll_seconds=1,
+        observe=observe,
+    )
+
+    result = asyncio.run(runtime.run())
+
+    assert result == ExternalPiSupervisorRunResult(
+        registrations=2, heartbeats=0, drained=True
+    )
+    # The expired claim is never heartbeated; the runtime goes straight back
+    # through fenced registration and drains under the new claim.
+    supervisor.heartbeat.assert_not_awaited()
+    assert observe.call_args_list == [
+        (("registered", claim, 0),),
+        (("lease_lost", claim, 0),),
+        (("registered", renewed, 0),),
+        (("drained", renewed, 0),),
+    ]
+    assert supervisor.begin_drain.await_args.kwargs["claim"] is renewed
+    assert supervisor.finish_drain.await_args.kwargs["claim"] is renewed
+
+
+def test_runtime_reregisters_immediately_when_the_registry_fences_its_claim():
+    claim = _claim(3)
+    renewed = _claim(4)
+    supervisor = Mock(lease_seconds=15, drain_seconds=60)
+    supervisor.register = AsyncMock(
+        side_effect=[
+            claim,
+            WorkerLeaseUnavailable("External worker lease is still active"),
+            renewed,
+        ]
+    )
+    supervisor.heartbeat = AsyncMock(
+        side_effect=StaleWorkerClaim("External worker claim was fenced")
+    )
+    supervisor.begin_drain = AsyncMock(return_value=_status(state="draining"))
+    supervisor.finish_drain = AsyncMock(return_value=None)
+    clock = [0.0]
+
+    @contextmanager
+    def session_factory():
+        yield Mock()
+
+    async def wait_for_stop(seconds):
+        clock[0] += seconds
+        return supervisor.register.await_count == 3
+
+    runtime = ChatExternalPiSupervisorRuntime(
+        supervisor=supervisor,
+        session_factory=session_factory,
+        now=lambda: datetime(2026, 8, 26, 12, tzinfo=UTC),
+        monotonic=lambda: clock[0],
+        wait_for_stop=wait_for_stop,
+        sleep=AsyncMock(),
+        heartbeat_interval_seconds=5,
+        startup_timeout_seconds=30,
+        drain_poll_seconds=1,
+    )
+
+    result = asyncio.run(runtime.run())
+
+    assert result.registrations == 2
+    assert result.drained is True
+    # One fenced heartbeat is enough; the runtime does not wait out the lease.
+    assert supervisor.heartbeat.await_count == 1
+    # A registry that still shows the previous lease as live is retried inside
+    # the startup window rather than treated as fatal.
+    assert supervisor.register.await_count == 3
+    assert clock[0] == 5 + 5 + 5
