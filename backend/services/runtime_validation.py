@@ -203,8 +203,13 @@ _EXTERNAL_PI_CAPACITY_POLICIES = {
 _EXTERNAL_PI_CAPACITY_POLICY = _EXTERNAL_PI_CAPACITY_POLICIES[32]
 # OpenAI concurrency equals the tier; the ten-minute call allowance grows faster
 # because an MCP research turn spends 10-13 model calls and a full tier of turns
-# cycles several times per window.
-_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS = {32: 512, 64: 4096}
+# cycles several times per window. The 32-turn allowance keeps each
+# environment's established value; deploy/configure_host_env.py writes the same
+# table and a test pins the two together.
+_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS = {
+    "production": {32: 512, 64: 4096},
+    "staging": {32: 300, 64: 4096},
+}
 
 
 def validate_deployment_identity(settings: Settings) -> None:
@@ -895,11 +900,11 @@ def _external_pi_capacity_tier(settings: Settings) -> int | None:
     """Return the reviewed tier whose turn and OpenAI budgets the settings match."""
 
     tier = settings.chat_max_concurrency
+    allowances = _EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS.get(settings.environment, {})
     if (
         tier in _EXTERNAL_PI_CAPACITY_POLICIES
         and settings.chat_openai_global_max_concurrency == tier
-        and settings.chat_openai_global_rate_limit_calls
-        == _EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS[tier]
+        and settings.chat_openai_global_rate_limit_calls == allowances.get(tier)
     ):
         return tier
     return None

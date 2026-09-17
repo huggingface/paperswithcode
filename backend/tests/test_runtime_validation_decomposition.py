@@ -1274,20 +1274,23 @@ def test_sixty_four_turn_tier_is_a_reviewed_capacity_profile(
 
 
 @pytest.mark.parametrize(
-    ("turns", "openai_concurrency", "rate_calls", "recognized"),
+    ("environment", "turns", "openai_concurrency", "rate_calls", "recognized"),
     [
-        (32, 32, 512, True),
-        (64, 64, 4096, True),
-        (64, 64, 512, False),
-        (64, 32, 4096, False),
-        (32, 32, 4096, False),
-        (48, 48, 4096, False),
+        ("production", 32, 32, 512, True),
+        ("production", 64, 64, 4096, True),
+        ("production", 64, 64, 512, False),
+        ("production", 64, 32, 4096, False),
+        ("production", 32, 32, 4096, False),
+        ("production", 48, 48, 4096, False),
+        ("staging", 32, 32, 300, True),
+        ("staging", 32, 32, 512, False),
+        ("staging", 64, 64, 4096, True),
     ],
 )
 def test_durable_external_profile_requires_tier_consistent_openai_budgets(
-    settings_factory, turns, openai_concurrency, rate_calls, recognized
+    settings_factory, environment, turns, openai_concurrency, rate_calls, recognized
 ):
-    settings, _release = settings_factory("production")
+    settings, _release = settings_factory(environment)
     _configure_durable_external_admission_resource_profile(settings)
     settings.chat_max_concurrency = turns
     settings.chat_openai_global_max_concurrency = openai_concurrency
@@ -1299,4 +1302,18 @@ def test_durable_external_profile_requires_tier_consistent_openai_budgets(
     )
     assert runtime_validation._external_pi_capacity_tier(settings) == (
         turns if recognized else None
+    )
+
+
+def test_capacity_tier_openai_allowances_match_the_host_env_helper():
+    from deploy import configure_host_env
+
+    assert {
+        environment: {tier: str(calls) for tier, calls in allowances.items()}
+        for environment, allowances in (
+            runtime_validation._EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS.items()
+        )
+    } == configure_host_env._CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS
+    assert set(runtime_validation._EXTERNAL_PI_CAPACITY_POLICIES) == set(
+        configure_host_env.CHAT_CAPACITY_TIERS
     )
