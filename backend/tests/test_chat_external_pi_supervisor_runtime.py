@@ -561,3 +561,47 @@ def test_runtime_reregisters_immediately_when_the_registry_fences_its_claim():
     # the startup window rather than treated as fatal.
     assert supervisor.register.await_count == 3
     assert clock[0] == 5 + 5 + 5
+
+
+def test_runtime_reports_an_undrained_stop_that_interrupts_reregistration():
+    claim = _claim(3)
+    supervisor = Mock(lease_seconds=15, drain_seconds=60)
+    supervisor.register = AsyncMock(
+        side_effect=[claim, ExternalPiWorkerUnavailable("offline")]
+    )
+    supervisor.heartbeat = AsyncMock(side_effect=StaleWorkerClaim("fenced"))
+    supervisor.begin_drain = AsyncMock()
+    clock = [0.0]
+
+    @contextmanager
+    def session_factory():
+        yield Mock()
+
+    async def wait_for_stop(seconds):
+        clock[0] += seconds
+        # The stop lands while the replacement claim is still being retried.
+        return supervisor.register.await_count == 2
+
+    observe = Mock()
+    runtime = ChatExternalPiSupervisorRuntime(
+        supervisor=supervisor,
+        session_factory=session_factory,
+        now=lambda: datetime(2026, 8, 26, 12, tzinfo=UTC),
+        monotonic=lambda: clock[0],
+        wait_for_stop=wait_for_stop,
+        sleep=AsyncMock(),
+        heartbeat_interval_seconds=5,
+        startup_timeout_seconds=30,
+        drain_poll_seconds=1,
+        observe=observe,
+    )
+
+    result = asyncio.run(runtime.run())
+
+    # The caller can tell this apart from a stop before any claim existed:
+    # a claim was taken, nothing drained it, and the last event was the loss.
+    assert result == ExternalPiSupervisorRunResult(
+        registrations=1, heartbeats=0, drained=False
+    )
+    assert observe.call_args_list[-1] == (("lease_lost", claim, 0),)
+    supervisor.begin_drain.assert_not_awaited()
