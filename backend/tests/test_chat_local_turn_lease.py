@@ -490,6 +490,107 @@ def test_slow_terminal_keeps_heartbeat_live_until_transaction_returns(
     assert orchestrator.lease_heartbeat_task is None
 
 
+def test_failed_terminal_keeps_heartbeat_live_for_durable_retry(monkeypatch):
+    claim = TurnLeaseClaim(uuid.uuid4(), "local-runner:abc", 7, 1)
+    settings = get_settings().model_copy(
+        update={
+            "chat_durable_turn_dispatch_enabled": True,
+            "chat_external_pi_heartbeat_seconds": 0.01,
+        }
+    )
+    started = threading.Event()
+    release = threading.Event()
+    calls: list[TurnLeaseClaim] = []
+
+    def failing_terminal(path):
+        assert path == "close"
+        started.set()
+        assert release.wait(timeout=1)
+        raise RuntimeError("complete persist failed")
+
+    monkeypatch.setattr(
+        chat_stream_service,
+        "_heartbeat_local_turn",
+        lambda _settings, current: calls.append(current.durable_claim),
+    )
+    orchestrator = _orchestrator(settings, _admission(claim=claim))
+
+    async def exercise():
+        orchestrator.lease_heartbeat_task = asyncio.create_task(
+            orchestrator._heartbeat_durable_turn()
+        )
+        terminal = asyncio.create_task(
+            orchestrator._persist_terminal_with_lease(failing_terminal, "close")
+        )
+        while not started.is_set():
+            await asyncio.sleep(0)
+        await asyncio.sleep(0.035)
+        assert len(calls) >= 2
+        release.set()
+        with pytest.raises(RuntimeError, match="complete persist failed"):
+            await terminal
+        stopped_at = len(calls)
+        await asyncio.sleep(0.025)
+        assert len(calls) > stopped_at
+        await orchestrator._stop_lease_heartbeat()
+
+    asyncio.run(exercise())
+
+    assert orchestrator.lease_heartbeat_task is None
+
+
+def test_durable_close_keeps_heartbeat_when_terminal_is_unpersisted(monkeypatch):
+    claim = TurnLeaseClaim(uuid.uuid4(), "local-runner:abc", 7, 1)
+    settings = get_settings().model_copy(
+        update={
+            "chat_durable_turn_dispatch_enabled": True,
+            "chat_external_pi_heartbeat_seconds": 0.01,
+        }
+    )
+    heartbeats: list[TurnLeaseClaim] = []
+    latency: list[str] = []
+    monkeypatch.setattr(
+        chat_stream_service,
+        "_heartbeat_local_turn",
+        lambda _settings, current: heartbeats.append(current.durable_claim),
+    )
+    orchestrator = _orchestrator(settings, _admission(claim=claim))
+    monkeypatch.setattr(
+        orchestrator,
+        "_persist_latency",
+        lambda status, _total_ms: latency.append(status),
+    )
+
+    async def exercise():
+        queue = asyncio.Queue()
+        await queue.put(
+            CompletionEvent(
+                TerminalOutcome.SUCCESS,
+                followups=[],
+            )
+        )
+        await queue.put(ResearchFinishedEvent())
+        frames = [frame async for frame in orchestrator._consume(queue)]
+        orchestrator.lease_heartbeat_task = asyncio.create_task(
+            orchestrator._heartbeat_durable_turn()
+        )
+        await asyncio.sleep(0.025)
+        assert heartbeats
+        await orchestrator._close()
+        stopped_at = len(heartbeats)
+        await asyncio.sleep(0.025)
+        assert len(heartbeats) > stopped_at
+        await orchestrator._stop_lease_heartbeat()
+        return frames
+
+    frames = asyncio.run(exercise())
+
+    assert frames[0].event == "done"
+    assert latency == []
+    assert orchestrator.terminal_persistence.completed is False
+    assert orchestrator.lease_heartbeat_task is None
+
+
 @pytest.mark.parametrize("terminal_path", ["preparation_failure", "generic_failure"])
 def test_cancelled_terminal_waits_for_transaction_without_orphan_or_duplicate(
     monkeypatch, terminal_path

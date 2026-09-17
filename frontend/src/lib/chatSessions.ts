@@ -339,8 +339,12 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
     if (["provider_error", "provider_unavailable"].includes(code ?? "")) return "The model provider failed before completing the response. You can edit and retry your question.";
     if (code === "persistence_error") return "The response could not be saved. You can edit and retry your question.";
     if (code === "transcript_mirror_error") return "The conversation could not be saved. Please try again in a new chat.";
+    if (code === "external_worker_lost") return "The assistant worker lost contact before the response could be saved. You can edit and retry your question.";
     return "The response did not complete. You can edit and retry your question.";
   };
+  const userStopped = (code: string | null): boolean => (
+    code == null || ["cancelled", "interrupted", "stopped"].includes(code)
+  );
 
   return detail.messages.flatMap((message): ChatMessage[] => {
     if (message.role === "assistant") {
@@ -368,15 +372,15 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
       error: message.status === "complete" ? undefined : message.error_code || message.status,
     };
     if (!["error", "interrupted"].includes(message.status)) return [userMessage];
-    const interrupted = message.status === "interrupted";
+    const stoppedEarly = message.status === "interrupted" && userStopped(message.error_code);
     return [userMessage, {
-      id: `${message.id}-${interrupted ? "interrupted" : "error"}`,
+      id: `${message.id}-${message.status === "interrupted" ? "interrupted" : "error"}`,
       role: "assistant",
       blocks: restoreBlocks(message.display_blocks, true),
       streaming: false,
-      finishReason: interrupted ? "stopped" : undefined,
-      error: interrupted ? undefined : failureMessage(message.error_code),
-      errorCode: interrupted ? undefined : message.error_code ?? undefined,
+      finishReason: stoppedEarly ? "stopped" : undefined,
+      error: stoppedEarly ? undefined : failureMessage(message.error_code),
+      errorCode: stoppedEarly ? undefined : message.error_code ?? undefined,
     }];
   });
 }

@@ -2193,7 +2193,8 @@ class ChatStreamOrchestrator:
                 self.terminal_persistence.retry()
             raise
         finally:
-            await self._stop_lease_heartbeat()
+            if self.terminal_persistence.completed:
+                await self._stop_lease_heartbeat()
 
     async def _produce_research(self, queue: BoundedRawEventQueue) -> None:
         try:
@@ -2988,7 +2989,11 @@ class ChatStreamOrchestrator:
                 InterruptionReason(self.interruption_reason)
             )
         await self._cancel_runner()
-        await self._stop_lease_heartbeat()
+        if (
+            not self.settings.chat_durable_turn_dispatch_enabled
+            or self.terminal_persistence.completed
+        ):
+            await self._stop_lease_heartbeat()
         if self.runner:
             with contextlib.suppress(Exception):
                 await asyncio.shield(self.runner.close())
@@ -3009,6 +3014,14 @@ class ChatStreamOrchestrator:
             (time.perf_counter() - self.started) * 1000,
             self.terminal_label,
         )
+        if (
+            self.settings.chat_durable_turn_dispatch_enabled
+            and not self.terminal_persistence.completed
+        ):
+            # The coordinator still owns durable completion. Closing the live
+            # source must not mark the turn complete or drop its lease.
+            await self.release_admission()
+            return
         status = {
             "success": "complete",
             "max_turns": "complete",

@@ -951,7 +951,7 @@ def test_duplicate_durable_post_attaches_without_preparation_or_source(monkeypat
     assert calls == {"begin": 1}
 
 
-def test_failed_detached_terminal_callback_releases_orchestrator_registration():
+def test_failed_detached_terminal_callback_keeps_orchestrator_and_releases_reservation():
     from backend.services import chat_detached_runtime as runtime_module
 
     turn_id = uuid.uuid4()
@@ -977,7 +977,7 @@ def test_failed_detached_terminal_callback_releases_orchestrator_registration():
     try:
         with pytest.raises(RuntimeError, match="ambiguous terminal"):
             asyncio.run(runtime._persist_terminal(claim, "failed", "turn_failed"))
-        assert turn_id not in runtime._orchestrators
+        assert runtime._orchestrators[turn_id] is orchestrator
         assert released == [turn_id]
     finally:
         runtime_module.ChatExternalWorkerCapacityRepository.release_turn = (
@@ -1047,6 +1047,7 @@ def test_terminal_release_failure_does_not_mask_persistence_failure(
     with pytest.raises(RuntimeError, match="primary persistence failure"):
         asyncio.run(runtime._persist_terminal(claim, "failed", "turn_failed"))
     assert cleanup_attempted == [True]
+    assert runtime._orchestrators[turn_id] is orchestrator
 
 
 def test_detached_start_failure_releases_reservation_without_masking_primary_error(

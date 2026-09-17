@@ -76,6 +76,70 @@ describe("toUiMessages", () => {
     expect(toUiMessages(detail)[1].errorCode).toBe(errorCode);
   });
 
+  it("keeps a user stop as stopped-early after reload", () => {
+    const detail: ChatSessionDetail = {
+      id: "session-stopped",
+      title: "Test",
+      selected_model: "zai-org/GLM-5.2",
+      created_at: "2026-07-31T00:00:00Z",
+      updated_at: "2026-07-31T00:00:00Z",
+      message_count: 1,
+      is_busy: false,
+      web_search_enabled: false,
+      transcript_status: "ready",
+      messages: [{
+        id: "user-stopped",
+        turn_id: "turn-stopped",
+        sequence: 1,
+        role: "user",
+        content: "Question",
+        revision: 1,
+        status: "interrupted",
+        display_blocks: [{ kind: "answer", text: "Partial", done: false }],
+        citations: [],
+        followups: [],
+        error_code: "cancelled",
+      }],
+    };
+
+    expect(toUiMessages(detail)[1]).toMatchObject({
+      finishReason: "stopped",
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("surfaces worker-loss as a retryable failure instead of stopped-early", () => {
+    const detail: ChatSessionDetail = {
+      id: "session-worker-lost",
+      title: "Test",
+      selected_model: "zai-org/GLM-5.2",
+      created_at: "2026-07-31T00:00:00Z",
+      updated_at: "2026-07-31T00:00:00Z",
+      message_count: 1,
+      is_busy: false,
+      web_search_enabled: false,
+      transcript_status: "ready",
+      messages: [{
+        id: "user-worker-lost",
+        turn_id: "turn-worker-lost",
+        sequence: 1,
+        role: "user",
+        content: "Question",
+        revision: 1,
+        status: "interrupted",
+        display_blocks: [{ kind: "answer", text: "Partial", done: false }],
+        citations: [],
+        followups: [],
+        error_code: "external_worker_lost",
+      }],
+    };
+
+    expect(toUiMessages(detail)[1].finishReason).toBeUndefined();
+    expect(toUiMessages(detail)[1].error).toMatch(/lost contact/);
+    expect(toUiMessages(detail)[1].errorCode).toBe("external_worker_lost");
+  });
+
   it("collapses duplicate reasoning already stored in a session", () => {
     const detail: ChatSessionDetail = {
       id: "session-1",

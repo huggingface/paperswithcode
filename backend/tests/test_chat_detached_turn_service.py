@@ -1207,6 +1207,50 @@ def test_expected_source_transport_error_appends_bounded_failure_before_terminal
     )
 
 
+def test_completed_terminal_persist_failure_writes_persistence_error() -> None:
+    async def scenario() -> tuple[
+        list[tuple[str, str | None]], str, str | None, list[str]
+    ]:
+        harness = Harness()
+        original = harness.coordinator._persist_terminal
+
+        async def persist(claim, state, code):
+            if state == "completed":
+                raise RuntimeError("complete persist failed")
+            await original(claim, state, code)
+
+        harness.coordinator._persist_terminal = persist
+
+        async def source():
+            yield ChatStreamFrame("stream_start")
+            yield ChatStreamFrame("done", {"finish_reason": "success"})
+
+        stream = await harness.coordinator.start(turn=harness.turn, source=source())
+        await stream.source_task
+        frames = [
+            frame
+            async for frame in harness.coordinator.subscribe(
+                turn_id=harness.turn.turn_id, after_sequence=0
+            )
+        ]
+        with harness.sessions() as db:
+            job = harness.jobs.load_by_turn(db, harness.turn.turn_id)
+            assert job is not None
+            return (
+                harness.terminal_calls,
+                job.state,
+                job.failure_code,
+                [frame.event for frame in frames],
+            )
+
+    assert asyncio.run(scenario()) == (
+        [("failed", "persistence_error")],
+        "failed",
+        "persistence_error",
+        ["stream_start", "done", "error"],
+    )
+
+
 def test_programming_error_propagates_without_generic_turn_failed_terminal() -> None:
     async def scenario() -> tuple[list[tuple[str, str | None]], int]:
         harness = Harness()

@@ -438,7 +438,20 @@ class DetachedTurnCoordinator:
                 pending_bytes = 0
                 if terminal is not None:
                     self._observe("turn_state", terminal[0], 1)
-                    await self._persist_terminal_durably(handle.claim, *terminal)
+                    try:
+                        await self._persist_terminal_durably(handle.claim, *terminal)
+                    except asyncio.CancelledError:
+                        raise
+                    except Exception:
+                        logger.exception(
+                            "detached terminal persist failed turn_id=%s state=%s",
+                            handle.turn.turn_id,
+                            terminal[0],
+                        )
+                        await self._fail_source(handle, "persistence_error")
+                        terminal_seen = True
+                        terminal_durable = True
+                        break
                     terminal_seen = True
                     terminal_durable = True
                 await self._publish(handle.turn.turn_id, frames)
