@@ -9,15 +9,17 @@ from pathlib import Path
 
 try:
     from deploy.external_pi_slot_topology import (
-        REPLICA_MAXIMUM_SESSIONS,
         external_pi_endpoints,
+        fleet_sessions_from_values,
+        replica_maximum_sessions,
     )
     from deploy.release import ENVIRONMENTS, validate_manifest
     from deploy.runtime import runtime_id, runtime_manifest
 except ModuleNotFoundError:
     from external_pi_slot_topology import (  # type: ignore[no-redef]
-        REPLICA_MAXIMUM_SESSIONS,
         external_pi_endpoints,
+        fleet_sessions_from_values,
+        replica_maximum_sessions,
     )
     from release import ENVIRONMENTS, validate_manifest  # type: ignore[no-redef]
     from runtime import runtime_id, runtime_manifest  # type: ignore[no-redef]
@@ -128,9 +130,16 @@ def configure_release(manifest: dict, release: Path, environment: str) -> None:
 
 
 def configure_external_pi_slot(environment: str, slot: str) -> None:
-    """Bind a deployed backend slot to eight environment-isolated workers."""
+    """Bind a deployed backend slot to eight environment-isolated workers.
+
+    The protected environment names the fleet tier (32 or 64 sessions); the
+    backend learns the per-replica share so readiness checks match the workers.
+    """
     base_token = os.environ.get("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "")
-    endpoints = external_pi_endpoints(environment, slot, base_token)
+    fleet_sessions = fleet_sessions_from_values(os.environ)
+    endpoints = external_pi_endpoints(
+        environment, slot, base_token, fleet_sessions=fleet_sessions
+    )
     os.environ.update(
         {
             "PWC_CHAT_EXTERNAL_PI_WORKER_ID": "",
@@ -138,7 +147,9 @@ def configure_external_pi_slot(environment: str, slot: str) -> None:
             "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN": "",
             "PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS": endpoints,
             "PWC_CHAT_EXTERNAL_PI_WORKER_CONTRACT_VERSION": "external-pi-v1",
-            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(REPLICA_MAXIMUM_SESSIONS),
+            "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(
+                replica_maximum_sessions(fleet_sessions)
+            ),
         }
     )
 

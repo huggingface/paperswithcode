@@ -6481,3 +6481,76 @@ def test_qualification_schema_readiness_refuses_each_missing_contract_object(
         RuntimeError, match="required qualification evidence schema is missing"
     ):
         validate_qualification_evidence_schema(BrokenQualificationSchemaDB("off"))
+
+
+@pytest.mark.parametrize(
+    ("environment", "tier", "rate_calls"),
+    [
+        ("production", 64, "4096"),
+        ("production", 32, "512"),
+        ("staging", 64, "4096"),
+        ("staging", 32, "300"),
+    ],
+)
+def test_chat_capacity_tier_values_move_all_four_budgets_together(
+    environment, tier, rate_calls
+):
+    values = configure_host_env.chat_capacity_tier_values(
+        {
+            "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true"
+        },
+        environment=environment,
+        tier=tier,
+    )
+
+    assert values == {
+        "PWC_CHAT_MAX_CONCURRENCY": str(tier),
+        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(tier),
+        "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": str(tier),
+        "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": rate_calls,
+    }
+
+
+def test_chat_capacity_tier_values_require_external_admission_and_a_reviewed_tier():
+    enabled = {
+        "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true"
+    }
+    with pytest.raises(ValueError, match="admission must already be enabled"):
+        configure_host_env.chat_capacity_tier_values(
+            {}, environment="production", tier=64
+        )
+    with pytest.raises(ValueError, match="admission must already be enabled"):
+        configure_host_env.chat_capacity_tier_values(
+            {
+                "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false"
+            },
+            environment="production",
+            tier=64,
+        )
+    with pytest.raises(ValueError, match="32 or 64"):
+        configure_host_env.chat_capacity_tier_values(
+            enabled, environment="production", tier=48
+        )
+    with pytest.raises(ValueError, match="staging or production"):
+        configure_host_env.chat_capacity_tier_values(
+            enabled, environment="development", tier=64
+        )
+
+
+def test_slot_launcher_sizes_replicas_from_the_protected_fleet_tier(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    import json as _json
+
+    from deploy import slot_launcher
+
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN", "t" * 48)
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS", "64")
+    slot_launcher.configure_external_pi_slot("production", "blue")
+
+    assert os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"] == "8"
+    assert len(_json.loads(os.environ["PWC_CHAT_EXTERNAL_PI_WORKER_ENDPOINTS"])) == 8
+
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS", "48")
+    with pytest.raises(ValueError, match="reviewed tier"):
+        slot_launcher.configure_external_pi_slot("production", "blue")

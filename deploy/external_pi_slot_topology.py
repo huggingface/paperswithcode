@@ -1,14 +1,49 @@
-"""Fixed eight-replica topology for release-managed external Pi workers."""
+"""Fixed eight-replica topology for release-managed external Pi workers.
+
+Every slot runs eight replicas on fixed loopback ports. The reviewed fleet
+capacity (sessions across those eight replicas) is a tier read from the
+protected environment key ``PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS``; each
+replica serves ``fleet / 8`` sessions.
+"""
 
 from __future__ import annotations
 
 import hashlib
 import hmac
 import json
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 REPLICA_COUNT = 8
-REPLICA_MAXIMUM_SESSIONS = 4
+# Reviewed fleet capacities and the 32-turn tier's per-replica share, which
+# remains the default wherever no protected environment is available.
+FLEET_SESSION_TIERS = (32, 64)
+DEFAULT_FLEET_SESSIONS = 32
+FLEET_SESSIONS_KEY = "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS"
+REPLICA_MAXIMUM_SESSIONS = DEFAULT_FLEET_SESSIONS // REPLICA_COUNT
+
+
+def replica_maximum_sessions(fleet_sessions: int) -> int:
+    """Sessions one replica serves for a reviewed fleet tier."""
+    if (
+        type(fleet_sessions) is not int
+        or fleet_sessions not in FLEET_SESSION_TIERS
+        or fleet_sessions % REPLICA_COUNT
+    ):
+        raise ValueError("external Pi fleet capacity must be a reviewed tier")
+    return fleet_sessions // REPLICA_COUNT
+
+
+def fleet_sessions_from_values(values: Mapping[str, str]) -> int:
+    """Read the fleet tier from protected environment values (default 32)."""
+    raw = str(values.get(FLEET_SESSIONS_KEY, DEFAULT_FLEET_SESSIONS)).strip()
+    raw = raw.strip('"').strip("'")
+    if not raw.isdigit():
+        raise ValueError("external Pi fleet capacity must be a reviewed tier")
+    fleet_sessions = int(raw)
+    replica_maximum_sessions(fleet_sessions)
+    return fleet_sessions
+
 
 _SLOT_PORTS = {
     "staging": {
@@ -119,14 +154,18 @@ def _replica_token(base_token: str, worker_id: str) -> str:
 
 
 def replica_specs(
-    environment: str, slot: str, base_token: str
+    environment: str,
+    slot: str,
+    base_token: str,
+    *,
+    fleet_sessions: int = DEFAULT_FLEET_SESSIONS,
 ) -> tuple[ExternalPiReplicaSpec, ...]:
     return replica_specs_for_topology(
         environment,
         slot,
         base_token,
         replica_count=REPLICA_COUNT,
-        maximum_sessions=REPLICA_MAXIMUM_SESSIONS,
+        maximum_sessions=replica_maximum_sessions(fleet_sessions),
     )
 
 
@@ -148,7 +187,7 @@ def replica_specs_for_topology(
         type(replica_count) is not int
         or type(maximum_sessions) is not int
         or not 1 <= replica_count <= len(ports)
-        or replica_count * maximum_sessions != 32
+        or replica_count * maximum_sessions not in FLEET_SESSION_TIERS
     ):
         raise ValueError("external Pi deployment topology capacity is invalid")
     return tuple(
@@ -164,7 +203,13 @@ def replica_specs_for_topology(
     )
 
 
-def external_pi_endpoints(environment: str, slot: str, base_token: str) -> str:
+def external_pi_endpoints(
+    environment: str,
+    slot: str,
+    base_token: str,
+    *,
+    fleet_sessions: int = DEFAULT_FLEET_SESSIONS,
+) -> str:
     values = [
         {
             "endpoint_id": item.endpoint_id,
@@ -172,17 +217,24 @@ def external_pi_endpoints(environment: str, slot: str, base_token: str) -> str:
             "base_url": f"http://127.0.0.1:{item.port}",
             "token": item.token,
         }
-        for item in replica_specs(environment, slot, base_token)
+        for item in replica_specs(
+            environment, slot, base_token, fleet_sessions=fleet_sessions
+        )
     ]
     return json.dumps(values, separators=(",", ":"), sort_keys=True)
 
 
 __all__ = (
-    "ExternalPiReplicaSpec",
+    "DEFAULT_FLEET_SESSIONS",
+    "FLEET_SESSIONS_KEY",
+    "FLEET_SESSION_TIERS",
     "REPLICA_COUNT",
     "REPLICA_MAXIMUM_SESSIONS",
+    "ExternalPiReplicaSpec",
     "external_pi_endpoints",
+    "fleet_sessions_from_values",
     "replica_instance",
+    "replica_maximum_sessions",
     "replica_specs",
     "replica_specs_for_topology",
 )

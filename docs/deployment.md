@@ -596,6 +596,40 @@ print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
 test "$rollback_refreshed_sha" = "$rollback_sha" || exit 1
 ```
 
+### Chat capacity tiers
+
+The durable external Pi profile serves one of two reviewed capacity tiers per
+environment. A tier fixes four values together: admitted concurrent turns
+(`PWC_CHAT_MAX_CONCURRENCY`), the eight-replica fleet's total sessions
+(`PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS`, so each replica serves
+`tier / 8`), OpenAI global concurrency, and the OpenAI ten-minute call
+allowance. Runtime validation accepts only these shapes once external Pi
+admission is on; deploy tooling sizes replicas from the protected value and
+recognises the other tier's workers while a slot drains.
+
+| Tier | Turns | Replicas × sessions | OpenAI concurrency | OpenAI calls / 10 min |
+| --- | ---: | --- | ---: | ---: |
+| 32 | 32 | 8 × 4 | 32 | 512 (production), 300 (staging) |
+| 64 | 64 | 8 × 8 | 64 | 4096 |
+
+Moving between tiers is a configuration change followed by an environment
+refresh of the exact active release:
+
+```bash
+sudo python3 deploy/configure_host_env.py --legacy-env /dev/null \
+  --production-chat-capacity-tier 64 --confirm SET_PRODUCTION_CHAT_CAPACITY_TIER_64
+sudo pwc-deploy production <exact-active-main-sha> --refresh-environment \
+  --confirm DEPLOY_PRODUCTION
+```
+
+Use `--staging-chat-capacity-tier` with `SET_STAGING_CHAT_CAPACITY_TIER_<n>` for
+staging. The 64 tier keeps the replica count, so host memory stays within the
+current blue/green envelope; the per-replica Node process holds eight agent
+sessions instead of four. MCP catalog research turns use no sandbox, so the
+sandbox live cap (16) is unchanged by the tier. Per-chat-session MCP rate
+limits are unaffected; only the MCP server's global ceiling matters at the
+higher tier.
+
 ### Staging durable external Pi qualification profile
 
 The 32-turn durable external Pi qualification is a staging-only, explicitly

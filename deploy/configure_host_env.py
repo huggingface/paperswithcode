@@ -1128,6 +1128,39 @@ _PRODUCTION_DURABLE_EXTERNAL_ENABLED = {
 }
 
 
+# Reviewed chat capacity tiers for the durable external profile. OpenAI
+# concurrency equals admitted turns; the ten-minute call allowance grows faster
+# because an MCP research turn spends 10-13 model calls and a full tier of turns
+# cycles several times per window. The 32-turn allowance keeps each
+# environment's established value.
+CHAT_CAPACITY_TIERS = (32, 64)
+_CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS = {
+    "production": {32: "512", 64: "4096"},
+    "staging": {32: "300", 64: "4096"},
+}
+
+
+def chat_capacity_tier_values(
+    current: dict[str, str], *, environment: str, tier: int
+) -> dict[str, str]:
+    """Move one environment between reviewed chat capacity tiers atomically."""
+
+    if environment not in _CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS:
+        raise ValueError("chat capacity tiers apply to staging or production")
+    if tier not in CHAT_CAPACITY_TIERS:
+        raise ValueError("chat capacity tier must be 32 or 64")
+    if _decoded_flag(current, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") != "true":
+        raise ValueError("external Pi admission must already be enabled")
+    return {
+        "PWC_CHAT_MAX_CONCURRENCY": str(tier),
+        "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": str(tier),
+        "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": str(tier),
+        "PWC_CHAT_OPENAI_GLOBAL_RATE_LIMIT_CALLS": (
+            _CHAT_CAPACITY_TIER_RATE_LIMIT_CALLS[environment][tier]
+        ),
+    }
+
+
 def production_durable_external_values(
     current: dict[str, str], *, enabled: bool
 ) -> dict[str, str]:
@@ -1692,10 +1725,53 @@ def main() -> int:
         type=Path,
         default=Path("/root/.modal.toml"),
     )
+    parser.add_argument(
+        "--production-chat-capacity-tier", type=int, choices=CHAT_CAPACITY_TIERS
+    )
+    parser.add_argument(
+        "--staging-chat-capacity-tier", type=int, choices=CHAT_CAPACITY_TIERS
+    )
     parser.add_argument("--confirm")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo")
+    tier_modes = [
+        (environment, tier)
+        for environment, tier in (
+            ("production", args.production_chat_capacity_tier),
+            ("staging", args.staging_chat_capacity_tier),
+        )
+        if tier is not None
+    ]
+    if tier_modes:
+        other_modes = [
+            value for value in vars(args).values() if isinstance(value, bool) and value
+        ]
+        if (
+            len(tier_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("chat capacity tier mode must run alone")
+        environment, tier = tier_modes[0]
+        confirmation = f"SET_{environment.upper()}_CHAT_CAPACITY_TIER_{tier}"
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        current = read_lines(CONFIG_ROOT / f"{environment}.env")
+        try:
+            values = chat_capacity_tier_values(
+                current, environment=environment, tier=tier
+            )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / f"{environment}.env",
+            assign(current, values),
+            f"pwc-{environment}",
+        )
+        print(f"set {environment} chat capacity tier {tier}; deploy/refresh to apply")
+        return 0
     legacy = read_lines(args.legacy_env)
     modal_rate_modes = (
         args.staging_modal_rate_evidence_install_only,

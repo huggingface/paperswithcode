@@ -19,14 +19,22 @@ from pathlib import Path
 try:
     from deploy.external_pi_runtime import external_pi_runtime_manifest
     from deploy.external_pi_slot_topology import (
+        DEFAULT_FLEET_SESSIONS,
+        FLEET_SESSION_TIERS,
         ExternalPiReplicaSpec,
+        fleet_sessions_from_values,
         replica_specs,
         replica_specs_for_topology,
     )
 except ModuleNotFoundError:
-    from external_pi_runtime import external_pi_runtime_manifest  # type: ignore[no-redef]
+    from external_pi_runtime import (
+        external_pi_runtime_manifest,  # type: ignore[no-redef]
+    )
     from external_pi_slot_topology import (  # type: ignore[no-redef]
+        DEFAULT_FLEET_SESSIONS,
+        FLEET_SESSION_TIERS,
         ExternalPiReplicaSpec,
+        fleet_sessions_from_values,
         replica_specs,
         replica_specs_for_topology,
     )
@@ -180,7 +188,9 @@ def resolve_external_pi_replicas(
             worker_id=spec.worker_id,
             status_path=_environment_status_path(environment, spec.worker_id),
         )
-        for spec in replica_specs(environment, slot, base_token)
+        for spec in replica_specs(
+            environment, slot, base_token, fleet_sessions=fleet_sessions(environment)
+        )
     )
 
 
@@ -202,7 +212,10 @@ def node_environment(
     if base_state_root != expected_base_state_root:
         raise ValueError("external Pi worker state root is invalid")
     specs = replica_specs(
-        resolved.worker_id.split("-", 1)[0], resolved.slot, base_token
+        resolved.worker_id.split("-", 1)[0],
+        resolved.slot,
+        base_token,
+        fleet_sessions=fleet_sessions_from_values(protected),
     )
     spec = next((item for item in specs if item.worker_id == resolved.worker_id), None)
     legacy_worker_id = f"{resolved.worker_id.split('-', 1)[0]}-{resolved.slot}"
@@ -238,7 +251,12 @@ def supervisor_environment(
     spec = next(
         (
             item
-            for item in replica_specs(environment, resolved.slot, base_token)
+            for item in replica_specs(
+                environment,
+                resolved.slot,
+                base_token,
+                fleet_sessions=fleet_sessions_from_values(protected),
+            )
             if item.worker_id == resolved.worker_id
         ),
         None,
@@ -316,7 +334,9 @@ def _status_path(environment: str, slot: str) -> Path:
 def _status_paths(environment: str, slot: str) -> tuple[Path, ...]:
     return tuple(
         _environment_status_path(environment, spec.worker_id)
-        for spec in replica_specs(environment, slot, "x" * 32)
+        for spec in replica_specs(
+            environment, slot, "x" * 32, fleet_sessions=fleet_sessions(environment)
+        )
     )
 
 
@@ -329,7 +349,15 @@ def _draining_replica_specs(
     validated_release_ids: frozenset[str] = frozenset(),
     allow_endpoint_recovery: bool = False,
 ) -> tuple[ExternalPiReplicaSpec, ...]:
-    current = replica_specs(environment, slot, base_token)
+    fleet = fleet_sessions(environment)
+    current = replica_specs(environment, slot, base_token, fleet_sessions=fleet)
+    # The other reviewed tier shares this slot's replicas, ports, and tokens, so
+    # a slot drained across a tier change is recognised by its session shape.
+    other_tiers = tuple(
+        replica_specs(environment, slot, base_token, fleet_sessions=tier)
+        for tier in FLEET_SESSION_TIERS
+        if tier != fleet
+    )
     previous = replica_specs_for_topology(
         environment,
         slot,
@@ -339,15 +367,21 @@ def _draining_replica_specs(
     )
     trusted_release_ids = validated_release_ids | {release_id}
 
-    def current_status_is_proven(status: dict, spec: ExternalPiReplicaSpec) -> bool:
+    def status_is_proven(
+        status: dict,
+        spec: ExternalPiReplicaSpec,
+        specs: tuple[ExternalPiReplicaSpec, ...],
+    ) -> bool:
         return (
             status.get("worker_id") == spec.worker_id
             and status.get("protocol") == CONTRACT_VERSION
             and type(status.get("maximum_sessions")) is int
-            and status.get("maximum_sessions") == current[0].maximum_sessions
+            and status.get("maximum_sessions") == specs[0].maximum_sessions
         )
 
-    def current_topology_is_proven(statuses: tuple[dict, ...]) -> bool:
+    def topology_is_proven(
+        statuses: tuple[dict, ...], specs: tuple[ExternalPiReplicaSpec, ...]
+    ) -> bool:
         cohort_release_id = statuses[0].get("release_id") if statuses else None
         return bool(
             isinstance(cohort_release_id, str)
@@ -356,22 +390,23 @@ def _draining_replica_specs(
                 status.get("release_id") == cohort_release_id for status in statuses
             )
             and all(
-                current_status_is_proven(status, spec)
-                for status, spec in zip(statuses, current, strict=True)
+                status_is_proven(status, spec, specs)
+                for status, spec in zip(statuses, specs, strict=True)
             )
         )
 
-    durable_statuses = _read_replica_statuses(environment, slot, current)
-    if current_topology_is_proven(durable_statuses):
-        return current
-    if (
-        allow_endpoint_recovery
-        and not any(durable_statuses)
-        and not _read_status(environment, slot)
-    ):
-        endpoint_statuses = _read_authenticated_endpoint_statuses(current)
-        if current_topology_is_proven(endpoint_statuses):
-            return current
+    for specs in (current, *other_tiers):
+        durable_statuses = _read_replica_statuses(environment, slot, specs)
+        if topology_is_proven(durable_statuses, specs):
+            return specs
+        if (
+            allow_endpoint_recovery
+            and not any(durable_statuses)
+            and not _read_status(environment, slot)
+        ):
+            endpoint_statuses = _read_authenticated_endpoint_statuses(specs)
+            if topology_is_proven(endpoint_statuses, specs):
+                return specs
     return previous
 
 
@@ -507,6 +542,15 @@ def _protected_environment_values(environment: str) -> dict[str, str]:
     if environment == "staging":
         return _protected_staging_values()
     return _read_protected_values(environment)
+
+
+def fleet_sessions(environment: str) -> int:
+    """Reviewed fleet tier from the protected environment (32 when unreadable)."""
+    try:
+        values = _protected_environment_values(environment)
+    except OSError:
+        return DEFAULT_FLEET_SESSIONS
+    return fleet_sessions_from_values(values)
 
 
 def drain_stop_timeout_seconds(environment: str) -> float:
@@ -940,7 +984,9 @@ def _stop_proven_orphaned_worker_if_active(
         return
 
     if draining_specs is None:
-        specs = replica_specs(environment, slot, base_token)
+        specs = replica_specs(
+            environment, slot, base_token, fleet_sessions=fleet_sessions(environment)
+        )
     else:
         maximum_sessions = draining_specs[0].maximum_sessions
         specs = replica_specs_for_topology(
@@ -1091,7 +1137,10 @@ def qualify_candidate(
     deadline = time.monotonic() + timeout_seconds
     last: tuple[dict, ...] = ()
     worker_ids = tuple(
-        spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
+        spec.worker_id
+        for spec in replica_specs(
+            environment, slot, "x" * 32, fleet_sessions=fleet_sessions(environment)
+        )
     )
     while time.monotonic() < deadline:
         last = _read_replica_statuses(environment, slot)
@@ -1190,7 +1239,12 @@ def _restart_supervisor_after_lease_expiry(
             generation = last.get("generation")
             expected_worker_ids = {
                 f"{environment}-{slot}",
-                replica_specs(environment, slot, "x" * 32)[0].worker_id,
+                replica_specs(
+                    environment,
+                    slot,
+                    "x" * 32,
+                    fleet_sessions=fleet_sessions(environment),
+                )[0].worker_id,
             }
             if (
                 last.get("release_id") == release_id
@@ -1391,7 +1445,10 @@ def _cleanup_retired_replica_statuses(
     draining_specs: tuple[ExternalPiReplicaSpec, ...],
 ) -> None:
     current_worker_ids = {
-        spec.worker_id for spec in replica_specs(environment, slot, "x" * 32)
+        spec.worker_id
+        for spec in replica_specs(
+            environment, slot, "x" * 32, fleet_sessions=fleet_sessions(environment)
+        )
     }
     for spec in draining_specs:
         if spec.worker_id not in current_worker_ids:

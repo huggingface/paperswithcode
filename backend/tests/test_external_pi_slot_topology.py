@@ -83,3 +83,53 @@ def test_transition_topology_can_describe_sixteen_two_session_workers() -> None:
     assert len(replicas) == 16
     assert sum(item.maximum_sessions for item in replicas) == 32
     assert replicas[-1].worker_id == "staging-blue-15"
+
+
+def test_sixty_four_tier_keeps_eight_replicas_with_eight_sessions_each() -> None:
+    from deploy.external_pi_slot_topology import (
+        DEFAULT_FLEET_SESSIONS,
+        FLEET_SESSION_TIERS,
+        fleet_sessions_from_values,
+        replica_maximum_sessions,
+    )
+
+    token = "t" * 48
+    small = replica_specs("production", "green", token)
+    large = replica_specs("production", "green", token, fleet_sessions=64)
+
+    assert FLEET_SESSION_TIERS == (32, 64) and DEFAULT_FLEET_SESSIONS == 32
+    assert replica_maximum_sessions(32) == 4 and replica_maximum_sessions(64) == 8
+    assert len(large) == 8 and sum(item.maximum_sessions for item in large) == 64
+    # Same identities, ports, and tokens; only the per-replica share changes.
+    assert [item.worker_id for item in large] == [item.worker_id for item in small]
+    assert [item.port for item in large] == [item.port for item in small]
+    assert [item.token for item in large] == [item.token for item in small]
+    assert (
+        len(
+            json.loads(
+                external_pi_endpoints("staging", "blue", token, fleet_sessions=64)
+            )
+        )
+        == 8
+    )
+
+    assert fleet_sessions_from_values({}) == 32
+    assert (
+        fleet_sessions_from_values({"PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "64"})
+        == 64
+    )
+    assert (
+        fleet_sessions_from_values({"PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": '"32"'})
+        == 32
+    )
+    for invalid in ("48", "8", "abc", ""):
+        with pytest.raises(ValueError, match="reviewed tier"):
+            fleet_sessions_from_values(
+                {"PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": invalid}
+            )
+    with pytest.raises(ValueError, match="reviewed tier"):
+        replica_specs("staging", "blue", token, fleet_sessions=48)
+    with pytest.raises(ValueError, match="capacity is invalid"):
+        replica_specs_for_topology(
+            "staging", "blue", token, replica_count=8, maximum_sessions=6
+        )

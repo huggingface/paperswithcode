@@ -187,13 +187,24 @@ _SANDBOX_CAPACITY_POLICY = SandboxCapacityPolicy(
     blank_pool_min=1,
     blank_pool_max=1,
 )
-_EXTERNAL_PI_CAPACITY_POLICY = SandboxCapacityPolicy(
-    max_concurrency=32,
-    user_max_concurrency=1,
-    total_live_cap=16,
-    blank_pool_min=1,
-    blank_pool_max=1,
-)
+# Reviewed external Pi capacity tiers, keyed by admitted concurrent turns. The
+# deploy tooling sizes the eight-replica fleet from the same tier value, and
+# the OpenAI circuits below must match the tier (see docs/deployment.md).
+_EXTERNAL_PI_CAPACITY_POLICIES = {
+    tier: SandboxCapacityPolicy(
+        max_concurrency=tier,
+        user_max_concurrency=1,
+        total_live_cap=16,
+        blank_pool_min=1,
+        blank_pool_max=1,
+    )
+    for tier in (32, 64)
+}
+_EXTERNAL_PI_CAPACITY_POLICY = _EXTERNAL_PI_CAPACITY_POLICIES[32]
+# OpenAI concurrency equals the tier; the ten-minute call allowance grows faster
+# because an MCP research turn spends 10-13 model calls and a full tier of turns
+# cycles several times per window.
+_EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS = {32: 512, 64: 4096}
 
 
 def validate_deployment_identity(settings: Settings) -> None:
@@ -860,21 +871,38 @@ def _validate_chat_capacity_policy(settings: Settings) -> None:
         blank_pool_min=settings.chat_blank_pool_min,
         blank_pool_max=settings.chat_blank_pool_max,
     )
-    expected = (
-        _EXTERNAL_PI_CAPACITY_POLICY
+    candidates = (
+        tuple(_EXTERNAL_PI_CAPACITY_POLICIES.values())
         if settings.chat_external_pi_admission_enabled
-        else _SANDBOX_CAPACITY_POLICY
+        else (_SANDBOX_CAPACITY_POLICY,)
     )
-    if configured == expected:
+    if configured in candidates:
         return
     if (
         settings.environment == "staging"
         and settings.chat_external_pi_admission_enabled
         and settings.chat_executor_remote_transport_enabled
-        and configured == replace(expected, blank_pool_min=4, blank_pool_max=4)
+        and any(
+            configured == replace(expected, blank_pool_min=4, blank_pool_max=4)
+            for expected in candidates
+        )
     ):
         return
     raise RuntimeError("chat capacity must be the reviewed runtime profile")
+
+
+def _external_pi_capacity_tier(settings: Settings) -> int | None:
+    """Return the reviewed tier whose turn and OpenAI budgets the settings match."""
+
+    tier = settings.chat_max_concurrency
+    if (
+        tier in _EXTERNAL_PI_CAPACITY_POLICIES
+        and settings.chat_openai_global_max_concurrency == tier
+        and settings.chat_openai_global_rate_limit_calls
+        == _EXTERNAL_PI_OPENAI_RATE_LIMIT_CALLS[tier]
+    ):
+        return tier
+    return None
 
 
 def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
@@ -1249,11 +1277,9 @@ def _is_durable_external_admission_profile(settings: Settings) -> bool:
             settings.chat_lazy_workspace_enabled,
             not settings.chat_blank_pool_enabled,
             not settings.chat_pi_prewarm_enabled,
-            settings.chat_max_concurrency == 32,
+            _external_pi_capacity_tier(settings) is not None,
             settings.chat_user_max_concurrency == 1,
-            settings.chat_openai_global_max_concurrency == 32,
             settings.chat_openai_user_max_concurrency == 1,
-            settings.chat_openai_global_rate_limit_calls == 512,
             settings.chat_sandbox_total_live_cap == 16,
         )
     )

@@ -995,8 +995,9 @@ def test_start_checks_every_selected_previous_replica_before_replacement(
     monkeypatch.setattr(
         lifecycle.subprocess,
         "run",
-        lambda command, **_kwargs: commands.append(command)
-        or subprocess.CompletedProcess(command, 0),
+        lambda command, **_kwargs: (
+            commands.append(command) or subprocess.CompletedProcess(command, 0)
+        ),
     )
 
     with pytest.raises(
@@ -2787,3 +2788,64 @@ def test_worker_status_never_retries_a_malformed_payload(
     with pytest.raises(ValueError, match="too large"):
         lifecycle._worker_status(spec)
     assert attempts["n"] == 1
+
+
+@pytest.mark.parametrize(
+    ("configured_tier", "drained_sessions"), [(64, 4), (32, 8), (64, 8)]
+)
+def test_drain_recognises_workers_of_either_capacity_tier(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    configured_tier: int,
+    drained_sessions: int,
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    monkeypatch.setattr(
+        lifecycle, "fleet_sessions", lambda _environment: configured_tier
+    )
+    workers = lifecycle.replica_specs("staging", "green", "x" * 32)
+    for spec in workers:
+        (tmp_path / f"{spec.worker_id}.json").write_text(
+            json.dumps(
+                {
+                    "protocol": lifecycle.CONTRACT_VERSION,
+                    "release_id": "old-release",
+                    "worker_id": spec.worker_id,
+                    "state": "ready",
+                    "maximum_sessions": drained_sessions,
+                }
+            )
+        )
+
+    selected = lifecycle._draining_replica_specs(
+        "staging", "green", "x" * 32, "old-release"
+    )
+
+    assert len(selected) == 8
+    assert {spec.maximum_sessions for spec in selected} == {drained_sessions}
+    assert [spec.worker_id for spec in selected] == [spec.worker_id for spec in workers]
+
+
+def test_fleet_sessions_reads_the_protected_tier_and_defaults_when_unreadable(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {"PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "64"},
+    )
+    assert lifecycle.fleet_sessions("production") == 64
+
+    def missing(_environment):
+        raise FileNotFoundError
+
+    monkeypatch.setattr(lifecycle, "_protected_environment_values", missing)
+    assert lifecycle.fleet_sessions("production") == 32
+
+    monkeypatch.setattr(
+        lifecycle,
+        "_protected_environment_values",
+        lambda _environment: {"PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "40"},
+    )
+    with pytest.raises(ValueError, match="reviewed tier"):
+        lifecycle.fleet_sessions("production")
