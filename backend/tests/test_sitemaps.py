@@ -5,9 +5,11 @@ from xml.etree import ElementTree
 
 import pytest
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
+from backend.models.database import Author, Task
 from backend.services.sitemap_service import (
     ArchivePaper,
     SitemapEntity,
@@ -168,3 +170,74 @@ def test_empty_month_is_real_archive_and_invalid_period_is_404(client, monkeypat
     assert empty.status_code == 200
     assert "No eligible papers were published in this period." in empty.text
     assert invalid.status_code == 404
+
+
+def _selected_columns(query_mock):
+    return [column.key for column in query_mock.call_args.args]
+
+
+def test_paper_shard_selects_only_sitemap_columns():
+    db = MagicMock()
+
+    assert list(SitemapService(db).iter_shard(SitemapShard(2026, 1))) == []
+
+    assert _selected_columns(db.query) == [
+        "id",
+        "source",
+        "arxiv_id",
+        "date_published",
+        "created_at",
+    ]
+
+
+def test_entity_and_author_shards_select_only_sitemap_columns():
+    db = MagicMock()
+    assert list(SitemapService(db).iter_entities("tasks")) == []
+    assert [column.key for column in db.query.call_args.args] == ["slug", "updated_at"]
+    assert all(column.class_ is Task for column in db.query.call_args.args)
+
+    db = MagicMock()
+    assert list(SitemapService(db).iter_author_shard(2)) == []
+    assert [column.key for column in db.query.call_args.args] == ["id", "updated_at"]
+    assert all(column.class_ is Author for column in db.query.call_args.args)
+
+
+def test_archive_page_selects_only_archive_columns():
+    db = MagicMock()
+
+    assert SitemapService(db).archive_page(page=1, year=2026) == ([], False)
+
+    with_entities_calls = [
+        call for call in db.mock_calls if call[0].endswith(".with_entities")
+    ]
+    assert len(with_entities_calls) == 1
+    assert [column.key for column in with_entities_calls[0].args] == [
+        "id",
+        "source",
+        "arxiv_id",
+        "title",
+        "date_published",
+    ]
+
+
+def test_paper_shard_is_rendered_before_the_response_starts(client, monkeypatch):
+    lastmod = datetime(2026, 8, 1, tzinfo=timezone.utc)
+    monkeypatch.setattr(
+        SitemapService,
+        "iter_shard",
+        lambda self, shard: iter(
+            [
+                SitemapPaper(route_identifier=f"2608.{index:05d}", lastmod=lastmod)
+                for index in range(3)
+            ]
+        ),
+    )
+
+    response = client.get("/sitemaps/papers-2026-0.xml")
+
+    assert response.status_code == 200
+    # A materialized body carries its length; a streamed one would be chunked
+    # and hold the database connection open for the whole download.
+    assert response.headers["content-length"] == str(len(response.content))
+    assert "transfer-encoding" not in response.headers
+    assert response.content.count(b"<url>") == 3

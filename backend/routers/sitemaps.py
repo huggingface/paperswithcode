@@ -5,10 +5,10 @@ from __future__ import annotations
 import html
 import re
 from datetime import date
-from typing import Iterator, Optional
+from typing import Iterable, Iterator, Optional
 
 from fastapi import APIRouter, Depends, Query, Request
-from fastapi.responses import HTMLResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
@@ -33,15 +33,17 @@ ARCHIVE_HEADERS = {"Cache-Control": "public, max-age=300, stale-while-revalidate
 _SHARD_RE = re.compile(r"^(?P<year>\d{4})-(?P<bucket>\d+)$")
 
 
-def _xml_response(content: Iterator[str] | str) -> Response:
-    if isinstance(content, str):
-        return Response(
-            content=content,
-            media_type="application/xml",
-            headers=SITEMAP_HEADERS,
-        )
-    return StreamingResponse(
-        content,
+def _xml_response(content: Iterable[str] | str) -> Response:
+    # Render the whole document inside the request. Streaming it kept a pooled
+    # database connection and a server-side cursor open for as long as a
+    # crawler took to download the shard, and the request-scoped session could
+    # close underneath the cursor ("named cursor isn't valid anymore"). A shard
+    # of lightweight rows is a few megabytes of XML, so build it, release the
+    # connection, then send.
+    if not isinstance(content, str):
+        content = "".join(content)
+    return Response(
+        content=content,
         media_type="application/xml",
         headers=SITEMAP_HEADERS,
     )

@@ -33,6 +33,25 @@ SITEMAP_BUCKET_SIZE = 50_000
 SITEMAP_BATCH_SIZE = 1_000
 ARCHIVE_PAGE_SIZE = 100
 
+# Sitemaps and archives only need a few narrow columns. Loading whole ``Paper``
+# rows pulled the abstract and the full-text search vector along for up to
+# ``SITEMAP_BUCKET_SIZE`` papers per shard, which is what grew a production web
+# worker past 1 GB while crawlers walked the shards.
+SITEMAP_PAPER_COLUMNS = (
+    DBPaper.id,
+    DBPaper.source,
+    DBPaper.arxiv_id,
+    DBPaper.date_published,
+    DBPaper.created_at,
+)
+ARCHIVE_PAPER_COLUMNS = (
+    DBPaper.id,
+    DBPaper.source,
+    DBPaper.arxiv_id,
+    DBPaper.title,
+    DBPaper.date_published,
+)
+
 
 @dataclass(frozen=True)
 class SitemapShard:
@@ -133,7 +152,7 @@ class SitemapService:
         lower = shard.bucket * SITEMAP_BUCKET_SIZE
         upper = lower + SITEMAP_BUCKET_SIZE
         query = (
-            self.db.query(DBPaper)
+            self.db.query(*SITEMAP_PAPER_COLUMNS)
             .filter(
                 eligible_paper_filter(),
                 DBPaper.id >= lower,
@@ -225,6 +244,7 @@ class SitemapService:
     ) -> tuple[list[ArchivePaper], bool]:
         rows = (
             self.archive_query(recent=recent, year=year, month=month)
+            .with_entities(*ARCHIVE_PAPER_COLUMNS)
             .offset((page - 1) * ARCHIVE_PAGE_SIZE)
             .limit(ARCHIVE_PAGE_SIZE + 1)
             .all()
@@ -274,7 +294,7 @@ class SitemapService:
         }
         model, relation, relation_entity_column, prefix = definitions[kind]
         query = (
-            self.db.query(model)
+            self.db.query(model.slug, model.updated_at)
             .filter(
                 model.slug.is_not(None),
                 func.length(func.trim(model.slug)) > 0,
@@ -310,7 +330,7 @@ class SitemapService:
         lower = bucket * SITEMAP_BUCKET_SIZE
         upper = lower + SITEMAP_BUCKET_SIZE
         query = (
-            self.db.query(Author)
+            self.db.query(Author.id, Author.updated_at)
             .filter(
                 Author.id >= lower,
                 Author.id < upper,
