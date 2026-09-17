@@ -97,6 +97,7 @@ from backend.services.chat_sandbox_service import (
 )
 from backend.services.chat_sandbox_spend_access import (
     assert_chat_sandbox_spend_available,
+    chat_sandbox_spend_available,
     chat_sandbox_spend_status,
 )
 from backend.services.chat_sandbox_spend_service import (
@@ -811,11 +812,10 @@ def chat_availability():
                 and settings.chat_latex_compiler_jobs_enabled
             ),
         }
-    try:
-        assert_chat_sandbox_spend_available(
-            settings,
-            session_factory=db_manager.session_local,
-        )
+    if chat_sandbox_spend_available(
+        settings,
+        session_factory=db_manager.session_local,
+    ):
         return {
             "status": "available",
             "reason": None,
@@ -831,22 +831,21 @@ def chat_availability():
                 and settings.chat_latex_compiler_jobs_enabled
             ),
         }
-    except ChatComputeDisabled:
-        return {
-            "status": "paused",
-            "reason": "chat_temporarily_disabled",
-            "expected_recovery_at": None,
-            "paper_mentions_enabled": settings.chat_paper_mentions_enabled,
-            "web_search_available": False,
-            "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
-            "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
-            "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
-            "paper_artifacts_enabled": (
-                settings.chat_artifacts_enabled
-                and settings.chat_latex_paper_enabled
-                and settings.chat_latex_compiler_jobs_enabled
-            ),
-        }
+    return {
+        "status": "paused",
+        "reason": "chat_temporarily_disabled",
+        "expected_recovery_at": None,
+        "paper_mentions_enabled": settings.chat_paper_mentions_enabled,
+        "web_search_available": False,
+        "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
+        "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
+        "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
+        "paper_artifacts_enabled": (
+            settings.chat_artifacts_enabled
+            and settings.chat_latex_paper_enabled
+            and settings.chat_latex_compiler_jobs_enabled
+        ),
+    }
 
 
 @router.get(

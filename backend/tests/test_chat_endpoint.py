@@ -791,10 +791,9 @@ def test_chat_availability_maps_spend_rejection_to_content_free_paused_state(
     monkeypatch.setattr(chat_router, "get_settings", lambda: settings)
     monkeypatch.setattr(chat_router, "web_search_available", lambda _settings: True)
 
-    def reject(*_args, **_kwargs):
-        raise ChatComputeDisabled("private circuit detail")
-
-    monkeypatch.setattr(chat_router, "assert_chat_sandbox_spend_available", reject)
+    monkeypatch.setattr(
+        chat_router, "chat_sandbox_spend_available", lambda *_a, **_k: False
+    )
 
     assert chat_router.chat_availability() == {
         "status": "paused",

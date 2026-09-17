@@ -918,8 +918,9 @@ def test_prior_claim_finalization_locks_capacity_then_only_exact_owner(monkeypat
     order = []
     locked_statements = []
 
-    def record_capacity(_db, *, wait=True):
+    def record_capacity(_db, *, wait=True, environment=None):
         assert wait
+        assert environment == configured.environment
         order.append("capacity")
         return True
 

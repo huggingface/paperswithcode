@@ -12,6 +12,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from backend.config import get_settings
 from backend.services.chat_sandbox_pool_creation_coordinator import (
     ChatSandboxPoolCreationCoordinator,
 )
@@ -66,19 +67,20 @@ class PoolMaintenanceResult:
     replenished: int = 0
 
 
-def lock_pool_maintenance(db: Session) -> bool:
-    """Take the pool transaction lock; test backends use a no-op success."""
+def pool_maintenance_lock_key(environment: str) -> str:
+    """Environment-scoped advisory key; see ``capacity_lock_key``."""
+
+    return f"{POOL_MAINTENANCE_LOCK_NAME}:{environment}"
+
+
+def lock_pool_maintenance(db: Session, *, environment: str | None = None) -> bool:
+    """Take this environment's pool lock; test backends use a no-op success."""
 
     if db.get_bind().dialect.name != "postgresql":
         return True
+    key = pool_maintenance_lock_key(environment or get_settings().environment)
     return bool(
-        db.scalar(
-            select(
-                func.pg_try_advisory_xact_lock(
-                    func.hashtextextended(POOL_MAINTENANCE_LOCK_NAME, 0)
-                )
-            )
-        )
+        db.scalar(select(func.pg_try_advisory_xact_lock(func.hashtextextended(key, 0))))
     )
 
 

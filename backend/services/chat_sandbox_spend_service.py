@@ -79,7 +79,32 @@ class ChatSandboxSpendService:
         self.utcnow = utcnow or (lambda: datetime.now(UTC))
 
     def _lock(self) -> None:
-        lock_capacity(self.db)
+        lock_capacity(self.db, environment=self.settings.environment)
+
+    def circuit_tripped_snapshot(self, now: datetime | None = None) -> bool:
+        """Report the persisted circuit without taking any lock.
+
+        Used only for the public availability poll when the capacity lock is
+        busy; admission still goes through the locked ``assert_available``.
+        Without a row for the current cycle this mirrors ``_state``'s
+        conservative carry-over of a tripped previous cycle.
+        """
+
+        now = now or datetime.now(UTC)
+        state = self.db.execute(
+            select(ChatSandboxBudgetState).where(
+                ChatSandboxBudgetState.environment == self.settings.environment,
+                ChatSandboxBudgetState.billing_cycle == billing_cycle(now),
+            )
+        ).scalar_one_or_none()
+        if state is None:
+            state = self.db.execute(
+                select(ChatSandboxBudgetState)
+                .where(ChatSandboxBudgetState.environment == self.settings.environment)
+                .order_by(ChatSandboxBudgetState.billing_cycle.desc())
+                .limit(1)
+            ).scalar_one_or_none()
+        return state is not None and state.circuit_state == "tripped"
 
     def _policy(self) -> tuple[int, int, int, int]:
         return (

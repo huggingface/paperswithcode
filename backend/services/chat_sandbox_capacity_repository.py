@@ -12,7 +12,7 @@ from typing import Literal, TypeAlias
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from backend.config import Settings
+from backend.config import Settings, get_settings
 from backend.chat_sandbox_worker.mcp_app_registry import (
     EMPTY_EGRESS_POLICY_DIGEST,
     egress_policy_digest,
@@ -30,14 +30,29 @@ LIVE_LEASE_STATES = ("starting", "ready", "busy", "idle", "terminating")
 LIVE_POOL_STATES = ("starting", "blank_ready", "draining")
 
 
-def lock_capacity(db: Session, *, wait: bool = True) -> bool:
-    """Acquire the shared sandbox/spend capacity lock on PostgreSQL."""
+def capacity_lock_key(environment: str) -> str:
+    """Environment-scoped advisory key.
+
+    Every environment shares one PostgreSQL database, and advisory locks are
+    database-wide, so an unscoped key lets a slow staging watchdog block
+    production admission. Scoping by environment keeps each deployment's
+    capacity decisions serialized without coupling environments.
+    """
+
+    return f"{CAPACITY_LOCK_NAME}:{environment}"
+
+
+def lock_capacity(
+    db: Session, *, wait: bool = True, environment: str | None = None
+) -> bool:
+    """Acquire this environment's sandbox/spend capacity lock on PostgreSQL."""
 
     get_bind = getattr(db, "get_bind", None)
     if get_bind is not None and get_bind().dialect.name != "postgresql":
         return True
+    key = capacity_lock_key(environment or get_settings().environment)
     function = func.pg_advisory_xact_lock if wait else func.pg_try_advisory_xact_lock
-    result = db.scalar(select(function(func.hashtextextended(CAPACITY_LOCK_NAME, 0))))
+    result = db.scalar(select(function(func.hashtextextended(key, 0))))
     return True if wait else bool(result)
 
 

@@ -5,6 +5,7 @@ import pytest
 from backend.config import Settings
 from backend.services.chat_sandbox_spend_access import (
     assert_chat_sandbox_spend_available,
+    chat_sandbox_spend_available,
     chat_sandbox_spend_status,
 )
 from backend.services.chat_sandbox_spend_service import ChatComputeDisabled
@@ -27,6 +28,9 @@ class _Session:
 
     def commit(self):
         self.events.append("commit")
+
+    def rollback(self):
+        self.events.append("rollback")
 
 
 def _settings() -> Settings:
@@ -120,3 +124,84 @@ def test_spend_status_refreshes_inside_one_transaction():
         ("exit", None),
         ("exit", None),
     ]
+
+
+def test_spend_available_refreshes_and_commits_when_the_lock_is_free():
+    events: list[object] = []
+
+    class Spend:
+        @staticmethod
+        def assert_available(*, capacity_locked):
+            events.append(("available", capacity_locked))
+
+        @staticmethod
+        def circuit_tripped_snapshot():
+            raise AssertionError("snapshot must not be read when the lock is held")
+
+    def locker(_db, *, wait):
+        events.append(("lock", wait))
+        return True
+
+    assert (
+        chat_sandbox_spend_available(
+            _settings(),
+            session_factory=lambda: _Session(events),
+            spend_factory=lambda _db: Spend(),
+            capacity_locker=locker,
+        )
+        is True
+    )
+
+    assert events == [
+        "enter",
+        ("lock", False),
+        ("available", True),
+        "commit",
+        ("exit", None),
+    ]
+
+
+def test_spend_available_commits_a_trip_taken_under_the_lock():
+    events: list[object] = []
+
+    class Spend:
+        @staticmethod
+        def assert_available(*, capacity_locked):
+            events.append("trip")
+            raise ChatComputeDisabled("Chat is paused")
+
+    assert (
+        chat_sandbox_spend_available(
+            _settings(),
+            session_factory=lambda: _Session(events),
+            spend_factory=lambda _db: Spend(),
+            capacity_locker=lambda _db, *, wait: True,
+        )
+        is False
+    )
+
+    assert events == ["enter", "trip", "commit", ("exit", None)]
+
+
+@pytest.mark.parametrize("tripped", [False, True])
+def test_spend_available_reads_the_persisted_circuit_when_the_lock_is_busy(tripped):
+    events: list[object] = []
+
+    class Spend:
+        @staticmethod
+        def assert_available(**_kwargs):
+            raise AssertionError("must not wait for the capacity lock")
+
+        @staticmethod
+        def circuit_tripped_snapshot():
+            events.append("snapshot")
+            return tripped
+
+    assert chat_sandbox_spend_available(
+        _settings(),
+        session_factory=lambda: _Session(events),
+        spend_factory=lambda _db: Spend(),
+        capacity_locker=lambda _db, *, wait: False,
+    ) is (not tripped)
+
+    assert events == ["enter", "snapshot", "rollback", ("exit", None)]
