@@ -216,8 +216,6 @@ def test_throttle_requires_a_job_argument(monkeypatch):
 @pytest.mark.parametrize(
     "job_id,expected_after",
     [
-        ("calculate_trending_scores", "pwc-cron-update-github-stars.service"),
-        ("calculate_paper_trending_scores", "pwc-cron-update-hf-artifacts.service"),
         ("refresh_paper_embeddings", "pwc-cron-import-hf-daily-papers.service"),
         ("mirror_thumbnails_to_disk", "pwc-cron-preload-thumbnails-recent.service"),
         (
@@ -230,3 +228,28 @@ def test_producer_chains_declare_storm_ordering(job_id, expected_after):
     unit = "pwc-cron-" + job_id.replace("_", "-")
     source = (UNIT_DIR / f"{unit}.service").read_text()
     assert expected_after in source
+
+
+@pytest.mark.parametrize(
+    "job_id",
+    [
+        "calculate_trending_scores",
+        "calculate_paper_trending_scores",
+        "calculate_organization_trending_scores",
+    ],
+)
+def test_trending_consumers_never_order_behind_a_trending_producer(job_id):
+    """Trending jobs are staggered by the clock only.
+
+    An After= edge also applies while the producer is merely queued for a
+    throttle slot, which starved paper and organization trending for a day.
+    """
+    unit = "pwc-cron-" + job_id.replace("_", "-")
+    source = (UNIT_DIR / f"{unit}.service").read_text()
+    for producer in (
+        "pwc-cron-update-github-stars.service",
+        "pwc-cron-update-hf-artifacts.service",
+        "pwc-cron-calculate-trending-scores.service",
+        "pwc-cron-calculate-paper-trending-scores.service",
+    ):
+        assert producer not in source

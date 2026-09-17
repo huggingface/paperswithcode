@@ -56,7 +56,11 @@ TIMERS: tuple[TimerSpec, ...] = (
     ),
     # Trending pipeline: stars (:00) -> task trending (:15) -> paper trending
     # (:45, also consumes HF artifacts from :30).  Hot trending runs its own
-    # 15-minute lane.
+    # 15-minute lane.  The pipeline is ordered by the clock alone: an After=
+    # edge onto an hourly producer also applies while that producer merely
+    # waits for a throttle slot, which starved paper trending for over a day.
+    # Consumers recompute from whatever inputs are committed, so a stale input
+    # costs one hour of freshness while a missed run costs the whole column.
     TimerSpec(
         job="update_github_stars",
         on_calendar=("*-*-* *:00:00",),
@@ -71,7 +75,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="calculate_trending_scores",
         on_calendar=("*-*-* *:15:00",),
         description="Calculate task trending scores hourly",
-        after=("pwc-cron-update-github-stars",),
     ),
     TimerSpec(
         job="update_citations",
@@ -87,11 +90,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="calculate_paper_trending_scores",
         on_calendar=("*-*-* *:45:00",),
         description="Calculate paper trending scores hourly",
-        after=(
-            "pwc-cron-update-github-stars",
-            "pwc-cron-update-hf-artifacts",
-            "pwc-cron-calculate-trending-scores",
-        ),
     ),
     # Hugging Face import and consumers.
     TimerSpec(
@@ -229,10 +227,7 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="calculate_organization_trending_scores",
         on_calendar=("*-*-* 03:40:00",),
         description="Calculate organization trending scores daily",
-        after=(
-            "pwc-cron-sync-hf-organizations",
-            "pwc-cron-calculate-paper-trending-scores",
-        ),
+        after=("pwc-cron-sync-hf-organizations",),
     ),
     TimerSpec(
         job="mirror_thumbnails_to_disk",

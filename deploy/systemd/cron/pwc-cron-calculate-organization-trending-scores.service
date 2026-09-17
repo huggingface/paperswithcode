@@ -1,7 +1,7 @@
 [Unit]
 Description=Calculate organization trending scores daily
 After=network-online.target postgresql@16-main.service
-After=pwc-cron-sync-hf-organizations.service pwc-cron-calculate-paper-trending-scores.service
+After=pwc-cron-sync-hf-organizations.service
 Wants=network-online.target
 
 [Service]

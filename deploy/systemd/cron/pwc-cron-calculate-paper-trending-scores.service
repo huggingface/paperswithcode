@@ -1,7 +1,6 @@
 [Unit]
 Description=Calculate paper trending scores hourly
 After=network-online.target postgresql@16-main.service
-After=pwc-cron-update-github-stars.service pwc-cron-update-hf-artifacts.service pwc-cron-calculate-trending-scores.service
 Wants=network-online.target
 
 [Service]
