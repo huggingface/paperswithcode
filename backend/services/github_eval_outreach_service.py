@@ -53,6 +53,35 @@ def issues(api, repository: str, *, state: str = "all", creator: str | None = No
         page += 1
 
 
+def site_issues(api, repository: str):
+    """Yield issues in ``repository`` whose body links a Papers with Code paper.
+
+    Repository-wide ``/issues`` listings reject page-based pagination on large
+    repositories (HTTP 422), so coverage detection uses the search API, which
+    returns only the handful of issues that mention the site.
+    """
+    page = 1
+    while True:
+        batch = api(
+            [
+                "search/issues",
+                "--method",
+                "GET",
+                "-f",
+                f"q=repo:{repository} is:issue in:body paperswithcode.co/paper/",
+                "-f",
+                "per_page=100",
+                "-f",
+                f"page={page}",
+            ]
+        )
+        items = batch.get("items", [])
+        yield from (issue for issue in items if "pull_request" not in issue)
+        if len(items) < 100 or page >= 10:
+            return
+        page += 1
+
+
 class OutreachRunner:
     def __init__(
         self,
@@ -194,7 +223,7 @@ class OutreachRunner:
             self.record("open_issue", repository)
             return
         covered = set(record.get("covered", []))
-        for issue in issues(self.api, repository):
+        for issue in site_issues(self.api, repository):
             covered.update(
                 paper.id
                 for paper in uncovered

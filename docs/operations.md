@@ -122,6 +122,16 @@ the remote provider project enforces the independent cost ceiling.
 Use the dashboard to ensure health score stays ≥80%. For command-line
 visibility, use `pwc cron health` and `pwc-cron status`.
 
+When building the health report from a developer checkout, point it at the
+production log directory; otherwise log-plane evidence (per-job logs and the
+content-free chat monitor records) reads as `unknown` and the score drops by
+about 15 points for no operational reason:
+
+```bash
+PWC_CRON_LOG_DIR=/var/lib/paperswithcode/production/cron-logs \
+  uv run --env-file backend/keys.env python -m backend.cli cron health --strict --json
+```
+
 Deployed scheduled jobs run through `sudo /usr/local/sbin/pwc-cron <job>` from
 the immutable `production/current` release. Use `pwc cron health`, `pwc-status`,
 and journald for diagnostics; do not execute scheduled scripts from the

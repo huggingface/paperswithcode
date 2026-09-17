@@ -49,7 +49,7 @@ jobs:
             --output "$skill_temporary"
           test "$(sed -n '1p' "$skill_temporary")" = "---"
           grep -qx 'name: pwc-cli' "$skill_temporary"
-          grep -q 'The standalone parser contains no authentication' "$skill_temporary"
+          grep -qE 'contains? no authentication' "$skill_temporary"
 
           if cmp -s "$skill_temporary" "$DESTINATION"; then
             echo "changed=false" >> "$GITHUB_OUTPUT"

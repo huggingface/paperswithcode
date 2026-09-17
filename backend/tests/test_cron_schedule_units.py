@@ -216,8 +216,11 @@ def test_throttle_requires_a_job_argument(monkeypatch):
 @pytest.mark.parametrize(
     "job_id,expected_after",
     [
-        ("calculate_trending_scores", "pwc-cron-update-github-stars.service"),
         ("calculate_paper_trending_scores", "pwc-cron-update-hf-artifacts.service"),
+        (
+            "calculate_paper_trending_scores",
+            "pwc-cron-calculate-trending-scores.service",
+        ),
         ("refresh_paper_embeddings", "pwc-cron-import-hf-daily-papers.service"),
         ("mirror_thumbnails_to_disk", "pwc-cron-preload-thumbnails-recent.service"),
         (
@@ -230,3 +233,14 @@ def test_producer_chains_declare_storm_ordering(job_id, expected_after):
     unit = "pwc-cron-" + job_id.replace("_", "-")
     source = (UNIT_DIR / f"{unit}.service").read_text()
     assert expected_after in source
+
+
+@pytest.mark.parametrize(
+    "job_id", ["calculate_trending_scores", "calculate_paper_trending_scores"]
+)
+def test_trending_units_never_wait_on_the_hourly_stars_service(job_id):
+    # update_github_stars runs close to its full interval and re-fires under
+    # Persistent=, so an After= edge onto it starves the whole trending chain.
+    unit = "pwc-cron-" + job_id.replace("_", "-")
+    source = (UNIT_DIR / f"{unit}.service").read_text()
+    assert "pwc-cron-update-github-stars.service" not in source

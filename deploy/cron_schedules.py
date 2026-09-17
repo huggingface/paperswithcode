@@ -26,8 +26,11 @@ class TimerSpec:
     # each entry is a full argument vector passed to pwc-cron-throttled.
     commands: tuple[tuple[str, ...], ...] = ()
     # systemd After= orderings onto other generated cron services, by unit
-    # base name.  Ordering only applies when both units are queued (for
-    # example during a persistent catch-up storm after downtime).
+    # base name.  A queued start job waits while the named service is still
+    # activating, so never order a job after a long-running hourly service
+    # (update_github_stars runs close to its full interval and re-fires
+    # immediately under Persistent=, which starved the trending chain for a day
+    # on 2026-09-16/17).  Order only after short producers.
     after: tuple[str, ...] = ()
     # Unit base name override; defaults to pwc-cron-<job with - for _>.
     unit_name: str = ""
@@ -71,7 +74,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="calculate_trending_scores",
         on_calendar=("*-*-* *:15:00",),
         description="Calculate task trending scores hourly",
-        after=("pwc-cron-update-github-stars",),
     ),
     TimerSpec(
         job="update_citations",
@@ -88,7 +90,6 @@ TIMERS: tuple[TimerSpec, ...] = (
         on_calendar=("*-*-* *:45:00",),
         description="Calculate paper trending scores hourly",
         after=(
-            "pwc-cron-update-github-stars",
             "pwc-cron-update-hf-artifacts",
             "pwc-cron-calculate-trending-scores",
         ),
@@ -336,9 +337,13 @@ TIMERS: tuple[TimerSpec, ...] = (
         unit_name="pwc-cron-preload-thumbnails-external",
         on_calendar=("*-*-* 04:45:00",),
         description="Preload thumbnails for external resources daily",
+        # Newest-first; ~2,400 captures fit the 2h launcher timeout, so bound
+        # the sweep instead of letting a large backlog kill the unit.
         args=(
             "--priority",
             "external-missing",
+            "--limit",
+            "2000",
             "--request-delay-seconds",
             "2",
             "--max-failures",

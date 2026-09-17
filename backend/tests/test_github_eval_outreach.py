@@ -56,6 +56,17 @@ class Github:
         if args[0].split("/")[-1].isdigit():
             return self.rows[int(args[0].split("/")[-1]) - 1].copy()
         rows = self.rows
+        if args[0] == "search/issues":
+            page = int(next(value[5:] for value in args if value.startswith("page=")))
+            items = [
+                row
+                for row in rows
+                if "paperswithcode.co/paper/" in (row.get("body") or "")
+            ]
+            return {
+                "total_count": len(items),
+                "items": items[(page - 1) * 100 : page * 100],
+            }
         if "creator=NielsRogge" in args:
             rows = [
                 row
@@ -132,7 +143,7 @@ def test_open_author_issue_beyond_first_page_blocks(state):
     assert not github.posts
 
 
-def test_closed_numeric_or_versioned_arxiv_url_beyond_page_one_blocks(state):
+def test_closed_arxiv_url_among_many_unrelated_issues_blocks_via_search(state):
     github = Github()
     github.rows = [{"state": "closed", "body": "unrelated"}] * 101
     github.rows.append(
@@ -143,7 +154,28 @@ def test_closed_numeric_or_versioned_arxiv_url_beyond_page_one_blocks(state):
     )
     assert runner(state, github).run()["counts"]["already_contacted"] == 1
     assert not github.posts
-    assert any("page=2" in call for call in github.calls)
+    # Coverage detection must not walk the repository-wide issue list, which
+    # rejects page-based pagination on large repositories (HTTP 422).
+    assert any(call[0] == "search/issues" for call in github.calls)
+    assert not any(
+        call[0] == "repos/lab/code/issues" and "creator=NielsRogge" not in call
+        for call in github.calls
+    )
+
+
+def test_site_issue_search_paginates_past_one_hundred_matches(state):
+    github = Github()
+    github.rows = [
+        {"state": "closed", "body": "https://paperswithcode.co/paper/9999#results"}
+    ] * 100
+    github.rows.append(
+        {
+            "state": "closed",
+            "body": "https://paperswithcode.co/paper/2601.00001v1#results",
+        }
+    )
+    assert runner(state, github).run()["counts"]["already_contacted"] == 1
+    assert any(call[0] == "search/issues" and "page=2" in call for call in github.calls)
 
 
 @pytest.mark.parametrize(

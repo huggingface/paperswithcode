@@ -1,7 +1,6 @@
 [Unit]
 Description=Calculate task trending scores hourly
 After=network-online.target postgresql@16-main.service
-After=pwc-cron-update-github-stars.service
 Wants=network-online.target
 
 [Service]
