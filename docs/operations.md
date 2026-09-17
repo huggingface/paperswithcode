@@ -138,8 +138,11 @@ timer sets `Persistent=true`, so missed slots (downtime, reboots) are caught up
 on the next activation. Services invoke `pwc-cron-throttled`, which admits at
 most `PWC_CRON_THROTTLE_SLOTS` (default 3) concurrent launches through slot
 locks in `/run/paperswithcode/cron-slots` before delegating to the immutable
-`pwc-cron` launcher; producer chains additionally declare `After=` orderings
-for catch-up storms. The former GitHub `schedule:` triggers were removed; the
+`pwc-cron` launcher; some producer chains additionally declare `After=`
+orderings for catch-up storms. The trending jobs deliberately declare none: an
+`After=` edge also applies while the producer merely waits for a throttle slot,
+which starved paper and organization trending for over a day, so they are
+staggered by their calendar offsets alone. The former GitHub `schedule:` triggers were removed; the
 workflows stay `workflow_dispatch`-only for manual recovery. Enable or inspect
 a job's schedule with `systemctl status pwc-cron-<job>.timer`; list all with
 `systemctl list-timers 'pwc-cron-*'`.
