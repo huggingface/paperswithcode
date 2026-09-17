@@ -25,6 +25,9 @@ interface PaperPreviewLinkProps {
   children: React.ReactNode;
   target?: React.HTMLAttributeAnchorTarget;
   title?: string;
+  ariaLabel?: string;
+  onClick?: React.MouseEventHandler<HTMLAnchorElement>;
+  previewFooter?: (data: PaperPreviewData) => React.ReactNode;
 }
 
 const isCoarsePointer = (): boolean =>
@@ -39,6 +42,9 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
   children,
   target,
   title,
+  ariaLabel,
+  onClick,
+  previewFooter,
 }) => {
   const normalizedRouteId = normalizePaperRouteId(routeId);
   const [open, setOpen] = React.useState(false);
@@ -63,6 +69,8 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
       to={to ?? `/paper/${normalizedRouteId}`}
       target={target}
       title={title}
+      aria-label={ariaLabel}
+      onClick={(event) => { setOpen(false); onClick?.(event); }}
       rel={target === "_blank" ? "noopener noreferrer" : undefined}
     >
       {children}
@@ -86,7 +94,7 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
         collisionPadding={12}
       >
         {data ? (
-          <PaperPreviewCard data={data} />
+          <><PaperPreviewCard data={data} />{previewFooter?.(data)}</>
         ) : query.isError ? (
           <div className="paper-preview-status">Preview unavailable</div>
         ) : (

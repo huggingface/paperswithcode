@@ -10,6 +10,9 @@ import type { PaperSelectionDraft } from "@/lib/chat";
 import { usePdfSelection } from "@/hooks/usePdfSelection";
 import { PdfToolbar } from "./PdfToolbar";
 import type { PdfToolbarResources } from "./PdfToolbar";
+import { createPdfCitationResolver, type PdfCitationResolver } from "./pdfCitationLinks";
+import { PdfPaperLink } from "./PdfPaperLink";
+import { usePdfPaperLinks } from "./usePdfPaperLinks";
 
 interface PdfViewerProps {
   url: string;
@@ -72,14 +75,17 @@ function LazyPdfPage({
   width,
   searchQuery,
   activeSearchPage,
+  resolveCitation,
 }: {
   page: number;
   width: number;
   searchQuery: string;
   activeSearchPage?: number;
+  resolveCitation?: PdfCitationResolver;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
+  const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -96,11 +102,13 @@ function LazyPdfPage({
       devicePixelRatio={Math.min(window.devicePixelRatio || 1, 2)}
       renderTextLayer
       renderAnnotationLayer
+      onGetAnnotationsSuccess={onAnnotations}
       loading={null}
       customTextRenderer={searchQuery
         ? ({ str }) => highlightPdfText(str, searchQuery, page === activeSearchPage)
         : undefined}
     />}
+    {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
   </div>;
 }
 
@@ -164,6 +172,7 @@ export function PdfViewer({
   const scrollRef = useRef<HTMLDivElement>(null);
   const pagesRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
+  const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
   const internalLinkNavigation = useRef<(page: number) => void>(() => {});
   const searchGeneration = useRef(0);
   const recenterAfterZoom = useRef(false);
@@ -216,6 +225,7 @@ export function PdfViewer({
     pinchCommitTimer.current = 0;
     pinchDelta.current = 0;
     setPages(0);
+    setResolveCitation(undefined);
     setPage(initialPage);
     setNavigationPage(undefined);
     setZoom(1);
@@ -483,6 +493,7 @@ export function PdfViewer({
         loading={<div className="pdf-loading" role="status">{chrome === "canvas" ? "Loading paper preview…" : "Loading paper…"}</div>}
         onLoadSuccess={(pdf) => {
           documentRef.current = pdf;
+          if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf));
           setPages(pdf.numPages);
           setError("");
           const restoredPage = Math.max(1, Math.min(pdf.numPages, initialPage));
@@ -509,6 +520,7 @@ export function PdfViewer({
             width={pageWidth}
             searchQuery={searchQuery.trim()}
             activeSearchPage={matches[activeMatch]}
+            resolveCitation={resolveCitation}
           />)}
         </div>
       </Document>}

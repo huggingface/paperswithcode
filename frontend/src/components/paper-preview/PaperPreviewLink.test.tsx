@@ -166,6 +166,20 @@ describe("PaperPreviewLink", () => {
     expect(await screen.findByTestId("faux-paper-thumb")).toBeInTheDocument();
   });
 
+  it("renders an optional footer once preview data is available", async () => {
+    renderWithProviders(
+      <PaperPreviewLink
+        routeId="2501.12326"
+        initialData={initialData}
+        previewFooter={() => <button type="button">Jump to reference</button>}
+      >
+        Cited
+      </PaperPreviewLink>,
+    );
+    screen.getByRole("link", { name: "Cited" }).focus();
+    expect(await screen.findByRole("button", { name: "Jump to reference" })).toBeInTheDocument();
+  });
+
   it("opens from keyboard focus and closes with Escape", async () => {
     renderWithProviders(
       <PaperPreviewLink routeId="2501.12326" initialData={initialData}>
