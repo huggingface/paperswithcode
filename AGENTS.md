@@ -31,9 +31,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
 ## Development workflow
 
 - Give each feature request and non-hotfix bug fix an isolated worktree and a
-  dedicated `codex/<short-feature-name>` branch. If Codex supplies a
-  detached-HEAD worktree, create the branch before the first commit. Do not
-  develop independent features in the primary `main` checkout.
+  dedicated `<agent>/<short-feature-name>` branch, where `<agent>` is the name
+  of the coding agent doing the work (for example `codex/…`, `claude/…`,
+  `cursor/…`). If the agent supplies a detached-HEAD worktree, create the
+  branch before the first commit. Do not develop independent features in the
+  primary `main` checkout.
 - Commit only the task's intended changes. Never switch, reset, delete, or reuse
   another task's worktree or branch.
 - Implementation approval includes validation, a commit to the task branch,
