@@ -13,8 +13,12 @@ const TOOLS = [
   ["get_paper_info", "Read canonical metadata, authors, abstract, links, and resources."],
   ["read_paper", "Read stored paper Markdown with safe continuation for long papers."],
   ["get_related_papers", "Find related work already indexed in the catalogue."],
+  ["get_trending_papers", "Discover papers with recent citation momentum."],
+  ["get_paper_evaluations", "Inspect benchmark results reported by one paper."],
   ["get_paper_lineage", "Follow explicit predecessor and successor relationships."],
+  ["list_tasks", "Search tasks and retrieve stable slugs for exact lookup."],
   ["get_task", "Inspect a research task and its benchmark coverage."],
+  ["list_methods", "Search methods and retrieve stable slugs for exact lookup."],
   ["get_method", "Inspect a method, its source paper, and catalogue metadata."],
   ["list_benchmarks", "Browse and filter benchmark leaderboards."],
   ["get_benchmark", "Read one benchmark, metrics, datasets, and leading results."],
@@ -196,7 +200,7 @@ const McpView: React.FC = () => {
       <section className="mcp-section" aria-labelledby="mcp-tools">
         <div className="mcp-section-heading">
           <p className="sidebar-label">Catalogue</p>
-          <h2 id="mcp-tools">Ten focused, read-only tools</h2>
+          <h2 id="mcp-tools">Fourteen focused, read-only tools</h2>
         </div>
         <div className="mcp-tool-grid">
           {TOOLS.map(([name, description]) => (
@@ -255,6 +259,7 @@ const McpView: React.FC = () => {
             <a href="https://github.com/huggingface/pwc-cli" target="_blank" rel="noreferrer">CLI repository <ExternalLink size={13} /></a>
             <a href="https://modelcontextprotocol.io/docs/2026-07-28/learn/server-concepts" target="_blank" rel="noreferrer">MCP specification <ExternalLink size={13} /></a>
             <a href="/docs" target="_blank" rel="noreferrer">Public API <ExternalLink size={13} /></a>
+            <a href="/mcp/schema" target="_blank" rel="noreferrer">MCP tool schema <ExternalLink size={13} /></a>
             <a href="/llms.txt" target="_blank" rel="noreferrer">llms.txt <ExternalLink size={13} /></a>
           </nav>
         </div>

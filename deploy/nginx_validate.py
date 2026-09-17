@@ -101,7 +101,6 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
             "if ($request_method = OPTIONS) { return 418; }",
             'if ($http_mcp_protocol_version != "") { return 418; }',
             f"if (${prefix}_stream_signal) {{ return 418; }}",
-            f"if (${prefix}_html_signal = 0) {{ return 406; }}",
             "try_files /index.html =404;",
             'add_header Vary "Accept, MCP-Protocol-Version" always;',
             'add_header Allow "GET, HEAD, POST, DELETE, OPTIONS" always;',
@@ -121,6 +120,18 @@ def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
             and "auth_request /_staging_access_check;" not in block
         ):
             failures.append("staging MCP documentation bypasses browser authentication")
+    for location, upstream_path in (
+        ("location = /.well-known/mcp", "/.well-known/mcp"),
+        ("location = /mcp/schema", "/docs"),
+    ):
+        block = location_block(config, location)
+        if (
+            not block
+            or f"proxy_pass http://127.0.0.1:{port}{upstream_path};" not in block
+            or 'add_header Cache-Control "no-store" always;' not in block
+            or "auth_request" in block
+        ):
+            failures.append(f"{environment} MCP discovery route is unsafe: {location}")
     descendants = location_block(config, "location ^~ /mcp/")
     if not descendants or "return 404;" not in descendants:
         failures.append(f"{environment} unknown MCP descendants do not return 404")
