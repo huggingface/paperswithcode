@@ -38,7 +38,10 @@ from backend.models.database import (
     Task,
     TaskDataset,
 )
-from backend.services.benchmark_gap_service import BenchmarkGapService
+from backend.services.benchmark_gap_service import (
+    BenchmarkGapService,
+    benchmark_candidate_identity_key,
+)
 from backend.services.autonomous_operations_repository import (
     AutonomousOperationsRepository,
     Operator,
@@ -2223,6 +2226,44 @@ def test_benchmark_gap_rejects_server_owned_fields():
     assert rejected == [
         {"index": 0, "error": "agent proposal contains server-owned fields"}
     ]
+
+
+def test_benchmark_candidate_identity_uses_benchmark_name_not_evidence_url():
+    osworld = {
+        "gap_type": "dataset_missing",
+        "_normalized": {
+            "name": "OSWorld 2.0 (0808 offline)",
+            "canonical_url": "https://arxiv.org/abs/2609.15364",
+        },
+    }
+    agents_last_exam = {
+        "gap_type": "dataset_missing",
+        "_normalized": {
+            "name": "Agents' Last Exam (Near-term)",
+            "canonical_url": "https://arxiv.org/abs/2609.15364",
+        },
+    }
+    gamecraft_from_another_paper = {
+        "gap_type": "dataset_missing",
+        "_normalized": {
+            "name": "GameCraft Bench",
+            "canonical_url": "https://arxiv.org/abs/2609.01481",
+        },
+    }
+    gamecraft_from_result_paper = {
+        "gap_type": "dataset_missing",
+        "_normalized": {
+            "name": "GameCraft-Bench",
+            "canonical_url": "https://arxiv.org/abs/2609.15364",
+        },
+    }
+
+    assert benchmark_candidate_identity_key(osworld) != (
+        benchmark_candidate_identity_key(agents_last_exam)
+    )
+    assert benchmark_candidate_identity_key(gamecraft_from_another_paper) == (
+        benchmark_candidate_identity_key(gamecraft_from_result_paper)
+    )
 
 
 def test_reviewed_benchmark_promotion_requeues_only_evidence_papers():
