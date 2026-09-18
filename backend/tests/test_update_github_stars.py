@@ -13,6 +13,10 @@ if str(WORKFLOWS_DIR) not in sys.path:
     sys.path.append(str(WORKFLOWS_DIR))
 
 from scripts.hourly.update_github_stars import (  # noqa: E402
+    FRESH_MAX_RUNTIME_SECONDS,
+    FRESH_MAX_UPDATES,
+    FRESH_REFRESH_HOURS,
+    FRESH_REQUEST_DELAY_SECONDS,
     GitHubFetchResult,
     RateLimit,
     fetch_github_stars,
@@ -21,8 +25,8 @@ from scripts.hourly.update_github_stars import (  # noqa: E402
     rate_limit_reserve_reached,
     require_successful_queues,
     run_queue,
-    summarize_queues,
     store_star_snapshot,
+    summarize_queues,
 )
 from scripts.hourly.update_hot_github_trending import resolve_hot_token  # noqa: E402
 
@@ -352,3 +356,32 @@ def test_empty_or_partially_successful_queue_does_not_fail_job():
             },
         ]
     )
+
+
+def test_run_queue_passes_the_refresh_threshold_to_selection(monkeypatch):
+    captured = {}
+
+    def select(_session, queue, limit, **kwargs):
+        captured.update(queue=queue, limit=limit, **kwargs)
+        return []
+
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_service",
+        lambda: (Mock(), Mock()),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_groups", select
+    )
+    run_queue("fresh", "token", 7, 60, delay=0, threshold_hours_recent=2)
+    assert captured["queue"] == "fresh"
+    assert captured["limit"] == 7
+    assert captured["threshold_hours_recent"] == 2
+
+
+def test_fresh_lane_can_drain_its_whole_cohort_inside_one_run():
+    # The lane must finish inside its runtime even when the full two-hour
+    # cohort is eligible, otherwise it drifts back into a permanent backlog.
+    per_group_seconds = FRESH_REQUEST_DELAY_SECONDS + 0.4  # request + DB write
+    assert FRESH_MAX_UPDATES * per_group_seconds < FRESH_MAX_RUNTIME_SECONDS
+    assert FRESH_MAX_RUNTIME_SECONDS < 50 * 60  # launcher timeout
+    assert FRESH_REFRESH_HOURS == 2

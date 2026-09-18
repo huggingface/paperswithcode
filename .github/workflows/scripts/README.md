@@ -118,8 +118,10 @@ latest papers aged 0–30 days. Once separately activated in production, every
 repository EMA only for touched rows, then writes composite scores only for
 their linked latest papers using full-corpus normalization.
 
-`update_github_stars.py` owns the non-overlapping hourly fresh (31–180 days,
-2,500 calls) and weekly (>180 days, 1,000 calls) queues.
+`update_github_stars.py` owns the non-overlapping fresh (31–180 days, refreshed
+every two hours, up to 3,500 calls in 40 minutes) and weekly (>180 days, 1,000
+calls) queues. The hourly timer runs both; the fresh lane simply finds nothing
+eligible in alternate hours.
 The hot/fresh boundary is a fixed 30 days shared by both adapters and CRON
 health; only cadence, caps, delays, and credentials are configurable.
 

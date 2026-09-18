@@ -22,7 +22,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `update_github_stars`
 
-- **Effect:** Refreshes `repositories.num_stars`, `num_stars_updated_at`, and `repository_star_history` for 31–180-day hourly and older weekly queues.
+- **Effect:** Refreshes `repositories.num_stars`, `num_stars_updated_at`, and `repository_star_history` for 31–180-day two-hourly and older weekly queues.
 - **Independent proof:** Partition eligibility by queue, inspect age distribution and oldest wait, and ensure duplicate owner/name records agree. Compare a stratified GitHub API sample with stored stars and latest snapshots; inspect implausible deltas.
 - **Trap:** Terminal 404/451 handling may advance a checked timestamp without changing stars. Count these separately from successful refreshes.
 

@@ -31,6 +31,16 @@ from backend.services.repository_service import RepositoryService
 
 HOT_PAPER_WINDOW_DAYS = 30
 FRESH_PAPER_WINDOW_DAYS = 180
+# Fresh lane (31-180 day papers). It shares PWC_GITHUB_TOKEN with the hot lane
+# (~870 calls/hour), so refreshing the whole ~3,300-group cohort every hour
+# does not fit under the 5,000/hour limit with the reserve; refresh it every
+# two hours instead and let one run drain the full cohort well inside its slot.
+# GitHub asks only that requests on one token stay serial, so a quarter-second
+# pause is plenty; the old one-second pause capped a run at ~2,100 groups.
+FRESH_REFRESH_HOURS = 2
+FRESH_REQUEST_DELAY_SECONDS = 0.25
+FRESH_MAX_UPDATES = 3_500
+FRESH_MAX_RUNTIME_SECONDS = 40 * 60
 DEFAULT_RATE_LIMIT_RESERVE = 500
 MAX_RETRIES = 3
 MAX_RETRY_DELAY_SECONDS = 60.0
@@ -421,6 +431,7 @@ def run_queue(
     delay: float = 1.0,
     rate_limit_reserve: int = 0,
     hot_threshold_minutes: int = 15,
+    threshold_hours_recent: int = 1,
     selection_only: bool = False,
 ) -> Dict:
     """Process one queue and return structured stage statistics."""
@@ -452,6 +463,7 @@ def run_queue(
                 selection_session,
                 queue,
                 max_updates,
+                threshold_hours_recent=threshold_hours_recent,
                 hot_threshold_minutes=hot_threshold_minutes,
             )
         finally:
@@ -606,9 +618,11 @@ def main():
                 run_queue,
                 "fresh",
                 token_config["fresh"],
-                2_500,
-                48 * 60,
+                FRESH_MAX_UPDATES,
+                FRESH_MAX_RUNTIME_SECONDS,
+                delay=FRESH_REQUEST_DELAY_SECONDS,
                 rate_limit_reserve=reserve,
+                threshold_hours_recent=FRESH_REFRESH_HOURS,
             ),
             executor.submit(
                 run_queue,
