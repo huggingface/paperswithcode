@@ -2426,10 +2426,14 @@ def submit_chat_feedback(
             comment=body.comment,
         )
     except ChatFeedbackUnavailable:
+        db.rollback()
         raise HTTPException(
             status_code=503,
             detail="Chat feedback is temporarily unavailable",
         ) from None
     if not found:
+        db.rollback()
         raise HTTPException(status_code=404, detail="Assistant response not found")
+    # The request session only closes on exit; the stored rating must commit.
+    db.commit()
     return Response(status_code=204)

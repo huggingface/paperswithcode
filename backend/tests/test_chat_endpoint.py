@@ -4172,3 +4172,51 @@ def test_one_user_can_admit_two_concurrent_active_turns(monkeypatch):
             client_message_id="second-request",
             text="A second concurrent turn is allowed",
         )
+
+
+@pytest.mark.parametrize(
+    ("found", "status", "outcome"), [(True, 204, "commit"), (False, 404, "rollback")]
+)
+def test_feedback_route_commits_the_stored_rating(monkeypatch, found, status, outcome):
+    from backend.database.connection import get_database_session
+
+    calls: list[str] = []
+
+    class FakeSession:
+        def commit(self) -> None:
+            calls.append("commit")
+
+        def rollback(self) -> None:
+            calls.append("rollback")
+
+    class FakeFeedbackService:
+        def __init__(self, db, settings) -> None:
+            self.db = db
+
+        def submit(self, **kwargs) -> bool:
+            calls.append("submit")
+            return found
+
+    import backend.main as pwc_main
+
+    settings = Settings(_env_file=None, chat_enabled=True)
+    monkeypatch.setattr(pwc_main, "get_settings", lambda: settings)
+    monkeypatch.setattr(chat_router, "ChatFeedbackService", FakeFeedbackService)
+    app = create_app()
+    app.dependency_overrides[require_user] = lambda: {
+        "source": "cookie",
+        "username": "tester",
+        "hf_user_id": "hf-test-sub",
+    }
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: FakeSession()
+    with TestClient(app) as client:
+        response = client.post(
+            f"/api/v1/chat/messages/{uuid.uuid4()}/feedback",
+            json={"value": True, "comment": "Helpful"},
+        )
+
+    assert response.status_code == status, response.json()
+    # The request session only closes at exit, so the route itself must commit
+    # a stored rating and roll back when nothing was stored.
+    assert calls == ["submit", outcome]
