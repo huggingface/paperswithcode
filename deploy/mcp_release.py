@@ -29,8 +29,10 @@ MCP_RELEASES = MCP_ROOT / "releases"
 MCP_ENVIRONMENTS = MCP_ROOT / "environments"
 MCP_CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode"))
 MCP_PORTS = {"production": 8002, "staging": 8003}
+# Both environments read the catalog through nginx's loopback-only bridge so MCP
+# traffic never leaves the host or shares the public per-IP rate limits.
 MCP_API_URLS = {
-    "production": "https://paperswithcode.co/api/v1",
+    "production": "http://127.0.0.1:8010/api/v1",
     "staging": "http://127.0.0.1:8011/api/v1",
 }
 MCP_RETAIN_RELEASES = 3

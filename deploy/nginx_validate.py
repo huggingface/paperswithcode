@@ -197,6 +197,48 @@ def location_block(config: str, location: str) -> str:
     return ""
 
 
+def _validate_mcp_api_bridge(
+    config: str, environment: str, port: int, backend: str, host: str
+) -> list[str]:
+    """The loopback bridge the MCP service uses to read the catalog."""
+    failures: list[str] = []
+    server_name = f"server_name pwc-{environment}-mcp-api;"
+    if server_name not in config:
+        return [f"{environment} MCP API bridge is missing"]
+    marker = config.index(server_name)
+    bridge = config[config.rfind("server {", 0, marker) :].split("\n}\n\nmap ", 1)[0]
+    for requirement in (
+        f"listen 127.0.0.1:{port};",
+        "allow 127.0.0.1;",
+        "deny all;",
+        'location ~ "^/api/v1/(papers(?:/|$)|research/papers/|tasks(?:/|$)|methods(?:/|$)|datasets(?:/|$)|areas(?:/|$)|conferences(?:/|$)|organizations(?:/|$)|frameworks(?:/|$)|evaluations(?:/|$))"',
+        "limit_except GET HEAD",
+        f"proxy_pass http://{backend};",
+        f"proxy_set_header Host {host};",
+        'proxy_set_header Cookie "";',
+        'proxy_set_header Authorization "";',
+        "location ~ ^/ {",
+        "return 404;",
+    ):
+        if requirement not in bridge:
+            failures.append(f"{environment} MCP API bridge misses: {requirement}")
+    if "auth_request" in bridge or "listen 0.0.0.0" in bridge:
+        failures.append(f"{environment} MCP API bridge is not loopback-only")
+    if "limit_req" in bridge:
+        failures.append(f"{environment} MCP API bridge applies public rate limits")
+    catalog_location = 'location ~ "^/api/v1/'
+    catch_all_location = "location ~ ^/ {"
+    if (
+        catalog_location in bridge
+        and catch_all_location in bridge
+        and bridge.index(catch_all_location) < bridge.index(catalog_location)
+    ):
+        failures.append(
+            f"{environment} MCP API bridge catch-all shadows catalog routes"
+        )
+    return failures
+
+
 def validate(production: str, staging: str) -> list[str]:
     failures: list[str] = []
     if (
@@ -231,39 +273,13 @@ def validate(production: str, staging: str) -> list[str]:
             failures.append(f"{environment} does not deny public deployment operators")
     if "8081" in staging:
         failures.append("staging exposes Vite/HMR")
-    bridge_server = staging.split("server_name pwc-staging-mcp-api;", 1)
-    if len(bridge_server) != 2:
-        failures.append("staging MCP API bridge is missing")
-    else:
-        marker = staging.index("server_name pwc-staging-mcp-api;")
-        bridge = staging[staging.rfind("server {", 0, marker) :].split(
-            "\n}\n\nmap ", 1
-        )[0]
-        for requirement in (
-            "listen 127.0.0.1:8011;",
-            "allow 127.0.0.1;",
-            "deny all;",
-            'location ~ "^/api/v1/(papers(?:/|$)|research/papers/|tasks(?:/|$)|methods(?:/|$)|datasets(?:/|$)|areas(?:/|$)|conferences(?:/|$)|organizations(?:/|$)|frameworks(?:/|$)|evaluations(?:/|$))"',
-            "limit_except GET HEAD",
-            "proxy_pass http://pwc_staging_backend;",
-            "proxy_set_header Host staging.paperswithcode.co;",
-            'proxy_set_header Cookie "";',
-            'proxy_set_header Authorization "";',
-            "location ~ ^/ {",
-            "return 404;",
-        ):
-            if requirement not in bridge:
-                failures.append(f"staging MCP API bridge misses: {requirement}")
-        if "auth_request" in bridge or "listen 0.0.0.0" in bridge:
-            failures.append("staging MCP API bridge is not loopback-only")
-        catalog_location = 'location ~ "^/api/v1/'
-        catch_all_location = "location ~ ^/ {"
-        if (
-            catalog_location in bridge
-            and catch_all_location in bridge
-            and bridge.index(catch_all_location) < bridge.index(catalog_location)
-        ):
-            failures.append("staging MCP API bridge catch-all shadows catalog routes")
+    for config, environment, port, backend, host in (
+        (staging, "staging", 8011, "pwc_staging_backend", "staging.paperswithcode.co"),
+        (production, "production", 8010, "pwc_production_backend", "paperswithcode.co"),
+    ):
+        failures.extend(
+            _validate_mcp_api_bridge(config, environment, port, backend, host)
+        )
     access_block = location_block(staging, "location = /_staging_access_check")
     if (
         not access_block

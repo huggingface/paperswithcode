@@ -197,7 +197,7 @@ def main() -> int:
         ensure_dir(path, "root", "root", 0o755)
     ensure_dir(CONFIG_ROOT, "root", "root", 0o711)
     for environment, port, api_url in (
-        ("production", 8002, "https://paperswithcode.co/api/v1"),
+        ("production", 8002, "http://127.0.0.1:8010/api/v1"),
         ("staging", 8003, "http://127.0.0.1:8011/api/v1"),
     ):
         mcp_config = CONFIG_ROOT / f"mcp-{environment}.env"

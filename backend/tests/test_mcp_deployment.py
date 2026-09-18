@@ -50,6 +50,12 @@ def test_mcp_paths_are_separate_from_site_releases():
     assert mcp_release.MCP_RELEASES == mcp_release.MCP_ROOT / "releases"
     assert mcp_release.MCP_PORTS == {"production": 8002, "staging": 8003}
     assert mcp_release.MCP_API_URLS["staging"].startswith("http://127.0.0.1:8011/")
+    # Production also reads the catalog over nginx's loopback bridge, never the
+    # public edge, so MCP calls do not consume the per-IP catalog rate limits.
+    assert mcp_release.MCP_API_URLS["production"] == "http://127.0.0.1:8010/api/v1"
+    assert not any(
+        url.startswith("https://") for url in mcp_release.MCP_API_URLS.values()
+    )
 
 
 def test_resolve_sha_fetches_and_enforces_production_ancestry(monkeypatch):
