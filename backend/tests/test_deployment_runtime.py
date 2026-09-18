@@ -1499,7 +1499,11 @@ class _ChatSchemaDB:
                 "chat_openrouter_credential_audit",
             )
             if self.include_artifact_foundation:
-                names += ("chat_artifacts", "chat_latex_paper_versions")
+                names += (
+                    "chat_artifacts",
+                    "chat_latex_paper_versions",
+                    "chat_feedback",
+                )
             if self.include_durable_schema:
                 names += (
                     "chat_turn_jobs",

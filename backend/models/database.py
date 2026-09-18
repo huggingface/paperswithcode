@@ -11,17 +11,17 @@ from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import (
-    DDL,
-    JSON,
     BigInteger,
     Boolean,
     CheckConstraint,
+    DDL,
     Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
     Integer,
+    JSON,
     LargeBinary,
     Numeric,
     SmallInteger,
@@ -4467,6 +4467,47 @@ class ChatTitleBudgetEvent(Base):
             "budget_state_id", "event_type", name="uq_chat_title_budget_event"
         ),
         Index("idx_chat_title_budget_events_delivery", "delivery_state", "created_at"),
+    )
+
+
+class ChatFeedback(Base):
+    """One end-user thumbs rating for a completed assistant response.
+
+    Feedback used to be forwarded straight to the trace store and was lost
+    whenever that store changed; the catalog database is now the record and
+    the trace export is a best-effort mirror.
+    """
+
+    __tablename__ = "chat_feedback"
+
+    assistant_message_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_messages.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    session_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("chat_sessions.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    turn_id: Mapped[str] = mapped_column(UUID(as_uuid=True), nullable=False)
+    value: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    comment: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    trace_id: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    exported_to: Mapped[Optional[str]] = mapped_column(String(16), nullable=True)
+    exported_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+
+    __table_args__ = (
+        Index("idx_chat_feedback_created_at", "created_at"),
+        Index("idx_chat_feedback_session_id", "session_id"),
     )
 
 

@@ -104,6 +104,23 @@ class TrackioClient:
                 else {"trace": self._trace_metric(root)}
             ),
         }
+        self._enqueue(entry, root.trace_id)
+
+    def log_metrics(self, kind: str, metrics: dict[str, float], *, log_id: str) -> None:
+        """Queue plain numeric metrics into today's ``<environment>-<kind>`` run."""
+        if not kind or not metrics or not log_id:
+            raise ValueError("Trackio metrics need a run kind, values, and a log id")
+        run = f"{self.environment}-{kind}-{datetime.now(UTC).date().isoformat()}"
+        entry = {
+            "project": self.project,
+            "run": run,
+            "run_id": hashlib.sha256(f"{self.project}:{run}".encode()).hexdigest()[:32],
+            "log_id": log_id,
+            "metrics": dict(metrics),
+        }
+        self._enqueue(entry, log_id)
+
+    def _enqueue(self, entry: dict[str, Any], trace_id: str) -> None:
         encoded = json.dumps(entry, default=str).encode()
         with self._lock:
             self.counters["submitted"] += 1
@@ -112,16 +129,16 @@ class TrackioClient:
                 self.counters["dropped"] += 1
                 logger.warning(
                     "chat Trackio trace dropped: payload exceeds 2 MiB trace_id=%s",
-                    root.trace_id,
+                    trace_id,
                 )
                 return
             if self._pending_bytes + len(encoded) > MAX_QUEUE_BYTES:
-                self._drop_queue_full(root.trace_id)
+                self._drop_queue_full(trace_id)
                 return
             try:
                 self.pending.put_nowait(encoded)
             except queue.Full:
-                self._drop_queue_full(root.trace_id)
+                self._drop_queue_full(trace_id)
                 return
             self._pending_bytes += len(encoded)
 

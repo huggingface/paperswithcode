@@ -252,6 +252,28 @@ class ChatFeedbackRequest(BaseModel):
     comment: str | None = Field(default=None, max_length=500)
 
 
+class ChatFeedbackEntry(BaseModel):
+    """One stored rating, as listed for operators."""
+
+    assistant_message_id: uuid.UUID
+    session_id: uuid.UUID
+    turn_id: uuid.UUID
+    value: bool
+    comment: str | None = None
+    trace_id: str | None = None
+    exported_to: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ChatFeedbackListResponse(BaseModel):
+    environment: str
+    total: int
+    positive: int
+    negative: int
+    items: list[ChatFeedbackEntry]
+
+
 class ChatPaperMetadata(BaseModel):
     arxiv_id: str | None
     source: Literal["arxiv", "external"]

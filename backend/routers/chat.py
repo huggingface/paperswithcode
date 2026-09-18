@@ -36,6 +36,7 @@ from backend.models.chat import (
     ArchiveOldChatsResponse,
     ChatAvailabilityResponse,
     ChatBrowserLatencyRequest,
+    ChatFeedbackListResponse,
     ChatFeedbackRequest,
     ChatMessageResponse,
     ChatRequest,
@@ -2392,6 +2393,20 @@ def report_browser_latency(
         raise HTTPException(status_code=404, detail="Chat request not found")
     db.commit()
     return Response(status_code=204)
+
+
+@router.get(
+    "/admin/feedback",
+    dependencies=[Depends(require_admin)],
+    response_model=ChatFeedbackListResponse,
+)
+def list_chat_feedback(
+    limit: int = Query(default=50, ge=1, le=200),
+    value: bool | None = Query(default=None),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    return ChatFeedbackService(db, settings).list_recent(limit=limit, value=value)
 
 
 @router.post("/messages/{message_id}/feedback", status_code=204)

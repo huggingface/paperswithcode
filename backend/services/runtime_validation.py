@@ -2103,6 +2103,7 @@ def validate_chat_schema(db, settings: Settings) -> None:
         "chat_turn_latency",
         "chat_artifacts",
         "chat_latex_paper_versions",
+        "chat_feedback",
     }
     pi_tables = {
         "chat_pi_sessions",
