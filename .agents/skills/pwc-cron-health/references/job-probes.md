@@ -71,6 +71,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `open-asr-leaderboard`, WER plus optional RTFx, official HF Space; typically 40–150 rows.
 - **Proof:** Apply the shared procedure; verify lower-is-better WER ranking, units, optional RTFx mapping, and managed methodology.
 
+## `sync_open_tts`
+
+- **Contract:** `open-tts-leaderboard` is the English macro-average and `open-tts-leaderboard-all-languages` is the macro-average across every available language, both over Seed-TTS and CV3-Eval. Managed rows come from the official Open TTS HF Space, rank by lower-is-better WER, and may also carry RTFx.
+- **Independent proof:** Fetch both current Gradio tables read-only with the exact deployed language/dataset filters. Compare the complete validated model set, WER, RTFx, upstream rank, HF model identity, paper mapping, open status, managed methodology, and stale-row deletion independently for each dataset.
+- **Correctness:** Require the expected language choices and plausible row-count bounds before comparing. Verify that English and all-language aggregates were not swapped or copied, WER ranks are ascending with ties handled correctly, unrelated manual rows survive, and both public benchmark APIs match the recomputed tables.
+
 ## `sync_mmteb_overall`
 
 - **Contract:** `embedding-models` / `mmteb-v2`, `MMTEB Score`, official MMTEB v2 source, and only rows with the managed MMTEB methodology.
@@ -131,6 +137,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Inserts/updates papers, authors, resources, auto task/method tags, organizations, and version/external-paper merges from HF daily papers.
 - **Independent proof:** Fetch complete HF daily cohorts for each day in the rolling seven-day window and anti-join every arXiv ID against latest papers. Inspect per-day missing and duplicate IDs plus error/delta history.
 - **Correctness:** Compare title, abstract, date, TLDR, authors, organization attribution, and resources for a stratified sample. A successful no-op requires proven cohort completeness.
+
+## `create_eval_verification_issues`
+
+- **Effect:** Reconciles recent evaluation-outreach candidates into a protected SQLite ledger and creates at most ten GitHub verification issues per run; aliases, pending posts, rate-limit cooldown, and the last-run summary make retries idempotent.
+- **Independent proof:** Read the ledger through the script's `--status` mode, then independently recompute the bounded recent candidate cohort from the catalog. Compare repository identities with the complete paginated GitHub issue set, including open and closed matches, and verify every pending checkpoint resolves to exactly one issue or a recorded review/cooldown state.
+- **Correctness:** Inspect `last_run` counts/events, oldest pending repository, duplicate issue identities, uncertain-post `needs_review`, and rate-limit expiry. A fresh log or empty pending list is insufficient if eligible repositories were omitted or GitHub pagination stopped early. Never use `--execute` as a health probe.
 
 ## `enqueue_hf_daily_paper_curation`
 
@@ -214,6 +226,24 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** A minutely systemd job reads content-free operational signals, writes private state and health JSON, and delivers primary/fallback alerts.
 - **Independent proof:** Check timer/service cadence, health-record mtime/schema/status, journal cursor advancement, pending delivery states/attempts, and bounded history. Recompute provider/content-free journal health from source aggregates.
 - **Limitation:** Alert delivery cannot be fully proven without authorized Slack/channel evidence. Do not inspect chat content.
+
+## `run_chat_synthetic_probe`
+
+- **Effect:** Runs a production-only, content-free synthetic chat when the four-hour gate or a release/critical-alert trigger is due, records transition events in `chat-synthetic-probe-state.json`, writes `chat-synthetic-probe-health.json`, and retries pending primary/fallback alert delivery.
+- **Independent proof:** Check the systemd minute cadence separately from the internal due gate. Validate health/state JSON schema and mtimes, `last_synthetic_probe_at`, active-probe age, release/runtime revision triggers, recent transition events, pending delivery states/attempts, and the absence of overlapping active probes. Corroborate the latest due run with content-free production reliability telemetry only.
+- **Correctness:** Classify intentional `dormant` or mutation `paused` states separately from healthy execution. A minute timer success with no due probe is not end-to-end proof; an overdue four-hour probe, stale `synthetic_active`, undelivered event, release-trigger miss, or synthetic failure is a finding. Do not inspect user chats or invoke a synthetic run merely to test health.
+
+## `autonomous_cron_health`
+
+- **Effect:** Every 15 minutes, builds a strict multi-plane dashboard snapshot, selects at most one unhealthy job, and records a fenced retry/source-repair/no-op outcome in `autonomous-cron-operator-health.json` plus autonomous run/action ledgers and alert receipts.
+- **Independent proof:** Verify timer/service cadence and health-file schema/mode, then independently rebuild the strict snapshot from the current registry, scheduler state, logs, locks, freshness providers, and output evaluators. Match the selected job, before/after finding digests, reason code, run ID, policy decision, action ledger, alert receipt, and any published SHA or rollback record.
+- **Safety:** Read-only comparison is the probe. Do not trigger the operator or retry a job to demonstrate health. Treat `monitoring_only` as an operator-policy outcome, not proof that the selected CRON recovered; verify the underlying finding again.
+
+## `autonomous_cron_audit`
+
+- **Effect:** Runs the daily-mode four-plane audit at 02:20 UTC, handles at most one selected finding under the same fenced policy, builds the daily digest, and records digest-delivery evidence. It shares the operator health filename with strict mode, so a later strict run may replace the daily file.
+- **Independent proof:** Prove the daily timer occurrence from systemd/journal and the autonomous run/action and alert-receipt ledgers rather than relying only on the shared JSON file. Rebuild the daily snapshot, compare all findings and selected-job digests, and verify exactly one current-day digest payload/receipt with bounded aggregate counts.
+- **Correctness:** Distinguish audit completeness from successful remediation and notification delivery. Flag a missing daily run/digest, partial plane inventory, stale or duplicate digest, unexplained finding suppression, unauthorized action, or mismatch between the daily snapshot, durable ledgers, and delivery receipt.
 
 ## `process_curation_thumbnails`
 
