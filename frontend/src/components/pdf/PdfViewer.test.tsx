@@ -292,6 +292,7 @@ describe("PdfViewer resize rendering", () => {
 
     expect(scrollTo).toHaveBeenCalledWith({ top: 4000 + 500 - 8, behavior: "smooth" });
     expect(window.location.hash).toBe("#pdf-section-1");
+    expect(screen.getByRole("link", { name: "System Design" })).not.toHaveFocus();
     expect(screen.getByRole("link", { name: "System Design" })).toHaveAttribute("aria-current", "location");
     expect(toc.querySelector(".pdf-outline-tick.is-active")).toBe(toc.querySelectorAll(".pdf-outline-tick")[1]);
 
@@ -346,6 +347,24 @@ describe("PdfViewer resize rendering", () => {
     expect(scrollIntoView).not.toHaveBeenCalled();
     // jsdom reports zero-size pages, so the scroll tracker later snaps back to page 1.
     expect(onPageChange).toHaveBeenCalledWith(9);
+    window.history.replaceState(null, "", "/paper/2609.18063/read");
+  });
+
+  it("falls back to the remembered page when a #pdf-section deep link cannot be resolved", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    window.history.replaceState(null, "", "/paper/2609.18063/read#pdf-section-99");
+    const onPageChange = vi.fn();
+    const view = render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" initialPage={7} onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+
+    await waitFor(() => expect(onPageChange).toHaveBeenCalledWith(7));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(view.container.querySelector('[data-page="7"]'));
+
+    // The same holds for a document without any bookmarks.
+    onPageChange.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    await waitFor(() => expect(onPageChange).toHaveBeenCalledWith(7));
     window.history.replaceState(null, "", "/paper/2609.18063/read");
   });
 

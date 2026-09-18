@@ -202,7 +202,7 @@ export function PdfViewer({
   const [outline, setOutline] = useState<PdfOutlineEntry[]>([]);
   const [activeSection, setActiveSection] = useState(-1);
   const [navigationSection, setNavigationSection] = useState<number>();
-  const pendingSection = useRef<number>();
+  const sectionNavigation = useRef<(entry: PdfOutlineEntry, behavior?: ScrollBehavior) => void>(() => {});
   const [page, setPage] = useState(initialPage);
   const [navigationPage, setNavigationPage] = useState<number>();
   const [fitWidth, setFitWidth] = useState(700);
@@ -489,24 +489,12 @@ export function PdfViewer({
       window.history.replaceState(window.history.state, "", `#pdf-section-${entry.index}`);
     }
   };
-  // Deep links (`#pdf-section-<n>`) resolve once the outline and page
-  // placeholders exist; they take precedence over the remembered page.
-  useEffect(() => {
-    const section = pendingSection.current;
-    if (section === undefined || !outline.length) return;
-    pendingSection.current = undefined;
-    const entry = outline[section];
-    if (!entry) return;
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() => jumpToSection(entry, "instant")));
-    return () => cancelAnimationFrame(frame);
-    // jumpToSection reads the current mounted scroll surface.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [outline]);
   // React-PDF retains its initial onItemClick callback. Forward through a ref so
   // links use the loaded page count and current reader callbacks. Our wrappers
   // exist even when the destination Page is unmounted by lazy rendering.
   useLayoutEffect(() => {
     internalLinkNavigation.current = jumpToPage;
+    sectionNavigation.current = jumpToSection;
   });
   const navigateMatch = (direction: 1 | -1) => {
     if (!matches.length) return;
@@ -561,25 +549,34 @@ export function PdfViewer({
           if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf));
           setPages(pdf.numPages);
           setError("");
-          pendingSection.current = chrome === "reader" ? pdfSectionFromHash(window.location.hash) : undefined;
           // Papers use one page size throughout; the first page stands for all placeholders.
           void pdf.getPage(1).then((first) => {
             const [left, bottom, right, top] = first.view;
             const aspect = (top - bottom) / (right - left);
             if (documentRef.current === pdf && aspect > 0) setPageAspect(aspect);
           });
+          const restoredPage = Math.max(1, Math.min(pdf.numPages, initialPage));
+          const restorePage = () => {
+            if (restoredPage <= 1) return;
+            scrollRef.current?.querySelector<HTMLElement>(`[data-page="${restoredPage}"]`)?.scrollIntoView({ block: "start" });
+            setPage(restoredPage);
+            onPageChange?.(restoredPage);
+          };
+          const afterLayout = (callback: () => void) => requestAnimationFrame(() => requestAnimationFrame(() => {
+            if (documentRef.current === pdf) callback();
+          }));
+          // A `#pdf-section-<n>` deep link takes precedence over the remembered
+          // page, but only once the outline confirms the section exists.
+          const section = chrome === "reader" ? pdfSectionFromHash(window.location.hash) : undefined;
+          if (section === undefined) afterLayout(restorePage);
           // A malformed outline must not take the reader down with it.
           void loadPdfOutline(pdf).catch(() => []).then((entries) => {
-            if (documentRef.current === pdf) setOutline(entries);
+            if (documentRef.current !== pdf) return;
+            setOutline(entries);
+            if (section === undefined) return;
+            const entry = entries[section];
+            afterLayout(() => entry ? sectionNavigation.current(entry, "instant") : restorePage());
           });
-          const restoredPage = Math.max(1, Math.min(pdf.numPages, initialPage));
-          if (restoredPage > 1 && pendingSection.current === undefined) {
-            requestAnimationFrame(() => requestAnimationFrame(() => {
-              scrollRef.current?.querySelector<HTMLElement>(`[data-page="${restoredPage}"]`)?.scrollIntoView({ block: "start" });
-              setPage(restoredPage);
-              onPageChange?.(restoredPage);
-            }));
-          }
         }}
         onLoadError={(loadError) => setError(loadErrorMessage || pdfErrorMessage(loadError))}
         externalLinkTarget="_blank"

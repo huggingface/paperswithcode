@@ -52,6 +52,8 @@ export function PdfOutline({ entries, activeIndex, onSelect }: PdfOutlineProps) 
             aria-current={entry.index === activeIndex ? "location" : undefined}
             onClick={(event) => {
               event.preventDefault();
+              // Drop focus too, or :focus-within keeps the panel over the heading.
+              event.currentTarget.blur();
               setPinned(false);
               onSelect(entry);
             }}
