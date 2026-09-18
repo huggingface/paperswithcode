@@ -590,3 +590,54 @@ def test_versioned_markdown_chunk_cache_is_separate_and_avoids_content_reread(
     assert operations[len(reads_after_first) :] == [
         ("read", paper_markdown_service.PAPER_MARKDOWN_MANIFEST_MAX_BYTES + 1)
     ]
+
+
+def test_versioned_chunk_falls_back_to_the_compatibility_alias_without_a_manifest(
+    monkeypatch,
+):
+    # Older uploads have only ``<prefix>/<paper>.md``; chunk mode used to 404
+    # for them while the plain route served the same bytes.
+    data = "aα🙂z".encode()
+    files = {"1706/1706.03762.md": data}
+    _install_versioned_filesystem(monkeypatch, files)
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+    version = hashlib.sha256(data).hexdigest()
+    kwargs = {"bucket_id": "owner/content", "token": "private-token"}
+    try:
+        first = paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762v4", offset=0, limit=4, **kwargs
+        )
+        second = paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762",
+            offset=first.next_offset,
+            limit=5,
+            content_version=first.content_version,
+            **kwargs,
+        )
+        terminal = paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762", offset=len(data), limit=5, **kwargs
+        )
+        with pytest.raises(
+            paper_markdown_service.PaperMarkdownVersionMismatchError, match="restart"
+        ):
+            paper_markdown_service.read_paper_markdown_chunk(
+                "1706.03762", offset=1, limit=5, content_version="0" * 64, **kwargs
+            )
+        with pytest.raises(
+            paper_markdown_service.PaperMarkdownRangeError, match="code-point"
+        ):
+            paper_markdown_service.read_paper_markdown_chunk(
+                "1706.03762", offset=2, limit=5, **kwargs
+            )
+        with pytest.raises(paper_markdown_service.PaperMarkdownNotFoundError):
+            paper_markdown_service.read_paper_markdown_chunk(
+                "2308.10195", offset=0, limit=5, **kwargs
+            )
+    finally:
+        paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+    assert (first.markdown, first.next_offset, first.truncated) == ("aα", 3, True)
+    assert first.content_version == version
+    assert (second.markdown, second.next_offset) == ("🙂z", None)
+    assert second.content_version == version
+    assert (terminal.markdown, terminal.next_offset) == ("", None)

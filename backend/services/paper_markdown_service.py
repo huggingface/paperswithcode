@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import hashlib
 import json
 import threading
 import time
@@ -24,6 +25,9 @@ PAPER_PDF_MAX_BYTES = 150 * 1024 * 1024
 PAPER_PDF_CHUNK_BYTES = 1024 * 1024
 PAPER_MARKDOWN_MAX_BYTES = 64 * 1024 * 1024
 PAPER_MARKDOWN_MANIFEST_MAX_BYTES = 4096
+# Bound for chunking a paper that has no versioned manifest yet; the bytes are
+# held in the shared 128-entry in-process cache, so keep it modest.
+PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES = 2 * 1024 * 1024
 PAPER_MARKDOWN_CHUNK_CACHE_ENTRIES = 256
 PAPER_MARKDOWN_CHUNK_CACHE_BYTES = 16 * 1024 * 1024
 PAPER_MARKDOWN_CHUNK_CACHE_SECONDS = 3600
@@ -527,12 +531,26 @@ def read_paper_markdown_chunk(
         raise PaperMarkdownRangeError("Paper Markdown limit is invalid")
 
     filesystem = HfFileSystem(token=token)
-    manifest = _read_markdown_manifest(
-        filesystem,
-        bucket_id=bucket_id.strip(),
-        paper_id=normalized,
-        source=resolved_source,
-    )
+    try:
+        manifest = _read_markdown_manifest(
+            filesystem,
+            bucket_id=bucket_id.strip(),
+            paper_id=normalized,
+            source=resolved_source,
+        )
+    except PaperMarkdownNotFoundError:
+        # Older uploads have only the mutable compatibility alias the plain
+        # route serves.  Chunk it from a bounded in-process copy so agents can
+        # read those papers too; the content hash still versions the cursor.
+        return _read_unversioned_markdown_chunk(
+            paper_id=normalized,
+            source=resolved_source,
+            bucket_id=bucket_id.strip(),
+            token=token,
+            offset=offset,
+            limit=limit,
+            content_version=content_version,
+        )
     if content_version is not None and content_version != manifest.content_version:
         raise PaperMarkdownVersionMismatchError(
             "Paper Markdown changed; restart reading from offset zero"
@@ -586,6 +604,53 @@ def read_paper_markdown_chunk(
     )
     _paper_markdown_chunk_cache.put(cache_key, chunk)
     return chunk
+
+
+def _read_unversioned_markdown_chunk(
+    *,
+    paper_id: str,
+    source: str,
+    bucket_id: str,
+    token: str | None,
+    offset: int,
+    limit: int,
+    content_version: str | None,
+) -> PaperMarkdownChunk:
+    bucket_key = paper_markdown_bucket_key(paper_id, source=source)
+    try:
+        raw, _truncated = _read_paper_markdown_bytes(
+            bucket_key, bucket_id, token, PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES
+        )
+    except ValueError as error:
+        if isinstance(error, PaperMarkdownStorageError):
+            raise
+        raise PaperMarkdownNotFoundError(
+            "Markdown is not available for this paper"
+        ) from error
+    # Anything beyond the bound is not served, so the document ends there and
+    # the version hashes exactly the bytes a reader can reach.
+    version = hashlib.sha256(raw).hexdigest()
+    if content_version is not None and content_version != version:
+        raise PaperMarkdownVersionMismatchError(
+            "Paper Markdown changed; restart reading from offset zero"
+        )
+    size = len(raw)
+    if offset > size:
+        raise PaperMarkdownRangeError("Paper Markdown offset is beyond the document")
+    if offset == size:
+        return PaperMarkdownChunk("", version, None)
+    window = raw[offset : offset + limit + 4]
+    if window[0] & 0b1100_0000 == 0b1000_0000:
+        raise PaperMarkdownRangeError(
+            "Paper Markdown offset must be a UTF-8 code-point boundary"
+        )
+    chunk_bytes = _complete_utf8_prefix(window, min(limit, len(window)))
+    next_offset = offset + len(chunk_bytes)
+    return PaperMarkdownChunk(
+        markdown=chunk_bytes.decode("utf-8"),
+        content_version=version,
+        next_offset=next_offset if next_offset < size else None,
+    )
 
 
 @lru_cache(maxsize=128)
