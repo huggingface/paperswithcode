@@ -726,8 +726,14 @@ class CodexPaperJobService:
         db: Session, state: PaperCurationSchedulerState | None
     ) -> dict:
         now = _now()
+        # Only the three summed columns: a full-row load pulled ~1,300 completed
+        # jobs with their bootstrap bundles into memory on every dispatch.
         rows = (
-            db.query(PaperCurationJob)
+            db.query(
+                PaperCurationJob.finished_at,
+                PaperCurationJob.input_tokens,
+                PaperCurationJob.output_tokens,
+            )
             .filter(
                 PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
                 PaperCurationJob.status == "completed",

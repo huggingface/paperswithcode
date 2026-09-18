@@ -1025,7 +1025,11 @@ class PaperCurationJob(Base):
     trace_sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     trace_attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     proposal: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
-    bootstrap_bundle: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    # ~100 KB of base64 skill files per job; deferred so wide job queries (dispatch
+    # gate, reconcile, listings) do not drag every bundle into the API worker.
+    bootstrap_bundle: Mapped[Optional[dict]] = mapped_column(
+        JSONB, nullable=True, deferred=True
+    )
     validation_summary: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     mutation_result: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
     url_candidates: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
