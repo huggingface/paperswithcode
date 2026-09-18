@@ -2266,6 +2266,78 @@ def test_benchmark_candidate_identity_uses_benchmark_name_not_evidence_url():
     )
 
 
+def test_benchmark_gap_persist_upgrades_matching_legacy_identity():
+    legacy = SimpleNamespace(
+        id=uuid.uuid4(),
+        identity_key="legacy-url-hash",
+        gap_type="dataset_missing",
+        canonical_name="GameCraft-Bench",
+        last_seen_at=None,
+        distinct_paper_count=0,
+    )
+
+    class Query:
+        def __init__(self, result):
+            self.result = result
+
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def one_or_none(self):
+            return self.result
+
+        def first(self):
+            return self.result
+
+        def scalar(self):
+            return self.result
+
+    class Database:
+        def __init__(self):
+            self.query_count = 0
+            self.added = []
+
+        def query(self, _model):
+            self.query_count += 1
+            return Query({1: None, 2: legacy, 3: None, 4: 1}[self.query_count])
+
+        def add(self, value):
+            self.added.append(value)
+
+        def flush(self):
+            pass
+
+    gap = {
+        "gap_type": "dataset_missing",
+        "reasoning": "The exact protocol is absent.",
+        "_normalized": {
+            "name": "GameCraft Bench",
+            "canonical_url": "https://arxiv.org/abs/2609.15364",
+            "task_ids": [15],
+            "aliases": [],
+        },
+    }
+    expected_key = benchmark_candidate_identity_key(gap)
+    database = Database()
+
+    result = BenchmarkGapService(database).persist(
+        paper_id=114228,
+        job_id=uuid.uuid4(),
+        gaps=[gap],
+    )
+
+    assert legacy.identity_key == expected_key
+    assert result == [{"candidate_id": str(legacy.id), "identity_key": expected_key}]
+    assert len(database.added) == 1
+    assert isinstance(database.added[0], BenchmarkCurationEvidence)
+
+
 def test_reviewed_benchmark_promotion_requeues_only_evidence_papers():
     candidate_id = uuid.uuid4()
     candidate = SimpleNamespace(

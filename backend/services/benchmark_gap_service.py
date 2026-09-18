@@ -567,6 +567,8 @@ class BenchmarkGapService:
                     .with_for_update()
                     .first()
                 )
+                if row is not None:
+                    row.identity_key = identity_key
             if row is None:
                 row = BenchmarkCurationCandidate(
                     id=uuid.uuid4(),
