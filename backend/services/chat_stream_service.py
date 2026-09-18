@@ -2496,7 +2496,11 @@ class ChatStreamOrchestrator:
 
         elapsed_ms = round((time.perf_counter() - self.started) * 1000)
         if kind == "workspace_ready":
-            self._buffer_latency_phase("sdk_query_dispatched", elapsed_ms)
+            self._buffer_latency_phase(
+                "sdk_query_dispatched",
+                elapsed_ms,
+                acquisition_outcome=self._session_acquisition_outcome(),
+            )
         if not self.first_application_delta_recorded and kind in {
             "reasoning_delta",
             "tool_call",
@@ -3069,7 +3073,38 @@ class ChatStreamOrchestrator:
             )
         )
 
+    def _session_acquisition_outcome(self) -> str | None:
+        """Name how this turn got its agent session when nothing else has.
+
+        Sandbox-backed turns report ``pool_hit``/``pool_miss`` through their own
+        latency events before dispatch; external Pi turns never did, which left
+        every one of their rows at ``pending``. A first turn creates the durable
+        agent session, any later turn resumes it.
+        """
+        if any(phase.acquisition_outcome for phase in self.pending_latency_phases):
+            return None
+        return "created" if self.admission.is_first_turn else "reused_session"
+
+    def _failure_attribution(self, status: str) -> tuple[str | None, str | None]:
+        """Bounded stage/class labels for a failed turn, derived from progress."""
+        if status != "error":
+            return None, None
+        phases = {phase.phase for phase in self.pending_latency_phases}
+        if "first_semantic_event" in phases:
+            stage = "streaming"
+        elif "sdk_query_dispatched" in phases:
+            stage = "awaiting_first_event"
+        else:
+            stage = "before_dispatch"
+        return stage, self.lifecycle.failure_code or "unknown"
+
     def _persist_latency(self, status: str, total_ms: int) -> None:
+        failure_stage, failure_class = self._failure_attribution(status)
+        attribution = (
+            {"failure_stage": failure_stage, "failure_class": failure_class}
+            if failure_stage is not None
+            else {}
+        )
         try:
             with db_manager.session_local() as db:
                 latency = ChatLatencyService(db)
@@ -3102,7 +3137,7 @@ class ChatStreamOrchestrator:
                         and phase.pool_miss_reason == "unhealthy_blank"
                     ):
                         latency.record_pool_assignment_fallback(self.request_id)
-                latency.finalize(self.request_id, status, total_ms)
+                latency.finalize(self.request_id, status, total_ms, **attribution)
                 db.commit()
         except Exception as exc:
             logger.warning(
@@ -3111,5 +3146,7 @@ class ChatStreamOrchestrator:
                 type(exc).__name__,
             )
             with db_manager.session_local() as db:
-                ChatLatencyService(db).finalize(self.request_id, status, total_ms)
+                ChatLatencyService(db).finalize(
+                    self.request_id, status, total_ms, **attribution
+                )
                 db.commit()

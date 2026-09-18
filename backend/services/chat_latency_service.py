@@ -387,11 +387,30 @@ class ChatLatencyService:
             + (row.sandbox_memory_request_mib / 1024) * MODAL_MEMORY_USD_PER_GIB_SECOND
         )
 
-    def finalize(self, request_id: str, status: str, total_ms: int) -> bool:
+    def finalize(
+        self,
+        request_id: str,
+        status: str,
+        total_ms: int,
+        *,
+        failure_stage: str | None = None,
+        failure_class: str | None = None,
+    ) -> bool:
         if status not in TERMINAL_STATUSES:
             raise ValueError("Unsupported terminal latency status")
         total_ms = _bounded_duration(total_ms, "total_ms")
         now = datetime.now(UTC)
+        failure_values: dict[str, Any] = {}
+        if failure_stage is not None or failure_class is not None:
+            # Turn-level failure attribution: which stage the turn was in and
+            # the typed terminal code. Both are bounded, content-free labels and
+            # never overwrite warm-assignment diagnostics recorded earlier.
+            if status != "error":
+                raise ValueError("Failure attribution requires an error status")
+            failure_values = {
+                "failure_stage": sanitized_failure_stage(failure_stage),
+                "failure_class": sanitized_failure_class(failure_class),
+            }
         row = self.db.execute(
             select(ChatTurnLatency).where(
                 ChatTurnLatency.request_id == uuid.UUID(request_id)
@@ -413,6 +432,12 @@ class ChatLatencyService:
                 estimated_active_cost_usd=estimated_active_cost_usd,
                 completed_at=now,
                 updated_at=now,
+                **(
+                    {
+                        key: func.coalesce(getattr(ChatTurnLatency, key), value)
+                        for key, value in failure_values.items()
+                    }
+                ),
             )
         )
         return bool(result.rowcount)

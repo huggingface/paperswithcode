@@ -46,6 +46,10 @@ FAILURE_STAGES = frozenset(
         "agent_stream",
         "broker_clear",
         "worker_done_send",
+        # Turn-level stages recorded at finalize for any failed turn.
+        "before_dispatch",
+        "awaiting_first_event",
+        "streaming",
         "unknown",
     }
 )

@@ -723,3 +723,66 @@ def test_external_pi_backend_migration_is_environment_scoped():
     assert "DROP CONSTRAINT IF EXISTS chat_turn_latency_backend_check" in migration
     assert "ADD CONSTRAINT chat_turn_latency_backend_check" in migration
     assert "'external_pi'" in migration
+
+
+def test_finalize_records_turn_failure_attribution_once(db):
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    row = _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+
+    with pytest.raises(ValueError, match="requires an error status"):
+        service.finalize(
+            str(request_id), "complete", 10, failure_class="provider_error"
+        )
+    assert service.finalize(
+        str(request_id),
+        "error",
+        4200,
+        failure_stage="awaiting_first_event",
+        failure_class="external_worker_lost",
+    )
+    db.refresh(row)
+
+    assert row.terminal_status == "error"
+    assert row.failure_stage == "awaiting_first_event"
+    assert row.failure_class == "external_worker_lost"
+
+
+def test_finalize_keeps_warm_assignment_diagnostics_and_sanitizes_labels(db):
+    session_id = _session(db)
+    request_id = uuid.uuid4()
+    row = _admit(db, session_id=session_id, request_id=request_id)
+    service = ChatLatencyService(db)
+    service.record_phase(
+        str(request_id),
+        "assignment_fallback",
+        50,
+        failure_stage="dispatch_write",
+        failure_class="BrokenPipeError",
+        attempt_kind="pool",
+    )
+
+    assert service.finalize(
+        str(request_id),
+        "error",
+        900,
+        failure_stage="not a stage",
+        failure_class="bad class; DROP TABLE",
+    )
+    db.refresh(row)
+
+    # Earlier warm-assignment diagnostics win; finalize never overwrites them.
+    assert row.failure_stage == "dispatch_write"
+    assert row.failure_class == "BrokenPipeError"
+
+    other = uuid.uuid4()
+    other_row = _admit(db, session_id=session_id, request_id=other)
+    service.finalize(
+        str(other), "error", 900, failure_stage="not a stage", failure_class="bad;"
+    )
+    db.refresh(other_row)
+    assert (other_row.failure_stage, other_row.failure_class) == (
+        "unknown",
+        "UnknownError",
+    )

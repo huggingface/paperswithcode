@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from urllib.parse import urlsplit
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.orm import Session
 from pydantic import ValidationError
 
@@ -18,6 +18,10 @@ from backend.models.database import (
 )
 from backend.services.chat_external_worker_registry import ExternalWorkerClaim
 from backend.config import ExternalPiWorkerEndpointConfig, Settings
+
+
+# A turn never lasts a day; a bound reservation older than this is an orphan.
+BOUND_RESERVATION_RETENTION_SECONDS = 24 * 60 * 60
 
 
 class ExternalWorkerCapacityUnavailable(RuntimeError):
@@ -211,10 +215,19 @@ class ChatExternalWorkerCapacityRepository:
                 )
             return self._reservation(existing, endpoint)
 
+        # Unbound reservations expire on their own; bound ones are normally
+        # deleted when the turn is released, but a crashed or lease-lost turn
+        # leaves its row behind, so age those out too instead of forever.
         db.execute(
             delete(ChatExternalWorkerReservation).where(
-                ChatExternalWorkerReservation.turn_id.is_(None),
-                ChatExternalWorkerReservation.expires_at <= now,
+                or_(
+                    and_(
+                        ChatExternalWorkerReservation.turn_id.is_(None),
+                        ChatExternalWorkerReservation.expires_at <= now,
+                    ),
+                    ChatExternalWorkerReservation.expires_at
+                    <= now - timedelta(seconds=BOUND_RESERVATION_RETENTION_SECONDS),
+                )
             )
         )
         reserved_count = (

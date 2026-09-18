@@ -13,6 +13,7 @@ from backend.models.database import (
     ChatExternalWorkerReservation,
 )
 from backend.services.chat_external_worker_capacity import (
+    BOUND_RESERVATION_RETENTION_SECONDS,
     ChatExternalWorkerCapacityRepository,
     ExternalWorkerCapacityUnavailable,
     ExternalWorkerEndpoint,
@@ -362,3 +363,57 @@ def test_capacity_reservation_migration_is_additive_and_environment_scoped():
         "idx_chat_external_worker_reservations_capacity",
         "idx_chat_external_worker_reservations_unbound_expiry",
     }
+
+
+def test_reserve_ages_out_orphaned_bound_reservations(db):
+    endpoint = _worker(db, 1)
+    db.flush()
+    worker = db.query(ChatExternalWorker).filter_by(worker_id=endpoint.worker_id).one()
+    repository = ChatExternalWorkerCapacityRepository(environment="staging")
+    orphan_turn = uuid.uuid4()
+    live_turn = uuid.uuid4()
+    day = timedelta(seconds=BOUND_RESERVATION_RETENTION_SECONDS)
+    # A bound reservation whose turn crashed a day ago and was never released.
+    db.add(
+        ChatExternalWorkerReservation(
+            request_id="orphaned",
+            turn_id=orphan_turn,
+            endpoint_id=endpoint.endpoint_id,
+            worker_id=endpoint.worker_id,
+            instance_id=worker.instance_id,
+            worker_generation=worker.generation,
+            release_id="release-1",
+            contract_version="external-pi-v1",
+            maximum_sessions=32,
+            reserved_at=NOW - day - timedelta(hours=2),
+            expires_at=NOW - day - timedelta(hours=1),
+        )
+    )
+    # A bound reservation that expired minutes ago is still the turn's to release.
+    db.add(
+        ChatExternalWorkerReservation(
+            request_id="recent",
+            turn_id=live_turn,
+            endpoint_id=endpoint.endpoint_id,
+            worker_id=endpoint.worker_id,
+            instance_id=worker.instance_id,
+            worker_generation=worker.generation,
+            release_id="release-1",
+            contract_version="external-pi-v1",
+            maximum_sessions=32,
+            reserved_at=NOW - timedelta(minutes=10),
+            expires_at=NOW - timedelta(minutes=5),
+        )
+    )
+    db.flush()
+
+    repository.reserve(
+        db,
+        request_id="fresh",
+        endpoints=(endpoint,),
+        contract_version="external-pi-v1",
+        now=NOW,
+    )
+
+    remaining = {row.request_id for row in db.query(ChatExternalWorkerReservation)}
+    assert remaining == {"recent", "fresh"}

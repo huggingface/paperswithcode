@@ -1,5 +1,6 @@
 import asyncio
 from contextlib import contextmanager
+from dataclasses import replace
 from types import SimpleNamespace
 import threading
 import time
@@ -357,4 +358,92 @@ def test_latency_database_failure_retries_terminal_finalize_in_a_fresh_session(
         ("phase", 1),
         ("finalize", 2, "complete", 500),
         ("commit", 2),
+    ]
+
+
+def test_session_acquisition_outcome_names_created_or_resumed_agent_sessions():
+    orchestrator = _orchestrator()
+    assert orchestrator._session_acquisition_outcome() == "reused_session"
+
+    orchestrator.admission = replace(orchestrator.admission, is_first_turn=True)
+    assert orchestrator._session_acquisition_outcome() == "created"
+
+    # Sandbox-backed turns already report their pool outcome; never override it.
+    orchestrator._buffer_latency_phase(
+        "pool_lookup_completed", 20, acquisition_outcome="pool_hit"
+    )
+    assert orchestrator._session_acquisition_outcome() is None
+
+
+def test_failure_attribution_follows_turn_progress_and_lifecycle_code():
+    orchestrator = _orchestrator()
+    assert orchestrator._failure_attribution("complete") == (None, None)
+    assert orchestrator._failure_attribution("error") == ("before_dispatch", "unknown")
+
+    orchestrator._buffer_latency_phase("sdk_query_dispatched", 900)
+    orchestrator._transition_failure("external_worker_lost")
+    assert orchestrator._failure_attribution("error") == (
+        "awaiting_first_event",
+        "external_worker_lost",
+    )
+
+    orchestrator._buffer_latency_phase("first_semantic_event", 1500)
+    assert orchestrator._failure_attribution("error") == (
+        "streaming",
+        "external_worker_lost",
+    )
+
+
+def test_error_finalize_carries_failure_attribution(monkeypatch) -> None:
+    from backend.services import chat_stream_service
+
+    calls: list[tuple] = []
+
+    class Session:
+        def commit(self) -> None:
+            calls.append(("commit",))
+
+    @contextmanager
+    def session_local():
+        yield Session()
+
+    class LatencyService:
+        def __init__(self, _db) -> None:
+            pass
+
+        def record_phase(self, request_id, phase, elapsed_ms, **kwargs) -> bool:
+            calls.append(("phase", phase, kwargs.get("acquisition_outcome")))
+            return True
+
+        def finalize(self, request_id, status, total_ms, **kwargs) -> bool:
+            calls.append(("finalize", status, kwargs))
+            return True
+
+    monkeypatch.setattr(
+        chat_stream_service,
+        "db_manager",
+        SimpleNamespace(session_local=session_local),
+    )
+    monkeypatch.setattr(chat_stream_service, "ChatLatencyService", LatencyService)
+    orchestrator = _orchestrator()
+    orchestrator._buffer_latency_phase(
+        "sdk_query_dispatched",
+        300,
+        acquisition_outcome=orchestrator._session_acquisition_outcome(),
+    )
+    orchestrator._transition_failure("provider_error")
+
+    orchestrator._persist_latency("error", 4000)
+
+    assert calls == [
+        ("phase", "sdk_query_dispatched", "reused_session"),
+        (
+            "finalize",
+            "error",
+            {
+                "failure_stage": "awaiting_first_event",
+                "failure_class": "provider_error",
+            },
+        ),
+        ("commit",),
     ]
