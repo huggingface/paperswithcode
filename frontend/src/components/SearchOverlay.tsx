@@ -22,12 +22,18 @@ interface SearchOverlayProps {
 }
 
 const PAPER_PAGE_SIZE = 10;
+// Every debounced keystroke fans out to four catalog requests, three of which
+// share nginx's per-IP search limit (60/min, burst 20). A slower debounce, a
+// three-character minimum, and no retries keep a fast typist under it; a 429
+// while typing is not worth a second request for the same prefix.
+const TYPEAHEAD_DEBOUNCE_MS = 350;
+const TYPEAHEAD_MIN_CHARS = 3;
 
 const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const inputRef = useRef<HTMLInputElement>(null);
   const navigate = useNavigate();
   const [query, setQuery] = React.useState("");
-  const debouncedQuery = useDebounce(query, 200);
+  const debouncedQuery = useDebounce(query, TYPEAHEAD_DEBOUNCE_MS);
   const trimmedQuery = query.trim();
   const chatEnabled = isChatEnabled();
 
@@ -49,22 +55,25 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const papersQ = useQuery({
     queryKey: ["search-papers", debouncedQuery],
     queryFn: () => papersApi.search(debouncedQuery, 1, PAPER_PAGE_SIZE),
-    enabled: open && debouncedQuery.length >= 2,
+    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
     staleTime: 60_000,
+    retry: false,
   });
 
   const tasksQ = useQuery({
     queryKey: ["search-tasks", debouncedQuery],
     queryFn: () => catalogApi.listTasks({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && debouncedQuery.length >= 2,
+    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
     staleTime: 60_000,
+    retry: false,
   });
 
   const methodsQ = useQuery({
     queryKey: ["search-methods", debouncedQuery],
     queryFn: () => catalogApi.listMethods({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && debouncedQuery.length >= 2,
+    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
     staleTime: 60_000,
+    retry: false,
   });
 
   const benchmarksQ = useQuery({
@@ -74,8 +83,9 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
         q: debouncedQuery,
         page_size: 6,
       }),
-    enabled: open && debouncedQuery.length >= 2,
+    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
     staleTime: 60_000,
+    retry: false,
   });
 
   if (!open) return null;
@@ -223,7 +233,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
               ))}
             </>
           )}
-          {trimmedQuery.length >= 2 && (
+          {trimmedQuery.length >= TYPEAHEAD_MIN_CHARS && (
             <button
               type="button"
               className="search-view-all-row"
