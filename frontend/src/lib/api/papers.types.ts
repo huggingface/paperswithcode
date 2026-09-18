@@ -232,3 +232,20 @@ export interface PaperSubmitResponse {
   submission_id?: number | null;
   pending_review?: boolean;
 }
+
+/** One bibliography entry to match against the catalog. */
+export interface PaperReferenceQuery {
+  key: string;
+  arxiv_id?: string | null;
+  titles?: string[];
+}
+
+export interface ResolvedPaperReference {
+  key: string;
+  matched_by: 'arxiv_id' | 'title' | null;
+  paper: Paper | null;
+}
+
+export interface PaperLookupResponse {
+  references: ResolvedPaperReference[];
+}

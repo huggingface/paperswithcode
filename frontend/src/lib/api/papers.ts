@@ -3,7 +3,9 @@ import type {
   Paper,
   PaperBucketCopyRequest,
   PaperBucketCopyResponse,
+  PaperLookupResponse,
   PaperOrderBy,
+  PaperReferenceQuery,
   PaperSearchMode,
   PaperSubmitPayload,
   PaperSubmitResponse,
@@ -114,6 +116,14 @@ export class PapersApi {
   getByArxivId(arxivId: string, includeResources = true): Promise<Paper> {
     const query = includeResources ? "?include_resources=true" : "";
     return this.request<Paper>(`/papers/arxiv/${arxivId}${query}`);
+  }
+
+  /** Match bibliography entries to catalog papers in one round trip. */
+  lookup(references: PaperReferenceQuery[]): Promise<PaperLookupResponse> {
+    return this.request<PaperLookupResponse>("/papers/lookup", {
+      method: "POST",
+      body: JSON.stringify({ references }),
+    });
   }
 
   related(id: string, limit = 4): Promise<RelatedPaperRecommendation[]> {

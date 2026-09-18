@@ -23,7 +23,7 @@ export function PdfPaperLink({ anchor, routeId, internal }: PdfPaperLinkTarget) 
     to={anchor.href}
     target={internal ? undefined : "_blank"}
     className="pdf-paper-preview-link"
-    title={`Preview arXiv:${routeId}`}
+    title={/^\d+$/.test(routeId) ? "Preview paper" : `Preview arXiv:${routeId}`}
     ariaLabel={`${internal ? 'Citation' : 'arXiv paper'} ${routeId}`}
     onClick={internal ? (event) => {
       // Keep citation clicks as in-document navigation, including on touch.

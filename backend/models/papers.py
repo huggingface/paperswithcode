@@ -1119,3 +1119,53 @@ __all__ = [
     "RelatedPaperSummary",
     "OrganizationSummary",
 ]
+
+
+class PaperReferenceQuery(BaseModel):
+    """One bibliography entry a client wants matched to a catalog paper."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    key: str = Field(
+        ...,
+        min_length=1,
+        max_length=128,
+        description="Client identifier echoed back on the matching result",
+    )
+    arxiv_id: Optional[str] = Field(
+        None,
+        max_length=64,
+        description="Explicit arXiv identifier found in the entry, if any",
+    )
+    titles: List[str] = Field(
+        default_factory=list,
+        max_length=8,
+        description="Candidate title strings extracted from the entry",
+    )
+
+    @field_validator("titles")
+    @classmethod
+    def _bound_title_length(cls, titles: List[str]) -> List[str]:
+        return [title[:300] for title in titles]
+
+
+class PaperLookupRequest(BaseModel):
+    """Batch of bibliography entries to resolve in one round trip."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    references: List[PaperReferenceQuery] = Field(..., min_length=1, max_length=500)
+
+
+class ResolvedPaperReference(BaseModel):
+    """A bibliography entry with the catalog paper it resolved to, if any."""
+
+    key: str
+    matched_by: Optional[Literal["arxiv_id", "title"]] = Field(
+        None, description="Which evidence produced the match"
+    )
+    paper: Optional[Paper] = None
+
+
+class PaperLookupResponse(BaseModel):
+    references: List[ResolvedPaperReference]

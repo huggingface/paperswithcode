@@ -10,6 +10,7 @@ import {
 import {
   PaperPreviewCard,
 } from "@/components/paper-preview/PaperPreviewCard";
+import { paperPreviewQueryKey } from "@/components/paper-preview/paperPreviewCache";
 import {
   paperToPreviewData,
   type PaperPreviewData,
@@ -50,7 +51,7 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
   const [open, setOpen] = React.useState(false);
   const hasInitialData = Boolean(initialData?.title.trim());
   const query = useQuery({
-    queryKey: ["paper-preview", normalizedRouteId],
+    queryKey: paperPreviewQueryKey(normalizedRouteId),
     queryFn: () => papersApi.get(normalizedRouteId, false),
     enabled: open && !hasInitialData,
     staleTime: 5 * 60 * 1000,

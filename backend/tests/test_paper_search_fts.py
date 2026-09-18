@@ -27,6 +27,8 @@ from backend.models.database import (
     Repository as DBRepository,
     Task as DBTask,
 )
+from backend.models.api import PaperReferenceQuery
+from backend.services.paper_reference_service import PaperReferenceService
 from backend.services.paper_retrieval_service import PaperRetrievalService
 from backend.services.paper_service import PaperService
 
@@ -113,6 +115,10 @@ def search_engine(search_database_url):
         connection.exec_driver_sql(
             (MIGRATIONS / "add_paper_title_trigram_index.sql").read_text()
         )
+        for _ in range(2):
+            connection.exec_driver_sql(
+                (MIGRATIONS / "add_paper_title_fingerprint_index.sql").read_text()
+            )
     yield engine
     engine.dispose()
 
@@ -1691,3 +1697,52 @@ def test_backfill_is_bounded_and_resumable(search_engine, search_database_url):
     assert (updated, remaining) == (2, 1)
     updated, remaining = backfill(search_database_url, batch_size=2, max_batches=1)
     assert (updated, remaining) == (1, 0)
+
+
+def test_reference_lookup_matches_arxiv_ids_and_title_fingerprints(session_factory):
+    with session_factory() as session:
+        add_paper(
+            session,
+            title="Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+            arxiv_id="2312.00752",
+            version="v1",
+            is_latest_version=False,
+        )
+        mamba = add_paper(
+            session,
+            title="Mamba: Linear-Time Sequence Modeling with Selective State Spaces",
+            arxiv_id="2312.00752",
+            version="v2",
+            citation_count=5000,
+        )
+        lora = add_paper(
+            session,
+            title="LoRA: Low-Rank Adaptation of Large Language Models",
+            arxiv_id="2106.09685",
+        )
+        session.commit()
+
+        response = PaperReferenceService(session).resolve(
+            [
+                PaperReferenceQuery(key="cite.hu2022", arxiv_id="2106.09685v2"),
+                PaperReferenceQuery(
+                    key="cite.gu2024",
+                    titles=[
+                        "Albert Gu and Tri Dao",
+                        "Mamba: Linear-time sequence mod- eling with selective state spaces",
+                        "In Conference on Language Modeling (COLM), 2024",
+                    ],
+                ),
+                PaperReferenceQuery(
+                    key="cite.missing", titles=["A title nobody indexed"]
+                ),
+            ]
+        )
+
+        resolved = {entry.key: entry for entry in response.references}
+        assert resolved["cite.hu2022"].matched_by == "arxiv_id"
+        assert resolved["cite.hu2022"].paper.id == str(lora.id)
+        assert resolved["cite.gu2024"].matched_by == "title"
+        assert resolved["cite.gu2024"].paper.id == str(mamba.id)
+        assert resolved["cite.gu2024"].paper.citation_count == 5000
+        assert resolved["cite.missing"].paper is None
