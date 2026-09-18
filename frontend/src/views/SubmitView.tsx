@@ -98,7 +98,8 @@ const SubmitView: React.FC = () => {
 
   // Preview cards link here with the citation's arXiv ID prefilled.
   const [searchParams] = useSearchParams();
-  const [input, setInput] = React.useState(searchParams.get("arxiv_id") ?? "");
+  const prefilledArxivId = searchParams.get("arxiv_id") ?? "";
+  const [input, setInput] = React.useState(prefilledArxivId);
   const [title, setTitle] = React.useState("");
   const [abstract, setAbstract] = React.useState("");
   const [authors, setAuthors] = React.useState("");
@@ -106,6 +107,9 @@ const SubmitView: React.FC = () => {
   const [errorMsg, setErrorMsg] = React.useState<string | null>(null);
 
   React.useEffect(() => {
+    // A prefilled citation wins over an older draft, which stays stored for
+    // the next plain visit.
+    if (prefilledArxivId) return;
     const raw = sessionStorage.getItem(SUBMIT_DRAFT_KEY);
     if (!raw) return;
     sessionStorage.removeItem(SUBMIT_DRAFT_KEY);
@@ -119,7 +123,7 @@ const SubmitView: React.FC = () => {
     } catch {
       // Ignore a corrupt browser-local draft.
     }
-  }, []);
+  }, [prefilledArxivId]);
 
   const kind = classifyInput(input);
   const isExternal = kind === "external";
