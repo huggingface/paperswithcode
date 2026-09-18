@@ -35,6 +35,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const [query, setQuery] = React.useState("");
   const debouncedQuery = useDebounce(query, TYPEAHEAD_DEBOUNCE_MS);
   const trimmedQuery = query.trim();
+  const canSearch = debouncedQuery.length >= TYPEAHEAD_MIN_CHARS;
   const chatEnabled = isChatEnabled();
 
   useEffect(() => {
@@ -55,7 +56,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const papersQ = useQuery({
     queryKey: ["search-papers", debouncedQuery],
     queryFn: () => papersApi.search(debouncedQuery, 1, PAPER_PAGE_SIZE),
-    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
+    enabled: open && canSearch,
     staleTime: 60_000,
     retry: false,
   });
@@ -63,7 +64,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const tasksQ = useQuery({
     queryKey: ["search-tasks", debouncedQuery],
     queryFn: () => catalogApi.listTasks({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
+    enabled: open && canSearch,
     staleTime: 60_000,
     retry: false,
   });
@@ -71,7 +72,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   const methodsQ = useQuery({
     queryKey: ["search-methods", debouncedQuery],
     queryFn: () => catalogApi.listMethods({ q: debouncedQuery, page_size: 6 }),
-    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
+    enabled: open && canSearch,
     staleTime: 60_000,
     retry: false,
   });
@@ -83,7 +84,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
         q: debouncedQuery,
         page_size: 6,
       }),
-    enabled: open && debouncedQuery.length >= TYPEAHEAD_MIN_CHARS,
+    enabled: open && canSearch,
     staleTime: 60_000,
     retry: false,
   });
@@ -149,7 +150,12 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
               )}
             </div>
           )}
-          {debouncedQuery && !isLoading && !hasResults && (
+          {debouncedQuery && !canSearch && (
+            <div className="search-empty">
+              Keep typing: results appear from {TYPEAHEAD_MIN_CHARS} characters.
+            </div>
+          )}
+          {canSearch && !isLoading && !hasResults && (
             <div className="search-empty">No matches for "{query}"</div>
           )}
           {matchedTasks.length > 0 && (
