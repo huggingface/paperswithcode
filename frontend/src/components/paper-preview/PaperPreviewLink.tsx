@@ -11,11 +11,13 @@ import {
   PaperPreviewCard,
 } from "@/components/paper-preview/PaperPreviewCard";
 import { paperPreviewQueryKey } from "@/components/paper-preview/paperPreviewCache";
+import { ARXIV_ROUTE_ID, PaperIndexRequest } from "@/components/paper-preview/PaperIndexRequest";
 import {
   paperToPreviewData,
   type PaperPreviewData,
 } from "@/components/paper-preview/paperPreviewData";
 import { papersApi } from "@/lib/api/papers";
+import { ApiError } from "@/lib/apiTransport";
 import { normalizePaperRouteId } from "@/lib/utils";
 
 interface PaperPreviewLinkProps {
@@ -63,6 +65,10 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
     (query.data
       ? paperToPreviewData(query.data, normalizedRouteId)
       : undefined);
+  const notIndexed =
+    query.error instanceof ApiError &&
+    query.error.status === 404 &&
+    ARXIV_ROUTE_ID.test(normalizedRouteId);
 
   const link = (
     <Link
@@ -96,6 +102,8 @@ export const PaperPreviewLink: React.FC<PaperPreviewLinkProps> = ({
       >
         {data ? (
           <><PaperPreviewCard data={data} />{previewFooter?.(data)}</>
+        ) : notIndexed ? (
+          <PaperIndexRequest arxivId={normalizedRouteId} />
         ) : query.isError ? (
           <div className="paper-preview-status">Preview unavailable</div>
         ) : (

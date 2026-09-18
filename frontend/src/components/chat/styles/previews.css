@@ -172,6 +172,32 @@
   color: var(--ink-soft);
   font-size: 12px;
 }
+.paper-preview-index-request {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+.paper-preview-index-request a,
+.paper-preview-index-request button {
+  color: var(--accent);
+  font: inherit;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  cursor: pointer;
+}
+.paper-preview-index-request button:disabled {
+  color: var(--ink-soft);
+  cursor: default;
+}
+.paper-preview-index-request a:focus-visible,
+.paper-preview-index-request button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.paper-preview-index-request [role="alert"] {
+  flex-basis: 100%;
+  color: var(--negative-text, var(--ink-soft));
+}
 .paper-preview-thumb {
   position: relative;
   width: 96px;

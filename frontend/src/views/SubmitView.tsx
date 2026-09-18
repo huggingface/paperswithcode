@@ -9,7 +9,7 @@
  */
 
 import React from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -96,7 +96,9 @@ const SubmitView: React.FC = () => {
   const { toast } = useToast();
   const { user, isLoading: authLoading } = useAuth();
 
-  const [input, setInput] = React.useState("");
+  // Preview cards link here with the citation's arXiv ID prefilled.
+  const [searchParams] = useSearchParams();
+  const [input, setInput] = React.useState(searchParams.get("arxiv_id") ?? "");
   const [title, setTitle] = React.useState("");
   const [abstract, setAbstract] = React.useState("");
   const [authors, setAuthors] = React.useState("");

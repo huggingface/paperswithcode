@@ -106,3 +106,8 @@ export function useAuth(): AuthContextValue {
   }
   return ctx;
 }
+
+/** Like useAuth, but usable in components that also render outside an <AuthProvider>. */
+export function useOptionalAuth(): AuthContextValue | null {
+  return React.useContext(AuthContext);
+}

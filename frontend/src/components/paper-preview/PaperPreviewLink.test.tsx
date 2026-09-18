@@ -18,10 +18,14 @@ import MarkdownText from "@/components/MarkdownText";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import type { PaperPreviewData } from "@/components/paper-preview/paperPreviewData";
 import type { Paper } from "@/lib/api/papers.types";
+import { ApiError } from "@/lib/apiTransport";
 import { preloadImage } from "@/lib/imagePreloader";
 
 const mockedGetPaper = vi.hoisted(() => vi.fn());
-vi.mock("@/lib/api/papers", () => ({ papersApi: { get: mockedGetPaper } }));
+const mockedSubmit = vi.hoisted(() => vi.fn());
+const auth = vi.hoisted(() => ({ user: null as { username: string } | null }));
+vi.mock("@/lib/api/papers", () => ({ papersApi: { get: mockedGetPaper, submit: mockedSubmit } }));
+vi.mock("@/lib/authContext", () => ({ useOptionalAuth: () => (auth.user ? { user: auth.user } : null) }));
 vi.mock("@/lib/imagePreloader", () => ({
   preloadImage: vi.fn().mockResolvedValue(undefined),
 }));
@@ -85,6 +89,8 @@ beforeEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   mockedGetPaper.mockReset();
+  mockedSubmit.mockReset();
+  auth.user = null;
   mockedPreloadImage.mockClear();
 });
 
@@ -137,6 +143,59 @@ describe("PaperPreviewLink", () => {
     await hoverLink("Snapshot");
     expect(await screen.findByText("Snapshot Paper")).toBeInTheDocument();
     expect(mockedGetPaper).not.toHaveBeenCalled();
+  });
+
+  const notFound = () =>
+    new ApiError(
+      new Response('{"detail":"Paper not found"}', { status: 404, statusText: "Not Found" }),
+      '{"detail":"Paper not found"}',
+    );
+
+  it("offers a prefilled submit page when a cited arXiv paper is not indexed", async () => {
+    mockedGetPaper.mockRejectedValue(notFound());
+    renderWithProviders(
+      <PaperPreviewLink routeId="2605.20309">Unindexed</PaperPreviewLink>,
+    );
+    await hoverLink("Unindexed");
+    expect(await screen.findByText("Not indexed on Papers with Code yet.")).toBeInTheDocument();
+    const request = screen.getByRole("link", { name: "Request indexing ↗" });
+    expect(request).toHaveAttribute("href", "/submit?arxiv_id=2605.20309");
+    expect(request).toHaveAttribute("target", "_blank");
+    expect(mockedSubmit).not.toHaveBeenCalled();
+  });
+
+  it("lets a signed-in reader index the paper in place and then shows the card", async () => {
+    auth.user = { username: "niels" };
+    mockedGetPaper.mockRejectedValueOnce(notFound()).mockResolvedValue({ ...paper, arxiv_id: "2605.20309", title: "Now Indexed" });
+    mockedSubmit.mockResolvedValue({ created: true, route_identifier: "2605.20309" });
+    renderWithProviders(
+      <PaperPreviewLink routeId="2605.20309">Unindexed</PaperPreviewLink>,
+    );
+    await hoverLink("Unindexed");
+    fireEvent.click(await screen.findByRole("button", { name: "Request indexing" }));
+    await waitFor(() => expect(mockedSubmit).toHaveBeenCalledWith({ arxiv_id: "2605.20309" }));
+    expect(await screen.findByText("Now Indexed")).toBeInTheDocument();
+  });
+
+  it("shows the server's reason when an indexing request is refused", async () => {
+    auth.user = { username: "niels" };
+    mockedGetPaper.mockRejectedValue(notFound());
+    mockedSubmit.mockRejectedValue(new Error("Submission rate limit reached"));
+    renderWithProviders(
+      <PaperPreviewLink routeId="2605.20309">Unindexed</PaperPreviewLink>,
+    );
+    await hoverLink("Unindexed");
+    fireEvent.click(await screen.findByRole("button", { name: "Request indexing" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Submission rate limit reached");
+  });
+
+  it("keeps the plain unavailable state for non-arXiv identifiers", async () => {
+    mockedGetPaper.mockRejectedValue(notFound());
+    renderWithProviders(
+      <PaperPreviewLink routeId="999999">Missing</PaperPreviewLink>,
+    );
+    await hoverLink("Missing");
+    expect(await screen.findByText("Preview unavailable")).toBeInTheDocument();
   });
 
   it.each(["404", "network"])(
