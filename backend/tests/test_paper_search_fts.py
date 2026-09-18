@@ -119,6 +119,9 @@ def search_engine(search_database_url):
             connection.exec_driver_sql(
                 (MIGRATIONS / "add_paper_title_fingerprint_index.sql").read_text()
             )
+            connection.exec_driver_sql(
+                (MIGRATIONS / "add_paper_title_fingerprint_statistics.sql").read_text()
+            )
     yield engine
     engine.dispose()
 
