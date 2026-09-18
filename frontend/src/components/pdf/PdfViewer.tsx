@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties, FormEvent } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Document, Page } from "react-pdf";
 import type { PDFDocumentProxy, TextItem } from "pdfjs-dist/types/src/display/api";
 import "react-pdf/dist/Page/TextLayer.css";
@@ -8,6 +9,7 @@ import "react-pdf/dist/Page/AnnotationLayer.css";
 import { assertPdfWorkerConfigured } from "@/lib/pdf";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { usePdfSelection } from "@/hooks/usePdfSelection";
+import { createPaperPreviewCache } from "@/components/paper-preview/paperPreviewCache";
 import { PdfToolbar } from "./PdfToolbar";
 import type { PdfToolbarResources } from "./PdfToolbar";
 import { createPdfCitationResolver, type PdfCitationResolver } from "./pdfCitationLinks";
@@ -88,6 +90,7 @@ function LazyPdfPage({
   searchQuery,
   activeSearchPage,
   resolveCitation,
+  warmPreviews,
 }: {
   page: number;
   width: number;
@@ -95,10 +98,11 @@ function LazyPdfPage({
   searchQuery: string;
   activeSearchPage?: number;
   resolveCitation?: PdfCitationResolver;
+  warmPreviews?: (routeIds: string[]) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
-  const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation);
+  const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation, warmPreviews);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -186,6 +190,8 @@ export function PdfViewer({
   const pagesRef = useRef<HTMLDivElement>(null);
   const documentRef = useRef<PDFDocumentProxy | null>(null);
   const [resolveCitation, setResolveCitation] = useState<PdfCitationResolver>();
+  const queryClient = useQueryClient();
+  const previewCache = useMemo(() => createPaperPreviewCache(queryClient), [queryClient]);
   const internalLinkNavigation = useRef<(page: number) => void>(() => {});
   const searchGeneration = useRef(0);
   const recenterAfterZoom = useRef(false);
@@ -546,7 +552,7 @@ export function PdfViewer({
         loading={<div className="pdf-loading" role="status">{chrome === "canvas" ? "Loading paper preview…" : "Loading paper…"}</div>}
         onLoadSuccess={(pdf) => {
           documentRef.current = pdf;
-          if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf));
+          if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf, previewCache.lookup));
           setPages(pdf.numPages);
           setError("");
           // Papers use one page size throughout; the first page stands for all placeholders.
@@ -595,6 +601,7 @@ export function PdfViewer({
             searchQuery={searchQuery.trim()}
             activeSearchPage={matches[activeMatch]}
             resolveCitation={resolveCitation}
+            warmPreviews={previewCache.warm}
           />)}
         </div>
       </Document>}

@@ -160,6 +160,16 @@ class Dataset(BaseModel):
         None, description="Dataset variants/splits (e.g., ['COCO test-dev'])"
     )
 
+    @field_validator("languages", "variants", mode="before")
+    @classmethod
+    def coerce_optional_string_list(cls, value: object) -> Optional[List[str]]:
+        # Legacy imports stored JSON ``null`` and, for a few datasets, an object
+        # in these JSONB columns; neither is a list of names, so the API omits
+        # them instead of failing the whole listing.
+        if not isinstance(value, list):
+            return None
+        return [str(item) for item in value if item is not None]
+
     # Usage and warnings
     num_papers: Optional[int] = Field(
         None, description="Number of papers using this dataset"

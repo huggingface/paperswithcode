@@ -1354,6 +1354,7 @@ def test_scheduled_usage_filters_for_completed_jobs(monkeypatch):
     now = datetime(2026, 8, 18, 12, tzinfo=UTC)
     monkeypatch.setattr(codex_add_evals_service, "_now", lambda: now)
     filters = []
+    selected = []
 
     class Query:
         def filter(self, *predicates):
@@ -1364,12 +1365,24 @@ def test_scheduled_usage_filters_for_completed_jobs(monkeypatch):
             return []
 
     class Database:
-        def query(self, *_args):
+        def query(self, *entities):
+            selected.extend(entity.key for entity in entities)
             return Query()
 
     CodexPaperJobService._scheduled_usage_snapshot(Database(), None)
 
     assert any("paper_curation_jobs.status" in predicate for predicate in filters)
+    # Summing tokens must not load whole job rows (each carries a ~100 KB bundle).
+    assert selected == ["finished_at", "input_tokens", "output_tokens"]
+
+
+def test_bootstrap_bundle_column_is_deferred():
+    from sqlalchemy import inspect
+
+    from backend.models.database import PaperCurationJob
+
+    attribute = inspect(PaperCurationJob).column_attrs["bootstrap_bundle"]
+    assert attribute.deferred is True
 
 
 @pytest.mark.parametrize(
@@ -2333,7 +2346,7 @@ def test_reviewed_benchmark_promotion_requeues_only_evidence_papers():
     assert jobs.dispatched is True
 
 
-def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
+def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatch):
     scheduler = SimpleNamespace(consecutive_trace_failures=2)
 
     class Database:
@@ -2349,11 +2362,11 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
         def __init__(self):
             self.objects = {}
 
-        def create_bucket(self, *_args, **_kwargs):
-            pass
-
-        def batch_bucket_files(self, _bucket, *, add):
-            self.objects.update({path: data for data, path in add})
+        def upload(self, _bucket, prefix, objects, *, token):
+            assert token == settings.codex_jobs_token
+            self.objects.update(
+                {f"{prefix}/{name}": data for name, data in objects.items()}
+            )
 
     settings = get_settings().model_copy(
         update={
@@ -2380,7 +2393,10 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path):
         trace_uri=None,
     )
     hub = Hub()
-    service = CurationTraceService(Database(), settings, hf_api=hub)
+    monkeypatch.setattr(
+        "backend.services.curation_trace_service.upload_trace_objects", hub.upload
+    )
+    service = CurationTraceService(Database(), settings, hf_api=object())
     events = base64.b64encode(gzip.compress(b'{"type":"done"}\n')).decode()
     service.preapply(
         row,

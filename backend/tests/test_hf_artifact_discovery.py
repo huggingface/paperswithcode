@@ -111,3 +111,29 @@ def test_metric_refresh_raises_on_auth_throttle_and_server_errors(
 
     with pytest.raises(HfArtifactDiscoveryError, match=str(status_code)):
         fetch_hf_artifact_metrics("model", "org/model")
+
+
+def test_metric_refresh_does_not_expand_downloads_for_spaces(monkeypatch):
+    get = Mock(return_value=_response(200, {"trendingScore": 137, "likes": 437}))
+    monkeypatch.setattr(requests, "get", get)
+
+    metrics = fetch_hf_artifact_metrics("space", "org/space")
+
+    assert metrics == {"trending_score": 137, "likes": 437, "downloads": None}
+    assert get.call_args.kwargs["params"] == [
+        ("expand[]", "trendingScore"),
+        ("expand[]", "likes"),
+    ]
+
+
+@pytest.mark.parametrize("kind", ["model", "dataset"])
+def test_metric_refresh_expands_downloads_for_models_and_datasets(monkeypatch, kind):
+    get = Mock(
+        return_value=_response(200, {"trendingScore": 1, "likes": 2, "downloads": 3})
+    )
+    monkeypatch.setattr(requests, "get", get)
+
+    metrics = fetch_hf_artifact_metrics(kind, "org/repo")
+
+    assert metrics == {"trending_score": 1, "likes": 2, "downloads": 3}
+    assert ("expand[]", "downloads") in get.call_args.kwargs["params"]

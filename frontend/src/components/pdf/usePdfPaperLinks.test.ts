@@ -20,11 +20,13 @@ describe('PDF annotation lifecycle', () => {
     document.body.append(root);
     const ref = { current: root };
     const resolve = vi.fn().mockResolvedValue('1405.0312');
-    const { result } = renderHook(() => usePdfPaperLinks(ref, true, resolve));
+    const onResolved = vi.fn();
+    const { result } = renderHook(() => usePdfPaperLinks(ref, true, resolve, onResolved));
     act(() => result.current.onAnnotations([{ id: '1R', url: 'https://arxiv.org/abs/1405.0312' }]));
     const first = annotation();
     act(() => root.append(first.section));
     await waitFor(() => expect(result.current.paperLinks[0]?.anchor).toBe(first.anchor));
+    expect(onResolved).toHaveBeenCalledWith(['1405.0312']);
     const second = annotation();
     act(() => root.replaceChildren(second.section));
     await waitFor(() => expect(result.current.paperLinks[0]?.anchor).toBe(second.anchor));

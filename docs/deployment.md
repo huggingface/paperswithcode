@@ -238,11 +238,15 @@ different API URLs, Host allowlists, ports, and cursor secrets. They must contai
 `PWC_MCP_CURSOR_KEY_CURRENT`; during rotation, move the old value to
 `PWC_MCP_CURSOR_KEY_PREVIOUS`, install a fresh current value without printing
 either secret, deploy, wait longer than the one-hour cursor lifetime, then clear
-the previous value. Never load `backend/keys.env` into this service. Staging
-uses the nginx loopback-only blue/green bridge at
-`http://127.0.0.1:8011/api/v1`; production uses
-`https://paperswithcode.co/api/v1`. A failure restores the previous pointer and
-re-smokes it. If no prior release exists, the failed unit is stopped.
+the previous value. Never load `backend/keys.env` into this service. Both
+environments read the catalog through nginx's loopback-only blue/green bridge
+(`http://127.0.0.1:8010/api/v1` for production, `http://127.0.0.1:8011/api/v1`
+for staging), so MCP traffic never leaves the host or shares the public per-IP
+catalog rate limits. Changing a bridge needs `pwc-nginx` for the listener,
+`install_host_layout.py` to reconcile `PWC_API_URL` in the MCP env file, and an
+MCP redeploy to restart the service on the new URL. A failure restores the
+previous pointer and re-smokes it. If no prior release exists, the failed unit
+is stopped.
 
 The public route is activated separately with `pwc-nginx`; an application or
 MCP deploy never reloads nginx. The checked-in nginx template maps browser

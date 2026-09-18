@@ -273,17 +273,31 @@ def test_mcp_access_log_excludes_identifiers_and_request_content():
             assert allowed in line
 
 
-def test_staging_internal_mcp_api_bridge_is_loopback_only():
-    assert "listen 127.0.0.1:8011;" in STAGING
-    marker = STAGING.index("server_name pwc-staging-mcp-api;")
-    bridge_start = STAGING.rfind("server {", 0, marker)
-    bridge_end = STAGING.index("\n}\n\nmap ", bridge_start)
-    bridge = STAGING[bridge_start:bridge_end]
-    assert "listen 127.0.0.1:8011;" in bridge
+@pytest.mark.parametrize(
+    ("config", "environment", "port", "backend", "host"),
+    [
+        (STAGING, "staging", 8011, "pwc_staging_backend", "staging.paperswithcode.co"),
+        (PRODUCTION, "production", 8010, "pwc_production_backend", "paperswithcode.co"),
+    ],
+)
+def test_internal_mcp_api_bridge_is_loopback_only(
+    config, environment, port, backend, host
+):
+    # The MCP service reads the catalog through this bridge in both
+    # environments, so its traffic never leaves the host or shares the public
+    # per-IP rate limits.
+    assert f"listen 127.0.0.1:{port};" in config
+    marker = config.index(f"server_name pwc-{environment}-mcp-api;")
+    bridge_start = config.rfind("server {", 0, marker)
+    bridge_end = config.index("\n}\n\nmap ", bridge_start)
+    bridge = config[bridge_start:bridge_end]
+    assert f"listen 127.0.0.1:{port};" in bridge
     assert 'location ~ "^/api/v1/(papers' in bridge
     assert "limit_except GET HEAD" in bridge
-    assert "proxy_pass http://pwc_staging_backend;" in bridge
+    assert f"proxy_pass http://{backend};" in bridge
+    assert f"proxy_set_header Host {host};" in bridge
     assert "auth_request" not in bridge
+    assert "limit_req" not in bridge
     assert "location ~ ^/ {" in bridge
     assert "return 404;" in bridge
     assert bridge.index('location ~ "^/api/v1/') < bridge.index("location ~ ^/ {")

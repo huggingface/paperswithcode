@@ -555,7 +555,9 @@ Configuration is fail-closed. Production direct apply requires all of:
 - `PWC_CODEX_CURATION_SCHEDULER_ENABLED=true`;
 - `PWC_CODEX_CURATION_DIRECT_APPLY_ENABLED=true`;
 - `PWC_CODEX_CURATION_TRACE_UPLOAD_ENABLED=true`;
-- a private, fully qualified `PWC_CODEX_CURATION_TRACE_HF_BUCKET_ID`;
+- a private, fully qualified `PWC_CODEX_CURATION_TRACE_HF_BUCKET_ID`
+  (each trace bundle uploads from a short-lived subprocess, because the
+  `hf_xet` runtime never returns its memory to a long-lived API worker);
 - an immutable curator image: either a registry digest or a content-versioned
   public Docker Space plus its exact 40-character Hub revision;
 - pinned model `gpt-5.6-luna`, medium reasoning, and Codex CLI version.

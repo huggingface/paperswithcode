@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from "react"
 import type { PdfCitationResolver, PdfLinkAnnotation } from "./pdfCitationLinks";
 import type { PdfPaperLinkTarget } from "./PdfPaperLink";
 
-export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolean, resolveCitation?: PdfCitationResolver) {
+// onResolved receives every route id about to become hoverable so callers can
+// warm preview cards before the pointer arrives.
+export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolean, resolveCitation?: PdfCitationResolver, onResolved?: (routeIds: string[]) => void) {
   const annotationsRef = useRef<PdfLinkAnnotation[]>([]);
   const generation = useRef(0);
   const [paperLinks, setPaperLinks] = useState<PdfPaperLinkTarget[]>([]);
@@ -22,9 +24,12 @@ export function usePdfPaperLinks(ref: RefObject<HTMLDivElement>, visible: boolea
       const routeId = await resolveCitation(annotation).catch(() => null);
       return routeId ? { anchor, routeId, internal: !annotation.url } : null;
     })).then(links => {
-      if (generation.current === current) setPaperLinks(links.filter((link): link is PdfPaperLinkTarget => link !== null && link.anchor.isConnected));
+      if (generation.current !== current) return;
+      const connected = links.filter((link): link is PdfPaperLinkTarget => link !== null && link.anchor.isConnected);
+      if (connected.length) onResolved?.([...new Set(connected.map(link => link.routeId))]);
+      setPaperLinks(connected);
     });
-  }, [ref, resolveCitation]);
+  }, [onResolved, ref, resolveCitation]);
   useEffect(() => {
     const root = ref.current;
     if (!root || !visible || !resolveCitation) return;

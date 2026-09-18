@@ -10,6 +10,7 @@ from datetime import UTC, date, datetime
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 from claude_agent_sdk import (
     AssistantMessage,
     ResultMessage,
@@ -1623,6 +1624,77 @@ def test_sse_event_accepts_excalidraw_app_frames():
     assert json.loads(result[6:-2])["result"]["structuredContent"] == {
         "checkpointId": "cp-1"
     }
+
+
+REALISTIC_APP_INSTANCE_ID = (
+    "call_jmDrQQmYrX7oYoXE7Z4FP0a9"
+    "|fc_06f68c86132359c9016aaa4b63625c87d1b92a328f8e54ae09"
+)
+
+
+def test_sse_event_accepts_openai_call_ids_as_app_instance_ids():
+    # The Pi worker reuses the provider tool call ID as the App instance ID.
+    # OpenAI Responses IDs are ``call_<id>|fc_<id>`` and exceed 64 characters.
+    assert len(REALISTIC_APP_INSTANCE_ID) > 64
+    frame = sse_event(
+        "app_start",
+        id=REALISTIC_APP_INSTANCE_ID,
+        instance_id=REALISTIC_APP_INSTANCE_ID,
+        provider="excalidraw",
+        server="excalidraw",
+        tool="create_view",
+        resource_uri="ui://excalidraw/mcp-app.html",
+        input={"elements": "[]"},
+    )
+    assert json.loads(frame[6:-2])["instance_id"] == REALISTIC_APP_INSTANCE_ID
+
+
+def test_app_blocks_with_openai_call_ids_persist():
+    projection = ChatTurnProjection()
+    projection.apply(
+        "app_start",
+        {
+            "id": REALISTIC_APP_INSTANCE_ID,
+            "instance_id": REALISTIC_APP_INSTANCE_ID,
+            "provider": "excalidraw",
+            "server": "excalidraw",
+            "tool": "create_view",
+            "resource_uri": "ui://excalidraw/mcp-app.html",
+            "input": {"elements": "[]"},
+        },
+    )
+    projection.apply(
+        "app_result",
+        {
+            "id": REALISTIC_APP_INSTANCE_ID,
+            "status": "ready",
+            "took_ms": 12,
+            "result": {"content": [], "structuredContent": {}, "isError": False},
+        },
+    )
+
+    blocks = DISPLAY_BLOCKS_ADAPTER.validate_python(projection.completed_blocks())
+
+    assert [block.kind for block in blocks] == ["app"]
+    assert blocks[0].instance_id == REALISTIC_APP_INSTANCE_ID
+
+
+def test_app_instance_id_stays_bounded():
+    with pytest.raises(ValidationError):
+        DISPLAY_BLOCKS_ADAPTER.validate_python(
+            [
+                {
+                    "kind": "app",
+                    "instance_id": "x" * 201,
+                    "provider": "excalidraw",
+                    "server": "excalidraw",
+                    "tool": "create_view",
+                    "resource_uri": "ui://excalidraw/mcp-app.html",
+                    "status": "ready",
+                    "input": {"elements": "[]"},
+                }
+            ]
+        )
 
 
 def test_sse_event_accepts_posterly_artifact_frames():

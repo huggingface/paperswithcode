@@ -1,4 +1,5 @@
 import type { PDFDocumentProxy, TextContent } from "pdfjs-dist/types/src/display/api";
+import type { PaperReferenceQuery } from "@/lib/api/papers.types";
 
 export interface PdfLinkAnnotation {
   id: string;
@@ -8,6 +9,9 @@ export interface PdfLinkAnnotation {
   rect?: number[];
 }
 
+/** Resolves bibliography entries to paper route ids, keyed by destination name. */
+export type PdfCitationLookup = (references: PaperReferenceQuery[]) => Promise<Map<string, string>>;
+
 export function arxivIdFromUrl(value: string): string | null {
   let url: URL;
   try { url = new URL(value); } catch { return null; }
@@ -16,15 +20,39 @@ export function arxivIdFromUrl(value: string): string | null {
   return match?.[1] ?? null;
 }
 
-interface ReferencePosition { name: string; page: number; x: number; y: number }
+const MAX_TITLE_CANDIDATES = 8;
+const MAX_TITLE_LENGTH = 300;
 
-// Resolve only explicit PDF links, never guesses from author names. Named
-// bibliography destinations delimit the entry containing an external arXiv link.
-export function createPdfCitationResolver(pdf: PDFDocumentProxy) {
+// Sentences of a bibliography entry that could be its title. The backend only
+// accepts an exact letters-and-digits match, so author lists and venues are
+// harmless extra candidates; adjacent pairs cover titles containing a period.
+export function referenceTitleCandidates(entry: string): string[] {
+  const sentences = entry
+    .replace(/^\s*\[[^\]]{1,6}\]\s*/, '')
+    .split(/[.?!](?=\s|$|[A-Z])/)
+    .map(sentence => sentence.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+  const plausible = (sentence: string) =>
+    sentence.length <= MAX_TITLE_LENGTH && sentence.split(' ').length >= 3
+    && /[a-z]/i.test(sentence) && !/https?:\/\//i.test(sentence) && !/^arxiv preprint/i.test(sentence);
+  const byLength = (a: string, b: string) => b.length - a.length;
+  const singles = sentences.filter(plausible).sort(byLength);
+  const pairs = sentences.slice(0, -1).map((sentence, index) => `${sentence}. ${sentences[index + 1]}`).filter(plausible).sort(byLength);
+  return [...new Set([...singles, ...pairs])].slice(0, MAX_TITLE_CANDIDATES);
+}
+
+interface ReferencePosition { name: string; page: number; x: number; y: number }
+interface ReferenceEntry { arxivId: string | null; titles: string[] }
+
+// Named bibliography destinations delimit each entry. An explicit arXiv link or
+// identifier inside the entry wins; otherwise the entry's sentences go to the
+// catalog for exact title matching. Author names alone never resolve anything.
+export function createPdfCitationResolver(pdf: PDFDocumentProxy, lookup?: PdfCitationLookup) {
   let references: Promise<ReferencePosition[]> | undefined;
   const pageLinks = new Map<number, Promise<PdfLinkAnnotation[]>>();
   const pageText = new Map<number, Promise<TextContent>>();
-  const citations = new Map<string, Promise<string | null>>();
+  const entries = new Map<string, Promise<ReferenceEntry | null>>();
+  let catalog: Promise<Map<string, string>> | undefined;
   const getReferences = () => references ??= (async () => {
     const destinations = await pdf.getDestinations();
     const positions: ReferencePosition[] = [];
@@ -35,10 +63,10 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy) {
     }
     return positions;
   })();
-  const resolveCitation = (name: string) => {
-    let result = citations.get(name);
-    if (!result) {
-      result = (async () => {
+  const getEntry = (name: string) => {
+    let entry = entries.get(name);
+    if (!entry) {
+      entry = (async () => {
         const positions = await getReferences();
         const start = positions.find(position => position.name === name);
         if (!start) return null;
@@ -58,30 +86,49 @@ export function createPdfCitationResolver(pdf: PDFDocumentProxy) {
           const id = arxivIdFromUrl(annotation.url);
           if (!id) continue;
           const [x1, y1, x2, y2] = annotation.rect;
-          const x = (x1 + x2) / 2;
-          const y = (y1 + y2) / 2;
-          if (insideEntry(x, y)) ids.add(id);
+          if (insideEntry((x1 + x2) / 2, (y1 + y2) / 2)) ids.add(id);
         }
         let text = pageText.get(start.page);
         if (!text) {
           text = pdf.getPage(start.page).then(page => page.getTextContent());
           pageText.set(start.page, text);
         }
-        const entry = (await text).items.filter(item => 'str' in item && insideEntry(item.transform[4], item.transform[5]))
-          .map(item => 'str' in item ? item.str : '').join('').replace(/\s/g, '');
-        // Explicit identifiers only; no title/author fuzzy matching. Joining
-        // text items also handles arXiv URLs broken across lines in the PDF.
-        for (const match of entry.matchAll(/(?:arxiv:|arxiv\.org\/(?:abs|pdf|html)\/)(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?/gi)) ids.add(match[1]);
-        return ids.size === 1 ? [...ids][0] : null;
+        // Line ends become spaces so sentence boundaries survive; the arXiv
+        // scan drops all whitespace to catch identifiers broken across lines.
+        const entryText = (await text).items
+          .filter(item => 'str' in item && insideEntry(item.transform[4], item.transform[5]))
+          .map(item => 'str' in item ? item.str + (item.hasEOL ? ' ' : '') : '').join('');
+        for (const match of entryText.replace(/\s/g, '').matchAll(/(?:arxiv:|arxiv\.org\/(?:abs|pdf|html)\/)(\d{4}\.\d{4,5}|[a-z-]+(?:\.[A-Z]{2})?\/\d{7})(?:v\d+)?/gi)) ids.add(match[1]);
+        return { arxivId: ids.size === 1 ? [...ids][0] : null, titles: referenceTitleCandidates(entryText) };
       })();
-      citations.set(name, result);
+      entries.set(name, entry);
     }
-    return result;
+    return entry;
   };
+  const getCatalog = () => catalog ??= (async () => {
+    const matches = new Map<string, string>();
+    if (!lookup) return matches;
+    try {
+      const positions = await getReferences();
+      const queries: PaperReferenceQuery[] = [];
+      for (const position of positions) {
+        const entry = await getEntry(position.name);
+        if (entry && (entry.arxivId || entry.titles.length)) queries.push({ key: position.name, arxiv_id: entry.arxivId, titles: entry.titles });
+      }
+      return queries.length ? await lookup(queries) : matches;
+    } catch {
+      // Offline or unparseable bibliography: explicit arXiv identifiers still work.
+      return matches;
+    }
+  })();
+  // Warm every bibliography card as soon as the document opens.
+  if (lookup) void getCatalog();
   return async (annotation: PdfLinkAnnotation): Promise<string | null> => {
     if (annotation.url) return arxivIdFromUrl(annotation.url);
-    if (typeof annotation.dest === 'string' && /^cite[.:]/i.test(annotation.dest)) return resolveCitation(annotation.dest);
-    return null;
+    if (typeof annotation.dest !== 'string' || !/^cite[.:]/i.test(annotation.dest)) return null;
+    const entry = await getEntry(annotation.dest);
+    if (!entry) return null;
+    return entry.arxivId ?? (await getCatalog()).get(annotation.dest) ?? null;
   };
 }
 export type PdfCitationResolver = ReturnType<typeof createPdfCitationResolver>;

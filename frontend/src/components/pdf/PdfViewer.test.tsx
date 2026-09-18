@@ -1,5 +1,6 @@
 import React from "react";
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render as renderWithoutQueries, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 let observedWidth = 800;
@@ -64,6 +65,10 @@ vi.mock("react-pdf", () => ({
 }));
 
 import { highlightPdfText, PdfViewer } from "./PdfViewer";
+
+const render = (ui: React.ReactElement) => renderWithoutQueries(ui, {
+  wrapper: ({ children }) => <QueryClientProvider client={new QueryClient()}>{children}</QueryClientProvider>,
+});
 
 describe("highlightPdfText", () => {
   it("escapes PDF text and wraps every case-insensitive match", () => {

@@ -24,6 +24,18 @@ describe("domain API clients", () => {
     );
   });
 
+  it("posts bibliography lookups as one JSON batch", async () => {
+    const request = vi.fn().mockResolvedValue({ references: [] }) as ApiRequest;
+    const papers = new PapersApi(request);
+
+    await papers.lookup([{ key: "cite.gu2024", arxiv_id: null, titles: ["Mamba"] }]);
+
+    expect(request).toHaveBeenCalledWith("/papers/lookup", {
+      method: "POST",
+      body: JSON.stringify({ references: [{ key: "cite.gu2024", arxiv_id: null, titles: ["Mamba"] }] }),
+    });
+  });
+
   it("encapsulates the hydrated paper search feed without changing autocomplete", async () => {
     const request = vi.fn().mockResolvedValue({ results: [] }) as ApiRequest;
     const papers = new PapersApi(request);

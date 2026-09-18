@@ -34,6 +34,8 @@ from backend.models.papers import (
     PaperSummary,
     PaperSearchResults,
     PaperSearchFeedResults,
+    PaperLookupRequest,
+    PaperLookupResponse,
     RelatedPaperRecommendation,
     PaperVersions,
     VersionComparison,
@@ -47,6 +49,7 @@ from backend.services.paper_service import (
     MAX_AUTHOR_FILTERS,
     PaperService,
 )
+from backend.services.paper_reference_service import PaperReferenceService
 from backend.services.badge_service import (
     render_leaderboard_badge,
     resolve_leaderboard_badge_target,
@@ -488,6 +491,26 @@ def search_papers_feed(
         has_code=has_code,
         has_hf_artifacts=has_hf_artifacts,
     )
+
+
+@router.post(
+    "/papers/lookup",
+    response_model=PaperLookupResponse,
+    summary="Match bibliography entries to catalog papers",
+)
+def lookup_papers(
+    payload: PaperLookupRequest,
+    db: Session = Depends(get_database_session),
+):
+    """
+    Resolve a batch of PDF bibliography entries in one round trip.
+
+    Each entry is matched by its explicit arXiv identifier when it has one,
+    otherwise by an exact letters-and-digits fingerprint of one of its
+    candidate title strings. Entries without a confident match return
+    ``paper: null``; the endpoint never guesses from authors or venues.
+    """
+    return PaperReferenceService(db).resolve(payload.references)
 
 
 @router.get(
