@@ -555,12 +555,14 @@ export function PdfViewer({
           if (chrome === "reader") setResolveCitation(() => createPdfCitationResolver(pdf, previewCache.lookup));
           setPages(pdf.numPages);
           setError("");
-          // Papers use one page size throughout; the first page stands for all placeholders.
+          // Papers use one page size throughout; the first page stands for all
+          // placeholders. If it cannot be read, keep the default proportions and
+          // still restore the reader's position.
           const placeholdersSized = pdf.getPage(1).then((first) => {
             const [left, bottom, right, top] = first.view;
             const aspect = (top - bottom) / (right - left);
             if (documentRef.current === pdf && aspect > 0) setPageAspect(aspect);
-          });
+          }, () => undefined);
           const restoredPage = Math.max(1, Math.min(pdf.numPages, initialPage));
           const restorePage = () => {
             if (restoredPage <= 1) return;

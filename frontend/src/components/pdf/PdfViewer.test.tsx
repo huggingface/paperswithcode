@@ -15,6 +15,7 @@ const outlinePdf = (numPages: number, outline: unknown[] = []) => ({
   getPageIndex: async (ref: { num: number }) => ref.num / 10 - 1,
   getPage: async () => ({ view: [0, 0, 612, 792] }),
 });
+const unsizedPdf = { ...outlinePdf(13), getPage: async () => { throw new Error("broken page"); } };
 const sampleOutline = [
   { title: "Introduction", dest: [pageRef(1), { name: "XYZ" }, 72, 720, null], items: [] },
   { title: "System Design", dest: [pageRef(5), { name: "XYZ" }, 72, 396, null], items: [
@@ -56,6 +57,7 @@ vi.mock("react-pdf", () => ({
         <button onClick={() => onLoadSuccess(outlinePdf(1))}>Load PDF</button>
         <button onClick={() => onLoadSuccess(outlinePdf(13))}>Load long PDF</button>
         <button onClick={() => onLoadSuccess(outlinePdf(13, sampleOutline))}>Load outlined PDF</button>
+        <button onClick={() => onLoadSuccess(unsizedPdf)}>Load unsized PDF</button>
         <button onClick={() => initialItemClick.current?.({ pageNumber: 13, pageIndex: 12 })}>Citation link</button>
         <button onClick={() => onLoadError(new Error("network response was 404"))}>Fail PDF</button>
         {children}
@@ -317,6 +319,18 @@ describe("PdfViewer resize rendering", () => {
     const placeholder = view.container.querySelector<HTMLElement>('[data-page="13"]');
     expect(placeholder).toHaveStyle({ minHeight: `${Math.round(790 * 1.35)}px` });
     await waitFor(() => expect(placeholder).toHaveStyle({ minHeight: `${Math.round(790 * 792 / 612)}px` }));
+  });
+
+  it("still restores the remembered page when the first page cannot be sized", async () => {
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    const onPageChange = vi.fn();
+    const view = render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" initialPage={7} onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load unsized PDF" }));
+
+    await waitFor(() => expect(onPageChange).toHaveBeenCalledWith(7));
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(view.container.querySelector('[data-page="7"]'));
+    expect(view.container.querySelector<HTMLElement>('[data-page="13"]')).toHaveStyle({ minHeight: `${Math.round(790 * 1.35)}px` });
   });
 
   it("toggles the table of contents open on tap and closes it with Escape without leaving the reader", async () => {
