@@ -556,7 +556,7 @@ export function PdfViewer({
           setPages(pdf.numPages);
           setError("");
           // Papers use one page size throughout; the first page stands for all placeholders.
-          void pdf.getPage(1).then((first) => {
+          const placeholdersSized = pdf.getPage(1).then((first) => {
             const [left, bottom, right, top] = first.view;
             const aspect = (top - bottom) / (right - left);
             if (documentRef.current === pdf && aspect > 0) setPageAspect(aspect);
@@ -568,9 +568,13 @@ export function PdfViewer({
             setPage(restoredPage);
             onPageChange?.(restoredPage);
           };
-          const afterLayout = (callback: () => void) => requestAnimationFrame(() => requestAnimationFrame(() => {
-            if (documentRef.current === pdf) callback();
-          }));
+          // Scroll only once placeholders have their final size and are laid out,
+          // otherwise a later resize would move the target out from under the reader.
+          const afterLayout = (callback: () => void) => void placeholdersSized.then(() => {
+            requestAnimationFrame(() => requestAnimationFrame(() => {
+              if (documentRef.current === pdf) callback();
+            }));
+          });
           // A `#pdf-section-<n>` deep link takes precedence over the remembered
           // page, but only once the outline confirms the section exists.
           const section = chrome === "reader" ? pdfSectionFromHash(window.location.hash) : undefined;

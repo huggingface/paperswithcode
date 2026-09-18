@@ -339,7 +339,10 @@ describe("PdfViewer resize rendering", () => {
   });
 
   it("opens a #pdf-section deep link instead of the remembered page", async () => {
-    const scrollTo = vi.fn();
+    const placeholderHeightsAtScroll: string[] = [];
+    const scrollTo = vi.fn(function (this: HTMLElement) {
+      placeholderHeightsAtScroll.push(this.querySelector<HTMLElement>('[data-page="13"]')?.style.minHeight ?? "");
+    });
     const scrollIntoView = vi.fn();
     Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
     Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
@@ -350,6 +353,8 @@ describe("PdfViewer resize rendering", () => {
 
     await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "instant" })));
     expect(scrollIntoView).not.toHaveBeenCalled();
+    // Placeholders already had the document's real proportions when the jump measured them.
+    expect(placeholderHeightsAtScroll).toEqual([`${Math.round(790 * 792 / 612)}px`]);
     // jsdom reports zero-size pages, so the scroll tracker later snaps back to page 1.
     expect(onPageChange).toHaveBeenCalledWith(9);
     window.history.replaceState(null, "", "/paper/2609.18063/read");
