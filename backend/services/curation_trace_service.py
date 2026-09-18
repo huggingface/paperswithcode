@@ -9,6 +9,8 @@ import json
 import logging
 import os
 import re
+import subprocess
+import sys
 import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
@@ -29,6 +31,8 @@ SECRET_PATTERNS = (
     re.compile(r"\b(?:hf|sk)-[A-Za-z0-9_-]{12,}\b"),
 )
 MAX_TRACE_BYTES = 8_000_000
+UPLOAD_TIMEOUT_SECONDS = 180
+UPLOAD_WORKER = Path(__file__).with_name("curation_trace_upload_worker.py")
 
 
 def redact_trace(raw: bytes) -> bytes:
@@ -57,6 +61,53 @@ def _ordered_trace_value(value: Any) -> Any:
     return {key: _ordered_trace_value(value[key]) for key in keys}
 
 
+def upload_trace_objects(
+    bucket: str, prefix: str, objects: dict[str, bytes], *, token: str
+) -> None:
+    """Upload a trace bundle from a short-lived subprocess.
+
+    ``hf_xet`` keeps its Rust runtime and allocator arenas for the life of the
+    process, so uploading inside the API worker grows it by tens of megabytes
+    per trace until the memory cap throttles it. A child process gives that
+    memory back when it exits.
+    """
+    with tempfile.TemporaryDirectory(prefix="pwc-curation-trace-") as directory:
+        for name, data in objects.items():
+            (Path(directory) / name).write_bytes(data)
+        environment = {
+            **os.environ,
+            "HF_TOKEN": token,
+            "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+        }
+        command = [
+            sys.executable,
+            str(UPLOAD_WORKER),
+            "--bucket",
+            bucket,
+            "--prefix",
+            prefix,
+            "--directory",
+            directory,
+        ]
+        try:
+            completed = subprocess.run(
+                command,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=UPLOAD_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as error:
+            raise RuntimeError(
+                f"trace upload timed out after {UPLOAD_TIMEOUT_SECONDS}s"
+            ) from error
+    if completed.returncode != 0:
+        detail = completed.stderr.strip().splitlines()[-1:] or ["no output"]
+        raise RuntimeError(
+            f"trace upload exited with status {completed.returncode}: {detail[0]}"
+        )
+
+
 def trace_json(value: Any, *, indent: int | None = None) -> bytes:
     return json.dumps(
         _ordered_trace_value(value),
@@ -70,6 +121,7 @@ class CurationTraceService:
     def __init__(self, db: Session, settings: Settings, hf_api: HfApi | None = None):
         self.db = db
         self.settings = settings
+        # Only manifest reads use this client; uploads run in a subprocess.
         self.api = hf_api or HfApi(token=settings.codex_jobs_token)
 
     def _recovery_path(self, row: PaperCurationJob) -> Path:
@@ -100,11 +152,9 @@ class CurationTraceService:
         bucket = self.settings.codex_curation_trace_hf_bucket_id
         if not bucket:
             raise RuntimeError("PWC_CURATION_TRACE_HF_BUCKET_ID is not configured")
-        self.api.create_bucket(bucket, private=True, exist_ok=True)
         prefix = self._prefix(row)
-        self.api.batch_bucket_files(
-            bucket,
-            add=[(data, f"{prefix}/{name}") for name, data in objects.items()],
+        upload_trace_objects(
+            bucket, prefix, objects, token=self.settings.codex_jobs_token
         )
         return {
             "status": "stored",
