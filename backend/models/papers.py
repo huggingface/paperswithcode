@@ -148,6 +148,12 @@ class Paper(BaseModel):
         default=True, description="Whether this is the latest version"
     )
 
+    @field_validator("version", mode="before")
+    @classmethod
+    def default_missing_version(cls, value: object) -> object:
+        # A NULL version column must not make the paper page fail to render.
+        return "v1" if value is None else value
+
     # Citation and importance metrics
     citation_count: int = Field(
         default=0, description="Number of citations from Semantic Scholar"
