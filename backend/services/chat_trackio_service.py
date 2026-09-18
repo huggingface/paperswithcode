@@ -3,6 +3,13 @@
 Network writes run on a bounded background queue, never on the chat stream.
 Provider requests are correlated by trace_id but kept in separate runs from
 turn aggregates, so the dashboard does not double-count their token usage.
+
+Entries are batched into one ``bulk_log`` request each, because a research
+turn emits a chat trace, one provider-request trace per model call, and
+several lifecycle observations; sending each as its own POST could not keep
+up with production traffic and most traces were dropped on the queue.
+Lifecycle observations are exported as plain numeric metrics rather than
+single-span traces, which keeps them content-free and small.
 """
 
 from __future__ import annotations
@@ -25,6 +32,12 @@ from backend.config import Settings
 
 logger = logging.getLogger(__name__)
 MAX_PAYLOAD_BYTES = 2 * 1024 * 1024
+MAX_BATCH_ENTRIES = 20
+MAX_QUEUE_ENTRIES = 512
+MAX_QUEUE_BYTES = 64 * 1024 * 1024
+BATCH_LINGER_SECONDS = 0.25
+DROP_LOG_INTERVAL_SECONDS = 60.0
+LIFECYCLE_SPAN_NAME = "durable-chat-lifecycle"
 
 
 class TrackioClient:
@@ -36,7 +49,18 @@ class TrackioClient:
         self.project = project
         self.environment = environment
         self.release = release
-        self.pending: queue.Queue[bytes] = queue.Queue(maxsize=32)
+        self.pending: queue.Queue[bytes] = queue.Queue(maxsize=MAX_QUEUE_ENTRIES)
+        self._lock = threading.Lock()
+        self._pending_bytes = 0
+        self._last_drop_log = 0.0
+        self._unlogged_drops = 0
+        self.counters = {
+            "submitted": 0,
+            "dropped": 0,
+            "sent": 0,
+            "failed": 0,
+            "rejected": 0,
+        }
         self.worker = threading.Thread(
             target=self._work, name="chat-trackio", daemon=True
         )
@@ -55,62 +79,100 @@ class TrackioClient:
             self, (trace_context or {}).get("trace_id") or uuid.uuid4().hex, **fields
         )
 
+    def summary(self) -> dict[str, int]:
+        with self._lock:
+            return {
+                **self.counters,
+                "queued": self.pending.qsize(),
+                "queued_bytes": self._pending_bytes,
+            }
+
     def submit(self, root: TrackioObservation) -> None:
         kind = {
             "provider-request": "provider-requests",
-            "durable-chat-lifecycle": "lifecycle",
+            LIFECYCLE_SPAN_NAME: "lifecycle",
         }.get(root.span["name"], "chat")
         run = f"{self.environment}-{kind}-{root.span['start_time'][:10]}"
-        metadata = {
-            **root.span["metadata"],
-            "trace_id": root.trace_id,
-            "environment": self.environment,
-            "release": self.release,
-        }
-        messages = []
-        for field in ("input", "output"):
-            value = root.span.get(field)
-            if isinstance(value, list):
-                messages.extend(value)
         entry = {
             "project": self.project,
             "run": run,
             "run_id": hashlib.sha256(f"{self.project}:{run}".encode()).hexdigest()[:32],
             "log_id": root.span["id"],
-            "metrics": {
-                "trace": {
-                    "_type": "trackio.trace",
-                    "messages": messages,
-                    "metadata": metadata,
-                    "spans": root.spans,
-                }
-            },
+            "metrics": (
+                _lifecycle_metrics(root)
+                if root.span["name"] == LIFECYCLE_SPAN_NAME
+                else {"trace": self._trace_metric(root)}
+            ),
         }
-        payload = json.dumps(
-            {
-                "args": [],
-                "kwargs": {
-                    "logs": [entry],
-                    "hf_token": self.token,
-                },
-            },
-            default=str,
-        ).encode()
-        if len(payload) > MAX_PAYLOAD_BYTES:
-            logger.warning(
-                "chat Trackio trace dropped: payload exceeds 2 MiB trace_id=%s",
-                root.trace_id,
-            )
-            return
-        try:
-            self.pending.put_nowait(payload)
-        except queue.Full:
-            logger.warning(
-                "chat Trackio trace dropped: export queue full trace_id=%s",
-                root.trace_id,
-            )
+        encoded = json.dumps(entry, default=str).encode()
+        with self._lock:
+            self.counters["submitted"] += 1
+            if len(encoded) > MAX_PAYLOAD_BYTES:
+                # One oversized turn, not a burst: always worth its own line.
+                self.counters["dropped"] += 1
+                logger.warning(
+                    "chat Trackio trace dropped: payload exceeds 2 MiB trace_id=%s",
+                    root.trace_id,
+                )
+                return
+            if self._pending_bytes + len(encoded) > MAX_QUEUE_BYTES:
+                self._drop_queue_full(root.trace_id)
+                return
+            try:
+                self.pending.put_nowait(encoded)
+            except queue.Full:
+                self._drop_queue_full(root.trace_id)
+                return
+            self._pending_bytes += len(encoded)
 
-    def _send(self, payload: bytes) -> None:
+    def _trace_metric(self, root: TrackioObservation) -> dict[str, Any]:
+        messages = []
+        for field in ("input", "output"):
+            value = root.span.get(field)
+            if isinstance(value, list):
+                messages.extend(value)
+        return {
+            "_type": "trackio.trace",
+            "messages": messages,
+            "metadata": {
+                **root.span["metadata"],
+                "trace_id": root.trace_id,
+                "environment": self.environment,
+                "release": self.release,
+            },
+            "spans": root.spans,
+        }
+
+    def _drop_queue_full(self, trace_id: str) -> None:
+        # Called with ``self._lock`` held.  Queue-full drops arrive in bursts,
+        # so log the first one per interval with the count suppressed since,
+        # keeping the prefix the alert monitor matches.  The trace ID is a
+        # hash, not chat content.
+        self.counters["dropped"] += 1
+        self._unlogged_drops += 1
+        now = time.monotonic()
+        if now - self._last_drop_log < DROP_LOG_INTERVAL_SECONDS:
+            return
+        count = self._unlogged_drops
+        self._unlogged_drops = 0
+        self._last_drop_log = now
+        logger.warning(
+            "chat Trackio trace dropped: export queue full trace_id=%s "
+            "dropped_since_last_log=%d",
+            trace_id,
+            count,
+        )
+
+    def _batch_payload(self, entries: list[bytes]) -> bytes:
+        return (
+            b'{"args":[],"kwargs":{"logs":['
+            + b",".join(entries)
+            + b'],"hf_token":'
+            + json.dumps(self.token).encode()
+            + b"}}"
+        )
+
+    def _send(self, payload: bytes) -> bool:
         # No redirect following: credentials must stay on the configured Space.
         with httpx.Client(timeout=15, follow_redirects=False) as client:
             for attempt in range(3):
@@ -130,37 +192,84 @@ class TrackioClient:
                             and body.get("error") is None
                             and "data" in body
                         ):
-                            return
+                            return True
                         logger.warning("chat Trackio export rejected by API")
-                        return
+                        with self._lock:
+                            self.counters["rejected"] += 1
+                        return False
                     if response.status_code not in {408, 429, 500, 502, 503, 504}:
                         logger.warning(
                             "chat Trackio export failed HTTP %s", response.status_code
                         )
-                        return
+                        return False
                 except (httpx.HTTPError, ValueError):
                     # Never log payloads, response bodies or tokens.
                     pass
                 if attempt < 2:
                     time.sleep(2**attempt)
         logger.warning("chat Trackio export failed after 3 attempts")
+        return False
+
+    def _next_batch(self) -> list[bytes]:
+        first = self.pending.get()
+        batch = [first]
+        total = len(first)
+        deadline = time.monotonic() + BATCH_LINGER_SECONDS
+        while len(batch) < MAX_BATCH_ENTRIES:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                entry = self.pending.get(timeout=remaining)
+            except queue.Empty:
+                break
+            if total + len(entry) > MAX_PAYLOAD_BYTES:
+                self._requeue_front(entry)
+                break
+            batch.append(entry)
+            total += len(entry)
+        return batch
+
+    def _requeue_front(self, entry: bytes) -> None:
+        # ``queue.Queue`` has no push-front.  Reinsert under its mutex so an
+        # entry that would overflow the current POST keeps its place.  ``get``
+        # never touched ``unfinished_tasks``, so nothing is adjusted here; the
+        # batch that eventually carries the entry calls ``task_done`` for it.
+        with self.pending.mutex:
+            self.pending.queue.appendleft(entry)
+            self.pending.not_empty.notify()
 
     def _work(self) -> None:
         while True:
-            payload = self.pending.get()
+            batch = self._next_batch()
             try:
-                self._send(payload)
+                delivered = self._send(self._batch_payload(batch))
             except Exception:
                 # Keep the exporter alive; telemetry failures must not break chat.
                 logger.warning("chat Trackio exporter failed unexpectedly")
+                delivered = False
             finally:
-                self.pending.task_done()
+                with self._lock:
+                    self._pending_bytes -= sum(len(entry) for entry in batch)
+                for _ in batch:
+                    self.pending.task_done()
+            with self._lock:
+                self.counters["sent" if delivered else "failed"] += len(batch)
 
     def flush(self, timeout: float = 5) -> bool:
         deadline = time.monotonic() + timeout
         while self.pending.unfinished_tasks and time.monotonic() < deadline:
             time.sleep(0.05)
         return not self.pending.unfinished_tasks
+
+
+def _lifecycle_metrics(root: TrackioObservation) -> dict[str, int]:
+    metadata = root.span["metadata"]
+    name = f"lifecycle/{metadata['event']}"
+    code = metadata.get("code")
+    if code and code != "none":
+        name = f"{name}/{code}"
+    return {name: metadata["value"]}
 
 
 class TrackioObservation:
