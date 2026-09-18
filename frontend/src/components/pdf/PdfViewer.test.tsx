@@ -6,6 +6,21 @@ let observedWidth = 800;
 let resizeCallback: ResizeObserverCallback | undefined;
 let intersecting = true;
 const reactPdf = vi.hoisted(() => ({ documentOptions: [] as unknown[] }));
+const pageRef = (page: number) => ({ num: page * 10, gen: 0 });
+const outlinePdf = (numPages: number, outline: unknown[] = []) => ({
+  numPages,
+  getOutline: async () => outline,
+  getDestination: async () => null,
+  getPageIndex: async (ref: { num: number }) => ref.num / 10 - 1,
+  getPage: async () => ({ view: [0, 0, 612, 792] }),
+});
+const sampleOutline = [
+  { title: "Introduction", dest: [pageRef(1), { name: "XYZ" }, 72, 720, null], items: [] },
+  { title: "System Design", dest: [pageRef(5), { name: "XYZ" }, 72, 396, null], items: [
+    { title: "SSD Streaming Expert Layers", dest: [pageRef(6), { name: "Fit" }], items: [] },
+  ] },
+  { title: "Evaluation", dest: [pageRef(9), { name: "Fit" }], items: [] },
+];
 
 vi.mock("@/lib/pdf", () => ({
   assertPdfWorkerConfigured: vi.fn(),
@@ -37,8 +52,9 @@ vi.mock("react-pdf", () => ({
       const initialItemClick = React.useRef(onItemClick);
       reactPdf.documentOptions.push(options);
       return <div>
-        <button onClick={() => onLoadSuccess({ numPages: 1 })}>Load PDF</button>
-        <button onClick={() => onLoadSuccess({ numPages: 13 })}>Load long PDF</button>
+        <button onClick={() => onLoadSuccess(outlinePdf(1))}>Load PDF</button>
+        <button onClick={() => onLoadSuccess(outlinePdf(13))}>Load long PDF</button>
+        <button onClick={() => onLoadSuccess(outlinePdf(13, sampleOutline))}>Load outlined PDF</button>
         <button onClick={() => initialItemClick.current?.({ pageNumber: 13, pageIndex: 12 })}>Citation link</button>
         <button onClick={() => onLoadError(new Error("network response was 404"))}>Fail PDF</button>
         {children}
@@ -242,6 +258,95 @@ describe("PdfViewer resize rendering", () => {
     expect(screen.getByRole("button", { name: "Close search" })).toBeVisible();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("button", { name: "Close search" })).not.toBeInTheDocument();
+  });
+
+  it("shows a hover table of contents built from the PDF outline and jumps to sections", async () => {
+    const scrollTo = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
+    window.history.replaceState(null, "", "/paper/2609.18063/read");
+    const onPageChange = vi.fn();
+    const onPageChangeSpy = () => onPageChange.mock.lastCall?.[0];
+    const view = render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    expect(screen.queryByRole("navigation", { name: "Paper sections" })).not.toBeInTheDocument();
+
+    // Pages are 1000px tall, stacked below a scroller whose top edge is at 100px.
+    const scroller = screen.getByRole("region", { name: "Paper PDF" });
+    vi.spyOn(scroller, "getBoundingClientRect").mockReturnValue({ top: 100 } as DOMRect);
+    const layoutPages = (scrollTop: number) => view.container.querySelectorAll<HTMLElement>("[data-page]").forEach((element) => {
+      const top = 100 + (Number(element.dataset.page) - 1) * 1000 - scrollTop;
+      vi.spyOn(element, "getBoundingClientRect").mockReturnValue({ top, bottom: top + 1000, height: 1000 } as DOMRect);
+    });
+    layoutPages(0);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+    const toc = await screen.findByRole("navigation", { name: "Paper sections" });
+    expect(toc.querySelectorAll(".pdf-outline-tick")).toHaveLength(4);
+    const links = screen.getAllByRole("link", { name: /Introduction|System Design|SSD Streaming|Evaluation/ });
+    expect(links.map((link) => link.textContent)).toEqual(["Introduction", "System Design", "SSD Streaming Expert Layers", "Evaluation"]);
+    expect(links[2].closest("li")).toHaveClass("level-1");
+    // The Introduction heading starts 9% down page 1, below the reading anchor at the top.
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(toc.querySelector(".pdf-outline-tick.is-active")).toBeNull());
+
+    fireEvent.click(screen.getByRole("link", { name: "System Design" }));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 4000 + 500 - 8, behavior: "smooth" });
+    expect(window.location.hash).toBe("#pdf-section-1");
+    expect(screen.getByRole("link", { name: "System Design" })).toHaveAttribute("aria-current", "location");
+    expect(toc.querySelector(".pdf-outline-tick.is-active")).toBe(toc.querySelectorAll(".pdf-outline-tick")[1]);
+
+    // Once the smooth scroll lands, the section under the anchor stays active
+    // even though the viewport centre is already on the next page.
+    layoutPages(4000 + 500 - 8);
+    fireEvent.scroll(scroller);
+    await waitFor(() => expect(onPageChangeSpy()).toBe(5));
+    expect(screen.getByRole("link", { name: "System Design" })).toHaveAttribute("aria-current", "location");
+    expect(screen.getByRole("link", { name: "SSD Streaming Expert Layers" })).not.toHaveAttribute("aria-current");
+  });
+
+  it("sizes unrendered page placeholders from the document's page proportions", async () => {
+    intersecting = false;
+    const view = render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    const placeholder = view.container.querySelector<HTMLElement>('[data-page="13"]');
+    expect(placeholder).toHaveStyle({ minHeight: `${Math.round(790 * 1.35)}px` });
+    await waitFor(() => expect(placeholder).toHaveStyle({ minHeight: `${Math.round(790 * 792 / 612)}px` }));
+  });
+
+  it("toggles the table of contents open on tap and closes it with Escape without leaving the reader", async () => {
+    const onClose = vi.fn();
+    render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" onClose={onClose} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+    const rail = await screen.findByRole("button", { name: "Table of contents" });
+    expect(rail).toHaveAttribute("aria-expanded", "false");
+
+    fireEvent.click(rail);
+    expect(rail).toHaveAttribute("aria-expanded", "true");
+    expect(rail.closest(".pdf-outline")).toHaveClass("is-pinned");
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(rail).toHaveAttribute("aria-expanded", "false");
+    expect(onClose).not.toHaveBeenCalled();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("opens a #pdf-section deep link instead of the remembered page", async () => {
+    const scrollTo = vi.fn();
+    const scrollIntoView = vi.fn();
+    Object.defineProperty(HTMLElement.prototype, "scrollTo", { configurable: true, value: scrollTo });
+    Object.defineProperty(HTMLElement.prototype, "scrollIntoView", { configurable: true, value: scrollIntoView });
+    window.history.replaceState(null, "", "/paper/2609.18063/read#pdf-section-3");
+    const onPageChange = vi.fn();
+    render(<PdfViewer url="https://arxiv.org/pdf/2609.18063" paperKey="2609.18063" paperTitle="edge0" paperHref="/paper/2609.18063" initialPage={7} onPageChange={onPageChange} />);
+    fireEvent.click(screen.getByRole("button", { name: "Load outlined PDF" }));
+
+    await waitFor(() => expect(scrollTo).toHaveBeenCalledWith(expect.objectContaining({ behavior: "instant" })));
+    expect(scrollIntoView).not.toHaveBeenCalled();
+    // jsdom reports zero-size pages, so the scroll tracker later snaps back to page 1.
+    expect(onPageChange).toHaveBeenCalledWith(9);
+    window.history.replaceState(null, "", "/paper/2609.18063/read");
   });
 
   it("shows a preparation message for an archived PDF that is not ready yet", () => {

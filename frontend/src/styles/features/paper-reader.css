@@ -57,6 +57,7 @@
 .pdf-search-controls input { width: min(260px, 45vw); min-height: 30px; border: 1px solid var(--hairline); border-radius: 4px; padding: 4px 7px; background: var(--bg); color: var(--ink); }
 .pdf-search-controls span { min-width: 70px; color: var(--ink-soft); text-align: center; }
 .pdf-search-controls button { display: inline-flex; align-items: center; justify-content: center; }
+.pdf-scroll-frame { position: relative; min-height: 0; flex: 1; display: flex; flex-direction: column; }
 .pdf-scroll { min-height: 0; flex: 1; overflow: auto; overscroll-behavior: contain; background: #fff; scrollbar-color: var(--ink-faint) var(--bg-subtle); scrollbar-gutter: stable; }
 .pdf-scroll::-webkit-scrollbar { width: 12px; height: 12px; }
 .pdf-scroll::-webkit-scrollbar-track { background: var(--bg-subtle); }
@@ -68,6 +69,31 @@
 .pdf-page .textLayer ::selection { background: rgb(45 125 255 / .3); color: transparent; }
 .pdf-search-highlight { border-radius: 1px; background: rgb(45 125 255 / .34); color: inherit; box-shadow: 0 0 0 1px rgb(45 125 255 / .18); }
 .pdf-search-highlight.is-active { background: rgb(28 104 239 / .52); box-shadow: 0 0 0 1px rgb(28 104 239 / .34); }
+/* Hover table of contents: one tick per section along the right edge; the full outline appears while the rail is hovered, focused, or tapped open. */
+.pdf-outline { position: absolute; z-index: 9; top: 0; right: 14px; bottom: 0; display: flex; align-items: center; pointer-events: none; }
+.pdf-outline-rail { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; max-height: 100%; overflow: hidden; border: 0; padding: 12px 6px 12px 10px; background: transparent; cursor: pointer; pointer-events: auto; }
+.pdf-outline-rail:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; border-radius: 6px; }
+.pdf-outline-tick { display: block; width: 18px; height: 2px; border-radius: 1px; background: var(--ink-faint); transition: background 120ms ease, width 120ms ease; }
+.pdf-outline-tick.level-1 { width: 10px; }
+.pdf-outline-tick.is-active { width: 22px; background: var(--accent); }
+.pdf-outline-panel { position: absolute; right: 100%; top: 50%; width: min(320px, 60vw); max-height: min(70vh, 100%); overflow-y: auto; margin-right: -6px; padding: 10px 6px; border: 1px solid var(--hairline); border-radius: 12px; background: var(--bg-elevated); color: var(--ink); box-shadow: 0 8px 28px #0003; font-size: 14px; line-height: 1.35; opacity: 0; visibility: hidden; transform: translate(6px, -50%); transition: opacity 120ms ease, transform 120ms ease, visibility 0s linear 120ms; pointer-events: none; }
+.pdf-outline:hover .pdf-outline-panel, .pdf-outline:focus-within .pdf-outline-panel, .pdf-outline.is-pinned .pdf-outline-panel { opacity: 1; visibility: visible; transform: translate(0, -50%); transition-delay: 0s; pointer-events: auto; }
+.pdf-outline-panel ol { margin: 0; padding: 0; list-style: none; }
+.pdf-outline-panel li.level-1 a { padding-left: 32px; font-size: 13px; color: var(--ink-soft); }
+.pdf-outline-panel a { display: block; padding: 7px 16px; border-radius: 6px; color: var(--ink-muted); text-decoration: none; overflow-wrap: anywhere; }
+.pdf-outline-panel a:hover { background: var(--bg-subtle); color: var(--ink); text-decoration: none; }
+.pdf-outline-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.pdf-outline-panel a[aria-current="location"] { color: var(--accent-text); font-weight: 600; }
+@media (hover: none) {
+  .pdf-outline:hover:not(.is-pinned) .pdf-outline-panel { opacity: 0; visibility: hidden; pointer-events: none; }
+}
+@media (forced-colors: active) {
+  .pdf-outline-tick { background: ButtonText; }
+  .pdf-outline-tick.is-active { background: Highlight; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pdf-outline-panel, .pdf-outline-tick { transition: none; }
+}
 .pdf-loading, .pdf-error { min-height: 50vh; display: grid; place-content: center; color: var(--ink); text-align: center; padding: 24px; }
 .pdf-error a, .pdf-error button { color: inherit; }
 .chat-page--reader .chat-main { min-width: 0; }
