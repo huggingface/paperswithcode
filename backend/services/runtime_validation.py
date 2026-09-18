@@ -2186,6 +2186,7 @@ def validate_chat_schema(db, settings: Settings) -> None:
                     ,('chat_external_worker_reservations')
                     ,('chat_qualification_scopes')
                     ,('chat_qualification_evidence_events')
+                    ,('chat_feedback')
                 ) AS required(name)
                 """)
         ).all()

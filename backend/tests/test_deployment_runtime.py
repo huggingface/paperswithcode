@@ -6558,3 +6558,21 @@ def test_slot_launcher_sizes_replicas_from_the_protected_fleet_tier(
     monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS", "48")
     with pytest.raises(ValueError, match="reviewed tier"):
         slot_launcher.configure_external_pi_slot("production", "blue")
+
+
+def test_chat_schema_probe_lists_every_required_table():
+    # The required-table sets decide what must exist; the VALUES list is what
+    # actually asks PostgreSQL. A table declared in one but not the other is
+    # reported missing forever, so keep them in lockstep.
+    import inspect
+    import re
+
+    from backend.services import runtime_validation
+
+    source = inspect.getsource(runtime_validation.validate_chat_schema)
+    declared_section, probe_section = source.split("rows = dict(", 1)
+    declared = set(re.findall(r'"(chat_[a-z_]+)"', declared_section))
+    probed = set(re.findall(r"\('(chat_[a-z_]+)'\)", probe_section))
+
+    assert declared, "no required chat tables declared"
+    assert declared <= probed, sorted(declared - probed)
