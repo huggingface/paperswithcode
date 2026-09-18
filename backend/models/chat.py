@@ -433,7 +433,10 @@ class AppDisplayBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["app"]
     schema_version: Literal[1] = 1
-    instance_id: str = Field(min_length=1, max_length=64)
+    # Worker tool call IDs are reused as instance IDs.  OpenAI Responses IDs
+    # take the form ``call_<id>|fc_<id>`` (up to ~90 characters in practice),
+    # so this bound matches ``ToolDisplayBlock.id`` rather than a bare UUID.
+    instance_id: str = Field(min_length=1, max_length=200)
     provider: Literal["excalidraw"]
     server: Literal["excalidraw"]
     tool: Literal["create_view"]
@@ -1206,7 +1209,7 @@ class SessionTitleDoneEvent(_StrictEvent):
 class AppStartEvent(_StrictEvent):
     type: Literal["app_start"]
     id: str
-    instance_id: str = Field(min_length=1, max_length=64)
+    instance_id: str = Field(min_length=1, max_length=200)
     provider: Literal["excalidraw"]
     server: Literal["excalidraw"]
     tool: Literal["create_view"]
