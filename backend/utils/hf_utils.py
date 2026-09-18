@@ -180,6 +180,16 @@ def _hf_api_path_for_kind(kind: HfArtifactKind) -> str:
     return {"model": "models", "dataset": "datasets", "space": "spaces"}[kind]
 
 
+# Expandable metric fields per kind.  Spaces have no downloads counter and the
+# Hub rejects the entire request with HTTP 400 when an unsupported field is
+# expanded, so asking for it fails every Space refresh.
+_HF_METRIC_FIELDS: dict[HfArtifactKind, tuple[str, ...]] = {
+    "model": ("trendingScore", "likes", "downloads"),
+    "dataset": ("trendingScore", "likes", "downloads"),
+    "space": ("trendingScore", "likes"),
+}
+
+
 def fetch_hf_artifact_metrics(
     kind: HfArtifactKind,
     repo_id: str,
@@ -189,9 +199,11 @@ def fetch_hf_artifact_metrics(
 ) -> Optional[dict]:
     """Fetch Hub popularity metrics for one artifact.
 
-    Uses ``expand[]=trendingScore`` (plus likes/downloads) on the model/dataset/
-    space detail endpoint. Returns ``{"trending_score", "likes", "downloads"}``
-    or None only when the artifact is conclusively missing (404). Transient,
+    Uses ``expand[]=trendingScore`` (plus likes, and downloads for models and
+    datasets) on the model/dataset/space detail endpoint. Returns
+    ``{"trending_score", "likes", "downloads"}``, with ``downloads`` None for
+    Spaces because the Hub exposes no such counter for them, or None only when
+    the artifact is conclusively missing (404). Transient,
     authentication, throttling, and malformed-response failures raise so callers
     cannot checkpoint a failed fetch as healthy.
     """
@@ -199,11 +211,7 @@ def fetch_hf_artifact_metrics(
 
     base = _hf_api_path_for_kind(kind)
     url = f"https://huggingface.co/api/{base}/{repo_id}"
-    params = [
-        ("expand[]", "trendingScore"),
-        ("expand[]", "likes"),
-        ("expand[]", "downloads"),
-    ]
+    params = [("expand[]", field) for field in _HF_METRIC_FIELDS[kind]]
 
     headers = build_hf_headers(token=token, user_agent={"is_ci": "true"})
     try:
