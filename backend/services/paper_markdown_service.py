@@ -618,7 +618,7 @@ def _read_unversioned_markdown_chunk(
 ) -> PaperMarkdownChunk:
     bucket_key = paper_markdown_bucket_key(paper_id, source=source)
     try:
-        raw, _truncated = _read_paper_markdown_bytes(
+        raw, truncated = _read_paper_markdown_bytes(
             bucket_key, bucket_id, token, PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES
         )
     except ValueError as error:
@@ -627,6 +627,15 @@ def _read_unversioned_markdown_chunk(
         raise PaperMarkdownNotFoundError(
             "Markdown is not available for this paper"
         ) from error
+    if truncated:
+        # The cap may fall inside a multi-byte character; drop the partial
+        # sequence so every byte counted by the size and version is servable.
+        while raw:
+            try:
+                raw.decode("utf-8")
+                break
+            except UnicodeDecodeError as error:
+                raw = raw[: error.start]
     # Anything beyond the bound is not served, so the document ends there and
     # the version hashes exactly the bytes a reader can reach.
     version = hashlib.sha256(raw).hexdigest()

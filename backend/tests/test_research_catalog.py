@@ -641,3 +641,31 @@ def test_versioned_chunk_falls_back_to_the_compatibility_alias_without_a_manifes
     assert (second.markdown, second.next_offset) == ("🙂z", None)
     assert second.content_version == version
     assert (terminal.markdown, terminal.next_offset) == ("", None)
+
+
+def test_unversioned_chunk_drops_a_partial_character_at_the_byte_cap(monkeypatch):
+    data = "aα🙂z".encode()
+    _install_versioned_filesystem(monkeypatch, {"1706/1706.03762.md": data})
+    # A 5-byte cap cuts into the 4-byte emoji; only "aα" (3 bytes) is servable.
+    monkeypatch.setattr(
+        paper_markdown_service, "PAPER_MARKDOWN_UNVERSIONED_CHUNK_MAX_BYTES", 5
+    )
+    paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+    kwargs = {"bucket_id": "owner/content", "token": "private-token"}
+    try:
+        chunk = paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762", offset=0, limit=10, **kwargs
+        )
+        terminal = paper_markdown_service.read_paper_markdown_chunk(
+            "1706.03762",
+            offset=3,
+            limit=10,
+            content_version=chunk.content_version,
+            **kwargs,
+        )
+    finally:
+        paper_markdown_service._read_paper_markdown_bytes.cache_clear()
+
+    assert (chunk.markdown, chunk.next_offset, chunk.truncated) == ("aα", None, False)
+    assert chunk.content_version == hashlib.sha256("aα".encode()).hexdigest()
+    assert (terminal.markdown, terminal.next_offset) == ("", None)
