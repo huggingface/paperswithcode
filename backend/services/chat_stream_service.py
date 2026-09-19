@@ -2565,6 +2565,11 @@ class ChatStreamOrchestrator:
                         "credits may be exhausted; enable or review pay-as-you-go "
                         "billing in Settings."
                     )
+                elif provider_code == "openai_budget_exhausted":
+                    payload["message"] = (
+                        "The Papers With Code direct OpenAI allowance is exhausted. "
+                        "Select another model or try again later."
+                    )
                 elif provider_code == "openrouter_monthly_budget_exhausted":
                     usage = OpenRouterUserBudgetService(
                         error_db, self.settings

@@ -306,6 +306,42 @@ def test_execution_lost_event_persists_canonical_terminal_code(monkeypatch):
     assert persisted == ["execution_lost"]
 
 
+def test_openai_budget_failure_has_actionable_stream_message(monkeypatch):
+    settings = get_settings().model_copy(
+        update={"chat_durable_turn_dispatch_enabled": False}
+    )
+    orchestrator = _orchestrator(settings, _admission())
+    monkeypatch.setattr(
+        chat_stream_service.ChatCapabilityService,
+        "provider_error_for_turn",
+        lambda *_args, **_kwargs: "openai_budget_exhausted",
+    )
+    monkeypatch.setattr(chat_stream_service, "_persist_failure", lambda *_args: None)
+    monkeypatch.setattr(chat_stream_service, "_legacy_turn_is_active", lambda *_: True)
+
+    async def consume():
+        queue = asyncio.Queue()
+        await queue.put(
+            {
+                "type": "error",
+                "message": "The model request failed.",
+                "code": "provider_error",
+            }
+        )
+        await queue.put({"type": "_research_finished"})
+        return [frame async for frame in orchestrator._consume(queue)]
+
+    frames = asyncio.run(consume())
+
+    assert frames[0].payload == {
+        "code": "openai_budget_exhausted",
+        "message": (
+            "The Papers With Code direct OpenAI allowance is exhausted. "
+            "Select another model or try again later."
+        ),
+    }
+
+
 def test_durable_stream_start_payload_is_journal_serializable():
     settings = get_settings().model_copy(
         update={"chat_durable_turn_dispatch_enabled": True}
