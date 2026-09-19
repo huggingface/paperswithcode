@@ -61,6 +61,8 @@ EXPECTED_COLUMNS = (
     "Hardware",
     "MethodClass",
     "Tags",
+    "Commercial",
+    "License",
 )
 MODEL_CELL_RE = re.compile(
     r"^\[(?P<name>.+?) \((?P<variant>default|tuned|tuned \+ ensembled)\)\]"

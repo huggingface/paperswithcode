@@ -1,6 +1,7 @@
 """Validation and idempotency tests for the living TabArena sync."""
 
 from datetime import UTC, datetime
+from io import StringIO
 
 import httpx
 import pandas as pd
@@ -169,6 +170,17 @@ def test_parse_and_fetch_public_leaderboard_contract():
     assert len(entries) == 50
     assert entries[0].model_name == "Model-0 (default)"
     assert entries[-1].position == 49
+
+
+def test_parser_accepts_current_optional_metadata_columns():
+    frame = pd.read_csv(StringIO(_csv()))
+    frame["Commercial"] = False
+    frame["License"] = "MIT"
+
+    entries = parse_tabarena_leaderboard(frame.to_csv(index=False))
+
+    assert len(entries) == 50
+    assert entries[0].model_name == "Model-0 (default)"
 
 
 def test_parser_rejects_truncated_or_noncontiguous_data():
