@@ -648,3 +648,67 @@ def test_ordinary_openai_rate_limits_remain_configured():
         ChatOpenAIBudgetService(
             _ConcurrencyDB((29, 80)), settings
         )._enforce_rate_limits("owner", None, now)
+
+
+def test_status_percentage_reports_remaining_monthly_share():
+    engine = create_engine("sqlite://")
+    ChatOpenAIMonthlyUsage.__table__.create(engine)
+    now = datetime(2026, 9, 19, 12, tzinfo=UTC)
+    settings = _settings(chat_openai_direct_enabled=True)
+    with Session(engine) as db:
+        db.add(
+            ChatOpenAIMonthlyUsage(
+                owner_id="owner",
+                month_start=now.date().replace(day=1),
+                limit_microusd=1_000_000,
+                reserved_microusd=10_000,
+                spent_microusd=930_000,
+                unknown_cost_calls=0,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+        db.commit()
+        service = ChatOpenAIBudgetService(db, settings)
+
+        status = service.status_percentage("owner", now=now)
+        assert status.public_dict() == {
+            "used_percent": 94,
+            "remaining_percent": 6,
+            "resets_at": datetime(2026, 10, 1, tzinfo=UTC),
+            "available": True,
+            "as_of": now,
+        }
+
+        fresh = service.status_percentage("newcomer", now=now)
+        assert (fresh.used_percent, fresh.remaining_percent) == (0, 100)
+
+        db.get(
+            ChatOpenAIMonthlyUsage, ("owner", now.date().replace(day=1))
+        ).spent_microusd = 995_000
+        db.commit()
+        depleted = service.status_percentage("owner", now=now)
+        assert (depleted.remaining_percent, depleted.available) == (0, False)
+
+
+def test_openai_usage_route_requires_the_direct_route():
+    from backend.routers.chat import get_openai_usage
+
+    engine = create_engine("sqlite://")
+    ChatOpenAIMonthlyUsage.__table__.create(engine)
+    with Session(engine) as db:
+        with pytest.raises(HTTPException) as denied:
+            get_openai_usage(
+                user={"hf_user_id": "owner"},
+                db=db,
+                settings=_settings(chat_enabled=True, chat_openai_direct_enabled=False),
+            )
+        assert denied.value.status_code == 404
+
+        payload = get_openai_usage(
+            user={"hf_user_id": "owner"},
+            db=db,
+            settings=_settings(chat_enabled=True, chat_openai_direct_enabled=True),
+        )
+        assert payload["remaining_percent"] == 100
+        assert payload["available"] is True

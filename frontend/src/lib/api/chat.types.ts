@@ -8,6 +8,14 @@ export interface OpenRouterUsageStatus {
   as_of: string;
 }
 
+export interface OpenAIUsageStatus {
+  used_percent: number;
+  remaining_percent: number;
+  resets_at: string;
+  available: boolean;
+  as_of: string;
+}
+
 export interface OpenRouterCredentialStatus {
   connected: boolean;
   verified_at: string | null;

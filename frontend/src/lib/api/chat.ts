@@ -3,6 +3,7 @@ import type {
   ChatSandboxSpendStatus,
   ChatWebSearchBudgetStatus,
   OpenRouterCredentialStatus,
+  OpenAIUsageStatus,
   OpenRouterUsageStatus,
 } from "./chat.types";
 export type * from "./chat.types";
@@ -99,6 +100,10 @@ export class ChatApi {
 
   getUsage(): Promise<OpenRouterUsageStatus> {
     return this.request("/chat/usage", { cache: "no-store" });
+  }
+
+  getOpenAIUsage(): Promise<OpenAIUsageStatus> {
+    return this.request("/chat/openai-usage", { cache: "no-store" });
   }
 
   getAvailability(): Promise<ChatAvailability> {

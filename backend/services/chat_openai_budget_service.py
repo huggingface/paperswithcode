@@ -63,6 +63,24 @@ class OpenAIAccountingInvariantError(OpenAIBudgetError):
 
 
 @dataclass(frozen=True)
+class OpenAIUsageStatus:
+    used_percent: int
+    remaining_percent: int
+    resets_at: datetime
+    available: bool
+    as_of: datetime
+
+    def public_dict(self) -> dict[str, object]:
+        return {
+            "used_percent": self.used_percent,
+            "remaining_percent": self.remaining_percent,
+            "resets_at": self.resets_at,
+            "available": self.available,
+            "as_of": self.as_of,
+        }
+
+
+@dataclass(frozen=True)
 class OpenAIRequestBounds:
     request_bytes: int
     maximum_output_tokens: int
@@ -179,6 +197,28 @@ class ChatOpenAIBudgetService:
         if row is None:
             raise OpenAIAccountingInvariantError("OpenAI monthly usage row is missing")
         return row
+
+    def status_percentage(
+        self, owner_id: str, now: datetime | None = None
+    ) -> OpenAIUsageStatus:
+        current = (now or datetime.now(UTC)).astimezone(UTC)
+        month_start, reset = utc_month(current)
+        row = self._usage(owner_id, month_start)
+        if row is None:
+            limit = usd_to_microusd(self.settings.chat_openai_monthly_user_budget_usd)
+            consumed = 0
+        else:
+            limit = row.limit_microusd
+            consumed = min(limit, row.spent_microusd + row.reserved_microusd)
+        remaining_percent = max(0, min(100, (limit - consumed) * 100 // limit))
+        return OpenAIUsageStatus(
+            used_percent=100 - remaining_percent,
+            remaining_percent=remaining_percent,
+            resets_at=reset,
+            available=self.settings.chat_openai_direct_enabled
+            and remaining_percent > 0,
+            as_of=current,
+        )
 
     def _enforce_concurrency(
         self,

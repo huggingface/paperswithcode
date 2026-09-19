@@ -136,6 +136,7 @@ from backend.services.chat_web_search_service import (
     web_search_available,
 )
 from backend.services.deployment_lifecycle import deployment_lifecycle
+from backend.services.chat_openai_budget_service import ChatOpenAIBudgetService
 from backend.services.openrouter_budget_service import (
     OpenRouterBudgetExceeded,
     OpenRouterBudgetUnavailable,
@@ -1020,6 +1021,18 @@ async def get_openrouter_usage(
         unavailable_reason=unavailable_reason,
     )
     return result
+
+
+@router.get("/openai-usage")
+def get_openai_usage(
+    user: dict = Depends(require_user),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    if not settings.chat_enabled or not settings.chat_openai_direct_enabled:
+        raise HTTPException(status_code=404, detail="Not found")
+    status = ChatOpenAIBudgetService(db, settings).status_percentage(user["hf_user_id"])
+    return status.public_dict()
 
 
 @router.get("/openrouter-key")

@@ -37,6 +37,13 @@ import {
   useOpenRouterCredential,
 } from "@/lib/openrouter";
 import {
+  OPENAI_USAGE_QUERY_KEY,
+  dismissOpenAICreditsNotice,
+  openAiCreditsNotice,
+  readDismissedOpenAICreditsNotice,
+  useOpenAIUsage,
+} from "@/lib/openaiCredits";
+import {
   DEFAULT_CHAT_MODEL,
   PRODUCTION_FALLBACK_CHAT_MODELS,
   STAGING_FALLBACK_CHAT_MODELS,
@@ -148,6 +155,17 @@ export const ChatExperience: React.FC<ChatExperienceProps> = ({
   const openRouterCredentialQuery = useOpenRouterCredential(
     Boolean(user && selectedProvider === "openrouter"),
   );
+  const openAiUsageQuery = useOpenAIUsage(
+    isChatLive() && Boolean(user) && selectedProvider === "openai",
+  );
+  const [dismissedCreditsNotice, setDismissedCreditsNotice] = useState(
+    () => readDismissedOpenAICreditsNotice(),
+  );
+  const creditsNotice = openAiCreditsNotice(
+    openAiUsageQuery.data,
+    selectedProvider,
+    dismissedCreditsNotice,
+  );
   const selectedProviderRef = useRef(selectedProvider);
   selectedProviderRef.current = selectedProvider;
   const [liveTitle, setLiveTitle] = useState("");
@@ -258,6 +276,9 @@ export const ChatExperience: React.FC<ChatExperienceProps> = ({
       }
       activeStreamSessionIdRef.current = null;
       activeStreamRouteSessionIdRef.current = null;
+      if (selectedProviderRef.current === "openai") {
+        void queryClient.invalidateQueries({ queryKey: OPENAI_USAGE_QUERY_KEY });
+      }
       if (sessionId && mode === "general") {
         void getSession(sessionId).then((detail) => {
           if (routeSessionIdRef.current === sessionId) {
@@ -694,6 +715,23 @@ export const ChatExperience: React.FC<ChatExperienceProps> = ({
             />
           )}
         </div>
+
+        {creditsNotice && (
+          <div className="chat-credits-notice" role="status">
+            <span>{creditsNotice.message}</span>
+            <button
+              type="button"
+              className="chat-credits-notice-close"
+              aria-label="Dismiss credits notice"
+              onClick={() => {
+                dismissOpenAICreditsNotice(creditsNotice.resetsAt);
+                setDismissedCreditsNotice(creditsNotice.resetsAt);
+              }}
+            >
+              ×
+            </button>
+          </div>
+        )}
 
         {mode === "general" && latexPaper && <LatexPaperArtifact descriptor={latexPaper} />}
         {isRouteSessionLoading && !pendingAutoDraft.text ? <div className="chat-session-loading" role="status" aria-live="polite">
