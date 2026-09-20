@@ -69,3 +69,40 @@
 }
 .astra-note a { color: var(--ink-soft); }
 .astra-note a:hover { color: var(--ink); }
+
+.astra-posts {
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px dashed var(--hairline);
+}
+.astra-posts-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
+.astra-posts ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+.astra-posts li {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--ink-soft);
+}
+.astra-posts li a {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+}
+.astra-posts li a:hover { text-decoration-color: var(--ink); }
+.astra-post-author { color: var(--ink); }

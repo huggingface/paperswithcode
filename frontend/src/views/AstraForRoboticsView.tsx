@@ -27,6 +27,117 @@ const SORT_OPTIONS: Array<[OrderBy, string]> = [
   ["citation_count", "most cited"],
 ];
 
+type XPost = { handle: string; author: string; summary: string; url: string };
+
+// Hand-picked X posts for each family, in the order Yu Xiang's thread and the
+// follow-up curation listed them. Summaries paraphrase each post.
+const POLICY_POSTS: readonly XPost[] = [
+  {
+    handle: "Frame_Robotics",
+    author: "Frame Robotics",
+    summary: "Real-arm control that fixes grip angle and carry height on the next try after a miss.",
+    url: "https://x.com/Frame_Robotics/status/2099900836273090614",
+  },
+  {
+    handle: "qineng_wang",
+    author: "Qineng Wang",
+    summary: "Dual-ALOHA spatial-constraint puzzles: unlocking interlocked parts and threading a rope through three rings.",
+    url: "https://x.com/qineng_wang/status/2099893504658866561",
+  },
+  {
+    handle: "__Rhodium__",
+    author: "Lucas",
+    summary: "In-context learning of the controls and the workspace, reaching the task goal in three tries.",
+    url: "https://x.com/__Rhodium__/status/2099521054678925534",
+  },
+  {
+    handle: "SuveenE",
+    author: "Suveen Ellawela",
+    summary: "Picking up a pipette and fitting a 5 mm tip on a MolmoAct2 real-world eval, using the free hand for a better view.",
+    url: "https://x.com/SuveenE/status/2099448450341605672",
+  },
+  {
+    handle: "cdngdev",
+    author: "thijs",
+    summary: "A robot arm with a paintbrush painting the Golden Gate Bridge, improving across attempts from camera feedback.",
+    url: "https://x.com/cdngdev/status/2097339677128982873",
+  },
+  {
+    handle: "IsaacSin12",
+    author: "Isaac Sin",
+    summary: "Zero-shot sorting of irregularly shaped blocks into cups by color.",
+    url: "https://x.com/IsaacSin12/status/2096715382166098302",
+  },
+  {
+    handle: "chooi_jeq",
+    author: "Jay Chooi",
+    summary: "Robocurve's robot-control comparison: 95% task completion versus 40% for Fable 5.1 at lower cost.",
+    url: "https://x.com/chooi_jeq/status/2096064315115839904",
+  },
+];
+
+const AGENT_POSTS: readonly XPost[] = [
+  {
+    handle: "Lingjun_Mao",
+    author: "Lingjun Mao",
+    summary: "Adapting to a new embodiment to put a cake into an air fryer through CuRobo motion-planning tool APIs.",
+    url: "https://x.com/Lingjun_Mao/status/2100294902672462176",
+  },
+  {
+    handle: "walterzhu8",
+    author: "Wentao Zhu",
+    summary: "A day-and-a-half autonomous run that builds and trains pen spinning on a Sharpa hand in Isaac Lab.",
+    url: "https://x.com/walterzhu8/status/2100212420840989112",
+  },
+  {
+    handle: "mishig25",
+    author: "Mishig",
+    summary: "Painting the Eiffel Tower in MuJoCo with an SO-101 and a brush, with the full experiment shared on Hugging Face.",
+    url: "https://x.com/mishig25/status/2099611674793668676",
+  },
+  {
+    handle: "RunpeiDong",
+    author: "Runpei Dong",
+    summary: "Getting a humanoid into a Tesla in MuJoCo: learning from feedback, then reusing that experience with egocentric perception.",
+    url: "https://x.com/RunpeiDong/status/2099604536327614717",
+  },
+  {
+    handle: "frankzydou",
+    author: "Zhiyang (Frank) Dou",
+    summary: "A LeRobot SO-101 real-world pickup from a third-person RGB camera, where the arm has to bend back to reach the pen.",
+    url: "https://x.com/frankzydou/status/2099338127915512297",
+  },
+  {
+    handle: "Parvkpr",
+    author: "Parv Kapoor",
+    summary: "Real-to-sim: building an interactive simulation environment from a single image or video.",
+    url: "https://x.com/Parvkpr/status/2098847963867238597",
+  },
+  {
+    handle: "z_code68632",
+    author: "code_z",
+    summary: "One demo per task: unscrewing a bottle cap, inserting a plug, clearing obstacles, and imitating a dance on a real robot.",
+    url: "https://x.com/z_code68632/status/2098397364725895387",
+  },
+];
+
+const XPostList: React.FC<{ posts: readonly XPost[]; label: string }> = ({ posts, label }) => (
+  <div className="astra-posts">
+    <div className="astra-posts-label">{label}</div>
+    <ul>
+      {posts.map((post) => (
+        <li key={post.url}>
+          <a href={post.url} target="_blank" rel="noreferrer">
+            @{post.handle}
+          </a>
+          <span className="astra-post-author"> {post.author}</span>
+          <span className="astra-post-summary"> — {post.summary}</span>
+        </li>
+      ))}
+    </ul>
+  </div>
+);
+
 const parseOrderBy = (value: string | null): OrderBy =>
   value === "date_published" || value === "citation_count" ? value : "trending";
 
@@ -120,6 +231,7 @@ const AstraForRoboticsView: React.FC = () => {
             closing the control loop step by step with no task-specific
             training.
           </p>
+          <XPostList posts={POLICY_POSTS} label="Seen on X" />
         </article>
         <article className="astra-approach">
           <div className="astra-approach-num">02 / Agent</div>
@@ -130,6 +242,7 @@ const AstraForRoboticsView: React.FC = () => {
             policies such as VLAs, and keeps the robot on task over long
             horizons.
           </p>
+          <XPostList posts={AGENT_POSTS} label="Seen on X" />
         </article>
       </section>
 
