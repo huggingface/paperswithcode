@@ -241,3 +241,12 @@ def test_paper_shard_is_rendered_before_the_response_starts(client, monkeypatch)
     assert response.headers["content-length"] == str(len(response.content))
     assert "transfer-encoding" not in response.headers
     assert response.content.count(b"<url>") == 3
+
+
+def test_static_sitemap_lists_curated_landing_pages(client):
+    response = client.get("/sitemaps/static.xml")
+
+    assert response.status_code == 200
+    root = ElementTree.fromstring(response.content)
+    locations = [node.text for node in root.iter() if node.tag.endswith("loc")]
+    assert "https://paperswithcode.co/astra-for-robotics" in locations

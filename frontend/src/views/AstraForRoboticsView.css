@@ -1,0 +1,71 @@
+/* /astra-for-robotics — curated landing page for GPT-6 Astra robotics work. */
+.astra-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  margin-bottom: 10px;
+}
+
+.astra-lede {
+  font-family: var(--serif);
+  font-size: 18px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  max-width: 720px;
+  margin: 18px 0 0;
+}
+.astra-lede a {
+  color: var(--ink);
+  text-decoration: underline;
+  text-decoration-color: var(--hairline-strong);
+  text-underline-offset: 3px;
+}
+.astra-lede a:hover { text-decoration-color: var(--ink); }
+
+.astra-approaches {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin: 32px 0 8px;
+}
+@media (max-width: 720px) {
+  .astra-approaches { grid-template-columns: 1fr; }
+}
+
+.astra-approach {
+  border: 1px solid var(--hairline);
+  padding: 20px 22px 22px;
+}
+.astra-approach-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+  margin-bottom: 8px;
+}
+.astra-approach h2 {
+  font-family: var(--serif);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  margin: 0 0 8px;
+}
+.astra-approach p {
+  font-size: 14px;
+  line-height: 1.55;
+  color: var(--ink-soft);
+  margin: 0;
+}
+
+.astra-note {
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ink-faint);
+  margin: 20px 0 0;
+}
+.astra-note a { color: var(--ink-soft); }
+.astra-note a:hover { color: var(--ink); }

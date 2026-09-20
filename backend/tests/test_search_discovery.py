@@ -229,6 +229,7 @@ def test_merged_organization_slug_redirects_to_canonical_page(client):
         ("/conferences/safe", "conference"),
         ("/authors/7", "author"),
         ("/orgs/safe-org", "organization"),
+        ("/astra-for-robotics", "astra_for_robotics"),
     ],
 )
 def test_discovery_page_classes_support_head(client, monkeypatch, path, method_name):
@@ -254,3 +255,87 @@ def test_discovery_markdown_head_matches_get(client, monkeypatch):
     assert head.headers["vary"] == get.headers["vary"] == "Accept"
     assert head.headers["link"] == get.headers["link"]
     assert head.content == b""
+
+
+def _astra_db(
+    *, task=SimpleNamespace(id=11), method=SimpleNamespace(id=1041), papers=()
+):
+    """A MagicMock session whose query order mirrors ``astra_for_robotics``."""
+
+    def query(*, one=None, rows=()):
+        result = MagicMock()
+        for chain in ("filter", "join", "order_by", "limit"):
+            getattr(result, chain).return_value = result
+        result.one_or_none.return_value = one
+        result.all.return_value = rows
+        return result
+
+    db = MagicMock()
+    db.query.side_effect = [query(one=task), query(one=method), query(rows=papers)]
+    return db
+
+
+def test_astra_collection_page_lists_papers_tagged_with_task_and_method():
+    paper = SimpleNamespace(
+        id=122059,
+        source="external",
+        arxiv_id=None,
+        title="GPT-6 Astra on robotic manipulation",
+        date_published=date(2026, 9, 4),
+    )
+    page = DiscoveryPageService(_astra_db(papers=[paper])).astra_for_robotics()
+
+    assert page.kind == "Collection"
+    assert page.canonical_path == "/astra-for-robotics"
+    assert page.canonical_url == "https://paperswithcode.co/astra-for-robotics"
+    assert page.heading == "GPT-6 Astra for Robotics"
+    assert page.robots == "index,follow"
+    assert [link.href for link in page.entity_links] == [
+        "/methods/gpt-6-astra",
+        "/tasks/robotics",
+    ]
+    assert [(p.route_identifier, p.title) for p in page.paper_links] == [
+        ("122059", "GPT-6 Astra on robotic manipulation")
+    ]
+
+
+def test_astra_collection_page_without_taxonomy_rows_is_not_indexed():
+    page = DiscoveryPageService(_astra_db(method=None)).astra_for_robotics()
+
+    assert page.paper_links == ()
+    assert page.robots == "noindex,follow"
+
+
+def test_astra_collection_route_renders_server_side_document(client, monkeypatch):
+    monkeypatch.setattr(
+        DiscoveryPageService,
+        "astra_for_robotics",
+        lambda self: DiscoveryPage(
+            kind="Collection",
+            canonical_path="/astra-for-robotics",
+            title="GPT-6 Astra for Robotics | Papers with Code",
+            description="Astra robotics papers",
+            heading="GPT-6 Astra for Robotics",
+            breadcrumbs=(DiscoveryLink("/", "Home"),),
+            entity_links=(DiscoveryLink("/methods/gpt-6-astra", "GPT-6 Astra"),),
+            paper_links=(
+                DiscoveryPaperLink(
+                    "122059",
+                    "GPT-6 Astra on robotic manipulation",
+                    date(2026, 9, 4),
+                    "GPT-6 Astra for robotics",
+                ),
+            ),
+        ),
+    )
+    response = client.get("/astra-for-robotics")
+
+    assert response.status_code == 200
+    assert 'id="root"' in response.text
+    assert "<title>GPT-6 Astra for Robotics | Papers with Code</title>" in response.text
+    assert (
+        '<link rel="canonical" href="https://paperswithcode.co/astra-for-robotics">'
+        in response.text
+    )
+    assert 'href="/paper/122059"' in response.text
+    assert "Page not found" not in response.text

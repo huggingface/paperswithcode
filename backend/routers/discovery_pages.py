@@ -50,6 +50,7 @@ RESERVED_TOP_LEVEL_PREFIXES = frozenset(
         "cron-dashboard",
         "submissions",
         "ai-deadlines",
+        "astra-for-robotics",
         "sitemaps",
         "health",
         "docs",
@@ -78,6 +79,7 @@ KNOWN_CLIENT_TOP_LEVEL_PREFIXES = frozenset(
         "cron-dashboard",
         "submissions",
         "ai-deadlines",
+        "astra-for-robotics",
     }
 )
 ORGANIZATION_SLUG_ALIASES = {"googledeepmind": "google"}
@@ -254,6 +256,15 @@ def canonical_organization_task_page(
     db: Session = Depends(get_database_session),
 ) -> Response:
     return _render(DiscoveryPageService(db).organization_task(slug, task_slug), request)
+
+
+@router.api_route(
+    "/astra-for-robotics", methods=["GET", "HEAD"], include_in_schema=False
+)
+def astra_for_robotics_page(
+    request: Request, db: Session = Depends(get_database_session)
+) -> Response:
+    return _render(DiscoveryPageService(db).astra_for_robotics(), request)
 
 
 @router.api_route("/{slug}", methods=["GET", "HEAD"], include_in_schema=False)

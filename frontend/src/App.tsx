@@ -82,6 +82,7 @@ const AutonomousOperations = React.lazy(() => import("@/pages/AutonomousOperatio
 const SubmissionsDashboard = React.lazy(() => import("@/pages/SubmissionsDashboard"));
 const UserProfileView = React.lazy(() => import("@/views/UserProfileView"));
 const RateLimitsView = React.lazy(() => import("@/views/RateLimitsView"));
+const AstraForRoboticsView = React.lazy(() => import("@/views/AstraForRoboticsView"));
 const NotFound = React.lazy(() => import("@/pages/NotFound"));
 const SearchOverlay = React.lazy(() => import("@/components/SearchOverlay"));
 const StagingAccessRequestView = React.lazy(() => import("@/views/StagingAccessRequestView"));
@@ -310,6 +311,8 @@ const Shell: React.FC = () => {
             <Route path="/cron-dashboard" element={<Navigate to="/admin-dashboard" replace />} />
             <Route path="/submissions" element={<AuthGatedRoute element={<SubmissionsDashboard />} />} />
             <Route path="/rate-limits" element={<RateLimitsView />} />
+            {/* Curated landing pages must precede the greedy /:username route. */}
+            <Route path="/astra-for-robotics" element={<AstraForRoboticsView />} />
             <Route path="/:username" element={<UserProfileView />} />
             <Route path="*" element={<NotFound />} />
           </Routes>

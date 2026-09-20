@@ -33,6 +33,18 @@ from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 DISCOVERY_PAPER_LIMIT = 20
 
+# Curated landing page for GPT-6 Astra robotics work (/astra-for-robotics).
+ASTRA_ROBOTICS_PATH = "/astra-for-robotics"
+ASTRA_ROBOTICS_TASK_SLUG = "robotics"
+ASTRA_ROBOTICS_METHOD_SLUG = "gpt-6-astra"
+ASTRA_ROBOTICS_HEADING = "GPT-6 Astra for Robotics"
+ASTRA_ROBOTICS_DESCRIPTION = (
+    "Papers, technical reports, and evaluations that use OpenAI's GPT-6 Astra "
+    "to control robots, either directly as a robot policy that outputs actions "
+    "from camera observations, or as an agent that plans, writes code, and "
+    "calls tools or lower-level policies."
+)
+
 
 @dataclass(frozen=True)
 class DiscoveryLink:
@@ -188,6 +200,61 @@ class DiscoveryPageService:
             )
         return self._entity_page(
             "Task", f"/tasks/{canonical_slug}", entity.name, description, links, papers
+        )
+
+    def astra_for_robotics(self) -> DiscoveryPage:
+        """Curated landing page: GPT-6 Astra used for robot control.
+
+        Membership is data-driven: a paper appears when it is tagged with both
+        the Robotics task and the GPT-6 Astra method, so curators add papers by
+        tagging rather than by editing code.
+        """
+        task = (
+            self.db.query(Task)
+            .filter(Task.slug == ASTRA_ROBOTICS_TASK_SLUG)
+            .one_or_none()
+        )
+        method = (
+            self.db.query(Method)
+            .filter(Method.slug == ASTRA_ROBOTICS_METHOD_SLUG)
+            .one_or_none()
+        )
+        papers: tuple[DiscoveryPaperLink, ...] = ()
+        if task is not None and method is not None:
+            rows = (
+                self.db.query(Paper)
+                .join(PaperTask, PaperTask.paper_id == Paper.id)
+                .join(PaperMethod, PaperMethod.paper_id == Paper.id)
+                .filter(
+                    PaperTask.task_id == task.id,
+                    PaperMethod.method_id == method.id,
+                    eligible_paper_filter(),
+                )
+                .order_by(
+                    Paper.trending_score.desc().nullslast(),
+                    Paper.date_published.desc().nullslast(),
+                    Paper.id.desc(),
+                )
+                .limit(DISCOVERY_PAPER_LIMIT)
+                .all()
+            )
+            papers = tuple(
+                self._paper_link(paper, "GPT-6 Astra for robotics") for paper in rows
+            )
+        links = (
+            DiscoveryLink(f"/methods/{ASTRA_ROBOTICS_METHOD_SLUG}", "GPT-6 Astra"),
+            DiscoveryLink(f"/tasks/{ASTRA_ROBOTICS_TASK_SLUG}", "Robotics"),
+        )
+        return DiscoveryPage(
+            kind="Collection",
+            canonical_path=ASTRA_ROBOTICS_PATH,
+            title=f"{ASTRA_ROBOTICS_HEADING} | Papers with Code",
+            description=ASTRA_ROBOTICS_DESCRIPTION,
+            heading=ASTRA_ROBOTICS_HEADING,
+            breadcrumbs=(DiscoveryLink("/", "Home"),),
+            entity_links=links,
+            paper_links=papers,
+            robots="index,follow" if papers else "noindex,follow",
         )
 
     def method(self, slug: str) -> Optional[DiscoveryPage]:

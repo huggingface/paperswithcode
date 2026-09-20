@@ -21,6 +21,8 @@ interface UseInfinitePapersParams {
   start_date?: string;
   end_date?: string;
   conference?: string;
+  task?: string;
+  method?: string;
   latest_only?: boolean;
   include_resources?: boolean;
   has_code?: boolean;
@@ -39,6 +41,8 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
     start_date,
     end_date,
     conference,
+    task,
+    method,
     latest_only = true,
     include_resources = false,
     has_code = false,
@@ -49,7 +53,7 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: ['papers-infinite', { page_size, search, order_by, order_dir, start_date, end_date, conference, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository }],
+    queryKey: ['papers-infinite', { page_size, search, order_by, order_dir, start_date, end_date, conference, task, method, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.list({
         page: pageParam as number,
@@ -60,6 +64,8 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
         start_date,
         end_date,
         conference,
+        task,
+        method,
         latest_only,
         include_resources,
         has_code,

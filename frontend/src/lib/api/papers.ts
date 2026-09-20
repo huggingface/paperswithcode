@@ -26,6 +26,8 @@ export interface ListPapersParams {
   start_date?: string;
   end_date?: string;
   conference?: string;
+  task?: string;
+  method?: string;
   latest_only?: boolean;
   include_resources?: boolean;
   has_code?: boolean;

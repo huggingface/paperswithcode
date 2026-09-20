@@ -85,7 +85,7 @@ def sitemap_index(db: Session = Depends(get_database_session)) -> Response:
     "/sitemaps/static.xml", methods=["GET", "HEAD"], include_in_schema=False
 )
 def static_sitemap() -> Response:
-    paths = ("/", "/papers/recent", "/papers/archive")
+    paths = ("/", "/papers/recent", "/papers/archive", "/astra-for-robotics")
     urls = "".join(f"<url><loc>{PRODUCTION_ORIGIN}{path}</loc></url>" for path in paths)
     return _xml_response(
         '<?xml version="1.0" encoding="UTF-8"?>'
