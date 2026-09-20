@@ -133,6 +133,15 @@
   gap: 6px;
   flex-shrink: 0;
 }
+/* The site header widens `.brand` to the leading-column width and centers
+ * it on desktop, which drifts the logo left of the right-aligned URL in the
+ * exported image. Reset it here so the logo and URL share a right edge. */
+.bm-card-screenshot-brand .brand {
+  width: auto;
+  flex: none;
+  justify-content: flex-end;
+  cursor: default;
+}
 .bm-card-screenshot-url {
   font-family: var(--mono);
   font-size: 12px;
