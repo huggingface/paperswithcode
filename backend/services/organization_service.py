@@ -5,7 +5,7 @@ Organization service for listing organizations and organization-scoped taxonomy.
 from datetime import date, timedelta
 from typing import Optional
 
-from sqlalchemy import and_, asc, desc, func
+from sqlalchemy import Float, and_, asc, cast, desc, func, or_
 from sqlalchemy.orm import Session
 
 from backend.database.organizations_setup.organizations import BY_PWC_SLUG
@@ -231,14 +231,155 @@ class OrganizationService:
         except Exception as e:
             raise DatabaseError(f"Failed to retrieve organizations: {str(e)}")
 
+    def _project_organization(self, organization: DBOrganization) -> Organization:
+        """Project one organization with the fields its featured card exposes.
+
+        Featured organizations also carry their trending rank and top paper,
+        computed for this organization alone rather than for the whole list.
+        """
+        paper_count, first_year, latest_year = (
+            self.db.query(
+                func.count(func.distinct(DBPaper.id)),
+                func.min(func.extract("year", DBPaper.date_published)),
+                func.max(func.extract("year", DBPaper.date_published)),
+            )
+            .join(PaperOrganization, PaperOrganization.paper_id == DBPaper.id)
+            .filter(
+                PaperOrganization.organization_id == organization.id,
+                eligible_paper_filter(),
+            )
+            .one()
+        )
+        paper_count = paper_count or 0
+        if not organization.is_featured:
+            return self._organization_to_api(organization, paper_count)
+
+        repo_stats, active_score = active_paper_score_components(
+            self.db, get_settings().trending_ranking_mode
+        )
+        top_paper = (
+            self.db.query(DBPaper)
+            .join(PaperOrganization, PaperOrganization.paper_id == DBPaper.id)
+            .outerjoin(repo_stats, repo_stats.c.paper_id == DBPaper.id)
+            .filter(
+                PaperOrganization.organization_id == organization.id,
+                eligible_paper_filter(),
+            )
+            .order_by(
+                desc(active_score),
+                desc(DBPaper.date_published),
+                desc(DBPaper.id),
+            )
+            .first()
+        )
+        return self._organization_to_api(
+            organization,
+            paper_count,
+            trending_rank=self._featured_trending_rank(organization),
+            top_paper=top_paper,
+            first_year=int(first_year) if first_year is not None else None,
+            latest_year=int(latest_year) if latest_year is not None else None,
+        )
+
+    def _featured_trending_rank(self, organization: DBOrganization) -> int:
+        """Position of a featured organization in the featured-list ordering.
+
+        Organizations ahead on trending score or latest raw score are counted
+        directly. Only exact ties fall through to the paper-count, display-order
+        and name tiebreakers, which need per-organization paper counts. Scores
+        are compared as floats, matching the featured-list ORDER BY.
+        """
+        latest_snapshot_dates = (
+            self.db.query(
+                OrganizationTrendingHistory.organization_id.label("organization_id"),
+                func.max(OrganizationTrendingHistory.snapshot_date).label(
+                    "snapshot_date"
+                ),
+            )
+            .group_by(OrganizationTrendingHistory.organization_id)
+            .subquery()
+        )
+        featured = (
+            self.db.query(
+                DBOrganization.id.label("id"),
+                cast(func.coalesce(DBOrganization.trending_score, 0.0), Float).label(
+                    "score"
+                ),
+                cast(
+                    func.coalesce(OrganizationTrendingHistory.raw_score, 0.0), Float
+                ).label("raw_score"),
+            )
+            .outerjoin(
+                latest_snapshot_dates,
+                latest_snapshot_dates.c.organization_id == DBOrganization.id,
+            )
+            .outerjoin(
+                OrganizationTrendingHistory,
+                and_(
+                    OrganizationTrendingHistory.organization_id
+                    == latest_snapshot_dates.c.organization_id,
+                    OrganizationTrendingHistory.snapshot_date
+                    == latest_snapshot_dates.c.snapshot_date,
+                ),
+            )
+            .filter(DBOrganization.is_featured.is_(True))
+            .subquery()
+        )
+        own = (
+            self.db.query(featured.c.score, featured.c.raw_score)
+            .filter(featured.c.id == organization.id)
+            .one()
+        )
+        ahead = (
+            self.db.query(func.count())
+            .select_from(featured)
+            .filter(
+                or_(
+                    featured.c.score > own.score,
+                    and_(
+                        featured.c.score == own.score,
+                        featured.c.raw_score > own.raw_score,
+                    ),
+                )
+            )
+            .scalar()
+        )
+        tied_ids = [
+            row.id
+            for row in self.db.query(featured.c.id).filter(
+                featured.c.score == own.score,
+                featured.c.raw_score == own.raw_score,
+            )
+        ]
+        if len(tied_ids) > 1:
+            paper_count_col = func.count(func.distinct(DBPaper.id))
+            tied_ids = [
+                row.id
+                for row in self.db.query(DBOrganization.id)
+                .outerjoin(
+                    PaperOrganization,
+                    DBOrganization.id == PaperOrganization.organization_id,
+                )
+                .outerjoin(
+                    DBPaper,
+                    and_(
+                        DBPaper.id == PaperOrganization.paper_id,
+                        eligible_paper_filter(),
+                    ),
+                )
+                .filter(DBOrganization.id.in_(tied_ids))
+                .group_by(DBOrganization.id)
+                .order_by(
+                    desc(paper_count_col),
+                    DBOrganization.display_order,
+                    DBOrganization.name,
+                )
+            ]
+        return ahead + 1 + tied_ids.index(organization.id)
+
     def get_organization(self, slug: str) -> Organization:
         try:
-            organization = self._get_organization_by_slug(slug)
-            if organization.is_featured:
-                for projected in self.get_organizations(featured_only=True).results:
-                    if projected.slug == slug:
-                        return projected
-            return self._organization_to_api(organization)
+            return self._project_organization(self._get_organization_by_slug(slug))
         except PaperNotFoundError:
             raise
         except Exception as e:
@@ -293,17 +434,8 @@ class OrganizationService:
     ) -> OrganizationAreasWithTasks:
         try:
             organization = self._get_organization_by_slug(slug)
-
-            total_paper_count = (
-                self.db.query(func.count(func.distinct(DBPaper.id)))
-                .join(PaperOrganization, PaperOrganization.paper_id == DBPaper.id)
-                .filter(
-                    PaperOrganization.organization_id == organization.id,
-                    eligible_paper_filter(),
-                )
-                .scalar()
-                or 0
-            )
+            projected_organization = self._project_organization(organization)
+            total_paper_count = projected_organization.paper_count or 0
 
             area_rows = self.db.query(DBArea).order_by(DBArea.name).all()
 
@@ -312,18 +444,15 @@ class OrganizationService:
             ).label("paper_count")
             task_rows = (
                 self.db.query(DBTask, paper_count_col)
-                .outerjoin(
-                    PaperTask,
-                    DBTask.id == PaperTask.task_id,
-                )
-                .join(DBPaper, DBPaper.id == PaperTask.paper_id)
-                .outerjoin(
+                .join(PaperTask, DBTask.id == PaperTask.task_id)
+                .join(
                     PaperOrganization,
                     and_(
                         PaperTask.paper_id == PaperOrganization.paper_id,
                         PaperOrganization.organization_id == organization.id,
                     ),
                 )
+                .join(DBPaper, DBPaper.id == PaperTask.paper_id)
                 .filter(eligible_paper_filter())
                 .group_by(DBTask.id)
                 .order_by(DBTask.name)
@@ -332,8 +461,6 @@ class OrganizationService:
 
             tasks_by_area: dict[Optional[int], list[ConferenceTaskSummary]] = {}
             for db_task, paper_count in task_rows:
-                if not paper_count:
-                    continue
                 summary = ConferenceTaskSummary(
                     id=str(db_task.id),
                     name=db_task.name,
@@ -353,18 +480,6 @@ class OrganizationService:
                 if tasks_by_area.get(area.id)
             ]
 
-            projected_organization = self._organization_to_api(
-                organization, paper_count=total_paper_count
-            )
-            if organization.is_featured:
-                projected_organization = next(
-                    (
-                        item
-                        for item in self.get_organizations(featured_only=True).results
-                        if item.slug == slug
-                    ),
-                    projected_organization,
-                )
             return OrganizationAreasWithTasks(
                 organization=projected_organization,
                 total_paper_count=total_paper_count,

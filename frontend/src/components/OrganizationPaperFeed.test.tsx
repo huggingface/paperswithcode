@@ -171,6 +171,30 @@ describe("OrganizationPaperFeed task filtering", () => {
     );
   });
 
+  it("loads the contribution graph without waiting for organization metadata", async () => {
+    vi.spyOn(catalogApi, "getOrganization").mockReturnValue(
+      new Promise(() => {}),
+    );
+    vi.spyOn(catalogApi, "organizationAreasWithTasks").mockReturnValue(
+      new Promise(() => {}),
+    );
+    useInfiniteOrganizationPapers.mockReturnValue({
+      data: undefined,
+      error: null,
+      isLoading: true,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+    });
+
+    renderFeed();
+
+    expect(
+      await screen.findByText("3 papers recorded in the last year"),
+    ).toBeVisible();
+    expect(catalogApi.organizationContributions).toHaveBeenCalledWith("nvidia");
+  });
+
   it("renders organization metadata without waiting for taxonomy", async () => {
     vi.spyOn(catalogApi, "getOrganization").mockResolvedValue(
       taxonomy.organization,

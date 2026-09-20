@@ -224,12 +224,10 @@ export const OrganizationPaperFeed: React.FC<{
             </div>
           )}
         </div>
-        {organization && (
-          <OrganizationContributionGraph
-            organizationSlug={organizationSlug}
-            organizationName={organization.name}
-          />
-        )}
+        <OrganizationContributionGraph
+          organizationSlug={organizationSlug}
+          organizationName={organization?.name ?? organizationSlug}
+        />
       </header>
 
       <div className="sort-bar" style={{ alignItems: "center", gap: 16 }}>

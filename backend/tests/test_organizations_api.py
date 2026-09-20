@@ -394,6 +394,69 @@ def test_cached_logo_supports_edge_and_conditional_caching(org_client):
         assert "max-age=0" in compatibility.headers["cache-control"]
 
 
+def test_organization_detail_matches_featured_card_projection(org_client, monkeypatch):
+    _pin_trending_mode(monkeypatch, "composite")
+    listed = org_client.get("/api/v1/organizations/?featured_only=true").json()
+    detail = org_client.get("/api/v1/organizations/acme")
+    taxonomy = org_client.get("/api/v1/organizations/acme/areas-with-tasks")
+
+    assert detail.status_code == 200
+    assert detail.json() == listed["results"][0]
+    assert taxonomy.json()["organization"] == listed["results"][0]
+    assert detail.json()["trending_rank"] == 1
+    assert detail.json()["top_trending_paper"]["title"] == "Paper 1"
+    assert detail.json()["first_paper_year"] is None
+
+
+def test_featured_detail_rank_matches_list_order_including_ties(
+    org_client, monkeypatch
+):
+    _pin_trending_mode(monkeypatch, "composite")
+    db = TestingSessionLocal()
+    try:
+        db.add_all(
+            [
+                Organization(
+                    id=2,
+                    name="Beta",
+                    slug="beta",
+                    is_featured=True,
+                    display_order=5,
+                    trending_score=5.0,
+                ),
+                # Tied with acme on (missing) trending score; fewer papers.
+                Organization(
+                    id=3, name="Gamma", slug="gamma", is_featured=True, display_order=2
+                ),
+                # Tied with gamma on score and paper count; later display order.
+                Organization(
+                    id=4, name="Delta", slug="delta", is_featured=True, display_order=3
+                ),
+                Organization(id=5, name="Plain", slug="plain", is_featured=False),
+            ]
+        )
+        db.commit()
+    finally:
+        db.close()
+
+    listed = org_client.get("/api/v1/organizations/?featured_only=true").json()
+    assert [item["slug"] for item in listed["results"]] == [
+        "beta",
+        "acme",
+        "gamma",
+        "delta",
+    ]
+    for expected in listed["results"]:
+        detail = org_client.get(f"/api/v1/organizations/{expected['slug']}")
+        assert detail.status_code == 200
+        assert detail.json() == expected
+
+    plain = org_client.get("/api/v1/organizations/plain").json()
+    assert plain["trending_rank"] is None
+    assert plain["top_trending_paper"] is None
+    assert plain["paper_count"] == 0
+
+
 def test_organization_task_taxonomy_and_paper_filter(org_client, monkeypatch):
     _pin_trending_mode(monkeypatch, "composite")
     taxonomy = org_client.get("/api/v1/organizations/acme/areas-with-tasks")
