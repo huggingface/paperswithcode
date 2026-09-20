@@ -154,7 +154,7 @@ export function computeSeries(
   const items = evals
     .map((e) => {
       const value = parseMetricValue(e.metrics?.[bestMetric]);
-      const date = e.paper_published_date || "";
+      const date = e.evaluated_on || e.paper_published_date || "";
       return { eval: e, value, date };
     })
     .filter((x): x is { eval: Evaluation; value: number; date: string } =>

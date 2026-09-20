@@ -937,7 +937,7 @@ const BenchmarkDetailView: React.FC = () => {
                             renderBenchmarkPaperTitle(e.paper_title, paperLabel)
                           )}
                         </td>
-                        <td className="col-year">{e.paper_published_date?.slice(0, 4) || "—"}</td>
+                        <td className="col-year">{(e.evaluated_on || e.paper_published_date)?.slice(0, 4) || "—"}</td>
                       </tr>
                     );
                   });
