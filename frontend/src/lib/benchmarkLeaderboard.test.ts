@@ -109,4 +109,26 @@ describe("benchmark leaderboard model", () => {
     expect(result.sota).toBe(10);
     expect(result.sotaModel).toBe("Best");
   });
+
+  it("plots the paper publication date even when evaluations share an evaluated_on stamp", () => {
+    const result = computeSeries([
+      evaluation({
+        id: "earlier",
+        model_name: "Earlier",
+        evaluated_on: "2026-09-20",
+        paper_published_date: "2025-01-15",
+        metrics: { Accuracy: 70 },
+      }),
+      evaluation({
+        id: "later",
+        model_name: "Later",
+        evaluated_on: "2026-09-20",
+        paper_published_date: "2025-06-15",
+        metrics: { Accuracy: 90 },
+      }),
+    ], "Accuracy", "↑");
+
+    expect(result.points.map((point) => point.date)).toEqual(["2025-01-15", "2025-06-15"]);
+    expect(result.points.map((point) => point.isSota)).toEqual([true, true]);
+  });
 });

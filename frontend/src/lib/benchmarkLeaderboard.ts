@@ -150,11 +150,14 @@ export function computeSeries(
 ): { points: ChartPoint[]; sota: number; sotaModel: string } {
   if (evals.length === 0) return { points: [], sota: 0, sotaModel: "" };
 
-  // Sort by published date ascending; require numeric values for the metric.
+  // Sort by the paper's published date so the time axis follows when the
+  // result appeared, not the evaluation row's `evaluated_on` stamp. Managed
+  // syncs (Artificial Analysis, TabArena, Open ASR/TTS) set `evaluated_on`
+  // to the fetch date, which would stack every point on one vertical line.
   const items = evals
     .map((e) => {
       const value = parseMetricValue(e.metrics?.[bestMetric]);
-      const date = e.evaluated_on || e.paper_published_date || "";
+      const date = e.paper_published_date || "";
       return { eval: e, value, date };
     })
     .filter((x): x is { eval: Evaluation; value: number; date: string } =>
