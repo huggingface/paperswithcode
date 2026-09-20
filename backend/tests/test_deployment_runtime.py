@@ -6322,6 +6322,7 @@ def test_cron_status_reports_exact_production_release(
     )
     assert status["jobs"]["sync_programbench"]["timeout"] == "30m"
     assert status["jobs"]["sync_frontiercode"]["timeout"] == "30m"
+    assert status["jobs"]["sync_parsebench"]["timeout"] == "30m"
     assert status["jobs"]["sync_coarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_arc_prize"]["timeout"] == "30m"
 

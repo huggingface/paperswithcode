@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync ParseBench leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:20:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-parsebench.service
+
+[Install]
+WantedBy=timers.target

@@ -342,6 +342,14 @@ COMMANDS: dict[str, Job] = {
             "replace managed ProgramBench evaluation rows from validated live data"
         ),
     ),
+    "sync_parsebench": job(
+        "-m",
+        "scripts.hourly.sync_parsebench",
+        timeout="30m",
+        idempotency=(
+            "replace managed ParseBench evaluation rows from the validated leaderboard.csv"
+        ),
+    ),
     "sync_coarena": job(
         "-m",
         "scripts.hourly.sync_coarena",

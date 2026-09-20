@@ -34,6 +34,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-artificial-analysis.yml` | `35 * * * *` | `pwc-cron sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `cron-sync-programbench.yml` | `40 * * * *` | `pwc-cron sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
 | `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
+| `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -150,6 +151,13 @@ model link resolves to exactly one local paper through an arXiv URL, Hugging
 Face artifact, GitHub repository, project page, or external source URL. Each
 job owns only its managed-prefix rows, leaving manually curated evaluations
 untouched.
+
+`sync_parsebench.py` consumes the official `leaderboard.csv` published in the
+`run-llama/parsebench` repository (the source of parsebench.ai). It publishes
+only rows whose exact upstream provider label is mapped to a reviewed paper or
+official release page, stores the overall score plus the five dimension scores,
+owns only its managed-prefix rows, and logs unreviewed provider labels as a
+warning instead of failing.
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

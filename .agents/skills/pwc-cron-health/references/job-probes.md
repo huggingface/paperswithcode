@@ -111,6 +111,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `programbench`; Resolved, Almost Resolved, and Average Test Pass Rate; mini-SWE-agent; typically 15–60 rows.
 - **Proof:** Compare the current embedded upstream results and run URLs; verify units, owned row set, and rank semantics.
 
+## `sync_parsebench`
+
+- **Contract:** `parsebench` on task `ocr`; Overall (ParseBench) plus Tables, Charts, Content Faithfulness, Semantic Formatting, Visual Grounding; official `leaderboard.csv` in `run-llama/parsebench`; typically 40–400 upstream rows, of which only reviewed provider labels are published.
+- **Proof:** Diff the current CSV against managed rows (model label, six scores, `hf_model_url`); confirm `parsebench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Overall (ParseBench).
+
 ## `sync_frontiercode`
 
 - **Contract:** `frontiercode-main` and `frontiercode-extended`; Score and Pass Rate; official Cognition JSON.
