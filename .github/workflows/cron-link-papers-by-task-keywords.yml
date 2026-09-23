@@ -47,9 +47,10 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
+          GITHUB_EVENT_INPUTS_REBUILD: ${{ github.event.inputs.rebuild }}
         run: |
           REMOTE_COMMAND='sudo /usr/local/sbin/pwc-cron link_papers_by_task_keywords'
-          if [ "${{ github.event.inputs.rebuild }}" = "true" ]; then
+          if [ "${GITHUB_EVENT_INPUTS_REBUILD}" = "true" ]; then
             REMOTE_COMMAND="$REMOTE_COMMAND --rebuild"
           fi
           ssh -o StrictHostKeyChecking=yes \

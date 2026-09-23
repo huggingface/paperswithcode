@@ -46,8 +46,9 @@ jobs:
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_HOST: ${{ secrets.VPS_HOST }}
+          GITHUB_EVENT_INPUTS_DATE: ${{ github.event.inputs.date }}
         run: |
-          TARGET_DATE="${{ github.event.inputs.date }}"
+          TARGET_DATE="${GITHUB_EVENT_INPUTS_DATE}"
           if [ -n "$TARGET_DATE" ] && [[ ! "$TARGET_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
             echo "date must be in YYYY-MM-DD format"
             exit 1
