@@ -25,8 +25,12 @@ on:
 
   workflow_dispatch:
 
+permissions: {}
+
 jobs:
   test-database:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
 
     services:

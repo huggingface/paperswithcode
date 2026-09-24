@@ -16,8 +16,11 @@ concurrency:
   group: cron-mirror-thumbnails-to-disk
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:

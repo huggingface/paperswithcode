@@ -21,15 +21,17 @@ on:
         required: true
         default: "https://paperswithcode.co"
 
-permissions:
-  contents: read
 
 concurrency:
   group: deploy-hf-space-${{ github.ref }}
   cancel-in-progress: true
 
+permissions: {}
+
 jobs:
   deploy:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
 
     env:

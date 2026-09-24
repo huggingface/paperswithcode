@@ -7,8 +7,11 @@ concurrency:
   group: cron-backfill-method-keywords
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 65
     steps:

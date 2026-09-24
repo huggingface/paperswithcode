@@ -7,8 +7,11 @@ concurrency:
   group: cron-sync-hf-organizations
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 100
     steps:

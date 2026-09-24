@@ -85,8 +85,11 @@ concurrency:
   group: cron-preload-thumbnails
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 240
     steps:

@@ -12,8 +12,11 @@ concurrency:
   group: cron-import-hf-daily-papers
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

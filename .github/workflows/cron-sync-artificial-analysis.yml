@@ -7,8 +7,11 @@ concurrency:
   group: cron-sync-artificial-analysis
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

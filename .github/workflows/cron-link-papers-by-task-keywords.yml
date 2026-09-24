@@ -13,8 +13,11 @@ concurrency:
   group: cron-link-papers-by-task-keywords
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   run:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

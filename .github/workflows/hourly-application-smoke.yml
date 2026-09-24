@@ -5,15 +5,17 @@ on:
     - cron: "37 * * * *"
   workflow_dispatch: {}
 
-permissions:
-  contents: read
 
 concurrency:
   group: hourly-application-smoke
   cancel-in-progress: false
 
+permissions: {}
+
 jobs:
   smoke:
+    permissions:
+      contents: read
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:

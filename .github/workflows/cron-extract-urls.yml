@@ -22,11 +22,12 @@ concurrency:
   group: cron-extract-urls
   cancel-in-progress: false
 
-permissions:
-  contents: read
+
+permissions: {}
 
 jobs:
   select:
+    permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -78,6 +79,8 @@ jobs:
           retention-days: 1
 
   discover:
+    permissions:
+      contents: read
     needs: select
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -119,6 +122,7 @@ jobs:
           retention-days: 7
 
   persist:
+    permissions: {}
     needs: discover
     if: ${{ inputs.persist == true }}
     runs-on: ubuntu-latest
