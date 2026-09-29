@@ -9,11 +9,12 @@ concurrency:
   group: sync-chat-task-catalog
   cancel-in-progress: false
 
-permissions:
-  contents: write
+permissions: {}
 
 jobs:
   sync:
+    permissions:
+      contents: write
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     env:
