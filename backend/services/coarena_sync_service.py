@@ -101,7 +101,7 @@ class CoArenaEntry:
     rating_status: str
     win_rate: float
     ci: float
-    company: str
+    company: str | None
 
 
 @dataclass
@@ -161,10 +161,15 @@ def parse_coarena_leaderboard(payload: Any) -> list[CoArenaEntry]:
             ("id", model_id),
             ("name", name),
             ("model", model),
-            ("company", company),
         ):
             if not isinstance(value, str) or not value.strip() or len(value) > 255:
                 raise ValueError(f"CoArena row has an invalid {field_name}")
+        # Company is display metadata, and upstream may omit it for a rated
+        # model. Stable IDs, ratings and paper mappings remain mandatory.
+        if company is not None and (
+            not isinstance(company, str) or not company.strip() or len(company) > 255
+        ):
+            raise ValueError("CoArena row has an invalid company")
         if model_id in ids or name in names:
             raise ValueError("CoArena response contains duplicate IDs or names")
         if effort is not None and (

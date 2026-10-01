@@ -272,3 +272,20 @@ def test_current_model_with_missing_paper_keeps_previous_row():
     assert (
         session.query(Evaluation).filter_by(model_name="Gemini 3.6 Flash").count() == 1
     )
+
+
+def test_null_company_does_not_block_other_rated_models():
+    rows = [_payload_row(index) for index in range(5)]
+    rows[0]["company"] = None
+    entries = parse_coarena_leaderboard({"entries": rows})
+    assert len(entries) == 5
+    assert entries[0].company is None
+    assert entries[0].id == "model-0"
+
+
+@pytest.mark.parametrize("company", ["", " ", 42, {}, "x" * 256])
+def test_company_still_rejects_malformed_non_null_values(company):
+    rows = [_payload_row(index) for index in range(5)]
+    rows[0]["company"] = company
+    with pytest.raises(ValueError, match="invalid company"):
+        parse_coarena_leaderboard({"entries": rows})

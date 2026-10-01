@@ -86,6 +86,36 @@ def external(
 # currently present on FrontierCode 1.1. New upstream models must be reviewed
 # before the sync will publish them.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "Claude Opus 5.5": external(
+        "https://www.anthropic.com/claude-opus-5-5",
+        "Introducing Claude Opus 5.5",
+        "2026-09-22",
+    ),
+    "Claude Sonnet 5.5": external(
+        "https://www.anthropic.com/claude-sonnet-5-5",
+        "Introducing Claude Sonnet 5.5",
+        "2026-09-28",
+    ),
+    "GPT-6 Sol": external(
+        "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        "Introducing GPT-6 Sol and Luna",
+        "2026-09-22",
+    ),
+    "GPT-6 Luna": external(
+        "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        "Introducing GPT-6 Sol and Luna",
+        "2026-09-22",
+    ),
+    "GPT-6.1 Sol": external(
+        "https://openai.com/index/introducing-gpt-6-1-sol/",
+        "Introducing GPT-6.1 Sol",
+        "2026-09-29",
+    ),
+    "Grok 4.7": external(
+        "https://x.ai/news/grok-4-7",
+        "Introducing Grok 4.7",
+        "2026-09-21",
+    ),
     "Claude Fable 5.1": external(
         "https://www.anthropic.com/claude-fable-and-mythos-5-1",
         "Introducing Claude Fable 5.1 and Claude Mythos 5.1",

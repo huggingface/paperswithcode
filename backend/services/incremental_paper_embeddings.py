@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Iterable
+from urllib.parse import urlsplit
 
 import httpx
 from huggingface_hub import HfApi
@@ -191,10 +193,30 @@ def _validated_vectors(
     return validated
 
 
+def _endpoint_identity(url: str) -> str:
+    """Match HF's regional and regionless URLs without matching other hosts."""
+    parsed = urlsplit(url.rstrip("/"))
+    if parsed.scheme == "https" and not parsed.port and not parsed.username:
+        match = re.fullmatch(
+            r"([a-z0-9]+)(?:\.[a-z0-9-]+\.aws)?\.endpoints\.huggingface\.cloud",
+            parsed.hostname or "",
+        )
+        if (
+            match
+            and parsed.path in {"", "/embed"}
+            and not parsed.query
+            and not parsed.fragment
+        ):
+            return f"hf:{match[1]}"
+    return url.rstrip("/")
+
+
 def _recover_capacity_failure(endpoint_url: str, token: str) -> bool:
     """Retry allocation only for the configured endpoint's failed hardware."""
     for endpoint in HfApi(token=token).list_inference_endpoints(namespace="*"):
-        if (endpoint.url or "").rstrip("/") + "/embed" != endpoint_url.rstrip("/"):
+        if _endpoint_identity(
+            (endpoint.url or "").rstrip("/") + "/embed"
+        ) != _endpoint_identity(endpoint_url):
             continue
         error = endpoint.raw.get("status", {}).get("errorMessage", "")
         allocation_failed = (

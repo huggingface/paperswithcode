@@ -290,3 +290,36 @@ def test_capacity_recovery_never_resumes_an_unrelated_endpoint(monkeypatch):
     assert not module._recover_capacity_failure(
         "https://endpoint.example/embed", "secret"
     )
+
+
+@pytest.mark.parametrize(
+    "configured, same",
+    [
+        ("https://abc123.endpoints.huggingface.cloud/embed", True),
+        ("https://abc123.us-east-1.aws.endpoints.huggingface.cloud/embed", True),
+        ("https://other.us-east-1.aws.endpoints.huggingface.cloud/embed", False),
+        ("https://abc123.endpoints.huggingface.cloud.evil.example/embed", False),
+        ("http://abc123.endpoints.huggingface.cloud/embed", False),
+        ("https://abc123.endpoints.huggingface.cloud/other", False),
+    ],
+)
+def test_capacity_recovery_matches_only_same_hf_endpoint(monkeypatch, configured, same):
+    from types import SimpleNamespace
+    from backend.services import incremental_paper_embeddings as module
+
+    resumed = []
+    endpoint = SimpleNamespace(
+        url="https://abc123.endpoints.huggingface.cloud",
+        status="failed",
+        raw={"status": {"errorMessage": "Scheduling failure: unable to schedule"}},
+    )
+    endpoint.resume = lambda: (
+        resumed.append(True) or SimpleNamespace(wait=lambda **kw: None)
+    )
+    monkeypatch.setattr(
+        module,
+        "HfApi",
+        lambda **kw: SimpleNamespace(list_inference_endpoints=lambda **kw: [endpoint]),
+    )
+    assert module._recover_capacity_failure(configured, "secret") is same
+    assert bool(resumed) is same
