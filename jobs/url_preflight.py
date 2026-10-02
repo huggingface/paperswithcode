@@ -98,10 +98,15 @@ def _fetch(url: str, limit: int) -> tuple[bytes, str]:
     )
     with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
         final_url = response.geturl()
+        prefix = response.read(5)
+        # Project URLs can redirect to PDFs. Keep HTML bounded to the text
+        # budget even when the caller allows a larger PDF response.
+        if not prefix.startswith(b"%PDF-"):
+            limit = min(limit, MAX_TEXT_BYTES)
         content_length = int(response.headers.get("Content-Length") or 0)
         if content_length > limit:
             raise ValueError(f"response exceeds {limit} bytes")
-        body = response.read(limit + 1)
+        body = prefix + response.read(limit + 1 - len(prefix))
         if len(body) > limit:
             raise ValueError(f"response exceeds {limit} bytes")
         return body, final_url
@@ -366,7 +371,22 @@ def extract_candidates(
         )
         for project_url in dict.fromkeys(project_pages):
             try:
-                html, final_url = fetch(project_url, MAX_TEXT_BYTES)
+                html, final_url = fetch(project_url, MAX_PDF_BYTES)
+                if html.startswith(b"%PDF-"):
+                    reader = PdfReader(io.BytesIO(html), strict=False)
+                    pages = reader.pages[:2]
+                    text = "\n".join(page.extract_text() or "" for page in pages)
+                    validate_paper_text(text.encode())
+                    fetched("project_page_pdf", project_url, html, final_url)
+                    for raw in _matches(text):
+                        add(raw, "project_page_pdf")
+                    for page in pages:
+                        for annotation_ref in page.get("/Annots") or []:
+                            annotation = annotation_ref.get_object()
+                            uri = (annotation.get("/A") or {}).get("/URI")
+                            if uri:
+                                add(str(uri), "project_page_pdf")
+                    continue
                 fetched("project_page_html", project_url, html, final_url)
                 parser = _Links()
                 parser.feed(html.decode("utf-8", "replace"))
@@ -421,6 +441,8 @@ def extract_candidates(
                     if entry["url"] == source["final_url"]:
                         entry["local_path"] = source["local_path"]
                         entry["sha256"] = source["sha256"]
+        elif source.get("source") == "project_page_pdf":
+            document("paper_pdf", source.get("final_url"))
         elif source.get("source") == "paper_pdf":
             document("paper_pdf", source.get("url"))
 

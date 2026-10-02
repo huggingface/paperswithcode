@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+import io
 
 import pytest
 
@@ -9,6 +10,61 @@ PAPER = (
     b"# Paper\n"
     + b"We describe our method and evaluate it against the baselines. " * 25
 )
+
+
+@pytest.mark.parametrize("content_length", [True, False])
+def test_project_fetch_keeps_separate_pdf_and_html_limits(monkeypatch, content_length):
+    monkeypatch.setattr(url_preflight, "MAX_TEXT_BYTES", 20)
+
+    class Response(io.BytesIO):
+        def __init__(self, body):
+            super().__init__(body)
+            self.headers = {"Content-Length": str(len(body))} if content_length else {}
+
+        def geturl(self):
+            return "https://cdn.example.org/report.pdf"
+
+    for body, allowed in [(b"%PDF-" + b"x" * 30, True), (b"<html>" + b"x" * 30, False)]:
+        monkeypatch.setattr(
+            url_preflight.urllib.request, "urlopen", lambda *a, **k: Response(body)
+        )
+        if allowed:
+            assert url_preflight._fetch("https://example.org/card", 40)[0] == body
+        else:
+            with pytest.raises(ValueError, match="exceeds 20 bytes"):
+                url_preflight._fetch("https://example.org/card", 40)
+    monkeypatch.setattr(
+        url_preflight.urllib.request,
+        "urlopen",
+        lambda *a, **k: Response(b"%PDF-" + b"x" * 40),
+    )
+    with pytest.raises(ValueError, match="exceeds 40 bytes"):
+        url_preflight._fetch("https://example.org/card", 40)
+
+
+@pytest.mark.parametrize("readable", [True, False])
+def test_project_redirect_to_pdf_requires_readable_evidence(monkeypatch, readable):
+    class Page(dict):
+        def extract_text(self):
+            return PAPER.decode() if readable else ""
+
+    monkeypatch.setattr(
+        url_preflight, "PdfReader", lambda *_a, **_k: SimpleNamespace(pages=[Page()])
+    )
+    project = "https://example.org/system-card"
+    result = url_preflight.extract_candidates(
+        {"paper": {"id": 42, "project_pages": [{"url": project, "is_official": True}]}},
+        fetch=lambda url, limit: (b"%PDF-fixture", "https://cdn.example.org/card.pdf"),
+    )
+    assert result["complete"] is readable
+    if readable:
+        assert result["sources"][0]["source"] == "project_page_pdf"
+        assert {
+            "kind": "paper_pdf",
+            "url": "https://cdn.example.org/card.pdf",
+        } in result["source_documents"]
+    else:
+        assert result["sources"] == []
 
 
 @pytest.mark.parametrize(
