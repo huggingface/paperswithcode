@@ -353,6 +353,36 @@ def test_sync_replaces_legacy_and_only_deletes_stale_managed_rows(monkeypatch):
     assert session.query(Evaluation).count() == 3
 
 
+def test_sync_refreshes_throughput_rank_on_preserved_paper_native_rows(monkeypatch):
+    session = _session()
+    manual = Evaluation(
+        paper_id=1,
+        task_id=12,
+        dataset_id=181,
+        model_name="Paper-native throughput",
+        methodology="Paper Table 2",
+        metrics={"RTFx": 150.0},
+        best_metric="RTFx",
+        best_rank=21,
+    )
+    session.add(manual)
+    session.commit()
+    monkeypatch.setitem(
+        __import__(
+            "backend.services.open_asr_sync_service", fromlist=["MODEL_PAPER_ARXIV_IDS"]
+        ).MODEL_PAPER_ARXIV_IDS,
+        "vendor/legacy",
+        "2311.00430",
+    )
+    service = OpenAsrSyncService(session)
+    service.sync([OpenAsrEntry("vendor/legacy", 1, 5.0, 200.0, False)])
+    assert manual.best_rank == 2
+    assert manual.metrics == {"RTFx": 150.0}
+    # Updating or dropping secondary throughput must refresh manual ranks too.
+    service.sync([OpenAsrEntry("vendor/legacy", 1, 5.0, None, False)])
+    assert manual.best_rank == 1
+
+
 def test_discovered_paper_creates_managed_row_and_task_link():
     session = _session()
     paper = Paper(

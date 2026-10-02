@@ -120,6 +120,7 @@ def test_weekly_queue_uses_regular_eligibility():
 
     query = str(session.execute.call_args.args[0])
     assert "linked.newest_paper_date < :fresh_cutoff" in query
+    assert "OR linked.newest_paper_date IS NULL" in query
     assert "repo_groups.oldest_update < :threshold_regular" in query
     assert result["owner"] == "huggingface"
     assert result["repository_ids"] == [1, 2]

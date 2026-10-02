@@ -684,9 +684,13 @@ class OpenAsrSyncService:
                 stats.deleted += 1
 
             self.db.flush()
-            EvaluationService(self.db).recalculate_ranks(
-                task.id, dataset.id, metric_name=WER_METRIC, commit=False
-            )
+            # Live rows also carry RTFx, which affects preserved paper-native
+            # rows whose primary metric is throughput.
+            evaluation_service = EvaluationService(self.db)
+            for metric in (WER_METRIC, RTFX_METRIC):
+                evaluation_service.recalculate_ranks(
+                    task.id, dataset.id, metric_name=metric, commit=False
+                )
             if commit:
                 self.db.commit()
             else:

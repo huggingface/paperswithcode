@@ -5,6 +5,7 @@ Queue ownership is exclusive:
 * ``hot``: official repositories linked to latest papers aged 0-30 days
 * ``fresh``: official repositories linked to latest papers aged 31-180 days
 * ``weekly``: official repositories whose newest latest paper is older than 180 days
+  or whose linked papers have no publication date
 
 The dedicated ``update_hot_github_trending`` job owns the hot queue. This
 hourly adapter runs fresh and weekly concurrently with separate credentials.
@@ -167,7 +168,8 @@ def get_repository_groups(
         """
     else:
         eligibility_clause = """
-            linked.newest_paper_date < :fresh_cutoff
+            (linked.newest_paper_date < :fresh_cutoff
+             OR linked.newest_paper_date IS NULL)
             AND (
                 repo_groups.oldest_update IS NULL
                 OR repo_groups.oldest_update < :threshold_regular
