@@ -43,10 +43,18 @@ def test_project_fetch_keeps_separate_pdf_and_html_limits(monkeypatch, content_l
 
 
 @pytest.mark.parametrize("readable", [True, False])
-def test_project_redirect_to_pdf_requires_readable_evidence(monkeypatch, readable):
+@pytest.mark.parametrize("broken_annotations", [True, False])
+def test_project_redirect_to_pdf_requires_readable_evidence(
+    monkeypatch, readable, broken_annotations
+):
     class Page(dict):
         def extract_text(self):
             return PAPER.decode() if readable else ""
+
+        def get(self, key, default=None):
+            if broken_annotations and key == "/Annots":
+                raise url_preflight.PdfReadError("broken annotation reference")
+            return super().get(key, default)
 
     monkeypatch.setattr(
         url_preflight, "PdfReader", lambda *_a, **_k: SimpleNamespace(pages=[Page()])

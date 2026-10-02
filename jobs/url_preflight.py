@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Iterable
 
 from PyPDF2 import PdfReader
+from PyPDF2.errors import PdfReadError
 
 GITHUB_URL_PATTERN = r"\bhttps?:\/\/github\.com[^\s]*\b"
 PROJECT_PAGE_URL_PATTERN = r"\bhttps?:\/\/[^\s\/]+\.github\.io[^\s]*\b"
@@ -381,11 +382,16 @@ def extract_candidates(
                     for raw in _matches(text):
                         add(raw, "project_page_pdf")
                     for page in pages:
-                        for annotation_ref in page.get("/Annots") or []:
-                            annotation = annotation_ref.get_object()
-                            uri = (annotation.get("/A") or {}).get("/URI")
-                            if uri:
-                                add(str(uri), "project_page_pdf")
+                        # Hyperlinks supplement the validated text. Broken
+                        # annotation objects must not invalidate readable PDFs.
+                        try:
+                            for annotation_ref in page.get("/Annots") or []:
+                                annotation = annotation_ref.get_object()
+                                uri = (annotation.get("/A") or {}).get("/URI")
+                                if uri:
+                                    add(str(uri), "project_page_pdf")
+                        except (PdfReadError, AttributeError, TypeError, KeyError):
+                            continue
                     continue
                 fetched("project_page_html", project_url, html, final_url)
                 parser = _Links()
