@@ -81,7 +81,7 @@ test("prebound first-turn retry restores an existing durable transcript", async 
   }
 });
 
-for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject"] as const) {
+for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject", "compaction-timeout", "compaction-timeout-reject"] as const) {
   test(`${mode} during recovery preserves saved summaries and emits one terminal outcome`, async () => {
     const { PiWorker } = await import("../src/agent.js");
     const { CompactionController } = await import("../src/compaction.js");
@@ -101,6 +101,7 @@ for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject"] as const
       async prompt() {
         prompts++;
         if (prompts === 1) {
+          compaction.attempted = mode.startsWith("compaction-");
           compaction.startRecovery();
           await new Promise((resolve) => setTimeout(resolve, 35));
         } else {
@@ -134,7 +135,11 @@ for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject"] as const
         assert.equal(events.at(-1)?.status, "stopped");
       } else {
         assert.equal(events.filter((event) => event.type === "error").length, 1);
-        assert.equal(events.find((event) => event.type === "error")?.code, "context_too_large");
+        const error = events.find((event) => event.type === "error");
+        assert.equal(error?.code, mode.startsWith("compaction-") ? "context_too_large" : "provider_error");
+        if (!mode.startsWith("compaction-")) {
+          assert.doesNotMatch(String(error?.message), /shorten|new conversation/i);
+        }
       }
     } finally { clearInterval(keepAlive); compaction.finish(); }
   });

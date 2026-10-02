@@ -625,8 +625,7 @@ export class PiWorker {
         return;
       }
       if (this.compaction.timedOut) {
-        pendingAdapterError = { type: "error", code: "context_too_large",
-          message: RECOVERY_TIMEOUT_MESSAGE };
+        pendingAdapterError = this.recoveryTimeoutError();
       }
       if (this.compaction.failed && !this.compaction.timedOut && (!pendingAdapterError || pendingAdapterError.code === "context_too_large")) {
         pendingAdapterError = {
@@ -662,10 +661,10 @@ export class PiWorker {
         this.emit(run.request_id, { type: "worker_done", status: "stopped" });
       } else {
         process.stderr.write(turnFailureDiagnostic(this.failurePhase, error));
-        this.emit(run.request_id, {
+        this.emit(run.request_id, this.compaction.timedOut ? this.recoveryTimeoutError() : {
           type: "error",
-          code: this.compaction.timedOut ? "context_too_large" : "gateway_unavailable",
-          message: this.compaction.timedOut ? RECOVERY_TIMEOUT_MESSAGE : "The research run failed.",
+          code: "gateway_unavailable",
+          message: "The research run failed.",
         });
         this.emit(run.request_id, { type: "worker_done", status: "complete" });
       }
@@ -673,6 +672,18 @@ export class PiWorker {
       this.compaction.finish();
       this.activeRequest = undefined;
     }
+  }
+
+  private recoveryTimeoutError(): PwCEvent {
+    // Incomplete-answer retries share the recovery deadline but need not
+    // compact anything. Do not diagnose their timeout as oversized context.
+    return {
+      type: "error",
+      code: this.compaction.attempted ? "context_too_large" : "provider_error",
+      message: this.compaction.attempted
+        ? RECOVERY_TIMEOUT_MESSAGE
+        : "The model did not finish its response within the recovery time limit. Your conversation and completed research are saved. Please retry.",
+    };
   }
 
   private executionTelemetry(recovery: RecoverySummary, failed = false): PwCEvent {
