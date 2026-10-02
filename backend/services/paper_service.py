@@ -61,7 +61,11 @@ from backend.utils.urls import (
     get_paper_pdf_url,
     get_paper_url,
 )
-from backend.utils.exceptions import PaperNotFoundError, DatabaseError
+from backend.utils.exceptions import (
+    PaperNotFoundError,
+    DatabaseError,
+    ThumbnailGenerationError,
+)
 from backend.config import get_settings
 from backend.services.paper_implementation_service import (
     family_repository_exists_clause,
@@ -135,7 +139,14 @@ class PaperService:
             filename = build_thumbnail_filename(
                 db_paper.arxiv_id, db_paper.version or "v1"
             )
-            if self._get_thumbnail_service().get_local_thumbnail_path(filename):
+            thumbnail_service = self._get_thumbnail_service()
+            try:
+                thumbnail_path = thumbnail_service.get_local_thumbnail_path(filename)
+            except ThumbnailGenerationError:
+                # Legacy catalog identifiers can be malformed. An optional
+                # thumbnail must not prevent hydrating the paper or its batch.
+                return None
+            if thumbnail_path:
                 return build_thumbnail_url(filename)
         if db_paper.source == "external":
             filename = build_external_thumbnail_filename(db_paper.id)
