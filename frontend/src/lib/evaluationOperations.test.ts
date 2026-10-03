@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  mapApiEvaluationsToEditable,
   normalizeEvaluationOperations,
   toDirectEvaluationOperations,
   toPendingEvaluationOperations,
@@ -14,6 +15,8 @@ const row = (overrides: Partial<EditableEvaluationRow>): EditableEvaluationRow =
   harness: " verified ",
   metric_name: "Accuracy",
   metric_value: "91.2",
+  original_metrics: {},
+  original_metric_name: "",
   best_rank: "2",
   num_parameters: " 125000 ",
   hf_model_url: " https://huggingface.co/org/model ",
@@ -105,5 +108,68 @@ describe("evaluation operation normalization", () => {
     expect(toPendingEvaluationOperations(canonical)).toEqual([
       { op: "delete", evaluation_id: 21 },
     ]);
+  });
+});
+
+const storedEvaluation = {
+  id: "19", paper_id: "11", task_id: "3", dataset_id: "7",
+  model_name: "Model", metrics: { Accuracy: 0, F1: "88.5", Recall: 90 },
+  best_metric: "Accuracy", is_open: true, uses_additional_data: false,
+  created_at: "", updated_at: "",
+};
+
+function updateDraft(overrides: Partial<EditableEvaluationRow>) {
+  const [draft] = mapApiEvaluationsToEditable([storedEvaluation]);
+  return { ...draft, operation: "update" as const, ...overrides };
+}
+
+describe("lossless evaluation drafts", () => {
+  it.each([
+    { model_name: "Renamed" },
+    { num_parameters: "100" },
+    { harness: "New harness" },
+    { is_open: false },
+  ])("preserves every stored score for metadata edits: %j", (changes) => {
+    const operations = normalizeEvaluationOperations([updateDraft(changes)], () => true);
+    expect(operations[0]).toMatchObject({ data: { metrics: storedEvaluation.metrics } });
+    const [direct] = toDirectEvaluationOperations(11, operations);
+    const [pending] = toPendingEvaluationOperations(operations);
+    expect(pending).toEqual({ op: "update", evaluation_id: 19, data: direct.payload });
+  });
+
+  it("keeps zero visible and round-trips it without coercing other stored scores", () => {
+    const draft = updateDraft({});
+    expect(draft.metric_value).toBe("0");
+    expect(normalizeEvaluationOperations([draft], () => false)[0])
+      .toMatchObject({ data: { metrics: { Accuracy: 0, F1: "88.5", Recall: 90 } } });
+  });
+
+  it("changes only the selected score", () => {
+    const operations = normalizeEvaluationOperations([updateDraft({ metric_value: "1" })], () => false);
+    expect(operations[0]).toMatchObject({ data: { metrics: { Accuracy: "1", F1: "88.5", Recall: 90 } } });
+    expect(storedEvaluation.metrics.Accuracy).toBe(0);
+  });
+
+  it("explicitly replaces a renamed metric while preserving other scores", () => {
+    const operations = normalizeEvaluationOperations([
+      updateDraft({ metric_name: " Exact match ", metric_value: "5" }),
+    ], () => false);
+    expect(operations[0]).toMatchObject({ data: {
+      metrics: { "Exact match": "5", F1: "88.5", Recall: 90 }, best_metric: "Exact match",
+    } });
+    expect(operations[0]).not.toHaveProperty("data.metrics.Accuracy");
+  });
+
+  it("rejects renaming onto an existing score instead of overwriting it", () => {
+    expect(() => normalizeEvaluationOperations([
+      updateDraft({ metric_name: "F1" }),
+    ], () => false)).toThrow('already has that score');
+    expect(storedEvaluation.metrics).toEqual({ Accuracy: 0, F1: "88.5", Recall: 90 });
+  });
+
+  it("selects the first stored metric when no best metric is supplied", () => {
+    const [draft] = mapApiEvaluationsToEditable([{ ...storedEvaluation, best_metric: undefined }]);
+    expect(draft.metric_name).toBe("Accuracy");
+    expect(draft.metric_value).toBe("0");
   });
 });

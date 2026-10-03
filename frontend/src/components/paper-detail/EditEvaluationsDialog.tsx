@@ -17,6 +17,7 @@ import { catalogApi } from "@/lib/api/catalog";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { submissionsApi } from "@/lib/api/submissions";
 import {
+  mapApiEvaluationsToEditable,
   normalizeEvaluationOperations,
   toDirectEvaluationOperations,
   toPendingEvaluationOperations,
@@ -55,27 +56,6 @@ function paperHasCodingAgentsTask(
       task.slug === "coding-agents" ||
       task.name.trim().toLowerCase() === "coding agents",
   );
-}
-
-function mapApiEvaluationsToEditable(evaluations: APIEvaluation[]): EditableEvaluationRow[] {
-  return evaluations.map(e => {
-    const metricName = e.best_metric || Object.keys(e.metrics)[0];
-    const metricValue = e.metrics[metricName];
-    return {
-      id: e.id,
-      task_id: e.task_id,
-      dataset_id: e.dataset_id,
-      model_name: e.model_name || '',
-      harness: e.harness || '',
-      metric_name: metricName || '',
-      metric_value: String(metricValue || ''),
-      best_rank: e.best_rank ? String(e.best_rank) : '',
-      num_parameters: e.num_parameters != null ? String(e.num_parameters) : '',
-      hf_model_url: e.hf_model_url || '',
-      is_open: e.is_open !== false,
-      operation: 'unchanged' as const,
-    };
-  });
 }
 
 function buildKnownTasksFromEvaluations(evaluations: APIEvaluation[]): Map<string, APITask> {
@@ -389,6 +369,8 @@ export function EditEvaluationsDialog({
         harness: '',
         metric_name: '',
         metric_value: '',
+        original_metrics: {},
+        original_metric_name: '',
         best_rank: '',
         num_parameters: '',
         hf_model_url: '',
@@ -427,8 +409,16 @@ export function EditEvaluationsDialog({
     hasUserEditedRef.current = true;
     setEditedEvaluations(
       editedEvaluations.map((e, i) => {
-        if (i !== index) return e;
+        if (i !== index || e[field] === value) return e;
         const updated = { ...e, [field]: value };
+
+        if (field === 'task_id' || field === 'dataset_id') {
+          // Scores belong to a leaderboard; moving the row requires fresh scores.
+          updated.original_metrics = {};
+          updated.original_metric_name = '';
+          updated.metric_value = '';
+          updated.best_rank = '';
+        }
 
         if (field === 'task_id') {
           updated.dataset_id = '';
