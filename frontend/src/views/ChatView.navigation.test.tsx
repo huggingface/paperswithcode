@@ -189,6 +189,28 @@ describe("selected conversation and active turn ownership", () => {
     await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1));
   });
 
+  it("keeps a completed new conversation visible while its canonical reload is pending", async () => {
+    const finish = deferred<void>();
+    const canonical = deferred<ChatSessionDetail>();
+    mocks.getSession.mockReturnValue(canonical.promise);
+    mocks.stream.mockImplementation(async function* (): AsyncGenerator<ChatEvent> {
+      yield { type: "stream_start", session_id: "a", request_id: "r1" };
+      yield { type: "answer_delta", text: "Completed new answer" };
+      await finish.promise;
+      yield { type: "done", followups: [], finish_reason: "success" };
+    });
+    render(element("/chat"));
+    fireEvent.click(screen.getByText("Send test prompt"));
+    await screen.findByText("Completed new answer");
+    await act(async () => finish.resolve());
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId("transcript")).toHaveTextContent("Completed new answer");
+    expect(screen.queryByText("Loading conversation…")).not.toBeInTheDocument();
+    expect(screen.queryByText("Stop selected turn")).not.toBeInTheDocument();
+    await act(async () => canonical.resolve(detail("a", "Canonical completed conversation")));
+    await screen.findByText("Canonical completed conversation");
+  });
+
   it("refreshes a cached saved conversation before projecting it on return", async () => {
     render(element("/chat/a"));
     await screen.findByText("a saved question");

@@ -188,7 +188,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const manualTitleLockRef = useRef<Set<string>>(new Set());
   const routeSessionIdRef = useRef(routeSessionId);
   routeSessionIdRef.current = routeSessionId;
-  // Only tracks whether the selected route has initialized its editable controls.
+  // Tracks whether the selected route has initialized its transcript and controls.
   // Persisted data belongs to queries; the active transcript belongs to useChat.
   const [initializedRoute, setInitializedRoute] = useState<string | null | undefined>(undefined);
   const refreshSessions = useCallback(async () => {
@@ -369,7 +369,9 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     refetchOnMount: "always",
   });
   const detail = routeQuery.data;
-  const routeReady = selectedTurn || Boolean(detail && initializedRoute === routeSessionId);
+  // A newly admitted turn already initialized the visible transcript, even when
+  // its first canonical fetch is still pending after streaming finishes.
+  const routeReady = selectedTurn || initializedRoute === (routeSessionId ?? null);
   const latexPaper = streamedArtifact && streamedArtifact.sessionId === routeSessionId
     ? streamedArtifact.descriptor
     : detail?.latex_paper;
