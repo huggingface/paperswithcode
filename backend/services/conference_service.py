@@ -5,7 +5,7 @@ Conference service for listing conferences and conference-scoped taxonomy.
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import and_, asc, case, desc, func
+from sqlalchemy import and_, asc, case, func
 from sqlalchemy.orm import Session
 
 from backend.models.api import (
@@ -386,24 +386,7 @@ class ConferenceService:
                     PaperConference.award == self.BEST_PAPER_FINALIST_AWARD
                 )
 
-            if latest_only:
-                query = query.filter(DBPaper.is_latest_version)
-
-            if has_code:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_code_filter(query)
-
-            if has_hf_artifacts:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_hf_artifacts_filter(query)
-
-            if start_date is not None:
-                query = query.filter(DBPaper.date_published >= start_date)
-            if end_date is not None:
-                query = query.filter(DBPaper.date_published <= end_date)
-
+            order_override = None
             if presentation in ("outstanding", "best_paper_finalist"):
                 if presentation == "outstanding":
                     award_rank = case(
@@ -411,9 +394,7 @@ class ConferenceService:
                         (PaperConference.award == "honorable_mention", 1),
                         else_=2,
                     )
-                    query = query.order_by(
-                        award_rank, asc(DBPaper.title), asc(DBPaper.id)
-                    )
+                    order_override = (award_rank, asc(DBPaper.title), asc(DBPaper.id))
                 elif slug == "cvpr-2026":
                     finalist_rank = case(
                         *[
@@ -424,41 +405,29 @@ class ConferenceService:
                         ],
                         else_=len(CVPR_2026_BEST_PAPER_FINALIST_ARXIV_ORDER),
                     )
-                    query = query.order_by(finalist_rank, asc(DBPaper.id))
+                    order_override = (finalist_rank, asc(DBPaper.id))
                 else:
-                    query = query.order_by(asc(DBPaper.title), asc(DBPaper.id))
-            elif order_by == "trending":
-                # Match the home feed: rank by the active trending metric
-                # (paper-level composite score or official-repo velocity per
-                # PWC_TRENDING_RANKING_MODE). Unscored papers stay in the list
-                # but sort after scored papers.
-                from backend.services.paper_service import PaperService
-
-                query = PaperService(self.db).apply_scoped_trending_order(query)
-            elif presentation not in ("outstanding", "best_paper_finalist"):
-                if order_by == "date_published":
-                    order_field = DBPaper.date_published
-                elif order_by == "title":
-                    order_field = DBPaper.title
-                elif order_by == "citation_count":
-                    order_field = DBPaper.citation_count
-                else:
-                    order_field = DBPaper.date_published
-
-                if order_dir == "desc":
-                    query = query.order_by(desc(order_field), desc(DBPaper.id))
-                else:
-                    query = query.order_by(asc(order_field), asc(DBPaper.id))
-
-            total_count = query.count()
-            offset = (page - 1) * page_size
-            db_papers = query.offset(offset).limit(page_size).all()
-
+                    order_override = (asc(DBPaper.title), asc(DBPaper.id))
+            from backend.services.paper_feed_executor import (
+                PaperFeedExecutor,
+                SCOPED_ORDERING,
+            )
             from backend.services.paper_service import PaperService
 
-            paper_service = PaperService(self.db)
-            papers = paper_service.hydrate_cards(
-                db_papers, include_resources=include_resources
+            result = PaperFeedExecutor(PaperService(self.db)).execute(
+                query,
+                page=page,
+                page_size=page_size,
+                order_by=order_by,
+                order_dir=order_dir,
+                ordering=SCOPED_ORDERING,
+                order_override=order_override,
+                latest_only=latest_only,
+                has_code=has_code,
+                has_hf_artifacts=has_hf_artifacts,
+                start_date=start_date,
+                end_date=end_date,
+                include_resources=include_resources,
             )
 
             award_by_paper_id: dict[int, Optional[str]] = {}
@@ -472,26 +441,20 @@ class ConferenceService:
                     self.db.query(PaperConference.paper_id, PaperConference.award)
                     .filter(
                         PaperConference.conference_id == conference.id,
-                        PaperConference.paper_id.in_([paper.id for paper in db_papers]),
+                        PaperConference.paper_id.in_(
+                            [int(paper.id) for paper in result.results]
+                        ),
                         award_filter,
                     )
                     .all()
                 )
                 award_by_paper_id = {paper_id: award for paper_id, award in award_rows}
 
-            for paper in papers:
+            for paper in result.results:
                 if presentation in ("outstanding", "best_paper_finalist"):
                     paper.conference_award = award_by_paper_id.get(int(paper.id))
 
-            next_page = page + 1 if offset + page_size < total_count else None
-            previous_page = page - 1 if page > 1 else None
-
-            return Papers(
-                count=total_count,
-                next_page=next_page,
-                previous_page=previous_page,
-                results=papers,
-            )
+            return result
         except PaperNotFoundError:
             raise
         except Exception as e:

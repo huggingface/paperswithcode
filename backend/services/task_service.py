@@ -1084,7 +1084,7 @@ class TaskService:
 
             from backend.services.paper_feed_executor import (
                 PaperFeedExecutor,
-                TASK_ORDERING,
+                SCOPED_ORDERING,
             )
             from backend.services.paper_service import PaperService
 
@@ -1099,7 +1099,7 @@ class TaskService:
                 end_date=end_date,
                 order_by=order_by,
                 order_dir=order_dir,
-                ordering=TASK_ORDERING,
+                ordering=SCOPED_ORDERING,
                 deduplicate_task_id=task.id,
                 include_resources=include_resources,
             )

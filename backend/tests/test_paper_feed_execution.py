@@ -241,3 +241,161 @@ def test_global_trending_selector_preserves_sql_order_and_empty_page(monkeypatch
     assert (
         result.count == 0 and result.previous_page is None and result.next_page is None
     )
+
+
+@pytest.fixture
+def entity_feeds(feeds):
+    from backend.models.database import (
+        Method,
+        PaperMethod,
+        Organization,
+        PaperOrganization,
+        Conference,
+        PaperConference,
+    )
+    from backend.services.method_service import MethodService
+    from backend.services.organization_service import OrganizationService
+    from backend.services.conference_service import ConferenceService
+
+    db, hydrated = feeds
+    Base.metadata.create_all(
+        db.bind,
+        tables=[
+            model.__table__
+            for model in (
+                Method,
+                PaperMethod,
+                Organization,
+                PaperOrganization,
+                Conference,
+                PaperConference,
+            )
+        ],
+    )
+    db.add_all(
+        [
+            Method(id=1, name="Robotics", slug="robotics"),
+            Organization(id=1, name="Lab", slug="lab"),
+            Conference(id=1, name="CVPR 2026", slug="cvpr-2026"),
+        ]
+    )
+    for ident, award in [
+        (1, "honorable_mention"),
+        (2, "outstanding"),
+        (3, "best_paper_finalist"),
+        (4, None),
+    ]:
+        db.add_all(
+            [
+                PaperMethod(paper_id=ident, method_id=1),
+                PaperOrganization(paper_id=ident, organization_id=1),
+                PaperConference(paper_id=ident, conference_id=1, award=award),
+            ]
+        )
+        db.get(Paper, ident).proceeding = (
+            "CVPR 2026 Oral" if ident == 1 else "CVPR 2026 Spotlight"
+        )
+    db.commit()
+    return (
+        db,
+        hydrated,
+        {
+            "method": lambda **kw: MethodService(db).get_method_papers(
+                "robotics", **kw
+            ),
+            "organization": lambda **kw: OrganizationService(
+                db
+            ).get_organization_papers("lab", **kw),
+            "conference": lambda **kw: ConferenceService(db).get_conference_papers(
+                "cvpr-2026", **kw
+            ),
+        },
+    )
+
+
+@pytest.mark.parametrize("entity", ["method", "organization", "conference"])
+def test_entity_feed_filters_ties_empty_pages_and_hydration(entity_feeds, entity):
+    _, hydrated, services = entity_feeds
+    get = services[entity]
+    result = get(page_size=2, include_resources=True)
+    assert ids(result) == ["3", "2"] and result.count == 3 and result.next_page == 2
+    assert hydrated[-1] == ([3, 2], True)
+    assert ids(get(order_by="title", order_dir="asc")) == ["1", "2", "3"]
+    assert ids(get(order_by="unknown", order_dir="DESC")) == ["1", "2", "3"]
+    assert ids(get(latest_only=False)) == ["4", "3", "2", "1"]
+    assert ids(
+        get(
+            has_code=True,
+            has_hf_artifacts=True,
+            start_date=date(2026, 1, 2),
+            end_date=date(2026, 1, 2),
+        )
+    ) == ["2"]
+    empty = get(page=5, page_size=1)
+    assert empty.count == 3 and ids(empty) == []
+    assert empty.previous_page == 4 and empty.next_page is None
+
+
+@pytest.mark.parametrize("entity", ["method", "organization", "conference"])
+@pytest.mark.parametrize("mode", ["github", "composite"])
+def test_entity_trending_keeps_shared_repositories_and_unscored_papers(
+    entity_feeds, monkeypatch, entity, mode
+):
+    db, _, services = entity_feeds
+    monkeypatch.setattr(PaperService(db).settings, "trending_ranking_mode", mode)
+    result = services[entity](order_by="trending")
+    assert ids(result) == ["2", "1", "3"] and result.count == 3
+
+
+@pytest.mark.parametrize("entity", ["organization", "conference"])
+def test_entity_task_scope_intersects_entity_membership(entity_feeds, entity):
+    db, _, services = entity_feeds
+    db.query(PaperTask).filter(PaperTask.paper_id != 2).delete()
+    db.commit()
+    assert ids(services[entity](task_slug="robotics")) == ["2"]
+
+
+def test_conference_presentation_order_overrides_requested_trending(entity_feeds):
+    _, _, services = entity_feeds
+    get = services["conference"]
+    assert ids(get(presentation="oral")) == ["1"]
+    assert ids(get(presentation="spotlight")) == ["3", "2"]
+    awarded = get(presentation="outstanding", order_by="trending", page_size=1)
+    assert ids(awarded) == ["2"] and awarded.count == 2 and awarded.next_page == 2
+    assert awarded.results[0].conference_award == "outstanding"
+    second = get(presentation="outstanding", page=2, page_size=1)
+    assert (
+        ids(second) == ["1"]
+        and second.results[0].conference_award == "honorable_mention"
+    )
+    assert ids(get(presentation="outstanding", page=5)) == []
+    assert (
+        get(presentation="best_paper_finalist").results[0].conference_award
+        == "best_paper_finalist"
+    )
+
+
+def test_cvpr_finalists_use_curated_order_other_conferences_use_title(entity_feeds):
+    from backend.database.conferences_setup.cvpr2026_best_paper_finalist_order import (
+        CVPR_2026_BEST_PAPER_FINALIST_ARXIV_ORDER,
+    )
+    from backend.models.database import Conference, PaperConference
+    from backend.services.conference_service import ConferenceService
+
+    db, _, services = entity_feeds
+    for ident in (1, 2, 3):
+        db.get(Paper, ident).arxiv_id = CVPR_2026_BEST_PAPER_FINALIST_ARXIV_ORDER[
+            3 - ident
+        ]
+    db.query(PaperConference).update({PaperConference.award: "best_paper_finalist"})
+    db.commit()
+    assert ids(
+        services["conference"](presentation="best_paper_finalist", order_by="trending")
+    ) == ["3", "2", "1"]
+    db.get(Conference, 1).slug = "other"
+    db.commit()
+    assert ids(
+        ConferenceService(db).get_conference_papers(
+            "other", presentation="best_paper_finalist", order_by="trending"
+        )
+    ) == ["1", "2", "3"]

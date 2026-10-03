@@ -5,12 +5,14 @@ before pagination. It shares response hydration, while scoped feeds share the
 entire ORM pipeline. Ordering policies preserve public endpoint differences.
 """
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import TYPE_CHECKING
 
 from sqlalchemy import and_, asc, desc, or_, select
 from sqlalchemy.orm import Query, aliased
+from sqlalchemy.sql.elements import ColumnElement
 
 from backend.models.database import (
     Paper as DBPaper,
@@ -35,7 +37,7 @@ class FeedOrdering:
 
 
 GENERAL_ORDERING = FeedOrdering(nulls_last=True, case_insensitive_direction=True)
-TASK_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
+SCOPED_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
 
 
 class PaperFeedExecutor:
@@ -51,6 +53,7 @@ class PaperFeedExecutor:
         order_by: str,
         order_dir: str,
         ordering: FeedOrdering,
+        order_override: Sequence[ColumnElement] | None = None,
         latest_only: bool = True,
         has_code: bool = False,
         has_official_implementation: bool = False,
@@ -81,7 +84,9 @@ class PaperFeedExecutor:
         if end_date is not None:
             query = query.filter(DBPaper.date_published <= end_date)
 
-        if order_by == "trending":
+        if order_override is not None:
+            query = query.order_by(*order_override)
+        elif order_by == "trending":
             if deduplicate_task_id is not None:
                 query = deduplicate_task_trending_repositories(
                     query, deduplicate_task_id
