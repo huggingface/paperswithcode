@@ -33,6 +33,7 @@ from backend.models.database import (
     ChatSharedArtifact,
     ChatTurnReservation,
 )
+from backend.services.chat_turn_mode import TurnMode, resolve_turn_mode
 from backend.services.chat_executor_turn_admission import ChatExecutorTurnAdmission
 from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 from backend.services.chat_edit_service import (
@@ -1090,6 +1091,11 @@ class ChatSessionService:
         ).scalar_one_or_none()
         if existing is None:
             return _ReplayOutcome(kind="continue")
+        mode = resolve_turn_mode(
+            self.settings,
+            primary_paper_id=getattr(session, "primary_paper_id", None),
+            poster_intent=detect_poster_intent(getattr(existing, "content", "")),
+        )
         executor_reservation = (
             self.db.scalar(
                 select(ChatTurnReservation).where(
@@ -1147,12 +1153,8 @@ class ChatSessionService:
                     ),
                     web_search_enabled=existing_web_search_enabled,
                     reasoning_effort=existing_reasoning_effort,
-                    reader_mode=getattr(session, "primary_paper_id", None) is not None,
-                    poster_mode=(
-                        self.settings.chat_artifacts_enabled
-                        and self.settings.chat_posterly_enabled
-                        and detect_poster_intent(getattr(existing, "content", ""))
-                    ),
+                    reader_mode=mode.reader_mode,
+                    poster_mode=mode.poster_mode,
                     attach_only=True,
                     executor_transport=(
                         executor_reservation.transport
@@ -1207,12 +1209,8 @@ class ChatSessionService:
                     ),
                     web_search_enabled=existing_web_search_enabled,
                     reasoning_effort=existing_reasoning_effort,
-                    reader_mode=getattr(session, "primary_paper_id", None) is not None,
-                    poster_mode=(
-                        self.settings.chat_artifacts_enabled
-                        and self.settings.chat_posterly_enabled
-                        and detect_poster_intent(existing.content)
-                    ),
+                    reader_mode=mode.reader_mode,
+                    poster_mode=mode.poster_mode,
                     attach_only=self.settings.chat_durable_turn_dispatch_enabled,
                     executor_transport=(
                         executor_reservation.transport
@@ -1629,6 +1627,7 @@ class ChatSessionService:
         web_search_enabled: bool,
         reasoning_effort: str,
         update_web_search_preference: bool,
+        mode: TurnMode,
         now: datetime,
     ) -> ChatMessageRecord:
         prior = plan.replacement.prior
@@ -1636,19 +1635,7 @@ class ChatSessionService:
         if prior is None:
             session.message_count += 1
         session.active_turn_id = plan.replacement.turn_id
-        poster_mode = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_posterly_enabled
-            and detect_poster_intent(text)
-        )
-        session.active_turn_expires_at = now + timedelta(
-            seconds=(
-                self.settings.chat_posterly_timeout_seconds
-                if poster_mode
-                else self.settings.chat_timeout_seconds
-            )
-            + 30
-        )
+        session.active_turn_expires_at = now + timedelta(seconds=mode.lease_seconds)
         session.hf_username = owner.hf_username
         if update_web_search_preference:
             session.web_search_enabled = web_search_enabled
@@ -1702,19 +1689,13 @@ class ChatSessionService:
         external_worker_reservation: ExternalWorkerReservation | None,
         web_search_enabled: bool,
         reasoning_effort: str,
-        poster_mode: bool,
+        mode: TurnMode,
         executor_transport: Literal["legacy", "persistent"] = "legacy",
         executor_reservation_revision: int | None = None,
     ) -> TurnAdmission:
         prior = plan.replacement.prior
-        paper_artifacts_enabled = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_latex_paper_enabled
-            and self.settings.chat_latex_compiler_jobs_enabled
-            and getattr(session, "primary_paper_id", None) is None
-        )
         paper_descriptor: dict[str, object] | None = None
-        if paper_artifacts_enabled:
+        if mode.paper_artifacts_enabled:
             artifact = self.db.scalar(
                 select(ChatArtifact).where(
                     ChatArtifact.session_id == session.id,
@@ -1763,9 +1744,9 @@ class ChatSessionService:
             system_prompt_sha256=plan.runtime.system_prompt_sha256,
             web_search_enabled=web_search_enabled,
             reasoning_effort=reasoning_effort,
-            reader_mode=getattr(session, "primary_paper_id", None) is not None,
-            poster_mode=poster_mode,
-            paper_artifacts_enabled=paper_artifacts_enabled,
+            reader_mode=mode.reader_mode,
+            poster_mode=mode.poster_mode,
+            paper_artifacts_enabled=mode.paper_artifacts_enabled,
             paper_descriptor=paper_descriptor,
             executor_transport=executor_transport,
             executor_reservation_revision=executor_reservation_revision,
@@ -1977,6 +1958,13 @@ class ChatSessionService:
                 )
             )
 
+        mode = resolve_turn_mode(
+            self.settings,
+            primary_paper_id=(
+                session_primary_paper_id if session is not None else primary_paper_id
+            ),
+            poster_intent=detect_poster_intent(text),
+        )
         target_harness = (
             getattr(session, "agent_harness", "claude")
             if session is not None
@@ -1996,21 +1984,10 @@ class ChatSessionService:
             )
             and target_harness == "pi"
         ):
-            poster_mode = (
-                self.settings.chat_artifacts_enabled
-                and self.settings.chat_posterly_enabled
-                and detect_poster_intent(text)
-            )
-            paper_artifacts_enabled = (
-                self.settings.chat_artifacts_enabled
-                and self.settings.chat_latex_paper_enabled
-                and self.settings.chat_latex_compiler_jobs_enabled
-                and session_primary_paper_id is None
-            )
             try:
                 require_ordinary_research_mode(
-                    poster_mode=poster_mode,
-                    paper_artifacts_enabled=paper_artifacts_enabled,
+                    poster_mode=mode.poster_mode,
+                    paper_artifacts_enabled=mode.paper_artifacts_enabled,
                 )
             except UnsupportedChatMode as error:
                 raise ChatServiceError(
@@ -2022,8 +1999,8 @@ class ChatSessionService:
                 durable_preflight = durable_coordinator.reserve_external_capacity(
                     durable_preflight,
                     now=now,
-                    poster_mode=poster_mode,
-                    paper_artifacts_enabled=paper_artifacts_enabled,
+                    poster_mode=mode.poster_mode,
+                    paper_artifacts_enabled=mode.paper_artifacts_enabled,
                 )
             except (TurnJobError, ValueError, SQLAlchemyError) as error:
                 raise self._durable_admission_error(error) from error
@@ -2131,22 +2108,10 @@ class ChatSessionService:
         )
         executor_transport: Literal["legacy", "persistent"] = "legacy"
         executor_reservation_revision: int | None = None
-        poster_mode = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_posterly_enabled
-            and detect_poster_intent(text)
-        )
-        paper_artifacts_enabled = (
-            self.settings.chat_artifacts_enabled
-            and self.settings.chat_latex_paper_enabled
-            and self.settings.chat_latex_compiler_jobs_enabled
-            and getattr(session, "primary_paper_id", None) is None
-        )
         if (
             self.settings.chat_executor_remote_transport_enabled
             and target_harness == "pi"
-            and not poster_mode
-            and not paper_artifacts_enabled
+            and mode.ordinary_research
         ):
             try:
                 reservation = ChatExecutorTurnAdmission(self.settings).reserve(
@@ -2174,6 +2139,7 @@ class ChatSessionService:
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
             update_web_search_preference=update_web_search_preference,
+            mode=mode,
             now=now,
         )
         if (
@@ -2224,7 +2190,7 @@ class ChatSessionService:
             ),
             web_search_enabled=web_search_enabled,
             reasoning_effort=effective_reasoning_effort,
-            poster_mode=poster_mode,
+            mode=mode,
             executor_transport=executor_transport,
             executor_reservation_revision=executor_reservation_revision,
         )

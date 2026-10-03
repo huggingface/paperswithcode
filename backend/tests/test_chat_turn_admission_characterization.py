@@ -285,7 +285,10 @@ def test_first_message_admission_sets_title_flag_and_locks_user_before_global(
     )
     service = ChatSessionService(db, settings)
 
-    def create_session(owner, selected_model, reasoning_effort):
+    def create_session(
+        owner, selected_model, reasoning_effort, *, agent_harness_override
+    ):
+        assert agent_harness_override is None
         db.events.append(("create_session", (owner, selected_model, reasoning_effort)))
         return session
 
