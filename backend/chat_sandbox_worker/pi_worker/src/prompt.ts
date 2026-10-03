@@ -1,3 +1,4 @@
+import { WEB_SEARCH_TOOL } from "./mcp.js";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { pwcMcpEnabled } from "./pwc_mcp_tools.js";
@@ -98,6 +99,7 @@ export async function renderPrompt(options: {
     )
     : toolSource;
   const rendered = researchSource
+    .replace(/\bsearch_web\b/gu, WEB_SEARCH_TOOL)
     .replace(DATE_SENTINEL, date)
     .replace(MODEL_SENTINEL, options.model)
     .replace(USER_SENTINEL, options.hfUsername)

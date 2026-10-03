@@ -3,8 +3,8 @@
 import hashlib
 from pathlib import Path
 
-# Fits automatic paper evidence and uses 272K Luna/GLM working windows.
-WORKER_CONTRACT_VERSION = "109"
+# Pi 1.0 with native MCP web search.
+WORKER_CONTRACT_VERSION = "110"
 # Web search extends the catalog operation set without changing its request or
 # response framing, so it remains on the rollback-compatible gateway protocol.
 GATEWAY_CONTRACT_VERSION = 30
@@ -12,12 +12,11 @@ GATEWAY_COMPATIBLE_FROM = 29
 DIRECT_OPENAI_ENABLED = True
 DATABASE_CONTRACT_VERSION = 2
 SDK_VERSION = "0.2.115"
-PI_VERSION = "0.84.1"
-PI_MCP_ADAPTER_VERSION = "2.25.0"
-PI_SOURCE_COMMIT = "53fa77ccd8a279eb87e92294ef3687b03ff80112"
+PI_VERSION = "1.0.0"
+PI_SOURCE_COMMIT = "a13d35a742c6ef8462812a28fbe1d8c8b7431c32"
 PI_NPM_INTEGRITY = (
-    "sha512-ncAqFrG+iybuPGOhMiZoEHkEzTpJgz3guYD32pD+M7ucc0WeHmauP6wa7qwP8V/"
-    "KWvsZDVNa5XGsdZ7fkC7w7A=="
+    "sha512-/FtbxoSQU/mEv1QnichJjRjqteqaIaMWxmhB4G367+MwZfX7/DI5B9YAg5lqbN7n"
+    "ztFskBEtUSZ+FlmMBECtMw=="
 )
 PI_NODE_VERSION = "22.19.0"
 PI_NODE_SHA256 = "c0649af18e6a24f6fe5535a3e86b341dd49a8e71117c8b68bde973ef834f16f2"

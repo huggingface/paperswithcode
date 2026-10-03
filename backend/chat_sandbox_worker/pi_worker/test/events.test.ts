@@ -492,3 +492,10 @@ test("recovered output limits clear overflow, but cancellation does not", () => 
     assert.equal(adapter.failed, stopReason === "aborted");
   }
 });
+
+test("native MCP web search preserves the public chat event name", () => {
+  const adapter = new PiEventAdapter(false);
+  const events = adapter.feed({ type: "tool_execution_start", toolCallId: "native-web", toolName: "mcp__exa__search_web", args: { query: "Pi" } });
+  assert.ok(events.some(event => event.type === "tool_call_start" && event.name === "search_web"));
+  assert.ok(events.some(event => event.type === "tool_call_arguments_done" && event.name === "search_web"));
+});

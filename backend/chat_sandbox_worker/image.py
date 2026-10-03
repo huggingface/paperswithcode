@@ -13,7 +13,6 @@ import modal
 from backend.chat_sandbox_worker.contract import (
     BASE_IMAGE,
     MODAL_APP_NAME,
-    PI_MCP_ADAPTER_VERSION,
     PI_NODE_SHA256,
     PI_NODE_VERSION,
     PI_VERSION,
@@ -133,7 +132,6 @@ image = (
         "chmod -R a+rX /opt/pwc/backend",
         "cd /opt/pwc/backend/chat_sandbox_worker/pi_worker && npm ci --ignore-scripts && npm run build && npm prune --omit=dev --ignore-scripts",
         f"node -e \"const p=require('/opt/pwc/backend/chat_sandbox_worker/pi_worker/node_modules/@earendil-works/pi-coding-agent/package.json'); if(p.version !== '{PI_VERSION}') process.exit(1)\"",
-        f"node -e \"const p=require('/opt/pwc/backend/chat_sandbox_worker/pi_worker/node_modules/pi-mcp-adapter/package.json'); if(p.version !== '{PI_MCP_ADAPTER_VERSION}') process.exit(1)\"",
         "PYTHONPATH=/opt/pwc python -m backend.chat_sandbox_worker.render_pi_prompt_asset /opt/pwc/pi-system-prompt.txt",
         "chmod 0644 /opt/pwc/pi-system-prompt.txt",
         "chmod -R a+rX /opt/pwc/restricted_hf_cli",

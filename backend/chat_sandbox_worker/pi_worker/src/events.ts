@@ -1,3 +1,4 @@
+import { chatToolName } from "./mcp.js";
 import { type AssistantMessage, isContextOverflow } from "@earendil-works/pi-ai/compat";
 import { serializeExcalidrawElements } from "./mcp_app_registry.js";
 import { parsePwcPaperCommand, type PaperReceiptOperation } from "./paper_command.js";
@@ -31,7 +32,7 @@ function textContent(value: unknown): string {
 }
 
 function publicToolName(value: unknown): string {
-  const name = String(value ?? "");
+  const name = chatToolName(String(value ?? ""));
   if (name === "bash") return "Bash";
   if (name === "read") return "Read";
   return name;

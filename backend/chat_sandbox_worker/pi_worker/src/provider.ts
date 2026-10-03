@@ -1,7 +1,7 @@
 import {
   type Api,
   type AssistantMessageEventStream,
-  type Context,
+  type TranscriptContext,
   InMemoryCredentialStore,
   type Model,
   type SimpleStreamOptions,
@@ -46,7 +46,7 @@ export function boundedGatewayPayload(payload: unknown, limit = GATEWAY_PAYLOAD_
 
 function boundedOpenAIResponsesStream(
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
   const callerPayload = options?.onPayload;
@@ -73,7 +73,7 @@ function boundedOpenAIResponsesStream(
 
 function boundedAnthropicMessagesStream(
   model: Model<Api>,
-  context: Context,
+  context: TranscriptContext,
   options?: SimpleStreamOptions,
 ): AssistantMessageEventStream {
   const callerPayload = options?.onPayload;
@@ -168,7 +168,6 @@ export async function createProvider(
               supportsTemperature: false,
             }
           : {
-              supportsTemperature: false,
               sessionAffinityFormat: "openai-nosession",
             },
       },

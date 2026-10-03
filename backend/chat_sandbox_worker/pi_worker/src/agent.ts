@@ -12,7 +12,7 @@ import { fitPaperContext } from "./paper_context_budget.js";
 import { CompactionController } from "./compaction.js";
 import { PiEventAdapter, reasoningIsVisible, type PwCEvent } from "./events.js";
 import { createNativeExcalidrawExtension } from "./excalidraw_tools.js";
-import { createWebMcpExtension } from "./mcp.js";
+import { createWebMcpExtension, WEB_SEARCH_TOOL } from "./mcp.js";
 import {
   EXCALIDRAW_MODEL_TOOLS,
   assessExcalidrawReadiness,
@@ -158,16 +158,12 @@ export class PiWorker {
       mkdir(sessionDirectory, { recursive: true, mode: 0o700 }),
       mkdir(agentDirectory, { recursive: true, mode: 0o700 }),
     ]);
-    // pi-mcp-adapter's viewer is useful locally but would expose an unreachable
-    // Modal loopback URL.  Browser rendering is owned by the React App host.
-    process.env.MCP_UI_VIEWER = "none";
     this.promptAsset = await loadPromptAsset();
     this.policyExtension = pwcExtension(this.policy);
     this.webMcpExtension = createWebMcpExtension(
       process.execPath,
       [new URL("./exa_mcp_server.js", import.meta.url).pathname],
       {
-        excalidraw: false,
         ...(this.gateway ? { exaEnv: {
           PWC_EXTERNAL_GATEWAY_URL: this.gateway.url,
           PWC_EXTERNAL_GATEWAY_CAPABILITY: this.gateway.capability,
@@ -188,7 +184,6 @@ export class PiWorker {
       [new URL("./exa_mcp_server.js", import.meta.url).pathname],
       {
         exa: false,
-        excalidraw: false,
       },
     );
     if (process.env.PWC_CHAT_PI_PREWARM_ENABLED !== "true") return;
@@ -457,7 +452,7 @@ export class PiWorker {
       // MCP research turns have no sandbox tools; poster and paper authoring keep them.
       tools: [
         ...(this.gateway && this.remoteTools && pwcMcpEnabled() && !run.poster_mode && run.paper_artifacts_enabled !== true ? [] : ["read", "bash"]),
-        "search_web",
+        ...(run.web_search_enabled ? [WEB_SEARCH_TOOL] : []),
         ...(this.gateway && this.remoteTools ? (pwcMcpEnabled() ? PWC_MCP_TOOL_NAMES : CATALOG_TOOL_NAMES) : []),
         ...(this.excalidrawAvailable ? [...EXCALIDRAW_MODEL_TOOLS] : []),
       ],

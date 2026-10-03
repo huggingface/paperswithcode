@@ -116,7 +116,7 @@ test("registered catalog tools execute the corresponding gateway operation", asy
 test("only the external catalog-enabled prompt advertises structured tools", async () => {
   const options = { model: "test", hfUsername: "test", webSearchEnabled: false, readerMode: false,
     source: "The available tools for a normal research turn are Bash, Read, and search_web." };
-  assert.equal(await renderPrompt(options), options.source);
+  assert.equal(await renderPrompt(options), options.source.replace("search_web", "mcp__exa__search_web"));
   const enabled = await renderPrompt({ ...options, catalogToolsEnabled: true });
   for (const name of CATALOG_TOOL_NAMES) assert.ok(enabled.includes(name));
   assert.match(enabled, /same search budget/u);

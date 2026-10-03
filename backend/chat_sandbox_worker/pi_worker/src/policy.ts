@@ -1,3 +1,4 @@
+import { chatToolName } from "./mcp.js";
 import path from "node:path";
 import { PWC_MCP_TOOL_NAMES, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import type { ExtensionFactory } from "@earendil-works/pi-coding-agent";
@@ -311,7 +312,7 @@ export function pwcExtension(policy: PolicyController): ExtensionFactory {
   return (pi) => {
     pi.on("before_agent_start", () => ({ systemPrompt: policy.systemPrompt }));
     pi.on("tool_call", (event) => {
-      const reason = policy.authorize(event.toolCallId, event.toolName, event.input as Record<string, unknown>);
+      const reason = policy.authorize(event.toolCallId, chatToolName(event.toolName), event.input as Record<string, unknown>);
       return reason ? { block: true, reason } : undefined;
     });
     pi.on("tool_result", (event) => policy.finish(event.toolCallId, event.content, event.isError));
