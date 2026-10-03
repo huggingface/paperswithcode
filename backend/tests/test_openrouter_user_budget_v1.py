@@ -16,7 +16,9 @@ from starlette.requests import Request
 from backend import chat_gateway_app as gateway
 from backend.config import Settings
 from backend.routers import chat as chat_router
-from backend.routers.chat import _authorize_openrouter, _require_recent_auth
+from backend.services import chat_admission_billing as chat_billing
+from backend.routers.chat import _require_recent_auth
+from backend.services.chat_admission_billing import authorize_openrouter
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.openrouter_budget_service import (
     OpenRouterBudgetExceeded,
@@ -405,11 +407,11 @@ def test_migration_is_staging_owned_idempotent_and_secret_safe():
 def test_byok_remains_available_when_funded_preview_is_disabled(monkeypatch):
     revision = __import__("uuid").uuid4()
     monkeypatch.setattr(
-        "backend.routers.chat.OpenRouterBYOKService.selected",
+        "backend.services.chat_admission_billing.OpenRouterBYOKService.selected",
         lambda _service, _owner: SimpleNamespace(token="sk-or-user", revision=revision),
     )
     admission = asyncio.run(
-        _authorize_openrouter(
+        authorize_openrouter(
             _settings(chat_openrouter_server_funded_enabled=False),
             SimpleNamespace(),
             "hf-user",
@@ -420,12 +422,12 @@ def test_byok_remains_available_when_funded_preview_is_disabled(monkeypatch):
     assert admission.credential_revision == revision
 
     monkeypatch.setattr(
-        "backend.routers.chat.OpenRouterBYOKService.selected",
+        "backend.services.chat_admission_billing.OpenRouterBYOKService.selected",
         lambda _service, _owner: None,
     )
     with pytest.raises(ChatServiceError) as error:
         asyncio.run(
-            _authorize_openrouter(
+            authorize_openrouter(
                 _settings(chat_openrouter_server_funded_enabled=False),
                 SimpleNamespace(),
                 "hf-user",
@@ -438,9 +440,9 @@ def test_non_admin_staging_users_receive_shared_funding(monkeypatch):
     async def allow(_settings):
         return None
 
-    monkeypatch.setattr(chat_router, "require_openrouter_budget", allow)
+    monkeypatch.setattr(chat_billing, "require_openrouter_budget", allow)
     admission = asyncio.run(
-        _authorize_openrouter(
+        authorize_openrouter(
             _settings(chat_openrouter_server_funded_enabled=True),
         )
     )
@@ -451,9 +453,9 @@ def test_production_funding_is_unchanged_for_non_admins(monkeypatch):
     async def allow(_settings):
         return None
 
-    monkeypatch.setattr(chat_router, "require_openrouter_budget", allow)
+    monkeypatch.setattr(chat_billing, "require_openrouter_budget", allow)
     admission = asyncio.run(
-        _authorize_openrouter(
+        authorize_openrouter(
             _settings(
                 environment="production",
                 chat_openrouter_server_funded_enabled=True,
@@ -617,14 +619,14 @@ def test_allowance_and_workspace_failures_have_distinct_secret_safe_contracts(
                 resets_at=reset,
             )
 
-    monkeypatch.setattr(chat_router, "OpenRouterUserBudgetService", ExhaustedBudget)
+    monkeypatch.setattr(chat_billing, "OpenRouterUserBudgetService", ExhaustedBudget)
     monkeypatch.setattr(
-        "backend.routers.chat.OpenRouterBYOKService.selected",
+        "backend.services.chat_admission_billing.OpenRouterBYOKService.selected",
         lambda _service, _owner: None,
     )
     with pytest.raises(ChatServiceError) as exhausted:
         asyncio.run(
-            _authorize_openrouter(
+            authorize_openrouter(
                 _settings(chat_openrouter_server_funded_enabled=True),
                 SimpleNamespace(),
                 "hf-user",
@@ -646,11 +648,11 @@ def test_allowance_and_workspace_failures_have_distinct_secret_safe_contracts(
     async def workspace_exhausted(_settings):
         raise OpenRouterBudgetExceeded("internal workspace reason")
 
-    monkeypatch.setattr(chat_router, "OpenRouterUserBudgetService", AvailableBudget)
-    monkeypatch.setattr(chat_router, "require_openrouter_budget", workspace_exhausted)
+    monkeypatch.setattr(chat_billing, "OpenRouterUserBudgetService", AvailableBudget)
+    monkeypatch.setattr(chat_billing, "require_openrouter_budget", workspace_exhausted)
     with pytest.raises(ChatServiceError) as unavailable:
         asyncio.run(
-            _authorize_openrouter(
+            authorize_openrouter(
                 _settings(chat_openrouter_server_funded_enabled=True),
                 SimpleNamespace(),
                 "hf-user",

@@ -6,7 +6,7 @@ import httpx
 import pytest
 
 from backend.config import Settings
-from backend.routers import chat as chat_router
+from backend.services import chat_admission_billing as chat_billing
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.openrouter_budget_service import (
     OpenRouterBudgetExceeded,
@@ -220,7 +220,7 @@ def test_budget_guard_rejects_unverifiable_provider_data(payload: dict):
 def test_chat_admission_rejects_disabled_shared_provider():
     with pytest.raises(ChatServiceError) as error:
         asyncio.run(
-            chat_router._authorize_openrouter(
+            chat_billing.authorize_openrouter(
                 _settings(chat_openrouter_server_funded_enabled=False),
             )
         )
@@ -244,13 +244,13 @@ def test_chat_admission_maps_budget_failure_without_leaking_detail(
     async def fail(_settings):
         raise budget_error
 
-    monkeypatch.setattr(chat_router, "require_openrouter_budget", fail)
+    monkeypatch.setattr(chat_billing, "require_openrouter_budget", fail)
     with pytest.raises(ChatServiceError) as error:
-        asyncio.run(chat_router._authorize_openrouter(_settings()))
+        asyncio.run(chat_billing.authorize_openrouter(_settings()))
 
     assert error.value.code == expected_code
     assert "exhausted" not in str(error.value)
-    assert str(error.value) == chat_router.OPENROUTER_UNAVAILABLE_MESSAGE
+    assert str(error.value) == chat_billing.OPENROUTER_UNAVAILABLE_MESSAGE
 
 
 def test_chat_admission_has_no_process_local_request_quota(
@@ -259,6 +259,6 @@ def test_chat_admission_has_no_process_local_request_quota(
     async def allow(_settings):
         return None
 
-    monkeypatch.setattr(chat_router, "require_openrouter_budget", allow)
-    asyncio.run(chat_router._authorize_openrouter(_settings()))
-    asyncio.run(chat_router._authorize_openrouter(_settings()))
+    monkeypatch.setattr(chat_billing, "require_openrouter_budget", allow)
+    asyncio.run(chat_billing.authorize_openrouter(_settings()))
+    asyncio.run(chat_billing.authorize_openrouter(_settings()))

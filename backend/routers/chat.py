@@ -7,8 +7,6 @@ import logging
 import time
 import uuid
 from collections import deque
-from contextlib import nullcontext
-from dataclasses import dataclass, replace
 from datetime import UTC, datetime
 from itertools import count
 from typing import Literal
@@ -86,7 +84,6 @@ from backend.services.chat_mcp_app_proxy import (
 )
 from backend.services.chat_paper_context_service import (
     ChatPaperContextService,
-    PreparedPaperTurn,
 )
 from backend.services.chat_pi_release_window import (
     PiReleaseWindowUnavailable,
@@ -97,27 +94,17 @@ from backend.services.chat_sandbox_service import (
     SandboxSessionManager,
 )
 from backend.services.chat_sandbox_spend_access import (
-    assert_chat_sandbox_spend_available,
     chat_sandbox_spend_available,
     chat_sandbox_spend_status,
-)
-from backend.services.chat_sandbox_spend_service import (
-    ChatComputeDisabled,
 )
 from backend.services.chat_session_service import (
     ChatOwner,
     ChatServiceError,
     ChatSessionService,
-    TurnAdmission,
     owner_from_user,
-)
-from backend.services.chat_scope_guardrail_service import (
-    ScopeMessage,
-    build_scope_context,
 )
 from backend.services.chat_share_service import ChatShareService
 from backend.services.chat_stream_service import (
-    ChatStreamOrchestrator,
     encode_journal_frame,
 )
 from backend.services.chat_turn_runner import shared_sandbox_manager
@@ -129,19 +116,15 @@ from backend.services.chat_durable_lifecycle_observer import durable_lifecycle_o
 from backend.services.chat_durable_qualification_evidence import (
     ChatDurableQualificationEvidenceService,
     QualificationEvidenceUnavailable,
-    record_qualification_event_safely,
 )
 from backend.services.chat_web_search_service import (
     ChatWebSearchBudgetService,
     web_search_available,
 )
-from backend.services.deployment_lifecycle import deployment_lifecycle
 from backend.services.chat_openai_budget_service import ChatOpenAIBudgetService
 from backend.services.openrouter_budget_service import (
-    OpenRouterBudgetExceeded,
     OpenRouterBudgetUnavailable,
     openrouter_budget_status,
-    require_openrouter_budget,
 )
 from backend.services.openrouter_byok_service import (
     OpenRouterBYOKService,
@@ -150,11 +133,15 @@ from backend.services.openrouter_byok_service import (
 )
 from backend.utils.csrf import has_valid_non_cookie_admin_credential
 from backend.services.openrouter_user_budget_service import (
-    PUBLIC_SUPPORT_URL,
     OpenRouterUserBudgetService,
 )
 from backend.utils.auth import require_admin, require_user
 from backend.utils.client_ip import get_client_ip
+
+from backend.services.chat_application_service import (
+    ChatApplicationService,
+    ChatApplicationError,
+)
 
 router = APIRouter(prefix="/chat", tags=["chat"])
 logger = logging.getLogger(__name__)
@@ -206,24 +193,6 @@ class PaperContextPrewarmRequest(BaseModel):
     route_id: str = Field(min_length=1, max_length=200)
 
 
-def _prepare_paper_turn(
-    settings: Settings,
-    owner_id: str,
-    body: ChatRequest,
-) -> PreparedPaperTurn:
-    with db_manager.session_local() as db:
-        return ChatPaperContextService(db, settings).prepare_turn(
-            owner_id=owner_id,
-            display_message=body.message,
-            mentions=body.paper_mentions,
-            session_id=body.session_id,
-            replace_message_id=body.replace_message_id,
-            primary_route_id=body.primary_paper_route_id,
-            viewer_context=body.viewer_context,
-            paper_selection=body.paper_selection,
-        )
-
-
 def _prewarm_paper(settings: Settings, route_id: str) -> None:
     with db_manager.session_local() as db:
         ChatPaperContextService(db, settings).prewarm(route_id)
@@ -235,16 +204,6 @@ async def _run_prewarm(settings: Settings, route_id: str) -> None:
     finally:
         async with _prewarm_lock:
             _prewarm_tasks.pop(route_id, None)
-
-
-async def _release_durable_admission() -> None:
-    """The database lease is released by turn finalization, not this callback."""
-
-
-async def _never_disconnected() -> bool:
-    """A durable turn outlives any one browser transport."""
-
-    return False
 
 
 def _raise(exc: ChatServiceError, headers: dict[str, str] | None = None) -> None:
@@ -276,13 +235,6 @@ def _raise_artifact(error: ArtifactError) -> None:
     ) from error
 
 
-@dataclass(frozen=True)
-class OpenRouterAdmission:
-    mode: str
-    token: str | None = None
-    credential_revision: uuid.UUID | None = None
-
-
 class ConnectOpenRouterKey(BaseModel):
     model_config = ConfigDict(extra="forbid")
     api_key: str = Field(min_length=1, max_length=512)
@@ -300,15 +252,6 @@ class AdminCreateHarnessSession(BaseModel):
     agent_harness: Literal["claude", "pi"]
     selected_model: str | None = None
     reasoning_effort: Literal["low", "high", "max"] = "low"
-
-
-@dataclass(frozen=True)
-class _PreparedAdmission:
-    admission: TurnAdmission
-    transport: str
-    title_token: uuid.UUID | None
-    scope_messages: list[ScopeMessage]
-    qualified: bool
 
 
 def _durable_qualification_scope(
@@ -335,179 +278,9 @@ def _durable_qualification_scope(
     return scope_id, workload
 
 
-def _admit_prepared_turn(
-    *,
-    settings: Settings,
-    owner: ChatOwner,
-    body: ChatRequest,
-    prepared: PreparedPaperTurn,
-    request_id: str,
-    search_is_available: bool,
-    inference_credential_present: bool,
-    qualification_scope: tuple[uuid.UUID, Literal["no_tool", "read", "bash"]] | None,
-) -> _PreparedAdmission:
-    scope_messages = [ScopeMessage(role="user", content=body.message)]
-    with db_manager.session_local() as db:
-        try:
-            try:
-                qualification_context = (
-                    ChatDurableQualificationEvidenceService(db).require_active_context(
-                        qualification_scope[0],
-                        workload=qualification_scope[1],
-                        settings=settings,
-                    )
-                    if qualification_scope is not None
-                    else None
-                )
-            except QualificationEvidenceUnavailable:
-                raise HTTPException(
-                    status_code=409,
-                    detail={"code": "qualification_scope_unavailable"},
-                ) from None
-            service = ChatSessionService(db, settings)
-            admission = service.begin_turn(
-                owner,
-                session_id=body.session_id,
-                client_message_id=body.client_message_id,
-                text=prepared.display_message,
-                effective_prompt=prepared.effective_prompt,
-                paper_mentions=prepared.mentions,
-                primary_paper_id=prepared.primary_paper_id,
-                primary_paper_context=prepared.primary_paper_context,
-                viewer_context=prepared.viewer_context,
-                paper_selection=prepared.paper_selection,
-                initial_model=body.initial_model,
-                replace_message_id=body.replace_message_id,
-                prior_revision=body.prior_revision,
-                retry_message_id=body.retry_message_id,
-                web_search_enabled=body.web_search_enabled,
-                reasoning_effort=body.reasoning_effort,
-                update_web_search_preference=search_is_available,
-                qualification=qualification_context,
-            )
-            transport = settings.chat_route_providers[admission.model_route]
-            if (
-                not getattr(admission, "attach_only", False)
-                and transport == "huggingface"
-                and not inference_credential_present
-            ):
-                raise ChatServiceError(
-                    "hf_inference_billing_required",
-                    402,
-                    "Your Hugging Face Inference Providers authorization is "
-                    "missing or expired. Re-sign in with Hugging Face to continue.",
-                )
-            title_token = (
-                service.begin_title(
-                    owner,
-                    admission.session_id,
-                    revision=admission.prompt_revision,
-                )
-                if admission.title_should_generate and not admission.replay_assistant
-                else None
-            )
-            if not admission.replay_assistant and not getattr(
-                admission, "attach_only", False
-            ):
-                latency = ChatLatencyService(db)
-                latency.admit(
-                    turn_id=admission.turn_id,
-                    session_id=admission.session_id,
-                    request_id=request_id,
-                    settings=settings,
-                    model_route=admission.model_route,
-                    execution_backend=admission.execution_backend,
-                    is_new_chat=body.session_id is None,
-                    agent_harness=admission.agent_harness,
-                )
-                if qualification_context is not None and not latency.mark_qualification(
-                    request_id,
-                    scope_id=qualification_context.scope_id,
-                    run_id=qualification_context.run_id,
-                    profile=qualification_context.profile,
-                    workload=qualification_scope[1],
-                    scenario="reliability",
-                ):
-                    raise RuntimeError("qualification scope persistence failed")
-                if settings.chat_scope_guardrail_enabled:
-                    current_user = db.get(ChatMessageRecord, admission.user_message_id)
-                    cutoff = (
-                        admission.replacement_target_sequence
-                        if admission.replacement_target_sequence is not None
-                        else getattr(current_user, "sequence", 0)
-                    )
-                    prior_rows = list(
-                        db.execute(
-                            select(ChatMessageRecord)
-                            .where(
-                                ChatMessageRecord.session_id == admission.session_id,
-                                ChatMessageRecord.sequence < cutoff,
-                                ChatMessageRecord.role.in_(("user", "assistant")),
-                                ChatMessageRecord.status == "complete",
-                            )
-                            .order_by(ChatMessageRecord.sequence.desc())
-                            .limit(settings.chat_scope_guardrail_max_prior_messages)
-                        ).scalars()
-                    )
-                    selected_paper = None
-                    primary = prepared.primary_paper_context
-                    if isinstance(primary, dict):
-                        selected_paper = {
-                            "title": primary.get("title"),
-                            "route_id": primary.get("route_id"),
-                        }
-                    scope_messages = build_scope_context(
-                        [
-                            ScopeMessage(role=row.role, content=row.content)
-                            for row in reversed(prior_rows)
-                        ],
-                        prepared.display_message,
-                        max_prior_messages=(
-                            settings.chat_scope_guardrail_max_prior_messages
-                        ),
-                        max_chars=settings.chat_scope_guardrail_max_context_chars,
-                        selected_paper=selected_paper,
-                    )
-            db.commit()
-        except ChatServiceError as exc:
-            if exc.commit_changes:
-                db.commit()
-            else:
-                db.rollback()
-            raise
-    return _PreparedAdmission(
-        admission=admission,
-        transport=transport,
-        title_token=title_token,
-        scope_messages=scope_messages,
-        qualified=qualification_context is not None,
-    )
-
-
-OPENROUTER_UNAVAILABLE_MESSAGE = (
-    "OpenRouter is currently unavailable. However, you can still bring your own "
-    "key in Settings."
-)
-
-
 def _require_openrouter_settings(settings: Settings) -> None:
     if not settings.chat_enabled:
         raise HTTPException(status_code=404, detail="Not found")
-
-
-def _selected_byok(db: Session, settings: Settings, owner_id: str):
-    """Isolate credential faults so a healthy funded ledger can still admit."""
-
-    nested = db.begin_nested() if hasattr(db, "begin_nested") else nullcontext()
-    try:
-        with nested:
-            return OpenRouterBYOKService(db, settings).selected(owner_id)
-    except Exception as error:
-        logger.error(
-            "openrouter credential selection unavailable error=%s",
-            type(error).__name__,
-        )
-        return None
 
 
 def _require_same_origin_csrf(request: Request, settings: Settings) -> None:
@@ -562,94 +335,6 @@ def _require_recent_auth(request: Request, user: dict, settings: Settings) -> No
             },
         )
     _require_same_origin_csrf(request, settings)
-
-
-async def _authorize_openrouter(
-    settings: Settings,
-    db: Session | None = None,
-    owner_id: str | None = None,
-) -> OpenRouterAdmission:
-    if not settings.chat_openrouter_server_funded_enabled:
-        if db is not None and owner_id is not None:
-            byok = _selected_byok(db, settings, owner_id)
-            if byok:
-                return OpenRouterAdmission("openrouter_byok", byok.token, byok.revision)
-        raise ChatServiceError(
-            "openrouter_unavailable",
-            503,
-            OPENROUTER_UNAVAILABLE_MESSAGE,
-            details={
-                "byok_settings_available": True,
-                "support_url": PUBLIC_SUPPORT_URL,
-            },
-        )
-    if db is not None and owner_id is not None:
-        try:
-            funded_available = OpenRouterUserBudgetService(db, settings).can_fund_call(
-                owner_id
-            )
-        except Exception as error:
-            logger.error(
-                "openrouter user budget database failure error=%s",
-                type(error).__name__,
-            )
-            raise ChatServiceError(
-                "openrouter_unavailable",
-                503,
-                OPENROUTER_UNAVAILABLE_MESSAGE,
-                details={
-                    "byok_settings_available": True,
-                    "support_url": PUBLIC_SUPPORT_URL,
-                },
-            ) from None
-        byok = _selected_byok(db, settings, owner_id)
-        if not funded_available:
-            if byok:
-                return OpenRouterAdmission("openrouter_byok", byok.token, byok.revision)
-            status = OpenRouterUserBudgetService(db, settings).status_percentage(
-                owner_id
-            )
-            raise ChatServiceError(
-                "openrouter_monthly_budget_exhausted",
-                429,
-                "The remaining shared Papers With Code OpenRouter allowance is not enough for another model call.",
-                details={
-                    "used_percent": status.used_percent,
-                    "remaining_percent": status.remaining_percent,
-                    "resets_at": status.resets_at.isoformat().replace("+00:00", "Z"),
-                },
-            )
-    try:
-        await require_openrouter_budget(settings)
-    except OpenRouterBudgetExceeded:
-        if db is not None and owner_id is not None:
-            byok = _selected_byok(db, settings, owner_id)
-            if byok:
-                return OpenRouterAdmission("openrouter_byok", byok.token, byok.revision)
-        raise ChatServiceError(
-            "openrouter_unavailable",
-            503,
-            OPENROUTER_UNAVAILABLE_MESSAGE,
-            details={
-                "byok_settings_available": True,
-                "support_url": PUBLIC_SUPPORT_URL,
-            },
-        ) from None
-    except OpenRouterBudgetUnavailable:
-        if db is not None and owner_id is not None:
-            byok = _selected_byok(db, settings, owner_id)
-            if byok:
-                return OpenRouterAdmission("openrouter_byok", byok.token, byok.revision)
-        raise ChatServiceError(
-            "openrouter_unavailable",
-            503,
-            OPENROUTER_UNAVAILABLE_MESSAGE,
-            details={
-                "byok_settings_available": True,
-                "support_url": PUBLIC_SUPPORT_URL,
-            },
-        ) from None
-    return OpenRouterAdmission("openrouter_funded")
 
 
 def _busy(session: ChatSession) -> bool:
@@ -2122,182 +1807,23 @@ async def stream_chat(
         if settings.chat_durable_turn_dispatch_enabled
         else 0
     )
-    if not settings.chat_enabled:
-        raise HTTPException(status_code=503, detail="Chat is not configured")
-    if body.paper_selection is not None and not settings.paper_reader_selection_enabled:
-        raise HTTPException(
-            status_code=409,
-            detail={
-                "code": "paper_selection_disabled",
-                "message": "Paper selection is currently disabled. Remove it before sending.",
-            },
-        )
-    if body.primary_paper_route_id is not None or body.paper_selection is not None:
-        if not settings.paper_reader_chat_enabled:
-            raise HTTPException(
-                status_code=404,
-                detail={
-                    "code": "paper_reader_chat_disabled",
-                    "message": "Paper reader chat is not enabled.",
-                },
-            )
-        if settings.environment == "staging" and user.get("role") != "admin":
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "staging_access_required",
-                    "message": "Paper reader chat on staging is limited to the reviewer account.",
-                },
-            )
-    if (
-        not settings.chat_public_admission_enabled
-        or not settings.chat_sandbox_admission_enabled
-    ):
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "chat_temporarily_disabled",
-                "message": "Chat is temporarily disabled. Your message was not sent.",
-            },
-        )
-    if (
-        settings.chat_default_backend == "modal_cli"
-        and settings.chat_sandbox_spend_enforcement_enabled
-    ):
-        try:
-            assert_chat_sandbox_spend_available(
-                settings,
-                session_factory=db_manager.session_local,
-            )
-        except ChatComputeDisabled as error:
-            raise HTTPException(
-                status_code=503,
-                detail={"code": error.code, "message": str(error)},
-            ) from error
-    search_is_available = web_search_available(settings)
-    if body.web_search_enabled and not search_is_available:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "web_search_unavailable",
-                "message": "Web search is temporarily unavailable. Turn Search off and retry.",
-            },
-        )
-    inference_credential = inference_credential_for_request(request, user, settings)
-    if not deployment_lifecycle.status().accepting_chat_turns:
-        raise HTTPException(
-            status_code=503,
-            detail="A deployment is activating; retry this turn shortly",
-            headers={"Retry-After": "3"},
-        )
+    credential = inference_credential_for_request(request, user, settings)
     owner = owner_from_user(
         user,
-        inference_token=inference_credential.token if inference_credential else None,
-        inference_bill_to=(
-            inference_credential.bill_to if inference_credential else None
-        ),
+        inference_token=credential.token if credential else None,
+        inference_bill_to=credential.bill_to if credential else None,
     )
-    request_id = str(uuid.uuid4())
-    prepared = PreparedPaperTurn(body.message, body.message, [], 0, 0, 0)
-    scope_messages = [ScopeMessage(role="user", content=body.message)]
-    existing_prompt: str | None = None
-    if body.session_id is not None:
-        with db_manager.session_local() as replay_db:
-            existing_prompt = ChatSessionService(
-                replay_db, settings
-            ).existing_effective_prompt(owner, body.session_id, body.client_message_id)
-    if existing_prompt is not None:
-        prepared = PreparedPaperTurn(body.message, existing_prompt, [], 0, 0, 0)
-    else:
-        started = time.perf_counter()
-        try:
-            prepared = await asyncio.wait_for(
-                asyncio.to_thread(
-                    _prepare_paper_turn, settings, owner.hf_user_id, body
-                ),
-                timeout=settings.chat_paper_context_timeout_seconds,
-            )
-        except TimeoutError as exc:
-            logger.info(
-                "chat paper context outcome=timeout elapsed_ms=%s",
-                round((time.perf_counter() - started) * 1000),
-            )
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "code": "paper_context_unavailable",
-                    "message": "Attached paper context could not be prepared. Please retry.",
-                },
-                headers={"Retry-After": "2"},
-            ) from exc
-        except ChatServiceError as exc:
-            logger.info(
-                "chat paper context outcome=%s elapsed_ms=%s",
-                exc.code,
-                round((time.perf_counter() - started) * 1000),
-            )
-            _raise(exc, {"Retry-After": "2"} if exc.status_code == 503 else None)
-        logger.info(
-            "chat paper context prepared request_id=%s papers=%s occurrences=%s bytes=%s truncated=%s elapsed_ms=%s",
-            request_id,
-            prepared.distinct_papers,
-            len(prepared.mentions),
-            prepared.included_bytes,
-            prepared.truncated_papers,
-            round((time.perf_counter() - started) * 1000),
-        )
     try:
-        prepared_admission = await asyncio.to_thread(
-            _admit_prepared_turn,
-            settings=settings,
-            owner=owner,
+        outcome = await ChatApplicationService(settings).start_turn(
             body=body,
-            prepared=prepared,
-            request_id=request_id,
-            search_is_available=search_is_available,
-            inference_credential_present=inference_credential is not None,
+            owner=owner,
+            user_role=user.get("role"),
+            inference_credential_present=credential is not None,
             qualification_scope=qualification_scope,
+            after_sequence=after_sequence,
         )
-        admission = prepared_admission.admission
-        transport = prepared_admission.transport
-        title_token = prepared_admission.title_token
-        scope_messages = prepared_admission.scope_messages
-        if (
-            prepared_admission.qualified
-            and not admission.replay_assistant
-            and not getattr(admission, "attach_only", False)
-        ):
-            await asyncio.to_thread(
-                record_qualification_event_safely,
-                turn_id=admission.turn_id,
-                chat_session_id=admission.session_id,
-                event_type="admitted_no_queue",
-            )
-        if (
-            transport == "openrouter"
-            and not admission.replay_assistant
-            and not getattr(admission, "attach_only", False)
-        ):
-            try:
-                with db_manager.session_local() as db:
-                    openrouter = await _authorize_openrouter(
-                        settings,
-                        db,
-                        owner.hf_user_id,
-                    )
-            except ChatServiceError as exc:
-                with db_manager.session_local() as db:
-                    ChatSessionService(db, settings).fail_turn(
-                        owner, admission, exc.code
-                    )
-                    db.commit()
-                raise
-            owner = replace(
-                owner,
-                openrouter_mode=openrouter.mode,
-                openrouter_token=openrouter.token,
-                openrouter_credential_revision=openrouter.credential_revision,
-            )
+    except ChatApplicationError as exc:
+        raise HTTPException(exc.status_code, exc.detail, headers=exc.headers) from exc
     except ChatServiceError as exc:
         if exc.code == "chat_capacity":
             logger.warning(
@@ -2311,69 +1837,25 @@ async def stream_chat(
             )
         _raise(exc)
 
-    live_stream = None
-    journal_stream = None
-    if getattr(admission, "attach_only", False):
-        journal_stream = _durable_replay_frames(
-            admission,
-            request_id=request_id,
-            after_sequence=after_sequence,
-        )
-    else:
-        orchestrator = ChatStreamOrchestrator(
-            settings=settings,
-            owner=owner,
-            admission=admission,
-            prompt=prepared.effective_prompt,
-            display_message=prepared.title_prompt or prepared.display_message,
-            request_id=request_id,
-            title_token=title_token,
-            is_disconnected=_never_disconnected,
-            release_admission=_release_durable_admission,
-            scope_messages=scope_messages,
-        )
-        if (
-            settings.chat_durable_turn_dispatch_enabled
-            and admission.replay_assistant is None
-        ):
-            claim = await orchestrator.claim_durable_turn()
-            live_stream = await detached_chat_runtime(settings).start(
-                admission=admission,
-                owner_id=owner.hf_user_id,
-                claim=claim,
-                orchestrator=orchestrator,
-            )
-            journal_stream = live_stream.subscribe(after_sequence)
-        else:
-            live_stream = live_chat_stream_registry().start(
-                session_id=admission.session_id,
-                turn_id=admission.turn_id,
-                owner_id=owner.hf_user_id,
-                source=orchestrator.events(),
-            )
-
     async def event_stream():
         # Some edge POPs buffer small initial HTTP/2 DATA frames even when the
         # origin and nginx both disable response buffering. An ignored SSE
         # comment above the common 2 KiB threshold forces those intermediaries
         # to flush the response before the first model delta arrives.
         yield b": " + (b" " * SSE_PROXY_FLUSH_PADDING_BYTES) + b"\n\n"
-        if journal_stream is not None:
-            async for frame in journal_stream:
+        sequence = 0
+        async for frame in outcome.frames:
+            if isinstance(frame, JournalFrame):
                 yield encode_journal_frame(frame)
-        else:
-            assert live_stream is not None
-            sequence = 0
-            async for frame in live_stream.subscribe():
-                if frame.event is None:
-                    yield b": ping\n\n"
-                elif settings.chat_durable_turn_dispatch_enabled:
-                    sequence += 1
-                    yield encode_journal_frame(
-                        JournalFrame(sequence, frame.event, frame.payload)
-                    )
-                else:
-                    yield sse_event(frame.event, **frame.payload)
+            elif frame.event is None:
+                yield b": ping\n\n"
+            elif settings.chat_durable_turn_dispatch_enabled:
+                sequence += 1
+                yield encode_journal_frame(
+                    JournalFrame(sequence, frame.event, frame.payload)
+                )
+            else:
+                yield sse_event(frame.event, **frame.payload)
 
     return StreamingResponse(
         event_stream(),

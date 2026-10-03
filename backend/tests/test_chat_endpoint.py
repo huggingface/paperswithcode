@@ -37,6 +37,9 @@ from backend.models.chat import (
 )
 from backend.routers import chat as chat_router
 from backend.routers.inference_billing import _status as inference_billing_status
+from backend.services import chat_application_service as chat_application
+from backend.services import chat_admission_service as chat_admission
+from backend.services import chat_admission_billing as chat_billing
 from backend.services import chat_mcp, chat_stream_service
 from backend.services.chat_agent_service import (
     SEARCH_TOOL_NAME,
@@ -823,7 +826,7 @@ def test_stream_spend_rejection_preserves_exact_503_before_admission(monkeypatch
     def reject(*_args, **_kwargs):
         raise ChatComputeDisabled("Chat is temporarily disabled")
 
-    monkeypatch.setattr(chat_router, "assert_chat_sandbox_spend_available", reject)
+    monkeypatch.setattr(chat_application, "assert_chat_sandbox_spend_available", reject)
     body = ChatRequest(message="hello", client_message_id="message-a")
 
     with pytest.raises(Exception) as exc_info:
@@ -900,30 +903,35 @@ def test_duplicate_durable_post_attaches_without_preparation_or_source(monkeypat
             yield JournalFrame(4, "answer_delta", {"text": "attached"})
 
     monkeypatch.setattr(chat_router, "get_settings", lambda: settings)
-    monkeypatch.setattr(chat_router, "web_search_available", lambda *_args: True)
+    monkeypatch.setattr(chat_application, "web_search_available", lambda *_args: True)
     monkeypatch.setattr(
         chat_router,
         "inference_credential_for_request",
         lambda *_args: SimpleNamespace(token="token", bill_to=None),
     )
     monkeypatch.setattr(
-        chat_router.deployment_lifecycle,
+        chat_application.deployment_lifecycle,
         "status",
         lambda: SimpleNamespace(accepting_chat_turns=True),
     )
-    monkeypatch.setattr(chat_router, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_admission, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_application, "ChatSessionService", Service)
     monkeypatch.setattr(chat_router.db_manager, "_session_local", DB)
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "_prepare_paper_turn",
         lambda *_args: pytest.fail("duplicate prompt was prepared"),
     )
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "ChatStreamOrchestrator",
         lambda **_kwargs: pytest.fail("duplicate model source was created"),
     )
-    monkeypatch.setattr(chat_router, "detached_turn_coordinator", lambda: Coordinator())
+    monkeypatch.setattr(
+        chat_application,
+        "detached_chat_runtime",
+        lambda: SimpleNamespace(coordinator=Coordinator()),
+    )
     request = Request(
         {
             "type": "http",
@@ -3548,11 +3556,11 @@ def test_chat_endpoint_stream_contract(monkeypatch):
 
     async def authorize_openrouter(*_args, **_kwargs):
         assert commits, "durable admission must release its locks before provider I/O"
-        return chat_router.OpenRouterAdmission(
+        return chat_billing.OpenRouterAdmission(
             "openrouter_funded", "title-test-token", None
         )
 
-    monkeypatch.setattr(chat_router, "_authorize_openrouter", authorize_openrouter)
+    monkeypatch.setattr(chat_application, "authorize_openrouter", authorize_openrouter)
 
     class FakeLatencyService:
         def __init__(self, *_args):
@@ -3561,7 +3569,7 @@ def test_chat_endpoint_stream_contract(monkeypatch):
         def admit(self, **_kwargs):
             return None
 
-    monkeypatch.setattr(chat_router, "ChatLatencyService", FakeLatencyService)
+    monkeypatch.setattr(chat_admission, "ChatLatencyService", FakeLatencyService)
 
     class FakeRunner:
         sdk_directory = settings.chat_agent_cwd
@@ -3596,7 +3604,8 @@ def test_chat_endpoint_stream_contract(monkeypatch):
             return 1
 
     monkeypatch.setattr(chat_stream_service, "ChatTitleBudgetService", FakeTitleBudget)
-    monkeypatch.setattr(chat_router, "ChatSessionService", FakeService)
+    monkeypatch.setattr(chat_admission, "ChatSessionService", FakeService)
+    monkeypatch.setattr(chat_application, "ChatSessionService", FakeService)
     monkeypatch.setattr(chat_stream_service, "ChatSessionService", FakeService)
     monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)
     app = create_app()
@@ -3896,10 +3905,11 @@ def test_chat_endpoint_rejects_when_capacity_is_occupied(monkeypatch, caplog):
         "inference_credential_for_request",
         lambda *_args: SimpleNamespace(token="user-inference-token", bill_to=None),
     )
-    monkeypatch.setattr(chat_router, "ChatSessionService", NoCapacity)
+    monkeypatch.setattr(chat_admission, "ChatSessionService", NoCapacity)
+    monkeypatch.setattr(chat_application, "ChatSessionService", NoCapacity)
     monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "ChatStreamOrchestrator",
         lambda **_kwargs: calls.__setitem__("runner", calls["runner"] + 1),
     )
@@ -3999,17 +4009,19 @@ def test_stream_endpoint_rejects_nonexistent_active_qualification_scope(
         lambda *_args: SimpleNamespace(token="user-token", bill_to=None),
     )
     monkeypatch.setattr(
-        chat_router.deployment_lifecycle,
+        chat_application.deployment_lifecycle,
         "status",
         lambda: SimpleNamespace(accepting_chat_turns=True),
     )
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "_prepare_paper_turn",
-        lambda *_args: chat_router.PreparedPaperTurn("hello", "hello", [], 0, 0, 0),
+        lambda *_args: chat_application.PreparedPaperTurn(
+            "hello", "hello", [], 0, 0, 0
+        ),
     )
     monkeypatch.setattr(
-        chat_router, "ChatDurableQualificationEvidenceService", MissingScope
+        chat_admission, "ChatDurableQualificationEvidenceService", MissingScope
     )
     monkeypatch.setattr(chat_router.db_manager, "_session_local", FakeDB)
     request = Request(
@@ -4068,13 +4080,14 @@ def test_paper_hydration_failure_precedes_turn_admission_and_runner(monkeypatch)
         )
 
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "_prepare_paper_turn",
         fail_preparation,
     )
-    monkeypatch.setattr(chat_router, "ChatSessionService", NoAdmission)
+    monkeypatch.setattr(chat_admission, "ChatSessionService", NoAdmission)
+    monkeypatch.setattr(chat_application, "ChatSessionService", NoAdmission)
     monkeypatch.setattr(
-        chat_router,
+        chat_application,
         "ChatStreamOrchestrator",
         lambda **_kwargs: calls.__setitem__("runner", calls["runner"] + 1),
     )
