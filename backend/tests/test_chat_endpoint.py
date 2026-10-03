@@ -2079,7 +2079,12 @@ def test_complete_turn_persists_authoritative_streamed_tool_snapshot(monkeypatch
         lambda _db, _text: ([], {}),
     )
 
-    orchestrator._complete_turn({"followups": [], "finish_reason": "success"})
+    from backend.services.chat_turn_event_service import (
+        CompletionEvent,
+        TerminalOutcome,
+    )
+
+    orchestrator._complete_turn(CompletionEvent(TerminalOutcome.SUCCESS, followups=[]))
 
     DISPLAY_BLOCKS_ADAPTER.validate_python(captured["blocks"])
     tool = next(block for block in captured["blocks"] if block["kind"] == "tool")
@@ -2195,20 +2200,26 @@ def test_chat_projection_preserves_sse_block_order():
 def test_pi_tool_timing_fallback_measures_parallel_calls_and_preserves_worker_timing():
     from backend.services.chat_stream_service import _ToolTimingFallback
 
+    from backend.services.chat_turn_event_service import ToolEvent
+
     now = 10.0
     timing = _ToolTimingFallback(enabled=True, now=lambda: now)
-    timing.apply("tool_call", {"id": "slow"})
+    timing.apply(ToolEvent("tool_call", id="slow"))
+    from backend.services.chat_turn_event_service import ToolEvent
+
     now = 10.025
-    timing.apply("tool_call", {"id": "fast"})
+    timing.apply(ToolEvent("tool_call", id="fast"))
+    from backend.services.chat_turn_event_service import ToolEvent
+
     now = 10.04
-    fast = {"id": "fast", "took_ms": 0}
-    timing.apply("tool_result", fast)
-    assert fast["took_ms"] == 15
+    fast = timing.apply(ToolEvent("tool_result", id="fast", took_ms=0))
+    assert fast.took_ms == 15
+
+    from backend.services.chat_turn_event_service import ToolEvent
 
     now = 10.08
-    slow = {"id": "slow", "took_ms": 73}
-    timing.apply("tool_result", slow)
-    assert slow["took_ms"] == 73
+    slow = timing.apply(ToolEvent("tool_result", id="slow", took_ms=73))
+    assert slow.took_ms == 73
 
 
 def test_pi_recovery_telemetry_is_logged_without_becoming_a_public_frame(

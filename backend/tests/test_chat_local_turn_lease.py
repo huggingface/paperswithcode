@@ -179,7 +179,11 @@ def test_durable_done_waits_for_detached_terminal_callback(monkeypatch):
     orchestrator = _orchestrator(settings, admission)
     persisted = []
     monkeypatch.setattr(
-        orchestrator, "_complete_turn", lambda event: persisted.append(dict(event))
+        orchestrator,
+        "_complete_turn",
+        lambda event: persisted.append(
+            {key: value for key, value in event.to_legacy().items() if key != "type"}
+        ),
     )
 
     async def exercise():
@@ -211,7 +215,11 @@ def test_durable_consumer_accepts_typed_events_without_changing_stream_contract(
     orchestrator = _orchestrator(settings, _admission(claim=claim))
     persisted = []
     monkeypatch.setattr(
-        orchestrator, "_complete_turn", lambda event: persisted.append(dict(event))
+        orchestrator,
+        "_complete_turn",
+        lambda event: persisted.append(
+            {key: value for key, value in event.to_legacy().items() if key != "type"}
+        ),
     )
 
     async def exercise():

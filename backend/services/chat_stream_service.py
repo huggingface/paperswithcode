@@ -88,6 +88,13 @@ from backend.services.chat_turn_job_repository import TurnJobError, TurnLeaseCla
 from backend.services.chat_turn_event_repository import JournalFrame
 from backend.services.chat_turn_event_service import (
     CancellationEvent,
+    ToolEvent,
+    LegacyPassthroughEvent,
+    UNSET,
+    event_kind,
+    event_value,
+    event_extra,
+    update_event,
     ChatTurnEvent,
     ChatTurnLifecycle,
     CompletionEvent,
@@ -311,16 +318,37 @@ class _ToolTimingFallback:
         self.now = now
         self.started: dict[str, float] = {}
 
-    def apply(self, kind: str, event: dict) -> None:
+    def apply(self, event: ChatTurnEvent) -> ChatTurnEvent:
         if not self.enabled:
-            return
-        tool_id = str(event.get("id") or "")
-        if kind == "tool_call" and tool_id:
+            return event
+        if isinstance(event, LegacyPassthroughEvent) and event.event_type in {
+            "tool_call",
+            "tool_result",
+        }:
+            # Older typed producers can explicitly pass through tool frames.
+            event = ToolEvent(
+                event.event_type,
+                event_extra(event, "id", UNSET),
+                event_extra(event, "took_ms", UNSET),
+                tuple(
+                    (key, value)
+                    for key, value in event.extras
+                    if key not in {"id", "took_ms"}
+                ),
+                event.field_order,
+            )
+        if not isinstance(event, ToolEvent):
+            return event
+        tool_id = str(event_value(event.id) or "")
+        if event.event_type == "tool_call" and tool_id:
             self.started[tool_id] = self.now()
-        elif kind == "tool_result" and tool_id:
+        elif event.event_type == "tool_result" and tool_id:
             started = self.started.pop(tool_id, None)
-            if started is not None and int(event.get("took_ms") or 0) == 0:
-                event["took_ms"] = max(0, round((self.now() - started) * 1000))
+            if started is not None and int(event_value(event.took_ms) or 0) == 0:
+                return update_event(
+                    event, took_ms=max(0, round((self.now() - started) * 1000))
+                )
+        return event
 
 
 async def sequential_reasoning_events(events: AsyncIterator[dict[str, Any]]):
@@ -2071,11 +2099,9 @@ class ChatStreamOrchestrator:
             return
         if self.terminal_persistence.mirror_failure is not None:
             mirror_failure = self.terminal_persistence.mirror_failure
-            event = mirror_failure.to_legacy()
-            event.pop("type")
             await self._persist_terminal_with_lease(
                 self._fail_mirror,
-                event,
+                mirror_failure,
                 True,
                 lifecycle_event=mirror_failure,
             )
@@ -2087,11 +2113,9 @@ class ChatStreamOrchestrator:
             completion = self.terminal_persistence.completion
             if completion is None:
                 raise RuntimeError("Detached completion payload is missing")
-            event = completion.to_legacy()
-            event.pop("type")
             await self._persist_terminal_with_lease(
                 self._complete_turn,
-                event,
+                completion,
                 lifecycle_event=completion,
             )
             return
@@ -2265,7 +2289,14 @@ class ChatStreamOrchestrator:
             FailureEvent: self._handle_failure_event,
             CompletionEvent: self._handle_completion_event,
         }
-        handler = handlers.get(type(event), self._handle_projection_event)
+        handler = next(
+            (
+                handler
+                for event_class, handler in handlers.items()
+                if isinstance(event, event_class)
+            ),
+            self._handle_projection_event,
+        )
         return await handler(event)
 
     async def _handle_research_finished(
@@ -2287,11 +2318,10 @@ class ChatStreamOrchestrator:
     async def _handle_persistence_event(
         self, event: PersistenceEvent
     ) -> _HandledTurnEvent:
-        _kind, payload = self._legacy_payload(event)
         if self.sdk_session_persistence_task is not None:
             await self._await_sdk_session_persistence()
         self.sdk_session_persistence_task = asyncio.create_task(
-            asyncio.to_thread(self._bind_sdk_session, payload)
+            asyncio.to_thread(self._bind_sdk_session, event)
         )
         self.sdk_session_persistence_task.add_done_callback(_log_background_task_result)
         return _HandledTurnEvent()
@@ -2318,15 +2348,14 @@ class ChatStreamOrchestrator:
         self, event: MirrorFailureEvent
     ) -> _HandledTurnEvent:
         await self._await_sdk_session_persistence()
-        _kind, payload = self._legacy_payload(event)
         if self.settings.chat_durable_turn_dispatch_enabled:
             self.lifecycle = self.lifecycle.transition(event)
             self.terminal_persistence.mirror_failure = event
-            frame = await asyncio.to_thread(self._fail_mirror, payload)
+            frame = await asyncio.to_thread(self._fail_mirror, event)
         else:
             frame = await self._persist_terminal_with_lease(
                 self._fail_mirror,
-                payload,
+                event,
                 lifecycle_event=event,
             )
         self.trace.finish(
@@ -2345,22 +2374,20 @@ class ChatStreamOrchestrator:
         )
 
     async def _handle_latency_event(self, event: LatencyEvent) -> _HandledTurnEvent:
-        _kind, payload = self._legacy_payload(event)
         self._buffer_latency_phase(
-            str(payload["phase"]),
-            int(payload["elapsed_ms"]),
-            acquisition_outcome=payload.get("acquisition_outcome"),
-            first_semantic_event_class=payload.get("first_semantic_event_class"),
-            pool_miss_reason=payload.get("pool_miss_reason"),
-            session_reuse_cohort=payload.get("session_reuse_cohort"),
-            failure_stage=payload.get("failure_stage"),
-            failure_class=payload.get("failure_class"),
-            attempt_kind=payload.get("attempt_kind"),
+            str(event_value(event.phase)),
+            int(event_value(event.elapsed_ms)),
+            acquisition_outcome=event_value(event.acquisition_outcome),
+            first_semantic_event_class=event_value(event.first_semantic_event_class),
+            pool_miss_reason=event_value(event.pool_miss_reason),
+            session_reuse_cohort=event_value(event.session_reuse_cohort),
+            failure_stage=event_value(event.failure_stage),
+            failure_class=event_value(event.failure_class),
+            attempt_kind=event_value(event.attempt_kind),
         )
         return _HandledTurnEvent()
 
     async def _handle_telemetry_event(self, event: TelemetryEvent) -> _HandledTurnEvent:
-        _kind, payload = self._legacy_payload(event)
         logger.info(
             "chat execution recovery request_id=%s turn_id=%s "
             "rounds=%s/%s denied_rounds=%s calls=%s/%s denied_calls=%s "
@@ -2369,39 +2396,38 @@ class ChatStreamOrchestrator:
             "recovery_reason=%s recovery_attempts=%s recovery_outcome=%s",
             self.request_id,
             self.admission.turn_id,
-            payload.get("tool_rounds_executed"),
-            payload.get("maximum_tool_rounds"),
-            payload.get("tool_rounds_denied"),
-            payload.get("tool_calls_allowed"),
-            payload.get("maximum_tool_calls"),
-            payload.get("tool_calls_denied"),
-            payload.get("tooling_close_reason"),
-            payload.get("execution_limit_reached"),
-            payload.get("finalizer_attempted"),
-            payload.get("finalizer_outcome"),
-            payload.get("finalization_latency_ms"),
-            payload.get("recovery_reason"),
-            payload.get("recovery_attempts"),
-            payload.get("recovery_outcome"),
+            event_value(event.tool_rounds_executed),
+            event_value(event.maximum_tool_rounds),
+            event_extra(event, "tool_rounds_denied"),
+            event_value(event.tool_calls_allowed),
+            event_value(event.maximum_tool_calls),
+            event_extra(event, "tool_calls_denied"),
+            event_extra(event, "tooling_close_reason"),
+            event_value(event.execution_limit_reached),
+            event_value(event.finalizer_attempted),
+            event_value(event.finalizer_outcome),
+            event_extra(event, "finalization_latency_ms"),
+            event_extra(event, "recovery_reason"),
+            event_extra(event, "recovery_attempts"),
+            event_extra(event, "recovery_outcome"),
         )
         return _HandledTurnEvent()
 
     async def _handle_mcp_readiness_event(
         self, event: McpReadinessEvent
     ) -> _HandledTurnEvent:
-        _kind, payload = self._legacy_payload(event)
-        ready = payload.get("ready") is True
-        failure_class = payload.get("failure_class")
+        ready = event_value(event.ready) is True
+        failure_class = event_value(event.failure_class)
         logger.info(
             "chat MCP readiness request_id=%s enabled=%s ready=%s "
             "failure_class=%s latency_ms=%s tool_count=%s egress_digest=%s",
             self.request_id,
-            ",".join(payload.get("enabled_provider_ids") or []),
+            ",".join(event_value(event.enabled_provider_ids) or []),
             ready,
             failure_class or "none",
-            payload.get("registration_latency_ms"),
-            len(payload.get("registered_tool_names") or []),
-            payload.get("egress_policy_digest"),
+            event_value(event.registration_latency_ms),
+            len(event_value(event.registered_tool_names) or []),
+            event_value(event.egress_policy_digest),
         )
         if self.settings.chat_excalidraw_enabled and not ready:
             logger.warning(
@@ -2412,8 +2438,7 @@ class ChatStreamOrchestrator:
         return _HandledTurnEvent()
 
     async def _handle_usage_event(self, event: UsageEvent) -> _HandledTurnEvent:
-        _kind, payload = self._legacy_payload(event)
-        usage = payload.get("usage") or {}
+        usage = event_value(event.usage) or {}
         token_count = (
             sum(
                 int(value)
@@ -2428,14 +2453,16 @@ class ChatStreamOrchestrator:
             "provider_requests=%s tokens=%s",
             self.request_id,
             self.admission.turn_id,
-            payload.get("phase") or "research",
-            payload.get("provider_requests") or 0,
+            event_value(event.phase) or "research",
+            event_value(event.provider_requests) or 0,
             token_count,
         )
-        self.trace.record_usage(payload)
+        self.trace.record_usage(self._legacy_payload(event)[1])
         return _HandledTurnEvent()
 
     def _project_event(self, event: ChatTurnEvent) -> tuple[str, dict[str, Any]] | None:
+        # This is the public display/persistence boundary. Raw tracing has already
+        # observed the event; sanitize before either projection or public output.
         kind, payload = self._legacy_payload(event)
         if kind == "artifact_ready":
             trusted = _trusted_artifact_ready(payload, self.admission)
@@ -2530,7 +2557,7 @@ class ChatStreamOrchestrator:
         return kind, payload
 
     async def _handle_projection_event(self, event: ChatTurnEvent) -> _HandledTurnEvent:
-        if self._legacy_payload(event)[0] == "_compaction_telemetry":
+        if event_kind(event) == "_compaction_telemetry":
             return _HandledTurnEvent()
         projected = self._project_event(event)
         if projected is None:
@@ -2543,7 +2570,7 @@ class ChatStreamOrchestrator:
         projected = self._project_event(event)
         assert projected is not None
         _kind, payload = projected
-        budget_interrupted = payload.get("code") in {
+        budget_interrupted = event_value(event.code) in {
             "chat_temporarily_disabled",
             "chat_disabled_interrupted",
         }
@@ -2603,8 +2630,10 @@ class ChatStreamOrchestrator:
                     payload["message"] = (
                         "Your OpenRouter API key is temporarily rate-limited."
                     )
-        typed_failure = from_legacy_event({"type": "error", **payload})
-        assert isinstance(typed_failure, FailureEvent)
+        typed_failure = update_event(
+            event,
+            **{key: payload[key] for key in ("code", "message") if key in payload},
+        )
         if self.settings.chat_durable_turn_dispatch_enabled:
             self.lifecycle = self.lifecycle.transition(typed_failure)
         else:
@@ -2633,15 +2662,16 @@ class ChatStreamOrchestrator:
         assert projected is not None
         _kind, payload = projected
         payload["citations"] = self.projection.citations
-        completion = from_legacy_event({"type": "done", **payload})
-        assert isinstance(completion, CompletionEvent)
+        completion = replace(
+            event, citations=self.projection.citations, field_order=("type", *payload)
+        )
         if self.settings.chat_durable_turn_dispatch_enabled:
             self.lifecycle = self.lifecycle.transition(completion)
             self.terminal_persistence.completion = completion
         else:
             await self._persist_terminal_with_lease(
                 self._complete_turn,
-                payload,
+                completion,
                 lifecycle_event=completion,
             )
         self.trace.finish("".join(self.projection.answer_parts), self.terminal_label)
@@ -2678,22 +2708,18 @@ class ChatStreamOrchestrator:
                 raise asyncio.CancelledError
 
             after_persist = getattr(raw_event, "after_persist", None)
-            if isinstance(raw_event, dict):
-                serialized = dict(raw_event)
-                legacy = dict(serialized)
-                kind = legacy.pop("type")
-                self.tool_timing.apply(kind, legacy)
-                serialized.update(legacy)
-                typed_event = from_legacy_event(serialized)
-            else:
-                typed_event = raw_event
-                kind, legacy = self._legacy_payload(typed_event)
-                self.tool_timing.apply(kind, legacy)
-                typed_event = from_legacy_event({"type": kind, **legacy})
+            typed_event = (
+                from_legacy_event(raw_event)
+                if isinstance(raw_event, dict)
+                else raw_event
+            )
+            typed_event = self.tool_timing.apply(typed_event)
             if self._detached_cancel_requested:
                 yield await self._finalize_cancellation(cancel_runner=False)
                 return
-            self.trace.record_event(kind, legacy)
+            # Raw trace visibility precedes artifact trust and public sanitization.
+            kind, trace_payload = self._legacy_payload(typed_event)
+            self.trace.record_event(kind, trace_payload)
 
             handled = await self._dispatch_event(typed_event)
             if handled.frame is not None:
@@ -2708,9 +2734,9 @@ class ChatStreamOrchestrator:
             with contextlib.suppress(asyncio.CancelledError):
                 await self.research_task
 
-    def _bind_sdk_session(self, event: dict[str, Any]) -> None:
+    def _bind_sdk_session(self, event: PersistenceEvent) -> None:
         assert self.runner is not None
-        sdk_id = uuid.UUID(event["session_id"])
+        sdk_id = uuid.UUID(event_value(event.session_id))
         with db_manager.session_local() as db:
             ChatSessionService(db, self.settings).bind_sdk_session(
                 self.owner,
@@ -2722,16 +2748,16 @@ class ChatStreamOrchestrator:
             db.commit()
 
     def _fail_mirror(
-        self, event: dict[str, Any], persist: bool = False
+        self, event: MirrorFailureEvent, persist: bool = False
     ) -> ChatStreamFrame:
-        mirror_key = event.get("key") or {}
+        mirror_key = event_value(event.key) or {}
         mirror_session_id = mirror_key.get("session_id")
         mirror_project_key = mirror_key.get("project_key")
         logger.warning(
             "chat transcript mirror failed session_id=%s sdk_session_id=%s error=%s",
             self.admission.session_id,
             mirror_session_id,
-            str(event.get("error") or "unknown")[:500],
+            str(event_value(event.error) or "unknown")[:500],
         )
         if mirror_session_id and mirror_project_key:
             sdk_id = uuid.UUID(mirror_session_id)
@@ -2745,9 +2771,9 @@ class ChatStreamOrchestrator:
                 )
                 db.commit()
             self.mirror_recovery = (mirror_project_key, sdk_id)
-        terminal = event.get("terminal")
+        terminal = event_value(event.terminal)
         completed_result = (
-            event.get("result_available") is True
+            event.result_available is True
             and isinstance(terminal, dict)
             and terminal.get("type") == "done"
         )
@@ -2836,7 +2862,7 @@ class ChatStreamOrchestrator:
             },
         )
 
-    def _complete_turn(self, event: dict[str, Any]) -> None:
+    def _complete_turn(self, event: CompletionEvent) -> None:
         with db_manager.session_local() as db:
             service = ChatSessionService(db, self.settings)
             answer, citations = self._finalize_projection(db, service)
@@ -2845,9 +2871,9 @@ class ChatStreamOrchestrator:
                 self.admission,
                 answer,
                 citations,
-                event.get("followups", []),
+                event_value(event.followups, []),
                 self.projection.completed_blocks(),
-                event.get("finish_reason", "success"),
+                event.finish_reason(),
             )
             db.commit()
 

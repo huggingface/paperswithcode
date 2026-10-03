@@ -1,15 +1,14 @@
 """Immutable typed chat-turn events and lifecycle transitions.
 
-The orchestrator still exchanges legacy dictionaries. This service is the
-lossless boundary used to migrate it incrementally without changing either
-stream frames or durable outcomes.
+Raw adapters normalize into this contract once. Compatibility serializers
+retain exact wire shape at tracing, projection, and public output boundaries.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
-from typing import Any, Final, TypeAlias
+from typing import Any, Final, TypeAlias, ClassVar
 
 
 class _Unset:
@@ -108,6 +107,7 @@ class ArtifactEventType(StrEnum):
 
 @dataclass(frozen=True)
 class ResearchFinishedEvent:
+    event_type: ClassVar[str] = "_research_finished"
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
 
@@ -117,6 +117,7 @@ class ResearchFinishedEvent:
 
 @dataclass(frozen=True)
 class TitleEvent:
+    event_type: ClassVar[str] = "session_title_done"
     title: str | None | _Unset = UNSET
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
@@ -129,6 +130,7 @@ class TitleEvent:
 
 @dataclass(frozen=True)
 class TitleFinishedEvent:
+    event_type: ClassVar[str] = "_title_finished"
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
 
@@ -138,6 +140,7 @@ class TitleFinishedEvent:
 
 @dataclass(frozen=True)
 class PersistenceEvent:
+    event_type: ClassVar[str] = "_sdk_session"
     session_id: str | None | _Unset = UNSET
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
@@ -150,6 +153,7 @@ class PersistenceEvent:
 
 @dataclass(frozen=True)
 class MirrorFailureEvent:
+    event_type: ClassVar[str] = "_mirror_error"
     key: FrozenJson | _Unset = UNSET
     error: str | None | _Unset = UNSET
     terminal: FrozenJson | _Unset = UNSET
@@ -188,6 +192,7 @@ class MirrorFailureEvent:
 
 @dataclass(frozen=True)
 class TelemetryEvent:
+    event_type: ClassVar[str] = "_execution_telemetry"
     maximum_tool_rounds: int | None | _Unset = UNSET
     maximum_tool_calls: int | None | _Unset = UNSET
     tool_rounds_executed: int | None | _Unset = UNSET
@@ -215,24 +220,73 @@ class TelemetryEvent:
 
 @dataclass(frozen=True)
 class LatencyEvent:
+    event_type: ClassVar[str] = "_latency"
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
 
+    phase: str | None | _Unset = UNSET
+    elapsed_ms: int | None | _Unset = UNSET
+    acquisition_outcome: str | None | _Unset = UNSET
+    first_semantic_event_class: str | None | _Unset = UNSET
+    pool_miss_reason: str | None | _Unset = UNSET
+    session_reuse_cohort: str | None | _Unset = UNSET
+    failure_stage: str | None | _Unset = UNSET
+    failure_class: str | None | _Unset = UNSET
+    attempt_kind: str | None | _Unset = UNSET
+
     def to_legacy(self) -> dict[str, Any]:
-        return _legacy("_latency", self.extras, self.field_order)
+        return _legacy(
+            "_latency",
+            self.extras,
+            self.field_order,
+            phase=self.phase,
+            elapsed_ms=self.elapsed_ms,
+            acquisition_outcome=self.acquisition_outcome,
+            first_semantic_event_class=self.first_semantic_event_class,
+            pool_miss_reason=self.pool_miss_reason,
+            session_reuse_cohort=self.session_reuse_cohort,
+            failure_stage=self.failure_stage,
+            failure_class=self.failure_class,
+            attempt_kind=self.attempt_kind,
+        )
 
 
 @dataclass(frozen=True)
 class McpReadinessEvent:
+    event_type: ClassVar[str] = "_mcp_readiness"
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
 
+    ready: bool | None | _Unset = UNSET
+    failure_class: str | None | _Unset = UNSET
+    enabled_provider_ids: FrozenJson | None | _Unset = UNSET
+    registration_latency_ms: int | None | _Unset = UNSET
+    registered_tool_names: FrozenJson | None | _Unset = UNSET
+    egress_policy_digest: str | None | _Unset = UNSET
+
+    def __post_init__(self) -> None:
+        for name in ("enabled_provider_ids", "registered_tool_names"):
+            value = getattr(self, name)
+            if value is not UNSET:
+                object.__setattr__(self, name, _freeze(value))
+
     def to_legacy(self) -> dict[str, Any]:
-        return _legacy("_mcp_readiness", self.extras, self.field_order)
+        return _legacy(
+            "_mcp_readiness",
+            self.extras,
+            self.field_order,
+            ready=self.ready,
+            failure_class=self.failure_class,
+            enabled_provider_ids=self.enabled_provider_ids,
+            registration_latency_ms=self.registration_latency_ms,
+            registered_tool_names=self.registered_tool_names,
+            egress_policy_digest=self.egress_policy_digest,
+        )
 
 
 @dataclass(frozen=True)
 class UsageEvent:
+    event_type: ClassVar[str] = "usage"
     usage: FrozenJson | _Unset = UNSET
     model_usage: FrozenJson | _Unset = UNSET
     total_cost_usd: float | None | _Unset = UNSET
@@ -296,6 +350,7 @@ class ArtifactEvent:
 
 @dataclass(frozen=True)
 class CompletionEvent:
+    event_type: ClassVar[str] = "done"
     outcome: TerminalOutcome | None = None
     finish_reason_present: bool = True
     raw_finish_reason: str | None | _Unset = UNSET
@@ -309,6 +364,19 @@ class CompletionEvent:
             object.__setattr__(self, "followups", _freeze(self.followups))
         if self.citations is not UNSET:
             object.__setattr__(self, "citations", _freeze(self.citations))
+
+    def finish_reason(self, default="success"):
+        value = self.raw_finish_reason
+        if value is UNSET and self.finish_reason_present and self.outcome:
+            value = self.outcome.value
+        return event_value(value, default)
+
+    def effective_outcome(self) -> TerminalOutcome:
+        """Interpret exactly the finish reason that the compatibility wire exposes."""
+        try:
+            return TerminalOutcome(self.finish_reason())
+        except (TypeError, ValueError):
+            return TerminalOutcome.SUCCESS
 
     def to_legacy(self) -> dict[str, Any]:
         finish_reason: JsonValue | _Unset = self.raw_finish_reason
@@ -326,6 +394,7 @@ class CompletionEvent:
 
 @dataclass(frozen=True)
 class FailureEvent:
+    event_type: ClassVar[str] = "error"
     code: str | None | _Unset = UNSET
     message: str | None | _Unset = UNSET
     interruption: InterruptionReason | None = None
@@ -342,6 +411,7 @@ class FailureEvent:
 
 @dataclass(frozen=True)
 class CancellationEvent:
+    event_type: ClassVar[str] = "_cancelled"
     reason: InterruptionReason = InterruptionReason.WORKER_CANCELLED
     extras: FrozenExtras = ()
     field_order: tuple[str, ...] = ()
@@ -352,6 +422,26 @@ class CancellationEvent:
 
     def to_legacy(self) -> dict[str, Any]:
         return _legacy("_cancelled", self.extras, self.field_order)
+
+
+@dataclass(frozen=True)
+class ToolEvent:
+    """Tool lifecycle fields used internally; provider payload stays lossless."""
+
+    event_type: str
+    id: str | None | _Unset = UNSET
+    took_ms: int | None | _Unset = UNSET
+    extras: FrozenExtras = ()
+    field_order: tuple[str, ...] = ()
+
+    def to_legacy(self) -> dict[str, Any]:
+        return _legacy(
+            self.event_type,
+            self.extras,
+            self.field_order,
+            id=self.id,
+            took_ms=self.took_ms,
+        )
 
 
 @dataclass(frozen=True)
@@ -379,7 +469,39 @@ ChatTurnEvent: TypeAlias = (
     | FailureEvent
     | CancellationEvent
     | LegacyPassthroughEvent
+    | ToolEvent
 )
+
+
+def event_kind(event: ChatTurnEvent) -> str:
+    return event.kind.value if isinstance(event, ArtifactEvent) else event.event_type
+
+
+def event_value(value, default=None):
+    """Read an optional frozen field without materializing an entire event."""
+    return default if value is UNSET else _thaw(value)
+
+
+def event_extra(event: ChatTurnEvent, key: str, default=None):
+    return next((_thaw(value) for name, value in event.extras if name == key), default)
+
+
+def update_event(event: ChatTurnEvent, **changes) -> ChatTurnEvent:
+    """Enrich immutable fields while retaining wire insertion order."""
+    updated = replace(event, **changes)
+    order = event.field_order
+    if order:
+        for key, value in changes.items():
+            if isinstance(updated, CompletionEvent) and key in {
+                "outcome",
+                "raw_finish_reason",
+                "finish_reason_present",
+            }:
+                key, value = "finish_reason", updated.finish_reason(UNSET)
+            if key not in order and value is not UNSET:
+                order += (key,)
+        updated = replace(updated, field_order=order)
+    return updated
 
 
 def from_legacy_event(event: dict[str, Any]) -> ChatTurnEvent:
@@ -393,6 +515,20 @@ def from_legacy_event(event: dict[str, Any]) -> ChatTurnEvent:
     def value(key: str) -> JsonValue | _Unset:
         return event[key] if key in event else UNSET
 
+    if event_type in {
+        "tool_call",
+        "tool_call_start",
+        "tool_call_arguments_delta",
+        "tool_call_arguments_done",
+        "tool_result",
+    }:
+        return ToolEvent(
+            event_type,
+            value("id"),
+            value("took_ms"),
+            _extras(event, "id", "took_ms"),
+            field_order,
+        )
     if event_type == "_research_finished":
         return ResearchFinishedEvent(_extras(event), field_order)
     if event_type == "session_title_done":
@@ -422,9 +558,36 @@ def from_legacy_event(event: dict[str, Any]) -> ChatTurnEvent:
             *(value(key) for key in known), _extras(event, *known), field_order
         )
     if event_type == "_latency":
-        return LatencyEvent(_extras(event), field_order)
+        known = (
+            "phase",
+            "elapsed_ms",
+            "acquisition_outcome",
+            "first_semantic_event_class",
+            "pool_miss_reason",
+            "session_reuse_cohort",
+            "failure_stage",
+            "failure_class",
+            "attempt_kind",
+        )
+        return LatencyEvent(
+            extras=_extras(event, *known),
+            field_order=field_order,
+            **{key: value(key) for key in known},
+        )
     if event_type == "_mcp_readiness":
-        return McpReadinessEvent(_extras(event), field_order)
+        known = (
+            "ready",
+            "failure_class",
+            "enabled_provider_ids",
+            "registration_latency_ms",
+            "registered_tool_names",
+            "egress_policy_digest",
+        )
+        return McpReadinessEvent(
+            extras=_extras(event, *known),
+            field_order=field_order,
+            **{key: value(key) for key in known},
+        )
     if event_type == "usage":
         known = "usage", "model_usage", "total_cost_usd", "provider_requests", "phase"
         return UsageEvent(
@@ -521,7 +684,7 @@ class ChatTurnLifecycle:
         if self.terminal is not TurnTerminalState.ACTIVE:
             raise ValueError("Cannot add a second terminal chat-turn event")
         if isinstance(event, CompletionEvent):
-            outcome = event.outcome or TerminalOutcome.SUCCESS
+            outcome = event.effective_outcome()
             terminal = (
                 TurnTerminalState.INTERRUPTED
                 if outcome is TerminalOutcome.STOPPED
