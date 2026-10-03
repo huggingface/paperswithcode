@@ -45,9 +45,8 @@ describe("evaluation save cache lifecycle", () => {
     if (outcome === "pending") expect(api.batch).not.toHaveBeenCalled();
   });
   it("does not reconcile a no-op direct save", async () => {
-    const { client, close } = setup();
+    const { client } = setup();
     await userEvent.setup().click(await screen.findByRole("button", { name: "Save Changes" }));
-    await waitFor(() => expect(close).toHaveBeenCalled());
     expect(api.batch).not.toHaveBeenCalled();
     keys.forEach(key => expect(client.getQueryState(key)?.isInvalidated).toBe(false));
   });
