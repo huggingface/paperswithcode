@@ -858,22 +858,25 @@ describe("useChat canonical reloads", () => {
     expect(onSettled).toHaveBeenCalledWith("session-1");
   });
 
-  it("does not overwrite a conversation loaded while a canonical reload is pending", async () => {
+  it.each(["load", "reset"] as const)("settles without overwriting the selected conversation after %s during canonical reload", async (action) => {
     const canonical = deferred<ChatSessionDetail>();
     streamChatMock.mockImplementation(() => stream(
       { type: "stream_start", request_id: "r1", session_id: "session-1" },
       { type: "done", followups: [], finish_reason: "success" },
     )());
     getSessionMock.mockReturnValue(canonical.promise);
-    const { result } = renderChat();
+    const { result, onSettled } = renderChat();
 
     act(() => {
       expect(result.current.send("New turn")).toBe(true);
     });
     await waitFor(() => expect(getSessionMock).toHaveBeenCalledWith("session-1"));
 
-    const loaded = uiTurn("other-user", "Other conversation");
-    act(() => result.current.load(loaded));
+    const loaded = action === "load" ? uiTurn("other-user", "Other conversation") : [];
+    act(() => {
+      if (action === "load") result.current.load(loaded);
+      else result.current.reset();
+    });
     await act(async () => {
       canonical.resolve(sessionDetail("session-1", [
         persistedUser("stale-user", 1, "Stale conversation"),
@@ -882,6 +885,8 @@ describe("useChat canonical reloads", () => {
     });
 
     expect(result.current.messages).toEqual(loaded);
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledWith("session-1");
   });
 
   it("does not let an older canonical reload replace a newer request", async () => {

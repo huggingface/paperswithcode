@@ -560,7 +560,11 @@ export function useChat(options: UseChatOptions) {
             } else if (messagesGenerationRef.current === messagesGeneration) {
               transitionLifecycle({ type: "settle" });
             }
-            if (abortRef.current === controller) optionsRef.current.onSettled(canonicalId);
+            // Navigation can detach a finished turn while its reload is pending.
+            // Notify its completion unless another turn has taken ownership.
+            if (!abortRef.current || abortRef.current === controller) {
+              optionsRef.current.onSettled(canonicalId);
+            }
           }
           if (latencyRef.current?.controller === controller) {
             latencyRef.current = null;
