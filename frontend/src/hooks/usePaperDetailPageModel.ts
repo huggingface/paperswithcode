@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -98,13 +99,13 @@ export function usePaperDetailPageModel(
   );
   const evaluationsQuery = useEvaluationsByPaper(paper?.id, secondaryReady);
   const versionsQuery = useQuery({
-    queryKey: ["paper-versions", paper?.arxiv_id],
+    queryKey: [...paperQueryKeys.feeds.versions, paper?.arxiv_id],
     queryFn: () => papersApi.versions(paper!.arxiv_id!.replace(/v\d+$/, "")),
     enabled: secondaryReady && Boolean(paper?.arxiv_id),
     staleTime: 10 * 60 * 1000,
   });
   const relatedQuery = useQuery({
-    queryKey: ["related-papers", paper?.id],
+    queryKey: [...paperQueryKeys.feeds.related, paper?.id],
     queryFn: () => papersApi.related(paper!.arxiv_id || paper!.id, 4),
     enabled: secondaryReady,
     staleTime: 10 * 60 * 1000,

@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useInfiniteQuery, useQuery } from "@tanstack/react-query";
@@ -83,7 +84,7 @@ const MethodDetailView: React.FC = () => {
     sortBy === "trending" ? "trending" : sortBy === "cited" ? "citation_count" : "date_published";
   const papersQ = useInfiniteQuery({
     queryKey: [
-      "method-papers-infinite",
+      ...paperQueryKeys.feeds.method,
       methodSlug,
       orderBy,
       hasCode,

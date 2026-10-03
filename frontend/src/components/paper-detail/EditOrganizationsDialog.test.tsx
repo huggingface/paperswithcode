@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
 
-const { getOrganizations, updatePaperOrganizations } = vi.hoisted(() => ({
+const { getOrganizations, updatePaperOrganizations, submit } = vi.hoisted(() => ({
+  submit: vi.fn(),
   getOrganizations: vi.fn(),
   updatePaperOrganizations: vi.fn(),
 }));
@@ -18,6 +19,8 @@ vi.mock("@/lib/api/papers", () => ({
   papersApi: { updateOrganizations: updatePaperOrganizations },
 }));
 
+vi.mock("@/lib/api/submissions", () => ({ submissionsApi: { submit } }));
+
 const organizations = {
   count: 3,
   results: [
@@ -27,28 +30,33 @@ const organizations = {
   ],
 };
 
-function renderDialog(initialOrganizationIds: number[] = []) {
+function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct" | "pending" = "direct") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  return render(
+  queryClient.setQueryData(["paper", "42"], { id: "42", title: "Original" });
+  queryClient.setQueryData(["organization-papers-infinite", "nvidia"], []);
+  render(
     <QueryClientProvider client={queryClient}>
       <EditOrganizationsDialog
         open
         onOpenChange={vi.fn()}
         paperId="42"
         initialOrganizationIds={initialOrganizationIds}
-        submitMode="direct"
+        submitMode={submitMode}
       />
     </QueryClientProvider>,
   );
+  return queryClient;
 }
 
 beforeEach(() => {
   getOrganizations.mockReset();
   getOrganizations.mockResolvedValue(organizations);
   updatePaperOrganizations.mockReset();
-  updatePaperOrganizations.mockResolvedValue(undefined);
+  updatePaperOrganizations.mockResolvedValue({ id: "42", title: "Updated" });
+  submit.mockReset();
+  submit.mockResolvedValue({ id: "pending-1" });
 });
 
 describe("EditOrganizationsDialog", () => {
@@ -76,3 +84,23 @@ describe("EditOrganizationsDialog", () => {
     expect(screen.getByText('No organizations found matching "missing"')).toBeInTheDocument();
   });
 });
+
+ it("reconciles a direct organization edit without leaving its feed fresh", async () => {
+   const client = renderDialog();
+   const user = userEvent.setup();
+   await user.click(await screen.findByRole("checkbox", { name: "NVIDIA" }));
+   await user.click(screen.getByRole("button", { name: "Save changes" }));
+   await waitFor(() => expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Updated" }));
+   expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(true);
+ });
+
+ it("leaves live caches alone when submitting organizations for review", async () => {
+   const client = renderDialog([], "pending");
+   const user = userEvent.setup();
+   await user.click(await screen.findByRole("checkbox", { name: "NVIDIA" }));
+   await user.click(screen.getByRole("button", { name: "Submit test edit" }));
+   await waitFor(() => expect(submit).toHaveBeenCalled());
+   expect(updatePaperOrganizations).not.toHaveBeenCalled();
+   expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Original" });
+   expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(false);
+ });

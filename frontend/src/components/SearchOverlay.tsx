@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Global ⌘K search overlay.
  *
@@ -54,7 +55,7 @@ const SearchOverlay: React.FC<SearchOverlayProps> = ({ open, onClose }) => {
   }, [open, onClose]);
 
   const papersQ = useQuery({
-    queryKey: ["search-papers", debouncedQuery],
+    queryKey: [...paperQueryKeys.feeds.searchOverlay, debouncedQuery],
     queryFn: () => papersApi.search(debouncedQuery, 1, PAPER_PAGE_SIZE),
     enabled: open && canSearch,
     staleTime: 60_000,

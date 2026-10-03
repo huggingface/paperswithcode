@@ -1,3 +1,5 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
+import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
 import React from "react";
 import "./SubmissionsDashboard.css";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -213,11 +215,7 @@ function SubmissionCard({
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdit", reviewed.id] });
       if (reviewed.paper_id != null) {
-        queryClient.invalidateQueries({ queryKey: ["paper", String(reviewed.paper_id)] });
-        queryClient.invalidateQueries({ queryKey: ["paper-summary", String(reviewed.paper_id)] });
-      }
-      if (paper?.arxiv_id) {
-        queryClient.invalidateQueries({ queryKey: ["paper-arxiv", paper.arxiv_id] });
+        invalidatePaperDetails(queryClient, [String(reviewed.paper_id), paper?.arxiv_id]);
       }
       if (reviewed.edit_type === "evaluations" && reviewed.paper_id != null) {
         queryClient.invalidateQueries({ queryKey: ["evaluations", "paper", String(reviewed.paper_id)] });
@@ -230,6 +228,9 @@ function SubmissionCard({
     mutationFn: () => submissionsApi.approve(submission.id),
     onSuccess: (reviewed) => {
       invalidateAfterReview(reviewed);
+      if (reviewed.paper_id != null && !isAdministrativeSuggestion) {
+        invalidatePaperFeeds(queryClient);
+      }
       toast({
         title: "Submission approved",
         description: isAdministrativeSuggestion
@@ -445,7 +446,7 @@ export default function SubmissionsDashboard() {
 
   const paperQueries = useQueries({
     queries: paperIds.map((paperId) => ({
-      queryKey: ["paper-summary", String(paperId)],
+      queryKey: paperQueryKeys.summary(String(paperId)),
       queryFn: () => papersApi.get(String(paperId), false),
       enabled: isAdmin,
       staleTime: 5 * 60 * 1000,

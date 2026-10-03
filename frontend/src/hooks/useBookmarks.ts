@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Bookmark hooks for the signed-in HF user.
  *
@@ -100,7 +101,7 @@ export function useToggleBookmark() {
       },
       onSettled: () => {
         queryClient.invalidateQueries({ queryKey: BOOKMARK_IDS_KEY });
-        queryClient.invalidateQueries({ queryKey: ["my-bookmarks"] });
+        queryClient.invalidateQueries({ queryKey: [...paperQueryKeys.feeds.saved] });
       },
     },
   );

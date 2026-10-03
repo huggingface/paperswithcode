@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Saved papers view (`/saved`).
  *
@@ -28,7 +29,7 @@ const SavedPapersView: React.FC = () => {
   const { user, isLoading: isAuthLoading } = useAuth();
 
   const query = useQuery<SavedPapersResponse, Error>({
-    queryKey: ["my-bookmarks"],
+    queryKey: [...paperQueryKeys.feeds.saved],
     queryFn: () => accountApi.getBookmarks(),
     enabled: !!user,
     staleTime: 30 * 1000,

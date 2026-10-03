@@ -73,6 +73,29 @@ function renderView(path = "/datasets/test-benchmark") {
 afterEach(() => vi.restoreAllMocks());
 
 describe("BenchmarkDetailView parameter filters", () => {
+  it("renders the embedded summary while evaluations load, then reconciles all consumers", async () => {
+    setup();
+    vi.mocked(catalogApi.getDatasetBySlug).mockResolvedValue({
+      id: "dataset-1", name: "Test benchmark", slug: "test-benchmark",
+      leaderboard_summary: {
+        task_id: "task-1", metric: "Accuracy", value: 99,
+        model_name: "Initial winner", evaluation_id: "initial",
+      },
+    });
+    let resolveEvaluations!: (rows: Evaluation[]) => void;
+    vi.mocked(evaluationsApi.byDataset).mockReturnValue(new Promise((resolve) => { resolveEvaluations = resolve; }));
+    renderView("/datasets/test-benchmark?task=test-task");
+    expect(await screen.findByText("Initial winner", { selector: ".best-name" })).toBeInTheDocument();
+    expect(screen.queryByRole("table")).not.toBeInTheDocument();
+    await act(async () => resolveEvaluations([
+      evaluation({ model_name: "Loaded winner", metrics: { Accuracy: 91 }, paper_published_date: "2026-01-01" }),
+    ]));
+    expect(await screen.findByText("Loaded winner", { selector: ".best-name" })).toBeInTheDocument();
+    expect(within(screen.getByRole("table")).getByText("Loaded winner")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /Loaded winner: 91/ })).toBeInTheDocument();
+    expect(screen.queryByText("Initial winner")).not.toBeInTheDocument();
+  });
+
   it("updates the table, SOTA chart, and headline best model together", async () => {
     const smallOne = evaluation({
       id: "small-one",
