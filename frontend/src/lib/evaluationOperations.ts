@@ -1,3 +1,5 @@
+import type { Evaluation } from "./api/evaluations.types";
+
 export interface EditableEvaluationRow {
   id?: string;
   task_id: string;
@@ -6,6 +8,8 @@ export interface EditableEvaluationRow {
   harness: string;
   metric_name: string;
   metric_value: string;
+  original_metrics: Evaluation["metrics"];
+  original_metric_name: string;
   best_rank?: string;
   num_parameters: string;
   hf_model_url: string;
@@ -13,12 +17,49 @@ export interface EditableEvaluationRow {
   operation?: "create" | "update" | "delete" | "unchanged";
 }
 
+/** Keep the full score dictionary while exposing one selected score to the editor. */
+export function mapApiEvaluationsToEditable(evaluations: Evaluation[]): EditableEvaluationRow[] {
+  return evaluations.map(evaluation => {
+    const metricName = evaluation.best_metric || Object.keys(evaluation.metrics)[0] || "";
+    return {
+      id: evaluation.id,
+      task_id: evaluation.task_id,
+      dataset_id: evaluation.dataset_id,
+      model_name: evaluation.model_name || "",
+      harness: evaluation.harness || "",
+      metric_name: metricName,
+      metric_value: String(evaluation.metrics[metricName] ?? ""),
+      original_metrics: { ...evaluation.metrics },
+      original_metric_name: metricName,
+      best_rank: evaluation.best_rank != null ? String(evaluation.best_rank) : "",
+      num_parameters: evaluation.num_parameters != null ? String(evaluation.num_parameters) : "",
+      hf_model_url: evaluation.hf_model_url || "",
+      is_open: evaluation.is_open !== false,
+      operation: "unchanged",
+    };
+  });
+}
+
+function editedMetrics(row: EditableEvaluationRow, metricName: string): Evaluation["metrics"] {
+  const metrics = { ...row.original_metrics };
+  const originalValue = metrics[row.original_metric_name];
+  if (row.original_metric_name !== metricName && Object.prototype.hasOwnProperty.call(metrics, metricName)) {
+    throw new Error(`Cannot rename a metric to "${metricName}": this evaluation already has that score.`);
+  }
+  // Renaming replaces the selected metric, leaving every other score intact.
+  if (row.original_metric_name !== metricName) delete metrics[row.original_metric_name];
+  metrics[metricName] = originalValue != null && row.metric_value === String(originalValue)
+    ? originalValue
+    : row.metric_value;
+  return metrics;
+}
+
 interface EvaluationData extends Record<string, unknown> {
   task_id: number;
   dataset_id: number;
   model_name?: string;
   harness?: string | null;
-  metrics: Record<string, string>;
+  metrics: Evaluation["metrics"];
   best_metric: string;
   best_rank?: number;
   num_parameters?: number | null;
@@ -91,7 +132,7 @@ export function normalizeEvaluationOperations(
     const common: EvaluationData = {
       task_id: ids.taskId,
       dataset_id: ids.datasetId,
-      metrics: { [metricName]: row.metric_value },
+      metrics: editedMetrics(row, metricName),
       best_metric: metricName,
       is_open: row.is_open,
     };
