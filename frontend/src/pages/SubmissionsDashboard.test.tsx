@@ -7,8 +7,9 @@ import type { PendingPaperEdit } from "@/lib/pendingEdits";
 import { parsePendingPaperEdit } from "@/lib/pendingEdits";
 import SubmissionsDashboard from "@/pages/SubmissionsDashboard";
 
-const { listPendingPaperEdits } = vi.hoisted(() => ({
+const { listPendingPaperEdits, approve } = vi.hoisted(() => ({
   listPendingPaperEdits: vi.fn(),
+  approve: vi.fn(),
 }));
 
 vi.mock("@/lib/authContext", () => ({
@@ -18,10 +19,14 @@ vi.mock("@/lib/authContext", () => ({
   }),
 }));
 
+vi.mock("@/lib/api/papers", () => ({
+  papersApi: { get: vi.fn().mockResolvedValue({ id: "42", arxiv_id: "2401.00001", title: "Cached paper" }) },
+}));
+
 vi.mock("@/lib/api/submissions", () => ({
   submissionsApi: {
     list: listPendingPaperEdits,
-    approve: vi.fn(),
+    approve,
     reject: vi.fn(),
   },
 }));
@@ -68,10 +73,9 @@ function taxonomySubmission(
   });
 }
 
-function renderDashboard() {
-  const queryClient = new QueryClient({
+function renderDashboard(queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  });
+  })) {
   return render(
     <QueryClientProvider client={queryClient}>
       <SubmissionsDashboard />
@@ -213,4 +217,21 @@ describe("SubmissionsDashboard", () => {
     }
     expect(screen.queryByText("Taxonomy directory")).not.toBeInTheDocument();
   });
+});
+
+it.each(["tasks", "organizations"] as const)("invalidates route details and feeds when a %s edit is approved", async (edit_type) => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300_000 } } });
+  const paper = { id: "42", arxiv_id: "2401.00001", title: "Cached paper" };
+  client.setQueryData(["paper-summary", "42"], paper);
+  client.setQueryData(["paper", paper.arxiv_id], paper);
+  client.setQueryData(["paper-preview", paper.arxiv_id], paper);
+  client.setQueryData(["organization-papers-infinite", "nvidia"], [paper]);
+  const submission = { ...externalPaperSubmission, paper_id: 42, edit_type, proposed_payload: edit_type === "tasks" ? { task_ids: [1] } : { organization_ids: [1] } };
+  listPendingPaperEdits.mockResolvedValue({ count: 1, results: [submission] });
+  approve.mockResolvedValue({ ...submission, status: "approved" });
+  renderDashboard(client);
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(client.getQueryState(["paper", paper.arxiv_id])?.isInvalidated).toBe(true));
+  expect(client.getQueryState(["paper-preview", paper.arxiv_id])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(true);
 });

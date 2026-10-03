@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 /**
  * Shared visual components: tag/method chips, SOTA badges, inline icons,
  * paper thumbnails, and the PaperCard list item. `TagChip` takes a slug +
@@ -653,7 +654,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
   const paperHref = `/paper/${paper.id}`;
   const prefetchPaper = React.useCallback(() => {
     queryClient.prefetchQuery({
-      queryKey: ["paper-route", paper.id],
+      queryKey: paperQueryKeys.detail(paper.id),
       queryFn: () => papersApi.get(paper.id, true),
       staleTime: 10 * 60 * 1000,
     });

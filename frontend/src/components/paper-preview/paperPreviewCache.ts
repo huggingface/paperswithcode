@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import type { QueryClient } from "@tanstack/react-query";
 
 import { papersApi } from "@/lib/api/papers";
@@ -5,7 +6,7 @@ import type { Paper, PaperReferenceQuery } from "@/lib/api/papers.types";
 import { normalizePaperRouteId } from "@/lib/utils";
 
 export const paperPreviewQueryKey = (routeId: string) =>
-  ["paper-preview", normalizePaperRouteId(routeId)] as const;
+  paperQueryKeys.preview(normalizePaperRouteId(routeId));
 
 export const paperRouteId = (paper: Paper): string => paper.arxiv_id ?? paper.id;
 

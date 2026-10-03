@@ -1,8 +1,10 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { papersApi } from "@/lib/api/papers";
+import type { Paper } from "@/lib/api/papers.types";
 import { PaperCard } from "@/components";
 import type { PaperCardProps } from "@/lib/transform";
 
@@ -38,10 +40,9 @@ const paper: PaperCardProps = {
   sotaRanks: [],
 };
 
-const renderCard = (showInstitution?: boolean) => {
-  const queryClient = new QueryClient({
+const renderCard = (showInstitution?: boolean, queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
-  });
+  })) => {
   return render(
     <QueryClientProvider client={queryClient}>
       <MemoryRouter>
@@ -73,3 +74,15 @@ describe("PaperCard organization logos", () => {
     ).not.toBeInTheDocument();
   });
 });
+
+ it("prefetches the detail cache consumed when opening the paper", async () => {
+   const client = new QueryClient();
+   const response = { id: "1", arxiv_id: paper.id, title: paper.title } as Paper;
+   const get = vi.spyOn(papersApi, "get").mockResolvedValue(response);
+   renderCard(true, client);
+   fireEvent.mouseEnter(screen.getByRole("link", { name: paper.title }));
+   await waitFor(() => expect(client.getQueryData(["paper", paper.id])).toEqual(response));
+   expect(get).toHaveBeenCalledWith(paper.id, true);
+   get.mockRestore();
+   client.clear();
+ });
