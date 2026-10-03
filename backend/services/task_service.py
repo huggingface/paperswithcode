@@ -8,15 +8,14 @@ including pagination, filtering, hierarchical relationships, and paper associati
 from datetime import date, datetime, timedelta, timezone
 import math
 from typing import Optional, List
-from sqlalchemy.orm import Session, aliased
-from sqlalchemy import func, desc, asc, case, and_, cast, Float, or_, select
+from sqlalchemy.orm import Session
+from sqlalchemy import func, desc, asc, case, and_, cast, Float
 
 from backend.models.database import (
     Task as DBTask,
     Area as DBArea,
     Paper as DBPaper,
     PaperTask,
-    PaperRepository as DBPaperRepository,
     Repository as DBRepository,
     Evaluation as DBEvaluation,
     Framework as DBFramework,
@@ -85,57 +84,6 @@ class TaskService:
             if result is not None:
                 return result
         raise CatalogNotFoundError("Image not available")
-
-    @staticmethod
-    def _deduplicate_task_trending_repositories(query, task_id: int):
-        """Keep the newest task paper for each shared official repository.
-
-        The global trending feed attributes a repository's activity to only
-        its newest linked paper. Apply the same rule to task-scoped trending
-        feeds so a project that publishes a follow-up paper does not occupy
-        multiple cards with one repository signal. Papers without an official
-        repository remain independent.
-        """
-        current_repo = aliased(DBPaperRepository)
-        other_repo = aliased(DBPaperRepository)
-        other_paper = aliased(DBPaper)
-        other_task = aliased(PaperTask)
-
-        same_date = or_(
-            other_paper.date_published == DBPaper.date_published,
-            and_(
-                other_paper.date_published.is_(None),
-                DBPaper.date_published.is_(None),
-            ),
-        )
-        newer_paper = or_(
-            and_(
-                DBPaper.date_published.is_(None),
-                other_paper.date_published.is_not(None),
-            ),
-            other_paper.date_published > DBPaper.date_published,
-            and_(same_date, other_paper.id > DBPaper.id),
-        )
-        newer_for_shared_repo = (
-            select(1)
-            .select_from(current_repo)
-            .join(
-                other_repo,
-                other_repo.repository_id == current_repo.repository_id,
-            )
-            .join(other_paper, other_paper.id == other_repo.paper_id)
-            .join(other_task, other_task.paper_id == other_paper.id)
-            .where(
-                current_repo.paper_id == DBPaper.id,
-                current_repo.is_official.is_(True),
-                other_repo.is_official.is_(True),
-                other_task.task_id == task_id,
-                other_paper.is_latest_version.is_(True),
-                newer_paper,
-            )
-            .exists()
-        )
-        return query.filter(~newer_for_shared_repo)
 
     def _build_task_model(
         self,
@@ -1116,7 +1064,6 @@ class TaskService:
         """
         try:
             from backend.models.database import Paper as DBPaper
-            from backend.models.papers import Papers
 
             # Get task to verify it exists (try by ID or slug)
             task = None
@@ -1135,74 +1082,26 @@ class TaskService:
                 .filter(PaperTask.task_id == task.id)
             )
 
-            # Apply latest version filter
-            if latest_only:
-                query = query.filter(DBPaper.is_latest_version)
-
-            if has_code:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_code_filter(query)
-
-            if has_hf_artifacts:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_hf_artifacts_filter(query)
-
-            if start_date is not None:
-                query = query.filter(DBPaper.date_published >= start_date)
-            if end_date is not None:
-                query = query.filter(DBPaper.date_published <= end_date)
-
-            # Apply ordering
-            if order_by == "trending":
-                # Match the home feed: rank by the active trending metric
-                # (paper-level composite score or official-repo velocity per
-                # PWC_TRENDING_RANKING_MODE). Unscored papers stay in the list
-                # but sort after scored papers.
-                from backend.services.paper_service import PaperService
-
-                query = self._deduplicate_task_trending_repositories(query, task.id)
-                query = PaperService(self.db).apply_scoped_trending_order(query)
-            else:
-                if order_by == "date_published":
-                    order_field = DBPaper.date_published
-                elif order_by == "title":
-                    order_field = DBPaper.title
-                elif order_by == "citation_count":
-                    order_field = DBPaper.citation_count
-                else:
-                    order_field = DBPaper.date_published
-
-                if order_dir == "desc":
-                    query = query.order_by(desc(order_field), desc(DBPaper.id))
-                else:
-                    query = query.order_by(asc(order_field), asc(DBPaper.id))
-
-            # Get total count
-            total_count = query.count()
-
-            # Apply pagination
-            offset = (page - 1) * page_size
-            db_papers = query.offset(offset).limit(page_size).all()
-
-            # Convert to API models
+            from backend.services.paper_feed_executor import (
+                PaperFeedExecutor,
+                TASK_ORDERING,
+            )
             from backend.services.paper_service import PaperService
 
-            paper_service = PaperService(self.db)
-            papers = paper_service.hydrate_cards(
-                db_papers, include_resources=include_resources
-            )
-
-            # Calculate pagination
-            next_page = page + 1 if offset + page_size < total_count else None
-            previous_page = page - 1 if page > 1 else None
-
-            return Papers(
-                count=total_count,
-                next_page=next_page,
-                previous_page=previous_page,
-                results=papers,
+            return PaperFeedExecutor(PaperService(self.db)).execute(
+                query,
+                page=page,
+                page_size=page_size,
+                latest_only=latest_only,
+                has_code=has_code,
+                has_hf_artifacts=has_hf_artifacts,
+                start_date=start_date,
+                end_date=end_date,
+                order_by=order_by,
+                order_dir=order_dir,
+                ordering=TASK_ORDERING,
+                deduplicate_task_id=task.id,
+                include_resources=include_resources,
             )
 
         except PaperNotFoundError:
