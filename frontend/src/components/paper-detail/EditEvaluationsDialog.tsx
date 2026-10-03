@@ -1,5 +1,5 @@
 import { getApiErrorMessage } from "@/lib/apiTransport";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Loader2, Check, Plus, Trash2, Database } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -19,11 +19,15 @@ import { evaluationsApi } from "@/lib/api/evaluations";
 import { submissionsApi } from "@/lib/api/submissions";
 import {
   mapApiEvaluationsToEditable,
-  normalizeEvaluationOperations,
+  prepareEvaluationDraft,
+  validateEvaluationDraft,
+  type EvaluationOperation,
+  type EvaluationDraftError,
   toDirectEvaluationOperations,
   toPendingEvaluationOperations,
   type EditableEvaluationRow,
 } from "@/lib/evaluationOperations";
+import { evaluationChange, refreshEvaluationQueries } from "@/lib/evaluationQueryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
 import { SuggestTaxonomyDialog } from "@/components/paper-detail/SuggestTaxonomyDialog";
@@ -103,8 +107,11 @@ export function EditEvaluationsDialog({
   isAdmin = false,
   isAuthor = false,
 }: EditEvaluationsDialogProps) {
+  const errorId = useId();
   const showHarnessColumn = paperHasCodingAgentsTask(paperTasks);
   const [editedEvaluations, setEditedEvaluations] = useState<EditableEvaluationRow[]>([]);
+  const [hasAttemptedSave, setHasAttemptedSave] = useState(false);
+  const draftErrors = hasAttemptedSave ? validateEvaluationDraft(editedEvaluations) : [];
   const [suggestionKind, setSuggestionKind] = useState<"benchmark" | "metric" | null>(null);
   const [knownTasks, setKnownTasks] = useState<Map<string, APITask>>(new Map());
   const [knownDatasets, setKnownDatasets] = useState<Map<string, Dataset>>(new Map());
@@ -116,6 +123,7 @@ export function EditEvaluationsDialog({
 
   useEffect(() => {
     if (!open) {
+      setHasAttemptedSave(false);
       hasSeededRef.current = false;
       hasUserEditedRef.current = false;
       return;
@@ -273,20 +281,15 @@ export function EditEvaluationsDialog({
   };
 
   const saveEvaluationsMutation = useMutation({
-    mutationFn: async ({ paperId, evaluations }: {
+    mutationFn: async ({ paperId, canonical }: {
       paperId: string;
-      evaluations: EditableEvaluationRow[];
-    }): Promise<{ submitted: boolean }> => {
-      const canonical = normalizeEvaluationOperations(
-        evaluations,
-        selectedDatasetSupportsHarness,
-      );
+      canonical: EvaluationOperation[];
+    }): Promise<void> => {
       if (!isAdmin && submitMode === "direct" && canonical.length > 50) {
         throw new Error(
           "Contributor evaluation batches are limited to 50 operations; contact an admin.",
         );
       }
-      if (canonical.length === 0) return { submitted: false };
 
       const numericPaperId = Number.parseInt(paperId, 10);
       if (submitMode === "pending") {
@@ -298,33 +301,24 @@ export function EditEvaluationsDialog({
           },
         });
       } else {
+        const change = evaluationChange(paperId, initialEvaluations, canonical, arxivId);
         await evaluationsApi.batch(
           numericPaperId,
           toDirectEvaluationOperations(numericPaperId, canonical),
         );
+        refreshEvaluationQueries(queryClient, change);
       }
-      return { submitted: true };
     },
-    onSuccess: (result) => {
+    onSuccess: () => {
       if (submitMode === "pending") {
-        if (result?.submitted) {
-          toast({
-            title: "Edit submitted for review",
-            description:
-              "Thanks! An admin will review your proposed evaluation changes shortly.",
-          });
-        } else {
-          toast({
-            title: "No changes to submit",
-            description: "Your evaluation list matches the existing data.",
-          });
-        }
+        toast({
+          title: "Edit submitted for review",
+          description: "Thanks! An admin will review your proposed evaluation changes shortly.",
+        });
         onSuccess?.();
         onOpenChange(false);
         return;
       }
-      queryClient.invalidateQueries({ queryKey: ['paper-arxiv', arxivId] });
-      queryClient.invalidateQueries({ queryKey: ['evaluations', 'paper', paperId] });
       onSuccess?.();
       onOpenChange(false);
     },
@@ -444,13 +438,23 @@ export function EditEvaluationsDialog({
   };
 
   const handleSave = () => {
-    const evaluationsToSave = editedEvaluations.filter(
-      e => e.operation !== 'delete' || e.id
-    );
-    saveEvaluationsMutation.mutate({
-      paperId,
-      evaluations: evaluationsToSave,
-    });
+    setHasAttemptedSave(true);
+    const draft = prepareEvaluationDraft(editedEvaluations, selectedDatasetSupportsHarness);
+    if (!draft.valid) return;
+    if (draft.operations.length === 0) {
+      toast({ title: "No changes to submit", description: "Your evaluation list matches the existing data." });
+      return;
+    }
+    saveEvaluationsMutation.mutate({ paperId, canonical: draft.operations });
+  };
+
+  const renderFieldError = (rowIndex: number, field: EvaluationDraftError["field"]) => {
+    const error = draftErrors.find(error => error.rowIndex === rowIndex && error.field === field);
+    return error ? (
+      <p id={`${errorId}-${rowIndex}-${field}-error`} className="text-xs text-destructive">
+        {error.message}
+      </p>
+    ) : null;
   };
 
   return (
@@ -464,6 +468,18 @@ export function EditEvaluationsDialog({
         </DialogHeader>
         {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
 
+        {draftErrors.length > 0 && (
+          <div role="alert" className="text-sm text-destructive">
+            Fix the following errors before saving. No changes have been submitted.
+            <ul>
+              {draftErrors.map(error => (
+                <li key={`${error.rowIndex}-${error.field}`}>
+                  Row {editedEvaluations.slice(0, error.rowIndex + 1).filter(row => row.operation !== "delete").length}: {error.message}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
         <div className="py-4 overflow-y-auto max-h-[600px]">
           {editedEvaluations.filter(e => e.operation !== 'delete').length > 0 ? (
             <div className="overflow-x-auto">
@@ -508,43 +524,49 @@ export function EditEvaluationsDialog({
                     return (
                       <tr key={index} className="border-b border-border">
                         <td className="py-2 px-2">
-                          <SearchableSelect
-                            value={evaluation.task_id}
-                            onChange={(value) => handleUpdateEvaluationField(index, 'task_id', value)}
-                            placeholder="Select task"
-                            searchPlaceholder="Search tasks..."
-                            emptyMessage="No tasks found."
-                            selectedOption={
-                              selectedTask
-                                ? { value: selectedTask.id, label: selectedTask.name }
-                                : null
-                            }
-                            queryKey={['eval-edit-task-search']}
-                            queryFn={searchTasks}
-                            enabled={open}
-                          />
+                          <div role="group" aria-label="Task" aria-describedby={`${errorId}-${index}-task_id-error`}>
+                            <SearchableSelect
+                              value={evaluation.task_id}
+                              onChange={(value) => handleUpdateEvaluationField(index, 'task_id', value)}
+                              placeholder="Select task"
+                              searchPlaceholder="Search tasks..."
+                              emptyMessage="No tasks found."
+                              selectedOption={
+                                selectedTask
+                                  ? { value: selectedTask.id, label: selectedTask.name }
+                                  : null
+                              }
+                              queryKey={['eval-edit-task-search']}
+                              queryFn={searchTasks}
+                              enabled={open}
+                            />
+                            {renderFieldError(index, "task_id")}
+                          </div>
                         </td>
                         <td className="py-2 px-2">
-                          <SearchableSelect
-                            value={evaluation.dataset_id}
-                            onChange={(value) => handleUpdateEvaluationField(index, 'dataset_id', value)}
-                            placeholder={evaluation.task_id ? "Select dataset" : "Select task first"}
-                            searchPlaceholder="Search datasets..."
-                            emptyMessage={
-                              evaluation.task_id
-                                ? "No datasets found for this task."
-                                : "Select a task first."
-                            }
-                            disabled={!evaluation.task_id}
-                            selectedOption={
-                              selectedDataset
-                                ? { value: selectedDataset.id, label: selectedDataset.name }
-                                : null
-                            }
-                            queryKey={['eval-edit-dataset-search', evaluation.task_id]}
-                            queryFn={searchDatasetsForTask(evaluation.task_id)}
-                            enabled={open && Boolean(evaluation.task_id)}
-                          />
+                          <div role="group" aria-label="Dataset" aria-describedby={`${errorId}-${index}-dataset_id-error`}>
+                            <SearchableSelect
+                              value={evaluation.dataset_id}
+                              onChange={(value) => handleUpdateEvaluationField(index, 'dataset_id', value)}
+                              placeholder={evaluation.task_id ? "Select dataset" : "Select task first"}
+                              searchPlaceholder="Search datasets..."
+                              emptyMessage={
+                                evaluation.task_id
+                                  ? "No datasets found for this task."
+                                  : "Select a task first."
+                              }
+                              disabled={!evaluation.task_id}
+                              selectedOption={
+                                selectedDataset
+                                  ? { value: selectedDataset.id, label: selectedDataset.name }
+                                  : null
+                              }
+                              queryKey={['eval-edit-dataset-search', evaluation.task_id]}
+                              queryFn={searchDatasetsForTask(evaluation.task_id)}
+                              enabled={open && Boolean(evaluation.task_id)}
+                            />
+                            {renderFieldError(index, "dataset_id")}
+                          </div>
                         </td>
                         <td className="py-2 px-2">
                           <Input
@@ -585,6 +607,9 @@ export function EditEvaluationsDialog({
                           ) : metricOptions.length > 0 ? (
                             <select
                               className="w-full rounded-md border border-border bg-background px-2 py-1 text-sm"
+                              id={`${errorId}-${index}-metric_name`}
+                              aria-invalid={draftErrors.some(error => error.rowIndex === index && error.field === "metric_name")}
+                              aria-describedby={`${errorId}-${index}-metric_name-error`}
                               value={evaluation.metric_name}
                               onChange={(e) =>
                                 handleUpdateEvaluationField(index, 'metric_name', e.target.value)
@@ -602,15 +627,20 @@ export function EditEvaluationsDialog({
                               No configured metrics
                             </span>
                           )}
+                          {renderFieldError(index, "metric_name")}
                         </td>
                         <td className="py-2 px-2">
                           <Input
                             type="text"
                             className="w-full text-sm"
                             placeholder="44.9"
+                            id={`${errorId}-${index}-metric_value`}
+                            aria-invalid={draftErrors.some(error => error.rowIndex === index && error.field === "metric_value")}
+                            aria-describedby={`${errorId}-${index}-metric_value-error`}
                             value={evaluation.metric_value}
                             onChange={(e) => handleUpdateEvaluationField(index, 'metric_value', e.target.value)}
                           />
+                          {renderFieldError(index, "metric_value")}
                         </td>
                         <td className="py-2 px-2">
                           <Input
@@ -619,10 +649,14 @@ export function EditEvaluationsDialog({
                             step={1}
                             className="w-full text-sm"
                             placeholder="e.g. 7000000000"
+                            id={`${errorId}-${index}-num_parameters`}
+                            aria-invalid={draftErrors.some(error => error.rowIndex === index && error.field === "num_parameters")}
+                            aria-describedby={`${errorId}-${index}-num_parameters-error`}
                             value={evaluation.num_parameters}
                             onChange={(e) => handleUpdateEvaluationField(index, 'num_parameters', e.target.value)}
                             title="Raw model parameter count (e.g. 7000000000 for a 7B model). Leave blank if unknown."
                           />
+                          {renderFieldError(index, "num_parameters")}
                         </td>
                         <td className="py-2 px-2">
                           <Input

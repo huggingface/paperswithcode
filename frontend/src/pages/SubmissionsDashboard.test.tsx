@@ -235,3 +235,28 @@ it.each(["tasks", "organizations"] as const)("invalidates route details and feed
   expect(client.getQueryState(["paper-preview", paper.arxiv_id])?.isInvalidated).toBe(true);
   expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(true);
 });
+
+it("reconciles both benchmark contexts after approving an evaluation move", async () => {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: 300_000 } } });
+  const paper = { id: "42", arxiv_id: "2401.00001", title: "Cached paper" };
+  client.setQueryData(["paper-summary", "42"], paper);
+  client.setQueryData(["dataset-evals", "100"], []);
+  client.setQueryData(["dataset-evals", "200"], []);
+  client.setQueryData(["dataset-evals", "300"], []);
+  client.setQueryData(["task", "10"], { id: "10", name: "Old task" });
+  client.setQueryData(["task", "20"], { id: "20", name: "New task" });
+  client.setQueryData(["dataset", "100"], { id: "100", name: "Old benchmark" });
+  client.setQueryData(["dataset", "200"], { id: "200", name: "New benchmark" });
+  const submission = {
+    ...externalPaperSubmission, paper_id: 42, edit_type: "evaluations",
+    current_payload: { evaluations: [{ id: 1, task_id: 10, dataset_id: 100 }] },
+    proposed_payload: { operations: [{ op: "update", evaluation_id: 1, data: { task_id: 20, dataset_id: 200, metrics: { Accuracy: 99 } } }] },
+  };
+  listPendingPaperEdits.mockResolvedValue({ count: 1, results: [submission] });
+  approve.mockResolvedValue({ ...submission, status: "approved" });
+  renderDashboard(client);
+  await userEvent.setup().click(await screen.findByRole("button", { name: "Approve" }));
+  await waitFor(() => expect(client.getQueryState(["dataset-evals", "100"])?.isInvalidated).toBe(true));
+  expect(client.getQueryState(["dataset-evals", "200"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState(["dataset-evals", "300"])?.isInvalidated).toBe(false);
+});

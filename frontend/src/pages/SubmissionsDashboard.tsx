@@ -1,3 +1,4 @@
+import { evaluationChange, refreshEvaluationQueries } from "@/lib/evaluationQueryInvalidation";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { invalidatePaperDetails, invalidatePaperFeeds } from "@/lib/queryInvalidation";
 import React from "react";
@@ -214,11 +215,8 @@ function SubmissionCard({
     (reviewed: PendingPaperEdit) => {
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
       queryClient.invalidateQueries({ queryKey: ["pendingPaperEdit", reviewed.id] });
-      if (reviewed.paper_id != null) {
+      if (reviewed.paper_id != null && reviewed.edit_type !== "evaluations") {
         invalidatePaperDetails(queryClient, [String(reviewed.paper_id), paper?.arxiv_id]);
-      }
-      if (reviewed.edit_type === "evaluations" && reviewed.paper_id != null) {
-        queryClient.invalidateQueries({ queryKey: ["evaluations", "paper", String(reviewed.paper_id)] });
       }
     },
     [paper?.arxiv_id, queryClient],
@@ -228,7 +226,18 @@ function SubmissionCard({
     mutationFn: () => submissionsApi.approve(submission.id),
     onSuccess: (reviewed) => {
       invalidateAfterReview(reviewed);
-      if (reviewed.paper_id != null && !isAdministrativeSuggestion) {
+      if (reviewed.edit_type === "evaluations" && reviewed.paper_id != null) {
+        refreshEvaluationQueries(queryClient, evaluationChange(
+          String(reviewed.paper_id),
+          reviewed.current_payload?.evaluations ?? [],
+          reviewed.proposed_payload.operations.map(operation => operation.op === "create"
+            ? { kind: "create", data: operation.data }
+            : operation.op === "update"
+              ? { kind: "update", evaluationId: operation.evaluation_id, data: operation.data }
+              : { kind: "delete", evaluationId: operation.evaluation_id }),
+          paper?.arxiv_id ?? undefined,
+        ));
+      } else if (reviewed.paper_id != null && !isAdministrativeSuggestion) {
         invalidatePaperFeeds(queryClient);
       }
       toast({

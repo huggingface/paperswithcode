@@ -2,11 +2,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   mapApiEvaluationsToEditable,
-  normalizeEvaluationOperations,
+  prepareEvaluationDraft,
+  validateEvaluationDraft,
   toDirectEvaluationOperations,
   toPendingEvaluationOperations,
   type EditableEvaluationRow,
 } from "./evaluationOperations";
+
+function normalizeEvaluationOperations(...args: Parameters<typeof prepareEvaluationDraft>) {
+  const draft = prepareEvaluationDraft(...args);
+  if (!draft.valid) throw new Error(draft.errors.map(error => error.message).join("; "));
+  return draft.operations;
+}
 
 const row = (overrides: Partial<EditableEvaluationRow>): EditableEvaluationRow => ({
   task_id: "3",
@@ -94,11 +101,10 @@ describe("evaluation operation normalization", () => {
     expect(canonical[1]).toHaveProperty("data.harness", null);
   });
 
-  it("preserves delete operations and ignores unchanged or incomplete rows", () => {
+  it("preserves delete operations and ignores unchanged rows", () => {
     const canonical = normalizeEvaluationOperations([
       row({ id: "21", operation: "delete" }),
       row({ id: "22", operation: "unchanged" }),
-      row({ operation: "create", metric_value: "" }),
     ], () => true);
 
     expect(canonical).toEqual([{ kind: "delete", evaluationId: 21 }]);
@@ -172,4 +178,48 @@ describe("lossless evaluation drafts", () => {
     expect(draft.metric_name).toBe("Accuracy");
     expect(draft.metric_value).toBe("0");
   });
+});
+
+describe("whole draft validation", () => {
+  it("returns all row/field errors and no serializable operations for a mixed batch", () => {
+    const draft = prepareEvaluationDraft([
+      row({}), row({ task_id: "", dataset_id: "7x", metric_name: " ", metric_value: " " }),
+    ], () => true);
+    expect(draft).toEqual({ valid: false, errors: [
+      { rowIndex: 1, field: "task_id", message: "Select a valid task." },
+      { rowIndex: 1, field: "dataset_id", message: "Select a valid dataset." },
+      { rowIndex: 1, field: "metric_name", message: "Select a metric." },
+      { rowIndex: 1, field: "metric_value", message: "Enter a metric value." },
+    ] });
+    expect(draft).not.toHaveProperty("operations");
+  });
+
+  it.each(["", "0", "-1", "3.1", "3x", "Infinity", "9007199254740992"])("rejects invalid identifiers: %s", id => {
+    expect(validateEvaluationDraft([row({ task_id: id, dataset_id: id })])).toHaveLength(2);
+    expect(validateEvaluationDraft([row({ operation: "update", id })])).toHaveLength(1);
+    expect(validateEvaluationDraft([row({ operation: "delete", id })])).toHaveLength(1);
+  });
+
+  it("ignores unchanged incomplete rows and only requires an ID for deletion", () => {
+    expect(prepareEvaluationDraft([
+      row({ operation: "unchanged", metric_name: "", metric_value: "", task_id: "" }),
+      row({ operation: "delete", id: "9", task_id: "", dataset_id: "", metric_value: "" }),
+    ], () => false)).toEqual({ valid: true, operations: [{ kind: "delete", evaluationId: 9 }] });
+    expect(prepareEvaluationDraft([row({ operation: "unchanged" })], () => false))
+      .toEqual({ valid: true, operations: [] });
+  });
+
+  it("accepts zero and formatted scores without imposing a new numeric contract", () => {
+    expect(validateEvaluationDraft([row({ metric_value: "0" }), row({ metric_value: "91 ± 2" })])).toEqual([]);
+  });
+  it.each(["abc", "1.5", "Infinity"])("rejects invalid optional integer metadata: %s", value => {
+    expect(validateEvaluationDraft([row({ best_rank: value, num_parameters: value })]).map(error => error.field))
+      .toEqual(["best_rank", "num_parameters"]);
+  });
+
+  it("rejects negative parameter counts and accepts blank metadata or zero", () => {
+    expect(validateEvaluationDraft([row({ num_parameters: "-1" })])[0]?.field).toBe("num_parameters");
+    expect(validateEvaluationDraft([row({ num_parameters: "0", best_rank: "" }), row({ num_parameters: "" })])).toEqual([]);
+  });
+
 });
