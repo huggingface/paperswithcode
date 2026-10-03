@@ -1,0 +1,240 @@
+import type { Dataset, Task } from "@/lib/api/catalog.types";
+import type {
+  Evaluation,
+  LeaderboardMetric,
+  MetricDirections,
+} from "@/lib/api/evaluations.types";
+import { selectLeaderboardEvaluations } from "@/lib/leaderboardEvaluations";
+import {
+  computeSeries,
+  evaluationMatchesHighlight,
+  filterLeaderboardByParameterCount,
+  mergeLeaderboardEvaluations,
+  parseMetricValue,
+  storedRankForMetric,
+  PARAMETER_FILTERS,
+} from "@/lib/benchmarkLeaderboard";
+
+/** Resolve query dependencies with the same precedence used by the presentation. */
+export function resolveLeaderboardTask(
+  tasks: Task[],
+  evaluations: Evaluation[],
+  taskSlug?: string,
+  highlightEvalId?: string,
+): string | null {
+  const highlightEval = evaluations.find((e) => e.id === highlightEvalId);
+  if (tasks.length === 0) return null;
+  if (
+    highlightEval?.task_id &&
+    tasks.some((t) => t.id === highlightEval.task_id)
+  ) {
+    return highlightEval.task_id;
+  }
+  if (taskSlug) {
+    const match = tasks.find((t) => t.slug === taskSlug);
+    if (match) return match.id;
+  }
+  if (tasks.length === 1) return tasks[0].id;
+  if (evaluations.length > 0) {
+    const counts = new Map<string, number>();
+    for (const e of evaluations) {
+      counts.set(e.task_id, (counts.get(e.task_id) || 0) + 1);
+    }
+    let topId: string | null = null;
+    let topN = -1;
+    for (const t of tasks) {
+      const n = counts.get(t.id) || 0;
+      if (n > topN) {
+        topN = n;
+        topId = t.id;
+      }
+    }
+    if (topId) return topId;
+  }
+  return tasks[0].id;
+}
+
+export interface LeaderboardPresentationInput {
+  evaluations: Evaluation[];
+  tasks: Task[];
+  taskSlug?: string;
+  highlightEvalId?: string;
+  metric?: string;
+  configuredMetrics: LeaderboardMetric[];
+  directions?: MetricDirections;
+  hideClosed: boolean;
+  parameterBound?: number;
+  showMoreMetrics: boolean;
+  initialSummary?: Dataset["leaderboard_summary"];
+  ready: {
+    evaluations: boolean;
+    tasks: boolean;
+    directions: boolean;
+    metrics: boolean;
+  };
+}
+
+export function deriveLeaderboardPresentation(
+  input: LeaderboardPresentationInput,
+) {
+  const {
+    evaluations,
+    tasks,
+    taskSlug,
+    highlightEvalId,
+    parameterBound,
+    showMoreMetrics,
+  } = input;
+  const currentTaskId = resolveLeaderboardTask(
+    tasks,
+    evaluations,
+    taskSlug,
+    highlightEvalId,
+  );
+  const primaryTask =
+    tasks.find((task) => task.id === currentTaskId) || tasks[0] || null;
+  const highlightEval = evaluations.find((e) => e.id === highlightEvalId);
+  const visibility = selectLeaderboardEvaluations(
+    evaluations,
+    currentTaskId,
+    input.hideClosed,
+  );
+  const mergedTaskEvals = mergeLeaderboardEvaluations(visibility.visible);
+  const displayedLeaderboardEvals = filterLeaderboardByParameterCount(
+    mergedTaskEvals,
+    parameterBound,
+  );
+  const configuredMetrics = input.configuredMetrics.map(
+    (metric) => metric.metric_name,
+  );
+  const dataMetrics = Array.from(
+    new Set(
+      mergedTaskEvals.flatMap((e) => [
+        ...(e.best_metric ? [e.best_metric] : []),
+        ...Object.keys(e.metrics || {}),
+      ]),
+    ),
+  );
+  const allowedMetrics = configuredMetrics.length
+    ? configuredMetrics
+    : dataMetrics;
+  const counts = new Map<string, number>();
+  for (const entry of mergedTaskEvals) {
+    const metric = entry.best_metric;
+    if (!metric || parseMetricValue(entry.metrics[metric]) === null) continue;
+    if (configuredMetrics.length && !allowedMetrics.includes(metric)) continue;
+    counts.set(metric, (counts.get(metric) || 0) + 1);
+  }
+  const defaultMetric =
+    [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] || allowedMetrics[0] || "";
+  const requestedMetric = allowedMetrics.find(
+    (metric) =>
+      metric.toLocaleLowerCase() === input.metric?.trim().toLocaleLowerCase(),
+  );
+  const activeMetric =
+    requestedMetric || highlightEval?.best_metric || defaultMetric;
+  const arrow: "↑" | "↓" =
+    input.directions?.directions[activeMetric] === "lower_is_better"
+      ? "↓"
+      : "↑";
+  const orderedMetrics =
+    activeMetric && allowedMetrics.includes(activeMetric)
+      ? [
+          activeMetric,
+          ...allowedMetrics.filter((metric) => metric !== activeMetric),
+        ]
+      : allowedMetrics;
+  const visibleMetrics = orderedMetrics.length
+    ? showMoreMetrics
+      ? orderedMetrics
+      : orderedMetrics.slice(0, 1)
+    : activeMetric
+      ? [activeMetric]
+      : [];
+  const sortedRows = displayedLeaderboardEvals.slice().sort((a, b) => {
+    const va = parseMetricValue(a.metrics[activeMetric]);
+    const vb = parseMetricValue(b.metrics[activeMetric]);
+    if (va !== null && vb !== null) return arrow === "↓" ? va - vb : vb - va;
+    if (va !== null) return -1;
+    if (vb !== null) return 1;
+    return (
+      storedRankForMetric(a, activeMetric) -
+      storedRankForMetric(b, activeMetric)
+    );
+  });
+  let lastValue: number | null = null;
+  let lastRank = 0;
+  const rows = sortedRows.map((evaluation, index) => {
+    const value = parseMetricValue(evaluation.metrics[activeMetric]);
+    if (value !== null && value !== lastValue) {
+      lastValue = value;
+      lastRank = index + 1;
+    }
+    return {
+      evaluation,
+      rank: value === null ? null : lastRank,
+      isHighlighted: evaluationMatchesHighlight(evaluation, highlightEvalId),
+    };
+  });
+  const {
+    points: chartPoints,
+    sota,
+    sotaModel,
+  } = computeSeries(displayedLeaderboardEvals, activeMetric, arrow);
+  const initialSummary =
+    parameterBound === undefined ? input.initialSummary : undefined;
+  const isFullSummaryReady =
+    input.ready.evaluations &&
+    input.ready.tasks &&
+    input.ready.directions &&
+    (!currentTaskId || input.ready.metrics);
+  const parameterCoverage = {
+    parameter_coverage_known: mergedTaskEvals.filter(
+      (entry) => entry.parameterCount !== null,
+    ).length,
+    parameter_coverage_total: mergedTaskEvals.length,
+  };
+  return {
+    currentTaskId,
+    primaryTask,
+
+    activeMetric,
+    arrow,
+    allowedMetrics,
+    orderedMetrics,
+    visibleMetrics,
+
+    rows,
+    chartPoints,
+    highlightedEval: rows.find((row) => row.isHighlighted)?.evaluation || null,
+    hiddenClosedEvals: visibility.hiddenClosed,
+    hiddenClosedTopEval: visibility.topHiddenClosed,
+
+    parameterBound,
+    parameterCoverage,
+    hasParameterMetadata: parameterCoverage.parameter_coverage_known > 0,
+    parameterFilters: PARAMETER_FILTERS.map((filter) => ({
+      ...filter,
+      selected: parameterBound === filter.maxParametersExclusive,
+      disabled:
+        parameterBound !== filter.maxParametersExclusive &&
+        filterLeaderboardByParameterCount(
+          mergedTaskEvals,
+          filter.maxParametersExclusive,
+        ).length === 0,
+    })),
+
+    displayedMetric: isFullSummaryReady ? activeMetric : initialSummary?.metric,
+    displayedSota: isFullSummaryReady ? sota : initialSummary?.value,
+    displayedSotaModel: isFullSummaryReady
+      ? sotaModel
+      : initialSummary?.model_name,
+    isSummaryLoading: !isFullSummaryReady && !initialSummary,
+    isInitialFilteredViewLoading:
+      parameterBound !== undefined && !isFullSummaryReady,
+  };
+}
+
+export type LeaderboardPresentation = ReturnType<
+  typeof deriveLeaderboardPresentation
+>;

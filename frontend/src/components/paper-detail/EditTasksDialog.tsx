@@ -1,4 +1,5 @@
 import { getApiErrorMessage } from "@/lib/apiTransport";
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Search, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -175,15 +176,14 @@ export function EditTasksDialog({
 
       await Promise.all(
         ids.flatMap((id) => [
-          queryClient.cancelQueries({ queryKey: ["paper", id] }),
-          queryClient.cancelQueries({ queryKey: ["paper-arxiv", id] }),
+          queryClient.cancelQueries({ queryKey: paperQueryKeys.detail(id) }),
+          queryClient.cancelQueries({ queryKey: paperQueryKeys.arxiv(id) }),
         ]),
       );
 
       const snapshots: Array<{ key: readonly unknown[]; data: Paper | undefined }> = [];
       ids.forEach((id) => {
-        (["paper", "paper-arxiv"] as const).forEach((prefix) => {
-          const key = [prefix, id] as const;
+        [paperQueryKeys.detail(id), paperQueryKeys.arxiv(id)].forEach((key) => {
           const data = queryClient.getQueryData<Paper>(key);
           snapshots.push({ key, data });
           if (data) {

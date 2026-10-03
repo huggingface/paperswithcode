@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import { keepPreviousData, useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import type { Paper, PaperOrderBy } from '@/lib/api/papers.types';
 import type { PaginatedResponse, PaperSearchFeedPage } from '@/lib/api/shared.types';
@@ -5,7 +6,7 @@ import { papersApi } from '@/lib/api/papers';
 
 export function usePaper(id: string, enabled: boolean = true) {
   return useQuery<Paper, Error>({
-    queryKey: ['paper', id],
+    queryKey: paperQueryKeys.detail(id),
     queryFn: () => papersApi.get(id),
     enabled: enabled && !!id,
     staleTime: 10 * 60 * 1000, // 10 minutes
@@ -53,7 +54,7 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: ['papers-infinite', { page_size, search, order_by, order_dir, start_date, end_date, conference, task, method, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository }],
+    queryKey: [...paperQueryKeys.feeds.infinite, { page_size, search, order_by, order_dir, start_date, end_date, conference, task, method, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.list({
         page: pageParam as number,
@@ -102,7 +103,7 @@ export function useInfinitePaperSearch({
   enabled = true,
 }: UseInfinitePaperSearchParams) {
   return useInfiniteQuery<PaperSearchFeedPage<Paper>, Error>({
-    queryKey: ['paper-search-feed', { q, order_by, start_date, end_date, has_code, has_hf_artifacts }],
+    queryKey: [...paperQueryKeys.feeds.search, { q, order_by, start_date, end_date, has_code, has_hf_artifacts }],
     queryFn: ({ pageParam = 1 }) => papersApi.searchFeed({
       q,
       page: pageParam as number,
@@ -153,7 +154,7 @@ export function useInfiniteTaskPapers(params: UseInfiniteTaskPapersParams) {
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: ['task-papers-infinite', taskId, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
+    queryKey: [...paperQueryKeys.feeds.task, taskId, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.forTask(taskId, {
         page: pageParam as number,
@@ -210,7 +211,7 @@ export function useInfiniteConferencePapers(params: UseInfiniteConferencePapersP
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: ['conference-papers-infinite', conferenceSlug, taskSlug, presentation, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
+    queryKey: [...paperQueryKeys.feeds.conference, conferenceSlug, taskSlug, presentation, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.forConference(conferenceSlug, {
         task: taskSlug,
@@ -267,7 +268,7 @@ export function useInfiniteOrganizationPapers(params: UseInfiniteOrganizationPap
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: ['organization-papers-infinite', organizationSlug, taskSlug, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
+    queryKey: [...paperQueryKeys.feeds.organization, organizationSlug, taskSlug, { page_size, order_by, order_dir, latest_only, include_resources, has_code, has_hf_artifacts, start_date, end_date }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.forOrganization(organizationSlug, {
         task: taskSlug,

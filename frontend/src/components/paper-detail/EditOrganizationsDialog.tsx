@@ -1,3 +1,4 @@
+import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Search, X } from "lucide-react";
@@ -72,12 +73,14 @@ export const EditOrganizationsDialog = ({
           edit_type: "organizations",
           proposed_payload: { organization_ids: selected },
         });
+        return null;
       } else {
-        await papersApi.updateOrganizations(paperId, selected);
+        return papersApi.updateOrganizations(paperId, selected);
       }
     },
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["paper-arxiv"] });
+    onSuccess: (updatedPaper) => {
+      if (updatedPaper === undefined) return;
+      if (updatedPaper) refreshPaperQueries(queryClient, updatedPaper, [paperId]);
       onOpenChange(false);
     },
   });

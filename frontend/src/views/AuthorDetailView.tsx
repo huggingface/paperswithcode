@@ -1,3 +1,4 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import React from "react";
 import { Link, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -14,7 +15,7 @@ const AuthorDetailView: React.FC = () => {
     enabled: !!authorId,
   });
   const papers = useQuery({
-    queryKey: ["author-papers", authorId],
+    queryKey: [...paperQueryKeys.feeds.author, authorId],
     queryFn: () => papersApi.authorPapers(authorId!, { page: 1, page_size: 20 }),
     enabled: !!authorId,
   });

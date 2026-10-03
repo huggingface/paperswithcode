@@ -1,3 +1,5 @@
+import { paperQueryKeys } from "@/lib/paperQueryKeys";
+
 import type { QueryClient } from "@tanstack/react-query";
 
 import type { Evaluation } from "@/lib/api/evaluations.types";
@@ -65,6 +67,27 @@ function patchEvaluationsForPaper(
   return oldData;
 }
 
+/** Approval responses contain no Paper; refetch mounted details and stale the rest. */
+export function invalidatePaperDetails(
+  queryClient: QueryClient,
+  identifiers: Array<string | null | undefined>,
+) {
+  const ids = new Set(identifiers.filter((id): id is string => Boolean(id)));
+  for (const id of ids) {
+    for (const queryKey of [paperQueryKeys.detail(id), paperQueryKeys.arxiv(id), paperQueryKeys.preview(id), paperQueryKeys.summary(id)]) {
+      void queryClient.invalidateQueries({ queryKey, exact: true });
+    }
+  }
+}
+
+export function invalidatePaperFeeds(queryClient: QueryClient) {
+  // Membership and ordering may change even in lists not containing this paper.
+  // Fetch these stale families when readers return, not during the mutation.
+  for (const queryKey of Object.values(paperQueryKeys.feeds)) {
+    void queryClient.invalidateQueries({ queryKey, refetchType: "none" });
+  }
+}
+
 export function refreshPaperQueries(
   queryClient: QueryClient,
   updatedPaper: Paper,
@@ -77,19 +100,14 @@ export function refreshPaperQueries(
   );
 
   queryIds.forEach((id) => {
-    queryClient.setQueryData(["paper", id], updatedPaper);
-    queryClient.setQueryData(["paper-arxiv", id], updatedPaper);
+    queryClient.setQueryData(paperQueryKeys.detail(id), updatedPaper);
+    queryClient.setQueryData(paperQueryKeys.arxiv(id), updatedPaper);
+    // Update existing auxiliary cards without creating unused cache entries.
+    queryClient.setQueriesData({ queryKey: paperQueryKeys.preview(id), exact: true }, updatedPaper);
+    queryClient.setQueriesData({ queryKey: paperQueryKeys.summary(id), exact: true }, updatedPaper);
   });
 
-  queryClient.invalidateQueries({ queryKey: ["papers"], refetchType: "none" });
-  queryClient.invalidateQueries({
-    queryKey: ["papers-infinite"],
-    refetchType: "none",
-  });
-  queryClient.invalidateQueries({
-    queryKey: ["task-papers-infinite"],
-    refetchType: "none",
-  });
+  invalidatePaperFeeds(queryClient);
 
   const paperIdKey = String(updatedPaper.id);
   const patcher = (oldData: unknown) =>
