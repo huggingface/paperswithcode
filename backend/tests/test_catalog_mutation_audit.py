@@ -279,8 +279,26 @@ def test_evaluation_batch_is_one_ordered_audit_mutation(monkeypatch):
     )
     monkeypatch.setattr(evaluation_module, "CatalogMutationService", Mutation)
     operations = [
-        {"operation": "create", "payload": {"paper_id": 7, "model_name": "a"}},
-        {"operation": "create", "payload": {"paper_id": 7, "model_name": "b"}},
+        {
+            "operation": "create",
+            "payload": {
+                "paper_id": 7,
+                "task_id": 1,
+                "dataset_id": 1,
+                "metrics": {"Accuracy": 0},
+                "model_name": "a",
+            },
+        },
+        {
+            "operation": "create",
+            "payload": {
+                "paper_id": 7,
+                "task_id": 1,
+                "dataset_id": 1,
+                "metrics": {"Accuracy": 1},
+                "model_name": "b",
+            },
+        },
     ]
     result = service.batch(
         paper_id=7,

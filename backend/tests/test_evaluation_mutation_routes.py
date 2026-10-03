@@ -270,3 +270,43 @@ def test_post_put_translate_legacy_hydration_errors_at_boundary(
         if isinstance(legacy_error, DatabaseError)
         else str(legacy_error)
     }
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_public_update_cannot_override_patch_presence_with_internal_flags(
+    monkeypatch, batch
+):
+    calls = []
+
+    class Service:
+        def update(self, **kwargs):
+            calls.append(kwargs["payload"])
+            return _evaluation_payload()
+
+        def batch(self, **kwargs):
+            calls.append(kwargs["operations"][0]["payload"])
+            return {"evaluations": []}
+
+    payload = {"source_url": None, "source_url_set": False, "num_parameters_set": True}
+    with TestClient(_evaluation_app(monkeypatch, Service())) as client:
+        if batch:
+            # The batch route checks the actor's role before adapting operations.
+            from backend.utils.auth import evaluation_mutation_context
+
+            client.app.dependency_overrides[evaluation_mutation_context] = lambda: {
+                "actor": {"role": "admin"}
+            }
+            response = client.post(
+                "/api/v1/evaluations/batch",
+                json={
+                    "paper_id": 1,
+                    "operations": [
+                        {"operation": "update", "evaluation_id": 1, "payload": payload}
+                    ],
+                },
+            )
+        else:
+            response = client.put("/api/v1/evaluations/1", json=payload)
+    assert response.status_code == 200
+    assert calls[0]["source_url_set"] is True
+    assert calls[0]["num_parameters_set"] is False

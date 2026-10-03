@@ -18,7 +18,16 @@ from backend.models.paper_edits import (
     TaskEdit,
 )
 from backend.models.evaluations import EvaluationCreateRequest, EvaluationUpdateRequest
-from backend.services.catalog_errors import CatalogConflictError, CatalogValidationError
+from backend.services.catalog_errors import (
+    CatalogConflictError,
+    CatalogValidationError,
+    CatalogNotFoundError,
+)
+from backend.services.evaluation_commands import (
+    apply_evaluation_command,
+    evaluation_command,
+    update_payload,
+)
 from backend.services.catalog_mutation_service import (
     CatalogMutationService,
     canonical_hash,
@@ -135,19 +144,11 @@ class PaperEditService:
                             raise ValueError("Evaluation targets a different paper")
                         payload = {**payload, "paper_id": document.paper_id}
                     model = model_type.model_validate(payload)
-                    parsed = model.model_dump()
-                    if operation.evaluation_id:
-                        parsed.update(
-                            {
-                                f"{field}_set": field in model.model_fields_set
-                                for field in (
-                                    "harness",
-                                    "source_url",
-                                    "num_parameters",
-                                    "hf_model_url",
-                                )
-                            }
-                        )
+                    parsed = (
+                        update_payload(model)
+                        if isinstance(model, EvaluationUpdateRequest)
+                        else model.model_dump()
+                    )
                 else:
                     if operation.evaluation_id is not None:
                         raise ValueError("evaluation_id only applies to evaluations")
@@ -175,19 +176,17 @@ class PaperEditService:
             try:
                 if section == "evaluations":
                     evaluation_id = operation["evaluation_id"]
-                    if evaluation_id:
-                        row = self.db.get(DBEvaluation, evaluation_id)
-                        if row is None or int(row.paper_id) != paper_id:
-                            raise CatalogValidationError(
-                                "Evaluation does not belong to this paper"
-                            )
-                        self.evaluations.service.update_evaluation(
-                            evaluation_id=evaluation_id, **payload, commit=False
+                    command = evaluation_command(
+                        "update" if evaluation_id else "create", payload, evaluation_id
+                    )
+                    try:
+                        apply_evaluation_command(
+                            self.evaluations.service, command, paper_id=paper_id
                         )
-                    else:
-                        self.evaluations.service.create_evaluation(
-                            **payload, commit=False
-                        )
+                    except CatalogNotFoundError as error:
+                        raise CatalogValidationError(
+                            "Evaluation does not belong to this paper"
+                        ) from error
                 else:
                     kwargs = (
                         {"paper_scoped": actor["role"] != "admin"}
