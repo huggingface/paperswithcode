@@ -401,8 +401,16 @@ export function EditEvaluationsDialog({
     hasUserEditedRef.current = true;
     setEditedEvaluations(
       editedEvaluations.map((e, i) => {
-        if (i !== index) return e;
+        if (i !== index || e[field] === value) return e;
         const updated = { ...e, [field]: value };
+
+        if (field === 'task_id' || field === 'dataset_id') {
+          // Scores belong to a leaderboard; moving the row requires fresh scores.
+          updated.original_metrics = {};
+          updated.original_metric_name = '';
+          updated.metric_value = '';
+          updated.best_rank = '';
+        }
 
         if (field === 'task_id') {
           updated.dataset_id = '';
