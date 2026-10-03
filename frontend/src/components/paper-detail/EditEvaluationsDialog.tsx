@@ -22,6 +22,7 @@ import {
   toPendingEvaluationOperations,
   type EditableEvaluationRow,
 } from "@/lib/evaluationOperations";
+import { evaluationChange, refreshEvaluationQueries } from "@/lib/evaluationQueryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
 import { SuggestTaxonomyDialog } from "@/components/paper-detail/SuggestTaxonomyDialog";
@@ -317,10 +318,12 @@ export function EditEvaluationsDialog({
           },
         });
       } else {
+        const change = evaluationChange(paperId, initialEvaluations, canonical, arxivId);
         await evaluationsApi.batch(
           numericPaperId,
           toDirectEvaluationOperations(numericPaperId, canonical),
         );
+        refreshEvaluationQueries(queryClient, change);
       }
       return { submitted: true };
     },
@@ -342,8 +345,6 @@ export function EditEvaluationsDialog({
         onOpenChange(false);
         return;
       }
-      queryClient.invalidateQueries({ queryKey: ['paper-arxiv', arxivId] });
-      queryClient.invalidateQueries({ queryKey: ['evaluations', 'paper', paperId] });
       onSuccess?.();
       onOpenChange(false);
     },
