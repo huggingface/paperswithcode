@@ -8,14 +8,14 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from backend.services import paper_markdown_job_monitor as monitor
-from backend.services.cron_registry import SchedulePolicy, _SCHEDULE_CONTRACTS
+from backend.services.cron_registry import SchedulePolicy, get_cron_job
 
 
 def test_markdown_scheduler_contract_has_only_the_hourly_reconciliation():
-    policies, grace = _SCHEDULE_CONTRACTS["paper_markdown_backfill"]
+    job = get_cron_job("paper_markdown_backfill")
 
-    assert policies == (SchedulePolicy.fixed(60, offset_minutes=17),)
-    assert grace == 20
+    assert job.schedule_policies == (SchedulePolicy.fixed(60, offset_minutes=17),)
+    assert job.schedule_grace_minutes == 20
 
 
 def test_cached_monitor_does_not_trigger_remote_collection(monkeypatch):

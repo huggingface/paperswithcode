@@ -13,6 +13,10 @@ from backend.services.catalog_mutation_service import (
     CatalogMutationService,
     canonical_hash,
 )
+from backend.services.evaluation_commands import (
+    apply_evaluation_command,
+    evaluation_command,
+)
 from backend.services.evaluation_service import EvaluationService
 from backend.services.catalog_errors import (
     CatalogNotFoundError,
@@ -76,7 +80,9 @@ class EvaluationCurationService:
         created_id: list[int] = []
 
         def apply() -> None:
-            result = self.service.create_evaluation(**payload, commit=False)
+            result = apply_evaluation_command(
+                self.service, evaluation_command("create", payload)
+            )
             created_id.append(int(result.id))
 
         # Creation has no stale row. The stable entity is the paper-scoped
@@ -116,8 +122,8 @@ class EvaluationCurationService:
             entity_id=str(evaluation_id),
             request_payload=payload,
             snapshot=lambda: self.snapshot(evaluation_id, lock=True),
-            apply=lambda: self.service.update_evaluation(
-                evaluation_id=evaluation_id, commit=False, **payload
+            apply=lambda: apply_evaluation_command(
+                self.service, evaluation_command("update", payload, evaluation_id)
             ),
             **mutation,
         )
@@ -130,7 +136,9 @@ class EvaluationCurationService:
             entity_id=str(evaluation_id),
             request_payload={},
             snapshot=lambda: self.snapshot(evaluation_id, lock=True),
-            apply=lambda: self.service.delete_evaluation(evaluation_id, commit=False),
+            apply=lambda: apply_evaluation_command(
+                self.service, evaluation_command("delete", {}, evaluation_id)
+            ),
             **mutation,
         )
 
@@ -226,36 +234,15 @@ class EvaluationCurationService:
 
         def apply() -> None:
             for operation in operations:
-                kind = operation["operation"]
-                payload = operation.get("payload") or {}
-                evaluation_id = operation.get("evaluation_id")
-                if kind == "create":
-                    if int(payload.get("paper_id", -1)) != paper_id:
-                        raise CatalogValidationError(
-                            "Every batch operation must target the same paper"
-                        )
-                    result = self.service.create_evaluation(**payload, commit=False)
-                    result_ids.append(int(result.id))
-                else:
-                    row = self.db.get(DBEvaluation, evaluation_id)
-                    if row is None or int(row.paper_id) != paper_id:
-                        raise CatalogNotFoundError(
-                            f"Evaluation {evaluation_id} is not on paper {paper_id}"
-                        )
-                    if kind == "update":
-                        result = self.service.update_evaluation(
-                            evaluation_id=evaluation_id,
-                            commit=False,
-                            **payload,
-                        )
-                        result_ids.append(int(result.id))
-                    elif kind == "delete":
-                        self.service.delete_evaluation(evaluation_id, commit=False)
-                        result_ids.append(None)
-                    else:
-                        raise CatalogValidationError(
-                            f"Unsupported evaluation operation: {kind}"
-                        )
+                command = evaluation_command(
+                    operation["operation"],
+                    operation.get("payload") or {},
+                    operation.get("evaluation_id"),
+                )
+                result = apply_evaluation_command(
+                    self.service, command, paper_id=paper_id
+                )
+                result_ids.append(int(result.id) if result is not None else None)
 
         after, event, replayed = CatalogMutationService(self.db).mutate(
             operation="batch",

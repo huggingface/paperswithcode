@@ -468,6 +468,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   }, [chat.busy, refreshSessions, user]);
 
   const newChat = () => {
+    if (window.innerWidth <= 900) setSidebarOpen(false);
     loadChat([], null);
     setInitializedRoute(null);
     setDraft(emptyDraft());
@@ -604,7 +605,10 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onNew={newChat}
-        onNavigate={(sessionId) => navigate(`/chat/${sessionId}`)}
+        onNavigate={(sessionId) => {
+          if (window.innerWidth <= 900) setSidebarOpen(false);
+          navigate(`/chat/${sessionId}`);
+        }}
         onRename={saveRename}
         onDelete={(sessionId) => void remove(sessionId)}
       />}

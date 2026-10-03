@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional, Sequence, Tuple
 
@@ -174,9 +174,66 @@ class CronJobDefinition:
         )
 
 
+def validate_cron_jobs(jobs: Sequence[CronJobDefinition]) -> None:
+    """Reject incomplete declarations before dashboard or probe consumers use them."""
+    seen: set[str] = set()
+    for job in jobs:
+        if not job.id or job.id in seen:
+            raise ValueError(f"Invalid or duplicate CRON job ID: {job.id!r}")
+        seen.add(job.id)
+        if job.scheduler not in {"github_actions", "systemd", "manual"}:
+            raise ValueError(f"{job.id}: unknown scheduler {job.scheduler!r}")
+        if not job.output_evaluator or not job.output_evaluator.strip():
+            raise ValueError(f"{job.id}: output evaluator must be explicit")
+        if job.schedule_grace_minutes < 0:
+            raise ValueError(f"{job.id}: schedule grace must be nonnegative")
+        if job.scheduler != "manual" and not job.schedule_policies:
+            raise ValueError(f"{job.id}: scheduled jobs require schedule policies")
+        if job.scheduler == "github_actions" and not job.workflow_file:
+            raise ValueError(f"{job.id}: GitHub Actions jobs require a workflow")
+        if job.scheduler == "systemd":
+            if not job.systemd_timer or not job.systemd_service:
+                raise ValueError(f"{job.id}: systemd jobs require a timer/service pair")
+        elif job.systemd_timer or job.systemd_service or job.systemd_extra_units:
+            raise ValueError(f"{job.id}: non-systemd jobs cannot own systemd units")
+        for timer, service in job.systemd_unit_pairs:
+            if not timer.endswith(".timer") or not service.endswith(".service"):
+                raise ValueError(f"{job.id}: invalid timer/service pair")
+        for policy in job.schedule_policies:
+            if policy.kind == "fixed_interval":
+                valid = (
+                    policy.interval_minutes is not None
+                    and policy.interval_minutes > 0
+                    and policy.minute_of_day is not None
+                    and 0 <= policy.minute_of_day < policy.interval_minutes
+                    and policy.weekday is None
+                )
+            else:
+                valid = (
+                    policy.kind in {"daily", "weekly"}
+                    and policy.interval_minutes is None
+                    and policy.minute_of_day is not None
+                    and 0 <= policy.minute_of_day < 24 * 60
+                    and (
+                        policy.weekday is None
+                        if policy.kind == "daily"
+                        else policy.weekday is not None and 0 <= policy.weekday < 7
+                    )
+                )
+            if not valid:
+                raise ValueError(f"{job.id}: invalid schedule policy {policy!r}")
+
+
 CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="paper_markdown_backfill",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=17),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-paper-markdown-backfill.timer",
+        systemd_service="pwc-cron-paper-markdown-backfill.service",
+        systemd_extra_units=(),
+        output_evaluator="paper_markdown",
         display_name="Paper Markdown Backfill",
         category="hourly",
         schedule="17 * * * * (live and full backfill reconciliation)",
@@ -196,6 +253,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="update_hot_github_trending",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(15),),
+        schedule_grace_minutes=10,
+        systemd_timer="pwc-cron-update-hot-github-trending.timer",
+        systemd_service="pwc-cron-update-hot-github-trending.service",
+        systemd_extra_units=(),
+        output_evaluator="hot_github_trending",
         display_name="Update Hot GitHub Trending",
         category="hourly",
         schedule="*/15 * * * * (every 15 minutes)",
@@ -282,6 +346,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="update_github_stars",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-update-github-stars.timer",
+        systemd_service="pwc-cron-update-github-stars.service",
+        systemd_extra_units=(),
+        output_evaluator="github_stars",
         display_name="Update GitHub Stars",
         category="hourly",
         schedule="0 * * * * (hourly)",
@@ -306,6 +377,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="update_citations",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=30),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-update-citations.timer",
+        systemd_service="pwc-cron-update-citations.service",
+        systemd_extra_units=(),
+        output_evaluator="citations",
         display_name="Update Citations",
         category="hourly",
         schedule="30 * * * * (hourly)",
@@ -329,6 +407,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="extract_urls",
+        scheduler="manual",
+        schedule_policies=(),
+        schedule_grace_minutes=20,
+        systemd_timer=None,
+        systemd_service=None,
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Extract URLs",
         category="manual",
         schedule="paused (manual dispatch only; hourly schedule disabled)",
@@ -354,6 +439,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="calculate_trending_scores",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=15),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-calculate-trending-scores.timer",
+        systemd_service="pwc-cron-calculate-trending-scores.service",
+        systemd_extra_units=(),
+        output_evaluator="repository_trending",
         display_name="Calculate Repo Trending Scores",
         category="hourly",
         schedule="15 * * * * (hourly)",
@@ -386,6 +478,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="calculate_paper_trending_scores",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-calculate-paper-trending-scores.timer",
+        systemd_service="pwc-cron-calculate-paper-trending-scores.service",
+        systemd_extra_units=(),
+        output_evaluator="paper_trending",
         display_name="Calculate Paper Trending Scores",
         category="hourly",
         schedule="45 * * * * (hourly)",
@@ -422,6 +521,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="update_hf_artifacts",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=30),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-update-hf-artifacts.timer",
+        systemd_service="pwc-cron-update-hf-artifacts.service",
+        systemd_extra_units=(),
+        output_evaluator="hf_artifacts",
         display_name="Update Hugging Face Artifacts",
         category="hourly",
         schedule="30 * * * * (hourly)",
@@ -460,6 +566,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_3d_arena",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=5),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-3d-arena.timer",
+        systemd_service="pwc-cron-sync-3d-arena.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync 3D Arena",
         category="hourly",
         schedule="5 * * * * (hourly)",
@@ -490,6 +603,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_tabarena",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=55),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-tabarena.timer",
+        systemd_service="pwc-cron-sync-tabarena.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync TabArena",
         category="hourly",
         schedule="55 * * * * (hourly)",
@@ -520,6 +640,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_open_asr",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=15),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-open-asr.timer",
+        systemd_service="pwc-cron-sync-open-asr.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync Open ASR Leaderboard",
         category="hourly",
         schedule="15 * * * * (hourly)",
@@ -552,6 +679,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_open_tts",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=18),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-open-tts.timer",
+        systemd_service="pwc-cron-sync-open-tts.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync Open TTS Leaderboards",
         category="hourly",
         schedule="18 * * * * (hourly)",
@@ -588,6 +722,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_mmteb_overall",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=7),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-mmteb-overall.timer",
+        systemd_service="pwc-cron-sync-mmteb-overall.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync MMTEB v2 Overall",
         category="hourly",
         schedule="7 * * * * (hourly)",
@@ -622,6 +763,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_mmteb_retrieval",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=22),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-mmteb-retrieval.timer",
+        systemd_service="pwc-cron-sync-mmteb-retrieval.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync MMTEB v2 Retrieval",
         category="hourly",
         schedule="22 * * * * (hourly)",
@@ -656,6 +804,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_mmteb_reranking",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=37),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-mmteb-reranking.timer",
+        systemd_service="pwc-cron-sync-mmteb-reranking.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync MMTEB v2 Reranking",
         category="hourly",
         schedule="37 * * * * (hourly)",
@@ -690,6 +845,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_mmeb_v2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=12),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-mmeb-v2.timer",
+        systemd_service="pwc-cron-sync-mmeb-v2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync MMEB-v2 Overall",
         category="hourly",
         schedule="12 * * * * (hourly)",
@@ -722,6 +884,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_mmeb_v3",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=42),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-mmeb-v3.timer",
+        systemd_service="pwc-cron-sync-mmeb-v3.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync MMEB-v3 Overall",
         category="hourly",
         schedule="42 * * * * (hourly)",
@@ -754,6 +923,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_deepswe",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=25),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-deepswe.timer",
+        systemd_service="pwc-cron-sync-deepswe.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync DeepSWE Leaderboard",
         category="hourly",
         schedule="25 * * * * (hourly)",
@@ -785,6 +961,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_artificial_analysis",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=35),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-artificial-analysis.timer",
+        systemd_service="pwc-cron-sync-artificial-analysis.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync Artificial Analysis Leaderboards",
         category="hourly",
         schedule="35 * * * * (hourly)",
@@ -863,6 +1046,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_programbench",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=40),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-programbench.timer",
+        systemd_service="pwc-cron-sync-programbench.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync ProgramBench Leaderboard",
         category="hourly",
         schedule="40 * * * * (hourly)",
@@ -896,6 +1086,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_parsebench",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=20),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-parsebench.timer",
+        systemd_service="pwc-cron-sync-parsebench.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync ParseBench Leaderboard",
         category="hourly",
         schedule="20 * * * * (hourly)",
@@ -928,6 +1125,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_frontiercode",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-frontiercode.timer",
+        systemd_service="pwc-cron-sync-frontiercode.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync FrontierCode Leaderboard",
         category="hourly",
         schedule="45 * * * * (hourly)",
@@ -961,6 +1165,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_coarena",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=50),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-coarena.timer",
+        systemd_service="pwc-cron-sync-coarena.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync CoArena Leaderboard",
         category="hourly",
         schedule="50 * * * * (hourly)",
@@ -992,6 +1203,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_arc_prize",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=10),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-arc-prize.timer",
+        systemd_service="pwc-cron-sync-arc-prize.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Sync ARC Prize Leaderboards",
         category="hourly",
         schedule="10 * * * * (hourly)",
@@ -1021,6 +1239,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="import_hf_daily_papers",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-import-hf-daily-papers.timer",
+        systemd_service="pwc-cron-import-hf-daily-papers.service",
+        systemd_extra_units=(),
+        output_evaluator="hf_paper_import",
         display_name="Import HF Daily Papers",
         category="daily",
         schedule="0 * * * * (hourly)",
@@ -1038,6 +1263,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="create_eval_verification_issues",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=52),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-create-eval-verification-issues.timer",
+        systemd_service="pwc-cron-create-eval-verification-issues.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="GitHub Evaluation Verification Outreach",
         category="hourly",
         schedule="52 * * * *",
@@ -1053,6 +1285,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="enqueue_hf_daily_paper_curation",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=27),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-enqueue-hf-daily-paper-curation.timer",
+        systemd_service="pwc-cron-enqueue-hf-daily-paper-curation.service",
+        systemd_extra_units=(),
+        output_evaluator="daily_curation",
         display_name="HF Daily Paper Curation",
         category="daily",
         schedule="27 * * * * (hourly reconciliation)",
@@ -1111,6 +1350,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="enqueue_hf_trending_model_curation",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=42),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-enqueue-hf-trending-model-curation.timer",
+        systemd_service="pwc-cron-enqueue-hf-trending-model-curation.service",
+        systemd_extra_units=(),
+        output_evaluator="trending_curation",
         display_name="HF Trending Model Curation",
         category="hourly",
         schedule="42 * * * * (hourly reconciliation)",
@@ -1150,6 +1396,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="export_enrichment_dashboard",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(3, 10),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-export-enrichment-dashboard.timer",
+        systemd_service="pwc-cron-export-enrichment-dashboard.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
         display_name="Export Enrichment Dashboard",
         category="daily",
         schedule="10 3 * * * (daily UTC)",
@@ -1166,6 +1419,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="sync_hf_organizations",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(2, 20),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-sync-hf-organizations.timer",
+        systemd_service="pwc-cron-sync-hf-organizations.service",
+        systemd_extra_units=(),
+        output_evaluator="organization_sync",
         display_name="Sync HF Organizations",
         category="daily",
         schedule="20 2 * * * (daily)",
@@ -1199,6 +1459,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="calculate_organization_trending_scores",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(3, 40),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-calculate-organization-trending-scores.timer",
+        systemd_service="pwc-cron-calculate-organization-trending-scores.service",
+        systemd_extra_units=(),
+        output_evaluator="organization_trending",
         display_name="Calculate Organization Trending Scores",
         category="daily",
         schedule="40 3 * * * (daily)",
@@ -1240,6 +1507,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="refresh_paper_embeddings",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=15),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-refresh-paper-embeddings.timer",
+        systemd_service="pwc-cron-refresh-paper-embeddings.service",
+        systemd_extra_units=(),
+        output_evaluator="paper_embeddings",
         display_name="Refresh Paper Embeddings",
         category="hourly",
         schedule="15 * * * * (hourly)",
@@ -1289,6 +1563,35 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="preload_thumbnails",
+        scheduler="systemd",
+        schedule_policies=(
+            SchedulePolicy.fixed(180),
+            SchedulePolicy.daily(4, 15),
+            SchedulePolicy.daily(4, 30),
+            SchedulePolicy.daily(4, 45),
+        ),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-preload-thumbnails-visible.timer",
+        systemd_service="pwc-cron-preload-thumbnails-visible.service",
+        systemd_extra_units=(
+            (
+                "pwc-cron-preload-thumbnails-task-top.timer",
+                "pwc-cron-preload-thumbnails-task-top.service",
+            ),
+            (
+                "pwc-cron-preload-thumbnails-method-top.timer",
+                "pwc-cron-preload-thumbnails-method-top.service",
+            ),
+            (
+                "pwc-cron-preload-thumbnails-recent.timer",
+                "pwc-cron-preload-thumbnails-recent.service",
+            ),
+            (
+                "pwc-cron-preload-thumbnails-external.timer",
+                "pwc-cron-preload-thumbnails-external.service",
+            ),
+        ),
+        output_evaluator="thumbnail_preload",
         display_name="Preload Thumbnails",
         category="daily",
         schedule="0 */3 * * *; daily 04:00–04:45 UTC",
@@ -1306,6 +1609,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="mirror_thumbnails_to_disk",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(5, 0),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-mirror-thumbnails-to-disk.timer",
+        systemd_service="pwc-cron-mirror-thumbnails-to-disk.service",
+        systemd_extra_units=(),
+        output_evaluator="thumbnail_mirror",
         display_name="Mirror Thumbnails To Disk",
         category="daily",
         schedule="0 5 * * * (daily)",
@@ -1324,6 +1634,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="link_methods_by_references",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.weekly(6, 4, 0),),
+        schedule_grace_minutes=180,
+        systemd_timer="pwc-cron-link-methods-by-references.timer",
+        systemd_service="pwc-cron-link-methods-by-references.service",
+        systemd_extra_units=(),
+        output_evaluator="weekly_linker",
         display_name="Link Methods By References",
         category="weekly",
         schedule="0 4 * * 0 (Sun 04:00 UTC)",
@@ -1347,6 +1664,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="backfill_method_keywords",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(1, 10),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-backfill-method-keywords.timer",
+        systemd_service="pwc-cron-backfill-method-keywords.service",
+        systemd_extra_units=(),
+        output_evaluator="backfill",
         display_name="Backfill Method Keywords",
         category="backfill",
         schedule="10 1 * * * (daily 01:10 UTC)",
@@ -1395,6 +1719,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="backfill_method_references",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=15),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-backfill-method-references.timer",
+        systemd_service="pwc-cron-backfill-method-references.service",
+        systemd_extra_units=(),
+        output_evaluator="backfill",
         display_name="Backfill Method References",
         category="backfill",
         schedule="15 * * * * (hourly at :15 UTC)",
@@ -1449,6 +1780,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="link_papers_by_task_keywords",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.weekly(6, 5, 0),),
+        schedule_grace_minutes=180,
+        systemd_timer="pwc-cron-link-papers-by-task-keywords.timer",
+        systemd_service="pwc-cron-link-papers-by-task-keywords.service",
+        systemd_extra_units=(),
+        output_evaluator="weekly_linker",
         display_name="Link Papers By Task Keywords",
         category="weekly",
         schedule="0 5 * * 0 (Sun 05:00 UTC)",
@@ -1466,6 +1804,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="autonomous_cron_health",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(15),),
+        schedule_grace_minutes=10,
+        systemd_timer="autonomous-cron-health.timer",
+        systemd_service="autonomous-cron-health.service",
+        systemd_extra_units=(),
+        output_evaluator="autonomous_cron_operator",
         display_name="Autonomous CRON Strict Snapshot",
         category="systemd",
         schedule="every 15 minutes with bounded jitter (systemd)",
@@ -1479,16 +1824,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=390,
         critical=True,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(15),),
-        schedule_grace_minutes=10,
-        systemd_timer="autonomous-cron-health.timer",
-        systemd_service="autonomous-cron-health.service",
-        output_evaluator="autonomous_cron_operator",
         work_metrics_provider="autonomous_cron",
     ),
     CronJobDefinition(
         id="autonomous_cron_audit",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(2, 20),),
+        schedule_grace_minutes=45,
+        systemd_timer="autonomous-cron-audit.timer",
+        systemd_service="autonomous-cron-audit.service",
+        systemd_extra_units=(),
+        output_evaluator="autonomous_cron_operator",
         display_name="Autonomous CRON Daily Audit",
         category="systemd",
         schedule="daily at 02:20 UTC with bounded jitter (systemd)",
@@ -1502,16 +1848,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=1800,
         critical=False,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.daily(2, 20),),
-        schedule_grace_minutes=45,
-        systemd_timer="autonomous-cron-audit.timer",
-        systemd_service="autonomous-cron-audit.service",
-        output_evaluator="autonomous_cron_operator",
         work_metrics_provider="autonomous_cron",
     ),
     CronJobDefinition(
         id="review_submissions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60),),
+        schedule_grace_minutes=20,
+        systemd_timer="submission-review.timer",
+        systemd_service="submission-review.service",
+        systemd_extra_units=(),
+        output_evaluator="submission_review",
         display_name="Autonomous Submission Review",
         category="systemd",
         schedule="hourly with up to 15 minutes randomized delay (systemd)",
@@ -1525,12 +1872,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=135,
         critical=True,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60),),
-        schedule_grace_minutes=20,
-        systemd_timer="submission-review.timer",
-        systemd_service="submission-review.service",
-        output_evaluator="submission_review",
         work_metrics_provider="submission_review",
         enablement_settings=(
             "autonomous_submission_enabled",
@@ -1539,6 +1880,13 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="monitor_chat_operational_alerts",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-chat-alert-monitor.timer",
+        systemd_service="pwc-chat-alert-monitor.service",
+        systemd_extra_units=(),
+        output_evaluator="chat_alert_monitor",
         display_name="Chat Operational Alert Monitor",
         category="systemd",
         schedule="every minute (systemd)",
@@ -1550,16 +1898,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=5,
         critical=False,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(1),),
-        schedule_grace_minutes=3,
-        systemd_timer="pwc-chat-alert-monitor.timer",
-        systemd_service="pwc-chat-alert-monitor.service",
-        output_evaluator="chat_alert_monitor",
         work_metrics_provider="chat_monitor",
     ),
     CronJobDefinition(
         id="run_chat_synthetic_probe",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-cron-run-chat-synthetic-probe.timer",
+        systemd_service="pwc-cron-run-chat-synthetic-probe.service",
+        systemd_extra_units=(),
+        output_evaluator="chat_alert_monitor",
         display_name="Chat Synthetic Reliability Probe",
         category="systemd",
         schedule="every minute with an internal four-hour gate (systemd)",
@@ -1571,16 +1920,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=10,
         critical=False,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(1),),
-        schedule_grace_minutes=3,
-        systemd_timer="pwc-cron-run-chat-synthetic-probe.timer",
-        systemd_service="pwc-cron-run-chat-synthetic-probe.service",
-        output_evaluator="chat_alert_monitor",
         work_metrics_provider="chat_synthetic",
     ),
     CronJobDefinition(
         id="process_curation_thumbnails",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(1),),
+        schedule_grace_minutes=3,
+        systemd_timer="pwc-curation-thumbnails.timer",
+        systemd_service="pwc-curation-thumbnails.service",
+        systemd_extra_units=(),
+        output_evaluator="curation_thumbnails",
         display_name="Curation Thumbnail Queue",
         category="systemd",
         schedule="every minute (systemd)",
@@ -1592,12 +1942,6 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=35,
         critical=False,
         healthy_no_work_allowed=True,
-        scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(1),),
-        schedule_grace_minutes=3,
-        systemd_timer="pwc-curation-thumbnails.timer",
-        systemd_service="pwc-curation-thumbnails.service",
-        output_evaluator="curation_thumbnails",
         db_freshness_query="""
             SELECT max(COALESCE(thumbnail_finished_at, thumbnail_requested_at)) AS last_write,
                    count(*) FILTER (
@@ -1621,159 +1965,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
 )
 
 
-# Explicit machine-readable scheduler contracts.  Keeping them separate from the
-# human label makes schedule-boundary behavior deterministic and reviewable.
-_SCHEDULE_CONTRACTS: dict[str, tuple[tuple[SchedulePolicy, ...], int]] = {
-    "paper_markdown_backfill": (
-        (SchedulePolicy.fixed(60, offset_minutes=17),),
-        20,
-    ),
-    "update_hot_github_trending": ((SchedulePolicy.fixed(15),), 10),
-    "update_github_stars": ((SchedulePolicy.fixed(60),), 20),
-    "update_citations": ((SchedulePolicy.fixed(60, offset_minutes=30),), 20),
-    "calculate_trending_scores": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
-    "calculate_paper_trending_scores": (
-        (SchedulePolicy.fixed(60, offset_minutes=45),),
-        20,
-    ),
-    "update_hf_artifacts": ((SchedulePolicy.fixed(60, offset_minutes=30),), 20),
-    "sync_3d_arena": ((SchedulePolicy.fixed(60, offset_minutes=5),), 20),
-    "sync_tabarena": ((SchedulePolicy.fixed(60, offset_minutes=55),), 20),
-    "sync_open_asr": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
-    "sync_open_tts": ((SchedulePolicy.fixed(60, offset_minutes=18),), 20),
-    "sync_mmteb_overall": ((SchedulePolicy.fixed(60, offset_minutes=7),), 20),
-    "sync_mmteb_retrieval": ((SchedulePolicy.fixed(60, offset_minutes=22),), 20),
-    "sync_mmteb_reranking": ((SchedulePolicy.fixed(60, offset_minutes=37),), 20),
-    "sync_mmeb_v2": ((SchedulePolicy.fixed(60, offset_minutes=12),), 20),
-    "sync_mmeb_v3": ((SchedulePolicy.fixed(60, offset_minutes=42),), 20),
-    "sync_deepswe": ((SchedulePolicy.fixed(60, offset_minutes=25),), 20),
-    "sync_artificial_analysis": ((SchedulePolicy.fixed(60, offset_minutes=35),), 20),
-    "sync_programbench": ((SchedulePolicy.fixed(60, offset_minutes=40),), 20),
-    "sync_parsebench": ((SchedulePolicy.fixed(60, offset_minutes=20),), 20),
-    "sync_frontiercode": ((SchedulePolicy.fixed(60, offset_minutes=45),), 20),
-    "sync_coarena": ((SchedulePolicy.fixed(60, offset_minutes=50),), 20),
-    "sync_arc_prize": ((SchedulePolicy.fixed(60, offset_minutes=10),), 20),
-    "import_hf_daily_papers": ((SchedulePolicy.fixed(60),), 20),
-    "create_eval_verification_issues": (
-        (SchedulePolicy.fixed(60, offset_minutes=52),),
-        20,
-    ),
-    "enqueue_hf_daily_paper_curation": (
-        (SchedulePolicy.fixed(60, offset_minutes=27),),
-        20,
-    ),
-    "enqueue_hf_trending_model_curation": (
-        (SchedulePolicy.fixed(60, offset_minutes=42),),
-        20,
-    ),
-    "export_enrichment_dashboard": ((SchedulePolicy.daily(3, 10),), 60),
-    "sync_hf_organizations": ((SchedulePolicy.daily(2, 20),), 60),
-    "calculate_organization_trending_scores": ((SchedulePolicy.daily(3, 40),), 60),
-    "refresh_paper_embeddings": ((SchedulePolicy.fixed(60, offset_minutes=15),), 20),
-    # The three-hour lane and the four reviewed daily slots intentionally share
-    # a one-hour grace because GitHub runs them as one workflow duty.
-    "preload_thumbnails": (
-        (
-            SchedulePolicy.fixed(180),
-            SchedulePolicy.daily(4, 15),
-            SchedulePolicy.daily(4, 30),
-            SchedulePolicy.daily(4, 45),
-        ),
-        60,
-    ),
-    "mirror_thumbnails_to_disk": ((SchedulePolicy.daily(5, 0),), 60),
-    "link_methods_by_references": ((SchedulePolicy.weekly(6, 4, 0),), 180),
-    "backfill_method_keywords": ((SchedulePolicy.daily(1, 10),), 60),
-    "backfill_method_references": ((SchedulePolicy.fixed(60, offset_minutes=15),), 60),
-    "link_papers_by_task_keywords": ((SchedulePolicy.weekly(6, 5, 0),), 180),
-}
-
-_OUTPUT_EVALUATORS: dict[str, str] = {
-    "update_github_stars": "github_stars",
-    "update_hot_github_trending": "hot_github_trending",
-    "calculate_trending_scores": "repository_trending",
-    "calculate_paper_trending_scores": "paper_trending",
-    "import_hf_daily_papers": "hf_paper_import",
-    "enqueue_hf_daily_paper_curation": "daily_curation",
-    "enqueue_hf_trending_model_curation": "trending_curation",
-    "update_citations": "citations",
-    "update_hf_artifacts": "hf_artifacts",
-    "paper_markdown_backfill": "paper_markdown",
-    "refresh_paper_embeddings": "paper_embeddings",
-    "sync_hf_organizations": "organization_sync",
-    "calculate_organization_trending_scores": "organization_trending",
-    "backfill_method_keywords": "backfill",
-    "backfill_method_references": "backfill",
-    "preload_thumbnails": "thumbnail_preload",
-    "mirror_thumbnails_to_disk": "thumbnail_mirror",
-    "link_methods_by_references": "weekly_linker",
-    "link_papers_by_task_keywords": "weekly_linker",
-}
-
-
-# Host systemd timers own scheduled execution for the previously
-# GitHub-scheduled jobs.  GitHub Actions schedule: triggers proved unreliable
-# (delayed or missing scheduled events with no catch-up), so the units in
-# deploy/systemd/cron/ are now the execution authority; the workflows remain
-# workflow_dispatch-only for manual recovery.
-def _systemd_unit(job_id: str) -> str:
-    return "pwc-cron-" + job_id.replace("_", "-")
-
-
-_PRELOAD_LANES = ("visible", "task-top", "method-top", "recent", "external")
-
-_SYSTEMD_MIGRATED: dict[str, tuple[tuple[str, str], ...]] = {
-    job_id: ((f"{_systemd_unit(job_id)}.timer", f"{_systemd_unit(job_id)}.service"),)
-    for job_id, (_policies, _grace) in _SCHEDULE_CONTRACTS.items()
-    if job_id != "preload_thumbnails"
-}
-_SYSTEMD_MIGRATED["preload_thumbnails"] = tuple(
-    (
-        f"pwc-cron-preload-thumbnails-{lane}.timer",
-        f"pwc-cron-preload-thumbnails-{lane}.service",
-    )
-    for lane in _PRELOAD_LANES
-)
-
-
-def _migrated_scheduler(job: CronJobDefinition) -> str:
-    if job.id == "extract_urls":
-        return "manual"
-    if job.id in _SYSTEMD_MIGRATED:
-        return "systemd"
-    return job.scheduler
-
-
-CRON_JOBS = tuple(
-    replace(
-        job,
-        scheduler=_migrated_scheduler(job),
-        systemd_timer=(
-            _SYSTEMD_MIGRATED[job.id][0][0]
-            if job.id in _SYSTEMD_MIGRATED
-            else job.systemd_timer
-        ),
-        systemd_service=(
-            _SYSTEMD_MIGRATED[job.id][0][1]
-            if job.id in _SYSTEMD_MIGRATED
-            else job.systemd_service
-        ),
-        systemd_extra_units=(
-            _SYSTEMD_MIGRATED[job.id][1:]
-            if job.id in _SYSTEMD_MIGRATED
-            else job.systemd_extra_units
-        ),
-        schedule_policies=_SCHEDULE_CONTRACTS.get(
-            job.id, (job.schedule_policies, job.schedule_grace_minutes)
-        )[0],
-        schedule_grace_minutes=_SCHEDULE_CONTRACTS.get(
-            job.id, (job.schedule_policies, job.schedule_grace_minutes)
-        )[1],
-        output_evaluator=job.output_evaluator
-        or _OUTPUT_EVALUATORS.get(job.id, "generic"),
-    )
-    for job in CRON_JOBS
-)
+validate_cron_jobs(CRON_JOBS)
 
 
 def get_cron_job(job_id: str) -> Optional[CronJobDefinition]:

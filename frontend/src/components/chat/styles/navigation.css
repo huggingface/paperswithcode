@@ -102,17 +102,16 @@
   text-overflow: ellipsis;
 }
 .chat-session-delete {
-  display: none;
+  display: inline-flex;
   align-items: center;
   color: var(--ink-faint);
   padding: 2px;
   border-radius: 4px;
   flex: none;
 }
-.chat-session:hover .chat-session-delete { display: inline-flex; }
 .chat-session-delete:hover { color: var(--negative-text); }
 .chat-session-menu {
-  display: none;
+  display: inline-flex;
   border: 0;
   background: transparent;
   color: inherit;
@@ -121,8 +120,15 @@
   font-size: 17px;
   line-height: 1;
 }
-.chat-session:hover .chat-session-menu,
-.chat-session:focus-within .chat-session-menu { display: inline-flex; }
+/* Touch browsers can consume the first tap when hover reveals new controls. */
+@media (hover: hover) and (pointer: fine) {
+  .chat-session-delete,
+  .chat-session-menu { display: none; }
+  .chat-session:hover .chat-session-delete,
+  .chat-session:hover .chat-session-menu,
+  .chat-session:focus-within .chat-session-delete,
+  .chat-session:focus-within .chat-session-menu { display: inline-flex; }
+}
 .chat-session-title-input {
   min-width: 0;
   flex: 1;

@@ -19,7 +19,7 @@ Use pwc_get_paper_info for promising results; it returns the abstract, repositor
 
 Use the task and method indexes below to resolve names and acronyms. Verify a method with pwc_get_method. A missing exact task lookup is not proof that the entire field is absent: try a suitable parent or nearby canonical task from the index, and search task-scoped benchmarks.
 
-Follow the appended PwC MCP skill for tool selection and research workflows. Use exact returned paper IDs after discovery. Registered tool schemas define valid arguments and limits. Follow next_cursor when reading more paper text, respecting output truncation and the existing tool budget. pwc_search_papers and pwc_list_papers with a search argument count against the search ceiling.
+Follow the appended PwC MCP skill for tool selection and research workflows. Use exact returned paper IDs after discovery. Registered tool schemas define valid arguments and limits. For more paper text, call pwc_read_paper with the same paper argument and cursor: "next" when next_cursor is "next". The application retains the exact token. Omit cursor to restart; never invent or reconstruct continuation tokens. Respect output truncation and the existing tool budget. pwc_search_papers and pwc_list_papers with a search argument count against the search ceiling.
 
 Start named model-family research with PwC even for closed models. Resolve the exact family, check publication dates and official release sources, and verify recent releases with pwc_list_papers using organization and date ordering where appropriate. Do not select an older report merely because it has more citations.
 </catalog_usage>`;

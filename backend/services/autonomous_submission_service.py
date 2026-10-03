@@ -30,6 +30,7 @@ from backend.services.autonomous_operations_repository import Operator, RunConte
 from backend.services.autonomous_operations_repository import (
     AutonomousOperationsRepository,
 )
+from backend.services.pending_edit_transactions import review_transaction
 from backend.services.pending_edit_service import PendingEditService
 
 
@@ -514,6 +515,22 @@ class AutonomousSubmissionService:
         remote_signature: str | None = None,
         remote_usage: str | None = None,
     ) -> None:
+        with review_transaction(self.db):
+            self._apply_submission_decision(
+                callback_token,
+                decision,
+                remote_signature=remote_signature,
+                remote_usage=remote_usage,
+            )
+
+    def _apply_submission_decision(
+        self,
+        callback_token: str,
+        decision: AutonomousSubmissionDecision,
+        *,
+        remote_signature: str | None = None,
+        remote_usage: str | None = None,
+    ) -> None:
         now = self._clock()
         claim = self.db.execute(
             select(AutonomousSubmissionClaim)
@@ -665,7 +682,6 @@ class AutonomousSubmissionService:
         claim.decision = decision.decision
         claim.decision_digest = decision_digest
         claim.completed_at = now
-        self.db.commit()
 
     def _apply_canonical_decision(
         self, context: RunContext, decision: AutonomousSubmissionDecision

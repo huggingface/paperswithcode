@@ -18,6 +18,7 @@ from backend.models.evaluations import (
     EvaluationCreateRequest,
     EvaluationUpdateRequest,
 )
+from backend.services.evaluation_commands import update_payload
 from backend.services.evaluation_service import EvaluationService
 from backend.services.evaluation_curation_service import EvaluationCurationService
 from backend.database.connection import get_database_session
@@ -76,13 +77,7 @@ def batch_evaluations(
                 if operation.evaluation_id is None:
                     raise ValueError("evaluation_id is required for update")
                 model = EvaluationUpdateRequest.model_validate(operation.payload)
-                payload = {
-                    **model.model_dump(),
-                    "harness_set": "harness" in model.model_fields_set,
-                    "source_url_set": "source_url" in model.model_fields_set,
-                    "num_parameters_set": "num_parameters" in model.model_fields_set,
-                    "hf_model_url_set": "hf_model_url" in model.model_fields_set,
-                }
+                payload = update_payload(model)
             else:
                 if operation.evaluation_id is None:
                     raise ValueError("evaluation_id is required for delete")
@@ -306,13 +301,7 @@ def update_evaluation(
     """
     return EvaluationCurationService(db).update(
         evaluation_id=evaluation_id,
-        payload={
-            **request.model_dump(),
-            "harness_set": "harness" in request.model_fields_set,
-            "source_url_set": "source_url" in request.model_fields_set,
-            "num_parameters_set": "num_parameters" in request.model_fields_set,
-            "hf_model_url_set": "hf_model_url" in request.model_fields_set,
-        },
+        payload=update_payload(request),
         mutation=mutation,
     )
 
