@@ -1,3 +1,4 @@
+import { getApiErrorMessage } from "@/lib/apiTransport";
 import { useEffect, useRef, useState, type DragEvent } from "react";
 import { Check, ImagePlus, Loader2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -230,22 +231,10 @@ export function SuggestTaxonomyDialog({
       onOpenChange(false);
     },
     onError: (err: unknown) => {
-      const e = err as { response?: string; message?: string };
-      let description = e.message || `Failed to submit your ${label} suggestion.`;
-      if (e.response) {
-        try {
-          const parsed = JSON.parse(e.response);
-          if (typeof parsed?.detail === "string") {
-            description = parsed.detail;
-          } else if (parsed?.detail?.message) {
-            description = `${parsed.detail.message} See ${parsed.detail.help || "/rate-limits"} for help.`;
-          } else if (Array.isArray(parsed?.detail) && parsed.detail[0]?.msg) {
-            description = parsed.detail[0].msg;
-          }
-        } catch {
-          description = e.response;
-        }
-      }
+      const description = getApiErrorMessage(
+        err,
+        `Failed to submit your ${label} suggestion.`,
+      );
       toast({
         title: "Could not submit suggestion",
         description,

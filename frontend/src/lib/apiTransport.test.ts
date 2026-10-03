@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setStoredAdminToken } from "./adminAuth";
-import { ApiError, ApiTransport, requestJson } from "./apiTransport";
+import { ApiError, ApiTransport, getApiErrorMessage, requestJson } from "./apiTransport";
 
 describe("API transport", () => {
   beforeEach(() => {
@@ -92,6 +92,7 @@ describe("API transport", () => {
       expect.objectContaining<ApiError>({
         name: "ApiError",
         message: "API request failed: 409 Conflict",
+        displayMessage: "API request failed: 409 Conflict",
         status: 409,
         statusText: "Conflict",
         response: JSON.stringify({ detail: { code: "stale_catalog_version" } }),
@@ -143,5 +144,48 @@ describe("API transport", () => {
       "Submission limit reached. See /rate-limits for help.",
     );
     expect(error.code).toBe("submission_rate_limited");
+  });
+});
+
+describe("editing error messages", () => {
+  it.each([
+    ["No permission", "No permission"],
+    [[{ loc: ["body", "url"], msg: "Invalid URL" }], "Invalid URL"],
+    [{ code: "limited", message: "Try later", help: "/limits" }, "Try later See /limits for help."],
+    [{ code: "limited", message: "Try later" }, "Try later"],
+    [[], "API request failed: 422 Unprocessable Entity"],
+    [[null], "API request failed: 422 Unprocessable Entity"],
+    [[{ msg: 123 }], "API request failed: 422 Unprocessable Entity"],
+    [{ unexpected: true }, "API request failed: 422 Unprocessable Entity"],
+  ])("normalizes detail %j without losing the response contract", (detail, message) => {
+    const body = JSON.stringify({ detail });
+    const error = new ApiError(new Response(null, {
+      status: 422, statusText: "Unprocessable Entity",
+    }), body);
+    expect(getApiErrorMessage(error, "Save failed")).toBe(message);
+    expect(error).toMatchObject({ status: 422, statusText: "Unprocessable Entity", detail, response: body });
+  });
+
+  it.each(["upstream unavailable", "{invalid json", ""]) (
+    "preserves the legacy status message and raw non-JSON text %j", (body) => {
+      const error = new ApiError(new Response(null, { status: 502, statusText: "Bad Gateway" }), body);
+      expect(error.message).toBe("API request failed: 502 Bad Gateway");
+      expect(error.response).toBe(body);
+      expect(error.detail).toBeUndefined();
+      expect(getApiErrorMessage(error, "Save failed")).toBe(body || error.message);
+    },
+  );
+
+  it.each([null, undefined, {}, new Error(""), "unexpected"]) (
+    "uses the operation fallback for an unrecognized failure %j", (error) => {
+      expect(getApiErrorMessage(error, "Save failed")).toBe("Save failed");
+    },
+  );
+
+  it("preserves ordinary network errors without wrapping them", async () => {
+    const error = new TypeError("Failed to fetch");
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(error);
+    await expect(new ApiTransport("https://example.test").request("/papers")).rejects.toBe(error);
+    expect(getApiErrorMessage(error, "Save failed")).toBe("Failed to fetch");
   });
 });

@@ -1,3 +1,4 @@
+import { getApiErrorMessage } from "@/lib/apiTransport";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Loader2, Check, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -140,24 +141,12 @@ export function EditHfArtifactsDialog({
       setNewUrls({ hf_models: "", hf_datasets: "", hf_spaces: "" });
     },
     onError: (err: unknown) => {
-      const e = err as { response?: string; message?: string };
-      let description =
-        e.message ||
-        (submitMode === "pending"
+      const description = getApiErrorMessage(
+        err,
+        submitMode === "pending"
           ? "Failed to submit your edit. Please try again."
-          : "Failed to update Hugging Face artifacts.");
-      if (e.response) {
-        try {
-          const parsed = JSON.parse(e.response);
-          if (typeof parsed?.detail === "string") {
-            description = parsed.detail;
-          } else if (Array.isArray(parsed?.detail) && parsed.detail[0]?.msg) {
-            description = parsed.detail[0].msg;
-          }
-        } catch {
-          description = e.response;
-        }
-      }
+          : "Failed to update Hugging Face artifacts.",
+      );
       toast({
         title:
           submitMode === "pending"

@@ -1,3 +1,4 @@
+import { getApiErrorMessage } from "@/lib/apiTransport";
 import { useEffect, useRef, useState } from "react";
 import { Loader2, Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -82,24 +83,12 @@ export function EditSourceUrlDialog({
       onOpenChange(false);
     },
     onError: (err: unknown) => {
-      const e = err as { response?: string; message?: string };
-      let description =
-        e.message ||
-        (submitMode === "pending"
+      const description = getApiErrorMessage(
+        err,
+        submitMode === "pending"
           ? "Failed to submit your edit. Please try again."
-          : "Failed to update source URL.");
-      if (e.response) {
-        try {
-          const parsed = JSON.parse(e.response);
-          if (typeof parsed?.detail === "string") {
-            description = parsed.detail;
-          } else if (Array.isArray(parsed?.detail) && parsed.detail[0]?.msg) {
-            description = parsed.detail[0].msg;
-          }
-        } catch {
-          description = e.response;
-        }
-      }
+          : "Failed to update source URL.",
+      );
       toast({
         title:
           submitMode === "pending"

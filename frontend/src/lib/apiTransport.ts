@@ -8,6 +8,8 @@ export class ApiError extends Error {
   readonly response: string;
   readonly detail: unknown;
   readonly code?: string;
+  /** Dialog text; preserves raw non-JSON failures without changing Error.message. */
+  readonly displayMessage: string;
 
   constructor(response: Response, body: string) {
     super(`API request failed: ${response.status} ${response.statusText}`);
@@ -19,6 +21,15 @@ export class ApiError extends Error {
       this.detail = JSON.parse(body)?.detail;
       if (typeof this.detail === "string") {
         this.message = this.detail;
+      }
+      if (Array.isArray(this.detail)) {
+        const first: unknown = this.detail[0];
+        if (
+          typeof first === "object" && first !== null &&
+          "msg" in first && typeof first.msg === "string"
+        ) {
+          this.message = first.msg;
+        }
       }
       if (
         typeof this.detail === "object" &&
@@ -42,8 +53,23 @@ export class ApiError extends Error {
       }
     } catch {
       this.detail = undefined;
+      this.displayMessage = body || this.message;
+      return;
     }
+    this.displayMessage = this.message;
   }
+}
+
+/** User-facing failure text, with an operation-specific fallback for unknown errors. */
+export function getApiErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) return error.displayMessage || fallback;
+  if (
+    typeof error === "object" && error !== null &&
+    "message" in error && typeof error.message === "string"
+  ) {
+    return error.message || fallback;
+  }
+  return fallback;
 }
 
 export type ApiRequest = <T>(endpoint: string, options?: RequestInit) => Promise<T>;
