@@ -14,7 +14,7 @@ from backend.models.evaluations import (
     EvaluationUpdateRequest,
 )
 from backend.services.catalog_errors import CatalogNotFoundError, CatalogValidationError
-from backend.services.evaluation_service import EvaluationService
+from backend.services.evaluation_service import EvaluationService, RankScopes
 
 CLEARABLE_FIELDS = ("harness", "source_url", "num_parameters", "hf_model_url")
 
@@ -85,19 +85,29 @@ def apply_evaluation_command(
     command: EvaluationCommand,
     *,
     paper_id: int | None = None,
+    rank_scopes: RankScopes | None = None,
 ) -> Evaluation | None:
-    """Apply one command, leaving commit and rollback to the application boundary."""
+    """Apply a command without owning the transaction.
+
+    With rank_scopes, the batch owner must refresh collected scopes before reading
+    final results; the returned model is only the intermediate row state.
+    """
     if paper_id is not None:
         validate_evaluation_scope(service, command, paper_id)
     if isinstance(command, CreateEvaluation):
-        return service.create_evaluation(**command.payload.model_dump(), commit=False)
+        return service.create_evaluation(
+            **command.payload.model_dump(), commit=False, rank_scopes=rank_scopes
+        )
     if isinstance(command, UpdateEvaluation):
         return service.update_evaluation(
             evaluation_id=command.evaluation_id,
             **update_payload(command.payload),
             commit=False,
+            rank_scopes=rank_scopes,
         )
-    service.delete_evaluation(command.evaluation_id, commit=False)
+    service.delete_evaluation(
+        command.evaluation_id, commit=False, rank_scopes=rank_scopes
+    )
     return None
 
 

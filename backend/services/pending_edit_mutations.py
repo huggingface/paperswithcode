@@ -484,9 +484,13 @@ class PendingEditMutationService:
                 validate_evaluation_scope(service, command, paper_id)
             except (CatalogValidationError, CatalogNotFoundError) as exc:
                 raise PendingEditError(f"operations[{index}]: {exc}") from exc
+        rank_scopes = set()
         for index, command in enumerate(commands):
             try:
-                apply_evaluation_command(service, command, paper_id=paper_id)
+                apply_evaluation_command(
+                    service, command, paper_id=paper_id, rank_scopes=rank_scopes
+                )
             except (CatalogValidationError, CatalogNotFoundError) as exc:
                 raise PendingEditError(f"operations[{index}]: {exc}") from exc
+        service.refresh_rank_scopes(rank_scopes)
         return "paper", str(paper_id)

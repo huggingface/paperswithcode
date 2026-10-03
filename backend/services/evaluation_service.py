@@ -42,6 +42,8 @@ from backend.services.catalog_errors import (
     CatalogValidationError,
 )
 
+RankScopes = set[tuple[int, int, str]]
+
 _PAPER_REF = re.compile(r"^paper:(\d+)$", re.IGNORECASE)
 _CVF_OPENACCESS_PATH = re.compile(
     r"^/content/([^/]+)/(?:html|papers)/([^/]+?)(?:\.(?:html|pdf))?$",
@@ -905,6 +907,7 @@ class EvaluationService:
         num_parameters: Optional[int] = None,
         hf_model_url: Optional[str] = None,
         commit: bool = True,
+        rank_scopes: RankScopes | None = None,
     ) -> Evaluation:
         """
         Create a new evaluation.
@@ -980,22 +983,9 @@ class EvaluationService:
             self.db.flush()
             self.db.refresh(db_evaluation)
 
-            # Recalculate ranks for every metric this row carries
-            for metric in self._metric_names_for_rank_refresh(
-                db_evaluation.metrics, db_evaluation.best_metric
-            ):
-                self.recalculate_ranks(
-                    db_evaluation.task_id,
-                    db_evaluation.dataset_id,
-                    metric_name=metric,
-                    commit=False,
-                )
-
-            # Persist the recalculated rank before refresh reloads this row.
-            # Without this flush, refresh discards the new evaluation's in-memory
-            # best_rank while ranks on older rows remain pending and are committed.
-            self.db.flush()
-            self.db.refresh(db_evaluation)
+            self._refresh_or_collect_ranks(
+                self._rank_scopes(db_evaluation), rank_scopes
+            )
             if commit:
                 self.db.commit()
 
@@ -1041,6 +1031,7 @@ class EvaluationService:
         num_parameters_set: bool = False,
         hf_model_url_set: bool = False,
         commit: bool = True,
+        rank_scopes: RankScopes | None = None,
     ) -> Evaluation:
         """
         Update an existing evaluation.
@@ -1076,11 +1067,10 @@ class EvaluationService:
             if not db_evaluation:
                 raise CatalogNotFoundError(f"Evaluation {evaluation_id} not found")
 
-            # Store old task_id, dataset_id, best_metric, and metrics for rank recalculation
+            # Capture the original leaderboard before changing its keys or metrics.
             old_task_id = db_evaluation.task_id
             old_dataset_id = db_evaluation.dataset_id
-            old_best_metric = db_evaluation.best_metric
-            old_metrics = dict(db_evaluation.metrics or {})
+            affected_scopes = self._rank_scopes(db_evaluation)
 
             # Determine which dataset to validate against
             target_dataset_id = dataset_id if dataset_id is not None else old_dataset_id
@@ -1171,34 +1161,8 @@ class EvaluationService:
             self.db.flush()
             self.db.refresh(db_evaluation)
 
-            metric_names = self._metric_names_for_rank_refresh(
-                old_metrics, old_best_metric
-            )
-            metric_names.extend(
-                self._metric_names_for_rank_refresh(
-                    db_evaluation.metrics, db_evaluation.best_metric
-                )
-            )
-            metric_names = list(dict.fromkeys(metric_names))
-
-            leaderboards = {(db_evaluation.task_id, db_evaluation.dataset_id)}
-            if (task_id is not None and task_id != old_task_id) or (
-                dataset_id is not None and dataset_id != old_dataset_id
-            ):
-                leaderboards.add((old_task_id, old_dataset_id))
-
-            for task_id_lb, dataset_id_lb in leaderboards:
-                for metric in metric_names:
-                    self.recalculate_ranks(
-                        task_id_lb,
-                        dataset_id_lb,
-                        metric_name=metric,
-                        commit=False,
-                    )
-
-            # Persist rank changes before refresh reloads the updated row.
-            self.db.flush()
-            self.db.refresh(db_evaluation)
+            affected_scopes.update(self._rank_scopes(db_evaluation))
+            self._refresh_or_collect_ranks(affected_scopes, rank_scopes)
             if commit:
                 self.db.commit()
 
@@ -1221,7 +1185,13 @@ class EvaluationService:
                 self.db.rollback()
             raise DatabaseError(f"Failed to update evaluation: {str(e)}")
 
-    def delete_evaluation(self, evaluation_id: int, *, commit: bool = True) -> bool:
+    def delete_evaluation(
+        self,
+        evaluation_id: int,
+        *,
+        commit: bool = True,
+        rank_scopes: RankScopes | None = None,
+    ) -> bool:
         """
         Delete an evaluation.
 
@@ -1245,19 +1215,10 @@ class EvaluationService:
             if not db_evaluation:
                 raise CatalogNotFoundError(f"Evaluation {evaluation_id} not found")
 
-            # Store task_id, dataset_id, best_metric, and metrics before deletion
-            task_id = db_evaluation.task_id
-            dataset_id = db_evaluation.dataset_id
-            best_metric = db_evaluation.best_metric
-            metrics = dict(db_evaluation.metrics or {})
-
+            affected_scopes = self._rank_scopes(db_evaluation)
             self.db.delete(db_evaluation)
             self.db.flush()
-
-            for metric in self._metric_names_for_rank_refresh(metrics, best_metric):
-                self.recalculate_ranks(
-                    task_id, dataset_id, metric_name=metric, commit=False
-                )
+            self._refresh_or_collect_ranks(affected_scopes, rank_scopes)
             if commit:
                 self.db.commit()
 
@@ -1356,6 +1317,32 @@ class EvaluationService:
                 seen.add(name)
                 names.append(name)
         return names
+
+    def _rank_scopes(self, row: DBEvaluation) -> RankScopes:
+        return {
+            (row.task_id, row.dataset_id, metric)
+            for metric in self._metric_names_for_rank_refresh(
+                row.metrics, row.best_metric
+            )
+        }
+
+    def _refresh_or_collect_ranks(
+        self, affected: RankScopes, batch: RankScopes | None
+    ) -> None:
+        if batch is None:
+            self.refresh_rank_scopes(affected)
+        else:
+            batch.update(affected)
+
+    def refresh_rank_scopes(self, scopes: RankScopes) -> None:
+        """Refresh each affected leaderboard after all writes, without committing."""
+        self.db.flush()
+        for task_id, dataset_id, metric in sorted(scopes):
+            self.recalculate_ranks(
+                task_id, dataset_id, metric_name=metric, commit=False
+            )
+        # Required with autoflush=False, including before audit snapshots/reloads.
+        self.db.flush()
 
     def recalculate_ranks(
         self,

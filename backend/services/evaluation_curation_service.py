@@ -233,6 +233,7 @@ class EvaluationCurationService:
         result_ids: list[int | None] = []
 
         def apply() -> None:
+            rank_scopes = set()
             for operation in operations:
                 command = evaluation_command(
                     operation["operation"],
@@ -240,9 +241,10 @@ class EvaluationCurationService:
                     operation.get("evaluation_id"),
                 )
                 result = apply_evaluation_command(
-                    self.service, command, paper_id=paper_id
+                    self.service, command, paper_id=paper_id, rank_scopes=rank_scopes
                 )
                 result_ids.append(int(result.id) if result is not None else None)
+            self.service.refresh_rank_scopes(rank_scopes)
 
         after, event, replayed = CatalogMutationService(self.db).mutate(
             operation="batch",

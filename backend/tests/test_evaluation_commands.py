@@ -387,3 +387,220 @@ def test_pending_valid_stored_payload_preserves_json_date_and_null_presence(db):
         1, {"operations": [{"op": "delete", "evaluation_id": row.id}]}
     )
     assert db.query(dbm.Evaluation).count() == 0
+
+
+def configure_second_leaderboard(db):
+    db.add_all(
+        [
+            dbm.Dataset(id=2, name="Second", slug="second"),
+            dbm.Metric(id=2, name="Loss", direction="lower_is_better"),
+        ]
+    )
+    db.flush()
+    db.add(dbm.TaskDataset(task_id=1, dataset_id=2, supports_harness=True))
+    db.add_all(
+        [
+            dbm.TaskDatasetMetric(task_id=1, dataset_id=2, metric_id=1),
+            dbm.TaskDatasetMetric(task_id=1, dataset_id=2, metric_id=2),
+            dbm.TaskDatasetMetric(task_id=1, dataset_id=1, metric_id=2),
+        ]
+    )
+    db.commit()
+
+
+def run_evaluation_batch(db, adapter, operations):
+    if adapter == "direct":
+        return EvaluationCurationService(db).batch(
+            paper_id=1, operations=operations, mutation=mutation()
+        )
+    PendingEditMutationService(db)._paper_evaluations(
+        1,
+        {
+            "operations": [
+                {
+                    "op": op["operation"],
+                    **(
+                        {"evaluation_id": op["evaluation_id"]}
+                        if "evaluation_id" in op
+                        else {}
+                    ),
+                    **({"data": op["payload"]} if "payload" in op else {}),
+                }
+                for op in operations
+            ]
+        },
+    )
+    return None
+
+
+@pytest.mark.parametrize("adapter", ["direct", "pending"])
+def test_batch_refreshes_distinct_old_new_scopes_after_all_writes(
+    db, monkeypatch, adapter
+):
+    db.autoflush = False
+    configure_second_leaderboard(db)
+    service = EvaluationService(db)
+
+    def create(score, **extra):
+        return service.create_evaluation(
+            **{**create_payload(), "metrics": {"Accuracy": score}, **extra}
+        )
+
+    moved = create(90)
+    renamed = create(80)
+    deleted = create(100)
+    survivor = create(70)
+    destination = create(
+        20, dataset_id=2, metrics={"Accuracy": 20, "Loss": 2}, best_metric="Loss"
+    )
+    calls = []
+    original = EvaluationService.recalculate_ranks
+
+    def counted(self, task_id, dataset_id, metric_name=None, **kwargs):
+        calls.append((task_id, dataset_id, metric_name))
+        return original(self, task_id, dataset_id, metric_name=metric_name, **kwargs)
+
+    monkeypatch.setattr(EvaluationService, "recalculate_ranks", counted)
+    result = run_evaluation_batch(
+        db,
+        adapter,
+        [
+            {
+                "operation": "update",
+                "evaluation_id": int(moved.id),
+                "payload": {"dataset_id": 2},
+            },
+            {
+                "operation": "update",
+                "evaluation_id": int(renamed.id),
+                "payload": {"metrics": {"Loss": 1}, "best_metric": "Loss"},
+            },
+            {"operation": "delete", "evaluation_id": int(deleted.id)},
+            {
+                "operation": "create",
+                "payload": {**create_payload(), "metrics": {"Accuracy": 70, "Loss": 1}},
+            },
+            {
+                "operation": "create",
+                "payload": {**create_payload(), "metrics": {"Accuracy": 60}},
+            },
+        ],
+    )
+    assert sorted(calls) == [(1, 1, "Accuracy"), (1, 1, "Loss"), (1, 2, "Accuracy")]
+    db.commit()
+    db.expire_all()
+    rows = db.query(dbm.Evaluation).order_by(dbm.Evaluation.id).all()
+    ranks = {int(row.id): row.best_rank for row in rows}
+    assert ranks[int(moved.id)] == 1
+    assert ranks[int(renamed.id)] == 1
+    assert ranks[int(survivor.id)] == 1
+    assert ranks[int(destination.id)] == 1
+    assert int(deleted.id) not in ranks
+    assert [row.best_rank for row in rows[-2:]] == [1, 3]
+    if result:
+        assert {row["id"]: row["best_rank"] for row in result["evaluations"]} == ranks
+    # Recomputing every leaderboard independently must leave persisted ranks unchanged.
+    for dataset in (1, 2):
+        for metric in ("Accuracy", "Loss"):
+            original(service, 1, dataset, metric_name=metric, commit=False)
+    db.flush()
+    assert {int(row.id): row.best_rank for row in rows} == ranks
+
+
+@pytest.mark.parametrize("adapter", ["direct", "pending"])
+def test_batch_rank_failure_rolls_back_rows_and_derived_ranks(db, monkeypatch, adapter):
+    from backend.utils.exceptions import DatabaseError
+
+    db.autoflush = False
+    configure_second_leaderboard(db)
+    row = EvaluationService(db).create_evaluation(**create_payload())
+    original = EvaluationService.recalculate_ranks
+    calls = []
+
+    def fail_second(self, *args, **kwargs):
+        calls.append(kwargs["metric_name"])
+        if len(calls) == 2:
+            raise DatabaseError("rank failure")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(EvaluationService, "recalculate_ranks", fail_second)
+    with pytest.raises(DatabaseError, match="rank failure"):
+        try:
+            run_evaluation_batch(
+                db,
+                adapter,
+                [
+                    {
+                        "operation": "create",
+                        "payload": {
+                            **create_payload(),
+                            "metrics": {"Accuracy": 99, "Loss": 1},
+                        },
+                    }
+                ],
+            )
+        except Exception:
+            # Pending mutation intentionally leaves rollback to approval's owner.
+            if adapter == "pending":
+                db.rollback()
+            raise
+    db.expire_all()
+    assert calls == ["Accuracy", "Loss"]
+    persisted = db.query(dbm.Evaluation).one()
+    assert persisted.id == int(row.id)
+    assert persisted.best_rank == 1
+
+
+def test_batch_returns_final_state_after_repeated_update_and_delete(db):
+    db.autoflush = False
+    row = EvaluationService(db).create_evaluation(**create_payload())
+    result = run_evaluation_batch(
+        db,
+        "direct",
+        [
+            {
+                "operation": "update",
+                "evaluation_id": int(row.id),
+                "payload": {"metrics": {"Accuracy": 5}},
+            },
+            {
+                "operation": "update",
+                "evaluation_id": int(row.id),
+                "payload": {"metrics": {"Accuracy": 10}},
+            },
+            {"operation": "delete", "evaluation_id": int(row.id)},
+        ],
+    )
+    assert result["result_ids"] == [int(row.id), int(row.id), None]
+    assert result["evaluations"] == []
+
+
+def test_paper_edit_batch_refreshes_once_and_snapshots_final_ranks(db, monkeypatch):
+    db.autoflush = False
+    service = PaperEditService(db)
+    original = EvaluationService.recalculate_ranks
+    calls = []
+
+    def counted(self, *args, **kwargs):
+        calls.append(kwargs["metric_name"])
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(EvaluationService, "recalculate_ranks", counted)
+    document = PaperEditDocument(
+        paper_id=1,
+        version="0" * 64,
+        idempotency_key=uuid.uuid4(),
+        operations=[
+            {
+                "section": "evaluations",
+                "payload": {**create_payload(), "metrics": {"Accuracy": score}},
+            }
+            for score in (10, 20)
+        ],
+    )
+    service.apply(1, service.prepare(document), ACTOR)
+    assert calls == ["Accuracy"]
+    db.expire_all()
+    assert [
+        row.best_rank for row in db.query(dbm.Evaluation).order_by(dbm.Evaluation.id)
+    ] == [2, 1]

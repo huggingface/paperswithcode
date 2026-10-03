@@ -171,6 +171,7 @@ class PaperEditService:
         return prepared
 
     def apply(self, paper_id: int, operations: list[dict], actor: dict) -> None:
+        rank_scopes = set()
         for index, operation in enumerate(operations):
             section, payload = operation["section"], operation["payload"]
             try:
@@ -181,7 +182,10 @@ class PaperEditService:
                     )
                     try:
                         apply_evaluation_command(
-                            self.evaluations.service, command, paper_id=paper_id
+                            self.evaluations.service,
+                            command,
+                            paper_id=paper_id,
+                            rank_scopes=rank_scopes,
                         )
                     except CatalogNotFoundError as error:
                         raise CatalogValidationError(
@@ -208,6 +212,9 @@ class PaperEditService:
                         "errors": [{"index": index, "message": str(error)}],
                     }
                 ) from error
+
+        if rank_scopes:
+            self.evaluations.service.refresh_rank_scopes(rank_scopes)
 
     def submit(
         self,
