@@ -179,6 +179,12 @@ def test_completion_requires_an_accepted_verified_apply(
     )
 
     class Database:
+        def refresh(self, _row, *, with_for_update):
+            assert with_for_update is True
+
+        def flush(self):
+            pass
+
         def commit(self):
             pass
 
