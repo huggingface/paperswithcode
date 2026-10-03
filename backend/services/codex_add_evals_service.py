@@ -489,8 +489,11 @@ class CodexPaperJobService:
         settings: Settings,
         *,
         dispatch: bool = True,
+        commit: bool = True,
     ) -> bool:
         """Start the standard enrich -> add-evals workflow for one resolved card."""
+        if dispatch and not commit:
+            raise ValueError("Dispatch requires a committed workflow")
         if candidate.status != "resolved" or candidate.model_release_id is None:
             return False
         revision = candidate.readme_revision or candidate.readme_sha
@@ -551,7 +554,8 @@ class CodexPaperJobService:
             dispatch=False,
             commit=False,
         )
-        db.commit()
+        if commit:
+            db.commit()
         if dispatch:
             self.dispatch_next(db, settings)
         return True
@@ -868,8 +872,8 @@ class CodexPaperJobService:
                     candidate.status = "failed"
                     candidate.rejection_reason = row.error
                     candidate.processed_at = _now()
-            db.commit()
             self._advance_workflow(db, row, settings)
+            db.commit()
 
     @staticmethod
     def _bind_active_release(row: PaperCurationJob, settings: Settings) -> None:
@@ -1267,9 +1271,9 @@ class CodexPaperJobService:
                 row.finished_at = _now()
                 changed_rows.append(row)
         if changed_rows:
-            db.commit()
             for row in changed_rows:
                 self._advance_workflow(db, row, settings)
+            db.commit()
             self.dispatch_next(db, settings)
 
     def authenticate(
@@ -1323,6 +1327,9 @@ class CodexPaperJobService:
         error: str | None,
         settings: Settings,
     ) -> CodexPaperJob:
+        # Authentication may have loaded this row before another callback finished.
+        # Serialize the complete transition, not just the terminal-state write.
+        db.refresh(row, with_for_update=True)
         if row.status in TERMINAL_STATUSES:
             return self.serialize(row, settings)
         completion_error = error
@@ -1381,22 +1388,24 @@ class CodexPaperJobService:
         row.report = report[:40_000] or None
         row.error = completion_error[:4_000] if completion_error else None
         row.finished_at = _now()
-        db.commit()
         candidate_id = getattr(row, "candidate_id", None)
         if getattr(row, "kind", None) == "resolve-model-paper" and candidate_id:
             candidate = db.get(TrendingModelCandidate, candidate_id)
             if candidate is not None:
                 if row.status == "completed":
                     self.enqueue_resolved_candidate_workflow(
-                        db, candidate, settings, dispatch=False
+                        db, candidate, settings, dispatch=False, commit=False
                     )
                 elif candidate.status not in {"resolved", "rejected"}:
                     candidate.status = "failed"
                     candidate.rejection_reason = row.error
                     candidate.processed_at = _now()
-                    db.commit()
         self._advance_workflow(db, row, settings)
+        db.flush()
         self._evaluate_scheduled_health(db, row)
+        # Queued jobs are the durable dispatch backlog. A dispatch failure after
+        # this commit cannot strand a terminal job without its successor.
+        db.commit()
         self.dispatch_next(db, settings)
         return self.serialize(row, settings)
 
@@ -1447,7 +1456,6 @@ class CodexPaperJobService:
             state.pause_condition = condition
             state.pause_reason = reason
             logger.error("paper curation dispatch paused condition=%s", condition)
-        db.commit()
 
     def _advance_workflow(
         self, db: Session, row: PaperCurationJob, settings: Settings
@@ -1482,6 +1490,7 @@ class CodexPaperJobService:
                     policy_version=workflow.policy_version,
                     priority=row.priority,
                     dispatch=False,
+                    commit=False,
                 )
             elif workflow.evals_satisfied_by_job_id is not None:
                 workflow.status = "completed"
@@ -1496,7 +1505,6 @@ class CodexPaperJobService:
                 workflow.deferred_reason = "awaiting_markdown"
                 workflow.error = None
                 workflow.finished_at = None
-                db.commit()
                 return
             if (
                 row.retry_of_id is None
@@ -1530,11 +1538,13 @@ class CodexPaperJobService:
             workflow.status = "canceled"
             workflow.error = "Canceled by an administrator"
             workflow.finished_at = _now()
-        db.commit()
 
     def _release_canary_backlog(
         self, db: Session, policy_version: str, settings: Settings
     ) -> None:
+        # Production sessions disable autoflush. Eligibility queries must see
+        # the workflow transition that triggered this release.
+        db.flush()
         state = db.get(PaperCurationSchedulerState, 1)
         if state is None or state.canary_released:
             return
@@ -1603,8 +1613,8 @@ class CodexPaperJobService:
             )
         row.status = "canceled"
         row.finished_at = _now()
-        db.commit()
         self._advance_workflow(db, row, settings)
+        db.commit()
         self.dispatch_next(db, settings)
         return self.serialize(row, settings)
 

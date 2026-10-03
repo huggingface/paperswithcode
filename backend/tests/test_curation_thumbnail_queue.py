@@ -190,6 +190,12 @@ class _Database:
     def commit(self):
         self.commits += 1
 
+    def refresh(self, _row, *, with_for_update):
+        assert with_for_update is True
+
+    def flush(self):
+        pass
+
     def rollback(self):
         self.rollbacks += 1
 

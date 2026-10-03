@@ -70,6 +70,7 @@ from backend.config import get_settings
 from backend.services.paper_implementation_service import (
     family_repository_exists_clause,
 )
+from backend.services.paper_feed_executor import PaperFeedExecutor, GENERAL_ORDERING
 from backend.services.paper_citation_refresh_service import PaperCitationRefreshService
 from backend.services.paper_relation_loader import PaperRelationLoader, PaperRelations
 from backend.services.paper_retrieval_service import PaperRetrievalService
@@ -598,11 +599,7 @@ class PaperService:
             # Limit page size
             page_size = min(page_size, self.settings.max_page_size)
 
-            allowed_order_columns = {
-                "date_published": DBPaper.date_published,
-                "citation_count": DBPaper.citation_count,
-            }
-            if order_by not in {*allowed_order_columns.keys(), "trending"}:
+            if order_by not in {"date_published", "citation_count", "trending"}:
                 raise ValueError(f"Unsupported order_by: {order_by}")
 
             applied_filters = {
@@ -731,38 +728,6 @@ class PaperService:
             for author in resolved_authors:
                 query = query.filter(DBPaper.authors.any(DBAuthor.id == author.id))
 
-            # Filter for latest versions only
-            if latest_only:
-                query = query.filter(DBPaper.is_latest_version)
-
-            if has_code:
-                query = self.apply_has_code_filter(query)
-
-            if has_official_implementation:
-                query = query.filter(
-                    family_repository_exists_clause(official_only=True)
-                )
-
-            if has_hf_artifacts:
-                query = self.apply_has_hf_artifacts_filter(query)
-
-            # Apply search filter
-            if search:
-                search_term = f"%{search}%"
-                query = query.filter(
-                    or_(
-                        DBPaper.title.ilike(search_term),
-                        DBPaper.abstract.ilike(search_term),
-                    )
-                )
-
-            # Apply date filters
-            if start_date:
-                query = query.filter(DBPaper.date_published >= start_date)
-
-            if end_date:
-                query = query.filter(DBPaper.date_published <= end_date)
-
             # Apply conference filter
             if conference:
                 conference_filters = [DBPaper.conference.ilike(f"%{conference}%")]
@@ -772,40 +737,25 @@ class PaperService:
                     )
                 query = query.filter(or_(*conference_filters))
 
-            # Apply ordering
-            if order_by == "trending":
-                query = self.apply_scoped_trending_order(query)
-            else:
-                order_column = allowed_order_columns[order_by]
-                if order_dir.lower() == "desc":
-                    query = query.order_by(desc(order_column).nullslast())
-                else:
-                    query = query.order_by(asc(order_column).nullslast())
-
-            # Get total count
-            total_count = query.order_by(None).count()
-
-            # Apply pagination
-            offset = (page - 1) * page_size
-            db_papers = query.offset(offset).limit(page_size).all()
-
-            api_papers = self.hydrate_cards(
-                db_papers, include_resources=include_resources
+            response = PaperFeedExecutor(self).execute(
+                query,
+                page=page,
+                page_size=page_size,
+                latest_only=latest_only,
+                has_code=has_code,
+                has_official_implementation=has_official_implementation,
+                has_hf_artifacts=has_hf_artifacts,
+                search=search,
+                start_date=start_date,
+                end_date=end_date,
+                order_by=order_by,
+                order_dir=order_dir,
+                ordering=GENERAL_ORDERING,
+                include_resources=include_resources,
             )
-
-            # Calculate pagination info
-            total_pages = (total_count + page_size - 1) // page_size
-            next_page = page + 1 if page < total_pages else None
-            previous_page = page - 1 if page > 1 else None
-
-            return Papers(
-                count=total_count,
-                next_page=next_page,
-                previous_page=previous_page,
-                results=api_papers,
-                scope=scope,
-                applied_filters=applied_filters,
-            )
+            response.scope = scope
+            response.applied_filters = applied_filters
+            return response
 
         except (PaperNotFoundError, AmbiguousAuthorError, InvalidAuthorFilterError):
             raise
@@ -1471,20 +1421,12 @@ class PaperService:
                 if paper_id in papers_by_id
             ]
 
-            api_papers = self.hydrate_cards(
-                db_papers, include_resources=include_resources
-            )
-
-            # Calculate pagination info
-            total_pages = (total_count + page_size - 1) // page_size
-            next_page = page + 1 if page < total_pages else None
-            previous_page = page - 1 if page > 1 else None
-
-            return Papers(
+            return PaperFeedExecutor(self).page(
+                db_papers,
                 count=total_count,
-                next_page=next_page,
-                previous_page=previous_page,
-                results=api_papers,
+                page=page,
+                page_size=page_size,
+                include_resources=include_resources,
             )
 
         except Exception as e:

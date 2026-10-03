@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+from contextlib import nullcontext
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -31,12 +32,14 @@ from backend.services.autonomous_operations_repository import RunContext
 from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.pending_edit_errors import (
     PendingEditAlreadyReviewedError,
+    PendingEditApplyError,
     PendingEditConflictError,
     PendingEditError,
     PendingEditNotFoundError,
     SubmissionRateLimitError,
     SubmissionSuspendedError,
 )
+from backend.services.pending_edit_transactions import review_transaction
 from backend.services.pending_edit_mutations import PendingEditMutationService
 from backend.services.pending_edit_payloads import (
     EDIT_TYPES,
@@ -365,6 +368,37 @@ class PendingEditService:
         user_review_reason: Optional[str] = None,
         commit: bool = True,
     ) -> PendingPaperEdit:
+        boundary = review_transaction(self.db) if commit else nullcontext()
+        with boundary:
+            return self._approve(
+                edit_id=edit_id,
+                reviewer_username=reviewer_username,
+                reviewer_hf_subject=reviewer_hf_subject,
+                reviewer_kind=reviewer_kind,
+                autonomous_context=autonomous_context,
+                review_run_id=review_run_id,
+                review_model=review_model,
+                review_evidence=review_evidence,
+                resolved_payload=resolved_payload,
+                admin_note=admin_note,
+                user_review_reason=user_review_reason,
+            )
+
+    def _approve(
+        self,
+        *,
+        edit_id: int,
+        reviewer_username: Optional[str],
+        reviewer_hf_subject: Optional[str] = None,
+        reviewer_kind: str = "human",
+        autonomous_context: RunContext | None = None,
+        review_run_id: Any = None,
+        review_model: Optional[str] = None,
+        review_evidence: Optional[dict[str, Any]] = None,
+        resolved_payload: Optional[dict[str, Any]] = None,
+        admin_note: Optional[str] = None,
+        user_review_reason: Optional[str] = None,
+    ) -> PendingPaperEdit:
         if reviewer_kind not in {"human", "codex"}:
             raise PendingEditError("Unsupported reviewer kind")
         row = self._pending_for_review(edit_id)
@@ -402,9 +436,10 @@ class PendingEditService:
                         "submitted_snapshot": row.current_payload or {},
                         "current_snapshot": current,
                     }
-                    self.db.commit()
                     raise PendingEditConflictError(
-                        "Canonical state changed after submission"
+                        "Canonical state changed after submission",
+                        edit_id=edit_id,
+                        conflict_payload=row.conflict_payload,
                     )
                 applied_payload = rebased_payload
             row.conflict_payload = None
@@ -433,8 +468,7 @@ class PendingEditService:
                         actor_username=row.hf_username,
                     )
             except Exception as exc:
-                self._record_apply_failure(edit_id, row.edit_type, exc)
-                raise
+                raise PendingEditApplyError(edit_id, exc) from exc
 
         row.status = "approved"
         row.reviewed_by = reviewer_username
@@ -462,11 +496,7 @@ class PendingEditService:
         row.admin_note = admin_note
         row.user_review_reason = user_review_reason
         row.reviewed_at = datetime.now(timezone.utc)
-        if commit:
-            self.db.commit()
-            self.db.refresh(row)
-        else:
-            self.db.flush()
+        self.db.flush()
         logger.info(
             "submission_approved id=%s reviewer_subject=%s result=%s:%s",
             row.id,
@@ -490,21 +520,6 @@ class PendingEditService:
                 f"Pending edit {edit_id} is already {row.status}"
             )
         return row
-
-    def _record_apply_failure(
-        self, edit_id: int, edit_type: str, error: Exception
-    ) -> None:
-        self.db.rollback()
-        failed_row = self.db.get(PendingPaperEdit, edit_id)
-        if failed_row is not None and failed_row.status == "pending":
-            failed_row.failure_reason = str(error)[:2000]
-            self.db.commit()
-        logger.warning(
-            "submission_apply_failed id=%s edit_type=%s error_type=%s",
-            edit_id,
-            edit_type,
-            type(error).__name__,
-        )
 
     @staticmethod
     def _approval_event(
