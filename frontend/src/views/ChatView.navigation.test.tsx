@@ -10,9 +10,11 @@ import type { ChatConversation } from "@/components/chat/ChatConversation";
 
 const mocks = vi.hoisted(() => ({
   stream: vi.fn(), resume: vi.fn(), getSession: vi.fn(), listSessions: vi.fn(),
-  user: { hf_subject: "owner", username: "owner" },
+  user: { hf_subject: "owner", username: "owner" } as { hf_subject: string; username: string } | null,
+  authLoading: false,
+  frames: [] as Array<{ path: string; text: string }>,
 }));
-vi.mock("@/lib/authContext", () => ({ useAuth: () => ({ user: mocks.user, isLoading: false }) }));
+vi.mock("@/lib/authContext", () => ({ useAuth: () => ({ user: mocks.user, isLoading: mocks.authLoading }) }));
 vi.mock("@/lib/chat", async (original) => ({
   ...await original<typeof import("@/lib/chat")>(),
   streamChat: mocks.stream, resumeChat: mocks.resume, isChatLive: () => false,
@@ -30,11 +32,15 @@ vi.mock("@/components/chat/ChatComposerSurface", () => ({
   </>,
 }));
 vi.mock("@/components/chat/ChatConversation", () => ({
-  ChatConversation: ({ messages, busy }: ComponentProps<typeof ChatConversation>) => <div data-testid="transcript" data-busy={busy}>
+  ChatConversation: ({ messages, busy }: ComponentProps<typeof ChatConversation>) => {
+    const location = useLocation();
+    mocks.frames.push({ path: location.pathname, text: JSON.stringify(messages) });
+    return <div data-testid="transcript" data-busy={busy}>
     {messages.map((message) => <div key={message.id}>{message.text}{message.blocks?.map((block, index) => (
       <span key={index}>{block.kind === "answer" ? block.text : ""}</span>
     ))}</div>)}
-  </div>,
+  </div>;
+  },
 }));
 vi.mock("@/components/chat/useArtifactPanel", () => ({
   ArtifactPanelProvider: ({ children }: { children: ReactNode }) => children,
@@ -63,6 +69,7 @@ const Probe = () => {
   const location = useLocation();
   return <>
     <output data-testid="route">{location.pathname}</output>
+    <output data-testid="search">{location.search}</output>
     {["a", "b", "missing"].map((id) => <button key={id} onClick={() => navigate(`/chat/${id}`)}>Visit {id}</button>)}
     <button onClick={() => navigate("/chat")}>Visit new</button>
   </>;
@@ -76,12 +83,34 @@ beforeEach(() => {
   vi.clearAllMocks();
   sessionStorage.clear();
   mocks.user = { hf_subject: "owner", username: "owner" };
+  mocks.authLoading = false;
+  mocks.frames = [];
   mocks.getSession.mockImplementation(async (id: string) => detail(id));
   mocks.listSessions.mockResolvedValue([detail("a"), detail("b")]);
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 });
 
 describe("selected conversation and active turn ownership", () => {
+  it("preserves a URL launch prompt and model while initial authentication loads", async () => {
+    mocks.user = null;
+    mocks.authLoading = true;
+    mocks.stream.mockImplementation(async function* () {
+      yield { type: "stream_start", session_id: "a", request_id: "r1" };
+      await new Promise(() => undefined);
+    });
+    const path = "/chat?q=Launch%20question&model=gpt-5.6-luna%40openai";
+    const view = render(element(path));
+    expect(screen.getByTestId("search")).toHaveTextContent("q=Launch%20question");
+    expect(mocks.stream).not.toHaveBeenCalled();
+    mocks.user = { hf_subject: "owner", username: "owner" };
+    mocks.authLoading = false;
+    view.rerender(element(path));
+    await waitFor(() => expect(mocks.stream).toHaveBeenCalledOnce());
+    expect(mocks.stream.mock.calls[0][0]).toMatchObject({
+      message: "Launch question", initial_model: "gpt-5.6-luna@openai",
+    });
+  });
+
   it("buffers a background answer and scopes title, artifact, and busy state when returning", async () => {
     const background = deferred<void>();
     const finish = deferred<void>();
@@ -106,8 +135,11 @@ describe("selected conversation and active turn ownership", () => {
     expect(screen.getByTestId("transcript")).toHaveTextContent("b saved question");
     expect(screen.queryByText("A paper artifact")).not.toBeInTheDocument();
     expect(document.querySelector(".chat-topbar-title")).toHaveTextContent("b title");
+    mocks.frames = [];
     fireEvent.click(screen.getByText("Visit a"));
     await screen.findByText("First chunk plus background chunk");
+    expect(mocks.frames.filter(frame => frame.path === "/chat/a")
+      .some(frame => frame.text.includes("b saved question"))).toBe(false);
     expect(screen.getByText("Stop selected turn")).toBeInTheDocument();
     expect(screen.getByText("A paper artifact")).toBeInTheDocument();
     expect(document.querySelector(".chat-topbar-title")).toHaveTextContent("Streamed A title");

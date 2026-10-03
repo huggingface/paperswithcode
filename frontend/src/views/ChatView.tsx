@@ -415,6 +415,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);
 
   useEffect(() => {
+    if (authLoading) return;
     const prompt = searchParams.get("q")?.trim();
     if (!prompt) return;
     autoSendStartedRef.current = false;
@@ -425,7 +426,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     next.delete("q");
     next.delete("model");
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [authLoading, searchParams, setSearchParams]);
 
   useEffect(() => {
     if (

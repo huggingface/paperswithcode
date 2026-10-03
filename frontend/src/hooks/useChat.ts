@@ -100,6 +100,10 @@ export function useChat(options: UseChatOptions) {
   const renderedSessionIdRef = useRef(options.sessionId);
   if (renderedSessionIdRef.current !== options.sessionId) {
     renderedSessionIdRef.current = options.sessionId;
+    // React retries this component before rendering its children, so returning
+    // to a running turn cannot render the previous conversation's transcript.
+    const projection = turn.projectSession(options.sessionId);
+    if (projection) setMessages(projection);
     if (turn.sessionId !== options.sessionId) {
       messagesGenerationRef.current += 1;
       latencyRef.current = null;
