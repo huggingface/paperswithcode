@@ -177,6 +177,41 @@ beforeEach(() => {
   });
 });
 
+describe("ChatView sidebar navigation", () => {
+  it.each([390, 900, 1200])("reveals a new chat at viewport width %i", async (width) => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(width);
+    const user = userEvent.setup();
+    renderChat();
+    await screen.findByText(session.title, { selector: ".chat-session-title" });
+    if (width <= 900) await user.click(screen.getByTitle("Open sidebar"));
+
+    await user.click(screen.getByRole("button", { name: "New chat" }));
+
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat");
+    expect(document.querySelector(".chat-sidebar")?.classList.contains("chat-sidebar-closed"))
+      .toBe(width <= 900);
+  });
+
+  it.each([
+    [390, "/chat"],
+    [900, "/chat"],
+    [1200, "/chat"],
+    [390, `/chat/${sessionId}`],
+  ])("reveals a selected chat at viewport width %i from %s", async (width, path) => {
+    vi.spyOn(window, "innerWidth", "get").mockReturnValue(width);
+    const user = userEvent.setup();
+    renderChat(path);
+    const title = await screen.findByText(session.title, { selector: ".chat-session-title" });
+    if (width <= 900) await user.click(screen.getByTitle("Open sidebar"));
+
+    await user.click(title);
+
+    expect(screen.getByTestId("chat-location").textContent).toBe(`/chat/${sessionId}`);
+    expect(document.querySelector(".chat-sidebar")?.classList.contains("chat-sidebar-closed"))
+      .toBe(width <= 900);
+  });
+});
+
 describe("ChatView inference authorization", () => {
   it("renders authenticated previous-chat navigation, conversation, and poster as three columns", async () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1400);
