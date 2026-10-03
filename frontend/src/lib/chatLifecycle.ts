@@ -29,6 +29,7 @@ export type ChatLifecycleAction =
   | { type: "clear_workspace_status" }
   | { type: "settle" }
   | { type: "stop" }
+  | { type: "toggle_block"; messageId: string; blockIndex: number }
   | { type: "reset" };
 
 export const initialChatLifecycle = (): ChatLifecycleState => ({
@@ -461,7 +462,19 @@ export function chatLifecycleReducer(
       };
     case "stop":
       return { ...state, messages: stopMessages(state.messages), phase: "stopped" };
+    case "toggle_block":
+      return { ...state, messages: toggleChatBlock(state.messages, action.messageId, action.blockIndex) };
     case "reset":
       return initialChatLifecycle();
   }
+}
+
+export function toggleChatBlock(messages: ChatMessage[], messageId: string, blockIndex: number) {
+  return messages.map((message) => message.id !== messageId ? message : {
+    ...message,
+    blocks: message.blocks?.map((block, index) => (
+      index === blockIndex && (block.kind === "reasoning" || block.kind === "tool")
+        ? { ...block, open: !block.open } : block
+    )),
+  });
 }

@@ -899,7 +899,7 @@ describe("useChat canonical reloads", () => {
     getSessionMock
       .mockReturnValueOnce(firstCanonical.promise)
       .mockReturnValueOnce(secondCanonical.promise);
-    const { result } = renderChat();
+    const { result, onSettled } = renderChat();
 
     act(() => {
       expect(result.current.send("First turn")).toBe(true);
@@ -919,6 +919,7 @@ describe("useChat canonical reloads", () => {
     });
     expect(result.current.messages.some((message) => message.text === "Second turn")).toBe(true);
     expect(result.current.messages.some((message) => message.id === "stale-user")).toBe(false);
+    expect(onSettled).not.toHaveBeenCalled();
 
     await act(async () => {
       secondCanonical.resolve(sessionDetail("session-1", [
@@ -927,6 +928,8 @@ describe("useChat canonical reloads", () => {
       await secondCanonical.promise;
     });
     await waitFor(() => expect(result.current.messages[0]?.id).toBe("latest-user"));
+    expect(onSettled).toHaveBeenCalledTimes(1);
+    expect(onSettled).toHaveBeenCalledWith("session-1");
   });
 });
 
@@ -1234,4 +1237,51 @@ it("Retry continues from saved progress without replacing the failed turn or hid
   expect(request?.replace_message_id).toBeUndefined();
   expect(result.current.messages.slice(0, 2)).toEqual(prior);
   await flushMicrotasks();
+});
+
+it("keeps a toggled streaming block in the authoritative transcript after another delta", async () => {
+  const more = deferred<void>();
+  const finish = deferred<void>();
+  streamChatMock.mockImplementation(async function* () {
+    yield { type: "stream_start", request_id: "r1", session_id: "session-1" };
+    yield { type: "reasoning_start" };
+    yield { type: "reasoning_delta", text: "First" };
+    await more.promise;
+    yield { type: "reasoning_delta", text: " second" };
+    await finish.promise;
+  });
+  const { result, unmount } = renderChat();
+  act(() => { result.current.send("Reason"); });
+  await waitFor(() => expect(result.current.messages.at(-1)?.blocks?.[0]).toMatchObject({ text: "First" }));
+  act(() => result.current.toggleBlock(result.current.messages.at(-1)!.id, 0));
+  await act(async () => { more.resolve(); await more.promise; });
+  expect(result.current.messages.at(-1)?.blocks?.[0]).toMatchObject({ text: "First second", open: false });
+  unmount();
+  finish.resolve();
+});
+
+it("ignores an aborted stream failure after reset starts a new turn", async () => {
+  const oldFailure = deferred<void>();
+  const finish = deferred<void>();
+  streamChatMock.mockImplementationOnce(async function* () {
+    yield { type: "stream_start", request_id: "old", session_id: null };
+    await oldFailure.promise;
+    throw new ChatStreamError("Disabled", "chat_temporarily_disabled");
+  }).mockImplementationOnce(async function* () {
+    yield { type: "stream_start", request_id: "new", session_id: null };
+    yield { type: "answer_delta", text: "New answer" };
+    await finish.promise;
+    yield { type: "done", followups: [], finish_reason: "success" };
+  });
+  const { result, onSettled } = renderChat(null);
+  act(() => { result.current.send("Old"); });
+  await flushMicrotasks();
+  act(() => { result.current.reset(); result.current.send("New"); });
+  await flushMicrotasks();
+  await act(async () => { oldFailure.resolve(); await oldFailure.promise; });
+  expect(result.current.disabledRequest).toBeNull();
+  expect(result.current.busy).toBe(true);
+  await act(async () => { finish.resolve(); await finish.promise; });
+  expect(result.current.messages.at(-1)?.blocks?.[0]).toMatchObject({ text: "New answer", done: true });
+  expect(onSettled).toHaveBeenCalledTimes(1);
 });

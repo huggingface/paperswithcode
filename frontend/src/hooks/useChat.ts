@@ -5,9 +5,7 @@ import {
   type ChatEvent,
   type ChatMessage,
   type ChatPaperHit,
-  type ChatStreamRequest,
   ChatStreamError,
-  ChatTransportError,
   isChatLive,
   isChatSmoothStreamingEnabled,
   resumeChat,
@@ -20,76 +18,17 @@ import {
 } from "@/lib/chatLatency";
 import {
   type ChatLifecycleAction,
-  chatLifecycleReducer,
-  initialChatLifecycle,
+  toggleChatBlock,
 } from "@/lib/chatLifecycle";
 import {
   createSmoothedChatStream,
   type SmoothedChatStream,
 } from "@/lib/chatStreamSmoother";
+import { reconnectChatStream } from "@/lib/chatReconnect";
+import { ChatTurn, type EditRequest, type PendingGeneration } from "@/lib/chatTurn";
 import { cancelSession, getSession, toUiMessages } from "@/lib/chatSessions";
 
 const WORKSPACE_STATUS_DELAY_MS = 750;
-const STREAM_RECONNECT_DELAYS_MS = [250, 500, 1_000] as const;
-
-const waitForReconnect = (delayMs: number, signal: AbortSignal): Promise<void> => (
-  new Promise((resolve) => {
-    const finish = () => {
-      window.clearTimeout(timer);
-      signal.removeEventListener("abort", finish);
-      resolve();
-    };
-    const timer = window.setTimeout(finish, delayMs);
-    signal.addEventListener("abort", finish, { once: true });
-  })
-);
-
-async function* reconnectChatStream(
-  initialSource: AsyncGenerator<ChatEvent>,
-  options: {
-    signal: AbortSignal;
-    getSessionId: () => string | null;
-    getAfterSequence: () => number;
-    onSequence: (sequence: number) => void;
-    onDisconnect: () => void;
-  },
-): AsyncGenerator<ChatEvent> {
-  let source = initialSource;
-  let reconnectAttempts = 0;
-  for (;;) {
-    let sawTerminalEvent = false;
-    try {
-      for await (const event of source) {
-        if (event.type === "done" || event.type === "error") sawTerminalEvent = true;
-        yield event;
-      }
-      if (sawTerminalEvent || options.signal.aborted) return;
-      throw new ChatTransportError();
-    } catch (error) {
-      options.onDisconnect();
-      const sessionId = options.getSessionId();
-      if (
-        options.signal.aborted
-        || sawTerminalEvent
-        || !(error instanceof ChatTransportError)
-        || !sessionId
-        || reconnectAttempts >= STREAM_RECONNECT_DELAYS_MS.length
-      ) throw error;
-      await waitForReconnect(
-        STREAM_RECONNECT_DELAYS_MS[reconnectAttempts],
-        options.signal,
-      );
-      if (options.signal.aborted) return;
-      reconnectAttempts += 1;
-      source = resumeChat(sessionId, {
-        signal: options.signal,
-        afterSequence: options.getAfterSequence(),
-        onSequence: options.onSequence,
-      });
-    }
-  }
-}
-
 function findLastMatchingIndex<T>(items: T[], predicate: (item: T) => boolean): number {
   for (let index = items.length - 1; index >= 0; index -= 1) {
     if (predicate(items[index])) return index;
@@ -122,27 +61,11 @@ interface UseChatOptions {
   viewerContext?: () => { page: number } | undefined;
 }
 
-interface EditRequest {
-  targetId: string;
-  snapshot: ChatMessage[];
-}
-
-interface PendingGeneration {
-  question: string;
-  draft: ChatDraft;
-  request: ChatStreamRequest;
-  optimistic: ChatMessage[];
-  original: ChatMessage[];
-  edit?: EditRequest;
-  retryAt: number;
-  retryAfterSeconds: number;
-}
-
 export function useChat(options: UseChatOptions) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [busy, setBusy] = useState(false);
   const [sessionError, setSessionError] = useState("");
-  const busyRef = useRef(false);
+  const [turn] = useState(() => new ChatTurn());
   const abortRef = useRef<AbortController | null>(null);
   const smoothedStreamRef = useRef<{
     controller: AbortController;
@@ -161,26 +84,22 @@ export function useChat(options: UseChatOptions) {
     controller: AbortController;
     tracker: ChatLatencyTracker;
   } | null>(null);
-  const pendingCapacityRef = useRef<PendingGeneration | null>(null);
   const [capacityRequest, setCapacityRequest] = useState<Pick<
     PendingGeneration,
     "question" | "draft" | "retryAt" | "retryAfterSeconds"
   > | null>(null);
   const [disabledRequest, setDisabledRequest] = useState<{ question: string; draft: ChatDraft } | null>(null);
   const messagesRef = useRef<ChatMessage[]>([]);
-  const lifecycleRef = useRef(initialChatLifecycle());
-  const activeMessagesRef = useRef<ChatMessage[] | null>(null);
   const activeMessagesGenerationRef = useRef<number | null>(null);
   const activeProjectionVisibleRef = useRef(false);
   const optionsRef = useRef(options);
   const promptRef = useRef<ChatDraft>(emptyChatDraft());
   const idRef = useRef(0);
   const messagesGenerationRef = useRef(0);
-  const activeSessionIdRef = useRef(options.sessionId);
   const renderedSessionIdRef = useRef(options.sessionId);
   if (renderedSessionIdRef.current !== options.sessionId) {
     renderedSessionIdRef.current = options.sessionId;
-    if (activeSessionIdRef.current !== options.sessionId) {
+    if (turn.sessionId !== options.sessionId) {
       messagesGenerationRef.current += 1;
       latencyRef.current = null;
     }
@@ -196,24 +115,19 @@ export function useChat(options: UseChatOptions) {
     smoothedStreamRef.current = null;
     if (presentationFrameRef.current !== null) cancelAnimationFrame(presentationFrameRef.current);
     if (presentationTimerRef.current !== null) window.clearTimeout(presentationTimerRef.current);
-    pendingCapacityRef.current = null;
-  }, []);
+    turn.cancelCapacity();
+  }, [turn]);
   useEffect(() => {
-    if (!busyRef.current) activeSessionIdRef.current = options.sessionId;
-  }, [options.sessionId]);
+    if (!turn.busy) turn.restore(turn.messages, options.sessionId);
+  }, [options.sessionId, turn]);
   useEffect(() => {
-    const visibleMessages = (
-      busyRef.current
-      && options.sessionId === activeSessionIdRef.current
-      ? activeMessagesRef.current
-      : null
-    );
+    const visibleMessages = turn.projectSession(options.sessionId);
     activeProjectionVisibleRef.current = visibleMessages !== null;
     if (visibleMessages) {
       setMessages(visibleMessages);
       messagesRef.current = visibleMessages;
     }
-  }, [options.sessionId]);
+  }, [options.sessionId, turn]);
 
   const papers = useMemo(() => {
     const map: Record<string, ChatPaperHit> = {};
@@ -232,23 +146,15 @@ export function useChat(options: UseChatOptions) {
     action: ChatLifecycleAction,
     projectToVisible = true,
   ) => {
-    const previous = {
-      ...lifecycleRef.current,
-      messages: activeMessagesRef.current ?? messagesRef.current,
-      sessionId: activeSessionIdRef.current,
-    };
-    const next = chatLifecycleReducer(previous, action);
-    lifecycleRef.current = next;
-    if (activeMessagesRef.current) activeMessagesRef.current = next.messages;
+    const previous = turn.state;
+    const next = turn.transition(action);
     const announcedSessionId = action.type === "event"
       && action.event.type === "stream_start"
       ? action.event.session_id
       : null;
     if (announcedSessionId) {
-      activeSessionIdRef.current = announcedSessionId;
       optionsRef.current.onSessionId(announcedSessionId);
     } else if (next.sessionId && next.sessionId !== previous.sessionId) {
-      activeSessionIdRef.current = next.sessionId;
       optionsRef.current.onSessionId(next.sessionId);
     }
     if (next.title !== previous.title) optionsRef.current.onTitle(next.title);
@@ -278,10 +184,10 @@ export function useChat(options: UseChatOptions) {
   const commitPresentation = () => {
     cancelPresentationFrame();
     if (document.visibilityState === "hidden") return;
-    if (!activeProjectionVisibleRef.current || !activeMessagesRef.current) return;
+    if (!activeProjectionVisibleRef.current) return;
     presentationDirtyRef.current = false;
-    messagesRef.current = activeMessagesRef.current;
-    setMessages(activeMessagesRef.current);
+    messagesRef.current = turn.messages;
+    setMessages(turn.messages);
   };
 
   const schedulePresentation = () => {
@@ -403,12 +309,7 @@ export function useChat(options: UseChatOptions) {
     ) return null;
     setMessages(restored);
     messagesRef.current = restored;
-    activeMessagesRef.current = restored;
-    lifecycleRef.current = chatLifecycleReducer(lifecycleRef.current, {
-      type: "load",
-      messages: restored,
-      sessionId,
-    });
+    turn.restore(restored, sessionId);
     return restored;
   };
 
@@ -423,20 +324,13 @@ export function useChat(options: UseChatOptions) {
     const messagesGeneration = ++messagesGenerationRef.current;
     activeMessagesGenerationRef.current = messagesGeneration;
     activeProjectionVisibleRef.current = true;
-    busyRef.current = true;
     const controller = new AbortController();
     abortRef.current = controller;
     const question = draft.text;
     promptRef.current = draft;
-    activeSessionIdRef.current = request.session_id;
     setSessionError("");
     setMessages(optimistic);
-    activeMessagesRef.current = optimistic;
-    lifecycleRef.current = chatLifecycleReducer(lifecycleRef.current, {
-      type: "start",
-      messages: optimistic,
-      sessionId: request.session_id,
-    });
+    turn.start(optimistic, request.session_id);
     setBusy(true);
     latencyRef.current = resumeSessionId ? null : {
       controller,
@@ -444,12 +338,6 @@ export function useChat(options: UseChatOptions) {
     };
     workspaceStatusStateRef.current = "cleared";
     void (async () => {
-      let sawStreamStart = false;
-      let providerExecuted = false;
-      let providerStatusChanged = false;
-      let sawTerminalEvent = false;
-      let streamFailed = false;
-      let admissionRejected = false;
       let latestSequence = 0;
       const trackSequence = (sequence: number) => {
         if (sequence > latestSequence) latestSequence = sequence;
@@ -466,9 +354,11 @@ export function useChat(options: UseChatOptions) {
             });
         const source = reconnectChatStream(initialSource, {
           signal: controller.signal,
-          getSessionId: () => activeSessionIdRef.current,
+          getSessionId: () => turn.sessionId,
           onDisconnect: () => {
-            if (projectsActiveStream()) applyEvent({ type: "compaction_status", state: "finished" });
+            if (!controller.signal.aborted && abortRef.current === controller) {
+              applyEvent({ type: "compaction_status", state: "finished" }, projectsActiveStream());
+            }
           },
           getAfterSequence: () => latestSequence,
           onSequence: trackSequence,
@@ -484,10 +374,9 @@ export function useChat(options: UseChatOptions) {
           : null;
         if (smoothed) smoothedStreamRef.current = { controller, stream: smoothed };
         for await (const event of smoothed?.events ?? source) {
+          if (controller.signal.aborted || abortRef.current !== controller) break;
           if (event.type === "paper_artifact") optionsRef.current.onPaperArtifact?.(event);
           if (event.type === "stream_start") {
-            sawStreamStart = true;
-            providerExecuted = event.provider_execution !== false;
             recordStreamStart(controller, event.request_id);
           }
           if (event.type === "sandbox_start") {
@@ -518,24 +407,9 @@ export function useChat(options: UseChatOptions) {
           ) {
             clearWorkspaceStatus(controller);
           }
+          if (turn.observe(event)) optionsRef.current.onInterrupted(draft);
           if (event.type === "done" || event.type === "error") {
-            sawTerminalEvent = true;
-            streamFailed = event.type === "error";
             recordTerminal(controller, event.type === "error" ? "error" : "complete");
-            if (
-              event.type === "error"
-              && [
-                "openrouter_monthly_budget_exhausted",
-                "openrouter_unavailable",
-                "openrouter_byok_credential_invalid",
-                "openrouter_byok_billing_error",
-                "openrouter_byok_rate_limit",
-                "hf_inference_billing_exhausted",
-              ].includes(event.code ?? "")
-            ) {
-              providerStatusChanged = true;
-              optionsRef.current.onInterrupted(draft);
-            }
           }
           const projectsToVisibleConversation = projectsActiveStream();
           const presentationProjects = projectsToVisibleConversation
@@ -556,52 +430,35 @@ export function useChat(options: UseChatOptions) {
             "tool_call_arguments_delta",
           ].includes(event.type);
           if (smooth && isStructural) commitPresentation();
-          if (
-            !controller.signal.aborted
-            && (projectsToVisibleConversation
-              || event.type === "stream_start"
-              || event.type === "session_title_start"
-              || event.type === "session_title_delta"
-              || event.type === "session_title_done")
-          ) {
-            if (smooth && isDelta) {
-              applyEvent(event, false);
-              presentationDirtyRef.current = presentationDirtyRef.current
-                || projectsToVisibleConversation;
-              schedulePresentation();
-            } else {
-              applyEvent(event, presentationProjects);
-              if (smooth && projectsToVisibleConversation && !presentationProjects) {
-                presentationDirtyRef.current = true;
-              }
-            }
-          } else if (!controller.signal.aborted) {
+          if (smooth && isDelta) {
             applyEvent(event, false);
+            presentationDirtyRef.current ||= projectsToVisibleConversation;
+            schedulePresentation();
+          } else {
+            applyEvent(event, presentationProjects);
+            if (smooth && projectsToVisibleConversation && !presentationProjects) {
+              presentationDirtyRef.current = true;
+            }
           }
         }
       } catch (error) {
-        const completedBeforeReconnect = Boolean(
-          resumeSessionId
-          && error instanceof ChatStreamError
-          && error.code === "chat_not_busy",
-        );
-        streamFailed = !completedBeforeReconnect;
-        if (!controller.signal.aborted) {
+        if (!controller.signal.aborted && abortRef.current === controller) {
+          const rejection = turn.reject(error, Boolean(resumeSessionId));
+          const completedBeforeReconnect = rejection === "completed";
           clearWorkspaceStatus(controller);
           if (completedBeforeReconnect) {
             // The turn settled after the session load but before this reconnect.
             // The canonical reload in `finally` replaces the active placeholder.
-          } else if (error instanceof ChatStreamError && error.code === "chat_temporarily_disabled") {
-            admissionRejected = true;
+          } else if (rejection === "disabled") {
             setDisabledRequest({ question, draft });
+            turn.restore(original);
             if (messagesGenerationRef.current === messagesGeneration) {
               setMessages(original);
               messagesRef.current = original;
               setSessionError("");
             }
-          } else if (error instanceof ChatStreamError && error.code === "chat_capacity") {
-            admissionRejected = true;
-            const retryAfterSeconds = error.retryAfterSeconds ?? 5;
+          } else if (rejection === "capacity") {
+            const retryAfterSeconds = error instanceof ChatStreamError ? error.retryAfterSeconds ?? 5 : 5;
             const pending: PendingGeneration = {
               question,
               draft,
@@ -612,13 +469,14 @@ export function useChat(options: UseChatOptions) {
               retryAfterSeconds,
               retryAt: Date.now() + retryAfterSeconds * 1_000,
             };
-            pendingCapacityRef.current = pending;
+            turn.queueCapacity(pending);
             setCapacityRequest({
               question,
               draft,
               retryAt: pending.retryAt,
               retryAfterSeconds,
             });
+            turn.restore(original);
             if (messagesGenerationRef.current === messagesGeneration) {
               setMessages(original);
               messagesRef.current = original;
@@ -626,47 +484,22 @@ export function useChat(options: UseChatOptions) {
             }
           } else {
             recordTerminal(controller, "network_error");
-            if (
-              error instanceof ChatStreamError
-              && [
-                "paper_context_unavailable",
-                "paper_mention_unavailable",
-                "paper_mentions_disabled",
-                "paper_selection_disabled",
-                "paper_selection_requires_reader",
-                "paper_selection_paper_mismatch",
-                "paper_selection_version_mismatch",
-                "paper_selection_page_invalid",
-                "paper_selection_too_large",
-                "chat_storage_quota_exceeded",
-              ].includes(error.code ?? "")
-            ) {
-              admissionRejected = true;
+            if (rejection === "draft") {
               optionsRef.current.onInterrupted(draft);
+              turn.restore(original);
               if (messagesGenerationRef.current === messagesGeneration) {
                 setMessages(original);
                 messagesRef.current = original;
-                setSessionError(error.message);
+                setSessionError(error instanceof Error ? error.message : "The assistant stream failed.");
               }
             }
-            if (
-              error instanceof ChatStreamError
-              && [
-                "openrouter_monthly_budget_exhausted",
-                "openrouter_unavailable",
-                "openrouter_byok_credential_invalid",
-                "openrouter_byok_billing_error",
-                "openrouter_byok_rate_limit",
-                "hf_inference_billing_exhausted",
-              ].includes(error.code ?? "")
-            ) {
-              providerStatusChanged = true;
+            if (rejection === "provider") {
               optionsRef.current.onInterrupted(draft);
             }
           }
           if (
             !completedBeforeReconnect
-            && !admissionRejected
+            && !turn.admissionRejected
             && messagesGenerationRef.current === messagesGeneration
           ) {
             applyEvent({
@@ -683,19 +516,20 @@ export function useChat(options: UseChatOptions) {
             smoothedStreamRef.current = null;
           }
           clearWorkspaceStatus(controller);
-          if (!sawTerminalEvent && !controller.signal.aborted) {
+          if (!turn.sawTerminalEvent && !controller.signal.aborted) {
             recordTerminal(controller, "network_error");
           }
-          busyRef.current = false;
+          turn.finish();
           setBusy(false);
-          if (admissionRejected) {
+          if (turn.admissionRejected) {
             optionsRef.current.onSettled(request.session_id);
           } else if (!controller.signal.aborted) {
-            if ((sawStreamStart && providerExecuted) || providerStatusChanged) {
+            if (turn.shouldRefreshProvider) {
               optionsRef.current.onProviderTerminal?.();
             }
-            const canonicalId = activeSessionIdRef.current;
-            if (edit && !sawStreamStart) {
+            const canonicalId = turn.sessionId;
+            if (edit && !turn.sawStreamStart) {
+              turn.restore(edit.snapshot);
               if (messagesGenerationRef.current === messagesGeneration) {
                 setMessages(edit.snapshot);
                 messagesRef.current = edit.snapshot;
@@ -704,8 +538,9 @@ export function useChat(options: UseChatOptions) {
             } else if (canonicalId) {
               if (
                 messagesGenerationRef.current === messagesGeneration
-                && edit && (streamFailed || !sawTerminalEvent)
+                && edit && (turn.streamFailed || !turn.sawTerminalEvent)
               ) {
+                turn.restore(edit.snapshot);
                 setMessages(edit.snapshot);
                 messagesRef.current = edit.snapshot;
               }
@@ -725,7 +560,7 @@ export function useChat(options: UseChatOptions) {
             } else if (messagesGenerationRef.current === messagesGeneration) {
               transitionLifecycle({ type: "settle" });
             }
-            optionsRef.current.onSettled(canonicalId);
+            if (abortRef.current === controller) optionsRef.current.onSettled(canonicalId);
           }
           if (latencyRef.current?.controller === controller) {
             latencyRef.current = null;
@@ -739,7 +574,7 @@ export function useChat(options: UseChatOptions) {
   const send = useStableCallback((input: ChatDraft | string) => {
     const draft = typeof input === "string" ? emptyChatDraft(input.trim()) : input;
     const question = draft.text;
-    if (!question || question.length > 8_000 || busyRef.current || pendingCapacityRef.current) return false;
+    if (!question || question.length > 8_000 || turn.busy || turn.pendingCapacity) return false;
     const current = messagesRef.current;
     const latestUser = [...current].reverse().find((message) => message.role === "user");
     const replacement = latestUser?.status && latestUser.status !== "complete" && latestUser.revision
@@ -780,7 +615,7 @@ export function useChat(options: UseChatOptions) {
   const editAndResend = useStableCallback((messageId: string, input: ChatDraft | string) => {
     const draft = typeof input === "string" ? emptyChatDraft(input.trim()) : input;
     const question = draft.text;
-    if (!question || question.length > 8_000 || busyRef.current || pendingCapacityRef.current) return false;
+    if (!question || question.length > 8_000 || turn.busy || turn.pendingCapacity) return false;
     const snapshot = messagesRef.current.slice();
     const targetIndex = snapshot.findIndex(
       (message) => message.id === messageId && message.role === "user",
@@ -828,7 +663,7 @@ export function useChat(options: UseChatOptions) {
   const retryFromProgress = useStableCallback(() => {
     const snapshot = messagesRef.current.slice();
     const latestUser = [...snapshot].reverse().find((message) => message.role === "user");
-    if (!optionsRef.current.sessionId || !latestUser?.revision || busyRef.current || pendingCapacityRef.current) return false;
+    if (!optionsRef.current.sessionId || !latestUser?.revision || turn.busy || turn.pendingCapacity) return false;
     const draft = emptyChatDraft(latestUser.text ?? "Continue the interrupted response from saved progress.");
     const optimistic: ChatMessage[] = [...snapshot,
       { id: nextId(), role: "user", text: draft.text, paperMentions: [] },
@@ -846,14 +681,14 @@ export function useChat(options: UseChatOptions) {
   });
 
   const cancelCapacity = useCallback(() => {
-    pendingCapacityRef.current = null;
+    turn.cancelCapacity();
     setCapacityRequest(null);
-  }, []);
+  }, [turn]);
 
   const retryCapacity = useStableCallback(() => {
-    const pending = pendingCapacityRef.current;
-    if (!pending || Date.now() < pending.retryAt || busyRef.current) return false;
-    pendingCapacityRef.current = null;
+    const pending = turn.pendingCapacity;
+    if (!pending || Date.now() < pending.retryAt || turn.busy) return false;
+    turn.cancelCapacity();
     setCapacityRequest(null);
     return run(
       pending.draft,
@@ -880,14 +715,13 @@ export function useChat(options: UseChatOptions) {
     if (latencyRef.current?.controller === controller) {
       latencyRef.current = null;
     }
-    busyRef.current = false;
+    turn.finish();
     setBusy(false);
     const stopped = transitionLifecycle({ type: "stop" }, false).messages;
-    activeMessagesRef.current = stopped;
     messagesRef.current = stopped;
     setMessages(stopped);
     optionsRef.current.onInterrupted(promptRef.current);
-    const sessionId = activeSessionIdRef.current;
+    const sessionId = turn.sessionId;
     if (sessionId) stoppedProjectionRef.current = { sessionId, messages: stopped };
     if (sessionId) void cancelSession(sessionId).catch(() => undefined);
     const messagesGeneration = ++messagesGenerationRef.current;
@@ -902,7 +736,13 @@ export function useChat(options: UseChatOptions) {
     }, 450);
   });
 
-  const toggleBlock = useCallback((messageId: string, blockIndex: number) => setMessages((previous) => previous.map((message) => message.id !== messageId ? message : { ...message, blocks: message.blocks?.map((block, index) => index === blockIndex && (block.kind === "reasoning" || block.kind === "tool") ? { ...block, open: !block.open } : block) })), []);
+  const toggleBlock = useStableCallback((messageId: string, blockIndex: number) => {
+    const next = activeProjectionVisibleRef.current
+      ? turn.transition({ type: "toggle_block", messageId, blockIndex }).messages
+      : toggleChatBlock(messagesRef.current, messageId, blockIndex);
+    messagesRef.current = next;
+    setMessages(next);
+  });
   const reset = useCallback(() => {
     messagesGenerationRef.current += 1;
     if (preparingTimerRef.current !== null) {
@@ -917,18 +757,14 @@ export function useChat(options: UseChatOptions) {
     presentationDirtyRef.current = false;
     stoppedProjectionRef.current = null;
     latencyRef.current = null;
-    pendingCapacityRef.current = null;
     setCapacityRequest(null);
-    busyRef.current = false;
-    activeSessionIdRef.current = null;
-    activeMessagesRef.current = null;
-    lifecycleRef.current = chatLifecycleReducer(lifecycleRef.current, { type: "reset" });
+    turn.reset();
     activeMessagesGenerationRef.current = null;
     activeProjectionVisibleRef.current = false;
     setMessages([]);
     setBusy(false);
     setSessionError("");
-  }, []);
+  }, [turn]);
   const load = useStableCallback((
     restored: ChatMessage[],
     sessionId?: string | null,
@@ -943,17 +779,16 @@ export function useChat(options: UseChatOptions) {
     cancelPresentationFrame();
     presentationDirtyRef.current = false;
     latencyRef.current = null;
-    pendingCapacityRef.current = null;
+    turn.cancelCapacity();
     setCapacityRequest(null);
     if (
-      busyRef.current
+      turn.busy
       && sessionId !== undefined
-      && sessionId === activeSessionIdRef.current
-      && activeMessagesRef.current
+      && sessionId === turn.sessionId
     ) {
       activeProjectionVisibleRef.current = true;
-      setMessages(activeMessagesRef.current);
-      messagesRef.current = activeMessagesRef.current;
+      setMessages(turn.messages);
+      messagesRef.current = turn.messages;
       setSessionError("");
       return;
     }
@@ -961,10 +796,9 @@ export function useChat(options: UseChatOptions) {
     // A route change may replace the visible transcript while another chat is
     // still generating. Keep buffering that stream so it can be reattached if
     // the user returns, without projecting its events into this transcript.
-    if (!busyRef.current) {
+    if (!turn.busy) {
       abortRef.current?.abort();
       abortRef.current = null;
-      activeMessagesRef.current = null;
       activeMessagesGenerationRef.current = null;
       activeProjectionVisibleRef.current = false;
     }
@@ -997,12 +831,8 @@ export function useChat(options: UseChatOptions) {
     }
     setMessages(restored);
     messagesRef.current = restored;
-    lifecycleRef.current = chatLifecycleReducer(lifecycleRef.current, {
-      type: "load",
-      messages: restored,
-      sessionId: sessionId ?? optionsRef.current.sessionId,
-    });
-    if (!busyRef.current) setBusy(false);
+    if (!turn.busy) turn.restore(restored, sessionId ?? optionsRef.current.sessionId);
+    if (!turn.busy) setBusy(false);
     setSessionError("");
   });
 
