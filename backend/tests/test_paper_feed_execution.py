@@ -1,0 +1,243 @@
+"""Behavioral characterization of general and task feed selection on local SQL."""
+
+from datetime import date, datetime, timezone
+
+import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
+
+from backend.models.database import (
+    Base,
+    Paper,
+    Task,
+    PaperTask,
+    Repository,
+    PaperRepository,
+    HfArtifact,
+    PaperHfArtifact,
+)
+from backend.models.papers import Paper as PaperCard
+from backend.services.paper_service import PaperService
+from backend.services.task_service import TaskService
+
+
+@compiles(ARRAY, "sqlite")
+@compiles(JSONB, "sqlite")
+def _sqlite_json(_type, _compiler, **_kwargs):
+    return "TEXT"
+
+
+@pytest.fixture
+def feeds(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            model.__table__
+            for model in (
+                Paper,
+                Task,
+                PaperTask,
+                Repository,
+                PaperRepository,
+                HfArtifact,
+                PaperHfArtifact,
+            )
+        ],
+    )
+    hydrated = []
+
+    def cards(self, rows, *, include_resources=False):
+        hydrated.append(([row.id for row in rows], include_resources))
+        return [PaperCard.model_construct(id=str(row.id)) for row in rows]
+
+    monkeypatch.setattr(PaperService, "hydrate_cards", cards)
+    with Session(engine) as db:
+        db.add(Task(id=1, name="Robotics", slug="robotics"))
+        for ident, day, latest in [
+            (1, 1, True),
+            (2, 2, True),
+            (3, 2, True),
+            (4, 3, False),
+        ]:
+            db.add(
+                Paper(
+                    id=ident,
+                    title=f"Robot {ident}",
+                    abstract="Robotics",
+                    source="arxiv",
+                    arxiv_id=f"2601.0000{ident}",
+                    version="v1",
+                    date_published=date(2026, 1, day),
+                    is_latest_version=latest,
+                    citation_count=10,
+                )
+            )
+            db.add(PaperTask(paper_id=ident, task_id=1))
+        db.add(
+            Repository(
+                id=1,
+                url="https://github.com/org/repo",
+                owner="org",
+                name="repo",
+                num_stars=20,
+                trending_score=10,
+                trending_score_updated_at=datetime.now(timezone.utc),
+            )
+        )
+        db.add_all(
+            [
+                PaperRepository(paper_id=i, repository_id=1, is_official=True)
+                for i in (1, 2)
+            ]
+        )
+        db.add(
+            HfArtifact(
+                id=1,
+                kind="model",
+                repo_id="org/model",
+                url="https://huggingface.co/org/model",
+            )
+        )
+        db.add(PaperHfArtifact(paper_id=2, hf_artifact_id=1))
+        db.commit()
+        yield db, hydrated
+    engine.dispose()
+
+
+def ids(response):
+    return [row.id for row in response.results]
+
+
+@pytest.mark.parametrize("mode", ["github", "composite"])
+def test_task_trending_dedup_is_not_general_taxonomy_filter_policy(
+    feeds, monkeypatch, mode
+):
+    db, hydrated = feeds
+    monkeypatch.setattr(PaperService(db).settings, "trending_ranking_mode", mode)
+    task = TaskService(db).get_task_papers(
+        "robotics", order_by="trending", include_resources=True
+    )
+    general = PaperService(db).get_papers(task="robotics", order_by="trending")
+    assert ids(task) == ["2", "3"]  # unscored paper remains
+    assert ids(general) == ["2", "1", "3"]  # same repo can appear twice
+    assert task.count == 2 and general.count == 3
+    assert hydrated == [([2, 3], True), ([2, 1, 3], False)]
+
+
+@pytest.mark.parametrize("task_feed", [False, True])
+def test_feed_filters_count_and_paginate_before_hydration(feeds, task_feed):
+    db, hydrated = feeds
+    get = TaskService(db).get_task_papers if task_feed else PaperService(db).get_papers
+    scope = {"task_id": "1"} if task_feed else {"task": "robotics", "search": "Robot"}
+    result = get(
+        **scope,
+        order_by="date_published",
+        has_code=True,
+        has_hf_artifacts=True,
+        start_date=date(2026, 1, 2),
+        end_date=date(2026, 1, 2),
+        page_size=1,
+    )
+    assert ids(result) == ["2"] and result.count == 1
+    assert result.next_page is None and result.previous_page is None
+    assert hydrated == [([2], False)]
+    result = get(**scope, order_by="date_published", page=5, page_size=1)
+    assert result.count == 3 and ids(result) == []
+    assert result.previous_page == 4 and result.next_page is None
+
+
+def test_task_trending_winner_is_chosen_before_requested_date_filter(feeds):
+    db, _ = feeds
+    result = TaskService(db).get_task_papers(
+        "1", order_by="trending", end_date=date(2026, 1, 1)
+    )
+    assert (
+        result.count == 0
+    )  # newer linked paper outside window still displaces old one
+
+
+def test_nontrending_endpoint_ties_and_direction_contract(feeds):
+    db, _ = feeds
+    statements = []
+
+    def capture(_conn, _cursor, statement, *_args):
+        statements.append(statement)
+
+    event.listen(db.bind, "before_cursor_execute", capture)
+    task = TaskService(db).get_task_papers("1", order_by="citation_count", page_size=2)
+    assert ids(task) == ["3", "2"] and task.next_page == 2
+    assert any(
+        "ORDER BY papers.citation_count DESC, papers.id DESC" in sql
+        for sql in statements
+    )
+    statements.clear()
+    PaperService(db).get_papers(task="1", order_by="citation_count", order_dir="DESC")
+    assert any(
+        "ORDER BY papers.citation_count DESC NULLS LAST" in sql for sql in statements
+    )
+    assert not any("papers.id DESC" in sql for sql in statements)
+    # Task's existing internal contract treats uppercase DESC as ascending.
+    assert ids(
+        TaskService(db).get_task_papers("1", order_by="unknown", order_dir="DESC")
+    ) == ["1", "2", "3"]
+
+
+@pytest.mark.parametrize("task_feed", [False, True])
+def test_latest_only_can_be_disabled(feeds, task_feed):
+    db, _ = feeds
+    result = (
+        TaskService(db).get_task_papers("1", latest_only=False)
+        if task_feed
+        else PaperService(db).get_papers(
+            task="1", latest_only=False, order_by="date_published"
+        )
+    )
+    assert result.count == 4 and ids(result)[0] == "4"
+
+
+def test_search_and_official_implementation_filter_real_rows(feeds):
+    db, _ = feeds
+    service = PaperService(db)
+    assert ids(
+        service.get_papers(
+            task="1",
+            search="Robot 2",
+            has_official_implementation=True,
+            order_by="date_published",
+        )
+    ) == ["2"]
+    assert (
+        service.get_papers(task="1", search="missing", order_by="date_published").count
+        == 0
+    )
+
+
+def test_global_trending_selector_preserves_sql_order_and_empty_page(monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    database = MagicMock()
+    database.execute.return_value.fetchall.return_value = [(2, 3), (1, 3)]
+    database.query.return_value.filter.return_value.all.return_value = [
+        SimpleNamespace(id=1),
+        SimpleNamespace(id=2),
+    ]
+    service = PaperService(database)
+    hydrated = []
+
+    def cards(rows, **kwargs):
+        hydrated.append(([row.id for row in rows], kwargs))
+        return [PaperCard.model_construct(id=str(row.id)) for row in rows]
+
+    monkeypatch.setattr(service, "hydrate_cards", cards)
+    result = service._get_trending_papers(page_size=2, include_resources=True)
+    assert ids(result) == ["2", "1"] and result.count == 3 and result.next_page == 2
+    assert hydrated == [([2, 1], {"include_resources": True})]
+    database.execute.return_value.fetchall.return_value = []
+    result = service._get_trending_papers(page=5, page_size=2)
+    assert (
+        result.count == 0 and result.previous_page is None and result.next_page is None
+    )
