@@ -9,7 +9,6 @@ interface UseChatArchiveOptions {
   refreshSessions: () => Promise<void>;
   resetChat: () => void;
   restoreDraft: (draft: ChatDraft) => void;
-  clearTitle: () => void;
 }
 
 export function useChatArchive({
@@ -17,7 +16,6 @@ export function useChatArchive({
   refreshSessions,
   resetChat,
   restoreDraft,
-  clearTitle,
 }: UseChatArchiveOptions) {
   const { toast } = useToast();
   const [pending, setPending] = useState<"old" | "oldest" | null>(null);
@@ -34,7 +32,6 @@ export function useChatArchive({
         ? { paperSelection: failedMessage.paperSelection }
         : {}),
     });
-    clearTitle();
   };
 
   const archiveOld = async () => {

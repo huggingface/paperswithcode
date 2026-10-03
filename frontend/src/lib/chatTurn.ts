@@ -1,6 +1,12 @@
 import { type ChatDraft, type ChatEvent, type ChatMessage, type ChatStreamRequest, ChatStreamError } from "./chat";
 import { chatLifecycleReducer, initialChatLifecycle, type ChatLifecycleAction } from "./chatLifecycle";
 
+export interface ChatTurnConfiguration {
+  model?: string;
+  webSearchEnabled: boolean;
+  reasoningEffort: "low" | "high" | "max";
+}
+
 export interface EditRequest {
   targetId: string;
   snapshot: ChatMessage[];
@@ -33,6 +39,7 @@ const DRAFT_ERRORS = new Set([
  * Presentation snapshots must never be fed back into this state during streaming.
  */
 export class ChatTurn {
+  configuration: ChatTurnConfiguration | undefined;
   private lifecycle = initialChatLifecycle();
   private _busy = false;
   private _pendingCapacity: PendingGeneration | null = null;
@@ -68,7 +75,8 @@ export class ChatTurn {
     return this.lifecycle;
   }
 
-  start(messages: ChatMessage[], sessionId: string | null) {
+  start(messages: ChatMessage[], sessionId: string | null, configuration?: ChatTurnConfiguration) {
+    this.configuration = configuration;
     this._busy = true;
     this._sawStreamStart = this._providerExecuted = this._providerStatusChanged = false;
     this.terminal = "pending";

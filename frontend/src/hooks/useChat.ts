@@ -25,8 +25,8 @@ import {
   type SmoothedChatStream,
 } from "@/lib/chatStreamSmoother";
 import { reconnectChatStream } from "@/lib/chatReconnect";
-import { ChatTurn, type EditRequest, type PendingGeneration } from "@/lib/chatTurn";
-import { cancelSession, getSession, toUiMessages } from "@/lib/chatSessions";
+import { ChatTurn, type EditRequest, type PendingGeneration, type ChatTurnConfiguration } from "@/lib/chatTurn";
+import { cancelSession, getSession, toUiMessages, type ChatSessionDetail } from "@/lib/chatSessions";
 
 const WORKSPACE_STATUS_DELAY_MS = 750;
 function findLastMatchingIndex<T>(items: T[], predicate: (item: T) => boolean): number {
@@ -51,11 +51,12 @@ interface UseChatOptions {
   initialModel?: string;
   webSearchEnabled?: boolean;
   reasoningEffort?: "low" | "high" | "max";
-  onSessionId: (id: string) => void;
-  onTitle: (title: string) => void;
+  onSessionId: (id: string, originSessionId: string | null, configuration: ChatTurn["configuration"]) => void;
+  onTitle: (title: string, sessionId: string | null) => void;
   onSettled: (sessionId: string | null) => void;
   onProviderTerminal?: () => void;
-  onPaperArtifact?: (event: Extract<ChatEvent, { type: "paper_artifact" }>) => void;
+  onPaperArtifact?: (event: Extract<ChatEvent, { type: "paper_artifact" }>, sessionId: string | null) => void;
+  loadSession?: (sessionId: string) => Promise<ChatSessionDetail>;
   onInterrupted: (draft: ChatDraft) => void;
   primaryPaperRouteId?: string;
   viewerContext?: () => { page: number } | undefined;
@@ -153,11 +154,11 @@ export function useChat(options: UseChatOptions) {
       ? action.event.session_id
       : null;
     if (announcedSessionId) {
-      optionsRef.current.onSessionId(announcedSessionId);
+      optionsRef.current.onSessionId(announcedSessionId, previous.sessionId, turn.configuration);
     } else if (next.sessionId && next.sessionId !== previous.sessionId) {
-      optionsRef.current.onSessionId(next.sessionId);
+      optionsRef.current.onSessionId(next.sessionId, previous.sessionId, turn.configuration);
     }
-    if (next.title !== previous.title) optionsRef.current.onTitle(next.title);
+    if (next.title !== previous.title) optionsRef.current.onTitle(next.title, next.sessionId);
     if (projectToVisible) {
       messagesRef.current = next.messages;
       setMessages(next.messages);
@@ -293,7 +294,7 @@ export function useChat(options: UseChatOptions) {
   };
 
   const reloadCanonical = async (sessionId: string, generation: number) => {
-    const detail = await getSession(sessionId);
+    const detail = await (optionsRef.current.loadSession ?? getSession)(sessionId);
     let restored = toUiMessages(detail);
     if (stoppedProjectionRef.current?.sessionId === sessionId) {
       restored = stoppedProjectionRef.current.messages;
@@ -320,6 +321,7 @@ export function useChat(options: UseChatOptions) {
     original: ChatMessage[],
     edit?: EditRequest,
     resumeSessionId?: string,
+    configuration?: ChatTurnConfiguration,
   ) => {
     const messagesGeneration = ++messagesGenerationRef.current;
     activeMessagesGenerationRef.current = messagesGeneration;
@@ -330,7 +332,11 @@ export function useChat(options: UseChatOptions) {
     promptRef.current = draft;
     setSessionError("");
     setMessages(optimistic);
-    turn.start(optimistic, request.session_id);
+    turn.start(optimistic, request.session_id, configuration ?? {
+      model: optionsRef.current.initialModel,
+      webSearchEnabled: Boolean(request.web_search_enabled),
+      reasoningEffort: request.reasoning_effort ?? "low",
+    });
     setBusy(true);
     latencyRef.current = resumeSessionId ? null : {
       controller,
@@ -375,7 +381,7 @@ export function useChat(options: UseChatOptions) {
         if (smoothed) smoothedStreamRef.current = { controller, stream: smoothed };
         for await (const event of smoothed?.events ?? source) {
           if (controller.signal.aborted || abortRef.current !== controller) break;
-          if (event.type === "paper_artifact") optionsRef.current.onPaperArtifact?.(event);
+          if (event.type === "paper_artifact") optionsRef.current.onPaperArtifact?.(event, turn.sessionId);
           if (event.type === "stream_start") {
             recordStreamStart(controller, event.request_id);
           }
@@ -407,7 +413,7 @@ export function useChat(options: UseChatOptions) {
           ) {
             clearWorkspaceStatus(controller);
           }
-          if (turn.observe(event)) optionsRef.current.onInterrupted(draft);
+          if (turn.observe(event) && projectsActiveStream()) optionsRef.current.onInterrupted(draft);
           if (event.type === "done" || event.type === "error") {
             recordTerminal(controller, event.type === "error" ? "error" : "complete");
           }
@@ -485,7 +491,7 @@ export function useChat(options: UseChatOptions) {
           } else {
             recordTerminal(controller, "network_error");
             if (rejection === "draft") {
-              optionsRef.current.onInterrupted(draft);
+              if (projectsActiveStream()) optionsRef.current.onInterrupted(draft);
               turn.restore(original);
               if (messagesGenerationRef.current === messagesGeneration) {
                 setMessages(original);
@@ -493,7 +499,7 @@ export function useChat(options: UseChatOptions) {
                 setSessionError(error instanceof Error ? error.message : "The assistant stream failed.");
               }
             }
-            if (rejection === "provider") {
+            if (rejection === "provider" && projectsActiveStream()) {
               optionsRef.current.onInterrupted(draft);
             }
           }
@@ -721,21 +727,26 @@ export function useChat(options: UseChatOptions) {
     }
     turn.finish();
     setBusy(false);
+    const visible = projectsActiveStream();
     const stopped = transitionLifecycle({ type: "stop" }, false).messages;
-    messagesRef.current = stopped;
-    setMessages(stopped);
-    optionsRef.current.onInterrupted(promptRef.current);
+    if (visible) {
+      messagesRef.current = stopped;
+      setMessages(stopped);
+      optionsRef.current.onInterrupted(promptRef.current);
+    }
     const sessionId = turn.sessionId;
     if (sessionId) stoppedProjectionRef.current = { sessionId, messages: stopped };
     if (sessionId) void cancelSession(sessionId).catch(() => undefined);
     const messagesGeneration = ++messagesGenerationRef.current;
     window.setTimeout(() => {
-      if (sessionId && messagesGenerationRef.current === messagesGeneration) {
+      if (sessionId && visible && messagesGenerationRef.current === messagesGeneration) {
         void reloadCanonical(sessionId, messagesGeneration)
         .catch(() => undefined)
-        .finally(() => optionsRef.current.onSettled(sessionId));
-      } else if (!sessionId) {
-        optionsRef.current.onSettled(null);
+        .finally(() => {
+          if (!abortRef.current) optionsRef.current.onSettled(sessionId);
+        });
+      } else if (!abortRef.current) {
+        optionsRef.current.onSettled(sessionId);
       }
     }, 450);
   });
@@ -773,6 +784,7 @@ export function useChat(options: UseChatOptions) {
     restored: ChatMessage[],
     sessionId?: string | null,
     resumeActive = false,
+    configuration?: ChatTurnConfiguration,
   ) => {
     messagesGenerationRef.current += 1;
     if (preparingTimerRef.current !== null) {
@@ -806,7 +818,7 @@ export function useChat(options: UseChatOptions) {
       activeMessagesGenerationRef.current = null;
       activeProjectionVisibleRef.current = false;
     }
-    if (resumeActive && sessionId) {
+    if (resumeActive && sessionId && !turn.busy) {
       const lastUser = [...restored].reverse().find((message) => message.role === "user");
       if (lastUser) {
         const draft: ChatDraft = {
@@ -829,7 +841,7 @@ export function useChat(options: UseChatOptions) {
           client_message_id: "reconnect",
           web_search_enabled: Boolean(optionsRef.current.webSearchEnabled),
           reasoning_effort: optionsRef.current.reasoningEffort ?? "low",
-        }, optimistic, restored, undefined, sessionId);
+        }, optimistic, restored, undefined, sessionId, configuration);
         return;
       }
     }
@@ -843,6 +855,10 @@ export function useChat(options: UseChatOptions) {
   return {
     messages,
     busy,
+    activeSessionId: busy ? turn.sessionId : null,
+    activeTitle: turn.state.title,
+    activeConfiguration: turn.configuration,
+    selectedBusy: busy && turn.sessionId === options.sessionId,
     papers,
     sessionError,
     capacityRequest,

@@ -15,8 +15,9 @@ import {
 
 const mocks = vi.hoisted(() => ({
   busy: false,
+  activeSessionId: null as string | null,
   authLoading: false,
-  authUser: { username: "owner", hf_user_id: "hf-owner" },
+  authUser: { username: "owner", hf_subject: "hf-owner" },
   messages: [{
     id: "user-1",
     role: "user" as const,
@@ -38,9 +39,10 @@ const mocks = vi.hoisted(() => ({
   clipboardWrite: vi.fn(),
   hfLoginUrl: vi.fn(() => window.location.href),
   chatOptions: null as {
+    sessionId: string | null;
     webSearchEnabled: boolean;
-    onSessionId: (id: string) => void;
-    onTitle: (title: string) => void;
+    onSessionId: (id: string, origin: string | null) => void;
+    onTitle: (title: string, id: string | null) => void;
     onSettled: (id: string | null) => void;
   } | null,
 }));
@@ -50,6 +52,8 @@ vi.mock("@/hooks/useChat", () => ({
     mocks.chatOptions = options;
     return {
       busy: mocks.busy,
+      activeSessionId: mocks.activeSessionId,
+      selectedBusy: mocks.busy && mocks.activeSessionId === options.sessionId,
       messages: mocks.messages,
       papers: {},
       sessionError: "",
@@ -134,7 +138,9 @@ beforeEach(() => {
   localStorage.clear();
   sessionStorage.clear();
   vi.unstubAllEnvs();
+  vi.spyOn(chatApi, "getOpenAIUsage").mockResolvedValue({ used_percent: 0, remaining_percent: 100, resets_at: "2026-11-01T00:00:00Z", available: true, as_of: "2026-10-03T00:00:00Z" });
   mocks.busy = false;
+  mocks.activeSessionId = null;
   mocks.authLoading = false;
   mocks.messages.splice(0, mocks.messages.length, {
     id: "user-1",
@@ -214,7 +220,7 @@ describe("ChatView inference authorization", () => {
     mocks.authLoading = true;
     renderChat("/chat");
 
-    const input = screen.getByRole("combobox");
+    const input = screen.getByPlaceholderText("Ask anything about research…");
     await userEvent.type(input, "A fast prompt");
 
     expect(screen.getByRole("button", { name: "Send message" })).toBeDisabled();
@@ -479,6 +485,7 @@ describe("ChatView sharing", () => {
     const rendered = renderChat();
     expect(await screen.findByRole("button", { name: "Share conversation" })).toBeEnabled();
     mocks.busy = true;
+    mocks.activeSessionId = sessionId;
     rendered.rerender(chatElement());
     expect(screen.getByRole("button", { name: "Share conversation" })).toBeDisabled();
   });
@@ -573,6 +580,7 @@ describe("ChatView navigation", () => {
       mocks.messages,
       earlierSession.id,
       false,
+      { model: earlierSession.selected_model, webSearchEnabled: false, reasoningEffort: "high" },
     ));
     expect(screen.queryByText("Loading conversation…")).not.toBeInTheDocument();
   });
@@ -584,7 +592,7 @@ describe("ChatView new-session sidebar", () => {
     renderChat("/chat");
     await waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
 
-    act(() => mocks.chatOptions?.onSessionId(sessionId));
+    act(() => mocks.chatOptions?.onSessionId(sessionId, null));
 
     expect(await screen.findByTestId("chat-location")).toHaveTextContent(
       `/chat/${sessionId}`,
@@ -596,11 +604,11 @@ describe("ChatView new-session sidebar", () => {
     renderChat("/chat");
     await waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
 
-    act(() => mocks.chatOptions?.onSessionId(sessionId));
+    act(() => mocks.chatOptions?.onSessionId(sessionId, null));
     expect(await screen.findByText("New chat", { selector: ".chat-session-title" })).toBeInTheDocument();
 
-    act(() => mocks.chatOptions?.onTitle("Good OCR Models"));
-    expect(screen.getByText("Good OCR Models", { selector: ".chat-session-title" })).toBeInTheDocument();
+    act(() => mocks.chatOptions?.onTitle("Good OCR Models", sessionId));
+    expect(await screen.findByText("Good OCR Models", { selector: ".chat-session-title" })).toBeInTheDocument();
   });
 
   it("does not reset a busy new-session stream while its route catches up", async () => {
@@ -610,7 +618,7 @@ describe("ChatView new-session sidebar", () => {
     renderChat("/chat");
     await waitFor(() => expect(mocks.listSessions).toHaveBeenCalled());
 
-    act(() => mocks.chatOptions?.onSessionId(sessionId));
+    act(() => mocks.chatOptions?.onSessionId(sessionId, null));
 
     expect(await screen.findByTestId("chat-location")).toHaveTextContent(
       `/chat/${sessionId}`,

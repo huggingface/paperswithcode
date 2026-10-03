@@ -669,7 +669,9 @@ describe("useChat editAndResend", () => {
       prior_revision: 1,
     });
     await waitFor(() => expect(result.current.busy).toBe(false));
-    expect(onSessionId).toHaveBeenCalledWith("session-1");
+    expect(onSessionId).toHaveBeenCalledWith("session-1", "session-1", {
+      model: "zai-org/GLM-5.2", webSearchEnabled: false, reasoningEffort: "low",
+    });
     expect(result.current.messages[0]).toMatchObject({
       id: "new-user",
       text: "Same prompt",
@@ -1289,4 +1291,57 @@ it("ignores an aborted stream failure after reset starts a new turn", async () =
   await act(async () => { finish.resolve(); await finish.promise; });
   expect(result.current.messages.at(-1)?.blocks?.[0]).toMatchObject({ text: "New answer", done: true });
   expect(onSettled).toHaveBeenCalledTimes(1);
+});
+
+describe("useChat selected-session boundaries", () => {
+  it("stopping a background turn does not replace another conversation or its draft", async () => {
+    vi.useFakeTimers();
+    streamChatMock.mockImplementation(async function* () {
+      yield { type: "stream_start", request_id: "r1", session_id: null };
+      await new Promise(() => undefined);
+    });
+    const { result, onInterrupted, onSettled } = renderChat(null);
+    act(() => { result.current.send("Background question"); });
+    await flushMicrotasks();
+    const selected = uiTurn("selected-user", "Selected conversation");
+    act(() => result.current.load(selected, "other-session"));
+    act(() => result.current.stop());
+    expect(result.current.messages).toEqual(selected);
+    expect(onInterrupted).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(450));
+    expect(onSettled).toHaveBeenCalledWith(null);
+    expect(result.current.messages).toEqual(selected);
+  });
+
+  it("a stopped turn's delayed settlement cannot settle its replacement", async () => {
+    vi.useFakeTimers();
+    streamChatMock.mockImplementation(async function* () {
+      yield { type: "stream_start", request_id: "r1", session_id: null };
+      await new Promise(() => undefined);
+    });
+    const { result, onSettled } = renderChat(null);
+    act(() => { result.current.send("First question"); });
+    await flushMicrotasks();
+    act(() => result.current.stop());
+    act(() => { result.current.send("Replacement question"); });
+    await flushMicrotasks();
+    act(() => vi.advanceTimersByTime(450));
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(result.current.busy).toBe(true);
+  });
+
+  it("loading another busy session does not replace the locally owned turn", async () => {
+    streamChatMock.mockImplementation(async function* () {
+      yield { type: "stream_start", request_id: "r1", session_id: "session-1" };
+      await new Promise(() => undefined);
+    });
+    const { result } = renderChat();
+    act(() => { result.current.send("Locally owned question"); });
+    await flushMicrotasks();
+    const selected = uiTurn("remote-user", "Other busy session");
+    act(() => result.current.load(selected, "session-2", true));
+    expect(result.current.messages).toEqual(selected);
+    expect(result.current.activeSessionId).toBe("session-1");
+    expect(resumeChatMock).not.toHaveBeenCalled();
+  });
 });

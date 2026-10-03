@@ -25,7 +25,6 @@ describe("useChatArchive", () => {
     const refreshSessions = vi.fn().mockResolvedValue(undefined);
     const resetChat = vi.fn();
     const restoreDraft = vi.fn();
-    const clearTitle = vi.fn();
     const { result } = renderHook(() => useChatArchive({
       messages: [
         { id: "u1", role: "user", text: "First", paperMentions: [] },
@@ -34,7 +33,6 @@ describe("useChatArchive", () => {
       refreshSessions,
       resetChat,
       restoreDraft,
-      clearTitle,
     }));
 
     await act(() => result.current.archiveOldest());
@@ -42,7 +40,6 @@ describe("useChatArchive", () => {
     expect(refreshSessions).toHaveBeenCalledOnce();
     expect(resetChat).toHaveBeenCalledOnce();
     expect(restoreDraft).toHaveBeenCalledWith({ text: "Latest", paperMentions: [] });
-    expect(clearTitle).toHaveBeenCalledOnce();
     expect(mocks.toast).toHaveBeenCalledWith(expect.objectContaining({
       title: "2 chats archived",
     }));
@@ -56,7 +53,6 @@ describe("useChatArchive", () => {
       refreshSessions: vi.fn().mockResolvedValue(undefined),
       resetChat,
       restoreDraft: vi.fn(),
-      clearTitle: vi.fn(),
     }));
 
     await act(() => result.current.archiveOld());
