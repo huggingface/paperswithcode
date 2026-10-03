@@ -11,6 +11,7 @@ import re
 import stat
 import time
 from dataclasses import dataclass, replace
+from enum import Enum
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -31,7 +32,9 @@ from backend.chat_sandbox_worker.contract import (
     SDK_VERSION,
 )
 from backend.config import Settings
+from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_CONTRACT
 from backend.services.chat_runtime_contract import (
+    EXTERNAL_PI_WORKER_CONTRACT,
     ExternalAdmissionContract,
     dedicated_gateway_hostname,
     require_external_admission_contract,
@@ -864,11 +867,14 @@ def validate_chat_provider_policy(
 def validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
     """Validate migration controls and the chat capacity policy."""
 
-    validate_external_pi_migration_policy(settings)
-    _validate_chat_capacity_and_spend_policy(settings)
+    profile = validate_external_pi_migration_policy(settings)
+    _validate_chat_capacity_and_spend_policy(settings, profile)
 
 
-def _validate_chat_capacity_policy(settings: Settings) -> None:
+def _validate_chat_capacity_policy(
+    settings: Settings, profile: ChatRuntimeProfile | None = None
+) -> None:
+    profile = profile or _resolve_chat_runtime_profile(settings)
     configured = SandboxCapacityPolicy(
         max_concurrency=settings.chat_max_concurrency,
         user_max_concurrency=settings.chat_user_max_concurrency,
@@ -878,14 +884,14 @@ def _validate_chat_capacity_policy(settings: Settings) -> None:
     )
     candidates = (
         tuple(_EXTERNAL_PI_CAPACITY_POLICIES.values())
-        if settings.chat_external_pi_admission_enabled
+        if profile.kind is ChatRuntimeKind.EXTERNAL_ADMISSION
         else (_SANDBOX_CAPACITY_POLICY,)
     )
     if configured in candidates:
         return
     if (
         settings.environment == "staging"
-        and settings.chat_external_pi_admission_enabled
+        and profile.kind is ChatRuntimeKind.EXTERNAL_ADMISSION
         and settings.chat_executor_remote_transport_enabled
         and any(
             configured == replace(expected, blank_pool_min=4, blank_pool_max=4)
@@ -910,7 +916,9 @@ def _external_pi_capacity_tier(settings: Settings) -> int | None:
     return None
 
 
-def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
+def _validate_chat_capacity_and_spend_policy(
+    settings: Settings, profile: ChatRuntimeProfile
+) -> None:
     """Validate sandbox spend, capacity, alerting, and provider reserve."""
 
     if not settings.chat_sandbox_spend_enforcement_enabled:
@@ -946,7 +954,7 @@ def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
                 "sandbox spend policy must be $75/$100/$250 with no environment cap"
             )
         raise RuntimeError("team sandbox spend policy is not reviewed")
-    _validate_chat_capacity_policy(settings)
+    _validate_chat_capacity_policy(settings, profile)
     expected_modal_environment = f"pwc-chat-{settings.environment}"
     if settings.chat_sandbox_modal_environment != expected_modal_environment:
         raise RuntimeError(
@@ -1024,7 +1032,7 @@ def _validate_chat_capacity_and_spend_policy(settings: Settings) -> None:
             "sandbox provider reserve is smaller than the worst-case aggregate burst"
         )
     _validate_chat_title_policy(settings)
-    _validate_chat_resource_policy(settings)
+    _validate_chat_resource_policy(settings, profile)
 
 
 def _validate_chat_runtime_identity(settings: Settings) -> None:
@@ -1231,66 +1239,75 @@ def _validate_chat_openrouter_policy(settings: Settings) -> None:
         ) from error
 
 
-def _is_staging_durable_external_qualification_profile(settings: Settings) -> bool:
-    """Recognize only the exact pool-free staging qualification bridge."""
+class ChatRuntimeKind(Enum):
+    LOCAL = "local"
+    STAGING_QUALIFICATION = "staging_qualification"
+    EXTERNAL_ADMISSION = "external_admission"
 
-    return all(
-        (
-            settings.environment == "staging",
-            settings.chat_openai_direct_enabled,
-            not settings.chat_external_pi_admission_enabled,
-            settings.chat_external_pi_supervisor_enabled,
-            settings.chat_external_pi_ready_registry_enabled,
-            settings.chat_external_pi_runtime_contract_version
-            == "durable-external-pi-v1",
-            settings.chat_external_pi_worker_contract_version == "external-pi-v1",
-            settings.chat_durable_turn_dispatch_enabled,
-            settings.chat_turn_event_journal_schema_enabled,
-            settings.chat_sandbox_executor_enabled,
-            settings.chat_sandbox_executor_contract_version == "sandbox-executor-v1",
-            settings.chat_remote_workspace_tools_enabled,
-            settings.chat_remote_bash_enabled,
-            settings.chat_remote_read_enabled,
-            settings.chat_lazy_workspace_enabled,
-            not settings.chat_blank_pool_enabled,
-            not settings.chat_pi_prewarm_enabled,
-            settings.chat_max_concurrency == 2,
-            settings.chat_sandbox_total_live_cap == 3,
-        )
+
+@dataclass(frozen=True, slots=True)
+class ChatRuntimeProfile:
+    kind: ChatRuntimeKind
+    pool_free: bool = False
+
+
+def _resolve_chat_runtime_profile(settings: Settings) -> ChatRuntimeProfile:
+    """Resolve approved resource exceptions from the canonical runtime contract.
+
+    Incomplete reversible bridges remain local and gain no resource exemption.
+    Admission, unlike a disabled bridge, must always have a complete contract.
+    """
+    contract = ExternalAdmissionContract(
+        durable_dispatch=settings.chat_durable_turn_dispatch_enabled,
+        event_journal_schema=settings.chat_turn_event_journal_schema_enabled,
+        external_supervisor=settings.chat_external_pi_supervisor_enabled,
+        ready_worker_registry=settings.chat_external_pi_ready_registry_enabled,
+        remote_workspace_tools=settings.chat_remote_workspace_tools_enabled,
+        lazy_workspace=settings.chat_lazy_workspace_enabled,
+        sandbox_executor=settings.chat_sandbox_executor_enabled,
+        remote_bash=settings.chat_remote_bash_enabled,
+        remote_read=settings.chat_remote_read_enabled,
+        worker_contract_version=settings.chat_external_pi_worker_contract_version,
+        runtime_contract_version=settings.chat_external_pi_runtime_contract_version,
     )
+    try:
+        require_external_admission_contract(contract)
+    except ValueError as error:
+        if settings.chat_external_pi_admission_enabled:
+            raise RuntimeError(
+                "external Pi admission requires the complete durable runtime contract"
+            ) from error
+        return ChatRuntimeProfile(ChatRuntimeKind.LOCAL)
 
-
-def _is_durable_external_admission_profile(settings: Settings) -> bool:
-    """Recognize the approved pool-free external-harness serving profile."""
-
-    return all(
-        (
-            settings.environment in {"staging", "production"},
-            settings.chat_external_pi_admission_enabled,
-            settings.chat_external_pi_supervisor_enabled,
-            settings.chat_external_pi_ready_registry_enabled,
-            settings.chat_external_pi_runtime_contract_version
-            == "durable-external-pi-v1",
-            settings.chat_external_pi_worker_contract_version == "external-pi-v1",
-            settings.chat_durable_turn_dispatch_enabled,
-            settings.chat_turn_event_journal_schema_enabled,
-            settings.chat_sandbox_executor_enabled,
-            settings.chat_sandbox_executor_contract_version == "sandbox-executor-v1",
-            settings.chat_remote_workspace_tools_enabled,
-            settings.chat_remote_bash_enabled,
-            settings.chat_remote_read_enabled,
-            settings.chat_lazy_workspace_enabled,
-            not settings.chat_blank_pool_enabled,
-            not settings.chat_pi_prewarm_enabled,
-            _external_pi_capacity_tier(settings) is not None,
-            settings.chat_user_max_concurrency == 1,
-            settings.chat_openai_user_max_concurrency == 1,
-            settings.chat_sandbox_total_live_cap == 16,
-        )
+    pool_free = (
+        settings.chat_sandbox_executor_contract_version == EXECUTOR_CONTRACT
+        and not settings.chat_blank_pool_enabled
+        and not settings.chat_pi_prewarm_enabled
     )
+    if settings.chat_external_pi_admission_enabled:
+        return ChatRuntimeProfile(
+            ChatRuntimeKind.EXTERNAL_ADMISSION,
+            pool_free=pool_free
+            and settings.environment in {"staging", "production"}
+            and _external_pi_capacity_tier(settings) is not None
+            and settings.chat_user_max_concurrency == 1
+            and settings.chat_openai_user_max_concurrency == 1
+            and settings.chat_sandbox_total_live_cap == 16,
+        )
+    if (
+        pool_free
+        and settings.environment == "staging"
+        and settings.chat_openai_direct_enabled
+        and settings.chat_max_concurrency == 2
+        and settings.chat_sandbox_total_live_cap == 3
+    ):
+        return ChatRuntimeProfile(ChatRuntimeKind.STAGING_QUALIFICATION, pool_free=True)
+    return ChatRuntimeProfile(ChatRuntimeKind.LOCAL)
 
 
-def _validate_chat_resource_policy(settings: Settings) -> None:
+def _validate_chat_resource_policy(
+    settings: Settings, profile: ChatRuntimeProfile | None = None
+) -> None:
     """Validate sandbox resources and warm-pool lifetime."""
 
     if settings.chat_excalidraw_enabled != settings.chat_mcp_apps_host_enabled:
@@ -1319,20 +1336,13 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
         ):
             raise RuntimeError("blank pool rotation window is invalid")
     if settings.chat_openai_direct_enabled:
-        qualification_profile = _is_staging_durable_external_qualification_profile(
-            settings
-        )
-        external_admission_profile = _is_durable_external_admission_profile(settings)
-        if (
-            not qualification_profile
-            and not external_admission_profile
-            and (
-                not settings.chat_pi_prewarm_enabled
-                or not settings.chat_blank_pool_enabled
-                or settings.chat_effective_pi_prewarm_model
-                != settings.chat_openai_luna_route
-                or settings.chat_pi_prewarm_reasoning_effort != "low"
-            )
+        profile = profile or _resolve_chat_runtime_profile(settings)
+        if not profile.pool_free and (
+            not settings.chat_pi_prewarm_enabled
+            or not settings.chat_blank_pool_enabled
+            or settings.chat_effective_pi_prewarm_model
+            != settings.chat_openai_luna_route
+            or settings.chat_pi_prewarm_reasoning_effort != "low"
         ):
             raise RuntimeError(
                 "direct OpenAI chat requires the direct-Luna low-reasoning prewarm profile"
@@ -1362,7 +1372,7 @@ def _validate_chat_resource_policy(settings: Settings) -> None:
             raise RuntimeError("Pi prewarm requires an immutable prompt digest")
 
 
-def validate_external_pi_migration_policy(settings: Settings) -> None:
+def validate_external_pi_migration_policy(settings: Settings) -> ChatRuntimeProfile:
     """Keep each external-harness bridge independently reversible."""
 
     worker_switches = {
@@ -1505,10 +1515,13 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
             raise RuntimeError(
                 "external Pi worker endpoint must be an authenticated loopback service"
             ) from None
-        if settings.chat_external_pi_worker_contract_version != "external-pi-v1":
+        if (
+            settings.chat_external_pi_worker_contract_version
+            != EXTERNAL_PI_WORKER_CONTRACT
+        ):
             raise RuntimeError("external Pi worker identity is invalid")
     if any(executor_switches.values()):
-        if settings.chat_sandbox_executor_contract_version != "sandbox-executor-v1":
+        if settings.chat_sandbox_executor_contract_version != EXECUTOR_CONTRACT:
             raise RuntimeError("sandbox executor contract is invalid")
         if (
             settings.chat_remote_bash_enabled or settings.chat_remote_read_enabled
@@ -1568,36 +1581,7 @@ def validate_external_pi_migration_policy(settings: Settings) -> None:
             raise RuntimeError(
                 "external Pi ordinary research requires a 180-second deadline"
             )
-        try:
-            require_external_admission_contract(
-                ExternalAdmissionContract(
-                    durable_dispatch=settings.chat_durable_turn_dispatch_enabled,
-                    event_journal_schema=(
-                        settings.chat_turn_event_journal_schema_enabled
-                    ),
-                    external_supervisor=settings.chat_external_pi_supervisor_enabled,
-                    ready_worker_registry=(
-                        settings.chat_external_pi_ready_registry_enabled
-                    ),
-                    remote_workspace_tools=(
-                        settings.chat_remote_workspace_tools_enabled
-                    ),
-                    lazy_workspace=settings.chat_lazy_workspace_enabled,
-                    sandbox_executor=settings.chat_sandbox_executor_enabled,
-                    remote_bash=settings.chat_remote_bash_enabled,
-                    remote_read=settings.chat_remote_read_enabled,
-                    worker_contract_version=(
-                        settings.chat_external_pi_worker_contract_version
-                    ),
-                    runtime_contract_version=(
-                        settings.chat_external_pi_runtime_contract_version
-                    ),
-                )
-            )
-        except ValueError as error:
-            raise RuntimeError(
-                "external Pi admission requires the complete durable runtime contract"
-            ) from error
+    return _resolve_chat_runtime_profile(settings)
 
 
 def _validate_chat_execution_identity(settings: Settings) -> None:
@@ -1686,11 +1670,11 @@ def validate_runtime(settings: Settings) -> dict[str, bool]:
     validate_codex_jobs_configuration(settings)
     validate_environment_policy(settings)
     validate_private_paper_runtime(settings)
-    validate_external_pi_migration_policy(settings)
+    profile = validate_external_pi_migration_policy(settings)
     validate_chat_configuration = validate_chat_runtime_descriptor(settings)
     if validate_chat_configuration:
         validate_chat_provider_policy(settings, include_openrouter=False)
-        _validate_chat_capacity_and_spend_policy(settings)
+        _validate_chat_capacity_and_spend_policy(settings, profile)
         _validate_chat_openrouter_policy(settings)
     validate_release_manifest(settings)
     validate_deployed_mutation_policy(settings)

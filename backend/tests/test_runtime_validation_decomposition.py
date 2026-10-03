@@ -1045,7 +1045,8 @@ def test_runtime_finishes_local_chat_policy_before_openrouter_guardrail(
 
     monkeypatch.setattr(runtime_validation, "validate_chat_provider_policy", provider)
 
-    def capacity(_settings):
+    def capacity(_settings, profile):
+        assert profile.kind is runtime_validation.ChatRuntimeKind.LOCAL
         calls.append("capacity")
 
     monkeypatch.setattr(
@@ -1119,7 +1120,7 @@ def test_runtime_validates_external_migration_policy_exactly_once(
     def migration_policy(current_settings):
         nonlocal calls
         calls += 1
-        original(current_settings)
+        return original(current_settings)
 
     monkeypatch.setattr(
         runtime_validation,
@@ -1219,10 +1220,20 @@ def test_four_spare_profile_is_staging_persistent_only(
         chat_blank_pool_max=pool_max,
     )
     if accepted:
-        runtime_validation._validate_chat_capacity_policy(settings)
+        runtime_validation._validate_chat_capacity_policy(
+            settings,
+            runtime_validation.ChatRuntimeProfile(
+                runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION
+            ),
+        )
     else:
         with pytest.raises(RuntimeError, match="reviewed runtime profile"):
-            runtime_validation._validate_chat_capacity_policy(settings)
+            runtime_validation._validate_chat_capacity_policy(
+                settings,
+                runtime_validation.ChatRuntimeProfile(
+                    runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION
+                ),
+            )
 
 
 def test_four_spares_pass_capacity_and_direct_openai_resource_validation(
@@ -1267,10 +1278,20 @@ def test_sixty_four_turn_tier_is_a_reviewed_capacity_profile(
         chat_external_pi_worker_max_sessions=64,
     )
     if accepted:
-        runtime_validation._validate_chat_capacity_policy(settings)
+        runtime_validation._validate_chat_capacity_policy(
+            settings,
+            runtime_validation.ChatRuntimeProfile(
+                runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION
+            ),
+        )
     else:
         with pytest.raises(RuntimeError, match="reviewed runtime profile"):
-            runtime_validation._validate_chat_capacity_policy(settings)
+            runtime_validation._validate_chat_capacity_policy(
+                settings,
+                runtime_validation.ChatRuntimeProfile(
+                    runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION
+                ),
+            )
 
 
 @pytest.mark.parametrize(
@@ -1297,7 +1318,7 @@ def test_durable_external_profile_requires_tier_consistent_openai_budgets(
     settings.chat_openai_global_rate_limit_calls = rate_calls
 
     assert (
-        runtime_validation._is_durable_external_admission_profile(settings)
+        runtime_validation._resolve_chat_runtime_profile(settings).pool_free
         is recognized
     )
     assert runtime_validation._external_pi_capacity_tier(settings) == (
@@ -1317,3 +1338,107 @@ def test_capacity_tier_openai_allowances_match_the_host_env_helper():
     assert set(runtime_validation._EXTERNAL_PI_CAPACITY_POLICIES) == set(
         configure_host_env.CHAT_CAPACITY_TIERS
     )
+
+
+@pytest.mark.parametrize("flow", ["startup", "standalone"])
+def test_runtime_profile_and_canonical_contract_are_resolved_once(
+    settings_factory, monkeypatch, flow
+):
+    settings, _ = settings_factory("staging")
+    calls = []
+    original = runtime_validation.require_external_admission_contract
+
+    def validate_contract(contract):
+        calls.append(contract)
+        return original(contract)
+
+    monkeypatch.setattr(
+        runtime_validation, "require_external_admission_contract", validate_contract
+    )
+    validate = (
+        runtime_validation.validate_runtime
+        if flow == "startup"
+        else runtime_validation.validate_chat_capacity_and_spend_policy
+    )
+    validate(settings)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "mode,kind,pool_free",
+    [
+        ("local", runtime_validation.ChatRuntimeKind.LOCAL, False),
+        (
+            "qualification",
+            runtime_validation.ChatRuntimeKind.STAGING_QUALIFICATION,
+            True,
+        ),
+        ("serving", runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION, True),
+        ("warm_serving", runtime_validation.ChatRuntimeKind.EXTERNAL_ADMISSION, False),
+    ],
+)
+def test_profile_resolution_preserves_distinct_qualification_and_serving(
+    settings_factory, monkeypatch, mode, kind, pool_free
+):
+    settings, _ = settings_factory("staging")
+    if mode != "local":
+        _configure_durable_external_admission_resource_profile(settings)
+        settings.chat_openai_global_rate_limit_calls = 300
+    if mode == "qualification":
+        _durable_external_qualification_resource_profile(settings)
+        settings.chat_user_max_concurrency = 2
+    elif mode == "warm_serving":
+        settings.chat_blank_pool_enabled = True
+        settings.chat_pi_prewarm_enabled = True
+        settings.chat_default_agent_harness = "pi"
+        settings.chat_pi_prewarm_model = settings.chat_openai_luna_route
+        settings.chat_pi_prewarm_reasoning_effort = "low"
+    calls = []
+    original = runtime_validation.require_external_admission_contract
+
+    def validate_contract(contract):
+        calls.append(contract)
+        return original(contract)
+
+    monkeypatch.setattr(
+        runtime_validation, "require_external_admission_contract", validate_contract
+    )
+    profile = runtime_validation.validate_external_pi_migration_policy(settings)
+    assert profile.kind is kind and profile.pool_free is pool_free
+    runtime_validation._validate_chat_capacity_policy(settings, profile)
+    runtime_validation._validate_chat_resource_policy(settings, profile)
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "chat_durable_turn_dispatch_enabled",
+        "chat_turn_event_journal_schema_enabled",
+        "chat_external_pi_supervisor_enabled",
+        "chat_external_pi_ready_registry_enabled",
+        "chat_remote_workspace_tools_enabled",
+        "chat_lazy_workspace_enabled",
+        "chat_sandbox_executor_enabled",
+        "chat_remote_bash_enabled",
+        "chat_remote_read_enabled",
+    ],
+)
+def test_partial_admission_never_resolves_to_local_or_qualification(
+    settings_factory, field
+):
+    settings, _ = settings_factory("staging")
+    _configure_durable_external_admission_resource_profile(settings)
+    setattr(settings, field, False)
+    with pytest.raises(RuntimeError, match="complete durable runtime contract"):
+        runtime_validation._resolve_chat_runtime_profile(settings)
+
+
+def test_profile_uses_existing_flat_environment_fields(monkeypatch):
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED", "true")
+    monkeypatch.setenv("PWC_CHAT_EXTERNAL_PI_SUPERVISOR_ENABLED", "true")
+    settings = Settings(_env_file=None)
+    assert settings.chat_external_pi_admission_enabled
+    assert settings.chat_external_pi_supervisor_enabled
+    with pytest.raises(RuntimeError, match="complete durable runtime contract"):
+        runtime_validation._resolve_chat_runtime_profile(settings)
