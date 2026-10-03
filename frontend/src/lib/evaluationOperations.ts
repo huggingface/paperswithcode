@@ -43,9 +43,6 @@ export function mapApiEvaluationsToEditable(evaluations: Evaluation[]): Editable
 function editedMetrics(row: EditableEvaluationRow, metricName: string): Evaluation["metrics"] {
   const metrics = { ...row.original_metrics };
   const originalValue = metrics[row.original_metric_name];
-  if (row.original_metric_name !== metricName && Object.prototype.hasOwnProperty.call(metrics, metricName)) {
-    throw new Error(`Cannot rename a metric to "${metricName}": this evaluation already has that score.`);
-  }
   // Renaming replaces the selected metric, leaving every other score intact.
   if (row.original_metric_name !== metricName) delete metrics[row.original_metric_name];
   metrics[metricName] = originalValue != null && row.metric_value === String(originalValue)
@@ -87,16 +84,12 @@ type SupportsHarness = (taskId: string, datasetId: string) => boolean;
 
 function optionalInteger(value: string | undefined): number | undefined {
   const trimmed = value?.trim();
-  if (!trimmed) return undefined;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) ? Math.trunc(parsed) : undefined;
+  return trimmed ? Number(trimmed) : undefined;
 }
 
 function nullableNonNegativeInteger(value: string): number | null {
   const trimmed = value.trim();
-  if (!trimmed) return null;
-  const parsed = Number(trimmed);
-  return Number.isFinite(parsed) && parsed >= 0 ? Math.trunc(parsed) : null;
+  return trimmed ? Number(trimmed) : null;
 }
 
 function nullableString(value: string): string | null {
@@ -104,34 +97,77 @@ function nullableString(value: string): string | null {
   return trimmed || null;
 }
 
-function identifiers(row: EditableEvaluationRow): { taskId: number; datasetId: number } | null {
-  const taskId = Number.parseInt(row.task_id, 10);
-  const datasetId = Number.parseInt(row.dataset_id, 10);
-  return Number.isFinite(taskId) && Number.isFinite(datasetId)
-    ? { taskId, datasetId }
-    : null;
+export interface EvaluationDraftError {
+  rowIndex: number;
+  field: "id" | "task_id" | "dataset_id" | "metric_name" | "metric_value" | "best_rank" | "num_parameters";
+  message: string;
 }
 
-export function normalizeEvaluationOperations(
+function isIdentifier(value: string | undefined): boolean {
+  return Boolean(value && /^\d+$/.test(value.trim()) && Number.isSafeInteger(Number(value)) && Number(value) > 0);
+}
+
+export function validateEvaluationDraft(rows: EditableEvaluationRow[]): EvaluationDraftError[] {
+  const errors: EvaluationDraftError[] = [];
+  rows.forEach((row, rowIndex) => {
+    if (!row.operation || row.operation === "unchanged") return;
+    const add = (field: EvaluationDraftError["field"], message: string) => {
+      errors.push({ rowIndex, field, message });
+    };
+    if (row.operation !== "create" && !isIdentifier(row.id)) {
+      add("id", "This result has no valid evaluation ID. Reload the paper before editing it.");
+    }
+    if (row.operation === "delete") return;
+    if (!isIdentifier(row.task_id)) add("task_id", "Select a valid task.");
+    if (!isIdentifier(row.dataset_id)) add("dataset_id", "Select a valid dataset.");
+    const metricName = row.metric_name.trim();
+    if (!metricName) add("metric_name", "Select a metric.");
+    else if (metricName !== row.original_metric_name && Object.prototype.hasOwnProperty.call(row.original_metrics, metricName)) {
+      add("metric_name", `Cannot rename a metric to "${metricName}": this evaluation already has that score.`);
+    }
+    if (row.best_rank?.trim() && !Number.isSafeInteger(Number(row.best_rank))) {
+      add("best_rank", "Enter a whole-number rank.");
+    }
+    if (row.num_parameters.trim() && (!Number.isSafeInteger(Number(row.num_parameters)) || Number(row.num_parameters) < 0)) {
+      add("num_parameters", "Enter a non-negative whole-number parameter count.");
+    }
+    // Scores may be formatted strings (for example confidence intervals), not just numbers.
+    if (!row.metric_value.trim()) add("metric_value", "Enter a metric value.");
+  });
+  return errors;
+}
+
+export type PreparedEvaluationDraft =
+  | { valid: false; errors: EvaluationDraftError[] }
+  | { valid: true; operations: EvaluationOperation[] };
+
+export function prepareEvaluationDraft(
+  rows: EditableEvaluationRow[],
+  supportsHarness: SupportsHarness,
+): PreparedEvaluationDraft {
+  const errors = validateEvaluationDraft(rows);
+  if (errors.length) return { valid: false, errors };
+  return { valid: true, operations: normalizeEvaluationOperations(rows, supportsHarness) };
+}
+
+function normalizeEvaluationOperations(
   rows: EditableEvaluationRow[],
   supportsHarness: SupportsHarness,
 ): EvaluationOperation[] {
   const operations: EvaluationOperation[] = [];
   for (const row of rows) {
-    if (row.operation === "delete" && row.id) {
-      operations.push({ kind: "delete", evaluationId: Number.parseInt(row.id, 10) });
+    if (row.operation === "delete") {
+      operations.push({ kind: "delete", evaluationId: Number(row.id) });
       continue;
     }
     if (row.operation !== "create" && row.operation !== "update") continue;
 
-    const ids = identifiers(row);
     const metricName = row.metric_name.trim();
-    if (!ids || !metricName || !row.metric_value.trim()) continue;
 
     const harnessSupported = supportsHarness(row.task_id, row.dataset_id);
     const common: EvaluationData = {
-      task_id: ids.taskId,
-      dataset_id: ids.datasetId,
+      task_id: Number(row.task_id),
+      dataset_id: Number(row.dataset_id),
       metrics: editedMetrics(row, metricName),
       best_metric: metricName,
       is_open: row.is_open,
@@ -156,10 +192,9 @@ export function normalizeEvaluationOperations(
       continue;
     }
 
-    if (!row.id) continue;
     operations.push({
       kind: "update",
-      evaluationId: Number.parseInt(row.id, 10),
+      evaluationId: Number(row.id),
       data: {
         ...common,
         ...(modelName ? { model_name: modelName } : {}),

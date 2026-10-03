@@ -20,10 +20,11 @@ vi.mock("@/lib/api/catalog", () => ({ catalogApi: {
   ]),
 } }));
 
-function renderDialog(submitMode: "direct" | "pending") {
+function renderDialog(submitMode: "direct" | "pending", isAdmin = false) {
+  const onOpenChange = vi.fn();
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>
-    <EditEvaluationsDialog open onOpenChange={vi.fn()} paperId="11" submitMode={submitMode}
+    <EditEvaluationsDialog open onOpenChange={onOpenChange} paperId="11" submitMode={submitMode} isAdmin={isAdmin}
       initialEvaluations={[{
         id: "19", paper_id: "11", task_id: "3", dataset_id: "7",
         task_name: "Task", dataset_name: "Benchmark", model_name: "Model",
@@ -31,6 +32,7 @@ function renderDialog(submitMode: "direct" | "pending") {
         is_open: true, uses_additional_data: false, created_at: "", updated_at: "",
       }]} />
   </QueryClientProvider>);
+  return { onOpenChange };
 }
 
 beforeEach(() => { vi.clearAllMocks(); batch.mockResolvedValue({}); submit.mockResolvedValue({}); });
@@ -64,10 +66,59 @@ describe.each(["direct", "pending"] as const)("lossless %s evaluation editing", 
     const option = await screen.findByRole("option", { name: "F1" });
     await user.selectOptions(option.closest("select")!, "F1");
     await user.click(screen.getByRole("button", { name: mode === "direct" ? "Save Changes" : "Submit for review" }));
-    await waitFor(() => expect(toast).toHaveBeenCalledWith(expect.objectContaining({
-      description: expect.stringContaining('already has that score'), variant: "destructive",
-    })));
+    expect(await screen.findByRole("alert")).toHaveTextContent("already has that score");
     expect(batch).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
   });
+  it("blocks a mixed valid/incomplete batch, then submits the complete corrected draft", async () => {
+    const user = userEvent.setup();
+    const { onOpenChange } = renderDialog(mode);
+    await user.type(await screen.findByPlaceholderText("Model name"), " renamed");
+    await user.click(screen.getByRole("button", { name: "Add Row" }));
+    const save = screen.getByRole("button", { name: mode === "direct" ? "Save Changes" : "Submit for review" });
+    await user.click(save);
+    expect(screen.getByRole("alert")).toHaveTextContent("Row 2: Select a valid task.");
+    expect(batch).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.getAllByPlaceholderText("Model name")[0]).toHaveValue("Model renamed");
+    // Discard the incomplete new row, then introduce and correct a required field on the edit.
+    await user.click(screen.getByRole("button", { name: "Remove row" }));
+    const score = screen.getByPlaceholderText("44.9");
+    await user.clear(score);
+    await user.click(save);
+    expect(screen.getByRole("alert")).toHaveTextContent("Row 1: Enter a metric value.");
+    expect(score).toHaveAttribute("aria-invalid", "true");
+    expect(score).toHaveAccessibleDescription("Enter a metric value.");
+    expect(batch).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+    await user.type(score, "0");
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+    await user.click(save);
+    await waitFor(() => expect(mode === "direct" ? batch : submit).toHaveBeenCalledTimes(1));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
+  it("reports an unchanged draft explicitly without calling either API", async () => {
+    const user = userEvent.setup();
+    renderDialog(mode);
+    await screen.findByPlaceholderText("44.9");
+    await user.click(screen.getByRole("button", { name: mode === "direct" ? "Save Changes" : "Submit for review" }));
+    expect(toast).toHaveBeenCalledWith(expect.objectContaining({ title: "No changes to submit" }));
+    expect(batch).not.toHaveBeenCalled();
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+});
+
+it("submits a valid deletion even when the removed row has an incomplete score", async () => {
+  const user = userEvent.setup();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderDialog("direct", true);
+  await user.clear(await screen.findByPlaceholderText("44.9"));
+  await user.click(screen.getByRole("button", { name: "Remove row" }));
+  await user.click(screen.getByRole("button", { name: "Save Changes" }));
+  await waitFor(() => expect(batch).toHaveBeenCalledWith(11, [{ operation: "delete", evaluation_id: 19 }]));
+  expect(submit).not.toHaveBeenCalled();
+  confirm.mockRestore();
 });
