@@ -139,6 +139,20 @@ describe.each(["direct", "pending"] as const)("lossless %s evaluation editing", 
 
 });
 
+it("numbers validation errors by visible rows after deleting an existing result", async () => {
+  const user = userEvent.setup();
+  const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);
+  renderDialog("direct", true);
+  await screen.findByPlaceholderText("44.9");
+  await user.click(screen.getByRole("button", { name: "Remove row" }));
+  await user.click(screen.getByRole("button", { name: "Add Row" }));
+  await user.click(screen.getByRole("button", { name: "Save Changes" }));
+  expect(screen.getByRole("alert")).toHaveTextContent("Row 1: Select a valid task.");
+  expect(screen.getByRole("alert")).not.toHaveTextContent("Row 2:");
+  expect(batch).not.toHaveBeenCalled();
+  confirm.mockRestore();
+});
+
 it("submits a valid deletion even when the removed row has an incomplete score", async () => {
   const user = userEvent.setup();
   const confirm = vi.spyOn(window, "confirm").mockReturnValue(true);

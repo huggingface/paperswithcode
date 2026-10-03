@@ -484,7 +484,7 @@ export function EditEvaluationsDialog({
             <ul>
               {draftErrors.map(error => (
                 <li key={`${error.rowIndex}-${error.field}`}>
-                  Row {error.rowIndex + 1}: {error.message}
+                  Row {editedEvaluations.slice(0, error.rowIndex + 1).filter(row => row.operation !== "delete").length}: {error.message}
                 </li>
               ))}
             </ul>
