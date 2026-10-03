@@ -777,8 +777,6 @@ class MethodService:
         """
         try:
             from backend.models.database import Paper as DBPaper
-            from backend.models.papers import Papers
-            from sqlalchemy import desc, asc
 
             # Get method to verify it exists - try by ID first, then by slug/name
             method = None
@@ -811,73 +809,25 @@ class MethodService:
                 .filter(PaperMethod.method_id == method.id)
             )
 
-            # Apply latest version filter
-            if latest_only:
-                query = query.filter(DBPaper.is_latest_version)
-
-            if has_code:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_code_filter(query)
-
-            if has_hf_artifacts:
-                from backend.services.paper_service import PaperService
-
-                query = PaperService.apply_has_hf_artifacts_filter(query)
-
-            if start_date is not None:
-                query = query.filter(DBPaper.date_published >= start_date)
-            if end_date is not None:
-                query = query.filter(DBPaper.date_published <= end_date)
-
-            # Apply ordering
-            if order_by == "trending":
-                # Match the home feed: rank by the active trending metric
-                # (paper-level composite score or official-repo velocity per
-                # PWC_TRENDING_RANKING_MODE). Unscored papers stay in the list
-                # but sort after scored papers.
-                from backend.services.paper_service import PaperService
-
-                query = PaperService(self.db).apply_scoped_trending_order(query)
-            else:
-                if order_by == "date_published":
-                    order_field = DBPaper.date_published
-                elif order_by == "title":
-                    order_field = DBPaper.title
-                elif order_by == "citation_count":
-                    order_field = DBPaper.citation_count
-                else:
-                    order_field = DBPaper.date_published
-
-                if order_dir == "desc":
-                    query = query.order_by(desc(order_field), desc(DBPaper.id))
-                else:
-                    query = query.order_by(asc(order_field), asc(DBPaper.id))
-
-            # Get total count
-            total_count = query.count()
-
-            # Apply pagination
-            offset = (page - 1) * page_size
-            db_papers = query.offset(offset).limit(page_size).all()
-
-            # Convert to API models
+            from backend.services.paper_feed_executor import (
+                PaperFeedExecutor,
+                SCOPED_ORDERING,
+            )
             from backend.services.paper_service import PaperService
 
-            paper_service = PaperService(self.db)
-            papers = paper_service.hydrate_cards(
-                db_papers, include_resources=include_resources
-            )
-
-            # Calculate pagination
-            next_page = page + 1 if offset + page_size < total_count else None
-            previous_page = page - 1 if page > 1 else None
-
-            return Papers(
-                count=total_count,
-                next_page=next_page,
-                previous_page=previous_page,
-                results=papers,
+            return PaperFeedExecutor(PaperService(self.db)).execute(
+                query,
+                page=page,
+                page_size=page_size,
+                order_by=order_by,
+                order_dir=order_dir,
+                ordering=SCOPED_ORDERING,
+                latest_only=latest_only,
+                has_code=has_code,
+                has_hf_artifacts=has_hf_artifacts,
+                start_date=start_date,
+                end_date=end_date,
+                include_resources=include_resources,
             )
 
         except PaperNotFoundError:
