@@ -43,10 +43,15 @@ from backend.services.paper_service import PaperService
 from backend.services.pending_edit_errors import PendingEditError
 from backend.services.pending_edit_payloads import (
     Payload,
-    is_valid_evaluation_create_data,
+    validate_payload,
 )
 from backend.services.task_service import TaskService
-from backend.utils.exceptions import DatabaseError
+from backend.services.catalog_errors import CatalogNotFoundError, CatalogValidationError
+from backend.services.evaluation_commands import (
+    apply_evaluation_command,
+    evaluation_command,
+    validate_evaluation_scope,
+)
 
 Mutation = Callable[[int | None, Payload], tuple[str, str]]
 
@@ -460,76 +465,28 @@ class PendingEditMutationService:
         self, paper_id: int | None, payload: Payload
     ) -> tuple[str, str]:
         paper_id = self._require_paper(paper_id)
-        service = EvaluationService(self.db)
-        for operation in payload["operations"]:
-            kind = operation["op"]
-            if kind == "delete":
-                evaluation_id = int(operation["evaluation_id"])
-                self._ensure_evaluation_paper(evaluation_id, paper_id)
-                service.delete_evaluation(evaluation_id, commit=False)
-            elif kind == "update":
-                evaluation_id = int(operation["evaluation_id"])
-                self._ensure_evaluation_paper(evaluation_id, paper_id)
-                data = dict(operation["data"])
-                service.update_evaluation(
-                    evaluation_id=evaluation_id,
-                    task_id=data.get("task_id"),
-                    dataset_id=data.get("dataset_id"),
-                    model_name=data.get("model_name"),
-                    harness=data.get("harness"),
-                    methodology=data.get("methodology"),
-                    metrics=data.get("metrics"),
-                    uses_additional_data=data.get("uses_additional_data"),
-                    is_open=data.get("is_open"),
-                    best_rank=data.get("best_rank"),
-                    best_metric=data.get("best_metric"),
-                    evaluated_on=data.get("evaluated_on"),
-                    external_source_url=data.get("external_source_url"),
-                    source_url=data.get("source_url"),
-                    num_parameters=data.get("num_parameters"),
-                    hf_model_url=data.get("hf_model_url"),
-                    harness_set="harness" in data,
-                    source_url_set="source_url" in data,
-                    num_parameters_set="num_parameters" in data,
-                    hf_model_url_set="hf_model_url" in data,
-                    commit=False,
-                )
-            elif kind == "create":
-                data = dict(operation["data"])
-                if not is_valid_evaluation_create_data(data):
-                    continue
-                service.create_evaluation(
-                    paper_id=paper_id,
-                    task_id=data["task_id"],
-                    dataset_id=data["dataset_id"],
-                    metrics=data["metrics"],
-                    model_name=data.get("model_name"),
-                    harness=data.get("harness"),
-                    methodology=data.get("methodology"),
-                    uses_additional_data=bool(data.get("uses_additional_data", False)),
-                    is_open=bool(data.get("is_open", True)),
-                    best_rank=data.get("best_rank"),
-                    best_metric=data.get("best_metric"),
-                    evaluated_on=data.get("evaluated_on"),
-                    external_source_url=data.get("external_source_url"),
-                    source_url=data.get("source_url"),
-                    num_parameters=data.get("num_parameters"),
-                    hf_model_url=data.get("hf_model_url"),
-                    commit=False,
-                )
-            else:
-                raise PendingEditError(f"Unsupported evaluation op: {kind}")
-        return "paper", str(paper_id)
-
-    def _ensure_evaluation_paper(self, evaluation_id: int, paper_id: int) -> None:
-        row = (
-            self.db.query(Evaluation.paper_id)
-            .filter(Evaluation.id == evaluation_id)
-            .first()
-        )
-        if row is None:
-            raise DatabaseError(f"Evaluation {evaluation_id} not found")
-        if int(row[0]) != paper_id:
-            raise PendingEditError(
-                f"Evaluation {evaluation_id} does not belong to paper {paper_id}"
+        # Revalidate stored proposals before the first write, including proposals
+        # persisted before canonical command validation was introduced.
+        normalized = validate_payload("evaluations", payload)
+        commands = [
+            evaluation_command(
+                operation["op"],
+                {**operation["data"], "paper_id": paper_id}
+                if operation["op"] == "create"
+                else operation.get("data", {}),
+                operation.get("evaluation_id"),
             )
+            for operation in normalized["operations"]
+        ]
+        service = EvaluationService(self.db)
+        for index, command in enumerate(commands):
+            try:
+                validate_evaluation_scope(service, command, paper_id)
+            except (CatalogValidationError, CatalogNotFoundError) as exc:
+                raise PendingEditError(f"operations[{index}]: {exc}") from exc
+        for index, command in enumerate(commands):
+            try:
+                apply_evaluation_command(service, command, paper_id=paper_id)
+            except (CatalogValidationError, CatalogNotFoundError) as exc:
+                raise PendingEditError(f"operations[{index}]: {exc}") from exc
+        return "paper", str(paper_id)

@@ -16,6 +16,9 @@ from io import BytesIO
 from typing import Any, Callable
 
 from PIL import Image, UnidentifiedImageError
+from pydantic import ValidationError
+
+from backend.models.evaluations import EvaluationCreateData, EvaluationUpdateRequest
 
 from backend.services.pending_edit_errors import PendingEditError
 from backend.utils.public_urls import PublicUrlValidationError, normalize_public_url
@@ -372,33 +375,55 @@ def _validate_new_external_paper(payload: Payload) -> Payload:
     return output
 
 
-def is_valid_evaluation_create_data(data: Payload) -> bool:
-    if not isinstance(data.get("task_id"), int) or data["task_id"] <= 0:
-        return False
-    if not isinstance(data.get("dataset_id"), int) or data["dataset_id"] <= 0:
-        return False
-    if not isinstance(data.get("best_metric"), str) or not data["best_metric"].strip():
-        return False
-    metrics = data.get("metrics")
-    if not isinstance(metrics, dict) or not metrics:
-        return False
-    return all(
-        isinstance(name, str)
-        and name.strip()
-        and value is not None
-        and (not isinstance(value, str) or bool(value.strip()))
-        for name, value in metrics.items()
-    )
-
-
-def _normalize_evaluation_urls(data: Payload) -> Payload:
-    output = dict(data)
-    for field in ("external_source_url", "source_url", "hf_model_url"):
-        if output.get(field) is not None:
-            try:
-                output[field] = normalize_public_url(output[field])
-            except (PublicUrlValidationError, TypeError) as exc:
-                raise PendingEditError(str(exc)) from exc
+def _validate_evaluation_operation(operation: Any) -> Payload:
+    if not isinstance(operation, dict):
+        raise PendingEditError("Each evaluation operation must be an object")
+    kind = operation.get("op")
+    if kind not in ("create", "update", "delete"):
+        raise PendingEditError(
+            "Evaluation op must be one of: 'create', 'update', 'delete'"
+        )
+    output = {"op": kind}
+    if kind != "create":
+        evaluation_id = operation.get("evaluation_id")
+        if type(evaluation_id) is not int or evaluation_id <= 0:
+            raise PendingEditError(
+                "Evaluation operation needs positive int 'evaluation_id'"
+            )
+        output["evaluation_id"] = evaluation_id
+    if kind != "delete":
+        data = operation.get("data")
+        if not isinstance(data, dict):
+            raise PendingEditError("Evaluation operation needs a 'data' object")
+        # Pending proposals retain their stricter structural admission policy;
+        # canonical models own field types, URL normalization and patch presence.
+        for field in ("task_id", "dataset_id"):
+            if field in data and data[field] is not None:
+                if type(data[field]) is not int or data[field] <= 0:
+                    raise PendingEditError(f"{field} must be a positive integer")
+        metrics = data.get("metrics")
+        if kind == "create" or metrics is not None:
+            if (
+                not isinstance(metrics, dict)
+                or not metrics
+                or any(
+                    not isinstance(name, str)
+                    or not name.strip()
+                    or value is None
+                    or (isinstance(value, str) and not value.strip())
+                    for name, value in metrics.items()
+                )
+            ):
+                raise PendingEditError("metrics must contain nonblank names and values")
+        best_metric = data.get("best_metric")
+        if kind == "create" or best_metric is not None:
+            if not isinstance(best_metric, str) or not best_metric.strip():
+                raise PendingEditError("best_metric must be nonblank")
+        model = EvaluationCreateData if kind == "create" else EvaluationUpdateRequest
+        # Unknown internal flags cannot override the presence of supplied fields.
+        output["data"] = model.model_validate(data).model_dump(
+            mode="json", exclude_unset=True
+        )
     return output
 
 
@@ -410,45 +435,14 @@ def _validate_evaluations(payload: Payload) -> Payload:
             '{"operations": [{"op": ..., ...}, ...]} with at least one operation'
         )
     output = []
-    for operation in operations:
-        if not isinstance(operation, dict):
-            raise PendingEditError("Each evaluation operation must be an object")
-        kind = operation.get("op")
-        if kind not in {"create", "update", "delete"}:
-            raise PendingEditError(
-                "Evaluation op must be one of: 'create', 'update', 'delete'"
-            )
-        if kind == "create":
-            data = operation.get("data")
-            if not isinstance(data, dict):
-                raise PendingEditError("Evaluation create op needs a 'data' object")
-            if is_valid_evaluation_create_data(data):
-                output.append(
-                    {"op": "create", "data": _normalize_evaluation_urls(data)}
-                )
-        elif kind == "update":
-            evaluation_id = operation.get("evaluation_id")
-            data = operation.get("data")
-            if not isinstance(evaluation_id, int) or not isinstance(data, dict):
-                raise PendingEditError(
-                    "Evaluation update op needs int 'evaluation_id' and 'data' object"
-                )
-            output.append(
-                {
-                    "op": "update",
-                    "evaluation_id": evaluation_id,
-                    "data": _normalize_evaluation_urls(data),
-                }
-            )
-        else:
-            evaluation_id = operation.get("evaluation_id")
-            if not isinstance(evaluation_id, int):
-                raise PendingEditError("Evaluation delete op needs int 'evaluation_id'")
-            output.append({"op": "delete", "evaluation_id": evaluation_id})
-    if not output:
-        raise PendingEditError(
-            "Evaluations payload must include at least one valid operation"
-        )
+    errors = []
+    for index, operation in enumerate(operations):
+        try:
+            output.append(_validate_evaluation_operation(operation))
+        except (PendingEditError, ValidationError) as exc:
+            errors.append(f"operations[{index}]: {exc}")
+    if errors:
+        raise PendingEditError("; ".join(errors))
     return {"operations": output}
 
 

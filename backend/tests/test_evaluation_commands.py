@@ -21,6 +21,9 @@ from backend.services.evaluation_commands import (
 from backend.services.evaluation_curation_service import EvaluationCurationService
 from backend.services.evaluation_service import EvaluationService
 from backend.services.paper_edit_service import PaperEditService
+from backend.services.pending_edit_mutations import PendingEditMutationService
+from backend.services.pending_edit_errors import PendingEditError
+from backend.services.pending_edit_payloads import validate_payload
 
 
 @compiles(BigInteger, "sqlite")
@@ -122,14 +125,25 @@ def paper_apply(db, payload, evaluation_id=None, paper_id=1):
     return db.query(dbm.Evaluation).order_by(dbm.Evaluation.id.desc()).first()
 
 
-@pytest.mark.parametrize("adapter", ["direct", "paper"])
+def pending_apply(db, payload, evaluation_id=None, paper_id=1):
+    operation = {"op": "create" if evaluation_id is None else "update", "data": payload}
+    if evaluation_id is not None:
+        operation["evaluation_id"] = evaluation_id
+    PendingEditMutationService(db)._paper_evaluations(
+        paper_id, {"operations": [operation]}
+    )
+    return db.query(dbm.Evaluation).order_by(dbm.Evaluation.id.desc()).first()
+
+
+@pytest.mark.parametrize("adapter", ["direct", "paper", "pending"])
 def test_create_and_patch_presence_parity(db, adapter):
     curation = EvaluationCurationService(db)
     if adapter == "direct":
         result = curation.create(payload=create_payload(), mutation=mutation())
         row = db.get(dbm.Evaluation, int(result.id))
     else:
-        row = paper_apply(db, create_payload())
+        apply = pending_apply if adapter == "pending" else paper_apply
+        row = apply(db, create_payload())
     assert row.metrics == {"Accuracy": 0}
     assert row.num_parameters == 0
     original = (row.harness, row.source_url, row.num_parameters, row.hf_model_url)
@@ -142,7 +156,7 @@ def test_create_and_patch_presence_parity(db, adapter):
                 mutation=mutation(),
             )
         else:
-            paper_apply(db, payload, row.id)
+            apply(db, payload, row.id)
 
     update({"model_name": "Updated"})
     assert (
@@ -171,14 +185,15 @@ def test_create_and_patch_presence_parity(db, adapter):
     assert row.external_source_url is None
 
 
-@pytest.mark.parametrize("adapter", ["direct", "paper"])
+@pytest.mark.parametrize("adapter", ["direct", "paper", "pending"])
 def test_negative_parameter_count_rejected(db, adapter):
     payload = {**create_payload(), "num_parameters": -1}
-    with pytest.raises((ValidationError, CatalogValidationError)):
+    with pytest.raises((ValidationError, CatalogValidationError, PendingEditError)):
         if adapter == "direct":
             EvaluationCurationService(db).create(payload=payload, mutation=mutation())
         else:
-            paper_apply(db, payload)
+            apply = pending_apply if adapter == "pending" else paper_apply
+            apply(db, payload)
     assert db.query(dbm.Evaluation).count() == 0
 
 
@@ -280,3 +295,95 @@ def test_url_normalization_is_shared_by_both_adapters(db):
     result = EvaluationCurationService(db).create(payload=payload, mutation=mutation())
     row = paper_apply(db, payload)
     assert row.source_url == result.source_url == "https://example.com/result"
+
+
+@pytest.mark.parametrize("kind", ["create", "update"])
+@pytest.mark.parametrize(
+    "invalid",
+    [
+        {"num_parameters": -1},
+        {"task_id": -1},
+        {"dataset_id": 0},
+        {"metrics": {}},
+        {"metrics": {"Accuracy": " "}},
+        {"metrics": {"": 5}},
+        {"best_metric": " "},
+        {"source_url": "javascript:alert(1)"},
+        {"evaluated_on": "invalid"},
+    ],
+)
+def test_pending_mixed_batch_reports_index_before_writing(db, kind, invalid):
+    row = paper_apply(db, create_payload())
+    operations = [
+        {"op": "update", "evaluation_id": row.id, "data": {"model_name": "Changed"}},
+        {"op": kind, "evaluation_id": row.id, "data": {**create_payload(), **invalid}},
+    ]
+    with pytest.raises(PendingEditError, match=r"operations\[1\]"):
+        PendingEditMutationService(db)._paper_evaluations(1, {"operations": operations})
+    assert row.model_name == "Original"
+    assert db.query(dbm.Evaluation).count() == 1
+
+
+def test_pending_reports_every_invalid_member():
+    with pytest.raises(PendingEditError) as error:
+        validate_payload(
+            "evaluations", {"operations": [None, {"op": "create", "data": {}}]}
+        )
+    assert "operations[0]" in str(error.value)
+    assert "operations[1]" in str(error.value)
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+def test_pending_foreign_paper_rejected_before_any_mutation(db, operation):
+    row = paper_apply(db, create_payload())
+    with pytest.raises(PendingEditError, match=r"operations\[1\].*not on paper"):
+        PendingEditMutationService(db)._paper_evaluations(
+            2,
+            {
+                "operations": [
+                    {"op": "create", "data": create_payload()},
+                    {
+                        "op": operation,
+                        "evaluation_id": row.id,
+                        "data": {"model_name": "Wrong"},
+                    },
+                ]
+            },
+        )
+    assert row.model_name == "Original"
+    assert db.query(dbm.Evaluation).count() == 1
+
+
+def test_pending_create_scoped_to_context_and_flags_cannot_override_presence(db):
+    row = pending_apply(db, {**create_payload(), "paper_id": 2})
+    assert row.paper_id == 1
+    pending_apply(db, {"source_url": None, "source_url_set": False}, row.id)
+    assert row.source_url is None
+    payload = validate_payload(
+        "evaluations",
+        {
+            "operations": [
+                {
+                    "op": "update",
+                    "evaluation_id": row.id,
+                    "data": {"model_name": "Name", "num_parameters_set": True},
+                }
+            ]
+        },
+    )
+    assert payload["operations"][0]["data"] == {"model_name": "Name"}
+
+
+def test_pending_valid_stored_payload_preserves_json_date_and_null_presence(db):
+    data = {**create_payload(), "evaluated_on": "2026-01-01", "hf_model_url": None}
+    normalized = validate_payload(
+        "evaluations", {"operations": [{"op": "create", "data": data}]}
+    )
+    assert normalized["operations"][0]["data"]["evaluated_on"] == "2026-01-01"
+    assert normalized["operations"][0]["data"]["hf_model_url"] is None
+    row = pending_apply(db, normalized["operations"][0]["data"])
+    assert row.evaluated_on.isoformat() == "2026-01-01"
+    PendingEditMutationService(db)._paper_evaluations(
+        1, {"operations": [{"op": "delete", "evaluation_id": row.id}]}
+    )
+    assert db.query(dbm.Evaluation).count() == 0

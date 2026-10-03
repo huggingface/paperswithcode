@@ -87,18 +87,10 @@ def apply_evaluation_command(
     paper_id: int | None = None,
 ) -> Evaluation | None:
     """Apply one command, leaving commit and rollback to the application boundary."""
-    if isinstance(command, CreateEvaluation):
-        if paper_id is not None and command.payload.paper_id != paper_id:
-            raise CatalogValidationError(
-                "Every batch operation must target the same paper"
-            )
-        return service.create_evaluation(**command.payload.model_dump(), commit=False)
     if paper_id is not None:
-        row = service.db.get(DBEvaluation, command.evaluation_id)
-        if row is None or int(row.paper_id) != paper_id:
-            raise CatalogNotFoundError(
-                f"Evaluation {command.evaluation_id} is not on paper {paper_id}"
-            )
+        validate_evaluation_scope(service, command, paper_id)
+    if isinstance(command, CreateEvaluation):
+        return service.create_evaluation(**command.payload.model_dump(), commit=False)
     if isinstance(command, UpdateEvaluation):
         return service.update_evaluation(
             evaluation_id=command.evaluation_id,
@@ -107,3 +99,20 @@ def apply_evaluation_command(
         )
     service.delete_evaluation(command.evaluation_id, commit=False)
     return None
+
+
+def validate_evaluation_scope(
+    service: EvaluationService, command: EvaluationCommand, paper_id: int
+) -> None:
+    """Check ownership before applying a command or preparing a whole batch."""
+    if isinstance(command, CreateEvaluation):
+        if command.payload.paper_id != paper_id:
+            raise CatalogValidationError(
+                "Every batch operation must target the same paper"
+            )
+        return
+    row = service.db.get(DBEvaluation, command.evaluation_id)
+    if row is None or int(row.paper_id) != paper_id:
+        raise CatalogNotFoundError(
+            f"Evaluation {command.evaluation_id} is not on paper {paper_id}"
+        )

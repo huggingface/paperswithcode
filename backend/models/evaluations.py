@@ -516,14 +516,13 @@ class Evaluations(BaseModel):
     )
 
 
-class EvaluationCreateRequest(BaseModel):
+class EvaluationCreateData(BaseModel):
     """
     Request model for creating a new evaluation.
     """
 
     model_config = ConfigDict(from_attributes=True)
 
-    paper_id: int = Field(..., description="Paper ID")
     task_id: int = Field(..., description="Task ID")
     dataset_id: int = Field(..., description="Dataset ID")
     model_name: Optional[str] = Field(None, description="Model name")
@@ -566,6 +565,12 @@ class EvaluationCreateRequest(BaseModel):
     _normalize_urls = field_validator(
         "external_source_url", "source_url", "hf_model_url", mode="before"
     )(normalize_optional_public_url)
+
+
+class EvaluationCreateRequest(EvaluationCreateData):
+    """Create data scoped to the paper selected by the application boundary."""
+
+    paper_id: int = Field(..., description="Paper ID")
 
 
 class EvaluationRemovalRequest(BaseModel):

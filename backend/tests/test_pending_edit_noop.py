@@ -1251,3 +1251,55 @@ def test_evaluation_approval_ignores_only_recalculated_rank(
         assert reviewed.current_payload == submitted
         assert reviewed.catalog_event_id is not None
         apply.assert_called_once()
+
+
+@pytest.mark.parametrize("stage", ["submit", "approve_stored"])
+def test_malformed_evaluation_batch_rejected_without_partial_acceptance(
+    db_session, paper_fixture, monkeypatch, stage
+):
+    from unittest.mock import Mock
+
+    service = PendingEditService(db_session)
+    valid = {
+        "op": "create",
+        "data": {
+            "task_id": 1,
+            "dataset_id": 99,
+            "metrics": {"Accuracy": 0},
+            "best_metric": "Accuracy",
+        },
+    }
+    invalid = {
+        "op": "create",
+        "data": {
+            **valid["data"],
+            "num_parameters": -1,
+        },
+    }
+    payload = {"operations": [valid, invalid]}
+    apply = Mock()
+    monkeypatch.setattr(service.mutations, "apply_human_review", apply)
+    if stage == "submit":
+        with pytest.raises(PendingEditError, match=r"operations\[1\]"):
+            service.submit(
+                paper_id=1,
+                hf_username="alice",
+                edit_type="evaluations",
+                proposed_payload=payload,
+            )
+        assert db_session.query(PendingPaperEdit).count() == 0
+    else:
+        row = service.submit(
+            paper_id=1,
+            hf_username="alice",
+            edit_type="evaluations",
+            proposed_payload={"operations": [valid]},
+        )
+        # Simulate a stored proposal accepted before canonical validation.
+        row.proposed_payload = payload
+        db_session.commit()
+        with pytest.raises(PendingEditError, match=r"operations\[1\]"):
+            service.approve(edit_id=row.id, reviewer_username="admin")
+        assert row.status == "pending"
+        assert row.applied_payload is None
+    apply.assert_not_called()
