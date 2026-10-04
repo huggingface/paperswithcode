@@ -22,6 +22,7 @@ from psycopg2.extras import RealDictCursor
 from backend.config import get_settings
 from backend.services.autonomous_cron_probe import build_job_findings
 from backend.services.cron_registry import CronJobDefinition, list_cron_jobs
+from backend.services.cron_artifact_health import enrichment_snapshot_metrics
 
 WORKFLOWS_DIR = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 SCRIPTS_DIR = WORKFLOWS_DIR / "scripts"
@@ -303,7 +304,7 @@ def fetch_db_freshness_batch(
 
 def fetch_thumbnail_cache_freshness() -> Dict[str, Any]:
     settings = get_settings()
-    cache_dir = Path(settings.thumbnail_temp_cache_dir)
+    cache_dir = Path(settings.thumbnail_cache_dir)
     if not cache_dir.is_absolute():
         cache_dir = Path(__file__).resolve().parents[2] / cache_dir
 
@@ -1623,6 +1624,27 @@ def _backfill_contract(
     context: OutputEvaluationContext,
 ) -> tuple[str, List[str]]:
     work, db = context.work, context.db
+    completed_age = _minutes_since(
+        context.systemd.get("last_completed_at"), now=context.now
+    )
+    if (
+        status == "degraded"
+        and reasons == [context.db_reason]
+        and not db.get("freshness_error")
+        and int(db.get("total_partitions", 0) or 0) > 0
+        and db.get("incomplete_partitions") == 0
+        and db.get("unaccounted_partitions") == 0
+        and db.get("retryable_failures") == 0
+        and context.systemd.get("service_result") == "success"
+        and context.systemd.get("exec_main_status") == 0
+        and completed_age is not None
+        and 0 <= completed_age <= 120
+    ):
+        status = "healthy"
+        reasons = [
+            "latest successful reconciliation found all recorded reference "
+            "partitions complete and all papers processed or unresolvable"
+        ]
     stale_running = int(db.get("stale_running", 0) or 0)
     if stale_running:
         status = _worse_output(status, "broken")
@@ -1820,6 +1842,29 @@ OutputEvaluator = Callable[
 ]
 
 
+def _enrichment_snapshot_contract(status, reasons, context):
+    if status in {"broken", "stuck", "running"}:
+        return status, reasons
+    if not context.work.get("snapshot_valid"):
+        return "unknown", ["enrichment snapshot is missing or invalid"]
+    age = _minutes_since(context.work.get("snapshot_generated_at"), now=context.now)
+    completed_age = _minutes_since(
+        context.systemd.get("last_completed_at"), now=context.now
+    )
+    if age is None or age < 0:
+        return "unknown", ["enrichment snapshot timestamp is invalid"]
+    if age > 36 * 60:
+        return "degraded", ["enrichment snapshot is more than 36 hours old"]
+    if (
+        context.systemd.get("service_result") != "success"
+        or context.systemd.get("exec_main_status") != 0
+        or completed_age is None
+        or not 0 <= completed_age <= age
+    ):
+        return "unknown", ["snapshot has no matching successful export completion"]
+    return "healthy", ["fresh valid local snapshot and successful export completion"]
+
+
 @dataclass(frozen=True)
 class OutputPolicy:
     """Registry-selected output rules and their operator guidance."""
@@ -1831,6 +1876,7 @@ class OutputPolicy:
 
 
 OUTPUT_POLICIES = {
+    "enrichment_snapshot": OutputPolicy(_enrichment_snapshot_contract),
     "generic": OutputPolicy(lambda status, reasons, _context: (status, reasons)),
     "github_stars": OutputPolicy(_github_stars_contract),
     "hot_github_trending": OutputPolicy(_hot_github_trending_contract),
@@ -2506,6 +2552,7 @@ def _autonomous_cron_work_metrics(metrics: Dict[str, Any]) -> Dict[str, Any]:
 
 
 WORK_METRICS_PROVIDERS: Dict[str, Callable[[Dict[str, Any]], Dict[str, Any]]] = {
+    "enrichment_snapshot": lambda metrics: {**metrics, **enrichment_snapshot_metrics()},
     "paper_markdown_monitor": _paper_markdown_work_metrics,
     "chat_monitor": _chat_monitor_work_metrics,
     "chat_synthetic": _chat_synthetic_work_metrics,

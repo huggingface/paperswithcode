@@ -113,6 +113,7 @@ class CronJobDefinition:
             "chat_synthetic",
             "submission_review",
             "autonomous_cron",
+            "enrichment_snapshot",
         ]
     ] = None
     db_metrics_provider: Optional[Literal["thumbnail_cache"]] = None
@@ -1396,13 +1397,14 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     ),
     CronJobDefinition(
         id="export_enrichment_dashboard",
+        output_evaluator="enrichment_snapshot",
+        work_metrics_provider="enrichment_snapshot",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.daily(3, 10),),
         schedule_grace_minutes=60,
         systemd_timer="pwc-cron-export-enrichment-dashboard.timer",
         systemd_service="pwc-cron-export-enrichment-dashboard.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
         display_name="Export Enrichment Dashboard",
         category="daily",
         schedule="10 3 * * * (daily UTC)",
@@ -1745,7 +1747,12 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 FROM method_reference_backfill_months
                 WHERE status != 'complete'
             )
-            SELECT max(updated_at) AS last_write,
+            SELECT count(*) AS total_partitions,
+                   count(*) FILTER (WHERE status != 'complete') AS incomplete_partitions,
+                   count(*) FILTER (
+                       WHERE eligible_papers != processed_papers + unresolvable_papers
+                   ) AS unaccounted_partitions,
+                   max(updated_at) AS last_write,
                    count(*) FILTER (
                      WHERE updated_at > now() - interval '12 hours'
                    ) AS recent_writes,
