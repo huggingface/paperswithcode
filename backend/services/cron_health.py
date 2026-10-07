@@ -1242,6 +1242,24 @@ class OutputEvaluationContext:
     dependency_status: str | None
 
 
+def _tabarena_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    stale = context.db.get("stale_evaluations")
+    if stale is None:
+        return _worse_output(status, "unknown"), reasons + [
+            "TabArena owned-row freshness evidence is unavailable"
+        ]
+    if stale:
+        return _worse_output(status, "degraded"), reasons + [
+            f"{stale} managed TabArena evaluations are stale; "
+            "check unresolved paper identities"
+        ]
+    return status, reasons
+
+
 def _workflow_output_contract(
     status: str,
     reasons: List[str],
@@ -1878,6 +1896,7 @@ class OutputPolicy:
 OUTPUT_POLICIES = {
     "enrichment_snapshot": OutputPolicy(_enrichment_snapshot_contract),
     "generic": OutputPolicy(lambda status, reasons, _context: (status, reasons)),
+    "tabarena": OutputPolicy(_tabarena_contract),
     "github_stars": OutputPolicy(_github_stars_contract),
     "hot_github_trending": OutputPolicy(_hot_github_trending_contract),
     "repository_trending": OutputPolicy(_trending_contract),

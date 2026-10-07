@@ -610,7 +610,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-sync-tabarena.timer",
         systemd_service="pwc-cron-sync-tabarena.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        output_evaluator="tabarena",
         display_name="Sync TabArena",
         category="hourly",
         schedule="55 * * * * (hourly)",
@@ -627,10 +627,19 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                    count(*) FILTER (
                      WHERE e.updated_at > now() - interval '2 hours 30 minutes'
                    ) AS recent_writes,
-                   count(*) AS matched_evaluations
+                   count(*) AS matched_evaluations,
+                   min(e.updated_at) AS oldest_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at IS NULL OR
+                           e.updated_at <= now() - interval '2 hours 30 minutes'
+                   ) AS stale_evaluations
             FROM evaluations e
             JOIN datasets d ON d.id = e.dataset_id
+            JOIN tasks t ON t.id = e.task_id
             WHERE d.slug = 'tabarena-v0-1'
+              AND t.slug = 'tabular-learning'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code TabArena live sync.%'
               AND e.best_metric = 'Elo'
               AND e.external_source_url =
                   'https://huggingface.co/spaces/TabArena/leaderboard'
