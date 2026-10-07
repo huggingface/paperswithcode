@@ -288,3 +288,65 @@ def test_current_unmatched_model_does_not_delete_previous_row():
         session.query(Evaluation).filter_by(model_name="Unmatched (default)").count()
         == 1
     )
+
+
+def test_tabfm_refreshes_existing_blog_row_using_canonical_report():
+    session = _session()
+    url = "https://github.com/google-research/tabfm"
+    session.add(
+        Paper(
+            id=3,
+            title="TabFM: A Zero-Shot Foundation Model for Tabular Data",
+            arxiv_id="2609.37959",
+            source="arxiv",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(Repository(id=1, url=url))
+    session.flush()
+    session.add_all(
+        [
+            PaperRepository(paper_id=2, repository_id=1),
+            PaperRepository(paper_id=3, repository_id=1),
+        ]
+    )
+    row = Evaluation(
+        paper_id=2,
+        task_id=328,
+        dataset_id=1834,
+        model_name="TabFM (default)",
+        methodology=f"{MANAGED_METHODOLOGY_PREFIX} old",
+        metrics={METRIC_NAME: 1771},
+        best_metric=METRIC_NAME,
+        external_source_url=TABARENA_SOURCE_URL,
+        source_url=TABARENA_SOURCE_URL,
+        external=True,
+    )
+    session.add(row)
+    session.commit()
+    row_id = row.id
+
+    stats = TabArenaSyncService(session).sync([_entry("TabFM (default)", url, 0, 1774)])
+
+    assert stats.updated == 1
+    assert stats.created == 0
+    assert stats.unmatched_sources == []
+    assert stats.missing_papers == []
+    assert row.id == row_id
+    assert row.paper_id == 3
+    assert row.metrics == {METRIC_NAME: 1774}
+    assert row.best_rank == 1
+
+
+def test_tabfm_missing_canonical_report_does_not_fall_back_to_blog():
+    session = _session()
+    url = "https://github.com/google-research/tabfm"
+    session.get(Paper, 2).source_url = url
+    session.commit()
+
+    stats = TabArenaSyncService(session).sync([_entry("TabFM (default)", url, 0, 1774)])
+
+    assert stats.missing_papers == [f"{url}:2609.37959"]
+    assert stats.created == 0
+    assert session.query(Evaluation).count() == 0

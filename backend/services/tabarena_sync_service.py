@@ -78,6 +78,8 @@ URL_ARXIV_OVERRIDES = {
     "https://www.nature.com/articles/s41586-024-08328-6": "2207.01848",
     "https://github.com/LAMDA-Tabular/TabSwift": "2606.07345",
     "https://openreview.net/pdf?id=Y00pwFyrHR": "2608.01400",
+    # The release blog and subsequent technical report share this repository.
+    "https://github.com/google-research/tabfm": "2609.37959",
 }
 
 
