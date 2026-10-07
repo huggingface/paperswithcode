@@ -54,14 +54,35 @@ readlink -f /srv/paperswithcode/environments/production/current
 
 Record the production release ID and exact 40-character SHA. Confirm launcher provenance points to the same release. If source and live release differ, inspect files under the resolved production release rather than assuming the checkout reflects production.
 
-Build the inventory dynamically from the deployed `backend/services/cron_registry.py`; do not trust a remembered list or README. The current registry has 30 dashboard entries, but that number is evidence, not a permanent contract.
+Build the inventory dynamically from the deployed `backend/services/cron_registry.py`; do not trust a remembered list or README. Record the discovered count; no fixed job count is a permanent contract.
 
-Capture a fresh, uncached baseline from the repository backend CLI:
+Capture a fresh, uncached baseline from the repository backend CLI. Start in
+the developer checkout with its existing environment. Do not run `uv` from an
+immutable release: it can create a release-local `.venv` and build artifacts.
+`--no-sync` prevents dependency installation; `-B` prevents bytecode writes.
+The Python process below selects live source only after `uv` has started:
 
 ```bash
-uv run --env-file backend/keys.env \
-  python -m backend.cli cron health --strict --json > /tmp/pwc-cron-health.json
+PWC_CRON_LOG_DIR=/var/lib/paperswithcode/production/cron-logs \
+PWC_THUMBNAIL_CACHE_DIR=/var/lib/paperswithcode/shared/thumbnails \
+uv run --no-sync --env-file backend/keys.env python -B - <<'PYTHON' > /tmp/pwc-cron-health.json
+import os
+import runpy
+import sys
+from pathlib import Path
+
+release = Path("/srv/paperswithcode/environments/production/current").resolve()
+os.chdir(release)
+sys.path.insert(0, str(release))
+sys.argv = ["backend.cli", "cron", "health", "--strict", "--json"]
+runpy.run_module("backend.cli", run_name="__main__")
+PYTHON
 ```
+
+Confirm these log/cache paths against the active environment without printing
+credentials. If checkout dependencies cannot load live code, use an isolated
+temporary environment; never install into or edit the release. Treat any local
+configuration mismatch as missing audit evidence, not a production failure.
 
 The public catalog `pwc` executable may not expose the repository-only `cron` command. When `pwc cron health` and the source parser disagree, use `python -m backend.cli` from code matching the active release and report the mismatch.
 
@@ -80,7 +101,7 @@ Also enumerate all scheduled automation, because dashboard coverage discovery on
 
 ```bash
 rg -n "schedule:|cron:" /srv/paperswithcode/environments/production/current/.github/workflows/*.yml
-systemctl list-timers --all --no-pager | rg -i 'pwc|paperswithcode'
+systemctl list-timers --all --no-pager | rg -i 'pwc|paperswithcode|autonomous|submission'
 ```
 
 Report scheduled duties outside the dashboard separately. Do not silently redefine them as dashboard jobs.

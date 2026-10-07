@@ -225,3 +225,27 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** A minutely systemd worker claims thumbnail requests, generates/uploads output, and records status/timestamps/dimensions/warnings/errors.
 - **Independent proof:** Inspect queued, processing, stale-claim, failed, oldest-wait, attempts, and recent-completion distributions. For sampled succeeded rows, independently fetch/decode the URL or public endpoint and verify dimensions, nonblank content, and bucket/local presence.
 - **Trap:** A succeeded database flag is insufficient when the object is absent or corrupt.
+
+
+## `create_eval_verification_issues`
+
+- **Effect:** Checks eligible repositories and records GitHub verification outreach in a durable SQLite ledger.
+- **Proof:** Open the ledger using SQLite URI `mode=ro`; compare last-run counts, pending repositories and rate-limit state with a bounded GitHub issue sample. Match cited evaluations and eligible repository coverage; exit zero is insufficient proof of outreach completeness.
+- **Safety:** Do not invoke the issue creator or send a GitHub message as an audit probe.
+
+## `run_chat_synthetic_probe`
+
+- **Effect:** A timer checks the synthetic probe gate and writes a content-free health record; actual probes consume production capacity.
+- **Proof:** Compare health record status/reason/mtime with the `chat_reliability` operator state. Operator-disabled probes are not applicable, while their gate timer should still terminate successfully.
+- **Safety:** Do not launch a probe solely to verify health.
+
+## `autonomous_cron_audit` and `autonomous_cron_health`
+
+- **Effect:** Daily audit and frequent strict snapshot jobs record autonomous CRON run/action/intent/budget/lease state.
+- **Proof:** Read operator state and actual `autonomous-cron-{audit,health}.timer` units first. Disabled operators with inactive timers are not applicable. When enabled, verify cadence, terminal runs, action/intent correspondence, reservations and unreleased leases.
+- **Trap:** These units do not use the generated `pwc-cron-` prefix; inspect them explicitly.
+
+## `sync_open_tts`
+
+- **Contract:** English and all-language Open TTS datasets have separate managed rows and WER/RTFx metrics.
+- **Proof:** Compare each dataset independently with the official source; recompute the English macro-average across Seed-TTS and CV3-Eval, verify model identity, units, stale-row removal and rank direction. Freshness in one lane does not prove the other.

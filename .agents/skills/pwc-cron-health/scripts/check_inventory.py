@@ -65,9 +65,13 @@ def load_json(path: Path | None) -> dict[str, Any]:
     return json.loads(path.read_text())
 
 
-def probe_ids() -> list[str]:
-    reference = Path(__file__).resolve().parent.parent / "references/job-probes.md"
-    return re.findall(r"^## `([^`]+)`$", reference.read_text(), flags=re.MULTILINE)
+def probe_ids(reference: Path | None = None) -> list[str]:
+    if reference is None:
+        reference = Path(__file__).resolve().parent.parent / "references/job-probes.md"
+    headings = re.findall(r"^## (.+)$", reference.read_text(), flags=re.MULTILINE)
+    return [
+        job_id for heading in headings for job_id in re.findall(r"`([^`]+)`", heading)
+    ]
 
 
 def duplicate_values(values: list[str]) -> list[str]:
