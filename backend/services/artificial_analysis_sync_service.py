@@ -39,6 +39,15 @@ MANAGED_METHODOLOGY_PREFIX = (
 )
 
 
+# Reviewed upstream renames. Only previously managed rows may carry their
+# existing paper binding across these exact slug changes.
+MODEL_SLUG_RENAMES = {
+    "k2-4b-ph1": "k2-horizon-3-7b",
+    "k2-7b-ph2": "k2-horizon-7b",
+    "k2-mova-36b-mid5": "k2-horizon-mova-36b-a4b",
+}
+
+
 @dataclass(frozen=True)
 class ArtificialAnalysisIndex:
     key: str
@@ -597,6 +606,26 @@ class ArtificialAnalysisSyncService:
                 continue
             slug = (row.external_source_url or "").removeprefix(SOURCE_URL_PREFIX)
             entry = entries_by_slug.get(slug)
+            if entry is None and slug in MODEL_SLUG_RENAMES:
+                renamed_slug = MODEL_SLUG_RENAMES[slug]
+                entry = entries_by_slug.get(renamed_slug)
+                if entry is not None:
+                    replacement = rows_by_slug.get(renamed_slug)
+                    if replacement is not None:
+                        # Retire only an owned duplicate of the same paper and
+                        # metric. Manual rows and conflicting bindings need review.
+                        if (
+                            (replacement.methodology or "").startswith(
+                                MANAGED_METHODOLOGY_PREFIX
+                            )
+                            and replacement.paper_id == row.paper_id
+                            and replacement.best_metric == row.best_metric
+                        ):
+                            self.db.delete(row)
+                            stats.retired += 1
+                        continue
+                    rows_by_slug[renamed_slug] = row
+                    slug = renamed_slug
             if entry is None:
                 continue
             if index.key not in entry.scores:

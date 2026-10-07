@@ -977,7 +977,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-sync-artificial-analysis.timer",
         systemd_service="pwc-cron-sync-artificial-analysis.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        output_evaluator="artificial_analysis",
         display_name="Sync Artificial Analysis Leaderboards",
         category="hourly",
         schedule="35 * * * * (hourly)",
@@ -1021,33 +1021,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                   )
             )
             SELECT max(updated_at) AS last_write,
-                   LEAST(
-                     count(*) FILTER (
-                       WHERE dataset_slug = 'artificial-analysis-intelligence-index'
-                         AND updated_at > now() - interval '2 hours 30 minutes'
-                     ),
-                     count(*) FILTER (
-                       WHERE dataset_slug = 'artificial-analysis-agentic-index'
-                         AND updated_at > now() - interval '2 hours 30 minutes'
-                     ),
-                     count(*) FILTER (
-                       WHERE dataset_slug =
-                         'artificial-analysis-provider-voice-tts-arena'
-                         AND updated_at > now() - interval '2 hours 30 minutes'
-                     )
+                   count(*) FILTER (
+                     WHERE updated_at > now() - interval '2 hours 30 minutes'
                    ) AS recent_writes,
-                   LEAST(
-                     count(*) FILTER (
-                       WHERE dataset_slug = 'artificial-analysis-intelligence-index'
-                     ),
-                     count(*) FILTER (
-                       WHERE dataset_slug = 'artificial-analysis-agentic-index'
-                     ),
-                     count(*) FILTER (
-                       WHERE dataset_slug =
-                         'artificial-analysis-provider-voice-tts-arena'
-                     )
-                   ) AS matched_evaluations
+                   count(*) AS matched_evaluations,
+                   count(*) FILTER (
+                     WHERE updated_at IS NULL
+                        OR updated_at <= now() - interval '2 hours 30 minutes'
+                   ) AS stale_evaluations,
+                   3 - count(DISTINCT dataset_slug) FILTER (
+                     WHERE updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS missing_fresh_datasets
             FROM managed_evaluations
         """,
         workflow_file="cron-sync-artificial-analysis.yml",

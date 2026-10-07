@@ -562,3 +562,173 @@ def test_sync_refreshes_old_managed_rows_and_retires_withdrawn_scores(monkeypatc
     assert rows["manual"].metrics == {aa.METRIC_NAME: 1.0}
     assert stats.updated == 1
     assert stats.retired == 1
+
+
+@pytest.mark.parametrize("old_slug,new_slug", aa.MODEL_SLUG_RENAMES.items())
+def test_sync_migrates_reviewed_slug_rename_without_losing_paper(
+    monkeypatch, old_slug, new_slug
+):
+    session = _session()
+    Base.metadata.create_all(
+        session.get_bind(),
+        tables=[ModelRelease.__table__, ModelProviderAlias.__table__],
+    )
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
+    session.add(
+        Paper(
+            id=7,
+            title="Existing",
+            source="external",
+            source_url="https://example.com/existing",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.flush()
+    old = Evaluation(
+        paper_id=7,
+        task_id=5,
+        dataset_id=581,
+        model_name="Old label",
+        metrics={aa.METRIC_NAME: 1.0},
+        best_metric=aa.METRIC_NAME,
+        external_source_url=f"{aa.SOURCE_URL_PREFIX}{old_slug}",
+        methodology=aa.MANAGED_METHODOLOGY_PREFIX,
+    )
+    session.add(old)
+    session.commit()
+    old_id = old.id
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                new_slug, "Current label", {"intelligence": 20.6}, date(2026, 8, 1)
+            )
+        ],
+    )
+    service = aa.ArtificialAnalysisSyncService(session)
+    for _ in range(2):
+        stats = service.sync(leaderboard, discovery=aa.ArtificialAnalysisDiscovery())
+        row = session.query(Evaluation).one()
+        assert row.id == old_id
+        assert row.paper_id == 7
+        assert row.external_source_url == f"{aa.SOURCE_URL_PREFIX}{new_slug}"
+        assert row.metrics == {aa.METRIC_NAME: 20.6}
+        assert stats.updated == 1
+        assert stats.created == 0
+
+
+def test_slug_rename_does_not_adopt_manual_old_row(monkeypatch):
+    session = _session()
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
+    session.add(
+        Paper(
+            id=7,
+            title="Manual",
+            source="external",
+            source_url="https://example.com/manual",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.flush()
+    source = f"{aa.SOURCE_URL_PREFIX}k2-7b-ph2"
+    session.add(
+        Evaluation(
+            paper_id=7,
+            task_id=5,
+            dataset_id=581,
+            model_name="Manual",
+            metrics={aa.METRIC_NAME: 1.0},
+            best_metric=aa.METRIC_NAME,
+            external_source_url=source,
+            methodology="Manual",
+        )
+    )
+    session.commit()
+    board = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "k2-horizon-7b",
+                "K2 Horizon 7B",
+                {"intelligence": 20.6},
+                date(2026, 8, 1),
+            )
+        ],
+    )
+    stats = aa.ArtificialAnalysisSyncService(session).sync(
+        board, discovery=aa.ArtificialAnalysisDiscovery()
+    )
+    row = session.query(Evaluation).one()
+    assert row.external_source_url == source
+    assert row.metrics == {aa.METRIC_NAME: 1.0}
+    assert stats.matched == 0
+
+
+@pytest.mark.parametrize(
+    "managed,same_paper,retired", [(True, True, 1), (False, True, 0), (True, False, 0)]
+)
+def test_slug_rename_retires_only_owned_duplicate_with_same_binding(
+    monkeypatch, managed, same_paper, retired
+):
+    session = _session()
+    Base.metadata.create_all(
+        session.get_bind(),
+        tables=[ModelRelease.__table__, ModelProviderAlias.__table__],
+    )
+    monkeypatch.setattr(aa, "MODEL_PAPER_IDENTITIES", {})
+    for paper_id in (7, 8):
+        session.add(
+            Paper(
+                id=paper_id,
+                title="Model",
+                source="arxiv",
+                arxiv_id=f"2608.0000{paper_id}",
+                version="v1",
+                is_latest_version=True,
+            )
+        )
+    session.flush()
+    for slug, paper_id, methodology in [
+        ("k2-7b-ph2", 7, aa.MANAGED_METHODOLOGY_PREFIX),
+        (
+            "k2-horizon-7b",
+            7 if same_paper else 8,
+            aa.MANAGED_METHODOLOGY_PREFIX if managed else "Manual",
+        ),
+    ]:
+        session.add(
+            Evaluation(
+                paper_id=paper_id,
+                task_id=5,
+                dataset_id=581,
+                model_name=slug,
+                metrics={aa.METRIC_NAME: 1.0},
+                best_metric=aa.METRIC_NAME,
+                external_source_url=f"{aa.SOURCE_URL_PREFIX}{slug}",
+                methodology=methodology,
+            )
+        )
+    session.commit()
+    board = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                "k2-horizon-7b",
+                "K2 Horizon 7B",
+                {"intelligence": 20.6},
+                date(2026, 8, 1),
+            )
+        ],
+    )
+    stats = aa.ArtificialAnalysisSyncService(session).sync(
+        board, discovery=aa.ArtificialAnalysisDiscovery()
+    )
+    assert stats.retired == retired
+    assert session.query(Evaluation).count() == 2 - retired
+    if not managed:
+        manual = (
+            session.query(Evaluation).filter(Evaluation.methodology == "Manual").one()
+        )
+        assert manual.metrics == {aa.METRIC_NAME: 1.0}

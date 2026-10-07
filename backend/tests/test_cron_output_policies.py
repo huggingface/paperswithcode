@@ -209,3 +209,29 @@ def test_generic_policy_does_not_apply_paper_trending_dependency_rule():
 
     assert result["output_health"]["status"] == "healthy"
     assert "calculate_trending_scores" not in result["output_health"]["reason"]
+
+
+def test_artificial_analysis_detects_partial_staleness_and_missing_lane():
+    job = _job_with_alias("sync_artificial_analysis")
+    now = datetime(2026, 10, 7, 12, tzinfo=timezone.utc)
+    for stale, missing, expected in [
+        (6, 0, "degraded"),
+        (0, 1, "degraded"),
+        (0, 0, "healthy"),
+    ]:
+        result = evaluate_job_health(
+            job,
+            {"status": "success", "last_run": now, "is_running": False},
+            db_metrics={
+                "last_write": now,
+                "recent_writes": 99,
+                "matched_evaluations": 105,
+                "stale_evaluations": stale,
+                "missing_fresh_datasets": missing,
+            },
+            lock_state={"exists": False, "held": False, "stale": False},
+            workflow_status={"available": False},
+            process_running=False,
+            now=now,
+        )
+        assert result["output_health"]["status"] == expected
