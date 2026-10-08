@@ -24,6 +24,7 @@ class OutreachPaper:
     id: int
     route: str
     ready: bool
+    evaluated_at: float = 0
 
 
 def candidates(
@@ -73,5 +74,6 @@ def candidates(
                 paper_id,
                 arxiv_id or str(paper_id),
                 last_added <= settled_before and not job_active and not workflow_active,
+                last_added.timestamp(),
             )
     return dict(grouped)

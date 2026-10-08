@@ -391,9 +391,10 @@ def test_rate_limit_cooldown_skips_even_identity_request(state):
 def test_not_ready_repository_does_not_starve_other_candidates(state):
     github = Github()
     cohort = {"lab/code": {1: OutreachPaper(1, "1", False)}}
-    runner(state, github, cohort).run()
-    assert state.get("repo:42")["checked_at"] == 1_000_000
-    assert state.get("repo:42")["next_check"] == 1_003_600
+    result = runner(state, github, cohort).run()
+    assert result["counts"]["curating"] == 1
+    assert result["counts"]["repositories_checked"] == 0
+    assert not state.get("repo:42")
 
 
 def test_post_cap_applies_to_distinct_canonical_repositories(state):
@@ -528,3 +529,55 @@ def test_forbidden_post_is_a_definitive_rejection_with_cooldown(state):
     assert not state.get("repo:42").get("pending")
     runner(state, github).run()
     assert len(github.posts) == 1
+
+
+def multi_repository_github(count):
+    repositories = {}
+    for n in range(1, count + 1):
+        github = Github()
+        github.metadata.update(id=n, full_name=f"lab/repo{n}")
+        repositories[f"lab/repo{n}"] = github
+
+    def api(args):
+        if args == ["user"]:
+            return {"login": "NielsRogge"}
+        if args[0] == "search/issues":
+            name = next(a for a in args if a.startswith("q=repo:")).split()[0][7:]
+        else:
+            name = "/".join(args[0].split("/")[1:3])
+        return repositories[name](args)
+
+    return repositories, api
+
+
+def test_default_run_passes_fifty_blocked_repos_and_posts_thirty(state):
+    repositories, api = multi_repository_github(85)
+    cohort = {
+        name: {n: OutreachPaper(n, str(n), True, 1000 - n)}
+        for n, name in enumerate(repositories, 1)
+    }
+    for github in list(repositories.values())[:51]:
+        github.rows = [{"state": "open", "user": {"login": "NielsRogge"}}]
+    result = runner(state, api, cohort).run()
+    assert result["counts"]["open_issue"] == 51
+    assert result["counts"]["attempted"] == 30
+    assert result["counts"]["verified"] == 30
+    assert result["counts"]["repositories_checked"] == 81
+    assert sum(len(g.posts) for g in repositories.values()) == 30
+
+
+def test_new_evaluations_take_priority_after_oldest_fairness_slot(state):
+    repositories, api = multi_repository_github(4)
+    cohort = {
+        name: {n: OutreachPaper(n, str(n), n != 4, n * 100)}
+        for n, name in enumerate(repositories, 1)
+    }
+    for n in range(1, 5):
+        state.put(f"repo:{n}", {"checked_at": n * 1000})
+    result = runner(state, api, cohort, limit=2).run()
+    assert [e["repository"] for e in result["events"] if e["status"] == "verified"] == [
+        "lab/repo1",
+        "lab/repo3",
+    ]
+    assert result["counts"]["curating"] == 1
+    assert result["counts"]["repositories_due"] == 3

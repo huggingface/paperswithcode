@@ -71,10 +71,13 @@ and `anthropics`; repository names `tensorflow` and `pytorch`; and exact repos
 case insensitive and apply again after redirects. There is no blanket star-count
 or repository-age cutoff.
 
-Each run resolves up to 500 repository aliases, checks up to 50 repositories,
-and attempts at most 10 issue creations, with ten seconds between attempts.
-The overall GitHub request budget is 600. Initial identity discovery finishes
+Each run resolves up to 500 repository aliases, checks up to 500 repositories,
+and attempts at most 30 issue creations, with ten seconds between attempts.
+The overall GitHub request budget is 2,000. Initial identity discovery finishes
 across bounded runs before any messages are composed; identities refresh weekly.
+Ready repositories with the newest evaluations are prioritized,
+with one oldest eligible repository checked first each run to prevent starvation.
+Unsettled papers do not consume the repository-check allowance.
 Selection covers all latest papers with native evaluations and official GitHub
 links, rather than a time window that could lose work during downtime.
 

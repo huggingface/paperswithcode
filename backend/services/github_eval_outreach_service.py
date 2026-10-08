@@ -54,7 +54,7 @@ def issues(api, repository: str, *, state: str = "all", creator: str | None = No
 
 
 # GitHub allows 30 authenticated search requests per minute; pacing every
-# search call at this interval keeps a full 50-repository pass under that cap.
+# search call at this interval keeps a repository pass under that cap.
 SEARCH_PACE_SECONDS = 2
 
 
@@ -97,8 +97,8 @@ class OutreachRunner:
         draft,
         *,
         dry_run=False,
-        limit=50,
-        max_create=10,
+        limit=500,
+        max_create=30,
         sleep=time.sleep,
         now=time.time,
     ):
@@ -156,7 +156,7 @@ class OutreachRunner:
             cached = self.state.get(key)
             if cached.get("expires", 0) > self.now():
                 continue
-            if checked == self.limit * 10:
+            if checked == min(self.limit * 10, 500):
                 unresolved += 1
                 continue
             checked += 1
@@ -334,19 +334,45 @@ class OutreachRunner:
         self.counts["catalog_repositories"] = len(cohort)
         if self.resolve_aliases(cohort):
             groups, names = self.groups(cohort)
-            keys = sorted(
-                groups, key=lambda key: self.state.get(key).get("checked_at", 0)
-            )
-            checked = 0
-            for key in keys:
+            # Prefer newly settled evaluations over routine rechecks of old repos.
+            # Reserve the first check for the oldest eligible repo to prevent starvation.
+            eligible = []
+            for key, papers in groups.items():
                 record = self.state.get(key)
-                if record.get("next_check", 0) > self.now() or record.get("pending"):
-                    continue
-                if all(
-                    paper.id in record.get("covered", [])
-                    for paper in groups[key].values()
+                uncovered = [
+                    p for p in papers.values() if p.id not in record.get("covered", [])
+                ]
+                if (
+                    not uncovered
+                    or record.get("pending")
+                    or record.get("next_check", 0) > self.now()
                 ):
                     continue
+                if not all(p.ready for p in uncovered):
+                    self.counts["curating"] += 1
+                    continue
+                eligible.append(key)
+            self.counts["repositories_due"] = len(eligible)
+
+            def priority(key):
+                record = self.state.get(key)
+                newest = max(
+                    p.evaluated_at
+                    for p in groups[key].values()
+                    if p.id not in record.get("covered", [])
+                )
+                checked_at = record.get("checked_at", 0)
+                return (-newest, checked_at, key)
+
+            keys = sorted(eligible, key=priority)
+            if keys:
+                oldest = min(
+                    keys, key=lambda key: self.state.get(key).get("checked_at", 0)
+                )
+                keys.remove(oldest)
+                keys.insert(0, oldest)
+            checked = 0
+            for key in keys:
                 if checked >= self.limit or self.counts["attempted"] >= self.max_create:
                     break
                 checked += 1

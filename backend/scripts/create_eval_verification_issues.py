@@ -55,8 +55,8 @@ def main() -> int:
         action="store_true",
         help="Read the durable last-run summary without network access",
     )
-    parser.add_argument("--limit", type=int, choices=range(1, 101), default=50)
-    parser.add_argument("--max-create", type=int, choices=range(1, 11), default=10)
+    parser.add_argument("--limit", type=int, choices=range(1, 501), default=500)
+    parser.add_argument("--max-create", type=int, choices=range(1, 31), default=30)
     parser.add_argument("--token-env", default="PWC_GITHUB_TOKEN")
     parser.add_argument(
         "--state-file",
@@ -91,7 +91,7 @@ def main() -> int:
     def api(arguments):
         nonlocal calls
         calls += 1
-        if calls > 600:
+        if calls > 2000:
             raise ValueError(
                 "GitHub request budget exhausted; resume next scheduled run"
             )
