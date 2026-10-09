@@ -157,6 +157,11 @@ class Paper(Base):
         DateTime(timezone=True), nullable=True
     )
 
+    # Durable membership in HF daily papers, independent of conference metadata.
+    hf_daily_featured_on: Mapped[Optional[date]] = mapped_column(
+        Date, nullable=True, index=True
+    )
+
     # Timestamps
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()

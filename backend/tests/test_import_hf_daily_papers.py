@@ -227,11 +227,17 @@ def test_run_continues_after_one_failure_emits_summary_then_raises(monkeypatch):
         side_effect=[None, RuntimeError("merge failed"), None]
     )
     job.vacuum_analyze_table = MagicMock()
+    job.execute_query = MagicMock()
 
     with pytest.raises(RuntimeError, match="1 paper import failure"):
         job.run()
 
     assert job.process_paper.call_count == 3
+    assert job.execute_query.call_count == 2
+    assert [call.args[1][1] for call in job.execute_query.call_args_list] == [
+        "2608.00001",
+        "2608.00003",
+    ]
     assert job.processed_count == 2
     assert job.error_count == 1
     summary_call = next(

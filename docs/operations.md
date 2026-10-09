@@ -549,13 +549,26 @@ Scheduled work may use three of four global slots; one remains reserved for
 admin work. The first production run is capped at ten workflows until every
 canary reaches a successful terminal state. The nonterminal scheduled backlog
 is capped at 200, with overflow recorded as durable deferred workflows.
-The reconciler admits the rolling HF daily cohort before historical deferred
-work. Daily papers use priority 10 versus backfill priority 100; existing
-conference workflows featured on HF are promoted without duplicating jobs.
-The second stage inherits that priority. The dispatcher retains its one-slot
-overdue-work allowance, and already running work is not interrupted. A full
-queue still defers new work until a later hourly reconciliation has capacity.
+The importer durably records HF daily membership in
+`papers.hf_daily_featured_on`; reconciliation also records membership from the
+live feed and retains unfinished daily papers after they leave the seven-day
+window. Daily work must finish both enrichment and evaluation curation before
+conference backfill can be admitted or dispatched. Failed, deferred,
+awaiting-Markdown, and imported-but-not-yet-queued daily papers all block
+backfill. A completed no-evaluations audit counts as completed curation.
 
+Queued backfill workflows are parked to free admission capacity while preserving
+their existing job rows. Running work is allowed to finish, but subsequent
+background stages wait. Daily jobs use priority 10; backfill uses priority 100.
+The old overdue-work allowance applies only once no daily papers remain
+unfinished. Operators must resolve failed daily work rather than bypassing this
+gate by increasing worker count.
+
+Apply `backend/database/migrations/add_hf_daily_featured_on.sql` before deploying
+this scheduler or importer. The additive nullable column is compatible with the
+previous release. Bootstrap existing daily membership from official HF daily
+cohorts covering the curation history; never infer membership from conference
+absence or the shared legacy `hf-daily-cron` trigger.
 
 Configuration is fail-closed. Production direct apply requires all of:
 

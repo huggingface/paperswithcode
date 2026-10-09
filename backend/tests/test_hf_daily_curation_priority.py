@@ -73,7 +73,7 @@ def service(db, daily, capacity):
         db, settings, fetch_cohort=lambda _: daily, job_service=jobs
     )
     svc._state = lambda: SimpleNamespace(canary_released=True)
-    svc.release_awaiting_markdown = lambda _: 0
+    svc.release_awaiting_markdown = lambda _, **kwargs: 0
     return svc, jobs
 
 
@@ -130,9 +130,9 @@ def test_existing_conference_job_promoted_when_featured_on_hf(queue_db, job_stat
     jobs.enqueue.assert_not_called()
 
 
-def test_spare_capacity_still_admits_backfill(queue_db):
+def test_spare_capacity_does_not_admit_backfill_while_daily_pending(queue_db):
     db = queue_db
-    old = workflow(db, paper(db, 1).id)
+    workflow(db, paper(db, 1).id)
     fresh = paper(db, 2)
     db.commit()
     svc, jobs = service(db, [fresh.arxiv_id], 2)
@@ -142,7 +142,7 @@ def test_spare_capacity_still_admits_backfill(queue_db):
     assert [
         (c.kwargs["paper_id"], c.kwargs["priority"])
         for c in jobs.enqueue.call_args_list
-    ] == [(fresh.id, 10), (old.paper_id, 100)]
+    ] == [(fresh.id, 10)]
 
 
 def test_full_queue_defers_daily_without_exceeding_capacity(queue_db):
@@ -156,3 +156,129 @@ def test_full_queue_defers_daily_without_exceeding_capacity(queue_db):
 
     assert result["deferred"] == 1
     jobs.enqueue.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "status", [None, "deferred", "failed", "partial", "queued", "running"]
+)
+def test_pending_daily_blocks_conference_dispatch(queue_db, status):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 9, 1)
+    if status:
+        workflow(db, fresh.id, status=status)
+    old = workflow(db, paper(db, 2).id, status="queued")
+    db.add(
+        PaperCurationJob(
+            id=uuid.uuid4(),
+            paper_id=old.paper_id,
+            parent_workflow_id=old.id,
+            kind="enrich-paper",
+            status="queued",
+            priority=100,
+            trigger="hf-daily-cron",
+        )
+    )
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db) is None
+
+
+def test_completed_daily_allows_conference_dispatch(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 9, 1)
+    workflow(db, fresh.id, status="completed")
+    old = workflow(db, paper(db, 2).id, status="queued")
+    job = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=old.paper_id,
+        parent_workflow_id=old.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=100,
+        trigger="hf-daily-cron",
+    )
+    db.add(job)
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db) is job
+
+
+def test_daily_outside_live_window_is_still_admitted(queue_db):
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 9, 1)
+    db.commit()
+    svc, jobs = service(db, [], 1)
+    svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+    assert jobs.enqueue.call_args.kwargs["paper_id"] == fresh.id
+
+
+def test_daily_frees_full_backfill_queue_without_canceling_jobs(queue_db):
+    db = queue_db
+    old = workflow(db, paper(db, 1).id, status="queued")
+    old_job = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=old.paper_id,
+        parent_workflow_id=old.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=100,
+        trigger="hf-daily-cron",
+    )
+    db.add(old_job)
+    fresh = paper(db, 2)
+    db.commit()
+    svc, jobs = service(db, [fresh.arxiv_id], 1)
+    result = svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+    assert result["created"] == 1
+    assert jobs.enqueue.call_args.kwargs["paper_id"] == fresh.id
+    assert old_job.status == "queued"
+
+
+def test_released_backfill_reuses_parked_job(queue_db):
+    db = queue_db
+    old_paper = paper(db, 1)
+    old = workflow(db, old_paper.id)
+    job = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=old.paper_id,
+        parent_workflow_id=old.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=100,
+        trigger="hf-daily-cron",
+    )
+    db.add(job)
+    db.flush()
+    svc, jobs = service(db, [], 1)
+    svc._enqueue_workflow(old, old_paper, priority=100)
+    assert old.status == "queued"
+    jobs.enqueue.assert_not_called()
+
+
+def test_daily_dispatch_precedes_overdue_conference_job(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    old = workflow(db, paper(db, 1).id, status="queued")
+    fresh = paper(db, 2)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    daily = workflow(db, fresh.id, status="queued", cohort=date(2026, 10, 9))
+    daily.created_at = datetime.now(UTC)
+    for parent in (old, daily):
+        job = PaperCurationJob(
+            id=uuid.uuid4(),
+            paper_id=parent.paper_id,
+            parent_workflow_id=parent.id,
+            kind="enrich-paper",
+            status="queued",
+            priority=100,
+            trigger="hf-daily-cron",
+        )
+        db.add(job)
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db).paper_id == fresh.id

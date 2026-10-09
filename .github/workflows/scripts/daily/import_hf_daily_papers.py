@@ -119,6 +119,11 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
             for paper_data in daily_papers:
                 try:
                     self.process_paper(paper_data)
+                    self.execute_query(
+                        "UPDATE papers SET hf_daily_featured_on = GREATEST("
+                        "hf_daily_featured_on, %s::date) WHERE arxiv_id = %s",
+                        (target_date, paper_data.get("paper", {}).get("id")),
+                    )
                     self.processed_count += 1
                 except Exception as e:
                     self.error_count += 1

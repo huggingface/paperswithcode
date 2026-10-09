@@ -35,6 +35,7 @@ from backend.models.database import (
     PaperCurationWorkflow,
     TrendingModelCandidate,
 )
+from backend.services.curation_priority_service import has_pending_daily_papers
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
     serialize_thumbnail,
@@ -237,6 +238,10 @@ def deferred_workflows_for_release(
     )
     if policy_version is not None:
         query = query.filter(PaperCurationWorkflow.policy_version == policy_version)
+    if has_pending_daily_papers(db):
+        query = query.join(Paper, Paper.id == PaperCurationWorkflow.paper_id).filter(
+            Paper.hf_daily_featured_on.isnot(None)
+        )
     overdue = (
         query.filter(PaperCurationWorkflow.created_at < _now() - timedelta(hours=24))
         .order_by(
@@ -664,6 +669,30 @@ class CodexPaperJobService:
     @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:
         """Reserve one slot for the oldest 24-hour workflow, then stay newest-first."""
+        # Even failed, deferred, or awaiting-Markdown daily work blocks
+        # conference dispatch. Imported papers without a workflow also count.
+        if has_pending_daily_papers(db):
+            return (
+                db.query(PaperCurationJob)
+                .join(Paper, Paper.id == PaperCurationJob.paper_id)
+                .join(
+                    PaperCurationWorkflow,
+                    PaperCurationWorkflow.id == PaperCurationJob.parent_workflow_id,
+                )
+                .filter(
+                    Paper.hf_daily_featured_on.isnot(None),
+                    PaperCurationJob.trigger == "hf-daily-cron",
+                    PaperCurationJob.status == "queued",
+                    PaperCurationWorkflow.status.in_({"queued", "running"}),
+                )
+                .order_by(
+                    PaperCurationJob.priority,
+                    Paper.hf_daily_featured_on.desc(),
+                    PaperCurationJob.created_at,
+                    PaperCurationJob.id,
+                )
+                .first()
+            )
         cutoff = _now() - timedelta(hours=24)
         overdue_active = (
             db.query(PaperCurationJob.id)
@@ -687,6 +716,7 @@ class CodexPaperJobService:
             .filter(
                 PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
                 PaperCurationJob.status == "queued",
+                PaperCurationWorkflow.status.in_({"queued", "running"}),
             )
         )
         if overdue_active is None:

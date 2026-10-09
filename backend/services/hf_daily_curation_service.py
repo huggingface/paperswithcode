@@ -28,6 +28,10 @@ from backend.services.codex_add_evals_service import (
     codex_paper_job_service,
     deferred_workflows_for_release,
 )
+from backend.services.curation_priority_service import (
+    has_pending_daily_papers,
+    pending_daily_papers,
+)
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
@@ -138,17 +142,22 @@ class HFDailyCurationService:
         )
         return True
 
-    def release_awaiting_markdown(self, capacity: int) -> int:
+    def release_awaiting_markdown(
+        self, capacity: int, *, daily_only: bool = False
+    ) -> int:
         """Requeue deferred enrichment only after canonical Markdown exists."""
         if capacity <= 0:
             return 0
+        query = self.db.query(PaperCurationWorkflow).filter(
+            PaperCurationWorkflow.status == "deferred",
+            PaperCurationWorkflow.deferred_reason == "awaiting_markdown",
+        )
+        if daily_only:
+            query = query.join(
+                Paper, Paper.id == PaperCurationWorkflow.paper_id
+            ).filter(Paper.hf_daily_featured_on.isnot(None))
         workflows = (
-            self.db.query(PaperCurationWorkflow)
-            .filter(
-                PaperCurationWorkflow.status == "deferred",
-                PaperCurationWorkflow.deferred_reason == "awaiting_markdown",
-            )
-            .order_by(
+            query.order_by(
                 PaperCurationWorkflow.updated_at,
                 PaperCurationWorkflow.cohort_date,
                 PaperCurationWorkflow.cohort_order,
@@ -391,6 +400,20 @@ class HFDailyCurationService:
     def _enqueue_workflow(
         self, workflow: PaperCurationWorkflow, paper: Paper, *, priority: int
     ) -> None:
+        queued = (
+            self.db.query(PaperCurationJob)
+            .filter(
+                PaperCurationJob.parent_workflow_id == workflow.id,
+                PaperCurationJob.status == "queued",
+            )
+            .first()
+        )
+        if queued is not None:
+            queued.priority = priority
+            queued.cohort_date = workflow.cohort_date
+            workflow.status = "queued"
+            workflow.deferred_reason = None
+            return
         self.job_service.enqueue(
             self.db,
             kind="add-evals" if workflow.enrich_satisfied_by_job_id else "enrich-paper",
@@ -430,7 +453,46 @@ class HFDailyCurationService:
                     seen.add(arxiv_id)
                     discovered.append((cohort_date, order, arxiv_id))
 
+        for cohort_date, _, arxiv_id in discovered:
+            for paper in self.db.query(Paper).filter(Paper.arxiv_id == arxiv_id).all():
+                paper.hf_daily_featured_on = max(
+                    paper.hf_daily_featured_on or cohort_date, cohort_date
+                )
+        self.db.flush()
+        for paper in pending_daily_papers(self.db).order_by(
+            Paper.hf_daily_featured_on.desc(), Paper.id
+        ):
+            if paper.arxiv_id not in seen:
+                seen.add(paper.arxiv_id)
+                discovered.append((paper.hf_daily_featured_on, 0, paper.arxiv_id))
+
         state = self._state()
+        daily_pending = has_pending_daily_papers(self.db)
+        if daily_pending and state.canary_released:
+            # Keep queued attempts intact, but free their admission slots. Never
+            # interrupt running remote jobs or strand an active second stage.
+            active_job = (
+                self.db.query(PaperCurationJob.id)
+                .filter(
+                    PaperCurationJob.parent_workflow_id == PaperCurationWorkflow.id,
+                    PaperCurationJob.status.in_({"running", "dispatching"}),
+                )
+                .exists()
+            )
+            for workflow in (
+                self.db.query(PaperCurationWorkflow)
+                .join(Paper, Paper.id == PaperCurationWorkflow.paper_id)
+                .filter(
+                    PaperCurationWorkflow.status == "queued",
+                    PaperCurationWorkflow.source_candidate_id.is_(None),
+                    Paper.hf_daily_featured_on.is_(None),
+                    ~active_job,
+                )
+            ):
+                workflow.status = "deferred"
+                workflow.deferred_reason = "queue_cap"
+            self.db.flush()
+
         # Deferred overflow is durable backlog, not part of the initial ten
         # workflows whose terminal health decides whether that backlog may run.
         policy_workflows = (
@@ -473,7 +535,9 @@ class HFDailyCurationService:
 
         # Awaiting workflows already belong to the canary. Releasing one uses
         # queue capacity, but must not be blocked by the new-canary gate.
-        markdown_ready = self.release_awaiting_markdown(min(capacity, reconcile_limit))
+        markdown_ready = self.release_awaiting_markdown(
+            min(capacity, reconcile_limit), daily_only=daily_pending
+        )
         capacity -= markdown_ready
         reconcile_limit -= markdown_ready
         summary["released_markdown_ready"] = markdown_ready
@@ -591,7 +655,11 @@ class HFDailyCurationService:
         # Only fill spare capacity with historical work after admitting today's
         # rolling HF daily cohort, including previously deferred daily papers.
         self.db.flush()
-        deferred = deferred_workflows_for_release(self.db, create_capacity)
+        deferred = (
+            []
+            if has_pending_daily_papers(self.db)
+            else deferred_workflows_for_release(self.db, create_capacity)
+        )
         for workflow in deferred:
             paper = self.db.get(Paper, workflow.paper_id)
             if paper is None:
