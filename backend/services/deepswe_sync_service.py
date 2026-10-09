@@ -499,7 +499,7 @@ class DeepSweSyncService:
                 row.model_name = _model_name(entry)
                 row.harness = HARNESS_NAME
                 row.methodology = _methodology(entry, leaderboard)
-                row.metrics = {METRIC_NAME: round(entry.pass_at_1 * 100, 2)}
+                row.metrics = {METRIC_NAME: entry.pass_at_1}
                 row.uses_additional_data = False
                 row.is_open = identity.is_open
                 row.best_metric = METRIC_NAME

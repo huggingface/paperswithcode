@@ -111,7 +111,7 @@ def _session() -> Session:
     session = Session(engine)
     task = Task(id=15, name="Coding Agents", slug="coding-agents")
     dataset = Dataset(id=813, name="DeepSWE", slug="deepswe")
-    metric = Metric(id=47, name="Pass@1", direction="higher_is_better")
+    metric = Metric(id=47, name="Pass@1", direction="higher_is_better", scale="0-1")
     session.add_all([task, dataset, metric])
     session.add(
         TaskDataset(task_id=task.id, dataset_id=dataset.id, supports_harness=True)
@@ -218,7 +218,8 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert stats.unmatched_models == ["new-unmapped-model"]
     rows = {row.model_name: row for row in session.query(Evaluation).all()}
     assert set(rows) == {"Claude Opus 5 (max)", "Kimi K3 (max)"}
-    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 73.65}
+    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 0.7365}
+    assert rows["Kimi K3 (max)"].metrics == {"Pass@1": 0.6851}
     assert rows["Claude Opus 5 (max)"].is_open is False
     assert rows["Kimi K3 (max)"].is_open is True
     assert rows["Kimi K3 (max)"].harness == HARNESS_NAME
@@ -228,6 +229,33 @@ def test_sync_upserts_known_rows_and_preserves_unmatched_models():
     assert second.created == 0
     assert second.updated == 2
     assert session.query(Evaluation).count() == 2
+    assert rows["Claude Opus 5 (max)"].metrics == {"Pass@1": 0.7365}
+
+
+def test_sync_ranks_fraction_scores_with_paper_native_results():
+    session = _session()
+    native = Evaluation(
+        paper_id=1,
+        task_id=15,
+        dataset_id=813,
+        model_name="Paper-native result",
+        metrics={"Pass@1": 0.80},
+        best_metric="Pass@1",
+        harness=HARNESS_NAME,
+    )
+    session.add(native)
+    session.commit()
+    leaderboard = DeepSweLeaderboard(
+        generated_at=datetime(2026, 8, 13, 16, 11, tzinfo=UTC),
+        n_tasks=113,
+        entries=[_entry("kimi-k3", 0.6851)],
+    )
+
+    DeepSweSyncService(session).sync(leaderboard)
+
+    imported = session.query(Evaluation).filter_by(model_name="Kimi K3 (max)").one()
+    assert native.best_rank == 1
+    assert imported.best_rank == 2
 
 
 def test_sync_deletes_only_disappeared_managed_rows():

@@ -162,13 +162,6 @@ def _display_model_name(model_slug: str, reasoning_effort: str) -> str:
     return base
 
 
-def _format_score(value: float) -> str:
-    rounded = round(value, 2)
-    if rounded == int(rounded):
-        return str(int(rounded))
-    return f"{rounded:.2f}"
-
-
 def _get_task_and_dataset(session: Session) -> tuple[int, int]:
     task = session.query(DBTask).filter(DBTask.slug == TASK_SLUG).one_or_none()
     if task is None:
@@ -265,7 +258,7 @@ def import_rows(
                 model_name=model_name,
                 harness=HARNESS,
                 methodology=methodology,
-                metrics={METRIC: _format_score(pass_pct)},
+                metrics={METRIC: entry.pass_at_1},
                 best_metric=METRIC,
                 external_source_url=DEEPSWE_SOURCE_URL,
                 source_url=DEEPSWE_SOURCE_URL,
