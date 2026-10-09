@@ -554,6 +554,7 @@ class HFDailyCurationService:
             canary_capacity,
             reconcile_limit,
         )
+        initial_create_capacity = create_capacity
 
         for cohort_date, order, arxiv_id in discovered:
             paper = (
@@ -651,6 +652,17 @@ class HFDailyCurationService:
             self.db.flush()
             if workflow.status == "queued":
                 self._enqueue_workflow(workflow, paper, priority=10)
+
+        # Resume source-ready historical work too; blocked daily papers must
+        # not prevent it from using capacity left after daily admission. Existing
+        # awaiting-Markdown workflows may resume even before the canary opens.
+        self.db.flush()
+        remaining_capacity = min(capacity, reconcile_limit) - (
+            initial_create_capacity - create_capacity
+        )
+        markdown_ready = self.release_awaiting_markdown(remaining_capacity)
+        create_capacity = max(0, create_capacity - markdown_ready)
+        summary["released_markdown_ready"] += markdown_ready
 
         # Only fill spare capacity with historical work after admitting today's
         # rolling HF daily cohort, including previously deferred daily papers.

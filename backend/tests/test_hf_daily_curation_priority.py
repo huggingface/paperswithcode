@@ -386,3 +386,24 @@ def test_running_daily_does_not_reserve_idle_workers(queue_db):
 
     assert CodexPaperJobService._next_scheduled_row(db) is background
     assert active.status == "running"
+
+
+def test_source_ready_backfill_resumes_despite_failed_daily(queue_db):
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    workflow(db, fresh.id, status="failed")
+    old = workflow(db, paper(db, 2).id)
+    old.deferred_reason = "awaiting_markdown"
+    db.commit()
+    svc, jobs = service(db, [], 1)
+    svc.markdown_available = lambda paper, settings: True
+    svc.release_awaiting_markdown = (
+        HFDailyCurationService.release_awaiting_markdown.__get__(svc)
+    )
+
+    result = svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    assert result["released_markdown_ready"] == 1
+    assert jobs.enqueue.call_count == 1
+    assert jobs.enqueue.call_args.kwargs["paper_id"] == old.paper_id
