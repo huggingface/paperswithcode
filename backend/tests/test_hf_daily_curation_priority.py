@@ -130,9 +130,9 @@ def test_existing_conference_job_promoted_when_featured_on_hf(queue_db, job_stat
     jobs.enqueue.assert_not_called()
 
 
-def test_spare_capacity_does_not_admit_backfill_while_daily_pending(queue_db):
+def test_spare_capacity_admits_backfill_while_daily_pending(queue_db):
     db = queue_db
-    workflow(db, paper(db, 1).id)
+    old = workflow(db, paper(db, 1).id)
     fresh = paper(db, 2)
     db.commit()
     svc, jobs = service(db, [fresh.arxiv_id], 2)
@@ -142,7 +142,7 @@ def test_spare_capacity_does_not_admit_backfill_while_daily_pending(queue_db):
     assert [
         (c.kwargs["paper_id"], c.kwargs["priority"])
         for c in jobs.enqueue.call_args_list
-    ] == [(fresh.id, 10)]
+    ] == [(fresh.id, 10), (old.paper_id, 100)]
 
 
 def test_full_queue_defers_daily_without_exceeding_capacity(queue_db):
@@ -161,7 +161,7 @@ def test_full_queue_defers_daily_without_exceeding_capacity(queue_db):
 @pytest.mark.parametrize(
     "status", [None, "deferred", "failed", "partial", "queued", "running", "canceled"]
 )
-def test_pending_daily_blocks_conference_dispatch(queue_db, status):
+def test_daily_without_ready_job_allows_conference_dispatch(queue_db, status):
     from backend.services.codex_add_evals_service import CodexPaperJobService
 
     db = queue_db
@@ -182,7 +182,7 @@ def test_pending_daily_blocks_conference_dispatch(queue_db, status):
         )
     )
     db.flush()
-    assert CodexPaperJobService._next_scheduled_row(db) is None
+    assert CodexPaperJobService._next_scheduled_row(db).paper_id == old.paper_id
 
 
 def test_completed_daily_allows_conference_dispatch(queue_db):
@@ -302,3 +302,87 @@ def test_trending_resolution_can_run_while_daily_waits_for_markdown(queue_db):
     db.add(job)
     db.flush()
     assert CodexPaperJobService._next_scheduled_row(db) is job
+
+
+def test_daily_retry_reclaims_next_available_worker(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    daily = workflow(db, fresh.id, status="failed")
+    old = workflow(db, paper(db, 2).id, status="queued")
+    background = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=old.paper_id,
+        parent_workflow_id=old.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=100,
+        trigger="hf-daily-cron",
+    )
+    db.add(background)
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db) is background
+
+    daily.status = "running"
+    retry = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=fresh.id,
+        parent_workflow_id=daily.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=50,
+        trigger="hf-daily-cron",
+    )
+    db.add(retry)
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db) is retry
+
+
+def test_blocked_daily_does_not_prevent_backfill_admission(queue_db):
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    workflow(db, fresh.id, status="failed")
+    old = workflow(db, paper(db, 2).id)
+    db.commit()
+    svc, jobs = service(db, [], 1)
+
+    svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    assert jobs.enqueue.call_count == 1
+    assert jobs.enqueue.call_args.kwargs["paper_id"] == old.paper_id
+
+
+def test_running_daily_does_not_reserve_idle_workers(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    daily = workflow(db, fresh.id, status="running")
+    active = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=fresh.id,
+        parent_workflow_id=daily.id,
+        kind="enrich-paper",
+        status="running",
+        priority=10,
+        trigger="hf-daily-cron",
+    )
+    old = workflow(db, paper(db, 2).id, status="queued")
+    background = PaperCurationJob(
+        id=uuid.uuid4(),
+        paper_id=old.paper_id,
+        parent_workflow_id=old.id,
+        kind="enrich-paper",
+        status="queued",
+        priority=100,
+        trigger="hf-daily-cron",
+    )
+    db.add_all([active, background])
+    db.flush()
+
+    assert CodexPaperJobService._next_scheduled_row(db) is background
+    assert active.status == "running"

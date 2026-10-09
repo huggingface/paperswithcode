@@ -655,11 +655,7 @@ class HFDailyCurationService:
         # Only fill spare capacity with historical work after admitting today's
         # rolling HF daily cohort, including previously deferred daily papers.
         self.db.flush()
-        deferred = (
-            []
-            if has_pending_daily_papers(self.db)
-            else deferred_workflows_for_release(self.db, create_capacity)
-        )
+        deferred = deferred_workflows_for_release(self.db, create_capacity)
         for workflow in deferred:
             paper = self.db.get(Paper, workflow.paper_id)
             if paper is None:

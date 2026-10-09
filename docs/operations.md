@@ -552,22 +552,21 @@ is capped at 200, with overflow recorded as durable deferred workflows.
 The importer durably records HF daily membership in
 `papers.hf_daily_featured_on`; reconciliation also records membership from the
 live feed and retains unfinished daily papers after they leave the seven-day
-window. Daily work must finish both enrichment and evaluation curation before
-conference backfill can be admitted or dispatched. Failed, canceled, deferred,
-awaiting-Markdown, and imported-but-not-yet-queued daily papers all block
-backfill. A completed no-evaluations audit counts as completed curation.
+window. Ready daily jobs always get the next available scheduled worker, ahead
+of conference backfill and trending-model work, regardless of their trigger.
 
-Queued backfill workflows are parked to free admission capacity while preserving
-their existing job rows. Running work is allowed to finish, but subsequent
-background stages wait. Daily jobs use priority 10; backfill uses priority 100.
-The old overdue-work allowance applies only once no daily papers remain
-unfinished. Operators must resolve failed daily work rather than bypassing this
-gate by increasing worker count. A canceled daily workflow intentionally remains
-unfinished; explicitly resume it with the existing scheduled-job retry control
-(`pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-id>`). It is neither
-automatically restarted nor silently treated as enriched. Trending-model jobs
-can still run when no daily stage is ready; papers shared by daily and trending
-discovery receive daily precedence regardless of the job trigger.
+Failed, canceled, awaiting-Markdown, running, or not-yet-queued daily work does
+not reserve idle workers. The reconciler admits daily work first and fills
+remaining queue capacity with historical work; dispatch falls back to that
+work when no daily stage is ready. Already-running jobs finish normally.
+Retries regain daily precedence when they become runnable. Explicitly canceled
+daily work still requires the scheduled-job retry control to resume it.
+
+Queued backfill can be parked to free admission capacity for new daily papers,
+preserving its existing job rows. Unused capacity immediately readmits
+backfill. Daily jobs use priority 10 versus backfill priority 100, and a daily
+retry's source membership keeps it ahead even if its numeric priority differs.
+The existing overdue-work allowance applies only when no daily job is ready.
 
 Apply `backend/database/migrations/add_hf_daily_featured_on.sql` before deploying
 this scheduler or importer. The additive nullable column is compatible with the

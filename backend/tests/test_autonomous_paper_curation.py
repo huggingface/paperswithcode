@@ -1518,15 +1518,11 @@ class _DispatchDatabase:
         return _DispatchQuery(self)
 
 
-def test_overdue_dispatch_reserves_only_one_slot_before_newest_first(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.codex_add_evals_service.has_pending_daily_papers",
-        lambda db: False,
-    )
+def test_overdue_dispatch_reserves_only_one_slot_before_newest_first():
     oldest_overdue = object()
     newest = object()
-    first_slot = _DispatchDatabase(None, oldest_overdue)
-    remaining_slot = _DispatchDatabase(object(), None, newest)
+    first_slot = _DispatchDatabase(None, None, oldest_overdue)
+    remaining_slot = _DispatchDatabase(None, object(), None, newest)
 
     assert CodexPaperJobService._next_scheduled_row(first_slot) is oldest_overdue
     assert CodexPaperJobService._next_scheduled_row(remaining_slot) is newest
@@ -1537,24 +1533,16 @@ def test_overdue_dispatch_reserves_only_one_slot_before_newest_first(monkeypatch
     )
 
 
-def test_trending_resolution_precedes_non_overdue_daily_work(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.codex_add_evals_service.has_pending_daily_papers",
-        lambda db: False,
-    )
+def test_trending_resolution_precedes_non_overdue_backfill():
     trending = object()
-    database = _DispatchDatabase(object(), trending)
+    database = _DispatchDatabase(None, object(), trending)
 
     assert CodexPaperJobService._next_scheduled_row(database) is trending
 
 
-def test_newest_first_fallback_when_no_overdue_workflow_exists(monkeypatch):
-    monkeypatch.setattr(
-        "backend.services.codex_add_evals_service.has_pending_daily_papers",
-        lambda db: False,
-    )
+def test_newest_first_fallback_when_no_overdue_workflow_exists():
     newest = object()
-    database = _DispatchDatabase(None, None, newest)
+    database = _DispatchDatabase(None, None, None, None, newest)
 
     assert CodexPaperJobService._next_scheduled_row(database) is newest
 

@@ -35,7 +35,6 @@ from backend.models.database import (
     PaperCurationWorkflow,
     TrendingModelCandidate,
 )
-from backend.services.curation_priority_service import has_pending_daily_papers
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
     serialize_thumbnail,
@@ -238,10 +237,6 @@ def deferred_workflows_for_release(
     )
     if policy_version is not None:
         query = query.filter(PaperCurationWorkflow.policy_version == policy_version)
-    if has_pending_daily_papers(db):
-        query = query.join(Paper, Paper.id == PaperCurationWorkflow.paper_id).filter(
-            Paper.hf_daily_featured_on.isnot(None)
-        )
     overdue = (
         query.filter(PaperCurationWorkflow.created_at < _now() - timedelta(hours=24))
         .order_by(
@@ -684,34 +679,30 @@ class CodexPaperJobService:
 
     @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:
-        """Reserve one slot for the oldest 24-hour workflow, then stay newest-first."""
-        # Even failed, deferred, or awaiting-Markdown daily work blocks
-        # conference dispatch. Imported papers without a workflow also count.
-        if has_pending_daily_papers(db):
-            daily = (
-                db.query(PaperCurationJob)
-                .join(Paper, Paper.id == PaperCurationJob.paper_id)
-                .join(
-                    PaperCurationWorkflow,
-                    PaperCurationWorkflow.id == PaperCurationJob.parent_workflow_id,
-                )
-                .filter(
-                    Paper.hf_daily_featured_on.isnot(None),
-                    PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
-                    PaperCurationJob.status == "queued",
-                    PaperCurationWorkflow.status.in_({"queued", "running"}),
-                )
-                .order_by(
-                    PaperCurationJob.priority,
-                    Paper.hf_daily_featured_on.desc(),
-                    PaperCurationJob.created_at,
-                    PaperCurationJob.id,
-                )
-                .first()
+        """Choose ready daily work first, then keep spare workers busy."""
+        daily = (
+            db.query(PaperCurationJob)
+            .join(Paper, Paper.id == PaperCurationJob.paper_id)
+            .join(
+                PaperCurationWorkflow,
+                PaperCurationWorkflow.id == PaperCurationJob.parent_workflow_id,
             )
-            # Trending-model work has its own provenance; it is not conference
-            # backfill. Keep that lane progressing when daily work is not ready.
-            return daily or CodexPaperJobService._next_trending_row(db)
+            .filter(
+                Paper.hf_daily_featured_on.isnot(None),
+                PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
+                PaperCurationJob.status == "queued",
+                PaperCurationWorkflow.status.in_({"queued", "running"}),
+            )
+            .order_by(
+                PaperCurationJob.priority,
+                Paper.hf_daily_featured_on.desc(),
+                PaperCurationJob.created_at,
+                PaperCurationJob.id,
+            )
+            .first()
+        )
+        if daily is not None:
+            return daily
         cutoff = _now() - timedelta(hours=24)
         overdue_active = (
             db.query(PaperCurationJob.id)
