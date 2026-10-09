@@ -553,7 +553,7 @@ The importer durably records HF daily membership in
 `papers.hf_daily_featured_on`; reconciliation also records membership from the
 live feed and retains unfinished daily papers after they leave the seven-day
 window. Daily work must finish both enrichment and evaluation curation before
-conference backfill can be admitted or dispatched. Failed, deferred,
+conference backfill can be admitted or dispatched. Failed, canceled, deferred,
 awaiting-Markdown, and imported-but-not-yet-queued daily papers all block
 backfill. A completed no-evaluations audit counts as completed curation.
 
@@ -562,7 +562,12 @@ their existing job rows. Running work is allowed to finish, but subsequent
 background stages wait. Daily jobs use priority 10; backfill uses priority 100.
 The old overdue-work allowance applies only once no daily papers remain
 unfinished. Operators must resolve failed daily work rather than bypassing this
-gate by increasing worker count.
+gate by increasing worker count. A canceled daily workflow intentionally remains
+unfinished; explicitly resume it with the existing scheduled-job retry control
+(`pwc-cron enqueue_hf_daily_paper_curation --retry-job <job-id>`). It is neither
+automatically restarted nor silently treated as enriched. Trending-model jobs
+can still run when no daily stage is ready; papers shared by daily and trending
+discovery receive daily precedence regardless of the job trigger.
 
 Apply `backend/database/migrations/add_hf_daily_featured_on.sql` before deploying
 this scheduler or importer. The additive nullable column is compatible with the

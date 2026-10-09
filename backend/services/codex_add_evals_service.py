@@ -667,12 +667,28 @@ class CodexPaperJobService:
         return row
 
     @staticmethod
+    def _next_trending_row(db: Session) -> PaperCurationJob | None:
+        return (
+            db.query(PaperCurationJob)
+            .filter(
+                PaperCurationJob.trigger == "hf-trending-cron",
+                PaperCurationJob.status == "queued",
+            )
+            .order_by(
+                PaperCurationJob.priority,
+                PaperCurationJob.created_at,
+                PaperCurationJob.id,
+            )
+            .first()
+        )
+
+    @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:
         """Reserve one slot for the oldest 24-hour workflow, then stay newest-first."""
         # Even failed, deferred, or awaiting-Markdown daily work blocks
         # conference dispatch. Imported papers without a workflow also count.
         if has_pending_daily_papers(db):
-            return (
+            daily = (
                 db.query(PaperCurationJob)
                 .join(Paper, Paper.id == PaperCurationJob.paper_id)
                 .join(
@@ -681,7 +697,7 @@ class CodexPaperJobService:
                 )
                 .filter(
                     Paper.hf_daily_featured_on.isnot(None),
-                    PaperCurationJob.trigger == "hf-daily-cron",
+                    PaperCurationJob.trigger.in_({"hf-daily-cron", "hf-trending-cron"}),
                     PaperCurationJob.status == "queued",
                     PaperCurationWorkflow.status.in_({"queued", "running"}),
                 )
@@ -693,6 +709,9 @@ class CodexPaperJobService:
                 )
                 .first()
             )
+            # Trending-model work has its own provenance; it is not conference
+            # backfill. Keep that lane progressing when daily work is not ready.
+            return daily or CodexPaperJobService._next_trending_row(db)
         cutoff = _now() - timedelta(hours=24)
         overdue_active = (
             db.query(PaperCurationJob.id)
@@ -732,19 +751,7 @@ class CodexPaperJobService:
             )
             if overdue is not None:
                 return overdue
-        trending = (
-            db.query(PaperCurationJob)
-            .filter(
-                PaperCurationJob.trigger == "hf-trending-cron",
-                PaperCurationJob.status == "queued",
-            )
-            .order_by(
-                PaperCurationJob.priority,
-                PaperCurationJob.created_at,
-                PaperCurationJob.id,
-            )
-            .first()
-        )
+        trending = CodexPaperJobService._next_trending_row(db)
         if trending is not None:
             return trending
         return base.order_by(

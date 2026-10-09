@@ -159,7 +159,7 @@ def test_full_queue_defers_daily_without_exceeding_capacity(queue_db):
 
 
 @pytest.mark.parametrize(
-    "status", [None, "deferred", "failed", "partial", "queued", "running"]
+    "status", [None, "deferred", "failed", "partial", "queued", "running", "canceled"]
 )
 def test_pending_daily_blocks_conference_dispatch(queue_db, status):
     from backend.services.codex_add_evals_service import CodexPaperJobService
@@ -260,7 +260,8 @@ def test_released_backfill_reuses_parked_job(queue_db):
     jobs.enqueue.assert_not_called()
 
 
-def test_daily_dispatch_precedes_overdue_conference_job(queue_db):
+@pytest.mark.parametrize("daily_trigger", ["hf-daily-cron", "hf-trending-cron"])
+def test_daily_dispatch_precedes_overdue_conference_job(queue_db, daily_trigger):
     from backend.services.codex_add_evals_service import CodexPaperJobService
 
     db = queue_db
@@ -277,8 +278,27 @@ def test_daily_dispatch_precedes_overdue_conference_job(queue_db):
             kind="enrich-paper",
             status="queued",
             priority=100,
-            trigger="hf-daily-cron",
+            trigger=daily_trigger if parent is daily else "hf-daily-cron",
         )
         db.add(job)
     db.flush()
     assert CodexPaperJobService._next_scheduled_row(db).paper_id == fresh.id
+
+
+def test_trending_resolution_can_run_while_daily_waits_for_markdown(queue_db):
+    from backend.services.codex_add_evals_service import CodexPaperJobService
+
+    db = queue_db
+    fresh = paper(db, 1)
+    fresh.hf_daily_featured_on = date(2026, 10, 9)
+    workflow(db, fresh.id)
+    job = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind="resolve-model-paper",
+        status="queued",
+        priority=25,
+        trigger="hf-trending-cron",
+    )
+    db.add(job)
+    db.flush()
+    assert CodexPaperJobService._next_scheduled_row(db) is job
