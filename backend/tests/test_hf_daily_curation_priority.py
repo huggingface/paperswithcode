@@ -407,3 +407,32 @@ def test_source_ready_backfill_resumes_despite_failed_daily(queue_db):
     assert result["released_markdown_ready"] == 1
     assert jobs.enqueue.call_count == 1
     assert jobs.enqueue.call_args.kwargs["paper_id"] == old.paper_id
+
+
+@pytest.mark.parametrize("backfill_reason", ["queue_cap", "awaiting_markdown"])
+@pytest.mark.parametrize("capacity", [0, 1, 2])
+def test_daily_retry_consumes_admission_capacity(queue_db, backfill_reason, capacity):
+    db = queue_db
+    fresh = paper(db, 1)
+    current = workflow(db, fresh.id, status="failed")
+    old = workflow(db, paper(db, 2).id)
+    old.deferred_reason = backfill_reason
+    db.commit()
+    svc, jobs = service(db, [fresh.arxiv_id], capacity)
+    svc.markdown_available = lambda paper, settings: True
+    svc.release_awaiting_markdown = (
+        HFDailyCurationService.release_awaiting_markdown.__get__(svc)
+    )
+
+    def retry(row):
+        assert row is current
+        row.status = "running"
+        return True
+
+    svc.retry_terminal_workflow = Mock(side_effect=retry)
+    result = svc.reconcile(today=date(2026, 10, 9), lookback_days=1, dry_run=True)
+
+    assert result["retried"] == min(capacity, 1)
+    assert jobs.enqueue.call_count == max(0, capacity - 1)
+    if capacity == 2:
+        assert jobs.enqueue.call_args.kwargs["paper_id"] == old.paper_id
