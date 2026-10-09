@@ -171,10 +171,109 @@ _DEEPSEEK_V4_1_FLASH = arxiv("2609.19969")
 # The ParseBench paper is LlamaIndex's own report on its LlamaParse pipelines.
 _LLAMAPARSE = arxiv("2604.08538", is_open=False)
 
+_GPT_6_1_SOL = external(
+    "https://openai.com/index/introducing-gpt-6-1-sol/",
+    "Introducing GPT-6.1 Sol",
+    "2026-09-29",
+)
+
+_GEMINI_3_7_FLASH = external(
+    "https://blog.google/innovation-and-ai/models-and-research/gemini-models/introducing-gemini-3-7-flash/",
+    "Introducing Gemini 3.7 Flash",
+    "2026-08-13",
+)
+
+_OPUS_5_5 = external(
+    "https://www.anthropic.com/claude-opus-5-5",
+    "Introducing Claude Opus 5.5",
+    "2026-09-22",
+)
+
+_SONNET_5_5 = external(
+    "https://www.anthropic.com/claude-sonnet-5-5",
+    "Introducing Claude Sonnet 5.5",
+    "2026-09-28",
+)
+
+_HAIKU_5_5 = external(
+    "https://www.anthropic.com/claude-haiku-5-5",
+    "Introducing Claude Haiku 5.5",
+    "2026-10-07",
+)
+
+_GPT_6_ASTRA = external(
+    "https://openai.com/index/gpt-6-astra/",
+    "GPT-6 Astra: A new generation of intelligence",
+    "2026-09-03",
+)
+
+_GPT_6_SOL_LUNA = external(
+    "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+    "Introducing GPT-6 Sol and Luna",
+    "2026-09-22",
+)
+
 # Exact upstream `Provider` labels are the trust boundary between a leaderboard
 # row and its reviewed introducing paper or official release page. Rows whose
 # label is not reviewed here stay unpublished and are reported by the job.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "HPD-Parsing": arxiv("2607.18839"),
+    "HunyuanOCR 1.5": arxiv("2607.04884"),
+    "TeleOCR": arxiv("2608.12898"),
+    "OvisOCR2": arxiv("2607.13639"),
+    "WeVisDoc-2B": arxiv("2609.20423"),
+    "WeVisDoc-4B": arxiv("2609.20423"),
+    "OpenAI GPT-6.1 Sol (Reasoning Low)": _GPT_6_1_SOL,
+    "Google Gemini 3.7 Flash (Thinking High)": _GEMINI_3_7_FLASH,
+    "Google Gemini 3.7 Flash (Thinking Medium)": _GEMINI_3_7_FLASH,
+    "Google Gemini 3.7 Flash (Thinking Low)": _GEMINI_3_7_FLASH,
+    "Anthropic Opus 5.5 (Effort High)": _OPUS_5_5,
+    "Anthropic Opus 5.5": _OPUS_5_5,
+    "Anthropic Opus 5.5 (Effort Low)": _OPUS_5_5,
+    "Anthropic Sonnet 5.5": _SONNET_5_5,
+    "Anthropic Haiku 5.5": _HAIKU_5_5,
+    "OpenAI GPT-6 Astra (Reasoning Low)": _GPT_6_ASTRA,
+    "OpenAI GPT-6 Sol (Reasoning High)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Sol (Reasoning Medium)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Sol (Reasoning None)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning Max)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning XHigh)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning High)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning Medium)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning Low)": _GPT_6_SOL_LUNA,
+    "OpenAI GPT-6 Luna (Reasoning None)": _GPT_6_SOL_LUNA,
+    "Google Gemini 3 Flash (Thinking Medium)": _GEMINI_3_FLASH,
+    "Google Gemini 3.5 Flash (Thinking High)": _GEMINI_3_5,
+    "Google Gemini 3.6 Flash (Thinking High)": _GEMINI_3_6_FLASH,
+    "Google Gemini 3.8 Flash (Thinking Medium)": _GEMINI_3_8_FLASH,
+    "Google Gemini 3.1 Pro (Thinking Low)": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-pro/",
+        "Gemini 3.1 Pro: A smarter model for your most complex tasks",
+        "2026-02-19",
+        is_open=False,
+    ),
+    "Google Gemini 3.1 Flash Lite (Thinking Medium)": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-flash-lite/",
+        "Gemini 3.1 Flash-Lite: Built for intelligence at scale",
+        "2026-03-03",
+        is_open=False,
+    ),
+    "Google Gemini 3.1 Flash Lite (Thinking High)": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-3-1-flash-lite/",
+        "Gemini 3.1 Flash-Lite: Built for intelligence at scale",
+        "2026-03-03",
+        is_open=False,
+    ),
+    "Google Gemini 3.5 Flash Lite (Thinking High)": _GEMINI_3_6_FLASH,
+    "Google Gemini 3.5 Flash Lite (Thinking Medium)": _GEMINI_3_6_FLASH,
+    "OpenAI GPT-5.6 Terra (Reasoning Medium)": _GPT_5_6,
+    "OpenAI GPT-5.6 Terra (Reasoning Low)": _GPT_5_6,
+    "OpenAI GPT-5.6 Sol (Reasoning High)": _GPT_5_6,
+    "OpenAI GPT-5.6 Luna (Reasoning Max)": _GPT_5_6,
+    "OpenAI GPT-5.6 Luna (Reasoning XHigh)": _GPT_5_6,
+    "OpenAI GPT-5.6 Luna (Reasoning High)": _GPT_5_6,
+    "OpenAI GPT-5.6 Luna (Reasoning Medium)": _GPT_5_6,
+    "OpenAI GPT-5.6 Luna (Reasoning Low)": _GPT_5_6,
     "LlamaParse Agentic Plus": _LLAMAPARSE,
     "LlamaParse Agentic": _LLAMAPARSE,
     "LlamaParse Cost Effective": _LLAMAPARSE,

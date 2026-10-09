@@ -86,6 +86,11 @@ def external(
 # currently present on FrontierCode 1.1. New upstream models must be reviewed
 # before the sync will publish them.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "Claude Haiku 5.5": external(
+        "https://www.anthropic.com/claude-haiku-5-5",
+        "Introducing Claude Haiku 5.5",
+        "2026-10-07",
+    ),
     "Claude Opus 5.5": external(
         "https://www.anthropic.com/claude-opus-5-5",
         "Introducing Claude Opus 5.5",

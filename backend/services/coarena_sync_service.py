@@ -47,6 +47,39 @@ class PaperIdentity:
 # Exact upstream IDs are the trust boundary between a product label and a paper.
 # New models remain unmatched until their release identity has been reviewed.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "gemini-3-8-flash": PaperIdentity(
+        source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
+        is_open=False,
+    ),
+    "gpt-6-1-sol": PaperIdentity(
+        source_url="https://openai.com/index/introducing-gpt-6-1-sol/", is_open=False
+    ),
+    "opus-5-5": PaperIdentity(
+        source_url="https://www.anthropic.com/claude-opus-5-5", is_open=False
+    ),
+    "gpt-6-luna": PaperIdentity(
+        source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        is_open=False,
+    ),
+    "gpt-6-sol": PaperIdentity(
+        source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        is_open=False,
+    ),
+    "gpt-6-astra": PaperIdentity(
+        source_url="https://openai.com/index/gpt-6-astra/", is_open=False
+    ),
+    "fable-5-1": PaperIdentity(
+        source_url="https://www.anthropic.com/claude-fable-and-mythos-5-1",
+        is_open=False,
+    ),
+    "grok-4-7": PaperIdentity(source_url="https://x.ai/news/grok-4-7", is_open=False),
+    "sonnet-5-5": PaperIdentity(
+        source_url="https://www.anthropic.com/claude-sonnet-5-5", is_open=False
+    ),
+    "glm-5-3-flash": PaperIdentity(
+        source_url="https://z.ai/blog/glm-5.3-flash", is_open=True
+    ),
+    "mimo-v2-6-pro": PaperIdentity(arxiv_id="2610.11959", is_open=True),
     "fable-5": PaperIdentity(
         source_url="https://www.anthropic.com/news/claude-fable-5-mythos-5"
     ),

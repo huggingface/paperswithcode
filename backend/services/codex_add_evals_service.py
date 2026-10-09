@@ -780,8 +780,24 @@ class CodexPaperJobService:
             return True
         usage = cls._scheduled_usage_snapshot(db, state)
         threshold = usage["pause_threshold_tokens"]
+        now = _now()
+        if (
+            state.dispatch_enabled
+            and state.pause_condition == "daily_token_guardrail"
+            and state.paused_at is not None
+            and state.paused_at.astimezone(UTC).date() < now.date()
+            and threshold is not None
+            and usage["current_day_tokens"] <= threshold
+        ):
+            state.paused_at = None
+            state.pause_condition = None
+            state.pause_reason = None
+            db.commit()
+            logger.info("paper curation daily token pause expired after UTC rollover")
         if threshold is not None and usage["current_day_tokens"] > threshold:
-            now = _now()
+            # A usage observation must never replace an operator/security pause.
+            if state.pause_condition not in {None, "daily_token_guardrail"}:
+                return False
             state.paused_at = now
             state.pause_condition = "daily_token_guardrail"
             state.pause_reason = (
