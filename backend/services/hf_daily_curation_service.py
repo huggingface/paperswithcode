@@ -388,6 +388,30 @@ class HFDailyCurationService:
             },
         }
 
+    def _enqueue_workflow(
+        self, workflow: PaperCurationWorkflow, paper: Paper, *, priority: int
+    ) -> None:
+        self.job_service.enqueue(
+            self.db,
+            kind="add-evals" if workflow.enrich_satisfied_by_job_id else "enrich-paper",
+            paper_id=paper.id,
+            paper_route=get_paper_route_identifier(
+                paper.source, paper.arxiv_id, paper.id
+            ),
+            paper_title=paper.title,
+            requested_by="hf-daily-cron",
+            settings=self.settings,
+            trigger="hf-daily-cron",
+            parent_workflow_id=workflow.id,
+            cohort_date=workflow.cohort_date,
+            policy_version=workflow.policy_version,
+            priority=priority,
+            dispatch=False,
+            commit=False,
+        )
+        workflow.status = "queued"
+        workflow.deferred_reason = None
+
     def reconcile(
         self,
         *,
@@ -467,40 +491,6 @@ class HFDailyCurationService:
             reconcile_limit,
         )
 
-        deferred = deferred_workflows_for_release(self.db, create_capacity)
-        for workflow in deferred:
-            paper = self.db.get(Paper, workflow.paper_id)
-            if paper is None:
-                workflow.status = "failed"
-                workflow.error = (
-                    "Paper was deleted before deferred curation could start"
-                )
-                continue
-            route = get_paper_route_identifier(paper.source, paper.arxiv_id, paper.id)
-            kind = (
-                "add-evals" if workflow.enrich_satisfied_by_job_id else "enrich-paper"
-            )
-            self.job_service.enqueue(
-                self.db,
-                kind=kind,
-                paper_id=paper.id,
-                paper_route=route,
-                paper_title=paper.title,
-                requested_by="hf-daily-cron",
-                settings=self.settings,
-                trigger="hf-daily-cron",
-                parent_workflow_id=workflow.id,
-                cohort_date=workflow.cohort_date,
-                policy_version=workflow.policy_version,
-                priority=100,
-                dispatch=False,
-                commit=False,
-            )
-            workflow.status = "queued"
-            workflow.deferred_reason = None
-            create_capacity -= 1
-            summary["released_deferred"] += 1
-
         for cohort_date, order, arxiv_id in discovered:
             paper = (
                 self.db.query(Paper)
@@ -518,6 +508,31 @@ class HFDailyCurationService:
                 .first()
             )
             if existing:
+                # The live HF cohort is authoritative, including papers originally
+                # queued through a conference backfill under the same policy.
+                if existing.status in {"queued", "running", "deferred"}:
+                    existing.cohort_date = cohort_date
+                    existing.cohort_order = order
+                    for job in (
+                        self.db.query(PaperCurationJob)
+                        .filter(
+                            PaperCurationJob.parent_workflow_id == existing.id,
+                            PaperCurationJob.status.in_(
+                                {"queued", "dispatching", "running"}
+                            ),
+                        )
+                        .all()
+                    ):
+                        job.priority = 10
+                        job.cohort_date = cohort_date
+                    if (
+                        existing.status == "deferred"
+                        and existing.deferred_reason in {"queue_cap", "canary_cap"}
+                        and create_capacity > 0
+                    ):
+                        self._enqueue_workflow(existing, paper, priority=10)
+                        create_capacity -= 1
+                        summary["released_deferred"] += 1
                 if (
                     existing.status in {"failed", "partial"}
                     and summary["retried"] < reconcile_limit
@@ -571,26 +586,24 @@ class HFDailyCurationService:
             self.db.add(workflow)
             self.db.flush()
             if workflow.status == "queued":
-                kind = "add-evals" if admin_success["enrich-paper"] else "enrich-paper"
-                route = get_paper_route_identifier(
-                    paper.source, paper.arxiv_id, paper.id
+                self._enqueue_workflow(workflow, paper, priority=10)
+
+        # Only fill spare capacity with historical work after admitting today's
+        # rolling HF daily cohort, including previously deferred daily papers.
+        self.db.flush()
+        deferred = deferred_workflows_for_release(self.db, create_capacity)
+        for workflow in deferred:
+            paper = self.db.get(Paper, workflow.paper_id)
+            if paper is None:
+                workflow.status = "failed"
+                workflow.error = (
+                    "Paper was deleted before deferred curation could start"
                 )
-                self.job_service.enqueue(
-                    self.db,
-                    kind=kind,
-                    paper_id=paper.id,
-                    paper_route=route,
-                    paper_title=paper.title,
-                    requested_by="hf-daily-cron",
-                    settings=self.settings,
-                    trigger="hf-daily-cron",
-                    parent_workflow_id=workflow.id,
-                    cohort_date=cohort_date,
-                    policy_version=workflow.policy_version,
-                    priority=100,
-                    dispatch=False,
-                    commit=False,
-                )
+                continue
+            self._enqueue_workflow(workflow, paper, priority=100)
+            create_capacity -= 1
+            summary["released_deferred"] += 1
+
         if dry_run:
             self.db.rollback()
             summary["dry_run"] = True

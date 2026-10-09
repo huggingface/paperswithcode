@@ -549,6 +549,13 @@ Scheduled work may use three of four global slots; one remains reserved for
 admin work. The first production run is capped at ten workflows until every
 canary reaches a successful terminal state. The nonterminal scheduled backlog
 is capped at 200, with overflow recorded as durable deferred workflows.
+The reconciler admits the rolling HF daily cohort before historical deferred
+work. Daily papers use priority 10 versus backfill priority 100; existing
+conference workflows featured on HF are promoted without duplicating jobs.
+The second stage inherits that priority. The dispatcher retains its one-slot
+overdue-work allowance, and already running work is not interrupted. A full
+queue still defers new work until a later hourly reconciliation has capacity.
+
 
 Configuration is fail-closed. Production direct apply requires all of:
 
