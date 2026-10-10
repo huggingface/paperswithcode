@@ -73,6 +73,21 @@ describe("Header navigation", () => {
     expect(within(mobileLinks[1]).getByText("New")).toBeVisible();
   });
 
+  it("closes the mobile menu with its close button or Escape and restores focus", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><Header onOpenSearch={vi.fn()} /></MemoryRouter>);
+    const trigger = screen.getByRole("button", { name: "Open menu" });
+    await user.click(trigger);
+    expect(screen.getByRole("dialog", { name: "Navigation menu" })).toBeVisible();
+    await user.click(screen.getByRole("button", { name: "Close menu" }));
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+    await user.click(trigger);
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+    expect(trigger).toHaveFocus();
+  });
+
   it("slides one shared indicator to the active desktop tab", async () => {
     vi.spyOn(HTMLElement.prototype, "offsetLeft", "get")
       .mockImplementation(function getOffsetLeft(this: HTMLElement) {

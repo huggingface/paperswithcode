@@ -1,4 +1,5 @@
 import React from "react";
+import * as Dialog from "@radix-ui/react-dialog";
 import { NavLink, useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
@@ -123,7 +124,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   }, [location.pathname, navLinks.length]);
 
   return (
-    <>
+    <Dialog.Root open={mobileOpen} onOpenChange={setMobileOpen}>
       <header className="app-header">
         <div className="app-header-inner">
           <NavLink to="/" className="brand" onClick={closeMobile}>
@@ -186,13 +187,14 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           ) : (
             <HfSignInButton returnTo={returnTo} />
           )}
-          <button
-            className="icon-btn mobile-menu-btn"
-            aria-label="Open menu"
-            onClick={() => setMobileOpen((v) => !v)}
-          >
-            <HeaderIcon name={mobileOpen ? "close" : "menu"} size={14} />
-          </button>
+          <Dialog.Trigger asChild>
+            <button
+              className="icon-btn mobile-menu-btn"
+              aria-label="Open menu"
+            >
+              <HeaderIcon name="menu" size={14} />
+            </button>
+          </Dialog.Trigger>
         </div>
         {!isReaderRoute && showMcpAnnouncement && (
           <div className="site-announcement" role="status">
@@ -215,9 +217,13 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           </div>
         )}
       </header>
-      {mobileOpen && (
-        <div className="mobile-nav-drawer" onClick={closeMobile}>
-          <div className="mobile-nav-panel" onClick={(e) => e.stopPropagation()}>
+      <Dialog.Portal>
+        <Dialog.Overlay className="mobile-nav-drawer">
+          <Dialog.Content className="mobile-nav-panel" aria-describedby={undefined}>
+            <Dialog.Title className="sr-only">Navigation menu</Dialog.Title>
+            <Dialog.Close className="icon-btn mobile-nav-close" aria-label="Close menu">
+              <HeaderIcon name="close" size={14} />
+            </Dialog.Close>
             <button
               type="button"
               className="mobile-nav-link mobile-nav-search"
@@ -260,10 +266,10 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
                 Admin dashboard
               </NavLink>
             )}
-          </div>
-        </div>
-      )}
-    </>
+          </Dialog.Content>
+        </Dialog.Overlay>
+      </Dialog.Portal>
+    </Dialog.Root>
   );
 };
 
