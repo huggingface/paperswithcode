@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 
+import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
+
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
 import { ChatConversation } from "@/components/chat/ChatConversation";
 import {
@@ -541,16 +543,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       );
     }
   };
-  const [headerHeight, setHeaderHeight] = useState(60);
-  useLayoutEffect(() => {
-    const element = document.querySelector<HTMLElement>(".app-header");
-    if (!element) return;
-    const update = () => setHeaderHeight(element.offsetHeight);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
+  const viewportHeight = useChatViewportHeight(mode === "general");
   const visibleSessions = sessions.map((session) => session.id === chat.activeSessionId && chat.busy
     ? { ...session, is_busy: true, title: manualTitleLockRef.current.has(session.id) ? session.title : chat.activeTitle || session.title }
     : session);
@@ -596,7 +589,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
 
   return (
     <GeneralArtifactProvider enabled={mode === "general"} workspaceKey={routeSessionId ?? "new-chat"} onAskAiFix={(prompt) => { void send(emptyDraft(prompt)); }}>
-    <div className={`chat-page${mode === "paper" ? " chat-page--reader" : ""}`} style={{ height: mode === "paper" ? "100%" : `calc(100dvh - ${headerHeight}px)` }}>
+    <div className={`chat-page${mode === "paper" ? " chat-page--reader" : ""}`} style={{ height: viewportHeight }}>
       {mode === "general" && <ChatSessionNavigation
         sessions={visibleSessions}
         activeSessionId={routeSessionId}
