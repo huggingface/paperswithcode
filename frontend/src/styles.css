@@ -572,7 +572,7 @@ html { scroll-behavior: smooth; }
   .header-bookmark-btn {
     display: none;
   }
-  .hf-signin-btn {
+  .app-header .hf-signin-btn {
     width: 36px;
     height: 36px;
     padding: 0;
@@ -580,7 +580,7 @@ html { scroll-behavior: smooth; }
     justify-content: center;
     flex-shrink: 0;
   }
-  .hf-signin-btn > span { display: none; }
+  .app-header .hf-signin-btn > span { display: none; }
 }
 
 

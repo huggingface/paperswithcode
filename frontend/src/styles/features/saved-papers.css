@@ -43,7 +43,15 @@
   font-size: 13px;
   line-height: 1.5;
 }
-.saved-bucket-migration .hf-signin-btn { flex-shrink: 0; }
+.saved-bucket-migration .hf-signin-btn {
+  flex-shrink: 0;
+  max-width: 100%;
+  height: auto;
+  min-height: 36px;
+  padding: 8px 12px;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 @media (max-width: 700px) {
   .saved-bucket-migration {
     align-items: flex-start;
