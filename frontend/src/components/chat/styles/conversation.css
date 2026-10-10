@@ -42,6 +42,7 @@
   line-height: 1.45;
   max-width: 100%;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
   -webkit-user-select: text;
   user-select: text;
   cursor: text;
