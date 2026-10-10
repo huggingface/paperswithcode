@@ -3448,20 +3448,19 @@ def test_nginx_public_page_proxies_preserve_accept_and_origin_headers():
     assert "proxy_hide_header Cache-Control" not in production + staging
 
 
-def test_spa_shell_hides_initial_documents_without_waiting_for_javascript():
+def test_spa_shell_never_reveals_initial_documents():
     repository = Path(__file__).resolve().parents[2]
     shell = (repository / "frontend/index.html").read_text()
 
     hiding_rule = (
         "html [data-pwc-initial-document], "
-        "html .initial-discovery-footer { display: none; }"
+        "html .initial-discovery-footer { display: none !important; }"
     )
     assert hiding_rule in shell
     assert shell.index(hiding_rule) < shell.index("<script>")
     assert shell.index(hiding_rule) < shell.index('<link rel="stylesheet"')
-    noscript = shell.split("<noscript>", 1)[1].split("</noscript>", 1)[0]
-    assert "html [data-pwc-initial-document] { display: block; }" in noscript
-    assert "html .initial-discovery-footer { display: flex; }" in noscript
+    assert "<noscript>" not in shell
+    assert '<footer hidden id="initial-discovery-footer"' in shell
     assert 'data-pwc-initial-document="paper"' not in shell
     assert '<div id="root"></div>' in shell
 

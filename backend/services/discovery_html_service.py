@@ -31,7 +31,7 @@ def render_discovery_document(page: DiscoveryPage) -> str:
     )
     empty = "<p>No eligible public papers are currently linked to this page.</p>"
     return (
-        '<main data-pwc-initial-document="discovery">'
+        '<main hidden data-pwc-initial-document="discovery">'
         + (f'<nav aria-label="Breadcrumb">{breadcrumbs}</nav>' if breadcrumbs else "")
         + f"<header><p>{escape(page.kind)}</p><h1>{escape(page.heading)}</h1>"
         f"<p>{escape(page.description)}</p></header>"

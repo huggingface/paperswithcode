@@ -307,7 +307,7 @@ def render_initial_paper_document(document: PaperSeoDocument) -> str:
     )
 
     return (
-        '<main class="initial-paper" data-pwc-initial-document="paper">'
+        '<main hidden class="initial-paper" data-pwc-initial-document="paper">'
         '<nav class="initial-paper-breadcrumb" aria-label="Breadcrumb">'
         f'<a href="/papers/recent">Papers</a><span aria-hidden="true">›</span>'
         f'{breadcrumb_year}<span aria-hidden="true">›</span>'

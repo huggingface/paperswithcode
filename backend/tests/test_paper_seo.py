@@ -66,10 +66,11 @@ def _paper(**overrides) -> Paper:
     return Paper(**data)
 
 
-def test_initial_document_contains_visible_bibliography_and_resources():
+def test_initial_document_keeps_bibliography_and_resources_in_hidden_source():
     document = build_paper_seo_document(_paper(), "2607.24653")
     rendered = render_initial_paper_document(document)
 
+    assert '<main hidden class="initial-paper"' in rendered
     assert "<h1>Kimi K3: Open Frontier Intelligence</h1>" in rendered
     assert 'href="/authors/7">Kimi Team</a>' in rendered
     assert 'href="/authors/8">A. Researcher</a>' in rendered

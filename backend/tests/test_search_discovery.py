@@ -118,6 +118,7 @@ def test_robots_get_and_head_are_plain_text(client):
 
 def test_renderer_escapes_every_database_value():
     document = render_discovery_document(_page())
+    assert '<main hidden data-pwc-initial-document="discovery">' in document
     assert "<script>" not in document
     assert "&lt;Safe &amp; sound&gt;" in document
     assert "&lt;script&gt;alert(" in document

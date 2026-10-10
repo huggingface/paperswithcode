@@ -5,21 +5,15 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <!-- Paint the site theme before external styles or the app can load. -->
     <style>
-      :root { color-scheme: light; --bg: #FAF8F4; --ink: #1A1814; --ink-soft: #5A554C; --initial-link: #2563eb; }
-      :root.dark { color-scheme: dark; --bg: #11100E; --ink: #F3EFE7; --ink-soft: #B9B2A6; --initial-link: #93c5fd; }
+      :root { color-scheme: light; --bg: #FAF8F4; --ink: #1A1814; }
+      :root.dark { color-scheme: dark; --bg: #11100E; --ink: #F3EFE7; }
       @media (prefers-color-scheme: dark) {
-        :root:not(.light):not(.dark) { color-scheme: dark; --bg: #11100E; --ink: #F3EFE7; --ink-soft: #B9B2A6; --initial-link: #93c5fd; }
+        :root:not(.light):not(.dark) { color-scheme: dark; --bg: #11100E; --ink: #F3EFE7; }
       }
       html, body { margin: 0; background: var(--bg); color: var(--ink); }
-      /* Previews may defer scripts. Hide the fallback without relying on JS. */
-      html [data-pwc-initial-document], html .initial-discovery-footer { display: none; }
+      /* Source HTML is for crawlers, never an intermediate browser layout. */
+      html [data-pwc-initial-document], html .initial-discovery-footer { display: none !important; }
     </style>
-    <noscript>
-      <style>
-        html [data-pwc-initial-document] { display: block; }
-        html .initial-discovery-footer { display: flex; }
-      </style>
-    </noscript>
     <script>
       (function () {
         var theme;
@@ -56,28 +50,6 @@
     <link rel="icon" type="image/png" sizes="192x192" href="/favicon-192.png?v=2" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png?v=2" />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css" integrity="sha384-n8MVd4RsNIU0tAv4ct0nTaAbDJwPJzDEaqSD1odI+WdtXRGWt2kTvGFasHpSy3SV" crossorigin="anonymous" />
-    <style>
-      .initial-paper { max-width: 960px; margin: 0 auto; padding: 24px; color: var(--ink); font: 16px/1.6 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      .initial-paper article { max-width: 800px; }
-      .initial-paper h1 { margin: .25rem 0 .5rem; font-size: clamp(2rem, 5vw, 3rem); line-height: 1.12; letter-spacing: -.025em; }
-      .initial-paper h2 { margin: 2rem 0 .5rem; font-size: 1.3rem; }
-      .initial-paper h3 { margin-bottom: .25rem; font-size: 1rem; }
-      .initial-paper a { color: var(--initial-link); }
-      .initial-paper-breadcrumb { display: flex; flex-wrap: wrap; gap: .45rem; margin-bottom: 2rem; font-size: .9rem; }
-      .initial-paper-kicker { margin: 0; color: var(--ink-soft); font-size: .9rem; }
-      .initial-paper .citation_author { color: var(--ink-soft); }
-      .initial-paper-authors summary { cursor: pointer; color: var(--ink-soft); }
-      .initial-paper ul { margin-top: .25rem; padding-left: 1.25rem; }
-      .initial-paper-links { display: inline-block; min-width: 14rem; margin-right: 2rem; vertical-align: top; }
-      [data-pwc-initial-document="discovery"] { max-width: 1040px; margin: 0 auto; padding: 32px 24px; color: var(--ink); font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
-      [data-pwc-initial-document="discovery"] > nav { display: flex; flex-wrap: wrap; gap: .75rem; margin: 0 0 1.5rem; }
-      [data-pwc-initial-document="discovery"] h1 { margin: .25rem 0 .75rem; font-size: clamp(2rem, 5vw, 3.25rem); line-height: 1.1; }
-      [data-pwc-initial-document="discovery"] h2 { margin-top: 2rem; }
-      [data-pwc-initial-document="discovery"] li { margin: .7rem 0; }
-      [data-pwc-initial-document="discovery"] a { color: var(--initial-link); }
-      .initial-discovery-footer { max-width: 960px; margin: 2rem auto; padding: 0 24px 24px; display: flex; gap: .65rem; font: 14px/1.5 system-ui, sans-serif; }
-      .initial-discovery-footer a { color: var(--initial-link); }
-    </style>
 
     <!-- Privacy-friendly analytics by Plausible -->
     <script>
@@ -104,7 +76,7 @@
   </head>
   <body>
     <div id="root"></div>
-    <footer id="initial-discovery-footer" class="initial-discovery-footer">
+    <footer hidden id="initial-discovery-footer" class="initial-discovery-footer">
       <a href="/papers/recent">Recent papers</a>
       <span aria-hidden="true">·</span>
       <a href="/papers/archive">Paper archive</a>
