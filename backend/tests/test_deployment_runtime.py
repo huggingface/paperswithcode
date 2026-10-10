@@ -3448,18 +3448,20 @@ def test_nginx_public_page_proxies_preserve_accept_and_origin_headers():
     assert "proxy_hide_header Cache-Control" not in production + staging
 
 
-def test_spa_shell_hides_initial_documents_before_javascript_paint():
+def test_spa_shell_hides_initial_documents_without_waiting_for_javascript():
     repository = Path(__file__).resolve().parents[2]
     shell = (repository / "frontend/index.html").read_text()
 
-    marker = 'document.documentElement.classList.add("pwc-js")'
     hiding_rule = (
-        ".pwc-js [data-pwc-initial-document], "
-        ".pwc-js .initial-discovery-footer { display: none; }"
+        "html [data-pwc-initial-document], "
+        "html .initial-discovery-footer { display: none; }"
     )
-    assert marker in shell
     assert hiding_rule in shell
-    assert shell.index(marker) < shell.index("<style>")
+    assert shell.index(hiding_rule) < shell.index("<script>")
+    assert shell.index(hiding_rule) < shell.index('<link rel="stylesheet"')
+    noscript = shell.split("<noscript>", 1)[1].split("</noscript>", 1)[0]
+    assert "html [data-pwc-initial-document] { display: block; }" in noscript
+    assert "html .initial-discovery-footer { display: flex; }" in noscript
     assert 'data-pwc-initial-document="paper"' not in shell
     assert '<div id="root"></div>' in shell
 
