@@ -37,11 +37,16 @@ export function ChatConversation({
   const scrollTopBeforeToggleRef = useRef<number | null>(null);
   const editScrollAnchorRef = useRef<string | null>(null);
   const followingBottomRef = useRef(true);
-  const [followingBottom, setFollowingBottom] = useState(true);
+  const [hasContentBelow, setHasContentBelow] = useState(false);
   const touchYRef = useRef<number | null>(null);
   const followBottom = useCallback((follow: boolean) => {
     followingBottomRef.current = follow;
-    setFollowingBottom(follow);
+  }, []);
+  const updateContentBelow = useCallback(() => {
+    const scroller = scrollRef.current;
+    if (scroller) {
+      setHasContentBelow(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 1);
+    }
   }, []);
   const previousUserCountRef = useRef(0);
   const previousBusyRef = useRef(false);
@@ -85,6 +90,19 @@ export function ChatConversation({
     if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
   }, [messages, userCount, busy, followBottom]);
 
+  // Button visibility follows the actual viewport, independently of whether
+  // streaming is allowed to move the reader's position.
+  useLayoutEffect(updateContentBelow);
+
+  useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+    const observer = new ResizeObserver(updateContentBelow);
+    observer.observe(scroller);
+    if (scroller.firstElementChild) observer.observe(scroller.firstElementChild);
+    return () => observer.disconnect();
+  }, [updateContentBelow]);
+
   const toggleBlock = (messageId: string, blockIndex: number) => {
     scrollTopBeforeToggleRef.current = scrollRef.current?.scrollTop ?? null;
     onToggleBlock(messageId, blockIndex);
@@ -118,6 +136,7 @@ export function ChatConversation({
         // Scrolling away also covers scrollbar dragging. Only explicit actions
         // resume following, so delayed scroll events cannot undo upward intent.
         if (scrollHeight - scrollTop - clientHeight > 1) followBottom(false);
+        updateContentBelow();
       }}
     >
       <div className="chat-conversation-inner">
@@ -174,7 +193,7 @@ export function ChatConversation({
             />)}
       </div>
     </div>
-    {!followingBottom && <button
+    {hasContentBelow && <button
       type="button"
       className="chat-jump-latest"
       onClick={() => {
@@ -183,6 +202,7 @@ export function ChatConversation({
         if (scroller) {
           scroller.focus({ preventScroll: true });
           scroller.scrollTop = scroller.scrollHeight;
+          updateContentBelow();
         }
       }}
     >Jump to latest</button>}

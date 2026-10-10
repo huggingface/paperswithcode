@@ -1,4 +1,4 @@
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "@/lib/chat";
 import { ChatConversation } from "./ChatConversation";
@@ -73,13 +73,38 @@ describe("ChatConversation scrolling", () => {
     chat.update([{ id: "question", role: "user" }, { id: "answer", role: "assistant", streaming: false }], false);
     expect(chat.scroller.scrollTop).toBe(200);
   });
-  it("resumes following only when the reader requests the latest response", () => {
+  it.each([600, 599.5])("hides the button when the reader scrolls to the end at %s", (top) => {
+    const chat = setup();
+    chat.scrollTo(200);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).not.toBeNull();
+    chat.scrollTo(top);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+    // Reaching the end must not let a delayed scroll event override upward intent.
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(top);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).not.toBeNull();
+  });
+  it("hides the button when a viewport resize reveals the end", () => {
+    let onResize = () => {};
+    vi.spyOn(window, "ResizeObserver").mockImplementation((callback) => {
+      onResize = () => callback([], {} as ResizeObserver);
+      return { observe: vi.fn(), unobserve: vi.fn(), disconnect: vi.fn() };
+    });
+    const chat = setup();
+    chat.scrollTo(200);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).not.toBeNull();
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(800);
+    act(onResize);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).toBeNull();
+  });
+  it("resumes following when the reader clicks the latest response button", () => {
     const chat = setup();
     chat.scrollTo(200);
     chat.update();
     chat.scrollTo(780);
     expect(chat.getByRole("button", { name: "Jump to latest" })).toBeTruthy();
     fireEvent.click(chat.getByRole("button", { name: "Jump to latest" }));
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).toBeNull();
     expect(document.activeElement).toBe(chat.scroller);
     chat.update();
     expect(chat.scroller.scrollTop).toBe(1000);
@@ -95,6 +120,7 @@ describe("ChatConversation scrolling", () => {
     fireEvent.wheel(chat.scroller, { deltaY: -1 });
     // A queued programmatic scroll event at the bottom must not resume following.
     fireEvent.scroll(chat.scroller);
+    expect(chat.queryByRole("button", { name: "Jump to latest" })).toBeNull();
     chat.update();
     expect(chat.scroller.scrollTop).toBe(600);
   });
