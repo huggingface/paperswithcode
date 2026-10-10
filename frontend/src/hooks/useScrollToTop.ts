@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useLayoutEffect } from "react";
 import { useLocation } from "react-router-dom";
 
 /**
@@ -12,8 +12,10 @@ import { useLocation } from "react-router-dom";
  */
 export function useScrollToTop(): void {
   const { pathname, hash } = useLocation();
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (hash) return;
-    window.scrollTo(0, 0);
+    // Override the global smooth-scroll CSS: a route reset must finish before
+    // paint, not leave the new page under the sticky header mid-animation.
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" });
   }, [pathname, hash]);
 }
