@@ -318,16 +318,20 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  padding: 0 12px;
+  max-width: 100%;
+  min-height: 32px;
+  padding: 5px 12px;
   border: 1px solid var(--hairline);
   border-radius: 6px;
   background: var(--bg-elevated);
   font-size: 13px;
   color: var(--ink);
-  white-space: nowrap;
+  line-height: 20px;
+  white-space: normal;
+  overflow-wrap: anywhere;
   transition: border-color 0.15s, background 0.15s;
 }
+.hf-signin-btn > img { flex-shrink: 0; }
 .hf-signin-btn:hover {
   border-color: var(--hairline-strong);
   background: var(--bg-subtle);
