@@ -332,6 +332,11 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   transition: border-color 0.15s, background 0.15s;
 }
 .hf-signin-btn > img { flex-shrink: 0; }
+.app-header .hf-signin-btn {
+  flex-shrink: 0;
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
 .hf-signin-btn:hover {
   border-color: var(--hairline-strong);
   background: var(--bg-subtle);
