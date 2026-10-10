@@ -38,10 +38,12 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   primary `main` checkout.
 - Commit only the task's intended changes. Never switch, reset, delete, or reuse
   another task's worktree or branch.
-- Implementation approval includes validation, a commit to the task branch,
-  pushing that branch, and opening a GitHub pull request. Feature requests and
-  non-hotfix bug fixes then stop and report their PR and verification; they do
-  not update `main` or deploy before the PR is merged.
+- Implementation approval includes validation, committing and pushing the task
+  branch, opening a GitHub pull request, completing review, merging, and deploying
+  under the environment rules below. Continue through this workflow without
+  waiting for another user request, unless the user requested local-only work,
+  a draft PR, no merge, or no deployment. Do not update `main` or deploy before
+  the PR is merged. Documentation-only changes need no application deployment.
 - Concurrent feature tasks are allowed, but one explicitly designated publishing
   task must serialize integration, pushing, and deployment.
 - Put domain logic in `backend/services/`, HTTP adapters in `backend/routers/`,
@@ -67,9 +69,18 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   hotfixes must reach `main` through a merged GitHub pull request. The publishing
   task fetches the merged `origin main`, reruns proportionate validation, and
   deploys that exact commit with `pwc-deploy`.
-- Before merging any pull request, wait for Cursor Bugbot to finish its review
-  and resolve every Bugbot comment. Do not merge while its review is still in
-  progress or any Bugbot comment remains unresolved.
+- For pull requests in `huggingface/paperswithcode`, wait for Cursor Bugbot to
+  finish reviewing the latest head commit. Read its review and all review
+  threads, address every finding, validate and push fixes, and wait for Bugbot
+  again after each push. Resolve addressed threads before merging. Do not treat
+  an absent, queued, or in-progress review as approval. Bugbot runs only in this
+  repository; do not wait for it in other repositories.
+- Once review is complete, all Bugbot findings are addressed, and required checks
+  pass, merge without asking again. Fetch the merged `origin/main`, rerun
+  proportionate validation, deploy that exact commit to the authorized
+  environment, and review the live result with the smoke checks below. Report
+  the PR, release, and verification. If a check or review service fails or stays
+  unavailable, investigate and report the blocker instead of bypassing the gate.
 - Never force-push. If local and remote `main` have diverged, stop and resolve the
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
