@@ -40,10 +40,13 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   another task's worktree or branch.
 - Implementation approval includes validation, committing and pushing the task
   branch, opening a GitHub pull request, completing review, merging, and deploying
-  under the environment rules below. Continue through this workflow without
-  waiting for another user request, unless the user requested local-only work,
-  a draft PR, no merge, or no deployment. Do not update `main` or deploy before
-  the PR is merged. Documentation-only changes need no application deployment.
+  under the environment rules below for non-chat changes. Continue through this
+  workflow without waiting for another user request, unless the user requested
+  local-only work, a draft PR, no merge, or no deployment. Chat-related changes
+  stop after opening the PR and reporting verification; do not merge or deploy
+  them unless the user explicitly authorizes it. Do not update `main` or deploy
+  before the PR is merged. Documentation-only changes need no application
+  deployment.
 - Concurrent feature tasks are allowed, but one explicitly designated publishing
   task must serialize integration, pushing, and deployment.
 - Put domain logic in `backend/services/`, HTTP adapters in `backend/routers/`,
@@ -71,13 +74,14 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   deploys that exact commit with `pwc-deploy`.
 - For pull requests in `huggingface/paperswithcode`, wait for Cursor Bugbot to
   finish reviewing the latest head commit. Read its review and all review
-  threads, address every finding, validate and push fixes, and wait for Bugbot
-  again after each push. Resolve addressed threads before merging. Do not treat
+  threads and other reviewer comments, address every finding, validate and push
+  fixes, and wait for Bugbot again after each push. Resolve addressed threads
+  before merging. Do not treat
   an absent, queued, or in-progress review as approval. Bugbot runs only in this
   repository; do not wait for it in other repositories.
-- Once review is complete, all Bugbot findings are addressed, and required checks
-  pass, merge without asking again. Fetch the merged `origin/main`, rerun
-  proportionate validation, deploy that exact commit to the authorized
+- For non-chat changes, once review is complete, all review findings are
+  addressed, and required checks pass, merge without asking again. Fetch the
+  merged `origin/main`, rerun proportionate validation, deploy that exact commit to the authorized
   environment, and review the live result with the smoke checks below. Report
   the PR, release, and verification. If a check or review service fails or stays
   unavailable, investigate and report the blocker instead of bypassing the gate.
@@ -85,11 +89,12 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
   user requests local-only work or no deployment.
-- Chat-interface changes for `staging.paperswithcode.co/chat`—including its
-  frontend, backend, configuration, and infrastructure—go only to staging unless
-  the user explicitly authorizes production. Keep chat and non-chat changes in
-  separate commits when necessary. If they cannot be separated safely, ask the
-  user before deployment.
+- Chat-related changes—including frontend, backend, configuration, and
+  infrastructure—require explicit user authorization to merge and deploy,
+  including urgent chat hotfixes. When deployment is authorized, use staging
+  unless the user explicitly authorizes production. Keep chat and non-chat
+  changes in separate PRs. If they cannot be separated safely, apply the chat
+  authorization requirement to the entire PR.
 - Planning documents (`PLAN*.md`), scratch notes, temporary artifacts,
   diagnostic output, and generated reports are local by default. Do not stage,
   commit, or publish them unless explicitly requested. Tasks changing only local
