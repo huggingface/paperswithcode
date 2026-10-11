@@ -28,9 +28,10 @@ import os
 from typing import Dict, List
 
 import psycopg2
-from psycopg2.extras import RealDictCursor, execute_batch
+from psycopg2.extras import RealDictCursor
 from collections import defaultdict
 
+from backend.services.task_keyword_batches import insert_task_links, iter_latest_papers
 from backend.utils.keyword_matching import (
     apply_task_supersession_rules,
     create_keyword_patterns,
@@ -156,23 +157,8 @@ def link_papers_by_task_keywords(
         print("\n4. Processing papers...")
         print("   (Streaming through papers and matching keywords...)")
 
-        if paper_ids is None:
-            cur.execute("""
-                SELECT id, title, abstract
-                FROM papers
-                WHERE is_latest_version
-                ORDER BY id
-            """)
-        else:
-            cur.execute(
-                """
-                SELECT id, title, abstract
-                FROM papers
-                WHERE is_latest_version AND id = ANY(%s)
-                ORDER BY id
-                """,
-                (paper_ids,),
-            )
+        cur.close()
+        conn.close()
 
         papers_processed = 0
         papers_matched = 0
@@ -182,13 +168,7 @@ def link_papers_by_task_keywords(
 
         task_match_counts = defaultdict(int)
 
-        insert_sql = """
-            INSERT INTO paper_tasks (paper_id, task_id, source)
-            VALUES (%(paper_id)s, %(task_id)s, 'auto')
-            ON CONFLICT (paper_id, task_id) DO NOTHING
-        """
-
-        for paper in cur:
+        for paper in iter_latest_papers(get_db_connection, paper_ids):
             papers_processed += 1
 
             if papers_processed % 5000 == 0:
@@ -227,19 +207,13 @@ def link_papers_by_task_keywords(
                     task_match_counts[task_id] += 1
 
             if len(batch) >= batch_size:
-                cur2 = conn.cursor()
-                execute_batch(cur2, insert_sql, batch)
-                conn.commit()
-                cur2.close()
+                insert_task_links(get_db_connection, batch)
                 batch = []
 
         if batch:
-            cur2 = conn.cursor()
-            execute_batch(cur2, insert_sql, batch)
-            conn.commit()
-            cur2.close()
+            insert_task_links(get_db_connection, batch)
 
-        cur.close()
+        conn = get_db_connection()
 
         cur = conn.cursor(cursor_factory=RealDictCursor)
         cur.execute("SELECT COUNT(*) as count FROM paper_tasks")

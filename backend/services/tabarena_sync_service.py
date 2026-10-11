@@ -141,7 +141,7 @@ def parse_tabarena_leaderboard(csv_text: str) -> list[TabArenaEntry]:
     from io import StringIO
 
     frame = pd.read_csv(StringIO(csv_text))
-    if tuple(frame.columns) != EXPECTED_COLUMNS:
+    if not set(EXPECTED_COLUMNS).issubset(frame.columns):
         raise ValueError("TabArena CSV columns do not match the published contract")
     if not MIN_EXPECTED_ENTRIES <= len(frame) <= MAX_EXPECTED_ENTRIES:
         raise ValueError(

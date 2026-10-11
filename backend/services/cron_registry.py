@@ -1120,7 +1120,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="sync_extractbench",
         scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=20),),
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=32),),
         schedule_grace_minutes=20,
         systemd_timer="pwc-cron-sync-extractbench.timer",
         systemd_service="pwc-cron-sync-extractbench.service",
