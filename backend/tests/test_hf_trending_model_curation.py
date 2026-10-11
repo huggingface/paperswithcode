@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
-from backend.models.api import ApplyMutationRequest, ResolveModelPaperMutation
+from backend.models.curation import ApplyMutationRequest, ResolveModelPaperMutation
 from backend.models.database import (
     Base,
     Evaluation,

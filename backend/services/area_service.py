@@ -17,14 +17,14 @@ from backend.models.database import (
     Task as DBTask,
     TaskDataset,
 )
-from backend.models.api import (
+from backend.models.tasks import Task
+from backend.models.taxonomy import (
     Area,
     Areas,
     AreasWithTaskBenchmarks,
     AreaWithTasks,
     AreasWithTasks,
     AreaWithTaskBenchmarks,
-    Task,
     TaskBenchmarkListItem,
     TaskWithBenchmarks,
 )

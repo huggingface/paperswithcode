@@ -5,7 +5,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import func, inspect, or_, text
 from sqlalchemy.orm import Session
 
-from backend.models.api import MethodTrend, MethodTrendPoint
+from backend.models.taxonomy import MethodTrend, MethodTrendPoint
 from backend.models.database import Method as DBMethod
 from backend.models.database import Paper as DBPaper
 from backend.models.database import PaperMethod

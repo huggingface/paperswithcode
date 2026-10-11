@@ -23,7 +23,7 @@ from PIL import Image as PILImage
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.routers import paper_pages
 from backend.services import default_og_image, social_meta_service, spa_shell_service
 from backend.services.paper_service import PaperService

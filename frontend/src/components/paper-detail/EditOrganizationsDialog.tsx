@@ -52,9 +52,18 @@ export const EditOrganizationsDialog = ({
   const displayedOrganizations = useMemo(() => {
     const normalizedQuery = searchQuery.trim().toLocaleLowerCase();
     if (!normalizedQuery) return organizations.data?.results ?? [];
-    return (organizations.data?.results ?? []).filter((organization) =>
-      organization.name.toLocaleLowerCase().includes(normalizedQuery),
-    );
+    // Rank exact, prefix, and word-prefix matches above other substring
+    // matches; the stable sort keeps the API's popularity order within a rank.
+    const rank = (name: string) => {
+      if (name === normalizedQuery) return 0;
+      if (name.startsWith(normalizedQuery)) return 1;
+      return name.split(/[^\p{L}\p{N}]+/u).some((word) => word.startsWith(normalizedQuery)) ? 2 : 3;
+    };
+    return (organizations.data?.results ?? [])
+      .map((organization) => ({ organization, name: organization.name.toLocaleLowerCase() }))
+      .filter(({ name }) => name.includes(normalizedQuery))
+      .sort((a, b) => rank(a.name) - rank(b.name))
+      .map(({ organization }) => organization);
   }, [organizations.data?.results, searchQuery]);
   const save = useMutation({
     mutationFn: async () => {

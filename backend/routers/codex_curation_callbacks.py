@@ -12,19 +12,15 @@ from sqlalchemy.orm import Session
 
 from backend.config import Settings, get_settings
 from backend.database.connection import get_database_session
-from backend.models.api import (
+from backend.models.curation import (
     ApplyMutationRequest,
     CompleteJobRequest,
     CurationTraceFinalizeRequest,
     CurationTracePreapplyRequest,
     PromoteBenchmarkCandidateRequest,
 )
-from backend.models.api import (
-    CurationLink as CurationLink,
-)
-from backend.models.api import (
-    EnrichPaperMutation as EnrichPaperMutation,
-)
+from backend.models.curation import CurationLink as CurationLink
+from backend.models.curation import EnrichPaperMutation as EnrichPaperMutation
 from backend.models.evaluations import (
     EvaluationCreateRequest as EvaluationCreateRequest,
 )

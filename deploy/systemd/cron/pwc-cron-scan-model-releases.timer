@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Scan official lab news for unindexed model releases every three hours
+
+[Timer]
+OnCalendar=*-*-* 01/3:48:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-scan-model-releases.service
+
+[Install]
+WantedBy=timers.target

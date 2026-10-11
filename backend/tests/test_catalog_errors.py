@@ -11,16 +11,10 @@ from backend.services.catalog_errors import (
     CatalogPersistenceError,
     CatalogValidationError,
 )
-from backend.models.api import (
-    Method,
-    Methods,
-    Organizations,
-    ProjectPage,
-    ProjectPages,
-    Repositories,
-    Task,
-    Tasks,
-)
+from backend.models.organizations import Organizations
+from backend.models.papers import ProjectPage, ProjectPages, Repositories
+from backend.models.tasks import Task
+from backend.models.taxonomy import Method, Methods, Tasks
 from backend.utils.auth import require_catalog_mutator, require_fresh_catalog_mutator
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 

@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import Paper, PaperSearchResults, Papers
+from backend.models.papers import Paper, PaperSearchResults, Papers
 from backend.models.database import (
     Conference as DBConference,
     Framework as DBFramework,

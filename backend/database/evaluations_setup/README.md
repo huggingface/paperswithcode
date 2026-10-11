@@ -6,7 +6,7 @@ This directory contains the setup script for populating the evaluations table wi
 
 ## What Was Implemented
 
-### 1. API Models (`backend/models/api.py`)
+### 1. API Models (`backend/models/evaluations.py`)
 - **Evaluation**: Response model for individual evaluations
 - **Evaluations**: Paginated response model
 - **EvaluationCreateRequest**: Request model for creating evaluations
@@ -89,7 +89,7 @@ This implementation provides a foundation for:
 
 ## Files Created
 
-- `backend/models/api.py` (Evaluation models added)
+- `backend/models/evaluations.py` (Evaluation models added)
 - `backend/services/evaluation_service.py`
 - `backend/routers/evaluations.py`
 - `backend/database/evaluations_setup/import_detr_evaluation.py`

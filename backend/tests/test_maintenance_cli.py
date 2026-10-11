@@ -9,7 +9,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from backend import cli, cli_admin, cli_papers
-from backend.models.api import (
+from backend.models.papers import (
     PaperSummary,
     RepositoryTrendingPaper,
     RepositoryTrendingRepository,

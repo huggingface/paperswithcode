@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager
-from backend.models.api import TaskCreateRequest
+from backend.models.taxonomy import TaskCreateRequest
 from backend.models.database import Task as DBTask
 from backend.services.evaluation_service import EvaluationService
 from backend.services.task_service import TaskService

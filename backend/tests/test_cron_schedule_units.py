@@ -42,6 +42,8 @@ def _systemd_jobs():
         for job in list_cron_jobs()
         if job.scheduler == "systemd" and job.id != "process_curation_thumbnails"
         if job.id not in {"monitor_chat_operational_alerts", "review_submissions"}
+        # Autonomous operator units are installed separately, outside this table.
+        if job.output_evaluator != "autonomous_cron_operator"
     ]
 
 

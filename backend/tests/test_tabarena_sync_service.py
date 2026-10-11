@@ -176,11 +176,19 @@ def test_parser_accepts_current_optional_metadata_columns():
     frame = pd.read_csv(StringIO(_csv()))
     frame["Commercial"] = False
     frame["License"] = "MIT"
+    frame["FitsAtPredict"] = True
+    frame = frame[list(reversed(frame.columns))]
 
     entries = parse_tabarena_leaderboard(frame.to_csv(index=False))
 
     assert len(entries) == 50
     assert entries[0].model_name == "Model-0 (default)"
+
+
+def test_parser_rejects_missing_required_score_column():
+    frame = pd.read_csv(StringIO(_csv())).drop(columns=["Elo [⬆️]"])
+    with pytest.raises(ValueError, match="columns"):
+        parse_tabarena_leaderboard(frame.to_csv(index=False))
 
 
 def test_parser_rejects_truncated_or_noncontiguous_data():

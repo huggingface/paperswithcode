@@ -27,11 +27,8 @@ from backend.models.database import (
 from backend.services.evaluation_service import EvaluationService
 from backend.services.project_page_service import ProjectPageService
 from backend.services.repository_service import RepositoryService
-from backend.models.api import (
-    EvaluationCreateRequest,
-    ProjectPageCreateRequest,
-    ProjectPageUpdateRequest,
-)
+from backend.models.evaluations import EvaluationCreateRequest
+from backend.models.papers import ProjectPageCreateRequest, ProjectPageUpdateRequest
 
 
 @pytest.fixture

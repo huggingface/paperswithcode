@@ -12,6 +12,7 @@ REMOTE_BUCKET=""
 REMOTE_PREFIX="postgres"
 REMOTE_URI=""
 HF_BIN="${HF_BIN:-/srv/paperswithcode/.venv/bin/hf}"
+tmp_dump=""
 
 log() {
     printf '[backup] %s\n' "$*"
@@ -183,14 +184,15 @@ main() {
 
     mkdir -p "$BACKUP_DIR"
 
-    local timestamp backup_name tmp_dump dump_path checksum_path remote_listing
+    local timestamp backup_name dump_path checksum_path remote_listing
     timestamp="$(date -u +%Y%m%d_%H%M%S)"
     backup_name="${PWC_DB_NAME}_${timestamp}.dump"
-    tmp_dump="/tmp/$backup_name"
+    # PrivateTmp may be another mount: copying a full dump can fill the disk.
+    # Keep the in-progress file beside its final name for an atomic rename.
+    tmp_dump="$(mktemp "$BACKUP_DIR/.$backup_name.XXXXXX.partial")"
+    trap 'rm -f -- "$tmp_dump"' EXIT
     dump_path="$BACKUP_DIR/$backup_name"
     checksum_path="$dump_path.sha256"
-
-    rm -f -- "$tmp_dump"
 
     log "Dumping database: $PWC_DB_NAME"
     local backup_user="${PWC_POSTGRES_BACKUP_DB_USER:-${PWC_DB_USER:-}}"
@@ -208,6 +210,7 @@ main() {
 
     [[ -s "$tmp_dump" ]] || die "Dump file is missing or empty: $tmp_dump"
     mv "$tmp_dump" "$dump_path"
+    trap - EXIT
 
     (
         cd "$BACKUP_DIR"
