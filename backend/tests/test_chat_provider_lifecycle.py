@@ -21,6 +21,7 @@ from backend.services.chat_openai_budget_service import (
     OpenAILimitExceeded,
 )
 from backend.services.chat_provider_gateway import lifecycle, openai_responses
+from backend.services.openrouter_user_budget_service import opaque_owner
 
 REAL_ASYNC_CLIENT = httpx.AsyncClient
 
@@ -428,3 +429,373 @@ def test_responses_unavailable_gateway_rejects_before_reading_the_body(harness):
 
     assert error.value.status_code == 503
     assert harness.events == []
+
+
+# Anthropic Messages parity across provider modes.
+
+MESSAGES_STREAM = (
+    b"event: message_start\n"
+    b'data: {"type":"message_start","message":{"id":"msg_1"}}\n\n'
+    b"event: content_block_start\n"
+    b'data: {"type":"content_block_start","content_block":{"type":"tool_use",'
+    b'"name":"search"}}\n\n'
+    b"event: message_delta\n"
+    b'data: {"type":"message_delta","usage":{"output_tokens":3,"cost":0.0001}}\n\n'
+)
+MESSAGES_BODY = (
+    b'{"id":"gen-1","type":"message","content":[{"type":"text","text":"hi"}],'
+    b'"usage":{"input_tokens":5,"output_tokens":2,"cost":0.0002}}'
+)
+
+
+def _route_for(settings: Settings, provider: str) -> str:
+    return next(
+        route
+        for route, routed in settings.chat_route_providers.items()
+        if routed == provider
+    )
+
+
+@pytest.fixture
+def messages_harness(monkeypatch):
+    events = Events()
+    settings = _settings(
+        chat_openrouter_server_funded_enabled=True,
+        chat_openrouter_api_key="test-openrouter-key",
+        chat_initial_payload_optimization_enabled=False,
+    )
+    row = SimpleNamespace(
+        id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
+        chat_session_id=uuid.uuid4(),
+        owner_hash="owner-hash",
+        agent_harness="pi",
+        provider_mode="openrouter_funded",
+        model=_route_for(settings, "openrouter"),
+        reasoning_effort="high",
+        provider_requests=0,
+        scopes=["model"],
+        provider_credential_revision=None,
+    )
+    state = SimpleNamespace(
+        events=events,
+        settings=settings,
+        row=row,
+        status=200,
+        content=MESSAGES_STREAM,
+        headers={"content-type": "text/event-stream", "request-id": "req_m"},
+        transport_error=False,
+    )
+
+    class FakeCapabilityService:
+        def __init__(self, _db) -> None:
+            pass
+
+        def meter_provider(self, capability, **_bounds) -> None:
+            capability.provider_requests += 1
+            events.append(("meter",))
+
+        def record_provider_error(self, _capability, code) -> None:
+            events.append(("provider_error", code))
+
+    class FakeOpenRouterBudget:
+        def __init__(self, _db, _settings) -> None:
+            pass
+
+        def reserve_call(self, owner_id, turn_id, call_id, sequence, model, *a, **k):
+            events.append(("reserve", call_id))
+
+        def mark_dispatched(self, call_id) -> None:
+            events.append(("mark_dispatched", call_id))
+
+        def mark_cost_unknown(self, call_id, *_args) -> None:
+            events.append(("mark_cost_unknown", call_id))
+
+        def settle_call(self, call_id, cost, generation_id) -> None:
+            events.append(("settle", call_id, cost))
+
+    class FakeBYOK:
+        def __init__(self, _db, _settings) -> None:
+            pass
+
+        def invalidate_auth_failure(self, owner_id) -> None:
+            events.append(("byok_invalidated", owner_id))
+
+    class AccountingDB(FakeDB):
+        def get(self, _model, _id):
+            return SimpleNamespace(provider_ttft_ms=None)
+
+    @contextlib.contextmanager
+    def session_local():
+        yield AccountingDB(Events())
+
+    def client_factory(**kwargs):
+        events.append(("client",))
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            events.append(("send", request))
+            if state.transport_error:
+                raise httpx.ConnectError("unreachable")
+            return httpx.Response(
+                state.status, content=state.content, headers=state.headers
+            )
+
+        return REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handle), **kwargs)
+
+    async def allow_budget(_settings) -> None:
+        events.append(("budget_check",))
+
+    def start_trace(**fields):
+        events.append(("trace_start", fields))
+        return FakeTrace(events)
+
+    def record_ttft(call_id, elapsed_ms) -> None:
+        events.append(("ttft", call_id))
+
+    from backend.services.chat_provider_gateway import anthropic_messages
+
+    monkeypatch.setattr(gateway, "_scope", lambda *_args, **_kwargs: row)
+    monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "owner-1")
+    monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
+    monkeypatch.setattr(
+        anthropic_messages, "ChatCapabilityService", FakeCapabilityService
+    )
+    monkeypatch.setattr(
+        anthropic_messages, "OpenRouterUserBudgetService", FakeOpenRouterBudget
+    )
+    monkeypatch.setattr(anthropic_messages, "OpenRouterBYOKService", FakeBYOK)
+    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", allow_budget)
+    monkeypatch.setattr(anthropic_messages, "record_provider_ttft", record_ttft)
+    monkeypatch.setattr(
+        anthropic_messages,
+        "db_manager",
+        SimpleNamespace(session_local=session_local),
+    )
+    monkeypatch.setattr(
+        anthropic_messages,
+        "user_provider_credential",
+        lambda *_args: SimpleNamespace(token="hf-user-token", bill_to="acme"),
+    )
+    monkeypatch.setattr(lifecycle.httpx, "AsyncClient", client_factory)
+    monkeypatch.setattr(lifecycle, "start_provider_request_trace", start_trace)
+    monkeypatch.setattr(
+        lifecycle, "record_gateway_timing", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        lifecycle,
+        "record_provider_error",
+        lambda capability_id, code: events.append(("provider_error", code)),
+    )
+    return state
+
+
+def _call_messages(state, *, stream: bool):
+    payload = json.dumps(
+        {
+            "model": state.row.model,
+            "max_tokens": 100,
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": stream,
+        }
+    ).encode()
+
+    async def call():
+        response = await gateway.messages(
+            FakeRequest(state.events, payload),
+            "Bearer capability",
+            str(state.row.chat_session_id),
+            str(state.row.turn_id),
+            None,
+            FakeDB(state.events),
+            state.settings,
+        )
+        if hasattr(response, "body_iterator"):
+            body = b"".join([chunk async for chunk in response.body_iterator])
+        else:
+            body = response.body
+        return response, body
+
+    return asyncio.run(call())
+
+
+PROVIDER_MODES = {
+    "huggingface": (
+        "https://router.huggingface.co/v1/messages",
+        "Bearer hf-user-token",
+    ),
+    "openrouter_funded": (
+        "https://openrouter.ai/api/v1/messages",
+        "Bearer test-openrouter-key",
+    ),
+    "openrouter_byok": (
+        "https://openrouter.ai/api/v1/messages",
+        "Bearer byok-user-token",
+    ),
+}
+
+
+@pytest.fixture
+def provider_mode(request, messages_harness, monkeypatch):
+    mode = request.param
+    state = messages_harness
+    if mode == "huggingface":
+        state.row.model = _route_for(state.settings, "huggingface")
+        state.row.provider_mode = "huggingface"
+    elif mode == "openrouter_byok":
+        from backend.services.chat_provider_gateway import anthropic_messages
+
+        state.row.provider_mode = "openrouter_byok"
+        original = anthropic_messages.provider_target
+        monkeypatch.setattr(
+            anthropic_messages,
+            "provider_target",
+            lambda row, settings, db=None: (
+                ("https://openrouter.ai/api/v1/messages", "byok-user-token", None)
+                if row.provider_mode == "openrouter_byok"
+                else original(row, settings, db)
+            ),
+        )
+    return mode
+
+
+@pytest.mark.parametrize("provider_mode", list(PROVIDER_MODES), indirect=True)
+@pytest.mark.parametrize("stream", [True, False])
+def test_messages_relays_every_provider_mode_through_the_lifecycle(
+    messages_harness, provider_mode, stream
+):
+    state = messages_harness
+    if not stream:
+        state.content = MESSAGES_BODY
+        state.headers = {"content-type": "application/json", "request-id": "req_m"}
+
+    response, body = _call_messages(state, stream=stream)
+
+    assert response.status_code == 200
+    assert body == state.content
+    assert response.headers["request-id"] == "req_m"
+    url, authorization = PROVIDER_MODES[provider_mode]
+    send = _first(state.events, "send")[1]
+    assert str(send.url) == url
+    assert send.headers["authorization"] == authorization
+    assert send.headers["anthropic-version"] == "2023-06-01"
+    sent = json.loads(send.content)
+    names = state.events.names()
+    funded = provider_mode == "openrouter_funded"
+    assert ("reserve" in names) is funded
+    assert ("settle" in names) is funded
+    assert ("ttft" in names) is funded
+    if provider_mode == "huggingface":
+        assert send.headers["x-hf-bill-to"] == "acme"
+        assert "reasoning" not in sent
+    else:
+        assert sent["reasoning"] == {
+            "effort": "high",
+            "exclude": not state.settings.chat_show_reasoning,
+        }
+        assert sent["user"] == opaque_owner("owner-1", state.settings)
+        assert sent["provider"] == {"sort": "throughput"}
+    if funded:
+        call_id = uuid.uuid5(state.row.id, "provider-call:1")
+        assert _first(state.events, "reserve")[1] == call_id
+        assert names.index("budget_check") < names.index("reserve")
+        assert names.index("mark_dispatched") < names.index("send")
+    trace = _first(state.events, "trace_start")[1]
+    assert trace["provider_mode"] == provider_mode
+    assert "accounting_call_id" not in trace
+    finish = _first(state.events, "trace_finish")[1]
+    assert finish["error_code"] is None
+    assert finish["tool_call_returned"] is stream
+    # The Messages path keeps the request session for its whole lifetime.
+    assert "close" not in names
+
+
+def test_messages_byok_auth_failure_invalidates_the_credential_and_relays(
+    messages_harness,
+):
+    state = messages_harness
+    state.row.provider_mode = "openrouter_byok"
+    from backend.services.chat_provider_gateway import anthropic_messages
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            anthropic_messages,
+            "provider_target",
+            lambda *_args: ("https://openrouter.ai/api/v1/messages", "byok", None),
+        )
+        state.status = 401
+        state.content = b'{"error":{"message":"bad key"}}'
+        state.headers = {"content-type": "application/json"}
+        response, body = _call_messages(state, stream=False)
+
+    assert response.status_code == 401
+    assert body == state.content
+    assert ("byok_invalidated", "owner-1") in state.events
+    assert ("provider_error", "openrouter_byok_credential_invalid") in state.events
+    finish = _first(state.events, "trace_finish")[1]
+    assert finish["error_code"] == "provider_http_401"
+
+
+@pytest.mark.parametrize(
+    ("mode", "status", "code"),
+    [
+        ("openrouter_funded", 402, "openrouter_unavailable"),
+        ("huggingface", 402, "hf_inference_billing_exhausted"),
+    ],
+)
+def test_messages_records_provider_billing_errors_and_relays_them(
+    messages_harness, mode, status, code
+):
+    state = messages_harness
+    if mode == "huggingface":
+        state.row.model = _route_for(state.settings, "huggingface")
+        state.row.provider_mode = "huggingface"
+    state.status = status
+    state.content = b'{"error":{}}'
+
+    response, body = _call_messages(state, stream=True)
+
+    assert response.status_code == status
+    assert body == state.content
+    assert ("provider_error", code) in state.events
+
+
+def test_messages_funded_transport_failure_marks_cost_unknown(messages_harness):
+    state = messages_harness
+    state.transport_error = True
+
+    with pytest.raises(HTTPException) as error:
+        _call_messages(state, stream=True)
+
+    assert error.value.status_code == 502
+    assert error.value.detail == "Model provider failed"
+    names = state.events.names()
+    assert names.index("mark_dispatched") < names.index("mark_cost_unknown")
+    assert "settle" not in names
+    assert "provider_error" not in names
+    finish = _first(state.events, "trace_finish")[1]
+    assert finish["error_code"] == "provider_transport_error"
+
+
+def test_messages_funded_budget_outage_rejects_before_reservation(
+    messages_harness, monkeypatch
+):
+    from backend.services.chat_provider_gateway import anthropic_messages
+    from backend.services.openrouter_budget_service import (
+        OpenRouterBudgetUnavailable,
+    )
+
+    async def unavailable(_settings):
+        raise OpenRouterBudgetUnavailable("timeout")
+
+    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", unavailable)
+
+    with pytest.raises(HTTPException) as error:
+        _call_messages(messages_harness, stream=True)
+
+    assert error.value.status_code == 503
+    assert error.value.detail["code"] == "openrouter_unavailable"
+    assert error.value.detail["byok_settings_available"] is True
+    names = messages_harness.events.names()
+    assert ("provider_error", "openrouter_unavailable") in messages_harness.events
+    assert "reserve" not in names
+    assert "client" not in names

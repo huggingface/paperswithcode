@@ -6,18 +6,20 @@ import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
-from backend.chat_gateway_app import (
-    _apply_openrouter_reasoning_policy,
-    _byok_provider_error_code,
-    _huggingface_provider_error_code,
-    _offered_tool_inventory,
-    _optimize_initial_deepseek_payload,
-    _payload_contains_tool_use,
-    _prefer_fastest_openrouter_provider,
-    _provider_headers,
-    _provider_target,
-    _user_provider_credential,
-    _user_provider_token,
+from backend.services.chat_provider_gateway.anthropic_messages import (
+    apply_openrouter_reasoning_policy as _apply_openrouter_reasoning_policy,
+    byok_provider_error_code as _byok_provider_error_code,
+    huggingface_provider_error_code as _huggingface_provider_error_code,
+    optimize_initial_deepseek_payload as _optimize_initial_deepseek_payload,
+    payload_contains_tool_use as _payload_contains_tool_use,
+    prefer_fastest_openrouter_provider as _prefer_fastest_openrouter_provider,
+    provider_headers as _provider_headers,
+    provider_target as _provider_target,
+    user_provider_credential as _user_provider_credential,
+    user_provider_token as _user_provider_token,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    offered_tool_inventory as _offered_tool_inventory,
 )
 from backend.config import Settings
 from backend.services.chat_gateway_service import ChatGatewayService

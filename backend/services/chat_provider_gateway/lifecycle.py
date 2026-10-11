@@ -23,7 +23,7 @@ from typing import Any, Literal, Protocol
 import anyio
 import httpx
 from fastapi import HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -167,10 +167,10 @@ def _elapsed_ms(started: float) -> int:
     return round((time.perf_counter() - started) * 1000)
 
 
-async def close_upstream(upstream: Any, client: Any) -> None:
-    """Close the upstream stream even inside an already-cancelled scope."""
+async def close_upstream(upstream: Any, client: Any, *, shield: bool = True) -> None:
+    """Close the upstream stream, by default even inside a cancelled scope."""
 
-    with anyio.CancelScope(shield=True):
+    with anyio.CancelScope(shield=shield):
         await upstream.aclose()
         await client.aclose()
 
@@ -206,7 +206,8 @@ class ProviderError:
     """A provider failure mapped onto the gateway's public error contract."""
 
     code: str
-    error: HTTPException
+    # None records the code but relays the upstream response unchanged.
+    error: HTTPException | None
     usage: Any = None
     record: bool = True
 
@@ -216,6 +217,8 @@ class UsageStream(Protocol):
     saw_tool_call: bool
 
     def feed(self, chunk: bytes) -> None: ...
+
+    def inspect_complete_response(self, body: bytes) -> None: ...
 
     def result(self) -> Any: ...
 
@@ -264,7 +267,9 @@ class ProviderLedger(Protocol):
 @dataclass(frozen=True, slots=True)
 class ParsedProviderRequest:
     payload: Any
+    raw: bytes
     capability_model: str | None = None
+    maximum_tokens: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -274,7 +279,9 @@ class PreparedProviderCall:
     payload: dict[str, Any]
     raw: bytes
     maximum_tokens: int
+    capability_id: uuid.UUID
     owner_id: str
+    provider_mode: str
     url: str
     credential: str
     ledger: ProviderLedger
@@ -288,6 +295,9 @@ class ProviderProtocol(Protocol):
 
     receipt_phase: Literal["entry", "dispatch"]
     transport_error_code: str
+    releases_request_session: bool
+    shields_upstream_close: bool
+    logs_stream_completion: bool
 
     def check_available(self) -> None: ...
 
@@ -302,6 +312,8 @@ class ProviderProtocol(Protocol):
         row: ChatTurnCapability,
         db: Session,
         owner: Callable[[], str],
+        *,
+        turn_id: uuid.UUID,
     ) -> PreparedProviderCall:
         """Normalize the request against the validated capability."""
 
@@ -316,9 +328,9 @@ class ProviderProtocol(Protocol):
     def transport_failure(self) -> ProviderError: ...
 
     async def map_provider_status(
-        self, upstream: httpx.Response
+        self, upstream: httpx.Response, call: PreparedProviderCall
     ) -> ProviderError | None:
-        """Return a rejection for upstream failures that are not relayed."""
+        """Map an upstream status onto a recorded code or a rejection."""
 
     def stream_error_code(
         self, usage: UsageStream, status_code: int, *, cancelled: bool
@@ -343,7 +355,7 @@ class ProviderCallLifecycle:
         protocol: ProviderProtocol,
         request: Request,
         turn: str,
-    ) -> StreamingResponse:
+    ) -> Response:
         settings = self.settings
         protocol.check_available()
         try:
@@ -360,7 +372,9 @@ class ProviderCallLifecycle:
         except HTTPException:
             protocol.observe_rejection("capability_scope")
             raise
-        call = protocol.prepare(parsed, row, self.db, lambda: self.owner(row))
+        call = protocol.prepare(
+            parsed, row, self.db, lambda: self.owner(row), turn_id=turn_id
+        )
         capability_id = row.id
         call_sequence, trace_id = self._meter(row, turn_id, call)
         ledger = call.ledger
@@ -383,11 +397,12 @@ class ProviderCallLifecycle:
             offered_tool_names=inventory["offered_tool_names"],
             offered_tool_digest=inventory["offered_tool_digest"],
         )
-        # A FastAPI yield dependency otherwise retains this connection until the
-        # StreamingResponse finishes. At fleet concurrency that exhausts the pool
-        # while the gateway is merely waiting on the provider, blocking sibling
-        # calls. All subsequent accounting uses its own short-lived session.
-        self.db.close()
+        if protocol.releases_request_session:
+            # A FastAPI yield dependency otherwise retains this connection until
+            # the StreamingResponse finishes. At fleet concurrency that exhausts
+            # the pool while the gateway is merely waiting on the provider,
+            # blocking sibling calls. Later accounting uses short-lived sessions.
+            self.db.close()
         client = httpx.AsyncClient(timeout=180, follow_redirects=False)
         try:
             upstream = await client.send(
@@ -420,8 +435,11 @@ class ProviderCallLifecycle:
         )
 
         request_id = protocol.provider_request_id(upstream)
-        rejection = await protocol.map_provider_status(upstream)
-        if rejection is not None:
+        rejection = await protocol.map_provider_status(upstream, call)
+        if rejection is not None and rejection.error is None:
+            if rejection.record:
+                record_provider_error(capability_id, rejection.code)
+        elif rejection is not None:
             await upstream.aclose()
             await client.aclose()
             record_provider_error(capability_id, rejection.code)
@@ -439,6 +457,7 @@ class ProviderCallLifecycle:
             raise rejection.error
 
         usage = protocol.usage_extractor()
+        shield = protocol.shields_upstream_close
 
         async def chunks():
             first_body_byte_ms: int | None = None
@@ -465,7 +484,7 @@ class ProviderCallLifecycle:
                 cancelled = True
                 raise
             finally:
-                await close_upstream(upstream, client)
+                await close_upstream(upstream, client, shield=shield)
                 error_code = protocol.stream_error_code(
                     usage, upstream.status_code, cancelled=cancelled
                 )
@@ -483,12 +502,49 @@ class ProviderCallLifecycle:
                     error_code=error_code,
                     tool_call_returned=usage.saw_tool_call,
                 )
+                if protocol.logs_stream_completion:
+                    logger.info(
+                        "chat provider stream complete call_class=research turn=%s "
+                        "duration_ms=%.1f",
+                        opaque_turn(turn_id),
+                        (time.perf_counter() - self.started) * 1000,
+                    )
 
-        return StreamingResponse(
-            chunks(),
-            status_code=upstream.status_code,
-            headers=protocol.response_headers(upstream),
+        headers = protocol.response_headers(upstream)
+        if call.stream:
+            return StreamingResponse(
+                chunks(), status_code=upstream.status_code, headers=headers
+            )
+        body = await upstream.aread()
+        usage.inspect_complete_response(body)
+        elapsed_ms = _elapsed_ms(self.started)
+        provider_trace.first_byte(elapsed_ms)
+        ledger.record_ttft(elapsed_ms)
+        record_gateway_timing(
+            settings,
+            turn_id,
+            phase="upstream_first_body_byte",
+            elapsed_ms=elapsed_ms,
         )
+        await close_upstream(upstream, client, shield=shield)
+        error_code = protocol.stream_error_code(
+            usage, upstream.status_code, cancelled=False
+        )
+        trace_usage = self._settle(
+            ledger,
+            usage,
+            phase="response",
+            provider_request_id=request_id,
+            ttft_ms=elapsed_ms,
+            error_code=error_code,
+        )
+        provider_trace.finish(
+            usage=trace_usage,
+            status_code=upstream.status_code,
+            error_code=error_code,
+            tool_call_returned=usage.saw_tool_call,
+        )
+        return Response(body, status_code=upstream.status_code, headers=headers)
 
     def _meter(
         self,

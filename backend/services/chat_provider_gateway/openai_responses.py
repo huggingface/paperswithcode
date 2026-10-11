@@ -338,6 +338,9 @@ class OpenAIResponsesProtocol:
     settings: Settings
     receipt_phase: Literal["entry", "dispatch"] = "entry"
     transport_error_code: str = "openai_unavailable"
+    releases_request_session: bool = True
+    shields_upstream_close: bool = True
+    logs_stream_completion: bool = False
 
     def check_available(self) -> None:
         if not self.settings.chat_openai_direct_enabled or not (
@@ -350,7 +353,7 @@ class OpenAIResponsesProtocol:
             self.observe_rejection("request_size")
             raise HTTPException(status_code=413, detail=REQUEST_TOO_LARGE)
         try:
-            return ParsedProviderRequest(payload=json.loads(raw))
+            return ParsedProviderRequest(payload=json.loads(raw), raw=raw)
         except json.JSONDecodeError:
             raise HTTPException(
                 status_code=422, detail="Invalid Responses request"
@@ -365,7 +368,10 @@ class OpenAIResponsesProtocol:
         row: ChatTurnCapability,
         db: Session,
         owner: Callable[[], str],
+        *,
+        turn_id: uuid.UUID,
     ) -> PreparedProviderCall:
+        del turn_id
         settings = self.settings
         if (
             row.agent_harness != "pi"
@@ -390,7 +396,9 @@ class OpenAIResponsesProtocol:
             payload=payload,
             raw=raw,
             maximum_tokens=maximum_tokens,
+            capability_id=row.id,
             owner_id=owner_id,
+            provider_mode="openai_funded",
             url=OPENAI_RESPONSES_URL,
             credential=settings.openai_api_key,
             ledger=OpenAIResponsesLedger(
@@ -438,8 +446,9 @@ class OpenAIResponsesProtocol:
         )
 
     async def map_provider_status(
-        self, upstream: httpx.Response
+        self, upstream: httpx.Response, call: PreparedProviderCall
     ) -> ProviderError | None:
+        del call
         if upstream.status_code < 400:
             return None
         error_code = classify_openai_error(upstream.status_code, await upstream.aread())
