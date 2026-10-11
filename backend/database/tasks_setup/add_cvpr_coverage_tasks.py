@@ -8,7 +8,7 @@ import logging
 from sqlalchemy import bindparam, text
 
 from backend.database.connection import db_manager
-from backend.models.api import TaskCreateRequest
+from backend.models.taxonomy import TaskCreateRequest
 from backend.services.task_service import TaskService
 
 logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")

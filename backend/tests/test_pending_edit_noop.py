@@ -22,7 +22,7 @@ from sqlalchemy.pool import StaticPool
 
 from backend import cli_submissions
 from backend.config import Settings
-from backend.models.api import ApplyMutationRequest
+from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
     Base,
     CatalogMutationEvent,

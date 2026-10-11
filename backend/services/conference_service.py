@@ -8,7 +8,7 @@ from typing import Optional
 from sqlalchemy import and_, asc, case, desc, func
 from sqlalchemy.orm import Session
 
-from backend.models.api import (
+from backend.models.conferences import (
     Conference,
     ConferenceAreaWithTasks,
     ConferenceAreasWithTasks,

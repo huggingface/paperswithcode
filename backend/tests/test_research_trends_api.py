@@ -9,7 +9,7 @@ from sqlalchemy.exc import OperationalError
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import TrendPoint, TrendsResponse
+from backend.models.trends import TrendPoint, TrendsResponse
 from backend.services.research_trends_service import ResearchTrendsService
 from backend.utils.exceptions import DatabaseError
 

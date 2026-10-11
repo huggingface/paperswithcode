@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import Paper, PaperLookupResponse, PaperReferenceQuery
+from backend.models.papers import Paper, PaperLookupResponse, PaperReferenceQuery
 from backend.services.paper_reference_service import (
     PaperReferenceService,
     title_fingerprint,

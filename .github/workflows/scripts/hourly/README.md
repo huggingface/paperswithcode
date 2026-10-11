@@ -315,4 +315,4 @@ If you're migrating from the previous two-script setup:
 - **Detailed guide**: `.github/workflows/scripts/docs/TRENDING_EMA_GUIDE.md`
 - **Database schema**: `backend/database/migrations/add_trending_score.sql`
 - **Service methods**: `backend/services/repository_service.py`
-- **API models**: `backend/models/api.py` (Repository model includes trending_score)
+- **API models**: `backend/models/papers.py` (Repository model includes trending_score)

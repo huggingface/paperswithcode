@@ -6,7 +6,7 @@ from datetime import date
 
 import pytest
 
-from backend.models.api import (
+from backend.models.papers import (
     AuthorLink,
     MethodSummary,
     Paper,

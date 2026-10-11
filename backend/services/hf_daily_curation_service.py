@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.api import ApplyMutationRequest
+from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
     Paper,
     PaperCurationJob,

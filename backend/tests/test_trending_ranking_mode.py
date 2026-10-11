@@ -5,7 +5,7 @@ ranking (default + rollback path) vs the composite paper score, and that an
 unset/invalid value safely falls back to GitHub.
 """
 
-from backend.models.api import Papers
+from backend.models.papers import Papers
 from backend.services.paper_service import PaperService
 
 
