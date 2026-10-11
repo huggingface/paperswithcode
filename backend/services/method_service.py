@@ -16,7 +16,7 @@ from backend.models.database import (
     Paper as DBPaper,
     PaperMethod,
 )
-from backend.models.api import Method, MethodIndex, MethodIndexEntry, Methods
+from backend.models.taxonomy import Method, MethodIndex, MethodIndexEntry, Methods
 from backend.utils.entity_images import entity_image_url
 from backend.utils.entity_images import load_entity_image
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError

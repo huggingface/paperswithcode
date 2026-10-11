@@ -2341,3 +2341,54 @@ def test_repair_dispatch_waits_for_existing_remote_worker():
     job._budget_decision = Mock()
     assert job._launch([entry]) == []
     job._budget_decision.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [httpx.RemoteProtocolError("truncated response"), httpx.ReadError("disconnected")],
+)
+def test_http_transfer_failures_retry_with_attempt_limit(error):
+    assert WORKER.classify_failure(error, 1) == ("arxiv_transport", True)
+    assert WORKER.classify_failure(error, 3) == ("arxiv_transport", False)
+    old = {
+        "status": "failed",
+        "schema_version": 2,
+        "error_class": type(error).__name__,
+        "retryable": False,
+        "attempt_count": 1,
+    }
+    assert MODULE.status_disposition(old) == "retryable_due"
+    old["attempt_count"] = 3
+    assert MODULE.status_disposition(old) == "attempts_exhausted"
+
+
+def test_missing_canonical_object_overrides_old_success():
+    record = {"status": "succeeded", "attempt_count": 1}
+    assert MODULE.status_disposition(record) == "completed"
+    assert MODULE.status_disposition(record, canonical_missing=True) == "retryable_due"
+    record["attempt_count"] = 3
+    assert (
+        MODULE.status_disposition(record, canonical_missing=True)
+        == "attempts_exhausted"
+    )
+
+
+def test_refreshed_version_retries_old_missing_pdf():
+    record = {
+        "status": "failed",
+        "schema_version": 2,
+        "error_class": "arxiv_http_404",
+        "requested_version": "v1",
+        "version_fallback_attempted": True,
+        "retryable": False,
+        "attempt_count": 2,
+    }
+    assert (
+        MODULE.status_disposition(record, requested_version="v1") == "permanent_failure"
+    )
+    assert MODULE.status_disposition(record, requested_version="v3") == "retryable_due"
+    record["attempt_count"] = 3
+    assert (
+        MODULE.status_disposition(record, requested_version="v3")
+        == "attempts_exhausted"
+    )

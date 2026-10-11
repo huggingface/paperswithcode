@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.models.database import (
     Dataset as DBDataset,
     Framework as DBFramework,

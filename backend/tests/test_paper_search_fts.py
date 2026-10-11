@@ -27,7 +27,7 @@ from backend.models.database import (
     Repository as DBRepository,
     Task as DBTask,
 )
-from backend.models.api import PaperReferenceQuery
+from backend.models.papers import PaperReferenceQuery
 from backend.services.paper_reference_service import PaperReferenceService
 from backend.services.paper_retrieval_service import PaperRetrievalService
 from backend.services.paper_service import PaperService

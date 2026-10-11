@@ -74,6 +74,28 @@ describe("EditOrganizationsDialog", () => {
     expect(screen.getByRole("checkbox", { name: "NVIDIA" })).toBeChecked();
   });
 
+  it("ranks name-prefix matches above other substring matches", async () => {
+    getOrganizations.mockResolvedValue({
+      count: 3,
+      results: [
+        { id: "4", name: "Shanghai AI Lab", slug: "shanghai-ai-lab", is_featured: true },
+        { id: "5", name: "Mistral AI", slug: "mistral-ai", is_featured: true },
+        { id: "6", name: "Ai2", slug: "ai2", is_featured: true },
+      ],
+    });
+    const user = userEvent.setup();
+    renderDialog();
+
+    await screen.findByText("Ai2");
+    await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "ai");
+
+    expect(screen.getAllByRole("checkbox").map((box) => box.closest("label")?.textContent)).toEqual([
+      "Ai2",
+      "Shanghai AI Lab",
+      "Mistral AI",
+    ]);
+  });
+
   it("shows an empty state when the search has no matches", async () => {
     const user = userEvent.setup();
     renderDialog();

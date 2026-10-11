@@ -1,7 +1,7 @@
 from datetime import date, timedelta
 from types import SimpleNamespace
 
-from backend.models.api import Paper, PaperSummary
+from backend.models.papers import Paper, PaperSummary
 from backend.services.paper_service import PaperService
 
 

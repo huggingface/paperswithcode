@@ -10,7 +10,7 @@ from urllib.parse import urlsplit
 
 from sqlalchemy.orm import Session
 
-from backend.models.api import ResolveModelPaperMutation
+from backend.models.curation import ResolveModelPaperMutation
 from backend.models.database import (
     Evaluation,
     HfArtifact,

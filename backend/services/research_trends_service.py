@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
-from backend.models.api import TrendPoint, TrendsResponse
+from backend.models.trends import TrendPoint, TrendsResponse
 from backend.utils.exceptions import DatabaseError
 
 
