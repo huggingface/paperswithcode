@@ -62,10 +62,14 @@ class Github:
         rows = self.rows
         if args[0] == "search/issues":
             page = int(next(value[5:] for value in args if value.startswith("page=")))
+            query = next(value[2:] for value in args if value.startswith("q="))
+            # GitHub search ignores URL paths; only the site-name phrase that
+            # outreach issues carry finds them (GAIR-NLP/ASI-Evolve#12).
             items = [
                 row
                 for row in rows
-                if "paperswithcode.co/paper/" in (row.get("body") or "")
+                if query.endswith(' is:issue "Papers with Code"')
+                and "paperswithcode.co/paper/" in (row.get("body") or "")
             ]
             return {
                 "total_count": len(items),

@@ -11,6 +11,7 @@ from backend.services.github_issue_body_service import ISSUE_TITLE
 from backend.services.github_issue_publish_service import (
     GithubApiError,
     NIELSROGGE_LOGIN,
+    SITE_ISSUE_QUERY,
     _is_excluded_repository,
 )
 
@@ -63,7 +64,9 @@ def site_issues(api, repository: str, *, sleep=time.sleep):
 
     Repository-wide ``/issues`` listings reject page-based pagination on large
     repositories (HTTP 422), so coverage detection uses the search API, which
-    returns only the handful of issues that mention the site.
+    returns only the handful of issues that mention the site. GitHub search
+    does not tokenize URL paths, so the query matches the site name that every
+    outreach issue carries and ``matches_paper`` filters by paper.
     """
     page = 1
     while True:
@@ -74,7 +77,7 @@ def site_issues(api, repository: str, *, sleep=time.sleep):
                 "--method",
                 "GET",
                 "-f",
-                f"q=repo:{repository} is:issue in:body paperswithcode.co/paper/",
+                f"q=repo:{repository} {SITE_ISSUE_QUERY}",
                 "-f",
                 "per_page=100",
                 "-f",

@@ -32,6 +32,9 @@ class GithubIssuePublishResult:
 
 GithubApi = Callable[[list[str], dict[str, str]], Any]
 NIELSROGGE_LOGIN = "nielsrogge"
+# GitHub issue search does not match URL paths or arXiv ids in bodies, so
+# outreach issues are found by the site name they all carry.
+SITE_ISSUE_QUERY = 'is:issue "Papers with Code"'
 EXCLUDED_REPOSITORY_OWNERS = frozenset(
     {"huggingface", "tensorflow", "pytorch", "openai", "anthropic", "anthropics"}
 )
@@ -203,9 +206,9 @@ def _matching_issue(
         [
             "search/issues",
             "-f",
-            f"q=repo:{repository} is:issue in:body {draft.paper_id}",
+            f"q=repo:{repository} {SITE_ISSUE_QUERY}",
             "-f",
-            "per_page=10",
+            "per_page=100",
             "--method",
             "GET",
         ],
