@@ -2,10 +2,10 @@ import React from "react";
 import { Link } from "react-router-dom";
 import { ArrowRight } from "lucide-react";
 
-export const AstraRoboticsFeature: React.FC<{ className?: string }> = ({ className }) => (
+export const AstraRoboticsFeature: React.FC = () => (
   <Link
     to="/astra-for-robotics"
-    className={className ? `task-featured-collection ${className}` : "task-featured-collection"}
+    className="task-featured-collection"
     aria-label="Featured collection: GPT-6 Astra for Robotics"
   >
     <span className="task-featured-collection-eyebrow">Featured collection</span>

@@ -2,7 +2,6 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PaperCard } from "@/components";
-import { AstraRoboticsFeature } from "@/components/AstraRoboticsFeature";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
@@ -412,7 +411,6 @@ const FeedView: React.FC = () => {
           )}
 
           <div className="feed-content">
-            <AstraRoboticsFeature className="home-featured-collection" />
             <div className="sort-bar home-feed-sort-bar">
               <div className="paper-feed-toolbar-controls">
                 <div className="sort-options">
