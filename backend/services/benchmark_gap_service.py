@@ -535,12 +535,12 @@ class BenchmarkGapService:
     def persist(
         self, *, paper_id: int, job_id: uuid.UUID, gaps: list[dict]
     ) -> list[dict]:
-        results = []
-        for gap in gaps:
+        keyed_gaps = [(benchmark_candidate_identity_key(gap), gap) for gap in gaps]
+        results = {}
+        # Lock candidates in key order so concurrent jobs sharing benchmarks
+        # cannot deadlock; results keep the agent's gap order.
+        for identity_key, gap in sorted(keyed_gaps, key=lambda item: item[0]):
             normalized = gap.pop("_normalized")
-            identity_key = benchmark_candidate_identity_key(
-                {"gap_type": gap["gap_type"], "_normalized": normalized}
-            )
             row = (
                 self.db.query(BenchmarkCurationCandidate)
                 .filter(BenchmarkCurationCandidate.identity_key == identity_key)
@@ -610,8 +610,11 @@ class BenchmarkGapService:
                 .scalar()
                 or 0
             )
-            results.append({"candidate_id": str(row.id), "identity_key": identity_key})
-        return results
+            results[identity_key] = {
+                "candidate_id": str(row.id),
+                "identity_key": identity_key,
+            }
+        return [results[identity_key] for identity_key, _ in keyed_gaps]
 
     def promote_and_enqueue(
         self,

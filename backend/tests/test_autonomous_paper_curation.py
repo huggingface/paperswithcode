@@ -2338,6 +2338,68 @@ def test_benchmark_gap_persist_upgrades_matching_legacy_identity():
     assert isinstance(database.added[0], BenchmarkCurationEvidence)
 
 
+def test_benchmark_gap_persist_locks_candidates_in_identity_order():
+    class Query:
+        def filter(self, *_args):
+            return self
+
+        def order_by(self, *_args):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def one_or_none(self):
+            return None
+
+        def first(self):
+            return None
+
+        def scalar(self):
+            return 1
+
+    class Database:
+        def __init__(self):
+            self.added = []
+
+        def query(self, _model):
+            return Query()
+
+        def add(self, value):
+            self.added.append(value)
+
+        def flush(self):
+            pass
+
+    def gap(name):
+        return {
+            "gap_type": "dataset_missing",
+            "reasoning": "The exact protocol is absent.",
+            "_normalized": {
+                "name": name,
+                "canonical_url": None,
+                "task_ids": [15],
+                "aliases": [],
+            },
+        }
+
+    gaps = [gap("OSWorld 0808"), gap("GameCraft-Bench"), gap("ALE Near-term")]
+    expected_keys = [benchmark_candidate_identity_key(item) for item in gaps]
+    database = Database()
+
+    result = BenchmarkGapService(database).persist(
+        paper_id=114228, job_id=uuid.uuid4(), gaps=gaps
+    )
+
+    locked_keys = [
+        row.identity_key
+        for row in database.added
+        if not isinstance(row, BenchmarkCurationEvidence)
+    ]
+    assert locked_keys == sorted(expected_keys)
+    assert [item["identity_key"] for item in result] == expected_keys
+
+
 def test_reviewed_benchmark_promotion_requeues_only_evidence_papers():
     candidate_id = uuid.uuid4()
     candidate = SimpleNamespace(
