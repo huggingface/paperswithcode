@@ -311,6 +311,7 @@
 .chat-send-on:hover { background: color-mix(in oklch, var(--ink) 88%, var(--accent)); }
 @media (max-width: 900px) {
   .chat-composer-wrap { padding: 12px 16px 14px; }
+  .chat-composer-foot { display: none; }
   .chat-composer-hint { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
