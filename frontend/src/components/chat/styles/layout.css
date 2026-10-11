@@ -32,12 +32,13 @@
 .chat-empty {
   flex: 1;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   padding: 40px 24px;
   overflow-y: auto;
 }
-.chat-empty-inner { max-width: 680px; width: 100%; text-align: center; }
+/* Auto margins center content when it fits, without hiding its start on short viewports. */
+.chat-empty-inner { max-width: 680px; width: 100%; margin-block: auto; text-align: center; }
 .chat-empty-eyebrow {
   font-family: var(--mono);
   font-size: 11px;
