@@ -25,9 +25,11 @@ from sqlalchemy.sql import func, text
 from backend.models.database.base import Base
 
 if TYPE_CHECKING:
-    from backend.models.database import Conference, Method, Organization, Task
+    from backend.models.database.conferences import Conference
     from backend.models.database.evaluations import Dataset, Evaluation
+    from backend.models.database.organizations import Organization
     from backend.models.database.resources import HfArtifact, ProjectPage, Repository
+    from backend.models.database.taxonomy import Method, Task
 
 
 class Paper(Base):

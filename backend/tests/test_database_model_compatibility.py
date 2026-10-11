@@ -1,35 +1,18 @@
 """Compatibility checks for bounded persistence model modules."""
 
+import importlib
+import pkgutil
 import subprocess
 import sys
 
 import pytest
 
 from backend.models import database
-from backend.models.database import (
-    autonomous,
-    chat,
-    chat_artifacts,
-    chat_providers,
-    chat_sandbox,
-    chat_transcripts,
-    curation,
-    evaluations,
-    papers,
-    resources,
-)
 
-BOUNDED_MODULES = (
-    autonomous,
-    chat,
-    chat_artifacts,
-    chat_providers,
-    chat_sandbox,
-    chat_transcripts,
-    curation,
-    evaluations,
-    papers,
-    resources,
+BOUNDED_MODULES = tuple(
+    importlib.import_module(f"{database.__name__}.{info.name}")
+    for info in pkgutil.iter_modules(database.__path__)
+    if info.name != "base"
 )
 
 
@@ -50,12 +33,15 @@ def test_legacy_imports_are_canonical_class_aliases():
             assert getattr(database, name) is model
 
 
-def test_every_mapped_class_is_exported_once():
+def test_every_mapped_class_has_one_bounded_owner_and_one_export():
+    mapped = {mapper.class_ for mapper in database.Base.registry.mappers}
+    owned = [model for m in BOUNDED_MODULES for model in _owned_models(m).values()]
+    assert len(owned) == len(set(owned))
+    assert set(owned) == mapped
+
     exported = [name for name in database.__all__ if name != "Base"]
     assert len(exported) == len(set(exported))
-    assert {getattr(database, name) for name in exported} == {
-        mapper.class_ for mapper in database.Base.registry.mappers
-    }
+    assert {getattr(database, name) for name in exported} == mapped
 
 
 @pytest.mark.parametrize("module", BOUNDED_MODULES, ids=lambda m: m.__name__)

@@ -21,8 +21,8 @@ from sqlalchemy.sql import func, text
 from backend.models.database.base import Base
 
 if TYPE_CHECKING:
-    from backend.models.database import Task
     from backend.models.database.papers import Paper
+    from backend.models.database.taxonomy import Task
 
 
 class Dataset(Base):
