@@ -222,7 +222,7 @@ backend/
 ### Adding New Endpoints
 
 1. **Define API Models**: Add Pydantic models in `models/api.py`
-2. **Extend Database Models**: Update SQLAlchemy models in `models/database.py`
+2. **Extend Database Models**: Update SQLAlchemy models in the owning `models/database/` module
 3. **Create Service Methods**: Add business logic in appropriate service classes
 4. **Add Router Endpoints**: Define FastAPI routes in the relevant router
 5. **Update Main App**: Include new routers in `main.py`

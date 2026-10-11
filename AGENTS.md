@@ -52,8 +52,9 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
 - Put domain logic in `backend/services/`, HTTP adapters in `backend/routers/`,
   API models in bounded modules under `backend/models/` (with
   `backend/models/api.py` as the compatibility re-export surface), and
-  persistence models and migrations in `backend/models/database.py` and
-  `backend/database/migrations/`.
+  persistence models in bounded modules under `backend/models/database/` (with
+  `backend.models.database` as the compatibility re-export surface) and
+  migrations in `backend/database/migrations/`.
 - Run targeted tests and linters; a focused check is preferable to the entire
   suite when sufficient.
 - For an isolated backend, first confirm a free non-production port. Ports 8000
