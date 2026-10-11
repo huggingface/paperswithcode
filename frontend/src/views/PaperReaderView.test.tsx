@@ -37,8 +37,9 @@ vi.mock("@/lib/api/chat", () => ({
   chatApi: { getAvailability: mocks.getAvailability },
 }));
 vi.mock("@/components/pdf/PdfViewer", () => ({
-  PdfViewer: ({ url, paperTitle, paperHref, resources, resizeActive, selectionEnabled, paperVersion, onPaperSelection }: {
+  PdfViewer: ({ url, downloadUrl, paperTitle, paperHref, resources, resizeActive, selectionEnabled, paperVersion, onPaperSelection }: {
     url: string;
+    downloadUrl?: string;
     paperTitle: string;
     paperHref: string;
     resizeActive?: boolean;
@@ -55,7 +56,7 @@ vi.mock("@/components/pdf/PdfViewer", () => ({
     {resources?.repository && <a href={resources.repository.href}>Official repository · {resources.repository.stars} stars</a>}
     {resources?.projectPage && <a href={resources.projectPage.href}>Project page</a>}
     {resources?.huggingFace && <a href={resources.huggingFace.href}>{resources.huggingFace.count} HF artifacts</a>}
-    <div role="region" aria-label="Paper PDF" data-url={url} data-resize-active={String(Boolean(resizeActive))} data-selection-enabled={String(Boolean(selectionEnabled))} data-paper-version={paperVersion || ""}>PDF viewer</div>
+    <div role="region" aria-label="Paper PDF" data-url={url} data-download-url={downloadUrl} data-resize-active={String(Boolean(resizeActive))} data-selection-enabled={String(Boolean(selectionEnabled))} data-paper-version={paperVersion || ""}>PDF viewer</div>
     <button type="button" onClick={() => onPaperSelection?.({
       routeId: "1706.03762",
       paperVersion: paperVersion || "v7",
@@ -142,11 +143,26 @@ describe("PaperReaderView", () => {
       .toHaveAttribute("href", "https://huggingface.co/papers/1706.03762");
     expect(screen.getByRole("region", { name: "Paper PDF" })).toBeVisible();
     expect(screen.getByRole("region", { name: "Paper PDF" }))
-      .toHaveAttribute("data-url", "https://arxiv.org/pdf/1706.03762v7");
+      .toHaveAttribute("data-url", "/paper-assets/arxiv-pdf/1706.03762v7");
+    expect(screen.getByRole("region", { name: "Paper PDF" }))
+      .toHaveAttribute("data-download-url", "https://arxiv.org/pdf/1706.03762v7");
     fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
     expect(screen.getByText("Paper chat")).toBeVisible();
     expect(screen.queryByText("Notes")).not.toBeInTheDocument();
     await waitFor(() => expect(mocks.getAvailability).toHaveBeenCalled());
+  });
+
+  it.each([
+    ["http://arxiv.org/pdf/hep-th/9901001v2.pdf", "/paper-assets/arxiv-pdf/hep-th/9901001v2"],
+    ["https://www.arxiv.org/pdf/2610.03391", "/paper-assets/arxiv-pdf/2610.03391"],
+    ["https://arxiv.org/pdf/2610.03391?download=1", "https://arxiv.org/pdf/2610.03391?download=1"],
+    ["https://openreview.net/pdf?id=abc", "https://openreview.net/pdf?id=abc"],
+  ])("reads %s through %s", (urlPdf, expected) => {
+    mocks.paper = { ...mocks.paper, url_pdf: urlPdf };
+
+    renderReader();
+
+    expect(screen.getByRole("region", { name: "Paper PDF" })).toHaveAttribute("data-url", expected);
   });
 
   it("loads an archived external PDF by catalog paper ID", () => {

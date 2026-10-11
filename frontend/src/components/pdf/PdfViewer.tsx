@@ -221,9 +221,12 @@ export function PdfViewer({
   const [activeMatch, setActiveMatch] = useState(0);
   const pageWidth = Math.max(240, Math.round(fitWidth * zoom));
   // Canvas previews are private artifact endpoints. Public reader PDFs must keep
-  // their normal cross-origin fetch behavior.
+  // their normal cross-origin fetch behavior, and fetch only the byte ranges
+  // that visible pages, search, and citations need when the server allows it.
   const documentOptions = useMemo(
-    () => chrome === "canvas" ? { withCredentials: true } : undefined,
+    () => chrome === "canvas"
+      ? { withCredentials: true }
+      : { disableStream: true, disableAutoFetch: true },
     [chrome],
   );
 
@@ -544,7 +547,7 @@ export function PdfViewer({
     <div ref={scrollRef} className="pdf-scroll" role="region" aria-label={chrome === "canvas" ? `${paperTitle} PDF preview` : "Paper PDF"}>
       {error ? <div className="pdf-error" role="alert">
         <p>{error}</p>
-        <div><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button> <a href={url} target="_blank" rel="noopener noreferrer">Open PDF</a></div>
+        <div><button type="button" onClick={() => setRetry((value) => value + 1)}>Retry</button> <a href={downloadUrl} target="_blank" rel="noopener noreferrer">Open PDF</a></div>
       </div> : <Document
         key={`${paperKey}-${retry}`}
         file={url}

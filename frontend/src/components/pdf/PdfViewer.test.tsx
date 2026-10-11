@@ -436,7 +436,9 @@ describe("PdfViewer resize rendering", () => {
       paperHref="/paper/1706.03762"
     />);
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
-    expect(reactPdf.documentOptions.every((options) => options === undefined)).toBe(true);
+    expect(reactPdf.documentOptions).not.toHaveLength(0);
+    expect(reactPdf.documentOptions.every((options) => options === reactPdf.documentOptions[0])).toBe(true);
+    expect(reactPdf.documentOptions[0]).toEqual({ disableStream: true, disableAutoFetch: true });
 
     reader.unmount();
     reactPdf.documentOptions.length = 0;

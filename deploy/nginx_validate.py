@@ -32,6 +32,11 @@ SHARE_API_LOCATION = (
     r'[0-9a-f]{12}/(preview|download/(png|pdf)))?$"'
 )
 CHAT_STREAM_LOCATION = "location = /api/v1/chat/stream"
+ARXIV_PDF_LOCATION = (
+    r'location ~ "^/paper-assets/arxiv-pdf/(?<pwc_arxiv_pdf_id>'
+    r"[0-9]{4}\.[0-9]{4,5}(?:v[0-9]{1,3})?|"
+    r'[a-z]+(?:-[a-z]+)*(?:\.[A-Z]{2})?/[0-9]{7}(?:v[0-9]{1,3})?)$"'
+)
 
 
 def _validate_mcp_routes(config: str, environment: str, port: int) -> list[str]:
@@ -480,6 +485,27 @@ def validate(production: str, staging: str) -> list[str]:
         or "proxy_pass http://pwc_staging_backend;" not in access_api
     ):
         failures.append("staging access request API contract is invalid")
+    for config, environment in ((production, "production"), (staging, "staging")):
+        block = location_block(config, ARXIV_PDF_LOCATION)
+        if not block:
+            failures.append(f"{environment} arXiv PDF proxy route is missing")
+            continue
+        for requirement in (
+            "limit_except GET { deny all; }",
+            f"limit_req zone=pwc_{environment}_arxiv_pdf ",
+            "proxy_pass https://arxiv.org/pdf/$pwc_arxiv_pdf_id;",
+            "proxy_ssl_verify on;",
+            'proxy_set_header Cookie "";',
+            'proxy_set_header Authorization "";',
+            "proxy_hide_header Set-Cookie;",
+            "proxy_max_temp_file_size 0;",
+        ):
+            if requirement not in block:
+                failures.append(f"{environment} arXiv PDF proxy misses: {requirement}")
+        if "proxy_cache " in block:
+            failures.append(f"{environment} arXiv PDF proxy must not cache to disk")
+        if ("auth_request" in block) != (environment == "staging"):
+            failures.append(f"{environment} arXiv PDF proxy has the wrong access gate")
     forbidden = location_block(staging, "location @staging_forbidden")
     if "return 302 /request-access;" not in forbidden:
         failures.append("staging forbidden users are not sent to request access")

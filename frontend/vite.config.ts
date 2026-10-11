@@ -62,6 +62,12 @@ export default defineConfig(({ mode }) => {
       changeOrigin: true,
       secure: false,
     },
+    // Production nginx serves this same-origin route; dev forwards it to arXiv.
+    "/paper-assets/arxiv-pdf/": {
+      target: "https://arxiv.org",
+      changeOrigin: true,
+      rewrite: (path: string) => path.replace(/^\/paper-assets\/arxiv-pdf\//, "/pdf/"),
+    },
   };
 
   return {

@@ -46,6 +46,20 @@ function directArxivPdfHref(value: unknown): string | null {
   return parsed.href;
 }
 
+const ARXIV_PDF_PATH = /^\/pdf\/(\d{4}\.\d{4,5}(?:v\d{1,3})?|[a-z]+(?:-[a-z]+)*(?:\.[A-Z]{2})?\/\d{7}(?:v\d{1,3})?)$/;
+
+// arXiv hides Accept-Ranges from cross-origin fetches, which makes pdf.js
+// download the whole file before page 1. nginx serves arXiv PDFs same-origin
+// with range requests intact.
+function rangeReadablePdfHref(href: string): string {
+  const parsed = new URL(href);
+  const match = parsed.pathname.match(ARXIV_PDF_PATH);
+  if ((parsed.hostname === "arxiv.org" || parsed.hostname === "www.arxiv.org") && match && !parsed.search) {
+    return assetUrl(`/paper-assets/arxiv-pdf/${match[1]}`) ?? href;
+  }
+  return href;
+}
+
 function resourceHostname(href: string): string {
   return new URL(href).hostname.replace(/^www\./, "");
 }
@@ -102,9 +116,12 @@ function PaperReaderExperience() {
     retry: false,
   });
   const paper = query.data;
-  const pdfUrl = paper?.source === "external"
+  const originalPdfUrl = paper?.source === "external"
     ? assetUrl(`/paper-assets/external/${paper.id}/paper.pdf`)
     : directArxivPdfHref(paper?.url_pdf);
+  const pdfUrl = originalPdfUrl && paper?.source !== "external"
+    ? rangeReadablePdfHref(originalPdfUrl)
+    : originalPdfUrl;
   const toolbarResources = readerToolbarResources(paper);
   const canonicalRoute = paper?.arxiv_id?.replace(/v\d+$/i, "") || routeId;
   const closeReader = useCallback(() => navigate(`/paper/${canonicalRoute}`), [canonicalRoute, navigate]);
@@ -343,6 +360,7 @@ function PaperReaderExperience() {
       >
         <PdfViewer
           url={pdfUrl}
+          downloadUrl={originalPdfUrl ?? pdfUrl}
           paperKey={canonicalRoute}
           paperTitle={paper.title}
           paperHref={`/paper/${canonicalRoute}`}
