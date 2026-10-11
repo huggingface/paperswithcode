@@ -9,8 +9,8 @@ from sqlalchemy import Float, and_, cast, desc, func, or_
 from sqlalchemy.orm import Session
 
 from backend.database.organizations_setup.organizations import BY_PWC_SLUG
-from backend.models.api import (
-    ConferenceTaskSummary,
+from backend.models.conferences import ConferenceTaskSummary
+from backend.models.organizations import (
     Organization,
     OrganizationAreaWithTasks,
     OrganizationAreasWithTasks,

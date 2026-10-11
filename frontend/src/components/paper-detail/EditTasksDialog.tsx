@@ -122,23 +122,25 @@ export function EditTasksDialog({
     const results = searchData?.results || [];
     const seen = new Set<number>();
     const ordered: APITask[] = [];
-    // Pin currently-selected tasks at the top so they can always be unchecked.
-    selectedTaskIds.forEach((id) => {
-      if (seen.has(id)) return;
-      const task = knownTasks.get(id);
-      if (task) {
-        ordered.push(task);
-        seen.add(id);
-      }
-    });
-    results.forEach((t) => {
-      const id = parseInt(t.id);
-      if (Number.isNaN(id) || seen.has(id)) return;
-      ordered.push(t);
+    const add = (id: number, task: APITask | undefined) => {
+      if (!task || Number.isNaN(id) || seen.has(id)) return;
+      ordered.push(task);
       seen.add(id);
-    });
+    };
+    const addSelected = () => selectedTaskIds.forEach((id) => add(id, knownTasks.get(id)));
+    const addResults = () => results.forEach((t) => add(parseInt(t.id), t));
+    // Without a query, pin selected tasks at the top so they can always be
+    // unchecked. While searching, keep the API's relevance order first and
+    // list non-matching selected tasks after the results.
+    if (debouncedQuery) {
+      addResults();
+      addSelected();
+    } else {
+      addSelected();
+      addResults();
+    }
     return ordered;
-  }, [searchData, selectedTaskIds, knownTasks]);
+  }, [searchData, selectedTaskIds, knownTasks, debouncedQuery]);
 
   const updateTasksMutation = useMutation({
     mutationFn: async ({ paperId, taskIds }: { paperId: string; taskIds: number[] }) => {

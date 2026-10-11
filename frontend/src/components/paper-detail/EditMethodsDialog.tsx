@@ -115,22 +115,25 @@ export function EditMethodsDialog({
     const results = searchData?.results || [];
     const seen = new Set<number>();
     const ordered: APIMethod[] = [];
-    selectedMethodIds.forEach((id) => {
-      if (seen.has(id)) return;
-      const method = knownMethods.get(id);
-      if (method) {
-        ordered.push(method);
-        seen.add(id);
-      }
-    });
-    results.forEach((m) => {
-      const id = parseInt(m.id);
-      if (Number.isNaN(id) || seen.has(id)) return;
-      ordered.push(m);
+    const add = (id: number, method: APIMethod | undefined) => {
+      if (!method || Number.isNaN(id) || seen.has(id)) return;
+      ordered.push(method);
       seen.add(id);
-    });
+    };
+    const addSelected = () => selectedMethodIds.forEach((id) => add(id, knownMethods.get(id)));
+    const addResults = () => results.forEach((m) => add(parseInt(m.id), m));
+    // Without a query, pin selected methods at the top so they can always be
+    // unchecked. While searching, keep the API's relevance order first and
+    // list non-matching selected methods after the results.
+    if (debouncedQuery) {
+      addResults();
+      addSelected();
+    } else {
+      addSelected();
+      addResults();
+    }
     return ordered;
-  }, [searchData, selectedMethodIds, knownMethods]);
+  }, [searchData, selectedMethodIds, knownMethods, debouncedQuery]);
 
   const updateMethodsMutation = useMutation({
     mutationFn: async ({ paperId, methodIds }: { paperId: string; methodIds: number[] }) => {

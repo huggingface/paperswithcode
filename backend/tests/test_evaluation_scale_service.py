@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from backend.models.api import ApplyMutationRequest
+from backend.models.curation import ApplyMutationRequest
 from backend.models.evaluations import EvaluationScoreEvidence
 from backend.services.evaluation_scale_service import validate_source_score
 

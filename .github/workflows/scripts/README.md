@@ -21,6 +21,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-import-hf-daily-papers.yml` | `0 * * * *` | `pwc-cron import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
 | `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
+| local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
@@ -130,6 +131,26 @@ history and stores them on repositories for the trending API/view pipeline.
 
 `update_citations.py` pulls citation counts from Semantic Scholar for ArXiv
 papers. Runs are bounded so hourly Actions do not pile up under API throttling.
+
+`scan_model_releases.py` is a read-only radar for model releases that neither
+the daily-paper import (arXiv only) nor the trending-model curation (Hub
+weights only) can see, such as API-only or blog-first launches. Every three
+hours it reads the official news feeds of OpenAI and Google DeepMind (RSS) and
+Anthropic, Mistral AI, and DeepSeek (sitemaps plus the newest article pages),
+keeps posts whose headline announces a versioned model name, and adds recent
+Artificial Analysis leaderboard models that are missing from the reviewed
+`MODEL_PAPER_IDENTITIES` map. Each release from the last 14 days is matched
+against `papers.source_url`, paper titles, `model_releases`, and
+`artificial-analysis` provider aliases. Unindexed releases are logged as a
+`model_release_radar_unindexed` warning for an operator to index with the
+`add-external-paper` and `add-evals` skills; scheduled jobs never create
+external papers. Labs without a reachable machine-readable feed (Meta, Qwen,
+Moonshot, Zhipu, xAI, MiniMax, Xiaomi) are covered through Artificial Analysis
+and the trending-model curation. Run it by hand with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.scan_model_releases --lookback-days 30
+```
 
 `extract_urls.py` uses Gemini to find official GitHub repositories and project
 pages for papers that still have `urls_extracted = false`.

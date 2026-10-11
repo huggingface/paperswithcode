@@ -9,8 +9,8 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Response
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
-from backend.models.api import (
-    Task,
+from backend.models.tasks import Task
+from backend.models.taxonomy import (
     Tasks,
     TaskPage,
     KeywordUpdate,

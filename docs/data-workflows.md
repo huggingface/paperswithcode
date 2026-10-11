@@ -128,7 +128,7 @@ Checks performed:
 | Evaluation missing on task leaderboard | Confirm dataset is linked to task and rerun rank recalculation: `EvaluationService.recalculate_ranks(task_id, dataset_id)`. |
 | Rankings reversed (higher WER looks “better”) | Ensure metric direction is set to `lower_is_better` in `metrics` and rerun validation script. |
 | Duplicate evaluation blocked | Distinguish entries by `best_metric`, or update existing record with PUT/PATCH. |
-| API 422 validation error | Review fields against `backend/models/api.EvaluationCreateRequest`. |
+| API 422 validation error | Review fields against `backend/models/evaluations.EvaluationCreateRequest`. |
 
 ## Related Files
 

@@ -29,7 +29,7 @@ def test_unverified_bucket_never_dumps_or_uploads(tmp_path, metadata):
     assert calls == ["info"]
 
 
-def run_backup(tmp_path, responses, fail_info=False):
+def run_backup(tmp_path, responses, fail_info=False, fail_dump=False):
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
     calls = tmp_path / "calls"
@@ -42,7 +42,11 @@ args = sys.argv[1:]
 name = pathlib.Path(sys.argv[0]).name
 if name == 'pg_dump':
     with calls.open('a') as f: f.write('dump\\n')
-    pathlib.Path(args[args.index('-f') + 1]).write_bytes(b'fake private dump')
+    dump_path = pathlib.Path(args[args.index('-f') + 1])
+    assert dump_path.parent == pathlib.Path(os.environ['PWC_POSTGRES_BACKUP_DIR'])
+    assert dump_path.name.endswith('.partial')
+    dump_path.write_bytes(b'fake private dump')
+    sys.exit(1 if os.environ['TEST_FAIL_DUMP'] == '1' else 0)
 elif args[:2] == ['buckets', 'info']:
     with calls.open('a') as f: f.write('info\\n')
     n = int(state.read_text()) if state.exists() else 0
@@ -80,6 +84,7 @@ else:
         "TEST_STATE": str(state),
         "TEST_RESPONSES": json.dumps(responses),
         "TEST_FAIL_INFO": "1" if fail_info else "0",
+        "TEST_FAIL_DUMP": "1" if fail_dump else "0",
     }
     result = subprocess.run(
         ["bash", str(SCRIPT)], env=env, capture_output=True, text=True
@@ -122,3 +127,10 @@ def test_visibility_change_after_upload_fails_before_pruning(tmp_path):
     assert result.returncode != 0
     assert calls == ["info", "dump", "info", "upload", "upload", "info"]
     assert len(list(backups.iterdir())) == 2
+
+
+def test_failed_dump_is_removed_without_upload(tmp_path):
+    result, calls, backups = run_backup(tmp_path, ['{"private": true}'], fail_dump=True)
+    assert result.returncode != 0
+    assert calls == ["info", "dump"]
+    assert list(backups.iterdir()) == []
