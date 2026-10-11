@@ -162,8 +162,9 @@ warning instead of failing.
 
 `sync_extractbench.py` applies the same reviewed-label contract to the official
 `leaderboard.csv` in `run-llama/ExtractBench`. It stores unified value F1 plus
-word- and page-level grounding F1 on the Agents task, and omits the grounding
-metrics for systems that return no evidence (upstream reports 0.00 for both).
+word- and page-level grounding F1 on the Document Understanding task, and omits
+the grounding metrics for systems that return no evidence (upstream reports
+0.00 for both).
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

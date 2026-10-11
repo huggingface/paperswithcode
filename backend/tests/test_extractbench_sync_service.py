@@ -106,7 +106,7 @@ def _session() -> Session:
         ],
     )
     session = Session(engine)
-    task = Task(id=14, name="Agents", slug="agents")
+    task = Task(id=308, name="Document Understanding", slug="document-understanding")
     dataset = Dataset(id=900, name="ExtractBench", slug="extractbench")
     metrics = [
         Metric(id=100 + index, name=name, direction="higher_is_better")
@@ -204,7 +204,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
         [
             Evaluation(
                 paper_id=1000,
-                task_id=14,
+                task_id=308,
                 dataset_id=900,
                 model_name="Old label",
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} provider=model-0; old",
@@ -213,7 +213,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
             ),
             Evaluation(
                 paper_id=1000,
-                task_id=14,
+                task_id=308,
                 dataset_id=900,
                 model_name="Gone model",
                 methodology=f"{MANAGED_METHODOLOGY_PREFIX} provider=gone; old",
@@ -222,7 +222,7 @@ def test_sync_upserts_managed_rows_and_preserves_manual_rows(monkeypatch):
             ),
             Evaluation(
                 paper_id=1000,
-                task_id=14,
+                task_id=308,
                 dataset_id=900,
                 model_name="Manual model",
                 methodology="Human curated",

@@ -5,9 +5,12 @@ extraction. Requested in huggingface/paperswithcode-feedback#47. This script:
 
 * creates (or refreshes) `datasets.slug = 'extractbench'` pointing at the
   latest version of the introducing paper,
-* creates the three ExtractBench metrics and links them on the Agents and
-  Document Understanding tasks,
-* tags the introducing paper with both tasks.
+* creates the three ExtractBench metrics and links them on the Document
+  Understanding task,
+* tags the introducing paper with that task,
+* retires the original Agents placement: moves managed rows to Document
+  Understanding, unlinks the benchmark from Agents, and removes Agents tags
+  that only the ExtractBench rows justified.
 
 The sync refuses to run until this script has been applied.
 Dry-run by default; pass `--apply` to write.
@@ -26,10 +29,13 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager
-from backend.models.database import Dataset, Metric, Paper, Task
+from backend.models.database import Dataset, Evaluation, Metric, Paper, Task
+from backend.services.evaluation_service import EvaluationService
 from backend.services.extractbench_sync_service import (
     DATASET_SLUG,
     GROUNDING_METRICS,
+    MANAGED_METHODOLOGY_PREFIX,
+    METRIC_NAMES,
     PRIMARY_METRIC_NAME,
     TASK_SLUG,
 )
@@ -40,7 +46,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 EXTRACTBENCH_ARXIV_ID = "2607.29677"
-TASK_SLUGS = (TASK_SLUG, "document-understanding")
+RETIRED_TASK_SLUG = "agents"
 PAPER_URL = f"https://paperswithcode.co/paper/{EXTRACTBENCH_ARXIV_ID}"
 HF_DATASET_URL = "https://huggingface.co/datasets/llamaindex/ExtractBench"
 GITHUB_URL = "https://github.com/run-llama/ExtractBench"
@@ -112,12 +118,11 @@ def _ensure_dataset(session: Session, paper: Paper) -> Dataset:
     return dataset
 
 
-def _tasks(session: Session) -> list[Task]:
-    tasks = session.query(Task).filter(Task.slug.in_(TASK_SLUGS)).all()
-    missing = set(TASK_SLUGS) - {task.slug for task in tasks}
-    if missing:
-        raise RuntimeError(f"Tasks not found: {sorted(missing)!r}")
-    return tasks
+def _task(session: Session, slug: str) -> Task:
+    task = session.query(Task).filter(Task.slug == slug).one_or_none()
+    if task is None:
+        raise RuntimeError(f"Task slug={slug!r} not found")
+    return task
 
 
 def _ensure_metrics(session: Session) -> dict[str, int]:
@@ -161,17 +166,101 @@ def _link(session: Session, task_id: int, dataset_id: int, metric_ids: dict[str,
         )
 
 
-def _tag_source_paper(session: Session, paper_id: int, task_id: int) -> None:
+def _tag_source_paper(
+    session: Session, paper_id: int, task_id: int, *, source: str = "manual"
+) -> None:
     session.execute(
         text(
             """
             INSERT INTO paper_tasks (paper_id, task_id, source)
-            VALUES (:paper_id, :task_id, 'manual')
+            VALUES (:paper_id, :task_id, :source)
             ON CONFLICT DO NOTHING
             """
         ),
-        {"paper_id": paper_id, "task_id": task_id},
+        {"paper_id": paper_id, "task_id": task_id, "source": source},
     )
+
+
+def _retire_agents_placement(
+    session: Session, dataset: Dataset, task: Task, paper: Paper
+) -> int:
+    """Move the first live sync's Agents rows and drop the Agents links."""
+    agents = _task(session, RETIRED_TASK_SLUG)
+    target_models = {
+        model_name
+        for (model_name,) in session.query(Evaluation.model_name).filter(
+            Evaluation.task_id == task.id,
+            Evaluation.dataset_id == dataset.id,
+            Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
+        )
+    }
+    rows = (
+        session.query(Evaluation)
+        .filter(
+            Evaluation.task_id == agents.id,
+            Evaluation.dataset_id == dataset.id,
+            Evaluation.methodology.like(f"{MANAGED_METHODOLOGY_PREFIX}%"),
+        )
+        .all()
+    )
+    paper_ids = {row.paper_id for row in rows}
+    for row in rows:
+        if row.model_name in target_models:
+            session.delete(row)
+        else:
+            row.task_id = task.id
+    session.flush()
+    for paper_id in paper_ids:
+        _tag_source_paper(session, paper_id, task.id, source="auto")
+
+    params = {"agents_id": agents.id, "dataset_id": dataset.id}
+    session.execute(
+        text(
+            """
+            DELETE FROM task_dataset_metrics
+            WHERE task_id = :agents_id AND dataset_id = :dataset_id
+            """
+        ),
+        params,
+    )
+    session.execute(
+        text(
+            """
+            DELETE FROM task_datasets
+            WHERE task_id = :agents_id AND dataset_id = :dataset_id
+            """
+        ),
+        params,
+    )
+    # The sync auto-tagged every evaluated paper with its task; keep Agents
+    # tags only where other Agents evaluations still justify them.
+    untagged = session.execute(
+        text(
+            """
+            DELETE FROM paper_tasks pt
+            WHERE pt.task_id = :agents_id
+              AND (
+                pt.paper_id = :paper_id
+                OR (
+                  pt.source = 'auto'
+                  AND pt.paper_id = ANY(:paper_ids)
+                  AND NOT EXISTS (
+                    SELECT 1 FROM evaluations e
+                    WHERE e.paper_id = pt.paper_id AND e.task_id = :agents_id
+                  )
+                )
+              )
+            RETURNING pt.paper_id
+            """
+        ),
+        {**params, "paper_id": paper.id, "paper_ids": list(paper_ids)},
+    ).all()
+    logger.info(
+        "Moved %s managed rows off Agents; removed %s Agents tags",
+        len(rows),
+        len(untagged),
+    )
+    return len(rows)
 
 
 def main() -> None:
@@ -183,9 +272,15 @@ def main() -> None:
         paper = _latest_paper(session)
         dataset = _ensure_dataset(session, paper)
         metric_ids = _ensure_metrics(session)
-        for task in _tasks(session):
-            _link(session, task.id, dataset.id, metric_ids)
-            _tag_source_paper(session, paper.id, task.id)
+        task = _task(session, TASK_SLUG)
+        _link(session, task.id, dataset.id, metric_ids)
+        _tag_source_paper(session, paper.id, task.id)
+        _retire_agents_placement(session, dataset, task, paper)
+        ranking = EvaluationService(session)
+        for metric_name in METRIC_NAMES:
+            ranking.recalculate_ranks(
+                task.id, dataset.id, metric_name=metric_name, commit=False
+            )
         if args.apply:
             session.commit()
             logger.info(

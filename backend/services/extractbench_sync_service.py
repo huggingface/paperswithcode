@@ -34,7 +34,7 @@ EXTRACTBENCH_CSV_URL = (
     "https://raw.githubusercontent.com/run-llama/ExtractBench/main/leaderboard.csv"
 )
 EXTRACTBENCH_SOURCE_URL = "https://github.com/run-llama/ExtractBench#leaderboard"
-TASK_SLUG = "agents"
+TASK_SLUG = "document-understanding"
 DATASET_SLUG = "extractbench"
 PRIMARY_METRIC_NAME = "Value F1"
 GROUNDING_METRICS = (
