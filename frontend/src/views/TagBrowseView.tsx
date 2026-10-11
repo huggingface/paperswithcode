@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import { ArrowRight, Github, Trophy } from "lucide-react";
 
 import { MethodChip, PaperCard } from "@/components";
+import { AstraRoboticsFeature } from "@/components/AstraRoboticsFeature";
 import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
@@ -190,25 +191,6 @@ export const HealthcareMedicalAiHub: React.FC<{
     </section>
   );
 };
-
-export const AstraRoboticsFeature: React.FC = () => (
-  <Link
-    to="/astra-for-robotics"
-    className="task-featured-collection"
-    aria-label="Featured collection: GPT-6 Astra for Robotics"
-  >
-    <span className="task-featured-collection-eyebrow">Featured collection</span>
-    <strong>GPT-6 Astra for Robotics</strong>
-    <span className="task-featured-collection-description">
-      Papers and demos that put GPT-6 Astra in control of real and simulated robots, as the
-      policy itself or as an agent orchestrating the stack.
-    </span>
-    <span className="task-featured-collection-meta">
-      Explore the collection
-      <ArrowRight size={14} aria-hidden="true" />
-    </span>
-  </Link>
-);
 
 const sortSubtasksForDisplay = (subtasks: Task[]) =>
   [...subtasks].sort((a, b) => {

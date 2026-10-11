@@ -46,6 +46,9 @@
   gap: 10px;
   flex-wrap: wrap;
 }
+.home-featured-collection {
+  margin: 0 0 20px;
+}
 @media (max-width: 880px) {
   .layout-with-sidebar > .sidebar,
   .layout-with-sidebar > .feed-main {
