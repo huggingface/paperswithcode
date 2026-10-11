@@ -166,7 +166,12 @@ def utc_datetime(value: datetime | None) -> datetime | None:
 
 
 def status_disposition(
-    status: dict[str, object], *, now: datetime | None = None, max_attempts: int = 3
+    status: dict[str, object],
+    *,
+    now: datetime | None = None,
+    max_attempts: int = 3,
+    canonical_missing: bool = False,
+    requested_version: str | None = None,
 ) -> str:
     """Return a persisted retry disposition without parsing free-form errors."""
     state = str(status.get("status") or "").lower()
@@ -175,6 +180,8 @@ def status_disposition(
     except (TypeError, ValueError):
         return "permanent_failure"
     if state in {"succeeded", "already_exists"}:
+        if canonical_missing:
+            return "retryable_due" if attempts < max_attempts else "attempts_exhausted"
         return "completed"
     # Legacy failed records predate structured retry metadata. Admit each once
     # so the worker can persist a classified v2 record without error-string
@@ -183,6 +190,21 @@ def status_disposition(
         return "retryable_due"
     if attempts >= max_attempts:
         return "attempts_exhausted"
+    # Older workers treated interrupted HTTP transfers as permanent failures.
+    if state == "failed" and status.get("error_class") in {
+        "RemoteProtocolError",
+        "ReadError",
+        "ConnectError",
+        "WriteError",
+    }:
+        return "retryable_due"
+    if (
+        state == "failed"
+        and status.get("error_class") == "arxiv_http_404"
+        and requested_version is not None
+        and status.get("requested_version") != requested_version
+    ):
+        return "retryable_due"
     # Worker releases before the bounded arXiv-version fallback could classify a
     # stale requested version as a permanent 404. Re-admit those records once;
     # the corrected worker records that it tried the fallback chain.
@@ -1106,8 +1128,16 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 if semantic_records.get(str(item["output_key"])) == "invalid"
             )
         status_records = self._status_records(status_paths)
+        missing_versions = {
+            f"_jobs/status/{entry_paper_key(item)}.json": str(item["version"])
+            for item in remaining
+        }
         dispositions = {
-            path: status_disposition(payload)
+            path: status_disposition(
+                payload,
+                canonical_missing=path in missing_versions,
+                requested_version=missing_versions.get(path),
+            )
             for path, payload in status_records.items()
         }
         candidates = []

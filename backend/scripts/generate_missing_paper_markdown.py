@@ -930,6 +930,8 @@ def classify_failure(error: Exception, attempt_count: int) -> tuple[str, bool]:
     retryable = False
     if isinstance(error, httpx.TimeoutException):
         error_class, retryable = "arxiv_timeout", True
+    elif isinstance(error, (httpx.NetworkError, httpx.RemoteProtocolError)):
+        error_class, retryable = "arxiv_transport", True
     elif isinstance(error, httpx.HTTPStatusError):
         status = error.response.status_code
         error_class = f"arxiv_http_{status}"
