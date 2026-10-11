@@ -67,8 +67,9 @@ def test_importing_any_bounded_module_first_configures_every_mapper(module):
         "print(len(Base.registry.mappers), len(Base.metadata.tables))\n"
     )
     result = subprocess.run(
-        [sys.executable, "-c", code], check=True, capture_output=True, text=True
+        [sys.executable, "-c", code], capture_output=True, text=True
     )
+    assert result.returncode == 0, result.stderr
     assert result.stdout.split() == [
         str(len(database.Base.registry.mappers)),
         str(len(database.Base.metadata.tables)),
