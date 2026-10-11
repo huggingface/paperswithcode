@@ -72,13 +72,10 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   hotfixes must reach `main` through a merged GitHub pull request. The publishing
   task fetches the merged `origin main`, reruns proportionate validation, and
   deploys that exact commit with `pwc-deploy`.
-- For pull requests in `huggingface/paperswithcode`, wait for Cursor Bugbot to
-  finish reviewing the latest head commit. Read its review and all review
-  threads and other reviewer comments, address every finding, validate and push
-  fixes, and wait for Bugbot again after each push. Resolve addressed threads
-  before merging. Do not treat
-  an absent, queued, or in-progress review as approval. Bugbot runs only in this
-  repository; do not wait for it in other repositories.
+- Cursor Bugbot is paused because the account is out of credits, so do not
+  wait for or trigger it. Before merging, still read all review threads and
+  other reviewer comments, address every finding, validate and push fixes, and
+  resolve addressed threads.
 - For non-chat changes, once review is complete, all review findings are
   addressed, and required checks pass, merge without asking again. Fetch the
   merged `origin/main`, rerun proportionate validation, deploy that exact commit to the authorized
