@@ -16,6 +16,7 @@ import { createPdfCitationResolver, type PdfCitationResolver } from "./pdfCitati
 import { PdfPaperLink } from "./PdfPaperLink";
 import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
+import { clampZoom, stepZoom } from "./pdfZoom";
 import { activeSectionIndex, loadPdfOutline, pdfSectionFromHash, type PdfOutlineEntry } from "./pdfOutline";
 
 interface PdfViewerProps {
@@ -45,6 +46,39 @@ const SECTION_ANCHOR_OFFSET = 24;
 // own page proportions are known. Accurate placeholders keep page and section
 // jumps from overshooting when the pages above the target are still unrendered.
 const DEFAULT_PAGE_ASPECT = 1.35;
+// Keep each page canvas within mobile browsers' canvas area limits at high zoom.
+const MAX_CANVAS_PIXELS = 16_000_000;
+
+function pageRenderRatio(width: number, aspect: number): number {
+  const maxRatio = Math.sqrt(MAX_CANVAS_PIXELS / (width * width * aspect));
+  return Math.min(window.devicePixelRatio || 1, 2, maxRatio);
+}
+
+interface ZoomAnchor {
+  page: HTMLElement;
+  fraction: number;
+  viewportOffset: number;
+}
+
+// Zooming keeps the document point under the anchor (the pointer, or the
+// viewport center) in place instead of drifting with the growing pages above it.
+function captureZoomAnchor(scroller: HTMLElement, clientY?: number): ZoomAnchor | undefined {
+  const top = scroller.getBoundingClientRect().top;
+  const anchorY = clientY ?? top + scroller.clientHeight / 2;
+  for (const page of scroller.querySelectorAll<HTMLElement>("[data-page]")) {
+    const rect = page.getBoundingClientRect();
+    if (rect.bottom < anchorY) continue;
+    const fraction = rect.height ? Math.max(0, (anchorY - rect.top) / rect.height) : 0;
+    return { page, fraction, viewportOffset: anchorY - top };
+  }
+  return undefined;
+}
+
+function restoreZoomAnchor(scroller: HTMLElement, anchor: ZoomAnchor) {
+  const rect = anchor.page.getBoundingClientRect();
+  const anchorY = scroller.getBoundingClientRect().top + anchor.viewportOffset;
+  scroller.scrollTop += rect.top + rect.height * anchor.fraction - anchorY;
+}
 
 function pdfErrorMessage(error: Error): string {
   const message = error.message.toLowerCase();
@@ -103,6 +137,12 @@ function LazyPdfPage({
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
   const { paperLinks, onAnnotations } = usePdfPaperLinks(ref, visible, resolveCitation, warmPreviews);
+  // Double-buffer zoom changes: the last rendered canvas stays on screen,
+  // scaled to the new width, while a hidden canvas renders at full resolution.
+  // It replaces the old one only once painted, so zooming never blanks a page.
+  const [shownWidth, setShownWidth] = useState(width);
+  if (!visible && shownWidth !== width) setShownWidth(width);
+  const layerWidths = shownWidth === width ? [width] : [shownWidth, width];
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
@@ -113,18 +153,31 @@ function LazyPdfPage({
     return () => observer.disconnect();
   }, []);
   return <div ref={ref} className="pdf-page" data-page={page} style={{ minHeight: Math.round(width * aspect) }}>
-    {visible && <Page
-      pageNumber={page}
-      width={width}
-      devicePixelRatio={Math.min(window.devicePixelRatio || 1, 2)}
-      renderTextLayer
-      renderAnnotationLayer
-      onGetAnnotationsSuccess={onAnnotations}
-      loading={null}
-      customTextRenderer={searchQuery
-        ? ({ str }) => highlightPdfText(str, searchQuery, page === activeSearchPage)
-        : undefined}
-    />}
+    {visible && layerWidths.map((layerWidth) => {
+      const shown = layerWidth === shownWidth;
+      const promote = shown ? undefined : () => setShownWidth(layerWidth);
+      return <div
+        key={layerWidth}
+        className={shown ? "pdf-page-layer" : "pdf-page-layer is-pending"}
+        style={shown && layerWidth !== width ? { "--pdf-layer-scale": width / layerWidth } as CSSProperties : undefined}
+        aria-hidden={shown ? undefined : true}
+      >
+        <Page
+          pageNumber={page}
+          width={layerWidth}
+          devicePixelRatio={pageRenderRatio(layerWidth, aspect)}
+          renderTextLayer={shown}
+          renderAnnotationLayer={shown}
+          onGetAnnotationsSuccess={onAnnotations}
+          onRenderSuccess={promote}
+          onRenderError={promote}
+          loading={null}
+          customTextRenderer={searchQuery
+            ? ({ str }) => highlightPdfText(str, searchQuery, page === activeSearchPage)
+            : undefined}
+        />
+      </div>;
+    })}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
   </div>;
 }
@@ -195,7 +248,9 @@ export function PdfViewer({
   const internalLinkNavigation = useRef<(page: number) => void>(() => {});
   const searchGeneration = useRef(0);
   const recenterAfterZoom = useRef(false);
+  const zoomAnchor = useRef<ZoomAnchor>();
   const pinchDelta = useRef(0);
+  const pinchClientY = useRef<number>();
   const pinchFrame = useRef(0);
   const pinchCommitTimer = useRef(0);
   const renderedZoom = useRef(1);
@@ -219,7 +274,7 @@ export function PdfViewer({
   const [searching, setSearching] = useState(false);
   const [matches, setMatches] = useState<number[]>([]);
   const [activeMatch, setActiveMatch] = useState(0);
-  const pageWidth = Math.max(240, Math.round(fitWidth * zoom));
+  const pageWidth = Math.max(120, Math.round(fitWidth * zoom));
   // Canvas previews are private artifact endpoints. Public reader PDFs must keep
   // their normal cross-origin fetch behavior.
   const documentOptions = useMemo(
@@ -290,8 +345,10 @@ export function PdfViewer({
       "--pdf-live-scale",
       String(retainLiveResizeScale.current ? liveResizeScale.current : 1),
     );
-    if (!recenterAfterZoom.current) return;
     const element = scrollRef.current;
+    if (element && zoomAnchor.current) restoreZoomAnchor(element, zoomAnchor.current);
+    zoomAnchor.current = undefined;
+    if (!recenterAfterZoom.current) return;
     if (element) {
       element.scrollLeft = Math.max(0, (element.scrollWidth - element.clientWidth) / 2);
     }
@@ -300,10 +357,10 @@ export function PdfViewer({
 
   const setCenteredZoom = useCallback((nextZoom: (value: number) => number) => {
     window.clearTimeout(pinchCommitTimer.current);
-    const current = liveZoom.current;
-    const next = nextZoom(current);
+    const next = clampZoom(nextZoom(liveZoom.current));
     liveZoom.current = next;
     recenterAfterZoom.current = next !== renderedZoom.current;
+    if (recenterAfterZoom.current && scrollRef.current) zoomAnchor.current = captureZoomAnchor(scrollRef.current);
     setZoom(next);
   }, []);
 
@@ -314,20 +371,24 @@ export function PdfViewer({
       if (!event.ctrlKey) return;
       event.preventDefault();
       pinchDelta.current += event.deltaY;
+      pinchClientY.current = event.clientY;
       if (pinchFrame.current) return;
       pinchFrame.current = requestAnimationFrame(() => {
         const delta = pinchDelta.current;
         pinchDelta.current = 0;
         pinchFrame.current = 0;
-        const next = Math.max(0.5, Math.min(3, liveZoom.current * Math.exp(-delta * 0.002)));
+        const next = clampZoom(liveZoom.current * Math.exp(-delta * 0.002));
         liveZoom.current = next;
+        const anchor = captureZoomAnchor(element, pinchClientY.current);
         pagesRef.current?.style.setProperty(
           "--pdf-live-scale",
           String(liveResizeScale.current * next / renderedZoom.current),
         );
+        if (anchor) restoreZoomAnchor(element, anchor);
         window.clearTimeout(pinchCommitTimer.current);
         pinchCommitTimer.current = window.setTimeout(() => {
           recenterAfterZoom.current = next !== renderedZoom.current;
+          if (recenterAfterZoom.current) zoomAnchor.current = captureZoomAnchor(element, pinchClientY.current);
           setZoom(liveZoom.current);
         }, 180);
       });
@@ -517,8 +578,8 @@ export function PdfViewer({
       pages={pages}
       zoomPercent={Math.round(zoom * 100)}
       onPage={jumpToPage}
-      onZoomIn={() => setCenteredZoom((value) => Math.min(3, value + 0.15))}
-      onZoomOut={() => setCenteredZoom((value) => Math.max(0.5, value - 0.15))}
+      onZoomIn={() => setCenteredZoom((value) => stepZoom(value, 1))}
+      onZoomOut={() => setCenteredZoom((value) => stepZoom(value, -1))}
       onFitWidth={() => setCenteredZoom(() => 1)}
     /> : <PdfToolbar
       paperTitle={paperTitle}
@@ -533,8 +594,9 @@ export function PdfViewer({
       searchCount={matches.length}
       searching={searching}
       onPage={jumpToPage}
-      onZoomIn={() => setCenteredZoom((value) => Math.min(3, value + 0.15))}
-      onZoomOut={() => setCenteredZoom((value) => Math.max(0.5, value - 0.15))}
+      onZoom={(value) => setCenteredZoom(() => value)}
+      onZoomIn={() => setCenteredZoom((value) => stepZoom(value, 1))}
+      onZoomOut={() => setCenteredZoom((value) => stepZoom(value, -1))}
       onToggleSearch={() => searchOpen ? closeSearch() : setSearchOpen(true)}
       onCloseSearch={closeSearch}
       onSearchQuery={setSearchQuery}

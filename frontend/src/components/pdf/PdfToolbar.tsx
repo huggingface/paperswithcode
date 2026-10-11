@@ -2,6 +2,7 @@ import { useLayoutEffect, useRef } from "react";
 import type { FormEvent } from "react";
 import { ExternalLink, Github, X } from "lucide-react";
 import { Link } from "react-router-dom";
+import { clampZoom } from "./pdfZoom";
 
 export interface PdfToolbarResources {
   repository?: { href: string; stars: number };
@@ -22,6 +23,7 @@ interface PdfToolbarProps {
   searchCount: number;
   searching: boolean;
   onPage: (page: number) => void;
+  onZoom: (zoom: number) => void;
   onZoomIn: () => void;
   onZoomOut: () => void;
   onToggleSearch: () => void;
@@ -43,6 +45,7 @@ export function PdfToolbar({
   searchCount,
   searching,
   onPage,
+  onZoom,
   onZoomIn,
   onZoomOut,
   onToggleSearch,
@@ -70,6 +73,14 @@ export function PdfToolbar({
     event.preventDefault();
     const value = Number(new FormData(event.currentTarget).get("page"));
     if (Number.isInteger(value)) onPage(value);
+  };
+  const submitZoom = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const input = event.currentTarget.elements.namedItem("zoom") as HTMLInputElement;
+    const value = Number.parseFloat(input.value);
+    const next = Number.isFinite(value) && value > 0 ? clampZoom(value / 100) : zoomPercent / 100;
+    input.value = `${Math.round(next * 100)}%`;
+    onZoom(next);
   };
   return <div ref={toolbarRef} className="pdf-toolbar" aria-label="PDF controls">
     <div className="pdf-toolbar-paper">
@@ -124,7 +135,18 @@ export function PdfToolbar({
       </div>
       <div className="pdf-toolbar-group">
         <button type="button" onClick={onZoomOut} aria-label="Zoom out">−</button>
-        <span className="pdf-zoom-value" aria-live="polite">{zoomPercent}%</span>
+        <form onSubmit={submitZoom} className="pdf-zoom-form">
+          <input
+            className="pdf-zoom-value"
+            name="zoom"
+            inputMode="decimal"
+            defaultValue={`${zoomPercent}%`}
+            key={zoomPercent}
+            onFocus={(event) => event.currentTarget.select()}
+            onBlur={(event) => event.currentTarget.form?.requestSubmit()}
+            aria-label={`Zoom ${zoomPercent}%`}
+          />
+        </form>
         <button type="button" onClick={onZoomIn} aria-label="Zoom in">+</button>
         <button type="button" onClick={onToggleSearch} aria-expanded={searchOpen} aria-controls="pdf-search-controls">Search</button>
       </div>

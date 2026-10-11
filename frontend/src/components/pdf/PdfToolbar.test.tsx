@@ -7,6 +7,7 @@ import { PdfToolbar } from "./PdfToolbar";
 describe("PdfToolbar", () => {
   it("supports page, zoom, and search controls", () => {
     const onPage = vi.fn();
+    const onZoom = vi.fn();
     const onToggleSearch = vi.fn();
     const onCloseSearch = vi.fn();
     const header = document.createElement("header");
@@ -33,6 +34,7 @@ describe("PdfToolbar", () => {
         searchCount={0}
         searching={false}
         onPage={onPage}
+        onZoom={onZoom}
         onZoomIn={vi.fn()}
         onZoomOut={vi.fn()}
         onToggleSearch={onToggleSearch}
@@ -62,6 +64,14 @@ describe("PdfToolbar", () => {
     expect(screen.queryByText(/arXiv:/)).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Previous page" }));
     expect(onPage).toHaveBeenCalledWith(2);
+    const zoomInput = screen.getByRole("textbox", { name: "Zoom 125%" });
+    fireEvent.change(zoomInput, { target: { value: "137" } });
+    fireEvent.submit(zoomInput);
+    expect(onZoom).toHaveBeenLastCalledWith(1.37);
+    fireEvent.change(zoomInput, { target: { value: "900%" } });
+    fireEvent.submit(zoomInput);
+    expect(onZoom).toHaveBeenLastCalledWith(4);
+    expect(zoomInput).toHaveValue("400%");
     expect(screen.queryByRole("button", { name: "Fit width" })).not.toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Search" }));
     expect(onToggleSearch).toHaveBeenCalledOnce();

@@ -6,7 +6,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 let observedWidth = 800;
 let resizeCallback: ResizeObserverCallback | undefined;
 let intersecting = true;
-const reactPdf = vi.hoisted(() => ({ documentOptions: [] as unknown[] }));
+const reactPdf = vi.hoisted(() => ({
+  documentOptions: [] as unknown[],
+  renders: [] as Array<() => void>,
+  holdRenders: false,
+}));
 const pageRef = (page: number) => ({ num: page * 10, gen: 0 });
 const outlinePdf = (numPages: number, outline: unknown[] = []) => ({
   numPages,
@@ -63,7 +67,14 @@ vi.mock("react-pdf", () => ({
         {children}
       </div>;
     },
-    Page: ({ width }: { width: number }) => <div data-testid="pdf-page" data-width={width} />,
+    Page: ({ width, onRenderSuccess }: { width: number; onRenderSuccess?: () => void }) => {
+      React.useEffect(() => {
+        if (!onRenderSuccess) return;
+        if (reactPdf.holdRenders) reactPdf.renders.push(onRenderSuccess);
+        else onRenderSuccess();
+      }, [onRenderSuccess]);
+      return <div data-testid="pdf-page" data-width={width} />;
+    },
 }));
 
 import { highlightPdfText, PdfViewer } from "./PdfViewer";
@@ -93,6 +104,8 @@ describe("PdfViewer resize rendering", () => {
     intersecting = true;
     resizeCallback = undefined;
     reactPdf.documentOptions.length = 0;
+    reactPdf.renders.length = 0;
+    reactPdf.holdRenders = false;
     Object.defineProperty(HTMLElement.prototype, "clientWidth", {
       configurable: true,
       get: () => observedWidth,
@@ -225,6 +238,30 @@ describe("PdfViewer resize rendering", () => {
     fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
 
     expect(scrollSurface.scrollLeft).toBe(200);
+  });
+
+  it("keeps the previous render on screen until the zoomed page has painted", async () => {
+    render(<PdfViewer
+      url="https://arxiv.org/pdf/1706.03762"
+      paperKey="1706.03762"
+      paperTitle="Attention Is All You Need"
+      paperHref="/paper/1706.03762"
+    />);
+    fireEvent.click(screen.getByRole("button", { name: "Load PDF" }));
+    await waitFor(() => expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-width", "790"));
+    reactPdf.holdRenders = true;
+
+    fireEvent.click(screen.getByRole("button", { name: "Zoom in" }));
+
+    const [shown, pending] = screen.getAllByTestId("pdf-page");
+    expect(shown).toHaveAttribute("data-width", "790");
+    expect(shown.parentElement).toHaveStyle({ "--pdf-layer-scale": String(869 / 790) });
+    expect(pending).toHaveAttribute("data-width", "869");
+    expect(pending.parentElement).toHaveClass("is-pending");
+
+    act(() => reactPdf.renders.forEach((renderSuccess) => renderSuccess()));
+    expect(screen.getByTestId("pdf-page")).toHaveAttribute("data-width", "869");
+    expect(screen.getByTestId("pdf-page").parentElement).not.toHaveClass("is-pending");
   });
 
   it("zooms on a trackpad pinch without blocking ordinary scrolling", async () => {
