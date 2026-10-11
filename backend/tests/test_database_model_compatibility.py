@@ -3,6 +3,8 @@
 import subprocess
 import sys
 
+import pytest
+
 from backend.models import database
 from backend.models.database import (
     autonomous,
@@ -12,6 +14,9 @@ from backend.models.database import (
     chat_sandbox,
     chat_transcripts,
     curation,
+    evaluations,
+    papers,
+    resources,
 )
 
 BOUNDED_MODULES = (
@@ -22,6 +27,9 @@ BOUNDED_MODULES = (
     chat_sandbox,
     chat_transcripts,
     curation,
+    evaluations,
+    papers,
+    resources,
 )
 
 
@@ -50,10 +58,11 @@ def test_every_mapped_class_is_exported_once():
     }
 
 
-def test_importing_one_bounded_module_configures_every_mapper():
+@pytest.mark.parametrize("module", BOUNDED_MODULES, ids=lambda m: m.__name__)
+def test_importing_any_bounded_module_first_configures_every_mapper(module):
     code = (
         "from sqlalchemy.orm import configure_mappers\n"
-        "from backend.models.database.chat_sandbox import Base\n"
+        f"from {module.__name__} import Base\n"
         "configure_mappers()\n"
         "print(len(Base.registry.mappers), len(Base.metadata.tables))\n"
     )
