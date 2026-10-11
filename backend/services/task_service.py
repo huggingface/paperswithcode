@@ -23,9 +23,9 @@ from backend.models.database import (
     TaskFramework as DBTaskFramework,
     TaskSisterTask as DBTaskSisterTask,
 )
-from backend.models.api import (
+from backend.models.tasks import Task
+from backend.models.taxonomy import (
     Area,
-    Task,
     Tasks,
     TaskCreateRequest,
     TaskPage,

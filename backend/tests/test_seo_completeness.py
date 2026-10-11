@@ -1,6 +1,6 @@
 from datetime import date
 
-from backend.models.api import Paper, Repository
+from backend.models.papers import Paper, Repository
 from backend.services.seo_completeness_service import score_paper
 
 

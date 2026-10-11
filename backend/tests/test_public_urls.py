@@ -1,7 +1,7 @@
 import pytest
 from pydantic import ValidationError
 
-from backend.models.api import ProjectPageCreateRequest, ProjectPageUpdateRequest
+from backend.models.papers import ProjectPageCreateRequest, ProjectPageUpdateRequest
 from backend.services.pending_edit_errors import PendingEditError
 from backend.services.pending_edit_payloads import validate_payload
 from backend.utils.public_urls import PublicUrlValidationError, normalize_public_url

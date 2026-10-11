@@ -16,7 +16,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.models.api import ApplyMutationRequest
+from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
     Paper,
     PaperCurationJob,
@@ -335,9 +335,17 @@ class HFDailyCurationService:
         accepted_gaps, rejected_gaps = BenchmarkGapService(self.db).validate(
             body.benchmark_gaps,
             paper=self.db.get(Paper, row.paper_id) if body.benchmark_gaps else None,
+            source_documents=(row.url_candidates or {}).get("source_documents") or [],
         )
         service = CodexCurationCallbackService(self.db)
         try:
+            if rejected_gaps and row.trigger != "admin":
+                details = "; ".join(
+                    f"#{item['index']}: {item['error']}" for item in rejected_gaps
+                )
+                raise ValueError(
+                    f"Scheduled benchmark gap validation failed: {details}"
+                )
             service._validate_mutation(replay_row, body)
             validation = service._validate_scheduled_policy(replay_row, body)
         except (LookupError, RuntimeError, TypeError, ValueError) as exc:

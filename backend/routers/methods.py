@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException, Response
 from sqlalchemy.orm import Session
 from typing import Optional
 
-from backend.models.api import (
+from backend.models.taxonomy import (
     KeywordUpdate,
     Method,
     MethodIndex,

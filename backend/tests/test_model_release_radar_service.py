@@ -1,0 +1,338 @@
+"""Tests for the read-only model-release radar."""
+
+from datetime import date
+
+import httpx
+from sqlalchemy import BigInteger, create_engine
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR
+from sqlalchemy.ext.compiler import compiles
+from sqlalchemy.orm import Session
+
+from backend.models.database import Base, ModelProviderAlias, ModelRelease, Paper
+from backend.services.artificial_analysis_sync_service import (
+    ArtificialAnalysisEntry,
+    ArtificialAnalysisLeaderboard,
+)
+from backend.services.model_release_radar_service import (
+    ReleaseSource,
+    parse_article,
+    parse_rss,
+    release_model_name,
+    scan_model_releases,
+)
+
+
+@compiles(BigInteger, "sqlite")
+def _compile_bigint_sqlite(_element, _compiler, **_kw):
+    return "INTEGER"
+
+
+@compiles(ARRAY, "sqlite")
+@compiles(JSONB, "sqlite")
+@compiles(TSVECTOR, "sqlite")
+def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
+    return "JSON"
+
+
+TODAY = date(2026, 10, 11)
+
+OPENAI = ReleaseSource(
+    lab="OpenAI",
+    url="https://openai.com/news/rss.xml",
+    kind="rss",
+    families=("GPT", "o3"),
+)
+OPENAI_GEMINI = ReleaseSource(
+    lab="Google DeepMind",
+    url="https://deepmind.google/blog/rss.xml",
+    kind="rss",
+    families=("Gemini",),
+)
+MISTRAL = ReleaseSource(
+    lab="Mistral AI",
+    url="https://mistral.ai/sitemap.xml",
+    kind="sitemap",
+    families=("Mistral", "Magistral"),
+    path_prefix="/news/",
+)
+DEEPSEEK = ReleaseSource(
+    lab="DeepSeek",
+    url="https://api-docs.deepseek.com/sitemap.xml",
+    kind="sitemap",
+    families=("DeepSeek",),
+    path_prefix="/news/",
+    slug_date=(r"/news/news(\d{6})$", "%y%m%d"),
+)
+
+OPENAI_RSS = b"""<?xml version="1.0"?>
+<rss version="2.0"><channel>
+<item><title>Introducing GPT-6.1 Sol</title>
+<link>https://openai.com/index/introducing-gpt-6-1-sol</link>
+<pubDate>Tue, 29 Sep 2026 10:00:00 GMT</pubDate></item>
+<item><title>Asana cuts model costs 76x in browser tests with GPT-6.1 Sol</title>
+<link>https://openai.com/index/asana-browser-agent</link>
+<pubDate>Fri, 09 Oct 2026 07:00:00 GMT</pubDate></item>
+<item><title>Introducing GPT-5</title>
+<link>https://openai.com/index/introducing-gpt-5</link>
+<pubDate>Thu, 07 Aug 2025 10:00:00 GMT</pubDate></item>
+</channel></rss>"""
+
+MISTRAL_INDEX = b"""<?xml version="1.0"?>
+<sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<sitemap><loc>https://mistral.ai/sitemap-0.xml</loc></sitemap>
+</sitemapindex>"""
+
+MISTRAL_PAGES = b"""<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://mistral.ai/news/</loc><lastmod>2026-10-07T20:14:24Z</lastmod></url>
+<url><loc>https://mistral.ai/news/mistral-large-4/</loc><lastmod>2026-10-07T20:14:24Z</lastmod></url>
+<url><loc>https://mistral.ai/news/mistral-large-2407/</loc><lastmod>2026-10-05T16:53:47Z</lastmod></url>
+<url><loc>https://mistral.ai/news/old-post/</loc><lastmod>2025-01-01T00:00:00Z</lastmod></url>
+<url><loc>https://mistral.ai/pricing</loc><lastmod>2026-10-07T00:00:00Z</lastmod></url>
+</urlset>"""
+
+DEEPSEEK_SITEMAP = b"""<?xml version="1.0"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<url><loc>https://api-docs.deepseek.com/news/news261001</loc></url>
+<url><loc>https://api-docs.deepseek.com/news/news1226</loc></url>
+</urlset>"""
+
+
+def _article(title: str, published: str) -> bytes:
+    return (
+        f'<html><head><meta property="og:title" content="{title} | Lab">'
+        f'<script type="application/ld+json">{{"datePublished":"{published}"}}'
+        "</script></head></html>"
+    ).encode()
+
+
+PAGES = {
+    OPENAI.url: OPENAI_RSS,
+    MISTRAL.url: MISTRAL_INDEX,
+    "https://mistral.ai/sitemap-0.xml": MISTRAL_PAGES,
+    "https://mistral.ai/news/mistral-large-4/": _article(
+        "Introducing Mistral Large 4", "2026-10-06T12:00:27.000Z"
+    ),
+    "https://mistral.ai/news/mistral-large-2407/": _article(
+        "Large Enough", "2024-07-24T00:00:00.000Z"
+    ),
+    DEEPSEEK.url: DEEPSEEK_SITEMAP,
+    "https://api-docs.deepseek.com/news/news261001": (
+        b"<html><title data-rh='true'>DeepSeek-V4.2 Release | DeepSeek API Docs"
+        b"</title></html>"
+    ),
+}
+
+
+class FakeFeeds:
+    def __init__(self, pages: dict[str, bytes]):
+        self.pages = pages
+        self.requested: list[str] = []
+
+    def get(self, url: str) -> bytes:
+        self.requested.append(url)
+        if url not in self.pages:
+            raise httpx.HTTPStatusError(
+                "404",
+                request=httpx.Request("GET", url),
+                response=httpx.Response(404),
+            )
+        return self.pages[url]
+
+
+def _session() -> Session:
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Paper.__table__,
+            ModelRelease.__table__,
+            ModelProviderAlias.__table__,
+        ],
+    )
+    session = Session(engine)
+    session.add(
+        Paper(
+            id=123033,
+            title="Mistral Large 4",
+            source="external",
+            source_url="https://mistral.ai/news/mistral-large-4/",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(
+        Paper(
+            id=500,
+            title="Claude Opus 6",
+            source="external",
+            source_url="https://www.anthropic.com/claude/opus",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.add(
+        ModelRelease(id=7, paper_id=500, canonical_name="Claude Opus 6", aliases=[])
+    )
+    session.add(
+        ModelProviderAlias(
+            model_release_id=7, provider="artificial-analysis", alias="claude-opus-6"
+        )
+    )
+    session.commit()
+    return session
+
+
+def _leaderboard() -> ArtificialAnalysisLeaderboard:
+    def entry(slug: str, name: str, released: date) -> ArtificialAnalysisEntry:
+        return ArtificialAnalysisEntry(slug, name, {"intelligence": 50.0}, released)
+
+    return ArtificialAnalysisLeaderboard(
+        "4",
+        [
+            entry("claude-opus-6", "Claude Opus 6", date(2026, 10, 1)),
+            # Reviewed identity-map slugs are already handled by the AA sync.
+            entry("claude-opus-5", "Claude Opus 5", date(2026, 10, 1)),
+            entry("grok-5", "Grok 5 (Reasoning)", date(2026, 10, 9)),
+            entry("grok-5-non-reasoning", "Grok 5 (Non-reasoning)", date(2026, 10, 9)),
+            entry("mistral-large-4", "Mistral Large 4 Preview", date(2026, 10, 6)),
+            entry("old-model", "Old Model 1", date(2025, 1, 1)),
+        ],
+    )
+
+
+def test_release_model_name_keeps_only_model_announcements():
+    assert release_model_name("Introducing GPT-6.1 Sol", OPENAI) == "GPT-6.1 Sol"
+    assert (
+        release_model_name("Introducing Mistral Large 4 | Mistral", MISTRAL)
+        == "Mistral Large 4"
+    )
+    assert release_model_name(
+        "Gemini 4 Argon: our next era of frontier intelligence", OPENAI_GEMINI
+    ) == ("Gemini 4 Argon")
+    assert release_model_name("🚀 DeepSeek-V4-Pro GA Release", DEEPSEEK) == (
+        "DeepSeek-V4-Pro"
+    )
+    assert release_model_name("Introducing Magistral Medium", MISTRAL) == (
+        "Magistral Medium"
+    )
+    for headline in (
+        "Asana cuts model costs 76x in browser tests with GPT-6.1 Sol",
+        "A model guide for the GPT-6 family",
+        "GPT-6 and Intelligent UI for everyone",
+        "Mistral AI raises 2B to build compute",
+        "Introducing dots",
+        "Introducing Mistral",
+        "Mistral Large",
+    ):
+        source = MISTRAL if "Mistral" in headline else OPENAI
+        assert release_model_name(headline, source) is None, headline
+
+
+def test_parsers_read_rss_atom_and_article_metadata():
+    atom = b"""<feed xmlns="http://www.w3.org/2005/Atom"><entry>
+    <title>Gemini 4 &amp; more</title><link href="https://example.com/g4"/>
+    <published>2026-10-01T00:00:00Z</published></entry></feed>"""
+    assert [(e.url, e.title, e.published) for e in parse_rss(atom)] == [
+        ("https://example.com/g4", "Gemini 4 & more", date(2026, 10, 1))
+    ]
+    assert parse_article(
+        PAGES["https://mistral.ai/news/mistral-large-4/"].decode()
+    ) == (
+        "Introducing Mistral Large 4",
+        date(2026, 10, 6),
+    )
+
+
+def test_scan_reports_recent_releases_against_the_catalog():
+    db = _session()
+    feeds = FakeFeeds(PAGES)
+
+    report = scan_model_releases(
+        db,
+        lookback_days=14,
+        sources=(OPENAI, MISTRAL, DEEPSEEK),
+        feeds=feeds,
+        fetch_leaderboard=_leaderboard,
+        today=TODAY,
+    )
+
+    by_name = {signal.model_name: signal for signal in report.signals}
+    assert set(by_name) == {
+        "Mistral Large 4",
+        "GPT-6.1 Sol",
+        "DeepSeek-V4.2",
+        "Grok 5",
+        "Claude Opus 6",
+    }
+    mistral = by_name["Mistral Large 4"]
+    assert (mistral.status, mistral.paper_id, mistral.matched_by) == (
+        "indexed",
+        123033,
+        "source_url",
+    )
+    # The vendor post wins over the duplicate leaderboard slug.
+    assert mistral.lab == "Mistral AI"
+    assert by_name["Claude Opus 6"].matched_by == "provider_alias"
+    assert by_name["Grok 5"].status == "unindexed"
+    assert by_name["GPT-6.1 Sol"].status == "unindexed"
+    deepseek = by_name["DeepSeek-V4.2"]
+    assert (deepseek.published, deepseek.status) == (date(2026, 10, 1), "unindexed")
+    assert len(report.unindexed) == 3
+    assert report.errors == []
+    assert report.sources_checked == 4
+    # Old sitemap pages, non-article paths and undated slugs are never fetched.
+    assert "https://mistral.ai/news/old-post/" not in feeds.requested
+    assert "https://mistral.ai/pricing" not in feeds.requested
+    assert "https://api-docs.deepseek.com/news/news1226" not in feeds.requested
+    # The scan is read-only.
+    assert not db.new and not db.dirty
+
+
+def test_title_match_and_source_failures_are_reported():
+    db = _session()
+    db.add(
+        Paper(
+            id=600,
+            title="Introducing GPT-6.1 Sol",
+            source="external",
+            source_url="https://openai.com/index/gpt-6-1-sol-system-card",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    db.add(
+        Paper(
+            id=601,
+            title="Grok 5: Reasoning at scale",
+            source="external",
+            source_url="https://x.ai/news/grok-5",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    db.commit()
+    pages = dict(PAGES)
+    del pages[MISTRAL.url]
+
+    report = scan_model_releases(
+        db,
+        sources=(OPENAI, MISTRAL),
+        feeds=FakeFeeds(pages),
+        fetch_leaderboard=lambda: ArtificialAnalysisLeaderboard(
+            "4",
+            [
+                ArtificialAnalysisEntry(
+                    "grok-5", "Grok 5 (Reasoning)", {"intelligence": 1.0}, TODAY
+                )
+            ],
+        ),
+        today=TODAY,
+    )
+
+    assert [(s.model_name, s.matched_by, s.paper_id) for s in report.signals] == [
+        ("Grok 5", "title", 601),
+        ("GPT-6.1 Sol", "title", 600),
+    ]
+    assert [error["source"] for error in report.errors] == [MISTRAL.url]
+    assert report.to_dict()["unindexed"] == 0

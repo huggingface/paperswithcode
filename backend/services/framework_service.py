@@ -5,7 +5,7 @@ from collections import defaultdict
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from backend.models.api import (
+from backend.models.taxonomy import (
     FrameworkCatalog,
     FrameworkCatalogCategory,
     FrameworkCatalogDomain,
