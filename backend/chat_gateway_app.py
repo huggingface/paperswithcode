@@ -14,13 +14,12 @@ import tempfile
 import time
 import uuid
 from contextlib import asynccontextmanager
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Any, Literal
 
 import httpx
-import anyio
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.responses import Response, StreamingResponse
 from huggingface_hub.errors import HfHubHTTPError
@@ -29,22 +28,16 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.chat_execution_policy import (
-    MAX_POSTER_PROVIDER_REQUESTS,
-    MAX_PROVIDER_REQUESTS,
-    MAX_PROVIDER_TURN_TOKENS,
     MAX_PROVIDER_REQUEST_BYTES,
 )
-from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
 from backend.config import Settings, get_settings
 from backend.database.connection import db_manager, get_database_session
 from backend.models.chat import LatexPaperSourceEdit
 from backend.models.database import (
     ChatMessageRecord,
     ChatOpenRouterProviderCall,
-    ChatQualificationScope,
     ChatSession,
     ChatTurnCapability,
-    ChatTurnLatency,
 )
 from backend.services.chat_artifact_service import (
     ArtifactError,
@@ -71,26 +64,6 @@ from backend.services.chat_hf_hub_service import (
     ChatHfHubService,
     validate_hf_request,
 )
-from backend.services.chat_latency_service import ChatLatencyService
-from backend.services.durable_external_qualification_contract import (
-    DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN,
-)
-from backend.services.chat_openai_budget_service import (
-    MAX_REQUEST_BYTES as MAX_OPENAI_REQUEST_BYTES,
-)
-from backend.services.chat_openai_budget_service import (
-    ChatOpenAIBudgetService,
-    OpenAIBudgetError,
-    OpenAIBudgetExhausted,
-    OpenAILimitExceeded,
-    OpenAIRequestBounds,
-    actual_usage_microusd,
-)
-from backend.services.chat_openai_usage_extractor import (
-    ExtractedOpenAIUsage,
-    OpenAIResponsesUsageExtractor,
-    classify_openai_error,
-)
 from backend.services.chat_paper_context_service import ChatPaperContextService
 from backend.services.chat_pi_transcript_service import (
     ChatPiTranscriptService,
@@ -105,6 +78,30 @@ from backend.services.chat_session_store_gateway import (
     ChatSessionStoreGateway,
     SessionStoreCommand,
     SessionStoreGatewayError,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    ProviderCallLifecycle,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    offered_tool_inventory as _offered_tool_inventory,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    opaque_turn as _opaque_turn,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    output_tokens_allowed as _output_tokens_allowed,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    provider_turn_limits as _provider_turn_limits,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    record_gateway_timing as _record_gateway_timing,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    record_provider_error as _record_provider_error,
+)
+from backend.services.chat_provider_gateway.openai_responses import (
+    OpenAIResponsesProtocol,
 )
 from backend.services.chat_tracing_service import start_provider_request_trace
 from backend.services.chat_turn_job_repository import (
@@ -157,12 +154,6 @@ async def lifespan(app: FastAPI):
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None, lifespan=lifespan)
 logger = logging.getLogger(__name__)
 hf_telemetry_logger = logging.getLogger("uvicorn.error")
-MAX_PROVIDER_OUTPUT_TOKENS = PROVIDER_OUTPUT_TOKEN_LIMIT
-MAX_POSTER_PROVIDER_TURN_TOKENS = 8_000_000
-QUALIFICATION_PROVIDER_REQUESTS = DURABLE_QUALIFICATION_PROVIDER_REQUESTS_PER_TURN
-QUALIFICATION_PROVIDER_TURN_TOKENS = QUALIFICATION_PROVIDER_REQUESTS * (
-    MAX_OPENAI_REQUEST_BYTES // 4 + MAX_PROVIDER_OUTPUT_TOKENS
-)
 
 
 def _hf_latency_bucket(elapsed_seconds: float) -> str:
@@ -171,37 +162,6 @@ def _hf_latency_bucket(elapsed_seconds: float) -> str:
         if elapsed_ms < ceiling:
             return f"lt_{ceiling}ms"
     return "gte_10000ms"
-
-
-def _opaque_turn(turn_id: uuid.UUID) -> str:
-    return hashlib.sha256(str(turn_id).encode()).hexdigest()[:12]
-
-
-def _record_gateway_timing(
-    settings: Settings,
-    turn_id: uuid.UUID,
-    *,
-    phase: str | None = None,
-    elapsed_ms: int | None = None,
-    received_at: datetime | None = None,
-) -> None:
-    if settings.environment != "staging":
-        return
-    try:
-        with db_manager.session_local() as timing_db:
-            service = ChatLatencyService(timing_db)
-            if received_at is not None:
-                service.record_gateway_received(turn_id, received_at)
-            elif phase is not None and elapsed_ms is not None:
-                service.record_phase_for_turn(turn_id, phase, elapsed_ms)
-            timing_db.commit()
-    except Exception as error:
-        logger.warning(
-            "chat gateway latency persistence failed turn=%s phase=%s error=%s",
-            _opaque_turn(turn_id),
-            phase or "received",
-            type(error).__name__,
-        )
 
 
 class CatalogRequest(BaseModel):
@@ -257,48 +217,6 @@ def _bearer(authorization: Annotated[str, Header()]) -> str:
     if scheme.lower() != "bearer" or not token:
         raise HTTPException(status_code=401, detail="Invalid capability")
     return token
-
-
-def _output_tokens_allowed(value: int) -> bool:
-    return 1 <= value <= MAX_PROVIDER_OUTPUT_TOKENS
-
-
-def _provider_turn_limits(
-    row: ChatTurnCapability,
-    db: Session | None = None,
-    settings: Settings | None = None,
-) -> tuple[int, int]:
-    qualification_scope_id = (
-        _qualification_scope_claim(row, db, settings)
-        if db is not None and settings is not None
-        else None
-    )
-    if qualification_scope_id is not None:
-        return QUALIFICATION_PROVIDER_REQUESTS, QUALIFICATION_PROVIDER_TURN_TOKENS
-    if {"artifact", "paper_grant"} & set(getattr(row, "scopes", ())):
-        return MAX_POSTER_PROVIDER_REQUESTS, MAX_POSTER_PROVIDER_TURN_TOKENS
-    return MAX_PROVIDER_REQUESTS, MAX_PROVIDER_TURN_TOKENS
-
-
-def _qualification_scope_claim(
-    row: ChatTurnCapability, db: Session, settings: Settings
-) -> uuid.UUID | None:
-    if settings.environment != "staging":
-        return None
-    return db.scalar(
-        select(ChatQualificationScope.id)
-        .join(
-            ChatTurnLatency,
-            ChatTurnLatency.qualification_scope_id == ChatQualificationScope.id,
-        )
-        .where(
-            ChatTurnLatency.turn_id == row.turn_id,
-            ChatTurnLatency.qualification_profile == "32-functional-turns",
-            ChatQualificationScope.profile == "32-functional-turns",
-            ChatQualificationScope.window_ended_at.is_(None),
-            ChatQualificationScope.expires_at > datetime.now(UTC),
-        )
-    )
 
 
 def _user_provider_credential(row, settings: Settings) -> HfInferenceCredential:
@@ -471,23 +389,6 @@ def _optimize_initial_deepseek_payload(
     return {"system_blocks": removed_system, "tools": removed_tools}
 
 
-def _offered_tool_inventory(payload: dict[str, Any]) -> dict[str, Any]:
-    tools = payload.get("tools")
-    if not isinstance(tools, list):
-        names: list[str] = []
-    else:
-        names = sorted(
-            str(tool["name"])
-            for tool in tools
-            if isinstance(tool, dict) and isinstance(tool.get("name"), str)
-        )
-    return {
-        "offered_tool_count": len(names),
-        "offered_tool_names": names,
-        "offered_tool_digest": hashlib.sha256(",".join(names).encode()).hexdigest(),
-    }
-
-
 def _payload_contains_tool_use(payload: bytes) -> bool:
     return b'"type":"tool_use"' in payload or b'"type": "tool_use"' in payload
 
@@ -512,14 +413,6 @@ def _capability_owner(row: ChatTurnCapability, db: Session) -> str:
         logger.critical("openrouter funded dispatch owner binding mismatch")
         raise HTTPException(status_code=403, detail="Capability rejected")
     return session.hf_user_id
-
-
-def _record_provider_error(capability_id: uuid.UUID, code: str) -> None:
-    with db_manager.session_local() as error_db:
-        row = error_db.get(ChatTurnCapability, capability_id)
-        if row is not None:
-            ChatCapabilityService(error_db).record_provider_error(row, code)
-            error_db.commit()
 
 
 def _byok_provider_error_code(status_code: int) -> str | None:
@@ -565,155 +458,6 @@ def _record_provider_ttft(call_id: uuid.UUID | None, elapsed_ms: int) -> None:
         if call is not None and call.provider_ttft_ms is None:
             call.provider_ttft_ms = elapsed_ms
         timing_db.commit()
-
-
-OPENAI_RESPONSES_FIELDS = {
-    "include",
-    "input",
-    "instructions",
-    "max_output_tokens",
-    "model",
-    "parallel_tool_calls",
-    "prompt_cache_key",
-    "prompt_cache_options",
-    "prompt_cache_retention",
-    "reasoning",
-    "service_tier",
-    "store",
-    "stream",
-    "text",
-    "tool_choice",
-    "tools",
-}
-
-
-def _opaque_openai_identifier(kind: str, value: str, settings: Settings) -> str:
-    digest = hmac.new(
-        settings.jwt_secret.encode(),
-        f"openai:{kind}:{value}".encode(),
-        hashlib.sha256,
-    ).hexdigest()
-    return f"pwc_{digest[:48]}"
-
-
-def _trusted_openai_payload(
-    payload: object,
-    row: ChatTurnCapability,
-    settings: Settings,
-) -> tuple[dict[str, Any], int]:
-    if not isinstance(payload, dict) or not set(payload) <= OPENAI_RESPONSES_FIELDS:
-        raise HTTPException(status_code=422, detail="Invalid Responses request")
-    provider_model = settings.chat_openai_model
-    if payload.get("model") != provider_model:
-        raise HTTPException(status_code=403, detail="Capability rejected")
-    maximum_tokens = payload.get("max_output_tokens")
-    if (
-        not isinstance(maximum_tokens, int)
-        or isinstance(maximum_tokens, bool)
-        or not _output_tokens_allowed(maximum_tokens)
-    ):
-        raise HTTPException(status_code=422, detail="max_output_tokens is out of range")
-    include = payload.get("include")
-    if include is not None and (
-        not isinstance(include, list)
-        or any(item != "reasoning.encrypted_content" for item in include)
-    ):
-        raise HTTPException(status_code=422, detail="Unsupported Responses include")
-    reasoning = payload.get("reasoning")
-    if reasoning is not None and not isinstance(reasoning, dict):
-        raise HTTPException(status_code=422, detail="Invalid Responses reasoning")
-    summary = reasoning.get("summary") if isinstance(reasoning, dict) else None
-    if summary not in {None, "auto", "concise", "detailed"}:
-        raise HTTPException(
-            status_code=422, detail="Invalid Responses reasoning summary"
-        )
-    tools = payload.get("tools", [])
-    if not isinstance(tools, list) or any(
-        not isinstance(tool, dict)
-        or tool.get("type") != "function"
-        or not isinstance(tool.get("name"), str)
-        or not 1 <= len(tool["name"]) <= 64
-        or not set(tool) <= {"type", "name", "description", "parameters", "strict"}
-        for tool in tools
-    ):
-        raise HTTPException(status_code=422, detail="Unsupported Responses tool")
-    tool_choice = payload.get("tool_choice")
-    if isinstance(tool_choice, str):
-        if tool_choice not in {"auto", "none", "required"}:
-            raise HTTPException(
-                status_code=422, detail="Unsupported Responses tool choice"
-            )
-    elif tool_choice is not None and (
-        not isinstance(tool_choice, dict)
-        or tool_choice.get("type") != "function"
-        or not isinstance(tool_choice.get("name"), str)
-        or set(tool_choice) != {"type", "name"}
-    ):
-        raise HTTPException(status_code=422, detail="Unsupported Responses tool choice")
-    trusted = dict(payload)
-    trusted.pop("prompt_cache_options", None)
-    trusted.pop("prompt_cache_retention", None)
-    trusted["model"] = provider_model
-    trusted["stream"] = True
-    trusted["store"] = False
-    trusted["service_tier"] = "default"
-    trusted["include"] = ["reasoning.encrypted_content"]
-    trusted["reasoning"] = {"effort": row.reasoning_effort}
-    if summary is not None:
-        trusted["reasoning"]["summary"] = summary
-    trusted["safety_identifier"] = _opaque_openai_identifier(
-        "owner", row.owner_hash, settings
-    )
-    trusted["prompt_cache_key"] = _opaque_openai_identifier(
-        "session", str(row.chat_session_id), settings
-    )
-    return trusted, maximum_tokens
-
-
-def _safe_openai_request_id(value: str | None) -> str | None:
-    if not value or not re.fullmatch(r"[A-Za-z0-9._:-]{1,255}", value):
-        return None
-    return value
-
-
-def _openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | None:
-    if outcome == "completed":
-        return None
-    if cancelled:
-        return "openai_stream_cancelled"
-    if outcome == "incomplete":
-        return "openai_incomplete"
-    return "openai_unavailable"
-
-
-async def _close_openai_stream(upstream: Any, client: Any) -> None:
-    with anyio.CancelScope(shield=True):
-        await upstream.aclose()
-        await client.aclose()
-
-
-def _settle_openai_call(
-    settings: Settings,
-    call_id: uuid.UUID,
-    extractor: OpenAIResponsesUsageExtractor,
-    *,
-    provider_request_id: str | None,
-    latency_ms: int,
-    ttft_ms: int | None,
-    error_code: str | None,
-):
-    result = extractor.result()
-    with db_manager.session_local() as accounting_db:
-        ChatOpenAIBudgetService(accounting_db, settings).settle_call(
-            call_id,
-            result,
-            provider_request_id=provider_request_id,
-            latency_ms=latency_ms,
-            ttft_ms=ttft_ms,
-            error_code=error_code,
-        )
-        accounting_db.commit()
-    return replace(result, cost_microusd=actual_usage_microusd(settings, result))
 
 
 @dataclass(frozen=True, slots=True)
@@ -1554,318 +1298,22 @@ async def responses(
 ):
     """Capability-bound, stateless native OpenAI Responses streaming proxy."""
 
-    started = time.perf_counter()
-    if not settings.chat_openai_direct_enabled or not settings.openai_api_key:
-        raise HTTPException(status_code=503, detail="Direct OpenAI is unavailable")
-    try:
-        turn_id = uuid.UUID(x_pwc_turn)
-    except ValueError:
-        raise HTTPException(status_code=403, detail="Capability rejected") from None
-    received_at = datetime.now(UTC)
-    _record_gateway_timing(settings, turn_id, received_at=received_at)
-    raw = await request.body()
-    if not raw or len(raw) > MAX_OPENAI_REQUEST_BYTES:
-        logger.warning("chat OpenAI gateway rejected phase=request_size")
-        raise HTTPException(
-            status_code=413,
-            detail="request_too_large: Model request is too large",
-        )
-    try:
-        untrusted_payload = json.loads(raw)
-    except json.JSONDecodeError:
-        raise HTTPException(
-            status_code=422, detail="Invalid Responses request"
-        ) from None
-    try:
-        row = _scope(
-            _bearer(authorization),
+    lifecycle = ProviderCallLifecycle(
+        db=db,
+        settings=settings,
+        authenticate=lambda: _bearer(authorization),
+        authorize=lambda token, model: _scope(
+            token,
             "model",
             x_pwc_session,
             x_pwc_turn,
             db,
+            model=model,
             turn_fence=turn_fence,
-        )
-    except HTTPException:
-        logger.warning("chat OpenAI gateway rejected phase=capability_scope")
-        raise
-    if (
-        row.agent_harness != "pi"
-        or row.provider_mode != "openai_funded"
-        or row.model != settings.chat_openai_luna_route
-    ):
-        logger.warning("chat OpenAI gateway rejected phase=capability_profile")
-        raise HTTPException(status_code=403, detail="Capability rejected")
-    try:
-        payload, maximum_tokens = _trusted_openai_payload(
-            untrusted_payload, row, settings
-        )
-    except HTTPException:
-        logger.warning("chat OpenAI gateway rejected phase=request_contract")
-        raise
-    trusted_raw = json.dumps(payload, separators=(",", ":")).encode()
-    if len(trusted_raw) > MAX_OPENAI_REQUEST_BYTES:
-        logger.warning("chat OpenAI gateway rejected phase=trusted_request_size")
-        raise HTTPException(
-            status_code=413,
-            detail="request_too_large: Model request is too large",
-        )
-    owner_id = _capability_owner(row, db)
-    capability_id = row.id
-    qualification_scope_id = _qualification_scope_claim(row, db, settings)
-    try:
-        maximum_requests, maximum_turn_tokens = _provider_turn_limits(row, db, settings)
-        ChatCapabilityService(db).meter_provider(
-            row,
-            request_tokens=max(1, len(trusted_raw) // 4) + maximum_tokens,
-            maximum_requests=maximum_requests,
-            maximum_tokens=maximum_turn_tokens,
-        )
-        call_sequence = row.provider_requests
-        trace_id = db.scalar(
-            select(ChatMessageRecord.langfuse_trace_id)
-            .where(
-                ChatMessageRecord.turn_id == turn_id,
-                ChatMessageRecord.role == "user",
-            )
-            .order_by(ChatMessageRecord.sequence.desc())
-            .limit(1)
-        )
-        db.commit()
-    except CapabilityError:
-        db.rollback()
-        raise HTTPException(
-            status_code=429, detail="Model execution limit reached"
-        ) from None
-
-    call_id = uuid.uuid5(capability_id, f"openai-provider-call:{call_sequence}")
-    try:
-        reservation = ChatOpenAIBudgetService(db, settings).reserve_call(
-            owner_id=owner_id,
-            turn_id=turn_id,
-            call_id=call_id,
-            call_sequence=call_sequence,
-            public_model_id=row.model,
-            provider_model=settings.chat_openai_model,
-            reasoning_effort=row.reasoning_effort,
-            bounds=OpenAIRequestBounds(
-                request_bytes=len(trusted_raw),
-                maximum_output_tokens=maximum_tokens,
-            ),
-            qualification_scope_id=qualification_scope_id,
-        )
-        db.commit()
-    except OpenAIBudgetExhausted:
-        db.rollback()
-        _record_provider_error(capability_id, "openai_budget_exhausted")
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": "openai_budget_exhausted",
-                "message": "The Papers With Code direct OpenAI allowance is exhausted.",
-            },
-        ) from None
-    except OpenAILimitExceeded as error:
-        db.rollback()
-        code = f"openai_{error.scope}_limited"
-        _record_provider_error(capability_id, code)
-        headers = None
-        if error.retry_at is not None:
-            headers = {
-                "Retry-After": str(
-                    max(
-                        1,
-                        math.ceil((error.retry_at - datetime.now(UTC)).total_seconds()),
-                    )
-                )
-            }
-        raise HTTPException(
-            status_code=429,
-            detail={
-                "code": code,
-                "message": "Direct OpenAI usage is temporarily limited.",
-            },
-            headers=headers,
-        ) from None
-    except OpenAIBudgetError:
-        db.rollback()
-        _record_provider_error(capability_id, "openai_unavailable")
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "code": "openai_unavailable",
-                "message": "Direct OpenAI is unavailable.",
-            },
-        ) from None
-
-    ChatOpenAIBudgetService(db, settings).mark_dispatched(call_id)
-    db.commit()
-    inventory = _offered_tool_inventory(payload)
-    provider_trace = start_provider_request_trace(
-        settings=settings,
-        trace_id=trace_id,
-        turn_id=str(turn_id),
-        call_sequence=call_sequence,
-        model=settings.chat_openai_model,
-        public_model_id=row.model,
-        provider_mode="openai_funded",
-        reasoning_effort=row.reasoning_effort,
-        routing_policy="direct",
-        service_tier="default",
-        accounting_call_id=str(call_id),
-        reserved_microusd=reservation.reserved_microusd,
-        offered_tool_count=inventory["offered_tool_count"],
-        offered_tool_names=inventory["offered_tool_names"],
-        offered_tool_digest=inventory["offered_tool_digest"],
+        ),
+        owner=lambda row: _capability_owner(row, db),
     )
-    # A FastAPI yield dependency otherwise retains this connection until the
-    # StreamingResponse finishes. At fleet concurrency that exhausts the pool
-    # while the gateway is merely waiting on OpenAI, blocking sibling calls.
-    # All subsequent accounting uses its own short-lived session.
-    db.close()
-    client = httpx.AsyncClient(timeout=180, follow_redirects=False)
-    try:
-        upstream = await client.send(
-            client.build_request(
-                "POST",
-                "https://api.openai.com/v1/responses",
-                content=trusted_raw,
-                headers={
-                    "Authorization": f"Bearer {settings.openai_api_key}",
-                    "Content-Type": "application/json",
-                    "Accept": "text/event-stream",
-                },
-            ),
-            stream=True,
-        )
-    except httpx.HTTPError:
-        await client.aclose()
-        with db_manager.session_local() as accounting_db:
-            ChatOpenAIBudgetService(accounting_db, settings).mark_cost_unknown(
-                call_id, error_code="openai_unavailable"
-            )
-            accounting_db.commit()
-        _record_provider_error(capability_id, "openai_unavailable")
-        provider_trace.finish(
-            usage=OpenAIResponsesUsageExtractor().result(),
-            status_code=None,
-            error_code="openai_unavailable",
-            tool_call_returned=False,
-        )
-        raise HTTPException(
-            status_code=502,
-            detail={
-                "code": "openai_unavailable",
-                "message": "Direct OpenAI is unavailable.",
-            },
-        ) from None
-    _record_gateway_timing(
-        settings,
-        turn_id,
-        phase="upstream_response_headers",
-        elapsed_ms=round((time.perf_counter() - started) * 1000),
-    )
-
-    request_id = _safe_openai_request_id(
-        upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
-    )
-    if upstream.status_code >= 400:
-        error_body = await upstream.aread()
-        await upstream.aclose()
-        await client.aclose()
-        error_code = classify_openai_error(upstream.status_code, error_body)
-        failed_usage = ExtractedOpenAIUsage(
-            service_tier="default",
-            input_tokens=0,
-            cached_input_tokens=0,
-            cache_write_tokens=0,
-            output_tokens=0,
-            reasoning_tokens=0,
-            outcome="failed",
-            cost_microusd=0,
-        )
-        _record_provider_error(capability_id, error_code)
-        with db_manager.session_local() as accounting_db:
-            ChatOpenAIBudgetService(accounting_db, settings).settle_call(
-                call_id,
-                failed_usage,
-                provider_request_id=request_id,
-                error_code=error_code,
-                latency_ms=round((time.perf_counter() - started) * 1000),
-            )
-            accounting_db.commit()
-        provider_trace.finish(
-            usage=failed_usage,
-            status_code=upstream.status_code,
-            error_code=error_code,
-            tool_call_returned=False,
-        )
-        status_code = 429 if error_code == "openai_rate_limited" else 503
-        raise HTTPException(
-            status_code=status_code,
-            detail={"code": error_code, "message": "Direct OpenAI request failed."},
-        )
-
-    extractor = OpenAIResponsesUsageExtractor()
-
-    async def chunks():
-        first_body_byte_ms: int | None = None
-        ttft_ms: int | None = None
-        cancelled = False
-        try:
-            async for chunk in upstream.aiter_bytes():
-                extractor.feed(chunk)
-                elapsed_ms = round((time.perf_counter() - started) * 1000)
-                if first_body_byte_ms is None:
-                    first_body_byte_ms = elapsed_ms
-                    _record_gateway_timing(
-                        settings,
-                        turn_id,
-                        phase="upstream_first_body_byte",
-                        elapsed_ms=first_body_byte_ms,
-                    )
-                if ttft_ms is None and extractor.saw_token_delta:
-                    ttft_ms = elapsed_ms
-                    provider_trace.first_byte(ttft_ms)
-                yield chunk
-        except (asyncio.CancelledError, GeneratorExit):
-            cancelled = True
-            raise
-        finally:
-            await _close_openai_stream(upstream, client)
-            elapsed_ms = round((time.perf_counter() - started) * 1000)
-            error_code = _openai_stream_error_code(
-                extractor.result().outcome,
-                cancelled=cancelled,
-            )
-            try:
-                trace_usage = _settle_openai_call(
-                    settings,
-                    call_id,
-                    extractor,
-                    provider_request_id=request_id,
-                    latency_ms=elapsed_ms,
-                    ttft_ms=ttft_ms,
-                    error_code=error_code,
-                )
-            except Exception as error:
-                logger.error(
-                    "openai stream settlement failed call=%s error=%s",
-                    call_id,
-                    type(error).__name__,
-                )
-                trace_usage = extractor.result()
-            provider_trace.finish(
-                usage=trace_usage,
-                status_code=upstream.status_code,
-                error_code=error_code,
-                tool_call_returned=extractor.saw_tool_call,
-            )
-
-    return StreamingResponse(
-        chunks(),
-        status_code=upstream.status_code,
-        headers={"Content-Type": "text/event-stream", "Cache-Control": "no-store"},
-    )
+    return await lifecycle.run(OpenAIResponsesProtocol(settings), request, x_pwc_turn)
 
 
 @app.post("/v1/messages")
