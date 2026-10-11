@@ -174,6 +174,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync DeepSWE leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_extractbench",
+        on_calendar=("*-*-* *:32:00",),
+        description="Sync ExtractBench leaderboard hourly",
+    ),
+    TimerSpec(
         job="sync_artificial_analysis",
         on_calendar=("*-*-* *:35:00",),
         description="Sync Artificial Analysis leaderboards hourly",

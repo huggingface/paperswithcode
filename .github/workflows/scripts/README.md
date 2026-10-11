@@ -35,6 +35,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-programbench.yml` | `40 * * * *` | `pwc-cron sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
 | `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
 | `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
+| `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -158,6 +159,11 @@ only rows whose exact upstream provider label is mapped to a reviewed paper or
 official release page, stores the overall score plus the five dimension scores,
 owns only its managed-prefix rows, and logs unreviewed provider labels as a
 warning instead of failing.
+
+`sync_extractbench.py` applies the same reviewed-label contract to the official
+`leaderboard.csv` in `run-llama/ExtractBench`. It stores unified value F1 plus
+word- and page-level grounding F1 on the Agents task, and omits the grounding
+metrics for systems that return no evidence (upstream reports 0.00 for both).
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

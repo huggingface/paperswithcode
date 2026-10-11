@@ -116,6 +116,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `parsebench` on task `ocr`; Overall (ParseBench) plus Tables, Charts, Content Faithfulness, Semantic Formatting, Visual Grounding; official `leaderboard.csv` in `run-llama/parsebench`; typically 40–400 upstream rows, of which only reviewed provider labels are published.
 - **Proof:** Diff the current CSV against managed rows (model label, six scores, `hf_model_url`); confirm `parsebench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Overall (ParseBench).
 
+## `sync_extractbench`
+
+- **Contract:** `extractbench` on task `agents`; Value F1 plus Word Grounding F1 and Page Grounding F1 (omitted when upstream reports 0.00 for both); official `leaderboard.csv` in `run-llama/ExtractBench`; typically 30–400 upstream rows, of which only reviewed provider labels are published.
+- **Proof:** Diff the current CSV against managed rows (model label, three scores); confirm `extractbench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Value F1.
+
 ## `sync_frontiercode`
 
 - **Contract:** `frontiercode-main` and `frontiercode-extended`; Score and Pass Rate; official Cognition JSON.
