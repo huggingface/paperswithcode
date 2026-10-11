@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
 from backend.routers.paper_date_range import PaperDateRange, get_paper_date_range
-from backend.models.api import (
+from backend.models.organizations import (
     Organization,
     OrganizationAreasWithTasks,
     OrganizationContributions,

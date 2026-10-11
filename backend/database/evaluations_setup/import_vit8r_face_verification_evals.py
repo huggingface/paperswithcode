@@ -20,7 +20,7 @@ from datetime import date
 from sqlalchemy import text
 
 from backend.database.connection import db_manager
-from backend.models.api import TaskCreateRequest
+from backend.models.taxonomy import TaskCreateRequest
 from backend.models.database import Author, Dataset as DBDataset, Paper, PaperAuthor
 from backend.services.arxiv_service import ArxivService
 from backend.services.evaluation_service import EvaluationService

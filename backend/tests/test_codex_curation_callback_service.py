@@ -9,11 +9,8 @@ from fastapi.testclient import TestClient
 from backend.config import get_settings
 from backend.database.connection import get_database_session
 from backend.main import create_app
-from backend.models.api import (
-    ApplyMutationRequest,
-    EnrichPaperMutation,
-    EvaluationCreateRequest,
-)
+from backend.models.curation import ApplyMutationRequest, EnrichPaperMutation
+from backend.models.evaluations import EvaluationCreateRequest
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
     CodexCurationEvaluationPaperMismatchError,

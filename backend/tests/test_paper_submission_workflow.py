@@ -10,7 +10,7 @@ import pytest
 from fastapi import HTTPException, Response
 from starlette.requests import Request
 
-from backend.models.api import Paper
+from backend.models.papers import Paper
 from backend.routers import papers as papers_router
 from backend.routers.papers import PaperSubmitRequest, PaperSubmitResponse
 from backend.services import paper_ingestion_service as ingestion_module

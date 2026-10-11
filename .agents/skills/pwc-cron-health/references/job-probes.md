@@ -154,6 +154,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare a bounded current Hub trending cohort with candidate identities and `last_seen_at`; inspect missing/duplicate candidates, active/resolved/failed states, oldest wait, attempts, and downstream workflow linkage.
 - **Correctness:** Sample resolved candidates and verify canonical paper identity plus resulting enrichment. Fresh candidate timestamps alone do not prove resolution or application.
 
+## `scan_model_releases`
+
+- **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.
+- **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`.
+- **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed; a long-lived unindexed release means nobody indexed it, which is a curation gap rather than a job failure.
+
 ## `export_enrichment_dashboard`
 
 - **Effect:** Exports the private enrichment-dashboard artifact consumed by operators; it does not write catalog rows.

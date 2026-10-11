@@ -6204,6 +6204,7 @@ def test_cron_jobs_declare_bounded_execution_contracts():
         "alert_submission_review_failure",
         "export_enrichment_dashboard",
         "monitor_chat_operational_alerts",
+        "scan_model_releases",
     }
     for name, spec in cron_launcher.COMMANDS.items():
         assert spec.command

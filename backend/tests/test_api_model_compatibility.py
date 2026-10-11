@@ -1,6 +1,32 @@
 """Compatibility checks for bounded API model modules."""
 
-from backend.models import api, evaluations, papers
+import ast
+import inspect
+
+from pydantic import BaseModel
+
+from backend.models import (
+    api,
+    conferences,
+    curation,
+    errors,
+    evaluations,
+    operations,
+    organizations,
+    papers,
+    taxonomy,
+    trends,
+)
+
+CONTRACTED_MODULES = (
+    conferences,
+    curation,
+    errors,
+    operations,
+    organizations,
+    taxonomy,
+    trends,
+)
 
 
 def test_legacy_paper_imports_are_canonical_class_aliases():
@@ -31,3 +57,29 @@ def test_task_import_remains_the_canonical_shared_contract():
         .id
         == "1"
     )
+
+
+def test_catalog_and_operations_imports_are_canonical_aliases():
+    for module in CONTRACTED_MODULES:
+        for name in module.__all__:
+            canonical = getattr(module, name)
+            if isinstance(canonical, type):
+                assert canonical.__module__ == module.__name__
+            assert getattr(api, name) is canonical
+
+
+def test_every_api_model_has_one_canonical_bounded_module():
+    exported = {
+        name: value
+        for name, value in vars(api).items()
+        if isinstance(value, type) and issubclass(value, BaseModel)
+    }
+    assert exported
+    for name, model in exported.items():
+        assert model.__module__ != api.__name__, name
+
+
+def test_compatibility_surface_contains_only_imports():
+    tree = ast.parse(inspect.getsource(api))
+    body = tree.body[1:] if isinstance(tree.body[0], ast.Expr) else tree.body
+    assert all(isinstance(node, ast.ImportFrom) for node in body)

@@ -397,6 +397,16 @@ COMMANDS: dict[str, Job] = {
             "model-resolution and paper-curation workflows"
         ),
     ),
+    "scan_model_releases": job(
+        "-m",
+        "backend.scripts.scan_model_releases",
+        timeout="30m",
+        mutates_shared_data=False,
+        idempotency=(
+            "read-only scan of official lab news feeds and unmapped Artificial "
+            "Analysis models for releases without a paper row"
+        ),
+    ),
     "export_enrichment_dashboard": job(
         "-m",
         "backend.scripts.export_enrichment_dashboard",

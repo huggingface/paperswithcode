@@ -19,7 +19,7 @@ from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager
-from backend.models.api import TaskCreateRequest
+from backend.models.taxonomy import TaskCreateRequest
 from backend.models.evaluations import DatasetCreateRequest
 from backend.models.database import Paper, Task as DBTask
 from backend.services.dataset_service import DatasetService
