@@ -84,6 +84,56 @@
   gap: 56px;
   align-items: start;
 }
+.task-featured-collection {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px 24px;
+  align-items: center;
+  margin-top: 32px;
+  padding: 18px 24px;
+  border: 1px solid var(--hairline);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  text-decoration: none;
+  transition: border-color 0.15s;
+}
+.task-featured-collection:hover { border-color: var(--accent); }
+.task-featured-collection-eyebrow {
+  grid-column: 1;
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+}
+.task-featured-collection strong {
+  grid-column: 1;
+  font-family: var(--serif);
+  font-size: 22px;
+  line-height: 1.2;
+}
+.task-featured-collection-description {
+  grid-column: 1;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.task-featured-collection-meta {
+  grid-column: 2;
+  grid-row: 1 / span 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent-text);
+  white-space: nowrap;
+}
 .medical-ai-hub {
   margin-top: 32px;
   padding: 24px;
@@ -931,6 +981,8 @@
 
   .subtask-grid { grid-template-columns: 1fr; }
   .medical-ai-hub { padding: 18px; }
+  .task-featured-collection { grid-template-columns: 1fr; padding: 16px 18px; }
+  .task-featured-collection-meta { grid-column: 1; grid-row: auto; margin-top: 8px; }
   .medical-ai-hub-grid { grid-template-columns: 1fr; }
   .medical-ai-hub-card { min-height: 0; }
 

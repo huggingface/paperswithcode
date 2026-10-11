@@ -3,10 +3,25 @@ import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
 import {
+  AstraRoboticsFeature,
   HealthcareMedicalAiHub,
   RecommendedFrameworkLinks,
   TaskBreadcrumb,
 } from "@/views/TagBrowseView";
+
+describe("AstraRoboticsFeature", () => {
+  it("links the robotics task page to the GPT-6 Astra collection", () => {
+    render(
+      <MemoryRouter>
+        <AstraRoboticsFeature />
+      </MemoryRouter>,
+    );
+
+    expect(
+      screen.getByRole("link", { name: "Featured collection: GPT-6 Astra for Robotics" }),
+    ).toHaveAttribute("href", "/astra-for-robotics");
+  });
+});
 
 describe("HealthcareMedicalAiHub", () => {
   it("makes the four medical AI destinations directly discoverable", () => {
