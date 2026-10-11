@@ -15,12 +15,13 @@ from fastapi import HTTPException
 
 import backend.chat_gateway_app as gateway
 from backend.config import Settings
+from backend.models.database import ChatOpenRouterProviderCall
 from backend.services.chat_capability_service import CapabilityError
 from backend.services.chat_openai_budget_service import (
     OpenAIBudgetExhausted,
     OpenAILimitExceeded,
 )
-from backend.services.chat_provider_gateway import lifecycle, openai_responses
+from backend.services.chat_provider_gateway import ledgers, lifecycle
 from backend.services.openrouter_user_budget_service import opaque_owner
 
 REAL_ASYNC_CLIENT = httpx.AsyncClient
@@ -176,10 +177,10 @@ def harness(monkeypatch):
     monkeypatch.setattr(gateway, "_scope", lambda *_args, **_kwargs: row)
     monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "owner-1")
     monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
-    monkeypatch.setattr(openai_responses, "ChatOpenAIBudgetService", FakeBudgetService)
-    monkeypatch.setattr(openai_responses, "actual_usage_microusd", lambda *_a: 42)
+    monkeypatch.setattr(ledgers, "ChatOpenAIBudgetService", FakeBudgetService)
+    monkeypatch.setattr(ledgers, "actual_usage_microusd", lambda *_a: 42)
     monkeypatch.setattr(
-        openai_responses, "db_manager", SimpleNamespace(session_local=session_local)
+        lifecycle, "db_manager", SimpleNamespace(session_local=session_local)
     )
     monkeypatch.setattr(lifecycle.httpx, "AsyncClient", client_factory)
     monkeypatch.setattr(lifecycle, "start_provider_request_trace", start_trace)
@@ -485,6 +486,7 @@ def messages_harness(monkeypatch):
         content=MESSAGES_STREAM,
         headers={"content-type": "text/event-stream", "request-id": "req_m"},
         transport_error=False,
+        provider_call=SimpleNamespace(provider_ttft_ms=None),
     )
 
     class FakeCapabilityService:
@@ -522,8 +524,10 @@ def messages_harness(monkeypatch):
             events.append(("byok_invalidated", owner_id))
 
     class AccountingDB(FakeDB):
-        def get(self, _model, _id):
-            return SimpleNamespace(provider_ttft_ms=None)
+        def get(self, model, _id):
+            if model is ChatOpenRouterProviderCall:
+                return state.provider_call
+            return SimpleNamespace()
 
     @contextlib.contextmanager
     def session_local():
@@ -549,27 +553,16 @@ def messages_harness(monkeypatch):
         events.append(("trace_start", fields))
         return FakeTrace(events)
 
-    def record_ttft(call_id, elapsed_ms) -> None:
-        events.append(("ttft", call_id))
-
     from backend.services.chat_provider_gateway import anthropic_messages
 
     monkeypatch.setattr(gateway, "_scope", lambda *_args, **_kwargs: row)
     monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "owner-1")
     monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
+    monkeypatch.setattr(ledgers, "OpenRouterUserBudgetService", FakeOpenRouterBudget)
+    monkeypatch.setattr(ledgers, "OpenRouterBYOKService", FakeBYOK)
+    monkeypatch.setattr(ledgers, "require_openrouter_budget", allow_budget)
     monkeypatch.setattr(
-        anthropic_messages, "ChatCapabilityService", FakeCapabilityService
-    )
-    monkeypatch.setattr(
-        anthropic_messages, "OpenRouterUserBudgetService", FakeOpenRouterBudget
-    )
-    monkeypatch.setattr(anthropic_messages, "OpenRouterBYOKService", FakeBYOK)
-    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", allow_budget)
-    monkeypatch.setattr(anthropic_messages, "record_provider_ttft", record_ttft)
-    monkeypatch.setattr(
-        anthropic_messages,
-        "db_manager",
-        SimpleNamespace(session_local=session_local),
+        lifecycle, "db_manager", SimpleNamespace(session_local=session_local)
     )
     monkeypatch.setattr(
         anthropic_messages,
@@ -579,7 +572,11 @@ def messages_harness(monkeypatch):
     monkeypatch.setattr(lifecycle.httpx, "AsyncClient", client_factory)
     monkeypatch.setattr(lifecycle, "start_provider_request_trace", start_trace)
     monkeypatch.setattr(
-        lifecycle, "record_gateway_timing", lambda *_args, **_kwargs: None
+        lifecycle,
+        "record_gateway_timing",
+        lambda _settings, _turn, *, phase=None, **_kw: events.append(
+            ("timing", phase or "received")
+        ),
     )
     monkeypatch.setattr(
         lifecycle,
@@ -683,7 +680,7 @@ def test_messages_relays_every_provider_mode_through_the_lifecycle(
     funded = provider_mode == "openrouter_funded"
     assert ("reserve" in names) is funded
     assert ("settle" in names) is funded
-    assert ("ttft" in names) is funded
+    assert (state.provider_call.provider_ttft_ms is not None) is funded
     if provider_mode == "huggingface":
         assert send.headers["x-hf-bill-to"] == "acme"
         assert "reasoning" not in sent
@@ -705,8 +702,8 @@ def test_messages_relays_every_provider_mode_through_the_lifecycle(
     finish = _first(state.events, "trace_finish")[1]
     assert finish["error_code"] is None
     assert finish["tool_call_returned"] is stream
-    # The Messages path keeps the request session for its whole lifetime.
-    assert "close" not in names
+    # Both protocols release the request session before the provider call.
+    assert names.index("close") < names.index("client") < names.index("send")
 
 
 def test_messages_byok_auth_failure_invalidates_the_credential_and_relays(
@@ -779,7 +776,6 @@ def test_messages_funded_transport_failure_marks_cost_unknown(messages_harness):
 def test_messages_funded_budget_outage_rejects_before_reservation(
     messages_harness, monkeypatch
 ):
-    from backend.services.chat_provider_gateway import anthropic_messages
     from backend.services.openrouter_budget_service import (
         OpenRouterBudgetUnavailable,
     )
@@ -787,7 +783,7 @@ def test_messages_funded_budget_outage_rejects_before_reservation(
     async def unavailable(_settings):
         raise OpenRouterBudgetUnavailable("timeout")
 
-    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", unavailable)
+    monkeypatch.setattr(ledgers, "require_openrouter_budget", unavailable)
 
     with pytest.raises(HTTPException) as error:
         _call_messages(messages_harness, stream=True)
@@ -799,3 +795,135 @@ def test_messages_funded_budget_outage_rejects_before_reservation(
     assert ("provider_error", "openrouter_unavailable") in messages_harness.events
     assert "reserve" not in names
     assert "client" not in names
+
+
+# One lifecycle contract for both protocols.
+
+
+def _run_protocol(state, protocol: str, *, stream: bool = True):
+    if protocol == "responses":
+        return _drain(state)
+    response, body = _call_messages(state, stream=stream)
+    return response.status_code, body
+
+
+@pytest.fixture(params=["responses", "messages"])
+def any_protocol(request):
+    fixture = "harness" if request.param == "responses" else "messages_harness"
+    return request.param, request.getfixturevalue(fixture)
+
+
+def test_both_protocols_share_latency_phases_and_session_release(any_protocol):
+    protocol, state = any_protocol
+
+    status, _ = _run_protocol(state, protocol)
+
+    assert status == 200
+    names = state.events.names()
+    phases = [event[1] for event in state.events if event[0] == "timing"]
+    assert phases == [
+        "received",
+        "upstream_response_headers",
+        "upstream_first_body_byte",
+    ]
+    assert names.index("timing") < names.index("request_body")
+    assert names.index("meter") < names.index("close") < names.index("send")
+    assert names.count("trace_finish") == 1
+
+
+def test_both_protocols_settle_a_cancelled_stream_exactly_once(any_protocol):
+    protocol, state = any_protocol
+
+    async def cancel_after_first_chunk():
+        if protocol == "responses":
+            response = await _call_responses(state)()
+        else:
+            payload = json.dumps(
+                {"model": state.row.model, "max_tokens": 10, "stream": True}
+            ).encode()
+            response = await gateway.messages(
+                FakeRequest(state.events, payload),
+                "Bearer capability",
+                str(state.row.chat_session_id),
+                str(state.row.turn_id),
+                None,
+                FakeDB(state.events),
+                state.settings,
+            )
+        iterator = response.body_iterator
+        await iterator.__anext__()
+        await iterator.aclose()
+
+    asyncio.run(cancel_after_first_chunk())
+
+    assert state.events.names().count("settle") == 1
+    assert state.events.names().count("trace_finish") == 1
+
+
+def test_funded_messages_settlement_failure_still_finishes_the_trace(
+    messages_harness, monkeypatch, caplog
+):
+    def broken_settle(*_args, **_kwargs):
+        raise RuntimeError("database unavailable")
+
+    monkeypatch.setattr(ledgers.OpenRouterFundedLedger, "settle", broken_settle)
+
+    response, _ = _call_messages(messages_harness, stream=True)
+
+    assert response.status_code == 200
+    finish = _first(messages_harness.events, "trace_finish")[1]
+    assert finish["error_code"] is None
+    assert "openrouter stream settlement failed" in caplog.text
+
+
+def test_byok_revocation_and_error_record_share_one_lifecycle_transaction(
+    messages_harness, monkeypatch
+):
+    from backend.services.chat_provider_gateway import anthropic_messages
+
+    state = messages_harness
+    state.row.provider_mode = "openrouter_byok"
+    sessions = []
+
+    class RecordingDB(FakeDB):
+        def get(self, _model, _id):
+            return SimpleNamespace()
+
+    @contextlib.contextmanager
+    def session_local():
+        db = RecordingDB(Events())
+        sessions.append(db)
+        yield db
+
+    monkeypatch.setattr(
+        lifecycle, "db_manager", SimpleNamespace(session_local=session_local)
+    )
+    monkeypatch.setattr(
+        anthropic_messages,
+        "provider_target",
+        lambda *_args: ("https://openrouter.ai/api/v1/messages", "byok", None),
+    )
+    state.status = 401
+    state.content = b"{}"
+
+    _call_messages(state, stream=True)
+
+    assert len(sessions) == 1
+    assert sessions[0].events.names() == ["commit"]
+    assert ("byok_invalidated", "owner-1") in state.events
+    assert ("provider_error", "openrouter_byok_credential_invalid") in state.events
+
+
+def test_protocol_adapters_own_no_transactions():
+    import inspect
+
+    from backend.services.chat_provider_gateway import (
+        anthropic_messages,
+        openai_responses,
+    )
+
+    for module in (anthropic_messages, openai_responses, ledgers):
+        source = inspect.getsource(module)
+        assert "db_manager" not in source, module.__name__
+        assert ".commit()" not in source, module.__name__
+        assert ".rollback()" not in source, module.__name__

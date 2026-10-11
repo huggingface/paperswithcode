@@ -11,12 +11,10 @@ import hashlib
 import hmac
 import json
 import logging
-import math
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 from fastapi import HTTPException, Request
@@ -24,9 +22,7 @@ from sqlalchemy.orm import Session
 
 from backend.chat_execution_policy import MAX_PROVIDER_REQUEST_BYTES
 from backend.config import Settings, get_settings
-from backend.database.connection import db_manager
 from backend.models.database import (
-    ChatOpenRouterProviderCall,
     ChatSession,
     ChatTurnCapability,
 )
@@ -35,16 +31,14 @@ from backend.services.chat_provider_gateway.lifecycle import (
     ParsedProviderRequest,
     PreparedProviderCall,
     ProviderError,
-    ProviderReservationRejected,
     opaque_turn,
     output_tokens_allowed,
 )
-from backend.services.hf_inference_billing_service import HfInferenceCredential
-from backend.services.openrouter_budget_service import (
-    OpenRouterBudgetExceeded,
-    OpenRouterBudgetUnavailable,
-    require_openrouter_budget,
+from backend.services.chat_provider_gateway.ledgers import (
+    OpenRouterFundedLedger,
+    UserBilledLedger,
 )
+from backend.services.hf_inference_billing_service import HfInferenceCredential
 from backend.services.openrouter_byok_service import (
     OpenRouterBYOKService,
     OpenRouterCredentialUnavailable,
@@ -54,30 +48,12 @@ from backend.services.openrouter_usage_extractor import (
     OpenRouterUsageExtractor,
 )
 from backend.services.openrouter_user_budget_service import (
-    PUBLIC_SUPPORT_URL,
-    OpenRouterAbuseLimitExceeded,
-    OpenRouterMonthlyBudgetExhausted,
-    OpenRouterPricingUnavailable,
-    OpenRouterUserBudgetService,
-    RequestBounds,
     opaque_owner,
 )
 
 logger = logging.getLogger("backend.chat_gateway_app")
 
 MODEL_REQUEST_TOO_LARGE = "Model request is too large"
-
-
-def _openrouter_unavailable() -> dict[str, Any]:
-    return {
-        "code": "openrouter_unavailable",
-        "message": (
-            "OpenRouter is currently unavailable. However, you can "
-            "still bring your own key in Settings."
-        ),
-        "byok_settings_available": True,
-        "support_url": PUBLIC_SUPPORT_URL,
-    }
 
 
 def user_provider_credential(row, settings: Settings) -> HfInferenceCredential:
@@ -278,38 +254,6 @@ def huggingface_provider_error_code(status_code: int) -> str | None:
     return None
 
 
-def settle_openrouter_call(
-    settings: Settings,
-    call_id: uuid.UUID,
-    extractor: OpenRouterUsageExtractor,
-) -> None:
-    result = extractor.result()
-    with db_manager.session_local() as accounting_db:
-        service = OpenRouterUserBudgetService(accounting_db, settings)
-        if result.cost_microusd is None:
-            service.mark_cost_unknown(call_id, result.generation_id)
-        else:
-            service.settle_call(call_id, result.cost_microusd, result.generation_id)
-        call = accounting_db.get(ChatOpenRouterProviderCall, call_id)
-        if call is not None:
-            call.upstream_provider = result.provider
-            call.prompt_tokens = result.prompt_tokens
-            call.completion_tokens = result.completion_tokens
-            call.cache_read_tokens = result.cache_read_tokens
-            call.cache_creation_tokens = result.cache_creation_tokens
-        accounting_db.commit()
-
-
-def record_provider_ttft(call_id: uuid.UUID | None, elapsed_ms: int) -> None:
-    if call_id is None:
-        return
-    with db_manager.session_local() as timing_db:
-        call = timing_db.get(ChatOpenRouterProviderCall, call_id)
-        if call is not None and call.provider_ttft_ms is None:
-            call.provider_ttft_ms = elapsed_ms
-        timing_db.commit()
-
-
 class MessagesUsageStream:
     """OpenRouter usage plus the tool-use and first-byte signals of Messages."""
 
@@ -333,193 +277,18 @@ class MessagesUsageStream:
         return self.extractor.result()
 
 
-@dataclass(slots=True)
-class UnmeteredProviderLedger:
-    """Hugging Face and BYOK calls bill the user's own provider account."""
-
-    name: str = "provider"
-    call_id: uuid.UUID | None = None
-
-    async def reserve(
-        self, db: Session, *, turn_id: uuid.UUID, call_sequence: int
-    ) -> None:
-        del db, turn_id, call_sequence
-
-    def mark_dispatched(self, db: Session) -> None:
-        del db
-
-    def trace_accounting(self) -> dict[str, Any]:
-        return {}
-
-    def mark_unknown(self, error_code: str) -> None:
-        del error_code
-
-    def settle_rejected(
-        self,
-        failure: ProviderError,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-    ) -> None:
-        del failure, provider_request_id, latency_ms
-
-    def record_ttft(self, elapsed_ms: int) -> None:
-        del elapsed_ms
-
-    def settle(
-        self,
-        usage: MessagesUsageStream,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-        ttft_ms: int | None,
-        error_code: str | None,
-    ) -> ExtractedOpenRouterUsage:
-        del provider_request_id, latency_ms, ttft_ms, error_code
-        return usage.result()
-
-
-@dataclass(slots=True)
-class OpenRouterFundedLedger:
-    """Shared Papers With Code OpenRouter allowance for one funded call."""
-
-    settings: Settings
-    capability_id: uuid.UUID
-    owner_id: str
-    model: str
-    reasoning_effort: str
-    request_bytes: int
-    maximum_output_tokens: int
-    payload: dict[str, Any]
-    name: str = "openrouter"
-    call_id: uuid.UUID | None = None
-
-    async def reserve(
-        self, db: Session, *, turn_id: uuid.UUID, call_sequence: int
-    ) -> None:
-        try:
-            await require_openrouter_budget(self.settings)
-        except (OpenRouterBudgetExceeded, OpenRouterBudgetUnavailable):
-            raise ProviderReservationRejected(
-                "openrouter_unavailable",
-                status_code=503,
-                detail=_openrouter_unavailable(),
-            ) from None
-        self.call_id = uuid.uuid5(self.capability_id, f"provider-call:{call_sequence}")
-        try:
-            OpenRouterUserBudgetService(db, self.settings).reserve_call(
-                self.owner_id,
-                turn_id,
-                self.call_id,
-                call_sequence,
-                self.model,
-                RequestBounds(
-                    request_bytes=self.request_bytes,
-                    maximum_output_tokens=self.maximum_output_tokens,
-                    payload=self.payload,
-                ),
-                reasoning_effort=self.reasoning_effort,
-            )
-        except OpenRouterMonthlyBudgetExhausted as error:
-            resets_at = error.resets_at.isoformat().replace("+00:00", "Z")
-
-            def exhausted() -> dict[str, Any]:
-                usage = OpenRouterUserBudgetService(
-                    db, self.settings
-                ).status_percentage(self.owner_id)
-                return {
-                    "code": "openrouter_monthly_budget_exhausted",
-                    "message": (
-                        "The remaining shared Papers With Code OpenRouter allowance "
-                        "is not enough for another model call."
-                    ),
-                    "used_percent": usage.used_percent,
-                    "remaining_percent": usage.remaining_percent,
-                    "resets_at": resets_at,
-                }
-
-            raise ProviderReservationRejected(
-                "openrouter_monthly_budget_exhausted",
-                status_code=429,
-                detail=exhausted,
-            ) from None
-        except OpenRouterAbuseLimitExceeded as error:
-            code = f"openrouter_{error.scope}_limited"
-            retry_seconds = max(
-                1,
-                math.ceil((error.retry_at - datetime.now(UTC)).total_seconds()),
-            )
-            raise ProviderReservationRejected(
-                code,
-                status_code=429,
-                detail={
-                    "code": code,
-                    "message": (
-                        "Shared OpenRouter usage is temporarily limited. "
-                        "You can retry later or use your own key in Settings."
-                    ),
-                    "byok_settings_available": True,
-                },
-                headers={"Retry-After": str(retry_seconds)},
-            ) from None
-        except OpenRouterPricingUnavailable:
-            raise ProviderReservationRejected(
-                "openrouter_unavailable",
-                status_code=503,
-                detail=_openrouter_unavailable(),
-            ) from None
-
-    def mark_dispatched(self, db: Session) -> None:
-        OpenRouterUserBudgetService(db, self.settings).mark_dispatched(self.call_id)
-
-    def trace_accounting(self) -> dict[str, Any]:
-        return {}
-
-    def mark_unknown(self, error_code: str) -> None:
-        del error_code
-        with db_manager.session_local() as accounting_db:
-            OpenRouterUserBudgetService(accounting_db, self.settings).mark_cost_unknown(
-                self.call_id
-            )
-            accounting_db.commit()
-
-    def settle_rejected(
-        self,
-        failure: ProviderError,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-    ) -> None:
-        # Messages relays provider failures; settlement reads their usage.
-        del failure, provider_request_id, latency_ms
-
-    def record_ttft(self, elapsed_ms: int) -> None:
-        record_provider_ttft(self.call_id, elapsed_ms)
-
-    def settle(
-        self,
-        usage: MessagesUsageStream,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-        ttft_ms: int | None,
-        error_code: str | None,
-    ) -> ExtractedOpenRouterUsage:
-        del provider_request_id, latency_ms, ttft_ms, error_code
-        settle_openrouter_call(self.settings, self.call_id, usage.extractor)
-        return usage.result()
-
-
 @dataclass(frozen=True, slots=True)
 class AnthropicMessagesProtocol:
     """Anthropic Messages relayed to the capability's routed provider."""
 
     settings: Settings
-    receipt_phase: Literal["entry", "dispatch"] = "dispatch"
-    transport_error_code: str = "provider_transport_error"
-    releases_request_session: bool = False
-    shields_upstream_close: bool = False
-    logs_stream_completion: bool = True
+    transport_error: ProviderError = field(
+        default_factory=lambda: ProviderError(
+            code="provider_transport_error",
+            error=HTTPException(status_code=502, detail="Model provider failed"),
+            record=False,
+        )
+    )
 
     def check_available(self) -> None:
         return None
@@ -608,8 +377,10 @@ class AnthropicMessagesProtocol:
                 maximum_output_tokens=parsed.maximum_tokens,
                 payload=payload,
             )
+        elif provider_mode == "openrouter_byok":
+            ledger = UserBilledLedger(settings, owner_id=owner_id)
         else:
-            ledger = UnmeteredProviderLedger()
+            ledger = UserBilledLedger(settings)
         return PreparedProviderCall(
             payload=payload,
             raw=raw,
@@ -646,30 +417,17 @@ class AnthropicMessagesProtocol:
         del upstream
         return None
 
-    def transport_failure(self) -> ProviderError:
-        return ProviderError(
-            code="provider_transport_error",
-            error=HTTPException(status_code=502, detail="Model provider failed"),
-            record=False,
-        )
-
     async def map_provider_status(
         self, upstream: httpx.Response, call: PreparedProviderCall
     ) -> ProviderError | None:
         mode = call.provider_mode
         status = upstream.status_code
         if mode == "openrouter_byok" and status == 401:
-            with db_manager.session_local() as credential_db:
-                OpenRouterBYOKService(
-                    credential_db, self.settings
-                ).invalidate_auth_failure(call.owner_id)
-                capability = credential_db.get(ChatTurnCapability, call.capability_id)
-                if capability is not None:
-                    ChatCapabilityService(credential_db).record_provider_error(
-                        capability, "openrouter_byok_credential_invalid"
-                    )
-                credential_db.commit()
-            return None
+            return ProviderError(
+                code="openrouter_byok_credential_invalid",
+                error=None,
+                revokes_credential=True,
+            )
         if mode == "openrouter_byok":
             code = byok_provider_error_code(status)
         elif mode == "openrouter_funded" and status in {402, 403}:

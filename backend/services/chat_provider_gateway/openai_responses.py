@@ -6,42 +6,34 @@ import hashlib
 import hmac
 import json
 import logging
-import math
 import re
 import uuid
 from collections.abc import Callable
-from dataclasses import dataclass, replace
-from datetime import UTC, datetime
-from typing import Any, Literal
+from dataclasses import dataclass, field
+from typing import Any
 
 import httpx
 from fastapi import HTTPException, Request
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
-from backend.database.connection import db_manager
 from backend.models.database import ChatTurnCapability
 from backend.services.chat_openai_budget_service import (
     MAX_REQUEST_BYTES as MAX_OPENAI_REQUEST_BYTES,
-)
-from backend.services.chat_openai_budget_service import (
-    ChatOpenAIBudgetService,
-    OpenAIBudgetError,
-    OpenAIBudgetExhausted,
-    OpenAILimitExceeded,
-    OpenAIRequestBounds,
-    actual_usage_microusd,
 )
 from backend.services.chat_openai_usage_extractor import (
     ExtractedOpenAIUsage,
     OpenAIResponsesUsageExtractor,
     classify_openai_error,
 )
+from backend.services.chat_provider_gateway.ledgers import (
+    OpenAIResponsesLedger,
+    openai_unavailable,
+)
 from backend.services.chat_provider_gateway.lifecycle import (
     ParsedProviderRequest,
     PreparedProviderCall,
     ProviderError,
-    ProviderReservationRejected,
     output_tokens_allowed,
     qualification_scope_claim,
 )
@@ -68,10 +60,6 @@ OPENAI_RESPONSES_FIELDS = {
     "tools",
 }
 REQUEST_TOO_LARGE = "request_too_large: Model request is too large"
-OPENAI_UNAVAILABLE = {
-    "code": "openai_unavailable",
-    "message": "Direct OpenAI is unavailable.",
-}
 
 
 def opaque_openai_identifier(kind: str, value: str, settings: Settings) -> str:
@@ -173,174 +161,17 @@ def openai_stream_error_code(outcome: str | None, *, cancelled: bool) -> str | N
     return "openai_unavailable"
 
 
-def settle_openai_call(
-    settings: Settings,
-    call_id: uuid.UUID,
-    extractor: OpenAIResponsesUsageExtractor,
-    *,
-    provider_request_id: str | None,
-    latency_ms: int,
-    ttft_ms: int | None,
-    error_code: str | None,
-) -> ExtractedOpenAIUsage:
-    result = extractor.result()
-    with db_manager.session_local() as accounting_db:
-        ChatOpenAIBudgetService(accounting_db, settings).settle_call(
-            call_id,
-            result,
-            provider_request_id=provider_request_id,
-            latency_ms=latency_ms,
-            ttft_ms=ttft_ms,
-            error_code=error_code,
-        )
-        accounting_db.commit()
-    return replace(result, cost_microusd=actual_usage_microusd(settings, result))
-
-
-@dataclass(slots=True)
-class OpenAIResponsesLedger:
-    """Direct-OpenAI allowance accounting for one Responses call."""
-
-    settings: Settings
-    capability_id: uuid.UUID
-    owner_id: str
-    public_model_id: str
-    reasoning_effort: str
-    request_bytes: int
-    maximum_output_tokens: int
-    qualification_scope_id: uuid.UUID | None
-    name: str = "openai"
-    call_id: uuid.UUID | None = None
-    reserved_microusd: int | None = None
-
-    async def reserve(
-        self, db: Session, *, turn_id: uuid.UUID, call_sequence: int
-    ) -> None:
-        self.call_id = uuid.uuid5(
-            self.capability_id, f"openai-provider-call:{call_sequence}"
-        )
-        try:
-            reservation = ChatOpenAIBudgetService(db, self.settings).reserve_call(
-                owner_id=self.owner_id,
-                turn_id=turn_id,
-                call_id=self.call_id,
-                call_sequence=call_sequence,
-                public_model_id=self.public_model_id,
-                provider_model=self.settings.chat_openai_model,
-                reasoning_effort=self.reasoning_effort,
-                bounds=OpenAIRequestBounds(
-                    request_bytes=self.request_bytes,
-                    maximum_output_tokens=self.maximum_output_tokens,
-                ),
-                qualification_scope_id=self.qualification_scope_id,
-            )
-        except OpenAIBudgetExhausted:
-            raise ProviderReservationRejected(
-                "openai_budget_exhausted",
-                status_code=429,
-                detail={
-                    "code": "openai_budget_exhausted",
-                    "message": (
-                        "The Papers With Code direct OpenAI allowance is exhausted."
-                    ),
-                },
-            ) from None
-        except OpenAILimitExceeded as error:
-            code = f"openai_{error.scope}_limited"
-            headers = None
-            if error.retry_at is not None:
-                headers = {
-                    "Retry-After": str(
-                        max(
-                            1,
-                            math.ceil(
-                                (error.retry_at - datetime.now(UTC)).total_seconds()
-                            ),
-                        )
-                    )
-                }
-            raise ProviderReservationRejected(
-                code,
-                status_code=429,
-                detail={
-                    "code": code,
-                    "message": "Direct OpenAI usage is temporarily limited.",
-                },
-                headers=headers,
-            ) from None
-        except OpenAIBudgetError:
-            raise ProviderReservationRejected(
-                "openai_unavailable", status_code=503, detail=dict(OPENAI_UNAVAILABLE)
-            ) from None
-        self.reserved_microusd = reservation.reserved_microusd
-
-    def mark_dispatched(self, db: Session) -> None:
-        ChatOpenAIBudgetService(db, self.settings).mark_dispatched(self.call_id)
-
-    def trace_accounting(self) -> dict[str, Any]:
-        return {
-            "accounting_call_id": str(self.call_id),
-            "reserved_microusd": self.reserved_microusd,
-        }
-
-    def mark_unknown(self, error_code: str) -> None:
-        with db_manager.session_local() as accounting_db:
-            ChatOpenAIBudgetService(accounting_db, self.settings).mark_cost_unknown(
-                self.call_id, error_code=error_code
-            )
-            accounting_db.commit()
-
-    def settle_rejected(
-        self,
-        failure: ProviderError,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-    ) -> None:
-        with db_manager.session_local() as accounting_db:
-            ChatOpenAIBudgetService(accounting_db, self.settings).settle_call(
-                self.call_id,
-                failure.usage,
-                provider_request_id=provider_request_id,
-                error_code=failure.code,
-                latency_ms=latency_ms,
-            )
-            accounting_db.commit()
-
-    def record_ttft(self, elapsed_ms: int) -> None:
-        # Responses TTFT is settled together with the call.
-        del elapsed_ms
-
-    def settle(
-        self,
-        usage: OpenAIResponsesUsageExtractor,
-        *,
-        provider_request_id: str | None,
-        latency_ms: int,
-        ttft_ms: int | None,
-        error_code: str | None,
-    ) -> ExtractedOpenAIUsage:
-        return settle_openai_call(
-            self.settings,
-            self.call_id,
-            usage,
-            provider_request_id=provider_request_id,
-            latency_ms=latency_ms,
-            ttft_ms=ttft_ms,
-            error_code=error_code,
-        )
-
-
 @dataclass(frozen=True, slots=True)
 class OpenAIResponsesProtocol:
     """Capability-bound, stateless native OpenAI Responses streaming."""
 
     settings: Settings
-    receipt_phase: Literal["entry", "dispatch"] = "entry"
-    transport_error_code: str = "openai_unavailable"
-    releases_request_session: bool = True
-    shields_upstream_close: bool = True
-    logs_stream_completion: bool = False
+    transport_error: ProviderError = field(
+        default_factory=lambda: ProviderError(
+            code="openai_unavailable",
+            error=HTTPException(status_code=502, detail=openai_unavailable()),
+        )
+    )
 
     def check_available(self) -> None:
         if not self.settings.chat_openai_direct_enabled or not (
@@ -437,12 +268,6 @@ class OpenAIResponsesProtocol:
     def provider_request_id(self, upstream: httpx.Response) -> str | None:
         return safe_openai_request_id(
             upstream.headers.get("x-request-id") or upstream.headers.get("request-id")
-        )
-
-    def transport_failure(self) -> ProviderError:
-        return ProviderError(
-            code="openai_unavailable",
-            error=HTTPException(status_code=502, detail=dict(OPENAI_UNAVAILABLE)),
         )
 
     async def map_provider_status(
