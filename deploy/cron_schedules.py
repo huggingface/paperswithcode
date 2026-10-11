@@ -127,6 +127,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         on_calendar=("*-*-* *:42:00",),
         description="Enqueue Hugging Face trending model curation hourly",
     ),
+    TimerSpec(
+        job="scan_model_releases",
+        on_calendar=("*-*-* 01/3:48:00",),
+        description="Scan official lab news for unindexed model releases every three hours",
+    ),
     # Leaderboard syncs, staggered at their previous workflow minutes.
     TimerSpec(
         job="sync_3d_arena",
