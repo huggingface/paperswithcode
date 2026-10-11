@@ -33,20 +33,26 @@ from backend.chat_execution_policy import (
     MAX_FETCHABLE_URLS,
     MAX_POSTER_PROVIDER_REQUESTS,
     MAX_PROVIDER_REQUESTS,
+    MAX_PROVIDER_TURN_TOKENS,
     bounded_url_seed,
     effective_tool_rounds,
     validate_url_seed,
 )
 from backend.chat_gateway_app import (
-    MAX_POSTER_PROVIDER_TURN_TOKENS,
-    MAX_PROVIDER_OUTPUT_TOKENS,
-    MAX_PROVIDER_TURN_TOKENS,
     CatalogRequest,
     PaperCommandRequest,
-    _output_tokens_allowed,
-    _provider_turn_limits,
     catalog,
     paper_command,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    MAX_POSTER_PROVIDER_TURN_TOKENS,
+    MAX_PROVIDER_OUTPUT_TOKENS,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    output_tokens_allowed as _output_tokens_allowed,
+)
+from backend.services.chat_provider_gateway.lifecycle import (
+    provider_turn_limits as _provider_turn_limits,
 )
 from backend.chat_sandbox_worker import (
     agent,
