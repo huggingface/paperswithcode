@@ -189,6 +189,11 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     ),
     "k-exaone-2-0-0803": PaperIdentity(arxiv_id="2608.04505", is_open=True),
     "kimi-k3": PaperIdentity(arxiv_id="2607.24653", is_open=True),
+    "ling-3-1-flash": external(
+        "https://developer.ant-ling.com/en/docs/models/ling#ling-31-flash",
+        "Ling-3.1-flash",
+        "2026-09-30",
+    ),
     "minimax-m3": external(
         "https://www.minimax.io/blog/minimax-m3",
         "MiniMax M3: Frontier Coding, 1M Context, Native Multimodality — All in One Model",

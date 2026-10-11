@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 import backend.chat_gateway_app as gateway
+from backend.services.chat_provider_gateway import anthropic_messages
 import backend.services.chat_turn_runner as turn_runner
 from backend.config import get_settings
 from backend.services.chat_capability_service import (
@@ -310,8 +311,8 @@ def _install_downstream_sentinel(monkeypatch, name, reached, db):
     else:
         monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "owner-1")
         monkeypatch.setattr(
-            gateway,
-            "_provider_target",
+            anthropic_messages,
+            "provider_target",
             lambda *_args: ("https://provider.example.test", "token", None),
         )
         monkeypatch.setattr(gateway.ChatCapabilityService, "meter_provider", hit)

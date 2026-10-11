@@ -208,7 +208,7 @@ backend/
 ├── cli.py                 # `pwc` maintenance CLI (plus cli_*.py subcommands)
 ├── models/
 │   ├── api.py             # Pydantic models for API responses
-│   └── database.py        # SQLAlchemy models
+│   └── database/          # SQLAlchemy models (bounded modules, re-exported by __init__.py)
 ├── routers/               # FastAPI route handlers (papers, tasks, datasets, …)
 ├── services/              # Business logic (one module per domain)
 ├── database/

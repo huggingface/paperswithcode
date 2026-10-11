@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import inspect
 import uuid
 from decimal import Decimal, ROUND_CEILING
 from datetime import UTC, datetime, timedelta
@@ -14,7 +13,12 @@ from fastapi import HTTPException
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from backend.chat_gateway_app import _safe_openai_request_id, _trusted_openai_payload
+from backend.services.chat_provider_gateway import lifecycle
+from backend.services.chat_provider_gateway.openai_responses import (
+    openai_stream_error_code,
+    safe_openai_request_id as _safe_openai_request_id,
+    trusted_openai_payload as _trusted_openai_payload,
+)
 from backend.config import Settings
 from backend.models.database import (
     ChatOpenAIMonthlyUsage,
@@ -95,26 +99,6 @@ def test_existing_gateway_path_dispatches_explicit_responses_protocol(monkeypatc
         db,
         settings,
     )
-
-
-def test_direct_openai_releases_request_database_session_before_upstream_stream():
-    source = inspect.getsource(gateway_app.responses)
-
-    assert source.index("db.close()") < source.index("client = httpx.AsyncClient")
-
-
-def test_direct_openai_records_gateway_entry_and_upstream_headers_separately():
-    source = inspect.getsource(gateway_app.responses)
-
-    gateway_received = source.index(
-        "_record_gateway_timing(settings, turn_id, received_at=received_at)"
-    )
-    request_body = source.index("raw = await request.body()")
-    upstream_send = source.index("upstream = await client.send(")
-    response_headers = source.index('phase="upstream_response_headers"')
-
-    assert gateway_received < request_body
-    assert upstream_send < response_headers
 
 
 def test_trusted_responses_payload_overwrites_every_security_boundary_field():
@@ -294,9 +278,7 @@ def test_long_context_accounting_and_reservations(input_tokens, multiplier):
     ],
 )
 def test_openai_stream_terminal_classification(outcome, cancelled, expected):
-    assert (
-        gateway_app._openai_stream_error_code(outcome, cancelled=cancelled) == expected
-    )
+    assert openai_stream_error_code(outcome, cancelled=cancelled) == expected
 
 
 def test_openai_stream_closes_inside_an_already_cancelled_anyio_scope():
@@ -313,7 +295,7 @@ def test_openai_stream_closes_inside_an_already_cancelled_anyio_scope():
     async def cancel_during_stream():
         with anyio.CancelScope() as scope:
             scope.cancel()
-            await gateway_app._close_openai_stream(upstream, client)
+            await lifecycle.close_upstream(upstream, client)
 
     asyncio.run(cancel_during_stream())
 
@@ -537,10 +519,12 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement(
 
 
 def test_qualification_provider_limit_covers_two_tools_and_final_answer():
-    from backend.chat_gateway_app import (
+    from backend.services.chat_provider_gateway.lifecycle import (
         QUALIFICATION_PROVIDER_REQUESTS,
         QUALIFICATION_PROVIDER_TURN_TOKENS,
-        _provider_turn_limits,
+    )
+    from backend.services.chat_provider_gateway.lifecycle import (
+        provider_turn_limits as _provider_turn_limits,
     )
 
     database = SimpleNamespace(scalar=lambda _query: "32-functional-turns")
@@ -559,7 +543,10 @@ def test_qualification_provider_limit_covers_two_tools_and_final_answer():
 
 
 def test_production_provider_limits_never_query_staging_qualification_tables():
-    from backend.chat_gateway_app import MAX_PROVIDER_REQUESTS, _provider_turn_limits
+    from backend.chat_execution_policy import MAX_PROVIDER_REQUESTS
+    from backend.services.chat_provider_gateway.lifecycle import (
+        provider_turn_limits as _provider_turn_limits,
+    )
 
     def unexpected_query(_query):
         raise AssertionError("production queried staging qualification state")

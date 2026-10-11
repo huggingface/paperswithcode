@@ -14,6 +14,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import chat_gateway_app as gateway
+from backend.services.chat_provider_gateway import anthropic_messages, lifecycle
 from backend.config import Settings
 from backend.routers import chat as chat_router
 from backend.services import chat_admission_billing as chat_billing
@@ -243,6 +244,9 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
         def rollback(self):
             return None
 
+        def scalar(self, _query):
+            return None
+
     class FakeCapabilityService:
         def __init__(self, _db):
             pass
@@ -260,6 +264,7 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
     settings = _settings()
     row = SimpleNamespace(
         id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
         model=settings.chat_deepseek_v4_flash_openrouter_route,
         provider_mode="openrouter_funded",
         provider_requests=0,
@@ -273,13 +278,15 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
     monkeypatch.setattr(gateway, "_scope", lambda *_args, **_kwargs: row)
     monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "hf-user")
     monkeypatch.setattr(
-        gateway,
-        "_provider_target",
+        anthropic_messages,
+        "provider_target",
         lambda *_args: ("https://openrouter.ai/api/v1/messages", "token", None),
     )
-    monkeypatch.setattr(gateway, "ChatCapabilityService", FakeCapabilityService)
-    monkeypatch.setattr(gateway, "require_openrouter_budget", slow_budget_check)
-    monkeypatch.setattr(gateway, "_record_provider_error", lambda *_args: None)
+    monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
+    monkeypatch.setattr(
+        anthropic_messages, "require_openrouter_budget", slow_budget_check
+    )
+    monkeypatch.setattr(lifecycle, "record_provider_error", lambda *_args: None)
     with pytest.raises(HTTPException) as error:
         asyncio.run(
             gateway.messages(
@@ -287,6 +294,7 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
                 "Bearer capability",
                 str(uuid.uuid4()),
                 str(uuid.uuid4()),
+                None,
                 db,
                 settings,
             )
@@ -306,6 +314,9 @@ def test_gateway_reports_funded_abuse_limit_without_dispatch(monkeypatch):
 
         def rollback(self):
             self.rollbacks += 1
+
+        def scalar(self, _query):
+            return None
 
     class FakeCapabilityService:
         def __init__(self, _db):
@@ -334,6 +345,7 @@ def test_gateway_reports_funded_abuse_limit_without_dispatch(monkeypatch):
     settings = _settings()
     row = SimpleNamespace(
         id=uuid.uuid4(),
+        turn_id=uuid.uuid4(),
         model=settings.chat_deepseek_v4_flash_openrouter_route,
         provider_mode="openrouter_funded",
         provider_requests=0,
@@ -348,15 +360,17 @@ def test_gateway_reports_funded_abuse_limit_without_dispatch(monkeypatch):
     monkeypatch.setattr(gateway, "_scope", lambda *_args, **_kwargs: row)
     monkeypatch.setattr(gateway, "_capability_owner", lambda *_args: "hf-user")
     monkeypatch.setattr(
-        gateway,
-        "_provider_target",
+        anthropic_messages,
+        "provider_target",
         lambda *_args: ("https://openrouter.ai/api/v1/messages", "token", None),
     )
-    monkeypatch.setattr(gateway, "ChatCapabilityService", FakeCapabilityService)
-    monkeypatch.setattr(gateway, "OpenRouterUserBudgetService", LimitedBudgetService)
-    monkeypatch.setattr(gateway, "require_openrouter_budget", allow_budget)
+    monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
     monkeypatch.setattr(
-        gateway, "_record_provider_error", lambda *args: recorded.append(args)
+        anthropic_messages, "OpenRouterUserBudgetService", LimitedBudgetService
+    )
+    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", allow_budget)
+    monkeypatch.setattr(
+        lifecycle, "record_provider_error", lambda *args: recorded.append(args)
     )
 
     with pytest.raises(HTTPException) as error:
@@ -366,6 +380,7 @@ def test_gateway_reports_funded_abuse_limit_without_dispatch(monkeypatch):
                 "Bearer capability",
                 str(uuid.uuid4()),
                 str(uuid.uuid4()),
+                None,
                 db,
                 settings,
             )
