@@ -110,3 +110,65 @@ def test_scope_block_discards_speculative_events_and_cancels_runner(
     assert runner.cancelled is True
     assert runner.closed is True
     assert "suppressed answer" not in str(semantic)
+
+
+def test_scope_block_persists_refusal_as_answer_block(monkeypatch) -> None:
+    from contextlib import contextmanager
+
+    from backend.services import chat_stream_service
+
+    completed: list[tuple] = []
+
+    class Service:
+        def __init__(self, _db, _settings) -> None:
+            pass
+
+        def complete_turn(self, *args) -> None:
+            completed.append(args)
+
+    class DB:
+        def commit(self) -> None:
+            pass
+
+    class DBManager:
+        @contextmanager
+        def session_local(self):
+            yield DB()
+
+    async def persist_with_lease(_self, persist, **_kwargs) -> None:
+        persist()
+
+    monkeypatch.setattr(chat_stream_service, "ChatSessionService", Service)
+    monkeypatch.setattr(chat_stream_service, "db_manager", DBManager())
+    monkeypatch.setattr(
+        ChatStreamOrchestrator, "_persist_terminal_with_lease", persist_with_lease
+    )
+    orchestrator = ChatStreamOrchestrator(
+        settings=get_settings(),
+        owner=ChatOwner("owner", "owner"),
+        admission=TurnAdmission(
+            session_id=uuid.uuid4(),
+            turn_id=uuid.uuid4(),
+            user_message_id=uuid.uuid4(),
+            selected_model="model",
+            model_route="route",
+            sdk_session_id=None,
+            sdk_project_key=None,
+        ),
+        prompt="Who won the world cup?",
+        request_id="request",
+        title_token=None,
+        is_disconnected=lambda: asyncio.sleep(0, result=False),
+        release_admission=lambda: asyncio.sleep(0),
+    )
+
+    asyncio.run(orchestrator._persist_scope_block(REFUSAL_TEXT, "scope_blocked"))
+
+    *_, answer, citations, followups, blocks, finish_reason = completed[0]
+    assert (answer, citations, followups, finish_reason) == (
+        REFUSAL_TEXT,
+        [],
+        [],
+        "scope_blocked",
+    )
+    assert blocks == [{"kind": "answer", "text": REFUSAL_TEXT, "done": True}]

@@ -77,6 +77,39 @@ describe("toUiMessages", () => {
     expect(toUiMessages(detail)[1].errorCode).toBe(errorCode);
   });
 
+  it("restores a scope-blocked refusal stored only as content", () => {
+    const detail: ChatSessionDetail = {
+      id: "session-scope",
+      title: "Test",
+      selected_model: "gpt-5.6-luna@openai",
+      created_at: "2026-10-11T00:00:00Z",
+      updated_at: "2026-10-11T00:00:00Z",
+      message_count: 2,
+      is_busy: false,
+      web_search_enabled: false,
+      transcript_status: "ready",
+      messages: [{
+        id: "assistant-scope",
+        turn_id: "turn-scope",
+        sequence: 2,
+        role: "assistant",
+        content: "I can only help with AI research.",
+        revision: 1,
+        status: "complete",
+        display_blocks: [],
+        citations: [],
+        followups: [],
+        finish_reason: "scope_blocked",
+        error_code: null,
+      }],
+    };
+
+    expect(toUiMessages(detail)[0]).toMatchObject({
+      blocks: [{ kind: "answer", text: "I can only help with AI research.", done: true }],
+      finishReason: "scope_blocked",
+    });
+  });
+
   it("keeps a user stop as stopped-early after reload", () => {
     const detail: ChatSessionDetail = {
       id: "session-stopped",

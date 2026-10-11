@@ -276,6 +276,17 @@ export async function getChatModels(): Promise<{ items: ChatModelChoice[]; defau
   return chatApi.getModels();
 }
 
+// Older scope-blocked turns stored their refusal only in `content`.
+function assistantBlocks(
+  message: { content: string; display_blocks: ChatBlock[] },
+  expandFailedTools: boolean,
+): ChatBlock[] {
+  if (message.display_blocks.length === 0 && message.content) {
+    return [{ kind: "answer", text: message.content, done: true }];
+  }
+  return restoreBlocks(message.display_blocks, expandFailedTools);
+}
+
 function restoreBlocks(blocks: ChatBlock[], expandFailedTools: boolean): ChatBlock[] {
   const restored = blocks.map((block): ChatBlock => block.kind === "reasoning"
     ? { ...block, active: false, open: false }
@@ -352,7 +363,7 @@ export function toUiMessages(detail: ChatSessionDetail): ChatMessage[] {
       return [{
         id: message.id,
         role: "assistant",
-        blocks: restoreBlocks(message.display_blocks, true),
+        blocks: assistantBlocks(message, true),
         followups: message.followups,
         citations: message.citations,
         finishReason: message.finish_reason ?? undefined,
@@ -401,7 +412,7 @@ export function publicShareToUiMessages(detail: ChatShareDetail): ChatMessage[] 
     : {
         id: message.id,
         role: "assistant",
-        blocks: restoreBlocks(message.display_blocks, false),
+        blocks: assistantBlocks(message, false),
         citations: message.citations,
         finishReason: message.finish_reason ?? undefined,
         error: message.error ?? undefined,
