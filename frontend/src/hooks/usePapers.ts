@@ -163,6 +163,9 @@ export function useInfiniteTaskPapers(params: UseInfiniteTaskPapersParams) {
         order_dir,
         latest_only,
         include_resources,
+        // Cards show only the leading repository; highly cited papers can
+        // otherwise carry hundreds of community implementations each.
+        repository_limit: 1,
         has_code,
         has_hf_artifacts,
         start_date,

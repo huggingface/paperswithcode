@@ -9,6 +9,7 @@ from backend.database.connection import get_database_session
 from backend.main import create_app
 from backend.models.papers import Paper
 from backend.models.database import (
+    PaperRepository as DBPaperRepository,
     Dataset as DBDataset,
     Framework as DBFramework,
     PaperAuthor,
@@ -213,6 +214,9 @@ class _RelationQuery:
         self.database = database
         self.entities = entities
 
+    def select_from(self, *args, **kwargs):
+        return self
+
     def join(self, *args, **kwargs):
         return self
 
@@ -308,6 +312,48 @@ def test_paper_relation_query_count_is_constant_in_paper_count(
 
     assert isinstance(relations, PaperRelations)
     assert len(db.executed_entities) == expected_queries
+
+
+class _RepositoryDatabase(_RelationDatabase):
+    @staticmethod
+    def rows_for(entities):
+        if len(entities) == 3 and entities[1] is DBPaperRepository.is_official:
+            return [
+                (
+                    1,
+                    is_official,
+                    SimpleNamespace(
+                        id=repo_id,
+                        url=f"https://github.com/o/r{repo_id}",
+                        owner="o",
+                        name=f"r{repo_id}",
+                        num_stars=stars,
+                        source="manual",
+                        trending_score=None,
+                        trending_score_updated_at=None,
+                        created_at=None,
+                        updated_at=None,
+                    ),
+                )
+                for repo_id, is_official, stars in [
+                    (1, True, 5),
+                    (2, False, 900),
+                    (3, False, 50),
+                ]
+            ]
+        return []
+
+
+@pytest.mark.parametrize(("repository_limit", "expected"), [(None, 3), (1, 1), (2, 2)])
+def test_load_resources_caps_repositories_per_paper(repository_limit, expected):
+    relations = PaperRelations()
+    PaperRelationLoader(_RepositoryDatabase()).load_resources(
+        [1], relations, repository_limit
+    )
+
+    repositories = relations.repositories[1]
+    assert len(repositories) == expected
+    assert repositories[0].is_official
 
 
 def test_card_relations_exclude_detail_projection_but_details_include_author_links():

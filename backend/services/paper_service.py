@@ -79,7 +79,9 @@ from backend.services.paper_version_refresh_service import (
     PaperVersionRefreshService,
 )
 from backend.services.semantic_scholar_service import SemanticScholarService
-from backend.services.trending_ranking_service import active_paper_score_components
+from backend.services.trending_ranking_service import (
+    correlated_paper_score_expressions,
+)
 from backend.utils.github_utils import normalize_github_url, parse_github_url
 
 
@@ -160,6 +162,7 @@ class PaperService:
         db_papers: Sequence[DBPaper],
         *,
         include_resources: bool = False,
+        repository_limit: int | None = None,
     ) -> list[Paper]:
         """Hydrate paper rows with the relations rendered by card surfaces."""
         papers = list(db_papers)
@@ -167,7 +170,7 @@ class PaperService:
         loader = PaperRelationLoader(self.db)
         relations = loader.load_cards(paper_ids)
         if include_resources:
-            loader.load_resources(paper_ids, relations)
+            loader.load_resources(paper_ids, relations, repository_limit)
         return [self._to_api_paper(paper, relations) for paper in papers]
 
     def hydrate_details(
@@ -316,6 +319,7 @@ class PaperService:
             relations.repository_coverage.get(db_paper.id, (False, 0))
         )
         project_pages = relations.project_pages.get(db_paper.id) or None
+        x_threads = relations.x_threads.get(db_paper.id) or None
 
         # Create the API model
         paper_data = {
@@ -355,6 +359,7 @@ class PaperService:
             "code_repository_count": code_repository_count,
             "repositories": repositories,
             "project_pages": project_pages,
+            "x_threads": x_threads,
             "tasks": tasks,
             "methods": methods,
             "introduced_benchmarks": introduced_benchmarks,
@@ -1450,25 +1455,13 @@ class PaperService:
         but sort after scored papers (via the ``-1`` fallbacks), so scoped pages
         never drop tagged papers. ``query`` must select ``DBPaper`` rows.
         """
-        repo_stats, active_score = active_paper_score_components(
-            self.db,
+        active_score, max_stars = correlated_paper_score_expressions(
             self.settings.trending_ranking_mode,
             missing_score=-1.0,
         )
-
-        query = query.outerjoin(repo_stats, repo_stats.c.paper_id == DBPaper.id)
-
-        if self.settings.trending_ranking_mode == "composite":
-            return query.order_by(
-                desc(active_score),
-                desc(func.coalesce(repo_stats.c.max_stars, -1)),
-                desc(DBPaper.date_published),
-                desc(DBPaper.id),
-            )
-
         return query.order_by(
             desc(active_score),
-            desc(func.coalesce(repo_stats.c.max_stars, -1)),
+            desc(func.coalesce(max_stars, -1)),
             desc(DBPaper.date_published),
             desc(DBPaper.id),
         )

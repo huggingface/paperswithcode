@@ -157,6 +157,11 @@ const sourceUrlEdit = variant(
   z.object({ source_url: z.string().nullish() }),
 );
 const hfArtifactsEdit = variant("hf_artifacts", artifactsPayload, artifactsPayload);
+const xThreadsEdit = variant(
+  "x_threads",
+  z.object({ x_threads: z.array(z.string()) }),
+  z.object({ x_threads: z.array(z.object({ url: z.string() })) }),
+);
 const organizationEdit = variant(
   "organizations",
   z.object({ organization_ids: z.array(z.number()) }),
@@ -187,6 +192,7 @@ const pendingPaperEditSchema = z.discriminatedUnion("edit_type", [
   projectPageEdit,
   sourceUrlEdit,
   hfArtifactsEdit,
+  xThreadsEdit,
   organizationEdit,
   newTask,
   newMethod,

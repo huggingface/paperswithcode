@@ -49,7 +49,7 @@ def feeds(monkeypatch):
     )
     hydrated = []
 
-    def cards(self, rows, *, include_resources=False):
+    def cards(self, rows, *, include_resources=False, repository_limit=None):
         hydrated.append(([row.id for row in rows], include_resources))
         return [PaperCard.model_construct(id=str(row.id)) for row in rows]
 
@@ -235,7 +235,7 @@ def test_global_trending_selector_preserves_sql_order_and_empty_page(monkeypatch
     monkeypatch.setattr(service, "hydrate_cards", cards)
     result = service._get_trending_papers(page_size=2, include_resources=True)
     assert ids(result) == ["2", "1"] and result.count == 3 and result.next_page == 2
-    assert hydrated == [([2, 1], {"include_resources": True})]
+    assert hydrated == [([2, 1], {"include_resources": True, "repository_limit": None})]
     database.execute.return_value.fetchall.return_value = []
     result = service._get_trending_papers(page=5, page_size=2)
     assert (

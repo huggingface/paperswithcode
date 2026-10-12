@@ -53,6 +53,8 @@ def public_snapshot(entity_type, snapshot):
             key: (value or {}).get(key, [])
             for key in ("hf_models", "hf_datasets", "hf_spaces")
         }
+    if entity_type == "paper_x_threads":
+        return [{"url": row["url"]} for row in value or []]
     if entity_type == "paper_organizations":
         return [{"organization_id": row["organization_id"]} for row in value or []]
     if entity_type in {"paper_repositories", "paper_project_pages"}:

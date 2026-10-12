@@ -640,3 +640,64 @@ def test_legacy_batch_rollback_preserves_unrecorded_organization_links(db):
     service.rollback(event=event, actor=ADMIN, request_id="legacy-rollback")
     assert db.query(PaperTask).count() == 0
     assert db.query(PaperOrganization).one().organization_id == 1
+
+
+def test_x_thread_edits_publish_previews_and_rollback_without_refetch(db, monkeypatch):
+    from unittest.mock import Mock
+
+    from backend.models.database import PaperXThread
+    from backend.services import x_thread_service
+
+    def preview(tweet_id):
+        return {
+            "tweet_id": tweet_id,
+            "url": f"https://x.com/author/status/{tweet_id}",
+            "author_name": "Author",
+            "author_handle": "author",
+            "author_avatar_url": None,
+            "text": f"Introducing paper {tweet_id}",
+            "posted_at": datetime(2026, 10, 10, tzinfo=UTC),
+            "like_count": 7,
+            "reply_count": 1,
+            "media_url": None,
+            "media_type": None,
+            "fetched_at": datetime(2026, 10, 12, tzinfo=UTC),
+        }
+
+    fetch = Mock(side_effect=preview)
+    monkeypatch.setattr(x_thread_service, "fetch_x_post_row", fetch)
+    service = PaperEditService(db)
+    service.submit(
+        document(
+            db,
+            operations=[
+                {
+                    "section": "x_threads",
+                    "payload": {"x_threads": ["https://twitter.com/a/status/111"]},
+                }
+            ],
+        ),
+        ACTOR,
+        "seed",
+    )
+    changed = service.submit(
+        document(
+            db,
+            operations=[
+                {
+                    "section": "x_threads",
+                    "payload": {"x_threads": ["https://x.com/b/status/222"]},
+                }
+            ],
+        ),
+        ACTOR,
+        "change",
+    )
+    assert [row.tweet_id for row in db.query(PaperXThread)] == ["222"]
+
+    fetch.reset_mock()
+    event = db.get(CatalogMutationEvent, uuid.UUID(changed["event_id"]))
+    service.rollback(event=event, actor=ADMIN, request_id="restore")
+    restored = db.query(PaperXThread).one()
+    assert (restored.tweet_id, restored.text) == ("111", "Introducing paper 111")
+    fetch.assert_not_called()

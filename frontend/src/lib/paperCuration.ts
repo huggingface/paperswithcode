@@ -9,6 +9,7 @@ export type PaperEditSection =
   | "project_pages"
   | "hf_artifacts"
   | "source_url"
+  | "x_threads"
   | "evaluations";
 
 type Request = <T>(endpoint: string, options?: RequestInit) => Promise<T>;

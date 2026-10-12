@@ -1042,6 +1042,7 @@ class TaskService:
         has_hf_artifacts: bool = False,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        repository_limit: Optional[int] = None,
     ):
         """
         Get papers associated with a specific task.
@@ -1054,6 +1055,7 @@ class TaskService:
             order_by: Field to order by (date_published, title, citation_count, trending)
             order_dir: Order direction (asc, desc); ignored for trending which is always desc
             include_resources: Whether to include repositories and tasks
+            repository_limit: Max repositories per paper when including resources
 
         Returns:
             Papers object with pagination info and results
@@ -1102,6 +1104,7 @@ class TaskService:
                 ordering=SCOPED_ORDERING,
                 deduplicate_task_id=task.id,
                 include_resources=include_resources,
+                repository_limit=repository_limit,
             )
 
         except PaperNotFoundError:

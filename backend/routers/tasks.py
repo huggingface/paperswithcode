@@ -353,6 +353,14 @@ def get_task_papers(
     has_hf_artifacts: bool = Query(
         False, description="Only include papers with linked Hugging Face artifacts"
     ),
+    repository_limit: Optional[int] = Query(
+        None,
+        ge=1,
+        description=(
+            "With include_resources, return at most this many repositories per "
+            "paper (official first, then most starred). Omit for all."
+        ),
+    ),
     date_range: PaperDateRange = Depends(get_paper_date_range),
     db: Session = Depends(get_database_session),
 ):
@@ -380,6 +388,7 @@ def get_task_papers(
         has_hf_artifacts=has_hf_artifacts,
         start_date=date_range.start_date,
         end_date=date_range.end_date,
+        repository_limit=repository_limit,
     )
 
 

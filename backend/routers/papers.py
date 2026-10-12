@@ -1403,6 +1403,42 @@ def update_paper_hf_artifacts(
     )
 
 
+class UpdateXThreadsRequest(BaseModel):
+    """Request model for updating the X threads introducing a paper."""
+
+    x_threads: List[str] = Field(
+        ...,
+        max_length=10,
+        description="X post URLs (x.com or twitter.com), in display order",
+    )
+
+
+@router.put(
+    "/papers/{paper_id}/x-threads",
+    response_model=Paper,
+    summary="Update X threads for a paper",
+)
+def update_paper_x_threads(
+    paper_id: int = Path(..., description="Database paper ID"),
+    request: UpdateXThreadsRequest = Body(...),
+    mutation: dict = Depends(catalog_mutation_context),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Replace the X posts in which authors introduce a paper. A preview of each
+    newly linked post is captured from X; unavailable posts are rejected.
+
+    **Example:**
+    ```json
+    PUT /api/v1/papers/123/x-threads
+    {"x_threads": ["https://x.com/artemZholus/status/2108983104178213096"]}
+    ```
+    """
+    return _curated_paper_update(
+        db, mutation, paper_id, "x_threads", {"x_threads": request.x_threads}
+    )
+
+
 @router.put(
     "/papers/{paper_id}/source-url",
     response_model=Paper,

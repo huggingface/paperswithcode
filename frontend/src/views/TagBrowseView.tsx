@@ -288,8 +288,10 @@ const TagBrowseView: React.FC = () => {
     return map;
   }, [pageQ.data]);
 
+  // The papers endpoint resolves slugs itself, so start the feed in parallel
+  // with the task-page shell instead of waiting for its task id.
   const papersQ = useInfiniteTaskPapers({
-    taskId: pageQ.data?.task?.id || "",
+    taskId: taskSlug || "",
     page_size: 20,
     order_by: orderBy,
     order_dir: "desc",
@@ -298,7 +300,7 @@ const TagBrowseView: React.FC = () => {
     has_hf_artifacts: hasHfArtifacts,
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
-    enabled: !!pageQ.data?.task?.id,
+    enabled: !!taskSlug,
   });
 
   const cards = useMemo(() => {
