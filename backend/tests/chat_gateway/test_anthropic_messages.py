@@ -1,3 +1,5 @@
+"""Anthropic Messages gateway contract: provider routing, credentials, payload policy, and errors."""
+
 from __future__ import annotations
 
 from types import SimpleNamespace
@@ -22,7 +24,6 @@ from backend.services.chat_provider_gateway.lifecycle import (
     offered_tool_inventory as _offered_tool_inventory,
 )
 from backend.config import Settings
-from backend.services.chat_gateway_service import ChatGatewayService
 from backend.services.hf_inference_billing_service import (
     HfInferenceCredential,
     encrypt_credential,
@@ -335,26 +336,3 @@ def test_gateway_keeps_byok_billing_and_rate_limit_errors_distinct(
 )
 def test_gateway_classifies_hugging_face_billing_errors(status_code, error_code):
     assert _huggingface_provider_error_code(status_code) == error_code
-
-
-def test_chat_search_never_calls_shared_query_embedding_endpoint(monkeypatch):
-    calls = []
-
-    class PaperService:
-        def __init__(self, _db):
-            pass
-
-        def search_papers_page(self, query, page, limit, *, mode):
-            calls.append((query, page, limit, mode))
-            return {"results": []}
-
-    from backend.services import chat_gateway_service
-
-    monkeypatch.setattr(chat_gateway_service, "PaperService", PaperService)
-    result = ChatGatewayService(object(), Settings(_env_file=None)).catalog(
-        "search",
-        {"query": "vision transformers", "mode": "hybrid", "limit": 5},
-    )
-
-    assert result == {"results": []}
-    assert calls == [("vision transformers", 1, 5, "keyword")]

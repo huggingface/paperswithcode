@@ -257,7 +257,7 @@ def test_mcp_nginx_route_is_post_only_and_environment_isolated():
     from pathlib import Path
     from deploy.nginx_validate import validate
 
-    root = Path(__file__).resolve().parents[2] / "deploy/nginx"
+    root = Path(__file__).resolve().parents[3] / "deploy/nginx"
     prod = (root / "paperswithcode.co.conf").read_text()
     stage = (root / "staging.paperswithcode.co.conf").read_text()
     assert validate(prod, stage) == []

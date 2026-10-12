@@ -448,7 +448,7 @@ def test_prompt_and_tool_policy_treat_hf_content_as_untrusted(tmp_path):
 
 
 def test_worker_contract_pins_restricted_cli_and_skill_digests():
-    repository = Path(__file__).resolve().parents[2]
+    repository = Path(__file__).resolve().parents[3]
     restricted_cli = repository / "clis" / "restricted_hf_cli"
     package = restricted_cli / "src" / "restricted_hf_cli"
     wrapper = restricted_cli / "bin" / "hf"
