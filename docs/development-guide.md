@@ -43,6 +43,8 @@ served by nginx in production.
   | Chat sandbox, executor, worker, broker | `uv run pytest backend/tests/chat_sandbox -q` |
   | Chat gateway: provider lifecycle, OpenAI Responses, Anthropic Messages, turn fence, catalog tools | `uv run pytest backend/tests/chat_gateway -q` |
   | Curation: autonomous operations, Codex jobs, submissions | `uv run pytest backend/tests/curation -q` |
+  | Private LaTeX papers: authoring, compiler, qualification | `uv run pytest backend/tests/latex_papers -q` |
+  | Paper edits and pending edits | `uv run pytest backend/tests/paper_edits -q` |
   | Deployment, releases, nginx, host environment | `uv run pytest backend/tests/deployment -q` |
 
 For scripts that mutate domain data, use the existing services where possible.

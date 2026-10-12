@@ -27,10 +27,10 @@ from backend.services.pending_edit_errors import (
 from backend.services.pending_edit_mutations import PendingEditMutationService
 from backend.services.pending_edit_service import PendingEditService
 from backend.tests.curation.submission_harness import _run, _service
-from backend.tests import test_pending_edit_noop as fixtures
+from backend.tests.paper_edits import pending_harness
 
-db_session = fixtures.db_session
-paper_fixture = fixtures.paper_fixture
+db_session = pending_harness.db_session
+paper_fixture = pending_harness.paper_fixture
 
 
 def submit(db):

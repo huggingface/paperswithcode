@@ -14,21 +14,12 @@ from datetime import datetime, timezone
 from types import SimpleNamespace
 
 import pytest
-from sqlalchemy import BigInteger, create_engine, event
-from sqlalchemy.dialects.postgresql import ARRAY, JSONB
-from sqlalchemy.ext.compiler import compiles
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
 
 from backend import cli_submissions
 from backend.config import Settings
 from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
-    Base,
     CatalogMutationEvent,
-    PaperMethod,
-    PaperProjectPage,
-    PaperRepository,
     PaperTask,
     PaperCurationSchedulerState,
     PaperCurationJob,
@@ -50,12 +41,6 @@ from backend.models.database import (
 )
 from backend.models.database import (
     Paper as DBPaper,
-)
-from backend.models.database import (
-    ProjectPage as DBProjectPage,
-)
-from backend.models.database import (
-    Repository as DBRepository,
 )
 from backend.models.database import (
     Task as DBTask,
@@ -82,96 +67,10 @@ from backend.services.pending_edit_service import (
 )
 from backend.services.pending_edit_payloads import validate_payload
 from backend.services.submission_rollback_service import SubmissionRollbackService
+from backend.tests.paper_edits import pending_harness
 
-
-@compiles(BigInteger, "sqlite")
-def _compile_bigint_sqlite(_element, _compiler, **_kw):
-    return "INTEGER"
-
-
-@compiles(ARRAY, "sqlite")
-def _compile_array_sqlite(_element, _compiler, **_kw):
-    return "TEXT"
-
-
-@compiles(JSONB, "sqlite")
-def _compile_jsonb_sqlite(_element, _compiler, **_kw):
-    return "TEXT"
-
-
-SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
-
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    connect_args={"check_same_thread": False},
-    poolclass=StaticPool,
-)
-
-
-@event.listens_for(engine, "connect")
-def _register_jsonb_typeof(connection, _record):
-    def jsonb_typeof(value):
-        try:
-            parsed = json.loads(value)
-        except (TypeError, ValueError):
-            return None
-        return "array" if isinstance(parsed, list) else "object"
-
-    connection.create_function("jsonb_typeof", 1, jsonb_typeof)
-
-
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-
-@pytest.fixture
-def db_session():
-    Base.metadata.create_all(bind=engine)
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-        Base.metadata.drop_all(bind=engine)
-
-
-@pytest.fixture
-def paper_fixture(db_session):
-    """Paper #1 with two tasks, one method, one repo, one project page, and an
-    external source URL — enough state to exercise every edit_type."""
-
-    db_session.add(
-        DBPaper(
-            id=1,
-            title="Paper",
-            abstract="Abstract",
-            source="external",
-            source_url="https://example.com/paper",
-            arxiv_id=None,
-        )
-    )
-    db_session.add_all(
-        [
-            DBTask(id=1, name="Task A", slug="task-a", level=0),
-            DBTask(id=2, name="Task B", slug="task-b", level=0),
-            DBTask(id=3, name="Task C", slug="task-c", level=0),
-            DBMethod(id=10, name="Method X", slug="method-x"),
-            DBMethod(id=11, name="Method Y", slug="method-y"),
-            DBRepository(id=100, url="https://github.com/owner/repo"),
-            # `is_official` lives on ProjectPage itself (not the junction),
-            # so the snapshot reads it from this column.
-            DBProjectPage(id=200, url="https://example.com/project", is_official=False),
-        ]
-    )
-    db_session.add_all(
-        [
-            PaperTask(paper_id=1, task_id=1),
-            PaperTask(paper_id=1, task_id=2),
-            PaperMethod(paper_id=1, method_id=10),
-            PaperRepository(paper_id=1, repository_id=100, is_official=True),
-            PaperProjectPage(paper_id=1, project_page_id=200),
-        ]
-    )
-    db_session.commit()
+db_session = pending_harness.db_session
+paper_fixture = pending_harness.paper_fixture
 
 
 def _no_rows_created(db_session) -> None:
