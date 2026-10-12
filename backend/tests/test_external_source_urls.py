@@ -74,6 +74,7 @@ class _FakePaper:
         hf_models: list[str] | None = None,
     ):
         self.id = paper_id
+        self.arxiv_id = None
         self.source_url = source_url
         self.conference_url_abs = conference_url_abs
         self.conference_url_pdf = conference_url_pdf
@@ -99,18 +100,26 @@ class _FakeQuery:
     def all(self):
         return self._rows
 
+    def __iter__(self):
+        return iter(self._rows)
+
 
 class _FakeDB:
     def __init__(self, result, repository_urls=None):
         self._result = result
         self._repository_urls = repository_urls or []
 
+    def get(self, model, ident):
+        return self._result
+
     def query(self, *args, **kwargs):
-        if len(args) == 1 and getattr(args[0], "class_", None) is DBRepository:
+        if len(args) == 2 and getattr(args[1], "class_", None) is DBRepository:
             return _FakeQuery(
                 None,
-                [(url,) for url in self._repository_urls],
+                [(self._result.id, url) for url in self._repository_urls],
             )
+        if len(args) == 2:
+            return _FakeQuery(None)
         return _FakeQuery(self._result)
 
 

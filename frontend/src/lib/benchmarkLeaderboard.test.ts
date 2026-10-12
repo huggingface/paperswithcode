@@ -69,6 +69,8 @@ describe("benchmark leaderboard model", () => {
 
   it("accepts only supported URL bounds and formats up to three significant digits", () => {
     expect(parseParameterFilter("3000000000")).toBe(3_000_000_000);
+    expect(parseParameterFilter("10000000")).toBe(10_000_000);
+    expect(parseParameterFilter("100000000")).toBe(100_000_000);
     expect(parseParameterFilter("2000000000")).toBeUndefined();
     expect(parseParameterFilter("nonsense")).toBeUndefined();
     expect(formatParameterCount(1_234_567_890)).toBe("1.23B");

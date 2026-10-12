@@ -104,11 +104,12 @@ describe("domain API clients", () => {
 
   it("loads all evaluation pages without changing their ordering", async () => {
     const request = vi.fn()
-      .mockResolvedValueOnce({ results: [{ id: "1" }], next_page: 2 })
-      .mockResolvedValueOnce({ results: [{ id: "2" }], next_page: null }) as ApiRequest;
+      .mockResolvedValueOnce({ count: 201, results: [{ id: "1" }], next_page: 2 })
+      .mockResolvedValueOnce({ count: 201, results: [{ id: "2" }], next_page: 3 })
+      .mockResolvedValueOnce({ count: 201, results: [{ id: "3" }], next_page: null }) as ApiRequest;
     const evaluations = new EvaluationsApi(request);
 
-    await expect(evaluations.byPaper("9")).resolves.toEqual([{ id: "1" }, { id: "2" }]);
+    await expect(evaluations.byPaper("9")).resolves.toEqual([{ id: "1" }, { id: "2" }, { id: "3" }]);
     expect(request).toHaveBeenNthCalledWith(
       1,
       "/evaluations/?paper_id=9&ordering=-benchmark_popularity&page_size=100",
@@ -117,6 +118,11 @@ describe("domain API clients", () => {
     expect(request).toHaveBeenNthCalledWith(
       2,
       "/evaluations/?paper_id=9&ordering=-benchmark_popularity&page=2&page_size=100",
+      { cache: "no-store" },
+    );
+    expect(request).toHaveBeenNthCalledWith(
+      3,
+      "/evaluations/?paper_id=9&ordering=-benchmark_popularity&page=3&page_size=100",
       { cache: "no-store" },
     );
   });

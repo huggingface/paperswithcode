@@ -8,7 +8,7 @@ including pagination, filtering by paper, task, and dataset.
 import re
 from typing import Optional
 from urllib.parse import parse_qs, urlparse, urlunparse
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import desc, asc, or_, func
 
 from backend.models.database import (
@@ -170,11 +170,26 @@ def _extend_keys_from_url(keys: set[str], url: Optional[str]) -> None:
     keys.update(_source_match_keys(url))
 
 
+def _paper_related_keys(
+    paper_id: int,
+    paper_arxiv_id: Optional[str],
+    db: Optional[Session],
+    related_keys: Optional[set[str]],
+) -> set[str]:
+    """Source keys tied to a paper, preferring a batch-prefetched key set."""
+    if related_keys is not None:
+        return related_keys
+    if db is not None:
+        return _related_source_keys(db, paper_id, paper_arxiv_id)
+    return _paper_route_keys(paper_id, paper_arxiv_id)
+
+
 def evaluation_is_external(
     source_url: Optional[str],
     paper_arxiv_id: Optional[str],
     paper_id: int,
     db: Optional[Session] = None,
+    related_keys: Optional[set[str]] = None,
 ) -> bool:
     """True when a score source is independent of the evaluated paper/model."""
     if not source_url:
@@ -184,10 +199,7 @@ def evaluation_is_external(
     if not source_keys:
         return False
 
-    related = _paper_route_keys(paper_id, paper_arxiv_id)
-    if db is not None:
-        related.update(_related_source_keys(db, paper_id, paper_arxiv_id))
-
+    related = _paper_related_keys(paper_id, paper_arxiv_id, db, related_keys)
     return not source_keys.intersection(related)
 
 
@@ -197,10 +209,13 @@ def evaluation_external_flag(
     paper_arxiv_id: Optional[str],
     paper_id: int,
     db: Optional[Session] = None,
+    related_keys: Optional[set[str]] = None,
 ) -> bool:
     """Resolve whether an evaluation is externally sourced for API display."""
     if source_url:
-        return evaluation_is_external(source_url, paper_arxiv_id, paper_id, db)
+        return evaluation_is_external(
+            source_url, paper_arxiv_id, paper_id, db, related_keys
+        )
     return bool(stored_external)
 
 
@@ -215,7 +230,8 @@ def evaluation_public_source_url(
     if paper_ref:
         paper_id = int(paper_ref.group(1))
         if db is not None:
-            paper = db.query(DBPaper).filter(DBPaper.id == paper_id).first()
+            # `get` reuses papers already loaded by batch serialization.
+            paper = db.get(DBPaper, paper_id)
             if paper and paper.arxiv_id:
                 return f"/paper/{paper.arxiv_id}"
         return f"/paper/{paper_id}"
@@ -228,13 +244,12 @@ def evaluation_result_url(
     paper_arxiv_id: Optional[str],
     paper_source_url: Optional[str],
     db: Optional[Session] = None,
+    related_keys: Optional[set[str]] = None,
 ) -> Optional[str]:
     """Resolve the result/source link shown on evaluation rows."""
     if source_url:
         source_keys = _source_match_keys(source_url)
-        related = _paper_route_keys(paper_id, paper_arxiv_id)
-        if db is not None:
-            related.update(_related_source_keys(db, paper_id, paper_arxiv_id))
+        related = _paper_related_keys(paper_id, paper_arxiv_id, db, related_keys)
         if source_keys.intersection(related):
             if paper_arxiv_id:
                 return _paper_pdf_url(paper_arxiv_id) or evaluation_public_source_url(
@@ -254,9 +269,23 @@ def _related_source_keys(
 ) -> set[str]:
     """Known official/linked source keys for a paper/model."""
     keys = _paper_route_keys(paper_id, paper_arxiv_id)
+    paper = db.get(DBPaper, paper_id)
+    keys.update(_related_source_keys_by_paper(db, {paper_id: paper})[paper_id])
+    return keys
 
-    paper = db.query(DBPaper).filter(DBPaper.id == paper_id).first()
-    if paper:
+
+def _related_source_keys_by_paper(
+    db: Session,
+    papers: dict[int, Optional[DBPaper]],
+) -> dict[int, set[str]]:
+    """Known official/linked source keys for many papers in bounded queries."""
+    keys = {
+        paper_id: _paper_route_keys(paper_id, paper.arxiv_id if paper else None)
+        for paper_id, paper in papers.items()
+    }
+    for paper_id, paper in papers.items():
+        if not paper:
+            continue
         for url in [
             paper.source_url,
             paper.conference_url_abs,
@@ -265,37 +294,28 @@ def _related_source_keys(
             *(paper.hf_datasets or []),
             *(paper.hf_spaces or []),
         ]:
-            _extend_keys_from_url(keys, url)
+            _extend_keys_from_url(keys[paper_id], url)
 
-    repo_urls = (
-        db.query(DBRepository.url)
-        .join(DBPaperRepository, DBRepository.id == DBPaperRepository.repository_id)
-        .filter(DBPaperRepository.paper_id == paper_id)
-        .all()
-    )
-    for (url,) in repo_urls:
-        _extend_keys_from_url(keys, url)
-
-    project_page_urls = (
-        db.query(DBProjectPage.url)
+    if not keys:
+        return keys
+    paper_ids = list(keys)
+    linked_urls = [
+        db.query(DBPaperRepository.paper_id, DBRepository.url)
+        .join(DBRepository, DBRepository.id == DBPaperRepository.repository_id)
+        .filter(DBPaperRepository.paper_id.in_(paper_ids)),
+        db.query(DBPaperProjectPage.paper_id, DBProjectPage.url)
         .join(
-            DBPaperProjectPage,
+            DBProjectPage,
             DBProjectPage.id == DBPaperProjectPage.project_page_id,
         )
-        .filter(DBPaperProjectPage.paper_id == paper_id)
-        .all()
-    )
-    for (url,) in project_page_urls:
-        _extend_keys_from_url(keys, url)
-
-    hf_urls = (
-        db.query(DBHfArtifact.url)
-        .join(DBPaperHfArtifact, DBHfArtifact.id == DBPaperHfArtifact.hf_artifact_id)
-        .filter(DBPaperHfArtifact.paper_id == paper_id)
-        .all()
-    )
-    for (url,) in hf_urls:
-        _extend_keys_from_url(keys, url)
+        .filter(DBPaperProjectPage.paper_id.in_(paper_ids)),
+        db.query(DBPaperHfArtifact.paper_id, DBHfArtifact.url)
+        .join(DBHfArtifact, DBHfArtifact.id == DBPaperHfArtifact.hf_artifact_id)
+        .filter(DBPaperHfArtifact.paper_id.in_(paper_ids)),
+    ]
+    for query in linked_urls:
+        for paper_id, url in query:
+            _extend_keys_from_url(keys[paper_id], url)
 
     return keys
 
@@ -306,123 +326,96 @@ class EvaluationService:
     def __init__(self, db: Session):
         self.db = db
 
-    def _get_paper_info(
-        self, paper_id: int
-    ) -> tuple[
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-        Optional[str],
-    ]:
-        """
-        Get paper metadata used by evaluation responses.
-
-        Returns:
-            Tuple of (paper_title, paper_arxiv_id, code_url,
-            paper_published_date, paper_source, paper_source_url).
-
-            `paper_source` is 'arxiv' or 'external'. For external rows the
-            `paper_source_url` provides the canonical link used as a fallback
-            for `result_url` when no ArXiv ID exists.
-        """
-        try:
-            paper = self.db.query(DBPaper).filter(DBPaper.id == paper_id).first()
-            paper_title = paper.title if paper else None
-            paper_arxiv_id = paper.arxiv_id if paper else None
-            paper_published_date = (
-                str(paper.date_published) if paper and paper.date_published else None
-            )
-            paper_source = paper.source if paper else None
-            paper_source_url = paper.source_url if paper else None
-
-            code_url = None
-            repo_link = (
-                self.db.query(DBRepository)
-                .join(
-                    DBPaperRepository,
-                    DBRepository.id == DBPaperRepository.repository_id,
-                )
-                .filter(DBPaperRepository.paper_id == paper_id)
-                .order_by(DBPaperRepository.is_official.desc())  # Prefer official repos
-                .first()
-            )
-            if repo_link:
-                code_url = repo_link.url
-
-            return (
-                paper_title,
-                paper_arxiv_id,
-                code_url,
-                paper_published_date,
-                paper_source,
-                paper_source_url,
-            )
-        except Exception:
-            return None, None, None, None, None, None
-
-    def _get_task_name_and_slug(
-        self, task_id: int
-    ) -> tuple[Optional[str], Optional[str]]:
-        """
-        Get task name and slug for a given task ID in a single query.
-
-        Returns:
-            Tuple of (task_name, task_slug); both None if not found.
-        """
-        try:
-            task = self.db.query(DBTask).filter(DBTask.id == task_id).first()
-            if not task:
-                return None, None
-            return task.name, task.slug
-        except Exception:
-            return None, None
-
-    def _get_dataset_name(self, dataset_id: int) -> Optional[str]:
-        """
-        Get dataset name for a given dataset ID.
-
-        Returns:
-            Dataset name or None if not found
-        """
-        try:
-            dataset = (
-                self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
-            )
-            return dataset.name if dataset else None
-        except Exception:
-            return None
-
-    def _get_dataset_slug(self, dataset_id: int) -> Optional[str]:
-        """
-        Get dataset slug for a given dataset ID.
-
-        Returns:
-            Dataset slug or None if not found
-        """
-        try:
-            dataset = (
-                self.db.query(DBDataset).filter(DBDataset.id == dataset_id).first()
-            )
-            return dataset.slug if dataset else None
-        except Exception:
-            return None
-
     def _serialize_evaluation(self, db_evaluation: DBEvaluation) -> Evaluation:
-        (
-            paper_title,
-            paper_arxiv_id,
-            code_url,
-            paper_published_date,
-            _paper_source,
-            paper_source_url,
-        ) = self._get_paper_info(db_evaluation.paper_id)
+        return self._serialize_evaluations([db_evaluation])[0]
 
-        task_name, task_slug = self._get_task_name_and_slug(db_evaluation.task_id)
-        dataset_name = self._get_dataset_name(db_evaluation.dataset_id)
-        dataset_slug = self._get_dataset_slug(db_evaluation.dataset_id)
+    def _serialize_evaluations(
+        self, db_evaluations: list[DBEvaluation]
+    ) -> list[Evaluation]:
+        """Serialize rows with a fixed number of queries, not several per row."""
+        if not db_evaluations:
+            return []
 
+        paper_ids = {row.paper_id for row in db_evaluations}
+        source_paper_ids = set()
+        for row in db_evaluations:
+            paper_ref = _PAPER_REF.match(
+                (row.source_url or row.external_source_url or "").strip()
+            )
+            if paper_ref:
+                source_paper_ids.add(int(paper_ref.group(1)))
+
+        # Holding these objects keeps them in the session identity map, so
+        # `db.get` lookups in the URL helpers do not query again.
+        papers = {
+            paper.id: paper
+            for paper in self.db.query(DBPaper)
+            .options(
+                load_only(
+                    DBPaper.title,
+                    DBPaper.arxiv_id,
+                    DBPaper.date_published,
+                    DBPaper.source_url,
+                    DBPaper.conference_url_abs,
+                    DBPaper.conference_url_pdf,
+                    DBPaper.hf_models,
+                    DBPaper.hf_datasets,
+                    DBPaper.hf_spaces,
+                )
+            )
+            .filter(DBPaper.id.in_(paper_ids | source_paper_ids))
+        }
+        tasks = {
+            task.id: task
+            for task in self.db.query(DBTask)
+            .options(load_only(DBTask.name, DBTask.slug))
+            .filter(DBTask.id.in_({row.task_id for row in db_evaluations}))
+        }
+        datasets = {
+            dataset.id: dataset
+            for dataset in self.db.query(DBDataset)
+            .options(load_only(DBDataset.name, DBDataset.slug))
+            .filter(DBDataset.id.in_({row.dataset_id for row in db_evaluations}))
+        }
+        code_urls: dict[int, str] = {}
+        for paper_id, url in (
+            self.db.query(DBPaperRepository.paper_id, DBRepository.url)
+            .join(DBRepository, DBRepository.id == DBPaperRepository.repository_id)
+            .filter(DBPaperRepository.paper_id.in_(paper_ids))
+            # Same choice as dataset leaderboards: official, then most starred.
+            .order_by(
+                desc(DBPaperRepository.is_official),
+                desc(DBRepository.num_stars),
+                asc(DBRepository.url),
+            )
+        ):
+            code_urls.setdefault(paper_id, url)
+        related_keys = _related_source_keys_by_paper(
+            self.db, {paper_id: papers.get(paper_id) for paper_id in paper_ids}
+        )
+
+        return [
+            self._evaluation_model(
+                row,
+                papers.get(row.paper_id),
+                tasks.get(row.task_id),
+                datasets.get(row.dataset_id),
+                code_urls.get(row.paper_id),
+                related_keys[row.paper_id],
+            )
+            for row in db_evaluations
+        ]
+
+    def _evaluation_model(
+        self,
+        db_evaluation: DBEvaluation,
+        paper: Optional[DBPaper],
+        task: Optional[DBTask],
+        dataset: Optional[DBDataset],
+        code_url: Optional[str],
+        related_keys: set[str],
+    ) -> Evaluation:
+        paper_arxiv_id = paper.arxiv_id if paper else None
         stored_source_url = (
             db_evaluation.source_url or db_evaluation.external_source_url
         )
@@ -431,8 +424,9 @@ class EvaluationService:
             stored_source_url,
             db_evaluation.paper_id,
             paper_arxiv_id,
-            paper_source_url,
+            paper.source_url if paper else None,
             self.db,
+            related_keys,
         )
         external = evaluation_external_flag(
             db_evaluation.external,
@@ -440,6 +434,7 @@ class EvaluationService:
             paper_arxiv_id,
             db_evaluation.paper_id,
             self.db,
+            related_keys,
         )
 
         return Evaluation(
@@ -464,15 +459,17 @@ class EvaluationService:
             hf_model_url=db_evaluation.hf_model_url,
             created_at=db_evaluation.created_at,
             updated_at=db_evaluation.updated_at,
-            paper_title=paper_title,
+            paper_title=paper.title if paper else None,
             paper_arxiv_id=paper_arxiv_id,
             code_url=code_url,
-            paper_published_date=paper_published_date,
+            paper_published_date=(
+                str(paper.date_published) if paper and paper.date_published else None
+            ),
             result_url=result_url,
-            task_name=task_name,
-            task_slug=task_slug,
-            dataset_name=dataset_name,
-            dataset_slug=dataset_slug,
+            task_name=task.name if task else None,
+            task_slug=task.slug if task else None,
+            dataset_name=dataset.name if dataset else None,
+            dataset_slug=dataset.slug if dataset else None,
         )
 
     def _derive_external(self, paper_id: int, source_url: Optional[str]) -> bool:
@@ -750,10 +747,7 @@ class EvaluationService:
                 offset = (page - 1) * page_size
                 results = query.offset(offset).limit(page_size).all()
 
-            # Convert to API models
-            evaluation_list = []
-            for db_evaluation in results:
-                evaluation_list.append(self._serialize_evaluation(db_evaluation))
+            evaluation_list = self._serialize_evaluations(results)
 
             # Calculate pagination
             total_pages = (total_count + page_size - 1) // page_size

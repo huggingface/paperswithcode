@@ -34,13 +34,14 @@ served by nginx in production.
   `backend/main.py`.
 - Inject database sessions with `get_database_session`.
 - Add focused tests under `backend/tests/`. Subsystem suites live in their own
-  package with explicit `*harness.py` modules for shared builders; run only the suite
-  you touched:
+  package with explicit `harness.py` or `*harness.py` modules for shared
+  builders; run only the suite you touched:
 
   | Subsystem | Targeted command |
   | --- | --- |
   | Chat sandbox, executor, worker, broker | `uv run pytest backend/tests/chat_sandbox -q` |
   | Chat gateway: provider lifecycle, OpenAI Responses, Anthropic Messages, turn fence, catalog tools | `uv run pytest backend/tests/chat_gateway -q` |
+  | Deployment, releases, nginx, host environment | `uv run pytest backend/tests/deployment -q` |
 
 For scripts that mutate domain data, use the existing services where possible.
 Run them with `uv run --env-file backend/keys.env …`.

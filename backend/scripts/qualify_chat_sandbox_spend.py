@@ -17,6 +17,7 @@ from backend.database.connection import db_manager
 from backend.models.database import (
     ChatSandboxBudgetState,
     ChatSandboxCircuitEvent,
+    ChatSandboxComputeInterval,
     ChatTitleBudgetEvent,
     ChatTitleBudgetState,
 )
@@ -64,6 +65,49 @@ def fallback_spend_event_statement(environment: str):
             ChatSandboxCircuitEvent.event_type == "warning_entered",
         )
     )
+
+
+def qualify_concurrent_reservations(
+    session_local, settings, now: datetime, *, workers: int = 8
+) -> list[str]:
+    """Prove the synthetic cap admits exactly three reservations, then release them."""
+
+    def reserve(index: int) -> str | None:
+        with session_local() as db, db.begin():
+            try:
+                return str(
+                    ChatSandboxSpendService(db, settings).reserve_interval(
+                        origin="qualification",
+                        worker_generation=f"qualification-{index}",
+                        now=now,
+                    )
+                )
+            except ChatComputeDisabled:
+                return None
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        reservations = list(executor.map(reserve, range(8)))
+    accepted_reservations = [value for value in reservations if value is not None]
+    if len(accepted_reservations) != 3:
+        raise RuntimeError(
+            "atomic reservation qualification did not admit exactly three reservations"
+        )
+    with session_local() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings)
+        for interval_id in accepted_reservations:
+            service.abort_reservation(
+                uuid.UUID(interval_id), "qualification_complete", now
+            )
+        db.flush()
+        open_intervals = db.execute(
+            select(ChatSandboxComputeInterval.id).where(
+                ChatSandboxComputeInterval.environment == settings.environment,
+                ChatSandboxComputeInterval.terminal_at.is_(None),
+            )
+        ).all()
+    if open_intervals:
+        raise RuntimeError("synthetic qualification reservations were left open")
+    return accepted_reservations
 
 
 def main() -> int:
@@ -128,26 +172,9 @@ def main() -> int:
         }
     )
 
-    def reserve(index: int) -> str | None:
-        with db_manager.session_local() as db, db.begin():
-            try:
-                return str(
-                    ChatSandboxSpendService(db, reservation_settings).reserve_interval(
-                        origin="qualification",
-                        worker_generation=f"qualification-{index}",
-                        now=now,
-                    )
-                )
-            except ChatComputeDisabled:
-                return None
-
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        reservations = list(executor.map(reserve, range(8)))
-    accepted_reservations = [value for value in reservations if value is not None]
-    if len(accepted_reservations) != 3:
-        raise RuntimeError(
-            "atomic reservation qualification did not admit exactly three reservations"
-        )
+    accepted_reservations = qualify_concurrent_reservations(
+        db_manager.session_local, reservation_settings, now
+    )
     with db_manager.session_local() as db, db.begin():
         restarted = ChatSandboxSpendService(db, settings).status(now)
         if restarted["circuit_state"] != "tripped":
