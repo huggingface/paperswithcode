@@ -39,6 +39,7 @@ served by nginx in production.
 
   | Subsystem | Targeted command |
   | --- | --- |
+  | Chat sessions, turns, streaming, admission, qualification | `uv run pytest backend/tests/chat -q` |
   | Chat sandbox, executor, worker, broker | `uv run pytest backend/tests/chat_sandbox -q` |
   | Chat gateway: provider lifecycle, OpenAI Responses, Anthropic Messages, turn fence, catalog tools | `uv run pytest backend/tests/chat_gateway -q` |
   | Chat budgets and billing: direct OpenAI, OpenRouter, HF inference | `uv run pytest backend/tests/chat_budget -q` |

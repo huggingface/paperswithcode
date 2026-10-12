@@ -16,6 +16,7 @@ from backend.models.paper_edits import (
     RepositoryEdit,
     SourceEdit,
     TaskEdit,
+    XThreadEdit,
 )
 from backend.models.evaluations import EvaluationCreateRequest, EvaluationUpdateRequest
 from backend.services.catalog_errors import (
@@ -46,6 +47,7 @@ SECTION_MODELS = dict(
     project_pages=ProjectPageEdit,
     hf_artifacts=ArtifactEdit,
     source_url=SourceEdit,
+    x_threads=XThreadEdit,
 )
 
 

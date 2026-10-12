@@ -14,7 +14,7 @@ from backend.models.database import Organization as DBOrganization
 from backend.models.database import Paper as DBPaper
 from backend.models.database import PaperOrganization as DBPaperOrganization
 from backend.models.database import PaperProjectPage as DBPaperProjectPage
-from backend.models.database import PaperRepository, PaperTask
+from backend.models.database import PaperRepository, PaperTask, PaperXThread
 from backend.models.database import ProjectPage as DBProjectPage
 from backend.models.database import Repository as DBRepository
 from backend.models.database import Task as DBTask
@@ -22,6 +22,12 @@ from backend.services.catalog_errors import CatalogValidationError
 from backend.services.hf_artifact_service import sync_explicit_hf_artifact_links
 from backend.services.paper_method_link_service import replace_manual_links
 from backend.services.repository_service import find_repository_by_url
+from backend.services import x_thread_service
+from backend.services.x_thread_service import (
+    MAX_X_THREADS_PER_PAPER,
+    X_THREAD_FIELDS,
+    parse_x_post_id,
+)
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.github_utils import normalize_github_url, parse_github_url
 from backend.utils.hf_utils import normalize_hf_artifact_payload
@@ -340,6 +346,47 @@ class PaperAssociationService:
             self._raise_mutation_error("source URL", error, commit=commit)
         except (SQLAlchemyError, PaperAssociationHydrationError) as error:
             self._raise_mutation_error("source URL", error, commit=commit)
+
+    def update_x_threads(
+        self, paper_id: int, x_threads: list[str], *, commit: bool = True
+    ) -> Paper | DBPaper:
+        """Replace a paper's X threads, previewing only newly linked posts."""
+        try:
+            paper = self._paper(paper_id)
+            tweet_ids = list(dict.fromkeys(parse_x_post_id(url) for url in x_threads))
+            if len(tweet_ids) > MAX_X_THREADS_PER_PAPER:
+                raise CatalogValidationError(
+                    f"A paper can link at most {MAX_X_THREADS_PER_PAPER} X threads"
+                )
+            existing = {
+                row.tweet_id: {field: getattr(row, field) for field in X_THREAD_FIELDS}
+                for row in self.db.query(PaperXThread).filter(
+                    PaperXThread.paper_id == paper_id
+                )
+            }
+            rows = [
+                existing.get(tweet_id) or x_thread_service.fetch_x_post_row(tweet_id)
+                for tweet_id in tweet_ids
+            ]
+            self.replace_x_threads(paper_id, rows)
+            return self._finish(paper_id, paper, commit=commit)
+        except (PaperNotFoundError, DatabaseError, CatalogValidationError) as error:
+            self._raise_mutation_error("X threads", error, commit=commit)
+        except (SQLAlchemyError, PaperAssociationHydrationError) as error:
+            self._raise_mutation_error("X threads", error, commit=commit)
+
+    def replace_x_threads(self, paper_id: int, rows: list[dict[str, Any]]) -> None:
+        """Write already-previewed X thread rows in display order."""
+        self.db.query(PaperXThread).filter(PaperXThread.paper_id == paper_id).delete()
+        for position, row in enumerate(rows):
+            self.db.add(
+                PaperXThread(
+                    paper_id=paper_id,
+                    position=position,
+                    **{field: row[field] for field in X_THREAD_FIELDS},
+                )
+            )
+        self.db.flush()
 
     def update_hf_artifacts(
         self,

@@ -20,7 +20,9 @@ from pydantic import ValidationError
 
 from backend.models.evaluations import EvaluationCreateData, EvaluationUpdateRequest
 
+from backend.services.catalog_errors import CatalogValidationError
 from backend.services.pending_edit_errors import PendingEditError
+from backend.services.x_thread_service import MAX_X_THREADS_PER_PAPER, parse_x_post_id
 from backend.utils.public_urls import PublicUrlValidationError, normalize_public_url
 
 Payload = dict[str, Any]
@@ -121,6 +123,28 @@ def _validate_source_url(payload: Payload) -> Payload:
             payload.get("source_url"), 'Source URL payload must be {"source_url": str}'
         )
     }
+
+
+def _validate_x_threads(payload: Payload) -> Payload:
+    urls = payload.get("x_threads")
+    if not isinstance(urls, list) or not all(isinstance(url, str) for url in urls):
+        raise PendingEditError('X threads payload must be {"x_threads": [str, ...]}')
+    if len(urls) > MAX_X_THREADS_PER_PAPER:
+        raise PendingEditError(
+            f"A paper can link at most {MAX_X_THREADS_PER_PAPER} X threads"
+        )
+    try:
+        for url in urls:
+            parse_x_post_id(url)
+    except CatalogValidationError as exc:
+        raise PendingEditError(str(exc)) from exc
+    return {"x_threads": [url.strip() for url in urls]}
+
+
+def _x_threads_noop(proposed: Payload, current: Payload) -> bool:
+    return [parse_x_post_id(url) for url in proposed.get("x_threads", [])] == [
+        parse_x_post_id(row["url"]) for row in current.get("x_threads", [])
+    ]
 
 
 def _validate_hf_artifacts(payload: Payload) -> Payload:
@@ -491,6 +515,7 @@ EDIT_SPECS: dict[str, EditSpec] = {
         ),
     ),
     "hf_artifacts": EditSpec(_validate_hf_artifacts, True, _hf_artifacts_noop),
+    "x_threads": EditSpec(_validate_x_threads, True, _x_threads_noop),
     "evaluations": EditSpec(_validate_evaluations, True),
     "new_task": EditSpec(_validate_new_task, False),
     "new_method": EditSpec(_validate_new_method, False),

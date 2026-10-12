@@ -368,6 +368,52 @@ class PaperProjectPage(Base):
         return f"<PaperProjectPage(paper_id={self.paper_id}, project_page_id={self.project_page_id})>"
 
 
+class PaperXThread(Base):
+    """An X post introducing a paper, with the preview captured when linked."""
+
+    __tablename__ = "paper_x_threads"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    tweet_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, nullable=False)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    author_name: Mapped[str] = mapped_column(String(255), nullable=False)
+    author_handle: Mapped[str] = mapped_column(String(64), nullable=False)
+    author_avatar_url: Mapped[Optional[str]] = mapped_column(String(1000))
+    text: Mapped[str] = mapped_column(Text, nullable=False)
+    posted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    like_count: Mapped[Optional[int]] = mapped_column(Integer)
+    reply_count: Mapped[Optional[int]] = mapped_column(Integer)
+    media_url: Mapped[Optional[str]] = mapped_column(String(1000))
+    media_type: Mapped[Optional[str]] = mapped_column(String(16))
+    fetched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PaperXThreadScan(Base):
+    """Bounded X search state for one paper, kept by the discovery CRON."""
+
+    __tablename__ = "paper_x_thread_scans"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    scan_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_scanned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    candidates: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
 class PaperRepository(Base):
     """Junction table for papers and repositories (many-to-many relationship)."""
 

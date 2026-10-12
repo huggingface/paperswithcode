@@ -50,6 +50,10 @@ class SourceEdit(StrictModel):
     _url = field_validator("source_url", mode="before")(normalize_public_url)
 
 
+class XThreadEdit(StrictModel):
+    x_threads: list[str] = Field(max_length=10)
+
+
 class PaperEditOperation(StrictModel):
     section: Literal[
         "tasks",
@@ -59,6 +63,7 @@ class PaperEditOperation(StrictModel):
         "project_pages",
         "hf_artifacts",
         "source_url",
+        "x_threads",
         "evaluations",
     ]
     evaluation_id: int | None = Field(default=None, gt=0)

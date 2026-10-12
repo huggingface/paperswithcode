@@ -94,7 +94,7 @@ class PendingPaperEdit(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "edit_type IN ('tasks', 'methods', 'evaluations', 'repositories', 'project_pages', 'source_url', 'hf_artifacts', 'organizations', 'new_task', 'new_method', 'new_benchmark', 'new_metric', 'new_conference', 'new_external_paper')",
+            "edit_type IN ('tasks', 'methods', 'evaluations', 'repositories', 'project_pages', 'source_url', 'hf_artifacts', 'organizations', 'x_threads', 'new_task', 'new_method', 'new_benchmark', 'new_metric', 'new_conference', 'new_external_paper')",
             name="pending_paper_edits_edit_type_check",
         ),
         CheckConstraint(

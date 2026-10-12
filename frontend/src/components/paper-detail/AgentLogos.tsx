@@ -26,3 +26,17 @@ export function AgentLogos() {
     </span>
   );
 }
+
+export function AgentLogoList() {
+  return (
+    <ul className="flex flex-wrap gap-2" aria-label="Supported coding agents">
+      {logos.map(({ name, light, dark }) => (
+        <li key={name} className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-sm">
+          <img src={light} alt="" width={18} height={18} className="h-[18px] w-[18px] object-contain dark:hidden" />
+          <img src={dark} alt="" width={18} height={18} className="hidden h-[18px] w-[18px] object-contain dark:block" />
+          {name}
+        </li>
+      ))}
+    </ul>
+  );
+}

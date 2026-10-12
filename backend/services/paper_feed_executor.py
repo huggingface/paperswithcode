@@ -63,6 +63,7 @@ class PaperFeedExecutor:
         end_date: date | None = None,
         deduplicate_task_id: int | None = None,
         include_resources: bool = False,
+        repository_limit: int | None = None,
     ) -> Papers:
         if latest_only:
             query = query.filter(DBPaper.is_latest_version)
@@ -123,6 +124,7 @@ class PaperFeedExecutor:
             page=page,
             page_size=page_size,
             include_resources=include_resources,
+            repository_limit=repository_limit,
         )
 
     def page(
@@ -133,13 +135,16 @@ class PaperFeedExecutor:
         page: int,
         page_size: int,
         include_resources: bool,
+        repository_limit: int | None = None,
     ) -> Papers:
         return Papers(
             count=count,
             next_page=page + 1 if page * page_size < count else None,
             previous_page=page - 1 if page > 1 else None,
             results=self.papers.hydrate_cards(
-                rows, include_resources=include_resources
+                rows,
+                include_resources=include_resources,
+                repository_limit=repository_limit,
             ),
         )
 

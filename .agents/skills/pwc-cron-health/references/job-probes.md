@@ -154,6 +154,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare a bounded current Hub trending cohort with candidate identities and `last_seen_at`; inspect missing/duplicate candidates, active/resolved/failed states, oldest wait, attempts, and downstream workflow linkage.
 - **Correctness:** Sample resolved candidates and verify canonical paper identity plus resulting enrichment. Fresh candidate timestamps alone do not prove resolution or application.
 
+## `discover_x_threads`
+
+- **Effect:** Prints a JSON summary (`papers_scanned`, `papers_matched`, `threads_linked`, `errors`, `matches`) and upserts `paper_x_thread_scans`. Links `paper_x_threads` only when `PWC_X_THREAD_DISCOVERY_APPLY=true`; every link is a `paper_x_threads` catalog mutation event by `x-thread-discovery`. Exits 0 with an `x_thread_discovery_skipped` warning when `X_API_BEARER_TOKEN` is unset, and 1 only when every search failed.
+- **Independent proof:** Open one matched post from the JSON and confirm its author is a paper author introducing that paper; with apply on, confirm the paper page's X threads card shows it.
+- **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
+
 ## `scan_model_releases`
 
 - **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.
