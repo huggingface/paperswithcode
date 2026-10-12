@@ -31,16 +31,16 @@ from deploy.release import build_manifest
 
 
 def test_system_prompt_prevents_unsupported_method_search_flags():
-    prompt = render()
+    prompt = render(web_search_enabled=True, hf_username="nielsrogge")
 
     assert "When comparing papers, prefer a Markdown table." in prompt
     assert (
         "Always favor native paper hyperlinks instead of arXiv links, unless the user "
         "explicitly asks for an arXiv link." in prompt
     )
-    assert "use `--page-size`, never `--limit`" in prompt
-    assert "This subcommand has no `--search` or `--limit` flag" in prompt
-    assert "pwc method list --page-size 500 | rg -i -- 'QUERY'" in prompt
+    method_list = prompt.split("`pwc method list", 1)[1].split("\n", 1)[0]
+    assert "[--page-size PAGE_SIZE] [--search SEARCH]" in method_list
+    assert "--limit" not in method_list
     assert "Never pipe `pwc paper info` or `pwc paper lineage list`" in prompt
     assert "Paper lineage follows the abstract" in prompt
     assert "Use complete output, or use `--json`" in prompt
@@ -149,7 +149,7 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert MODAL_APP_NAME == "pwc-chat-sandbox-v1"
     assert BASE_IMAGE.startswith("python:3.12-slim-bookworm@sha256:")
     assert MODAL_IMAGE_ID.startswith("im-")
-    assert PRODUCTION_MODAL_IMAGE_ID == "im-t3Yjk8afcT3ajgqzwyvbRi"
+    assert PRODUCTION_MODAL_IMAGE_ID == "im-LqrG84SxmXoOrwZUsWQdUY"
     assert int(WORKER_CONTRACT_VERSION) >= 97
     assert CHAT_SANDBOX_REGION == "eu-west"
     assert CONTROL_PORT == 8080
@@ -282,7 +282,8 @@ def test_chat_worker_exposes_parameter_filtered_benchmarks():
     assert PWC_CLI_VERSION == "0.3.0"
     assert "--author AUTHOR" in skill
     assert "--max-parameters SIZE" in skill
-    assert "at or below an inclusive parameter" in skill
-    assert "resource-constrained device requests" in skill
+    prose = " ".join(skill.split())
+    assert "at or below an inclusive parameter" in prose
+    assert "when model size is part of the request" in prose
     assert "pwc benchmark --help | grep -F -- '--max-parameters'" in image_source
     assert "pwc paper list --help" in image_source

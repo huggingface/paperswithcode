@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
 
 import pytest
@@ -243,6 +244,7 @@ def test_tool_policy_rejects_traversal_and_enforces_aggregate_bytes(tmp_path):
     assert budget.output_bytes == 48
 
 
+@pytest.mark.skipif(shutil.which("rg") is None, reason="ripgrep is not installed")
 @pytest.mark.parametrize(
     ("command", "returncode"),
     [

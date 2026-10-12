@@ -317,6 +317,9 @@ class ScopeDatabase:
         self.conference = conference
         self.repository_query = None
 
+    def get_bind(self):
+        return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
+
     def query(self, *entities):
         if entities == (DBFramework, DBRepository, DBPaper):
             return ScopeQuery(
@@ -582,6 +585,9 @@ def test_date_published_feed_places_undated_papers_last(order_dir, expected_orde
     class FakeDatabase:
         def __init__(self):
             self.query_result = FakeQuery()
+
+        def get_bind(self):
+            return SimpleNamespace(dialect=SimpleNamespace(name="sqlite"))
 
         def query(self, *args):
             return self.query_result

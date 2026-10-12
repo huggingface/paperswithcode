@@ -81,8 +81,8 @@ publish a CLI release before the PRs are merged.
 ## Verification
 
 Run repository Python commands with `uv run --env-file backend/keys.env`.
-Focused unit tests: `backend/tests/test_paper_edit_policy.py`. Transaction and
-HTTP tests: `backend/tests/test_paper_edits_integration.py`. The latter require
+Focused unit tests: `backend/tests/paper_edits/test_policy.py`. Transaction and
+HTTP tests: `backend/tests/paper_edits/test_integration.py`. The latter require
 an isolated PostgreSQL database with `Base.metadata` installed and
 `PWC_EDIT_TEST_DATABASE=pwc_agent_edits_test`; the fixture refuses any other prefix
 and truncates only that dedicated database between tests. Do not point it at a

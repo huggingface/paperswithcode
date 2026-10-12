@@ -132,6 +132,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         on_calendar=("*-*-* 01/3:48:00",),
         description="Scan official lab news for unindexed model releases every three hours",
     ),
+    TimerSpec(
+        job="discover_x_threads",
+        on_calendar=("*-*-* 08,20:22:00",),
+        description="Discover author X threads for trending papers twice daily",
+    ),
     # Leaderboard syncs, staggered at their previous workflow minutes.
     TimerSpec(
         job="sync_3d_arena",

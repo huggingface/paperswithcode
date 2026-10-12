@@ -549,6 +549,10 @@ class _TransactionDB(_TransactionContext):
     def begin(self):
         return _TransactionContext()
 
+    def scalar(self, *_args):
+        # Staging startup looks up a running turn's qualification profile.
+        return None
+
 
 def _manager_for_start_transition(lease, provider) -> SandboxSessionManager:
     settings = _settings(
