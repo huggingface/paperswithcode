@@ -9,6 +9,7 @@ from backend.services.x_thread_discovery_service import (
     author_matches,
     build_query,
     match_posts,
+    organization_matches,
     short_name,
 )
 
@@ -116,3 +117,71 @@ def test_match_posts_keeps_best_original_post_per_author():
 
 def test_match_posts_handles_empty_results():
     assert match_posts({"meta": {"result_count": 0}}, ["Ruijin Hua"], None) == []
+
+
+def test_author_matches_nickname_through_handle():
+    authors = ["Wei Huang", "Yukang Chen"]
+    assert author_matches("Aaron Huang", authors, "AaronWeiHuang") == "Wei Huang"
+    assert author_matches("Aaron Huang", authors, "aaronh") is None
+
+
+@pytest.mark.parametrize(
+    ("user", "expected"),
+    [
+        (
+            {"name": "NVIDIA AI", "username": "NVIDIAAI", "verified_type": "business"},
+            "NVIDIA",
+        ),
+        (
+            {"name": "AI at Meta", "username": "AIatMeta", "verified_type": "business"},
+            "Meta",
+        ),
+        ({"name": "Ai2", "username": "allen_ai", "verified_type": "business"}, "Ai2"),
+        ({"name": "NVIDIA fan", "username": "nvfan", "verified_type": "blue"}, None),
+        ({"name": "NVIDIA AI", "username": "NVIDIAAI"}, None),
+        ({"name": "OpenAI", "username": "OpenAI", "verified_type": "business"}, None),
+    ],
+)
+def test_organization_matches_only_business_accounts_of_linked_orgs(user, expected):
+    assert organization_matches(user, ["NVIDIA", "Meta", "Ai2"]) == expected
+
+
+def test_match_posts_accepts_organization_accounts_but_not_outsiders():
+    response = {
+        "data": [
+            {
+                "id": "20",
+                "conversation_id": "20",
+                "author_id": "o1",
+                "created_at": "2026-10-11T10:00:00Z",
+                "public_metrics": {"like_count": 300},
+            },
+            {
+                "id": "21",
+                "conversation_id": "21",
+                "author_id": "x1",
+                "created_at": "2026-10-11T10:00:00Z",
+                "public_metrics": {"like_count": 5000},
+            },
+        ],
+        "includes": {
+            "users": [
+                {
+                    "id": "o1",
+                    "name": "NVIDIA Robotics",
+                    "username": "NVIDIARobotics",
+                    "verified_type": "business",
+                },
+                {
+                    "id": "x1",
+                    "name": "AK",
+                    "username": "_akhaliq",
+                    "verified_type": "blue",
+                },
+            ]
+        },
+    }
+    matches = match_posts(response, ["Wei Huang"], date(2026, 10, 10), ["NVIDIA"])
+    assert [(m["handle"], m["author"], m["kind"]) for m in matches] == [
+        ("NVIDIARobotics", "NVIDIA", "organization")
+    ]

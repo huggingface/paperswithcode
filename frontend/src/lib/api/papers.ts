@@ -174,7 +174,10 @@ export class PapersApi {
     return this.request(`/tasks/${taskId}/papers${query(params)}`);
   }
 
-  forMethod(methodId: string, params?: PaperFeedParams): Promise<PaginatedResponse<Paper>> {
+  forMethod(
+    methodId: string,
+    params?: PaperFeedParams & { repository_limit?: number },
+  ): Promise<PaginatedResponse<Paper>> {
     return this.request(`/methods/${encodeURIComponent(methodId)}/papers${query(params)}`);
   }
 

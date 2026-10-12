@@ -22,7 +22,7 @@ SKILL = Path(__file__).resolve().parents[2] / "chat_sandbox_worker" / "HF_CLI_SK
         ("discover newest releases", "use `--sort created_at`"),
         ("discover recently updated models", "use `--sort last_modified`"),
         ("inspect bounded repository tree", "bounded path metadata"),
-        ("connect PwC paper to artifact", "Prefer `pwc` for PwC papers"),
+        ("connect PwC paper to artifact", "Prefer the `pwc` CLI for questions covered"),
         (
             "refuse mutation and authentication",
             "Never authenticate, mutate, upload, download",
@@ -70,11 +70,12 @@ def test_behavior_contract_documents_exact_list_sorts_and_naming_exception():
 
 def test_behavior_contract_uses_hf_stdout_without_help_or_workspace_files():
     combined = render() + "\n" + SKILL.read_text(encoding="utf-8")
+    prose = " ".join(combined.split())
 
-    assert "Never run\nan `hf --help` or nested `--help` discovery command" in combined
-    assert "Do not run `hf --help` or any\nnested `--help` command" in combined
-    assert "Consume `hf` stdout directly" in combined
-    assert "Do not redirect `hf` output\ninto `/workspace`" in combined
+    assert "Never run an `hf --help` or nested `--help` discovery command" in prose
+    assert "Do not run `hf --help` or any nested `--help` command" in prose
+    assert "Consume `hf` stdout directly" in prose
+    assert "Do not redirect `hf` output into `/workspace`" in prose
     assert "> /workspace/model-card.md" not in combined
 
 

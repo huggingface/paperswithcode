@@ -102,10 +102,10 @@ Run the test suite to verify rank recalculation works correctly:
 
 ```bash
 # Using pytest
-uv run --env-file backend/keys.env python -m pytest backend/tests/test_rank_recalculation.py -v
+uv run --env-file backend/keys.env python -m pytest backend/tests/evaluation/test_rank_recalculation.py -v
 
 # Or run manually
-uv run --env-file backend/keys.env python backend/tests/test_rank_recalculation.py
+uv run --env-file backend/keys.env python backend/tests/evaluation/test_rank_recalculation.py
 ```
 
 **Tests include:**

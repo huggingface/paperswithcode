@@ -3,7 +3,7 @@ name: pwc-cli
 description: "Papers With Code CLI (`pwc`) for searching and reading AI/ML papers, discovering recent and trending research, finding related work and paper lineage, browsing tasks, methods, conferences, organizations, frameworks, and benchmark leaderboards, and submitting authenticated paper edits through the public Papers With Code catalog. Use whenever the user asks to find papers, survey literature, compare research, inspect an arXiv paper, explore AI/ML taxonomy or conferences, discover benchmarks or state-of-the-art models, or mentions Papers With Code, `pwc`, or `pwc-cli`."
 ---
 
-Generated with `pwc v0.4.3`. Run `pwc skills add --force` to regenerate.
+Generated with `pwc v0.4.4`. Run `pwc skills add --force` to regenerate.
 
 Research commands query the public [Papers With Code](https://paperswithcode.co) catalog anonymously.
 Paper editing requires explicit browser authorization through `pwc auth login --paper PAPER`.
@@ -124,8 +124,12 @@ Use this workflow only when the user requests edits. Research commands remain an
    and tags. Omitted sections stay unchanged. Allowed sections and payload keys:
    tasks/task_ids, methods/method_ids, repositories/repositories,
    project_pages/project_pages, hf_artifacts/hf_models+hf_datasets+hf_spaces,
-   source_url/source_url (external papers only), and evaluations.
-   Repository/project-page entries contain url and is_official.
+   x_threads/x_threads, source_url/source_url (external papers only), and
+   evaluations. Repository/project-page entries contain url and is_official.
+   x_threads is a list of x.com or twitter.com post URLs in display order (at
+   most 10). Link only posts in which the paper's authors or their organization
+   introduce the paper, never outside accounts; the server captures each post's
+   preview and rejects deleted or protected posts.
 4. For evaluations, an operation without evaluation_id creates a row. Include
    task_id, dataset_id, metrics (a dictionary of existing metric names to scores),
    model_name, and the evaluation setup where available. One row can contain

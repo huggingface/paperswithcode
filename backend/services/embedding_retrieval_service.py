@@ -181,8 +181,14 @@ class EmbeddingRetrievalService:
                 FROM paper_embeddings e
                 JOIN papers p ON p.id=e.paper_id
                 WHERE e.generation_id=:generation_id
-                  AND (e.paper_id=:paper_id OR
-                       (:arxiv_id IS NOT NULL AND p.arxiv_id=:arxiv_id))
+                  -- Resolve the source family first so both lookups use
+                  -- indexes; an OR across the join scans every embedding.
+                  AND e.paper_id IN (
+                      SELECT id FROM papers WHERE id=:paper_id
+                      UNION ALL
+                      SELECT id FROM papers
+                      WHERE :arxiv_id IS NOT NULL AND arxiv_id=:arxiv_id
+                  )
                 ORDER BY (e.paper_id=:paper_id) DESC,
                          {ARXIV_VERSION_NUMBER_SQL} DESC NULLS LAST,
                          p.id DESC

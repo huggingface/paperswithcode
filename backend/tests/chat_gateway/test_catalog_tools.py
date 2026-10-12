@@ -94,6 +94,7 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
             authorization="Bearer test",
             x_pwc_session=str(uuid.uuid4()),
             x_pwc_turn=str(uuid.uuid4()),
+            turn_fence=None,
             db=DB(),
             settings=SimpleNamespace(chat_max_direct_search_calls=4),
         )
@@ -214,6 +215,7 @@ def test_gateway_paper_mutation_rejects_same_owner_artifact_from_another_chat(
             authorization="Bearer capability",
             x_pwc_session=str(session_id),
             x_pwc_turn=str(turn_id),
+            turn_fence=None,
             db=DB(),
             settings=SimpleNamespace(
                 chat_artifacts_enabled=True,
@@ -591,6 +593,7 @@ def test_gateway_paper_read_returns_controlled_upstream_error(monkeypatch):
             authorization="Bearer test",
             x_pwc_session=str(uuid.uuid4()),
             x_pwc_turn=str(uuid.uuid4()),
+            turn_fence=None,
             db=DB(),
             settings=SimpleNamespace(chat_max_direct_search_calls=4),
         )
