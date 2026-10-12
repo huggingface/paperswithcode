@@ -755,6 +755,7 @@ class MethodService:
         has_hf_artifacts: bool = False,
         start_date: Optional[date] = None,
         end_date: Optional[date] = None,
+        repository_limit: Optional[int] = None,
     ):
         """
         Get papers associated with a specific method.
@@ -767,6 +768,7 @@ class MethodService:
             order_by: Field to order by (date_published, title, citation_count, trending)
             order_dir: Order direction (asc, desc); ignored for trending which is always desc
             include_resources: Whether to include repositories and methods
+            repository_limit: Max repositories per paper when including resources
 
         Returns:
             Papers object with pagination info and results
@@ -828,6 +830,7 @@ class MethodService:
                 start_date=start_date,
                 end_date=end_date,
                 include_resources=include_resources,
+                repository_limit=repository_limit,
             )
 
         except PaperNotFoundError:
