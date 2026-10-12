@@ -84,8 +84,22 @@ sudo python deploy/configure_host_env.py \
 ```
 
 Deploy that exact source commit to staging, run the qualification suite below,
-and inspect its root-owned evidence. Only after every required check passes may
-an operator configure the coherent user-facing state and deploy staging again:
+and inspect its root-owned evidence. Compiler qualification submits jobs
+directly and does not route chat turns, so it can run while staging chat uses
+external Pi.
+
+Paper turns run only on the Modal sandbox worker. External Pi admission accepts
+ordinary research, so the backend refuses to boot with paper flags and
+`PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true`, and activation refuses to write
+that combination. Before activation, move staging chat back to the sandbox
+worker: set external Pi admission off, and confirm the pinned staging Modal
+image (`PWC_CHAT_MODAL_IMAGE_VERSION`) was published from a commit that bakes
+the current `paper_cli.py` and paper guides. Republish and repin the image if
+either file changed since it was built. External Pi admission stays off while
+papers are enabled; re-enable it only after the disable transition below.
+
+Only after every required check passes may an operator configure the coherent
+user-facing state and deploy staging again:
 
 ```bash
 sudo python deploy/configure_host_env.py \
