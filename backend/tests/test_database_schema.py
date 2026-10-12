@@ -30,3 +30,16 @@ def test_paper_curation_cycle_can_be_dropped_on_postgresql():
         "fk_paper_curation_workflows_enrich_satisfied_by_job",
         "fk_paper_curation_workflows_evals_satisfied_by_job",
     }
+
+
+def test_server_defaults_avoid_postgresql_only_casts():
+    """SQLite-backed tests create these tables, so defaults must stay portable."""
+    casts = [
+        f"{table.name}.{column.name}"
+        for table in Base.metadata.tables.values()
+        for column in table.columns
+        if column.server_default is not None
+        and "::" in str(getattr(column.server_default, "arg", ""))
+    ]
+
+    assert casts == []
