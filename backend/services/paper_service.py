@@ -79,7 +79,9 @@ from backend.services.paper_version_refresh_service import (
     PaperVersionRefreshService,
 )
 from backend.services.semantic_scholar_service import SemanticScholarService
-from backend.services.trending_ranking_service import active_paper_score_components
+from backend.services.trending_ranking_service import (
+    correlated_paper_score_expressions,
+)
 from backend.utils.github_utils import normalize_github_url, parse_github_url
 
 
@@ -1450,25 +1452,13 @@ class PaperService:
         but sort after scored papers (via the ``-1`` fallbacks), so scoped pages
         never drop tagged papers. ``query`` must select ``DBPaper`` rows.
         """
-        repo_stats, active_score = active_paper_score_components(
-            self.db,
+        active_score, max_stars = correlated_paper_score_expressions(
             self.settings.trending_ranking_mode,
             missing_score=-1.0,
         )
-
-        query = query.outerjoin(repo_stats, repo_stats.c.paper_id == DBPaper.id)
-
-        if self.settings.trending_ranking_mode == "composite":
-            return query.order_by(
-                desc(active_score),
-                desc(func.coalesce(repo_stats.c.max_stars, -1)),
-                desc(DBPaper.date_published),
-                desc(DBPaper.id),
-            )
-
         return query.order_by(
             desc(active_score),
-            desc(func.coalesce(repo_stats.c.max_stars, -1)),
+            desc(func.coalesce(max_stars, -1)),
             desc(DBPaper.date_published),
             desc(DBPaper.id),
         )
