@@ -1,5 +1,8 @@
 -- Add Neural Architecture Search (NAS) method.
--- Source paper: arXiv 1611.01578 (Zoph & Le, "Neural Architecture Search with Reinforcement Learning").
+-- NAS has no single introducing paper: neuroevolution of network topologies
+-- predates Zoph & Le (arXiv 1611.01578), who popularized the term. The source
+-- is therefore an explainer survey and source_paper_id stays NULL, which also
+-- keeps the hourly reference backfill from linking every citer of 1611.01578.
 --
 -- Keywords deliberately omit the bare "NAS" token: case-sensitive substring
 -- matching would hit NASA, NASNet-free text, SNAS and other unrelated uses.
@@ -23,7 +26,7 @@ VALUES (
     'neural-architecture-search',
     'Neural Architecture Search',
     'Neural Architecture Search (NAS)',
-    'Neural Architecture Search (NAS) automates the design of neural network architectures by searching a predefined space of candidate operations and connections for the configuration that best trades off accuracy against cost. The original formulation trains an [RNN](/methods/rnn) controller with [REINFORCE](/methods/reinforce) to sample child networks and uses their validation accuracy as the reward; later work replaced the controller with evolutionary search, Bayesian optimization, weight-sharing supernets, differentiable relaxations such as DARTS, and training-free zero-cost proxies, cutting search cost from thousands of GPU days to a few hours. NAS produced widely used architectures such as NASNet, MnasNet, EfficientNet and MobileNetV3, and is now applied to hardware-aware model design and to compressing large language models.',
+    'Neural Architecture Search (NAS) automates the design of neural network architectures by searching a predefined space of candidate operations and connections for the configuration that best trades off accuracy against cost. Early work evolved network topologies with genetic algorithms (neuroevolution); the term was popularized by [Zoph & Le](/paper/1611.01578), who trained an [RNN](/methods/rnn) controller with [REINFORCE](/methods/reinforce) to sample child networks rewarded by their validation accuracy. Later work used evolutionary search, Bayesian optimization, weight-sharing supernets, differentiable relaxations such as DARTS, and training-free zero-cost proxies, cutting search cost from thousands of GPU days to a few hours. NAS produced widely used architectures such as NASNet, MnasNet, EfficientNet and MobileNetV3, and is now applied to hardware-aware model design and to compressing large language models.',
     'neural architecture search, differentiable architecture search, NAS-Bench',
     (
         SELECT id
@@ -31,16 +34,10 @@ VALUES (
         WHERE name = 'General'
         LIMIT 1
     ),
-    2016,
-    (
-        SELECT id
-        FROM papers
-        WHERE arxiv_id = '1611.01578'
-        ORDER BY is_latest_version DESC, id DESC
-        LIMIT 1
-    ),
     NULL,
-    'Neural Architecture Search with Reinforcement Learning',
+    NULL,
+    'https://jmlr.org/papers/v20/18-598.html',
+    'Neural Architecture Search: A Survey',
     NULL,
     NULL,
     '[Neural Architecture Search with Reinforcement Learning](/paper/1611.01578)'
@@ -61,17 +58,13 @@ SET
     image_credit = EXCLUDED.image_credit,
     updated_at = CURRENT_TIMESTAMP;
 
--- The introducing paper drives the native source link and the Introduced banner.
-INSERT INTO paper_methods (paper_id, method_id)
-SELECT source_paper_id, id FROM methods
-WHERE slug = 'neural-architecture-search' AND source_paper_id IS NOT NULL
-ON CONFLICT (paper_id, method_id) DO NOTHING;
+-- Drop provenance from the earlier sourced version of this method.
+DELETE FROM paper_method_evidence
+WHERE evidence_type = 'source'
+  AND method_id = (SELECT id FROM methods WHERE slug = 'neural-architecture-search');
 
-INSERT INTO paper_method_evidence (paper_id, method_id, evidence_type)
-SELECT source_paper_id, id, 'source' FROM methods
-WHERE slug = 'neural-architecture-search' AND source_paper_id IS NOT NULL
-ON CONFLICT (paper_id, method_id, evidence_type) DO UPDATE SET
-    last_seen_at = now();
+DELETE FROM method_reference_backfill_months
+WHERE method_id = (SELECT id FROM methods WHERE slug = 'neural-architecture-search');
 
 -- Curated 2026-10-12 from all 616 local candidates: the 448 catalog papers
 -- citing 1611.01578 on Semantic Scholar plus every title/abstract mention of
