@@ -10,6 +10,7 @@ import { EditProjectPagesDialog } from "./EditProjectPagesDialog";
 import { EditRepositoriesDialog } from "./EditRepositoriesDialog";
 import { EditSourceUrlDialog } from "./EditSourceUrlDialog";
 import { EditTasksDialog } from "./EditTasksDialog";
+import { EditXThreadsDialog } from "./EditXThreadsDialog";
 
 interface PaperDetailEditorsProps {
   activeEditor: PaperEditSection | null;
@@ -110,6 +111,13 @@ export function PaperDetailEditors({
           hf_datasets: paper.hf_datasets ?? [],
           hf_spaces: paper.hf_spaces ?? [],
         }}
+      />
+    ),
+    "x-threads": () => (
+      <EditXThreadsDialog
+        {...shared}
+        onOpenChange={close("x-threads")}
+        initialUrls={paper.x_threads?.map(({ url }) => url) ?? []}
       />
     ),
     organizations: () => (

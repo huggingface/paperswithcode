@@ -24,6 +24,7 @@ from backend.models.database import (
     PaperProjectPage,
     PaperRepository,
     PaperTask,
+    PaperXThread,
     ProjectPage,
     Repository,
     Task,
@@ -61,6 +62,7 @@ class PendingEditSnapshotService:
             "evaluations": self._evaluations,
             "source_url": self._source_url,
             "hf_artifacts": self._hf_artifacts,
+            "x_threads": self._x_threads,
         }
         builder = builders.get(edit_type)
         if builder is not None:
@@ -162,6 +164,15 @@ class PendingEditSnapshotService:
                 {"url": row[0], "is_official": bool(row[1])} for row in rows
             ]
         }
+
+    def _x_threads(self, paper_id: int) -> dict[str, Any]:
+        rows = (
+            self.db.query(PaperXThread.url)
+            .filter(PaperXThread.paper_id == paper_id)
+            .order_by(PaperXThread.position)
+            .all()
+        )
+        return {"x_threads": [{"url": row[0]} for row in rows]}
 
     def _organizations(self, paper_id: int) -> dict[str, Any]:
         rows = (

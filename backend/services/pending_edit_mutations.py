@@ -81,6 +81,7 @@ class PendingEditMutationService:
             "project_pages": self._paper_project_pages,
             "source_url": self._paper_source_url,
             "hf_artifacts": self._paper_hf_artifacts,
+            "x_threads": self._paper_x_threads,
             "evaluations": self._paper_evaluations,
         }
 
@@ -458,6 +459,15 @@ class PendingEditMutationService:
             list(payload["hf_datasets"]),
             list(payload["hf_spaces"]),
             commit=False,
+        )
+        return "paper", str(paper_id)
+
+    def _paper_x_threads(
+        self, paper_id: int | None, payload: Payload
+    ) -> tuple[str, str]:
+        paper_id = self._require_paper(paper_id)
+        self.paper_associations.update_x_threads(
+            paper_id, list(payload["x_threads"]), commit=False
         )
         return "paper", str(paper_id)
 

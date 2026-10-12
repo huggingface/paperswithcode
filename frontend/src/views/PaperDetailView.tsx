@@ -48,6 +48,7 @@ const EDIT_SECTION_LABEL: Record<PaperEditSection, string> = {
   "hf-artifacts": "Hugging Face artifacts",
   organizations: "organizations",
   "source-url": "source URL",
+  "x-threads": "X threads",
 };
 
 function formatLongDate(iso: string | null | undefined): string {
@@ -725,6 +726,7 @@ const PaperDetailView: React.FC = () => {
           onCopyCitation={handleCopyCitation}
           onEditHfArtifacts={() => openEdit("hf-artifacts")}
           onEditRepositories={() => openEdit("repositories")}
+          onEditXThreads={() => openEdit("x-threads")}
           paper={paper}
           relatedIsLoading={relatedQ.isLoading}
           relatedPapers={relatedQ.data}

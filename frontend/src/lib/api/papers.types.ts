@@ -25,6 +25,22 @@ interface ProjectPage {
   updated_at?: string;
 }
 
+/** An X post introducing a paper, previewed when it was linked. */
+export interface XThread {
+  url: string;
+  tweet_id: string;
+  author_name: string;
+  author_handle: string;
+  author_avatar_url?: string | null;
+  text: string;
+  posted_at?: string | null;
+  like_count?: number | null;
+  reply_count?: number | null;
+  media_url?: string | null;
+  media_type?: "photo" | "video" | null;
+  fetched_at: string;
+}
+
 /** Compact Hugging Face artifact summary for paper cards: per-kind counts plus
  *  the most populated category and a link to it. */
 interface HfArtifactSummary {
@@ -122,6 +138,8 @@ export interface Paper {
   semantic_scholar_id?: string;
   repositories?: Repository[];
   project_pages?: ProjectPage[];
+  /** X (formerly Twitter) posts in which the authors introduce the paper. */
+  x_threads?: XThread[];
   /** Hugging Face model URLs explicitly linked to this paper. Populated for
    *  external rows only; arXiv rows derive HF artifacts from `arxiv_id`. */
   hf_models?: string[];

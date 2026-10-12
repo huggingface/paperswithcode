@@ -21,6 +21,7 @@ from backend.models.papers import (
     RelatedPaperSummary,
     Repository,
     TaskSummary,
+    XThread,
 )
 from backend.models.database import (
     Author as DBAuthor,
@@ -41,6 +42,7 @@ from backend.models.database import (
     PaperRelation as DBPaperRelation,
     PaperRepository as DBPaperRepository,
     PaperTask,
+    PaperXThread as DBPaperXThread,
     ProjectPage as DBProjectPage,
     Repository as DBRepository,
     Task as DBTask,
@@ -84,6 +86,7 @@ class PaperRelations:
     repositories: dict[int, list[Repository]] = field(default_factory=dict)
     repository_coverage: dict[int, tuple[bool, int]] = field(default_factory=dict)
     project_pages: dict[int, list[ProjectPage]] = field(default_factory=dict)
+    x_threads: dict[int, list[XThread]] = field(default_factory=dict)
 
 
 _RelationValue = TypeVar("_RelationValue")
@@ -211,8 +214,13 @@ class PaperRelationLoader:
         self,
         paper_ids: Sequence[int],
         relations: PaperRelations,
+        repository_limit: int | None = None,
     ) -> PaperRelations:
-        """Add repositories and project pages to an existing projection."""
+        """Add repositories and project pages to an existing projection.
+
+        `repository_limit` keeps only each paper's leading repositories
+        (official first, then most starred) for card surfaces.
+        """
         unique_ids = self._unique_ids(paper_ids)
         if not unique_ids:
             return relations
@@ -236,14 +244,16 @@ class PaperRelationLoader:
             .order_by(
                 requested.id,
                 desc(DBPaperRepository.is_official),
-                desc(DBRepository.num_stars),
+                desc(DBRepository.num_stars).nullslast(),
             )
             .all()
         )
         seen_repositories: dict[int, set[int]] = {}
         for paper_id, is_official, repository in repository_rows:
             seen = seen_repositories.setdefault(int(paper_id), set())
-            if repository.id in seen:
+            if repository.id in seen or (
+                repository_limit is not None and len(seen) >= repository_limit
+            ):
                 continue
             seen.add(repository.id)
             _append_relation(
@@ -302,6 +312,19 @@ class PaperRelationLoader:
                         else None
                     ),
                 ),
+            )
+
+        x_thread_rows = (
+            self.db.query(DBPaperXThread)
+            .filter(DBPaperXThread.paper_id.in_(unique_ids))
+            .order_by(DBPaperXThread.paper_id, DBPaperXThread.position)
+            .all()
+        )
+        for row in x_thread_rows:
+            _append_relation(
+                relations.x_threads,
+                row.paper_id,
+                XThread.model_validate(row, from_attributes=True),
             )
 
         return relations
