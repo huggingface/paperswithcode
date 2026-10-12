@@ -76,7 +76,7 @@ const MethodDetailView: React.FC = () => {
   const trendQ = useQuery({
     queryKey: ["method-trend", methodSlug],
     queryFn: () => catalogApi.methodTrend(methodSlug!),
-    enabled: !!methodSlug && !!methodQ.data,
+    enabled: !!methodSlug,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -99,6 +99,8 @@ const MethodDetailView: React.FC = () => {
         order_by: orderBy,
         order_dir: "desc",
         include_resources: true,
+        // Cards show only the leading repository.
+        repository_limit: 1,
         has_code: hasCode,
         has_hf_artifacts: hasHfArtifacts,
         start_date: dateRange.startDate,

@@ -116,6 +116,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
         "backend/services/hf_trending_model_curation_service.py",
     ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
+    "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
     "export_enrichment_dashboard": ("backend/services/enrichment_dashboard_export.py",),
     "sync_hf_organizations": ("backend/services/organization_sync_service.py",),
     "calculate_organization_trending_scores": (
@@ -180,6 +181,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
         "backend/tests/test_hf_trending_model_curation.py",
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
+    "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
     "export_enrichment_dashboard": (
         "backend/tests/test_enrichment_dashboard_export.py",
     ),
@@ -205,9 +207,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "autonomous_cron_health": ("backend/tests/test_autonomous_cron_operator.py",),
     "autonomous_cron_audit": ("backend/tests/test_autonomous_cron_operator.py",),
     "monitor_chat_operational_alerts": (
-        "backend/tests/test_chat_operational_alerts.py",
+        "backend/tests/chat/test_operational_alerts.py",
     ),
-    "run_chat_synthetic_probe": ("backend/tests/test_chat_synthetic_probe.py",),
+    "run_chat_synthetic_probe": ("backend/tests/chat/test_synthetic_probe.py",),
 }
 
 

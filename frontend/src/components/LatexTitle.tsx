@@ -1,6 +1,21 @@
-import { Fragment, useMemo, type ReactNode } from 'react';
-import katex from 'katex';
-import 'katex/dist/katex.min.css';
+import { Fragment, useEffect, useMemo, useState, type ReactNode } from 'react';
+import type Katex from 'katex';
+
+// KaTeX is ~260 KB and most titles and abstracts contain no math, so load it
+// on first use instead of shipping it with every card and paper page.
+let katexModule: typeof Katex | null = null;
+let katexLoading: Promise<typeof Katex> | null = null;
+
+function loadKatex(): Promise<typeof Katex> {
+  katexLoading ??= Promise.all([
+    import('katex'),
+    import('katex/dist/katex.min.css'),
+  ]).then(([module]) => {
+    katexModule = module.default;
+    return katexModule;
+  });
+  return katexLoading;
+}
 
 interface LatexTextProps {
   text: string;
@@ -315,7 +330,20 @@ function parseTextContent(text: string, keyPrefix: string, highlight?: string): 
 }
 
 function KatexHtml({ latex, display }: { latex: string; display: boolean }) {
+  const [katex, setKatex] = useState(katexModule);
+  useEffect(() => {
+    if (katex) return;
+    let active = true;
+    void loadKatex().then((module) => {
+      if (active) setKatex(() => module);
+    });
+    return () => {
+      active = false;
+    };
+  }, [katex]);
+
   const html = useMemo(() => {
+    if (!katex) return undefined;
     try {
       return katex.renderToString(latex.trim(), {
         displayMode: display,
@@ -324,8 +352,9 @@ function KatexHtml({ latex, display }: { latex: string; display: boolean }) {
     } catch {
       return null;
     }
-  }, [latex, display]);
+  }, [katex, latex, display]);
 
+  if (html === undefined) return <>{latex}</>;
   if (!html) {
     return <>{display ? `$$${latex}$$` : `$${latex}$`}</>;
   }
