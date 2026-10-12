@@ -15,6 +15,7 @@ cd frontend && npm run dev
 
 # Checks
 cd frontend && npm run lint
+# DB-backed tests refuse the live database; see "Database-backed tests"
 uv run --env-file backend/keys.env pytest backend/tests -q
 ```
 
@@ -55,6 +56,22 @@ served by nginx in production.
   | Datasets and benchmarks | `uv run pytest backend/tests/dataset -q` |
   | Evaluations, ranks, leaderboard badges, leaderboard syncs | `uv run pytest backend/tests/evaluation -q` |
   | CRON registry, schedules, health, dashboard, logs | `uv run pytest backend/tests/cron -q` |
+
+### Database-backed tests
+
+`backend/tests/conftest.py` refuses every PostgreSQL connection opened under
+pytest unless `PWC_TEST_DATABASE=1` is set and `PWC_ENVIRONMENT` is neither
+`production` nor `staging`. DB-backed fixtures commit their rows, and
+`backend/keys.env` points at the live catalog, so with it those tests error
+with `LiveDatabaseRefused` while SQLite and mocked tests still run. To run them,
+point `PWC_DB_*` at a disposable database and opt in, as
+`.github/workflows/test-database.yml` does:
+
+```bash
+PWC_TEST_DATABASE=1 PWC_DB_NAME=pwc_test PWC_DB_USER=postgres uv run pytest backend/tests/test_api_alignment.py -q
+```
+
+Never set `PWC_TEST_DATABASE=1` for a database that holds real data.
 
 For scripts that mutate domain data, use the existing services where possible.
 Run them with `uv run --env-file backend/keys.env …`.

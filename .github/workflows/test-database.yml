@@ -8,6 +8,8 @@ on:
       - "backend/database/**"
       - "backend/models/**"
       - "backend/services/**"
+      - "backend/tests/conftest.py"
+      - "backend/tests/test_database_guard.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/test-database.yml"
@@ -19,6 +21,8 @@ on:
       - "backend/database/**"
       - "backend/models/**"
       - "backend/services/**"
+      - "backend/tests/conftest.py"
+      - "backend/tests/test_database_guard.py"
       - "pyproject.toml"
       - "uv.lock"
       - ".github/workflows/test-database.yml"
@@ -54,6 +58,9 @@ jobs:
       PWC_DB_NAME: paperswithcode_hf
       PWC_DB_USER: postgres
       PWC_DB_PASSWORD: postgres
+      # Disposable service database: lets backend/tests/conftest.py allow
+      # PostgreSQL connections from pytest.
+      PWC_TEST_DATABASE: "1"
 
     steps:
       - name: Checkout repository
@@ -80,6 +87,9 @@ jobs:
             echo "Waiting for PostgreSQL..."
             sleep 2
           done
+
+      - name: Test the live-database guard
+        run: uv run pytest backend/tests/test_database_guard.py -q
 
       - name: Test current database layer
         run: |
