@@ -19,7 +19,7 @@ from backend.services.chat_sandbox_worker_transport import (
     RunningWorker,
     WorkerCancelStatus,
 )
-from backend.tests.chat_sandbox_turn_harness import (
+from backend.tests.chat_sandbox.turn_harness import (
     TurnHarnessSession,
     build_turn_coordinator,
 )

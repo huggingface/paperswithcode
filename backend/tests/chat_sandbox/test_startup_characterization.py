@@ -7,7 +7,7 @@ import pytest
 
 from backend.models.database import ChatSandboxLease
 from backend.services.chat_sandbox_provider import SandboxError
-from backend.tests.test_chat_sandbox_capacity_acquisition import (
+from backend.tests.chat_sandbox.capacity_harness import (
     _database,
     _manager,
     _Provider,

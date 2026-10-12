@@ -15,7 +15,7 @@ from backend.models.database import (
 )
 from backend.services.chat_executor_runtime import ChatExecutorRuntime
 from backend.services.chat_sandbox_provider import SandboxError, SandboxLaunchMode
-from backend.tests.test_chat_sandbox_pool_coordinator import (
+from backend.tests.chat_sandbox.pool_harness import (
     _Harness,
     _settings,
     _session,

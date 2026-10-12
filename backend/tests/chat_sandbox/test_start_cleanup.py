@@ -16,7 +16,7 @@ from backend.services.chat_sandbox_capacity_repository import (
 from backend.services.chat_sandbox_provider import SandboxError
 from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
 from backend.services.chat_sandbox_state_repository import ChatSandboxStateRepository
-from backend.tests.test_chat_sandbox_capacity_acquisition import (
+from backend.tests.chat_sandbox.capacity_harness import (
     _database,
     _lease,
     _manager,

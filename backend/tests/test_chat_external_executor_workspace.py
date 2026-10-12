@@ -20,8 +20,8 @@ from backend.services.chat_sandbox_provider import SandboxError, SandboxLaunchMo
 from backend.services.chat_sandbox_capacity_repository import LeaseDecisionChanged
 from backend.services.chat_turn_job_repository import StaleTurnClaim, TurnLeaseClaim
 from backend.services.chat_turn_admission import ChatTurnAdmissionService
-from backend.tests.test_chat_sandbox_acquisition_coordinator import _coordinator
-from backend.tests.test_chat_sandbox_capacity_acquisition import (
+from backend.tests.chat_sandbox.acquisition_harness import _coordinator
+from backend.tests.chat_sandbox.capacity_harness import (
     _Provider,
     _database,
     _session,

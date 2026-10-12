@@ -43,7 +43,7 @@ from backend.services.chat_session_service import TurnAdmission
 from backend.services.chat_stream_service import ChatStreamOrchestrator
 from backend.services.chat_turn_job_repository import TurnLeaseClaim
 from backend.services.chat_turn_cancel_control import CancelControlResult
-from backend.tests.test_chat_sandbox_executor_client import (
+from backend.tests.chat_sandbox.executor_client_harness import (
     _Broker,
     _DropFirstResponseSocketProvider,
     _Process,

@@ -14,7 +14,7 @@ from backend.services.chat_sandbox_executor import (
 from backend.services.chat_sandbox_executor_channel import (
     PersistentSandboxExecutorChannel,
 )
-from backend.tests.test_chat_sandbox_executor_channel import (
+from backend.tests.chat_sandbox.executor_channel_harness import (
     _context,
     _operation_response,
     _read_frame,

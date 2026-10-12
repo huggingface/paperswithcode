@@ -40,7 +40,7 @@ from backend.services.chat_sandbox_turn_coordinator import (
     ChatSandboxTurnRequest,
 )
 from backend.services.chat_sandbox_worker_transport import ChatSandboxWorkerTransport
-from backend.tests.chat_sandbox_turn_harness import build_turn_coordinator
+from backend.tests.chat_sandbox.turn_harness import build_turn_coordinator
 
 
 def _settings(**overrides) -> Settings:

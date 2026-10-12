@@ -29,7 +29,7 @@ from backend.services.chat_sandbox_worker_transport import (
     WorkerTurnMode,
     WorkerTurnRequest,
 )
-from backend.tests.chat_sandbox_turn_harness import build_turn_coordinator
+from backend.tests.chat_sandbox.turn_harness import build_turn_coordinator
 
 
 class _AsyncConnection:
