@@ -17,7 +17,7 @@ from sqlalchemy.pool import StaticPool
 # The weekly cron lives under .github/workflows/scripts/, which is added to
 # PYTHONPATH at runtime via the wrapper shell. Mirror that for tests so we can
 # import `scripts.weekly.link_methods_by_references` directly.
-WORKFLOWS_SCRIPTS_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+WORKFLOWS_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / ".github" / "workflows"
 if str(WORKFLOWS_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(WORKFLOWS_SCRIPTS_PATH))
 
