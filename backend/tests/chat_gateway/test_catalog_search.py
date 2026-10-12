@@ -13,7 +13,7 @@ def test_chat_search_never_calls_shared_query_embedding_endpoint(monkeypatch):
         def __init__(self, _db):
             pass
 
-        def search_papers_page(self, query, page, limit, *, mode):
+        def search_papers_page(self, query, page, limit, *, mode, **_filters):
             calls.append((query, page, limit, mode))
             return {"results": []}
 
