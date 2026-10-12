@@ -136,6 +136,49 @@ def make_scheduled_enrichment_additive(proposal: dict, context: dict) -> dict:
     return normalized
 
 
+def check_benchmark_gap_fields(proposal: dict, candidates: dict | None) -> None:
+    """Catch correctable field errors before consuming a server apply attempt.
+
+    The server remains authoritative for evidence identity and catalog checks.
+    Do not rewrite evidence or scores to make a proposal pass validation.
+    """
+    errors = []
+    source_kinds = {}
+    for source in (candidates or {}).get("source_documents", []):
+        source_kinds.setdefault(source.get("url"), set()).add(source.get("kind"))
+    for index, gap in enumerate(proposal.get("benchmark_gaps") or []):
+        prefix = f"benchmark_gaps[{index}]"
+        metrics = gap.get("protocol", {}).get("metrics", [])
+        names = {metric.get("name") for metric in metrics}
+        for metric in metrics:
+            if not str(metric.get("definition") or "").strip():
+                errors.append(
+                    f"{prefix}: metric {metric.get('name')!r} needs a definition"
+                )
+        for blocked in gap.get("blocked_evaluations", []):
+            scores = blocked.get("metrics") or {}
+            best = blocked.get("best_metric")
+            if best not in scores or best not in names:
+                errors.append(
+                    f"{prefix}: best_metric {best!r} must appear in both metrics and protocol.metrics"
+                )
+            undefined = set(scores) - names
+            if undefined:
+                errors.append(
+                    f"{prefix}: undefined metric names {sorted(undefined)}; use split for split labels"
+                )
+        for evidence in gap.get("evidence", []):
+            kinds = source_kinds.get(evidence.get("source_url"))
+            if kinds and evidence.get("source_kind") not in kinds:
+                errors.append(
+                    f"{prefix}: source_kind must match manifest: {sorted(kinds)}"
+                )
+    if errors:
+        raise ValueError(
+            "Proposal preflight failed (no apply attempted):\n" + "\n".join(errors)
+        )
+
+
 def store_trace_with_retry(path: str, payload: dict) -> dict:
     last_error: Exception | None = None
     for attempt in range(5):
@@ -189,7 +232,9 @@ def main() -> None:
         with open(args.json_file, encoding="utf-8") as handle:
             proposal = json.load(handle)
         proposal = make_scheduled_enrichment_additive(proposal, request_json("context"))
-        store_trace_with_retry("trace/preapply", _trace_payload(proposal))
+        trace = _trace_payload(proposal)
+        check_benchmark_gap_fields(proposal, trace["url_candidates"])
+        store_trace_with_retry("trace/preapply", trace)
         request("apply", "POST", proposal, timeout=300)
 
 

@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 
 from backend.config import get_settings
 from backend.database.connection import get_database_session
-from backend.models.api import StagingAccessRequestResponse
+from backend.models.operations import StagingAccessRequestResponse
 from backend.routers.auth import decode_request_session
 from backend.services.staging_access_service import submit_staging_access_request
 from backend.utils.auth import can_access_staging

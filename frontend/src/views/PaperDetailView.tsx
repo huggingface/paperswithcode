@@ -341,6 +341,28 @@ const PaperDetailView: React.FC = () => {
             <div className="detail-hero-main">
           <h1 className="detail-title">
             <LatexTitle title={paper.title} />
+            {(paper.organizations || []).map((o) => (
+              <Link
+                key={o.id}
+                to={`/orgs/${o.slug}`}
+                className={`detail-title-org${o.logo_url ? " detail-title-org--logo" : ""}`}
+                title={o.name}
+                aria-label={o.name}
+              >
+                {o.logo_url ? (
+                  <img
+                    src={o.logo_url}
+                    alt=""
+                    onError={(e) => {
+                      e.currentTarget.parentElement?.classList.remove("detail-title-org--logo");
+                      e.currentTarget.replaceWith(o.name);
+                    }}
+                  />
+                ) : (
+                  o.name
+                )}
+              </Link>
+            ))}
           </h1>
           <div className="detail-meta">
             <span>{paperSourceLabel}</span>
@@ -538,39 +560,6 @@ const PaperDetailView: React.FC = () => {
                 <Icon name="external" size={12} /> Conference
               </a>
             )}
-            {(paper.organizations || []).map((o) => (
-              <Link
-                key={o.id}
-                to={`/orgs/${o.slug}`}
-                className="action-btn"
-                title={o.name}
-                aria-label={o.name}
-              >
-                {o.logo_url && (
-                  <span
-                    style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      height: 16,
-                      width: 16,
-                      borderRadius: 3,
-                      overflow: "hidden",
-                    }}
-                  >
-                    <img
-                      src={o.logo_url}
-                      alt=""
-                      style={{ height: "150%", width: "150%", objectFit: "contain" }}
-                      onError={(e) => {
-                        e.currentTarget.style.display = "none";
-                      }}
-                    />
-                  </span>
-                )}
-                {o.name}
-              </Link>
-            ))}
             <button
               type="button"
               className="action-btn"

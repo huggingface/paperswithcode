@@ -137,11 +137,11 @@ def _validate_chat_runtime_identity(settings: Settings) -> None:
         ):
             raise RuntimeError("Pi extension surfaces must remain disabled")
     if (
-        settings.chat_session_limit != 100
+        settings.chat_session_limit != 500
         or settings.chat_user_byte_limit != 100 * 1024 * 1024
     ):
         raise RuntimeError(
-            "chat retention quotas must remain 100 active chats and 100 MB"
+            "chat retention quotas must remain 500 active chats and 100 MB"
         )
 
 

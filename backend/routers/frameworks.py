@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import FrameworkCatalog
+from backend.models.taxonomy import FrameworkCatalog
 from backend.services.framework_service import FrameworkService
 
 router = APIRouter(prefix="/frameworks", tags=["frameworks"])

@@ -123,6 +123,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `biology` — Biology
 - `camera-pose-estimation` — Camera Pose Estimation
 - `classic-language-modeling` — Classic Language Modeling
+- `classic-reinforcement-learning` — Classic Reinforcement Learning
 - `click-through-rate-prediction` — Click-Through Rate Prediction
 - `coding-agents` — Coding Agents
 - `collaborative-filtering` — Collaborative Filtering

@@ -757,6 +757,100 @@ def test_uncertain_interval_metering_stops_at_configured_maximum_lifetime():
         assert state.estimated_accrued_microusd == 300 * service.cost_per_second()
 
 
+def test_late_stale_reservation_confirmation_stops_at_provider_timeout():
+    # Staging 2026-10: blank-pool sandboxes from 2026-09-16 were confirmed gone
+    # only on 2026-10-03; Modal billed nothing for them in October.
+    sessions = factory()
+    reserved_at = datetime(2026, 9, 16, 9, 18, 59, tzinfo=UTC)
+    created_at = reserved_at + timedelta(seconds=84)
+    confirmed_at = datetime(2026, 10, 3, 15, 31, 11, tzinfo=UTC)
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings())
+        interval_id = service.reserve_interval(
+            origin="blank_pool", worker_generation="stale", now=reserved_at
+        )
+        service.provider_created(interval_id, "sb-stale", created_at)
+        service.terminate(
+            "sb-stale", "termination_uncertain", confirmed=False, now=created_at
+        )
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings())
+        service.terminate(
+            "sb-stale",
+            "provider_confirmed_stale_reservation_reconciliation",
+            confirmed=True,
+            now=confirmed_at,
+        )
+        row = db.get(ChatSandboxComputeInterval, interval_id)
+        assert service._aware(row.terminal_at) == created_at + timedelta(days=1)
+        assert row.reconciliation_state == "confirmed"
+        assert row.reserved_microusd == 0
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings())
+        state = service.refresh(datetime(2026, 10, 11, tzinfo=UTC))
+        assert state.billing_cycle.isoformat() == "2026-10-01"
+        assert state.estimated_accrued_microusd == 0
+
+
+def test_lease_reconciliation_after_provider_timeout_stops_at_timeout():
+    sessions = factory()
+    start = datetime(2026, 8, 1, tzinfo=UTC)
+    session_id = uuid.uuid4()
+    configured = settings()
+    with sessions() as db, db.begin():
+        db.add(
+            ChatSession(
+                id=session_id,
+                hf_user_id="late-owner",
+                hf_username="late-owner",
+                selected_model="google/gemma-4-31B-it",
+                execution_backend="modal_cli",
+            )
+        )
+        service = ChatSandboxSpendService(db, configured)
+        interval_id = service.reserve_interval(
+            origin="blank_pool", worker_generation="late", now=start
+        )
+        service.provider_created(interval_id, "sb-late", start)
+        service.claim("sb-late", session_id, start + timedelta(seconds=10))
+        db.add(
+            ChatSandboxLease(
+                chat_session_id=session_id,
+                modal_sandbox_id=None,
+                app_release_id=configured.release_id,
+                image_version=configured.chat_modal_image_version,
+                worker_contract_version=configured.chat_worker_contract_version,
+                worker_generation="late",
+                state="failed",
+                last_activity_at=start + timedelta(days=3),
+                updated_at=start + timedelta(days=3),
+            )
+        )
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, configured)
+        state = service.refresh(start + timedelta(days=4))
+        interval = db.get(ChatSandboxComputeInterval, interval_id)
+        assert service._aware(interval.terminal_at) == start + timedelta(days=1)
+        assert state.estimated_accrued_microusd == 86_400 * service.cost_per_second()
+
+
+def test_confirmed_orphan_without_provider_creation_still_meters_to_confirmation():
+    sessions = factory()
+    now = datetime(2026, 8, 3, 8, tzinfo=UTC)
+    with sessions() as db, db.begin():
+        service = ChatSandboxSpendService(db, settings())
+        service.terminate(
+            "sb-unknown", "pool_orphan_reconciled", confirmed=True, now=now
+        )
+        row = db.execute(
+            select(ChatSandboxComputeInterval).where(
+                ChatSandboxComputeInterval.modal_sandbox_id == "sb-unknown"
+            )
+        ).scalar_one()
+        assert service._aware(row.terminal_at) == now
+        assert service._aware(row.reserved_at) == now - timedelta(days=1)
+
+
 def test_provider_reconciliation_claim_is_durable_across_workers():
     sessions = factory()
     now = datetime(2026, 8, 3, tzinfo=UTC)

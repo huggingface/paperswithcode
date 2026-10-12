@@ -6,7 +6,7 @@ from datetime import UTC, date, datetime, timedelta
 from sqlalchemy import and_, case, func
 from sqlalchemy.orm import Session
 
-from backend.models.api import (
+from backend.models.taxonomy import (
     BenchmarkTrendPoint,
     TrendingBenchmark,
     TrendingBenchmarks,

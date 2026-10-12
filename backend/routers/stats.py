@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, Response
 from sqlalchemy.orm import Session
 
 from backend.database.connection import get_database_session
-from backend.models.api import TrendsResponse
+from backend.models.trends import TrendsResponse
 from backend.services.research_trends_service import ResearchTrendsService
 
 

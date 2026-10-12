@@ -12,7 +12,7 @@ from sqlalchemy import String, asc, case, cast, desc, func, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session, aliased
 
-from backend.models.api import Task
+from backend.models.tasks import Task
 from backend.models.evaluations import (
     Dataset,
     DatasetCreateRequest,

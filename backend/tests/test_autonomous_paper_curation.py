@@ -914,7 +914,8 @@ def test_callback_validation_rejection_is_not_classified_as_transient():
     assert _is_callback_validation_rejection(transient) is False
 
 
-def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
+@pytest.mark.parametrize("rejected", [False, True])
+def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch, rejected):
     from backend.services import hf_daily_curation_service
 
     job_id = uuid.uuid4()
@@ -923,7 +924,11 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
         kind="add-evals",
         paper_id=42,
         trigger="hf-daily-cron",
-        url_candidates=None,
+        url_candidates={
+            "source_documents": [
+                {"url": "https://example.com/paper", "kind": "paper_source"}
+            ]
+        },
         proposal={
             "evaluations": [],
             "evaluation_removals": [],
@@ -945,10 +950,11 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
         def __init__(self, db):
             assert isinstance(db, Database)
 
-        def validate(self, gaps, *, paper):
+        def validate(self, gaps, *, paper, source_documents):
             assert gaps == []
             assert paper is None
-            return [], []
+            assert source_documents == row.url_candidates["source_documents"]
+            return [], [{"index": 0, "error": "bad evidence"}] if rejected else []
 
     class Callback:
         def __init__(self, db):
@@ -970,6 +976,11 @@ def test_validator_replay_uses_saved_proposal_without_writes(monkeypatch):
     result = HFDailyCurationService(
         Database(), SimpleNamespace(), job_service=SimpleNamespace()
     ).validator_replay(job_id)
+
+    if rejected:
+        assert result["valid"] is False
+        assert "Scheduled benchmark gap validation failed" in result["error"]
+        return
 
     assert result == {
         "job_id": str(job_id),

@@ -38,7 +38,7 @@ class ChatSessionSettings(BaseModel):
     chat_enabled: bool = Field(default=False)
     chat_paper_mentions_enabled: bool = Field(default=False)
     chat_paper_context_timeout_seconds: float = Field(default=20, gt=0, le=60)
-    chat_session_limit: int = Field(default=100, ge=1, le=1000)
+    chat_session_limit: int = Field(default=500, ge=1, le=1000)
     chat_session_message_limit: int = Field(default=200, ge=2, le=2000)
     chat_session_byte_limit: int = Field(default=25 * 1024 * 1024, ge=1024)
     chat_user_byte_limit: int = Field(default=100 * 1024 * 1024, ge=1024)
