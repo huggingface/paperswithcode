@@ -306,3 +306,18 @@ def test_worker_trusts_a_quoted_paper_title_with_literal_parentheses():
 
     assert hooks.paper_activated is True
     assert any(event["type"] == "paper_artifact" for event in events)
+
+
+def test_worker_recognizes_edit_context_without_a_receipt():
+    assert (
+        agent._pwc_paper_command("pwc-paper edit-context --directory /workspace/paper")
+        == "edit-context"
+    )
+    assert "edit-context" not in agent._PAPER_RECEIPT_OPERATIONS
+    assert agent._pwc_paper_command("pwc-paper edit-context") is None
+    assert (
+        agent._pwc_paper_command(
+            "pwc-paper edit-context --directory /workspace/paper --artifact-id x"
+        )
+        is None
+    )

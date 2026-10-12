@@ -15,7 +15,9 @@ details. `pwc-paper` is the only paper-writing interface; it creates or opens
 the current private project and reports its bounded descriptor. After creating
 a project, produce the first complete `.tex`/`.bib` draft in
 `/workspace/paper` and submit it through `pwc-paper draft`; its receipt is the
-only proof that the draft was published. For a failed paper compile, read the
+only proof that the draft was published. To revise an existing paper, check out
+its current source with `pwc-paper edit-context`, change only what the user
+asked for, and submit it through `pwc-paper draft`. For a failed paper compile, read the
 guide, check out the failed source with `pwc-paper repair-context`, and submit
 narrow candidates through `pwc-paper repair`. Never make more than three
 attempts.

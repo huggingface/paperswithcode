@@ -253,3 +253,41 @@ def test_repair_wait_covers_a_full_compile_inside_the_cli_timeout():
 
     assert wait >= 90
     assert wait + 15 <= cli_timeout
+
+
+def test_edit_context_checks_out_a_compiled_head_but_repair_context_does_not(
+    db, settings
+):
+    import pytest
+
+    from backend.services.chat_artifact_service import ArtifactError
+
+    compiler = _Compiler()
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    initial = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=_session(db)
+    )
+    assert initial.source_head is not None
+    source = b"\\documentclass{article}\\begin{document}Compiled\\end{document}"
+    compiled = service.save_human_version(
+        owner_id="owner-1",
+        artifact_id=initial.artifact_id,
+        expected_parent_version_id=initial.source_head.version_id,
+        files={"main.tex": source},
+    )
+    assert compiled.source_head is not None
+
+    descriptor, files = service.source_context(
+        owner_id="owner-1", artifact_id=initial.artifact_id
+    )
+
+    assert descriptor.source_head is not None
+    assert descriptor.source_head.version_id == compiled.source_head.version_id
+    assert files["main.tex"] == source
+    with pytest.raises(ArtifactError, match="has not failed"):
+        service.repair_context(owner_id="owner-1", artifact_id=initial.artifact_id)

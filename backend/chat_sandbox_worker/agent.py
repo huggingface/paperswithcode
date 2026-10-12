@@ -61,6 +61,7 @@ _PAPER_COMMAND_ARGUMENTS = {
     "begin-edit": (),
     "draft": ("--directory", "--artifact-id", "--expected-parent-version-id"),
     "repair": ("--directory", "--artifact-id", "--expected-parent-version-id"),
+    "edit-context": ("--directory",),
     "repair-context": ("--directory",),
 }
 _PAPER_UNSAFE_SHELL_CHARACTERS = frozenset("\\\r\n;&|<>()`$*?[]{}!~")

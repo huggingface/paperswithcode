@@ -1084,11 +1084,19 @@ class LatexPaperService:
         self, *, owner_id: str, artifact_id: uuid.UUID
     ) -> tuple[LatexPaperArtifactDescriptor, dict[str, bytes]]:
         """Return the current failed source for the authenticated chat turn."""
+        return self.source_context(
+            owner_id=owner_id, artifact_id=artifact_id, require_failed=True
+        )
+
+    def source_context(
+        self, *, owner_id: str, artifact_id: uuid.UUID, require_failed: bool = False
+    ) -> tuple[LatexPaperArtifactDescriptor, dict[str, bytes]]:
+        """Return the current head's editable text source for a narrow AI edit."""
         artifact = self._artifact(owner_id, artifact_id)
         if artifact.source_head_version_id is None:
             raise ArtifactError("paper_missing", "This chat has no paper source")
         version = self._version(owner_id, artifact_id, artifact.source_head_version_id)
-        if version.compile_status != "failed":
+        if require_failed and version.compile_status != "failed":
             raise ArtifactError(
                 "paper_not_failed", "The current paper source has not failed"
             )

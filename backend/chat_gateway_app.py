@@ -161,7 +161,9 @@ class ArtifactPrepareRequest(BaseModel):
 
 class PaperCommandRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    operation: Literal["create", "begin-edit", "repair-context", "draft", "repair"]
+    operation: Literal[
+        "create", "begin-edit", "edit-context", "repair-context", "draft", "repair"
+    ]
     title: str | None = Field(default=None, max_length=300)
     artifact_id: uuid.UUID | None = None
     expected_parent_version_id: uuid.UUID | None = None
@@ -800,12 +802,14 @@ def paper_command(
             if descriptor is None:
                 raise ArtifactError("paper_missing", "This chat has no paper yet")
             result = {"paper": descriptor.model_dump(mode="json")}
-        elif body.operation == "repair-context":
+        elif body.operation in {"edit-context", "repair-context"}:
             descriptor = service.get_descriptor(owner_id, capability.chat_session_id)
             if descriptor is None:
                 raise ArtifactError("paper_missing", "This chat has no paper yet")
-            context_descriptor, files = service.repair_context(
-                owner_id=owner_id, artifact_id=descriptor.artifact_id
+            context_descriptor, files = service.source_context(
+                owner_id=owner_id,
+                artifact_id=descriptor.artifact_id,
+                require_failed=body.operation == "repair-context",
             )
             result = {
                 "paper": context_descriptor.model_dump(mode="json"),

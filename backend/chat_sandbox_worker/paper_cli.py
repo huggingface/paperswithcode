@@ -395,9 +395,9 @@ def _write_repair_source(
             os.close(descriptor)
 
 
-def _write_context(directory: Path) -> int:
+def _write_context(directory: Path, operation: str) -> int:
     workspace, directory = _paper_directory(directory, create=True)
-    result = _command("repair-context")
+    result = _command(operation)
     files = result.get("files")
     if not isinstance(files, list):
         raise RuntimeError("Invalid paper repair context")
@@ -410,7 +410,11 @@ def _write_context(directory: Path) -> int:
             raise RuntimeError("Invalid paper repair source")
         path = _repair_path(directory, workspace, file["path"])
         _write_repair_source(workspace, directory, path, file["content"])
-    print("Checked out the failed paper source for repair.")
+    print(
+        "Checked out the failed paper source for repair."
+        if operation == "repair-context"
+        else "Checked out the current paper source for editing."
+    )
     return 0
 
 
@@ -448,8 +452,9 @@ def main() -> int:
     create = commands.add_parser("create")
     create.add_argument("--title", required=True)
     commands.add_parser("begin-edit")
-    checkout = commands.add_parser("repair-context")
-    checkout.add_argument("--directory", required=True)
+    for name in ("edit-context", "repair-context"):
+        checkout = commands.add_parser(name)
+        checkout.add_argument("--directory", required=True)
     repair = commands.add_parser("repair")
     repair.add_argument("--directory", required=True)
     repair.add_argument("--artifact-id", required=True)
@@ -460,8 +465,8 @@ def main() -> int:
     draft.add_argument("--expected-parent-version-id", required=True)
     args = parser.parse_args()
     try:
-        if args.command == "repair-context":
-            return _write_context(Path(args.directory))
+        if args.command in {"edit-context", "repair-context"}:
+            return _write_context(Path(args.directory), args.command)
         if args.command == "repair":
             return _repair(
                 Path(args.directory), args.expected_parent_version_id, args.artifact_id
