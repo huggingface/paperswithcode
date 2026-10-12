@@ -408,9 +408,7 @@ class PaperXThreadScan(Base):
     last_scanned_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )
-    candidates: Mapped[list] = mapped_column(
-        JSONB, nullable=False, server_default=text("'[]'::jsonb")
-    )
+    candidates: Mapped[list] = mapped_column(JSONB, nullable=False, server_default="[]")
     linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
