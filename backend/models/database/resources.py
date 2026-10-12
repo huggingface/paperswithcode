@@ -396,6 +396,24 @@ class PaperXThread(Base):
     )
 
 
+class PaperXThreadScan(Base):
+    """Bounded X search state for one paper, kept by the discovery CRON."""
+
+    __tablename__ = "paper_x_thread_scans"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    scan_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_scanned_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    candidates: Mapped[list] = mapped_column(
+        JSONB, nullable=False, server_default=text("'[]'::jsonb")
+    )
+    linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
 class PaperRepository(Base):
     """Junction table for papers and repositories (many-to-many relationship)."""
 
