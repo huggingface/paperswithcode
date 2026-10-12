@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 from backend.services.chat_sandbox_acquisition_coordinator import (
     ChatSandboxAcquisitionCoordinator,
 )
