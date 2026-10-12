@@ -870,6 +870,34 @@
   color: var(--ink-faint);
 }
 .bench-row-sub strong { color: var(--ink-soft); font-weight: 600; }
+.bench-row-variants {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 2px 0 6px;
+}
+.bench-row-variant {
+  font-family: var(--mono);
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  padding: 1px 5px;
+  border: 1px solid var(--hairline);
+  border-radius: 3px;
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition: border-color 0.15s, color 0.15s;
+}
+.bench-row-variant:hover { border-color: var(--ink); color: var(--ink); }
+.bench-row-variant[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent-text);
+}
+.bench-row-variant:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 .bench-row-sub .dot-sep { color: var(--hairline-strong); }
 .bench-row-sota { text-align: right; }
 .bench-row-sota-value {

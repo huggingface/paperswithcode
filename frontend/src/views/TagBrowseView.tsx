@@ -6,6 +6,7 @@ import { ArrowRight, Github, Trophy } from "lucide-react";
 import { MethodChip, PaperCard } from "@/components";
 import { AstraRoboticsFeature } from "@/components/AstraRoboticsFeature";
 import BenchmarkTrendSparkline from "@/components/BenchmarkTrendSparkline";
+import { groupBenchmarkVariants, variantLabel } from "@/lib/benchmarkVariants";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import MarkdownText from "@/components/MarkdownText";
@@ -227,6 +228,8 @@ const TagBrowseView: React.FC = () => {
     setSearchParams(params);
   };
   const [benchmarksExpanded, setBenchmarksExpanded] = useState(false);
+  // Selected protocol tab per benchmark group, keyed by the group's root id.
+  const [selectedVariants, setSelectedVariants] = useState<Record<string, string>>({});
   const [expandedSubtasks, setExpandedSubtasks] = useState<Set<string>>(() => new Set());
   const { preferences } = usePreferences();
 
@@ -394,6 +397,16 @@ const TagBrowseView: React.FC = () => {
           best_code_url: dataset.best_code_url,
           history: [],
         }));
+  const benchmarkGroups = groupBenchmarkVariants(
+    benchmarkRows,
+    (row) => datasetsById.get(row.id)?.parent_dataset_id,
+  );
+  const visibleBenchmarkGroups = benchmarksExpanded
+    ? benchmarkGroups
+    : benchmarkGroups.slice(0, 5);
+  const hiddenBenchmarkCount = benchmarkGroups
+    .slice(5)
+    .reduce((count, group) => count + group.members.length, 0);
   const trendWindowDays = benchmarkTrendsQ.data?.recent_days || 90;
   const hasVisibleSubtaskBenchmarks = visibleSubtasks.some(
     (s) => (subtaskBenchmarksById.get(s.id) || []).length > 0,
@@ -522,9 +535,23 @@ const TagBrowseView: React.FC = () => {
                   <span role="columnheader">Code</span>
                   <span role="columnheader">Compare</span>
                 </div>
-                {(benchmarksExpanded ? benchmarkRows : benchmarkRows.slice(0, 5)).map((benchmark) => (
+                {visibleBenchmarkGroups.map(({ key, members: listed }) => {
+                  const root = listed[0];
+                  const tabLabel = (member: (typeof listed)[number]) =>
+                    member === root ? "standard" : variantLabel(member.name, root.name);
+                  const members = [
+                    root,
+                    ...listed
+                      .slice(1)
+                      .sort((a, b) =>
+                        tabLabel(a).localeCompare(tabLabel(b), undefined, { sensitivity: "base" }),
+                      ),
+                  ];
+                  const benchmark =
+                    members.find((member) => member.id === selectedVariants[key]) ?? root;
+                  return (
                   <div
-                    key={benchmark.id}
+                    key={key}
                     className="benchmark-trend-row"
                     role="row"
                   >
@@ -562,6 +589,28 @@ const TagBrowseView: React.FC = () => {
                       >
                         {benchmark.name}
                       </Link>
+                      {members.length > 1 && (
+                        <div
+                          className="bench-row-variants"
+                          role="group"
+                          aria-label={`Evaluation protocols for ${root.name}`}
+                        >
+                          {members.map((member) => (
+                            <button
+                              key={member.id}
+                              type="button"
+                              className="bench-row-variant"
+                              aria-pressed={member.id === benchmark.id}
+                              title={member.name}
+                              onClick={() =>
+                                setSelectedVariants((prev) => ({ ...prev, [key]: member.id }))
+                              }
+                            >
+                              {tabLabel(member)}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       <div className="bench-row-sub">
                         <span>
                           <strong>{benchmark.all_time_paper_count}</strong> reporting papers
@@ -613,9 +662,10 @@ const TagBrowseView: React.FC = () => {
                       </Link>
                     </div>
                   </div>
-                ))}
+                  );
+                })}
               </div>
-              {benchmarkRows.length > 5 && (
+              {benchmarkGroups.length > 5 && (
                 <button
                   type="button"
                   className="bench-show-more"
@@ -623,7 +673,7 @@ const TagBrowseView: React.FC = () => {
                 >
                   {benchmarksExpanded
                     ? "− show top 5"
-                    : `+ show ${benchmarkRows.length - 5} more benchmarks`}
+                    : `+ show ${hiddenBenchmarkCount} more benchmarks`}
                 </button>
               )}
             </>

@@ -358,6 +358,7 @@ export interface Dataset {
   url?: string;
   hf_url?: string;
   slug?: string;
+  parent_dataset_id?: string | null;
   paper_count?: number;
   supports_harness?: boolean;
   best_model_name?: string | null;
