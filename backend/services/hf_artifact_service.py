@@ -80,3 +80,39 @@ def sync_explicit_hf_artifact_links(
         if result.rowcount > 0:
             links_added += 1
     return {"artifacts": len(artifacts), "links_added": links_added}
+
+
+def unlink_replaced_hf_artifact_links(
+    session: Session,
+    paper_id: int,
+    *,
+    previous: tuple[Iterable[str] | None, ...],
+    current: tuple[Iterable[str] | None, ...],
+) -> int:
+    """Delete paper junctions for explicit artifacts a replacement dropped.
+
+    Only artifacts that were in the paper's previous explicit URL arrays are
+    unlinked, so links attached by arXiv discovery are left alone.
+    """
+    kept = {(a.kind, a.repo_id) for a in collect_explicit_hf_artifacts(*current)}
+    removed = 0
+    for artifact in collect_explicit_hf_artifacts(*previous):
+        if (artifact.kind, artifact.repo_id) in kept:
+            continue
+        result = session.execute(
+            text("""
+                DELETE FROM paper_hf_artifacts AS link
+                USING hf_artifacts AS artifact
+                WHERE link.paper_id = :paper_id
+                  AND link.hf_artifact_id = artifact.id
+                  AND artifact.kind = :kind
+                  AND artifact.repo_id = :repo_id
+            """),
+            {
+                "paper_id": paper_id,
+                "kind": artifact.kind,
+                "repo_id": artifact.repo_id,
+            },
+        )
+        removed += result.rowcount
+    return removed

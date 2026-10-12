@@ -19,7 +19,10 @@ from backend.models.database import ProjectPage as DBProjectPage
 from backend.models.database import Repository as DBRepository
 from backend.models.database import Task as DBTask
 from backend.services.catalog_errors import CatalogValidationError
-from backend.services.hf_artifact_service import sync_explicit_hf_artifact_links
+from backend.services.hf_artifact_service import (
+    sync_explicit_hf_artifact_links,
+    unlink_replaced_hf_artifact_links,
+)
 from backend.services.paper_method_link_service import replace_manual_links
 from backend.services.repository_service import find_repository_by_url
 from backend.services import x_thread_service
@@ -178,7 +181,13 @@ class PaperAssociationService:
         repositories: list[dict[str, Any]],
         *,
         commit: bool = True,
+        promote_lone_repository: bool = True,
     ) -> Paper | DBPaper:
+        """Replace the paper's repositories.
+
+        A lone repository is marked official unless ``promote_lone_repository``
+        is false, for callers whose ``is_official=False`` is an explicit choice.
+        """
         try:
             paper = self._paper(paper_id)
             self.db.query(PaperRepository).filter(
@@ -223,7 +232,7 @@ class PaperAssociationService:
                     associations.get(repository_id, False) or is_official
                 )
 
-            if len(associations) == 1:
+            if promote_lone_repository and len(associations) == 1:
                 only_repository_id = next(iter(associations))
                 associations[only_repository_id] = True
 
@@ -401,6 +410,12 @@ class PaperAssociationService:
             paper = self._paper(paper_id)
             models, datasets, spaces = normalize_hf_artifact_payload(
                 hf_models, hf_datasets, hf_spaces
+            )
+            unlink_replaced_hf_artifact_links(
+                self.db,
+                paper.id,
+                previous=(paper.hf_models, paper.hf_datasets, paper.hf_spaces),
+                current=(models, datasets, spaces),
             )
             paper.hf_models = models or None
             paper.hf_datasets = datasets or None

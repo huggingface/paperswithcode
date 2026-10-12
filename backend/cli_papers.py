@@ -443,7 +443,10 @@ def update_paper(args: argparse.Namespace) -> int:
                 for url in urls
             ]
             if command == "repositories":
-                result = service.update_repositories(paper.id, resources)
+                # `--unofficial` is explicit, so never promote it to official.
+                result = service.update_repositories(
+                    paper.id, resources, promote_lone_repository=False
+                )
             else:
                 result = service.update_project_pages(paper.id, resources)
         elif command == "hf-artifacts":

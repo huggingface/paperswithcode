@@ -31,6 +31,8 @@ from pydantic import BaseModel, Field
 from backend.generators.openrouter_generator import OpenRouterGenerator
 from backend.models.generators import Generator, Message
 from backend.utils.url_fetch import (
+    canonical_github_repo_url,
+    canonical_hf_repo_url,
     extract_github_urls,
     extract_hf_repo_urls,
     fetch_html_and_text,
@@ -82,8 +84,9 @@ class ExternalResourceMetadata(BaseModel):
     github_repository_urls: List[str] = Field(
         default_factory=list,
         description=(
-            "GitHub repositories the page links to as code releases or "
-            "official implementations."
+            "GitHub repositories the page presents as its own code release "
+            "or official implementation. Exclude dependencies, frameworks, "
+            "baselines, benchmarks, and other third-party projects."
         ),
     )
     hf_artifact_urls: List[str] = Field(
@@ -110,7 +113,11 @@ Return JSON matching the provided schema. Specifically:
   scrape time. If only month/year is given, pick the 1st of the month. If
   truly unknown, omit.
 - github_repository_urls: links to github.com repositories the page presents
-  as official code for the release.
+  as ITS OWN code for this release (e.g. "code is available at ...", "we
+  open-source ..."). Do NOT include repositories the work merely uses, builds
+  on, or compares against: training frameworks, libraries, benchmarks,
+  simulators, baselines, or other third-party projects. Return an empty list
+  when the page releases no code of its own.
 - hf_artifact_urls: links to huggingface.co model/dataset/space pages.
 
 Page URL: {url}
@@ -120,6 +127,24 @@ Page text (truncated):
 {page_text}
 ---
 """
+
+
+def _keep_page_urls(suggested: List[str], page_urls: List[str]) -> List[str]:
+    """Return the page's spelling of each suggested URL that is on the page.
+
+    Matching ignores case, a trailing slash, a `.git` suffix, and deeper path
+    segments, the same way the page extractors canonicalize links.
+    """
+    page_by_key = {page_url.lower(): page_url for page_url in page_urls}
+    kept: List[str] = []
+    for suggestion in suggested:
+        canonical = canonical_github_repo_url(suggestion) or canonical_hf_repo_url(
+            suggestion
+        )
+        page_url = page_by_key.get(canonical.lower()) if canonical else None
+        if page_url is not None and page_url not in kept:
+            kept.append(page_url)
+    return kept
 
 
 async def extract_external_resource_metadata(
@@ -173,21 +198,20 @@ async def extract_external_resource_metadata(
         response = ExternalResourceMetadata(**json.loads(response))
 
     # Defence in depth: cross-check the LLM-suggested links against the actual
-    # page HTML. The LLM is instructed not to hallucinate, but trust-but-verify
-    # is cheap.
+    # page HTML so the LLM cannot hallucinate links that are not on the page.
+    # GitHub links become official repositories, so a page link the LLM did not
+    # present as the release's own code (a dependency, benchmark, or baseline)
+    # is never added back. HF links are artifacts, so an empty LLM answer
+    # falls back to every artifact on the page.
     if raw_html:
-        page_github = set(extract_github_urls(raw_html, base_url=url))
-        page_hf = set(extract_hf_repo_urls(raw_html, base_url=url))
-
-        kept_github = [u for u in response.github_repository_urls if u in page_github]
-        if not kept_github:
-            kept_github = sorted(page_github)
-        response.github_repository_urls = kept_github
-
-        kept_hf = [u for u in response.hf_artifact_urls if u in page_hf]
-        if not kept_hf:
-            kept_hf = sorted(page_hf)
-        response.hf_artifact_urls = kept_hf
+        response.github_repository_urls = _keep_page_urls(
+            response.github_repository_urls,
+            extract_github_urls(raw_html, base_url=url),
+        )
+        page_hf = extract_hf_repo_urls(raw_html, base_url=url)
+        response.hf_artifact_urls = (
+            _keep_page_urls(response.hf_artifact_urls, page_hf) or page_hf
+        )
 
     return response
 

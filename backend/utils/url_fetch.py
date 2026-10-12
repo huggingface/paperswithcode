@@ -86,9 +86,48 @@ def html_to_text(html: str, max_chars: int = 100_000) -> str:
 _GITHUB_RE = re.compile(
     r"https?://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", re.IGNORECASE
 )
+# Up to three path segments so `datasets/<owner>/<name>` and
+# `spaces/<owner>/<name>` are not cut down to a bare owner.
 _HF_REPO_RE = re.compile(
-    r"https?://huggingface\.co/(?!papers/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+",
+    r"https?://huggingface\.co/(?!papers/)[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+"
+    r"(?:/[A-Za-z0-9_.-]+)?",
     re.IGNORECASE,
+)
+# First path segments that are GitHub site pages rather than repository owners.
+_GITHUB_NON_OWNER_PATHS = frozenset(
+    {
+        "about",
+        "apps",
+        "collections",
+        "features",
+        "login",
+        "marketplace",
+        "orgs",
+        "settings",
+        "sponsors",
+        "topics",
+        "user-attachments",
+    }
+)
+# First path segments on huggingface.co that are not `<owner>/<model>` repos.
+_HF_NON_REPO_PATHS = frozenset(
+    {
+        "api",
+        "blog",
+        "chat",
+        "collections",
+        "docs",
+        "join",
+        "learn",
+        "login",
+        "models",
+        "organizations",
+        "papers",
+        "posts",
+        "pricing",
+        "settings",
+        "tasks",
+    }
 )
 
 
@@ -118,59 +157,67 @@ def _absolute_links_from_html(html: str, base_url: str) -> List[str]:
     return urls
 
 
-def extract_github_urls(html: str, base_url: str = "") -> List[str]:
-    """Unique-by-(owner, name) GitHub repository URLs found on a page."""
+def _url_path_parts(url: str, host: str) -> List[str]:
+    parsed = urlparse(url)
+    netloc = parsed.netloc.lower().removeprefix("www.")
+    if netloc != host:
+        return []
+    return [part for part in parsed.path.split("/") if part]
+
+
+def canonical_github_repo_url(url: str) -> Optional[str]:
+    """``https://github.com/<owner>/<name>`` for a GitHub repository link."""
+    # Drop trailing path segments (e.g. /tree/main/...).
+    parts = _url_path_parts(url, "github.com")[:2]
+    if len(parts) < 2 or parts[0].lower() in _GITHUB_NON_OWNER_PATHS:
+        return None
+    name = parts[1].removesuffix(".git")
+    if not name:
+        return None
+    return f"https://github.com/{parts[0]}/{name}"
+
+
+def canonical_hf_repo_url(url: str) -> Optional[str]:
+    """Canonical model, dataset, or space URL for a Hugging Face repo link.
+
+    Bare owner pages (``/LiquidAI``, ``/datasets/allenai``,
+    ``/spaces/multimodalart``) are not artifacts and return None.
+    """
+    parts = _url_path_parts(url, "huggingface.co")
+    if not parts:
+        return None
+    first = parts[0].lower()
+    if first in {"datasets", "spaces"}:
+        if len(parts) < 3:
+            return None
+        return f"https://huggingface.co/{first}/{parts[1]}/{parts[2]}"
+    if len(parts) < 2 or first in _HF_NON_REPO_PATHS:
+        return None
+    return f"https://huggingface.co/{parts[0]}/{parts[1]}"
+
+
+def _unique_page_urls(html: str, base_url: str, canonicalize) -> List[str]:
+    # GitHub and Hub repo ids are case-insensitive, so case variants keep the
+    # first spelling seen on the page.
     seen: set = set()
     out: List[str] = []
     for url in _absolute_links_from_html(html, base_url):
-        match = _GITHUB_RE.search(url)
-        if not match:
+        canonical = canonicalize(url)
+        if canonical is None or canonical.lower() in seen:
             continue
-        candidate = match.group(0).rstrip("/")
-        parts = urlparse(candidate).path.strip("/").split("/")
-        if len(parts) < 2:
-            continue
-        # Drop trailing path segments (e.g. /tree/main/...).
-        owner = parts[0]
-        name = parts[1].rstrip(".git")
-        key = (owner.lower(), name.lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        out.append(f"https://github.com/{owner}/{name}")
+        seen.add(canonical.lower())
+        out.append(canonical)
     return out
+
+
+def extract_github_urls(html: str, base_url: str = "") -> List[str]:
+    """Unique-by-(owner, name) GitHub repository URLs found on a page."""
+    return _unique_page_urls(html, base_url, canonical_github_repo_url)
 
 
 def extract_hf_repo_urls(html: str, base_url: str = "") -> List[str]:
     """Unique HF model/dataset/space URLs (owner/name shape) found on a page."""
-    seen: set = set()
-    out: List[str] = []
-    for url in _absolute_links_from_html(html, base_url):
-        match = _HF_REPO_RE.search(url)
-        if not match:
-            continue
-        candidate = match.group(0).rstrip("/")
-        # Strip query/fragment
-        candidate = candidate.split("?")[0].split("#")[0]
-        # Skip non-repo HF paths like /docs, /pricing, /papers, etc.
-        path = urlparse(candidate).path.strip("/")
-        parts = path.split("/")
-        if len(parts) < 2:
-            continue
-        first = parts[0].lower()
-        if first in {"docs", "pricing", "blog", "join", "login", "papers"}:
-            continue
-        # Normalize to "owner/name" for typical HF paths and "datasets/owner/name"
-        # or "spaces/owner/name" for datasets/spaces.
-        if first in {"datasets", "spaces"} and len(parts) >= 3:
-            normalized = f"https://huggingface.co/{parts[0]}/{parts[1]}/{parts[2]}"
-        else:
-            normalized = f"https://huggingface.co/{parts[0]}/{parts[1]}"
-        if normalized in seen:
-            continue
-        seen.add(normalized)
-        out.append(normalized)
-    return out
+    return _unique_page_urls(html, base_url, canonical_hf_repo_url)
 
 
 _FRAMER_SEARCH_INDEX_RE = re.compile(

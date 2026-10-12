@@ -151,6 +151,25 @@ def test_update_paper_repositories_marks_lone_repository_official(
     assert link.is_official is True
 
 
+def test_update_paper_repositories_can_keep_lone_repository_unofficial(
+    db_session, paper_with_duplicate_repo_urls
+):
+    PaperAssociationService(db_session, lambda *_args, **_kw: None).update_repositories(
+        1,
+        [
+            {
+                "url": "https://github.com/huggingface/transformers",
+                "is_official": False,
+            }
+        ],
+        promote_lone_repository=False,
+    )
+
+    link = db_session.query(PaperRepository).filter(PaperRepository.paper_id == 1).one()
+    assert link.repository_id == 12
+    assert link.is_official is False
+
+
 def test_update_paper_repositories_supports_outer_transaction_rollback(
     db_session, paper_with_duplicate_repo_urls
 ):

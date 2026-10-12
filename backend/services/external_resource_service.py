@@ -14,9 +14,10 @@ Design notes:
   contaminate trending or recent feeds with the wrong date.
 - Authors are optional. Organizations are NOT stored in `paper_authors`;
   organization support arrives later as its own normalized model.
-- GitHub URLs linked directly from the source page default to
-  `is_official=true` on `paper_repositories`. Hugging Face artifact URLs
-  (models, datasets, spaces) are stored directly on the paper row in
+- GitHub URLs that the source page presents as its own code are linked with
+  `is_official=true` on `paper_repositories`; the metadata extractor drops
+  dependency, benchmark, and baseline repositories the page merely mentions.
+  Hugging Face artifact URLs (models, datasets, spaces) are stored directly on the paper row in
   `papers.hf_models`, `papers.hf_datasets`, and `papers.hf_spaces` so they
   do not collide with the more generic `project_pages` table. For arXiv
   rows, those columns stay empty and clients derive HF artifacts from the
@@ -445,9 +446,11 @@ class ExternalResourceService:
         existing_models = list(paper.hf_models or [])
         existing_datasets = list(paper.hf_datasets or [])
         existing_spaces = list(paper.hf_spaces or [])
-        seen: set[str] = (
-            set(existing_models) | set(existing_datasets) | set(existing_spaces)
-        )
+        # Hub repo ids are case-insensitive, so `org/Model` and `org/model`
+        # are the same artifact.
+        seen: set[str] = {
+            url.lower() for url in existing_models + existing_datasets + existing_spaces
+        }
 
         models_added = 0
         datasets_added = 0
@@ -463,10 +466,10 @@ class ExternalResourceService:
                     raw_url,
                 )
                 continue
-            if normalized in seen:
+            if normalized.lower() in seen:
                 existing_count += 1
                 continue
-            seen.add(normalized)
+            seen.add(normalized.lower())
 
             kind = classify_hf_artifact_url(normalized)
             if kind == "model":
