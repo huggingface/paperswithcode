@@ -2,8 +2,9 @@
 
 For each candidate paper the job runs one X API v2 recent search for posts that
 link the paper (arXiv/HF paper URLs, project page, official repository) or
-name it (method short name, title). Only original posts whose author's display
-name matches one of the paper's authors are kept. Matches are stored on the
+name it (method short name, title). Only original posts from the paper's own
+authors (matched by display name or handle) or from a business-verified account
+of one of its linked organizations are kept; outside accounts never are. Matches are stored on the
 paper's scan row and, when applying, linked through the audited `x_threads`
 curation section, which captures the preview shown on the paper page.
 """
@@ -102,7 +103,7 @@ def make_x_search(bearer_token: str, *, timeout: float = 30) -> Search:
                 "max_results": 25,
                 "tweet.fields": "author_id,created_at,public_metrics,conversation_id",
                 "expansions": "author_id",
-                "user.fields": "name,username",
+                "user.fields": "name,username,verified_type",
             },
             headers={"Authorization": f"Bearer {bearer_token}"},
             timeout=timeout,
@@ -121,9 +122,12 @@ def _name_tokens(name: str) -> list[str]:
     return re.findall(r"[a-z]+", ascii_name)
 
 
-def author_matches(display_name: str, authors: list[str]) -> str | None:
-    """Return the paper author whose name tokens all appear in the display name."""
+def author_matches(
+    display_name: str, authors: list[str], handle: str = ""
+) -> str | None:
+    """Return the paper author named by an X account's display name or handle."""
     shown = set(_name_tokens(display_name))
+    handle = handle.lower()
     for author in authors:
         tokens = _name_tokens(author)
         if len(tokens) >= 2 and set(tokens) <= shown:
@@ -132,6 +136,30 @@ def author_matches(display_name: str, authors: list[str]) -> str | None:
         full = [token for token in tokens if len(token) > 1]
         if len(full) >= 2 and {full[0], full[-1]} <= shown:
             return author
+        # Nicknamed display names ("Aaron Huang" for Wei Huang) often keep the
+        # real name in the handle (@AaronWeiHuang).
+        if len(full) >= 2 and any(
+            len(joined) >= 6 and joined in handle
+            for joined in (full[0] + full[-1], full[-1] + full[0])
+        ):
+            return author
+    return None
+
+
+def organization_matches(user: dict, organizations: list[str]) -> str | None:
+    """Return the linked organization a business-verified X account belongs to."""
+    if user.get("verified_type") != "business":
+        return None
+    shown = set(_name_tokens(user.get("name", "")))
+    handle = user.get("username", "").lower()
+    shown.update(re.findall(r"[a-z0-9]+", user.get("name", "").lower()))
+    for organization in organizations:
+        tokens = re.findall(r"[a-z0-9]+", organization.lower())
+        # Very short names ("AI") would match unrelated business accounts.
+        if len("".join(tokens)) < 3:
+            continue
+        if set(tokens) <= shown or "".join(tokens) in handle:
+            return organization
     return None
 
 
@@ -182,9 +210,12 @@ def build_query(
 
 
 def match_posts(
-    response: dict, authors: list[str], published: date | None
+    response: dict,
+    authors: list[str],
+    published: date | None,
+    organizations: list[str] = (),
 ) -> list[dict]:
-    """Keep each matching author's most-liked original post, best first."""
+    """Keep each author's or organization's most-liked original post, best first."""
     users = {u["id"]: u for u in response.get("includes", {}).get("users", [])}
     earliest = (
         datetime.combine(published - timedelta(days=7), datetime.min.time(), UTC)
@@ -196,7 +227,11 @@ def match_posts(
         user = users.get(post.get("author_id"))
         if not user or post.get("conversation_id", post["id"]) != post["id"]:
             continue
-        author = author_matches(user.get("name", ""), authors)
+        author = author_matches(user.get("name", ""), authors, user["username"])
+        kind = "author"
+        if not author:
+            author = organization_matches(user, list(organizations))
+            kind = "organization"
         if not author:
             continue
         created = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
@@ -206,6 +241,7 @@ def match_posts(
         match = {
             "url": f"https://x.com/{user['username']}/status/{post['id']}",
             "author": author,
+            "kind": kind,
             "handle": user["username"],
             "likes": likes,
             "created_at": post["created_at"],
@@ -294,6 +330,7 @@ def discover_x_threads(
     curation = PaperCurationService(db)
     for paper in candidate_papers(db, today=today or date.today(), limit=max_papers):
         authors = [author.name for author in paper.authors]
+        organizations = [organization.name for organization in paper.organizations]
         project_urls, repo_urls = _paper_links(db, paper.id)
         query = build_query(paper.arxiv_id, paper.title, project_urls, repo_urls)
         result = PaperScanResult(paper.id, paper.arxiv_id, paper.title, query)
@@ -308,7 +345,9 @@ def discover_x_threads(
         except httpx.HTTPError as error:
             result.error = f"X search failed: {error}"
             continue
-        result.matches = match_posts(response, authors, paper.date_published)
+        result.matches = match_posts(
+            response, authors, paper.date_published, organizations
+        )
         if apply and result.matches:
             urls = [match["url"] for match in result.matches]
             try:

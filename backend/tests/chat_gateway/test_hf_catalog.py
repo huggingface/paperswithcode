@@ -365,6 +365,7 @@ def test_gateway_validates_then_meters_before_dispatch(monkeypatch):
         authorization="Bearer opaque",
         x_pwc_session=str(uuid.uuid4()),
         x_pwc_turn=str(uuid.uuid4()),
+        turn_fence=None,
         db=DB(),
         settings=settings,
     )
@@ -437,14 +438,17 @@ def test_prompt_and_tool_policy_treat_hf_content_as_untrusted(tmp_path):
     pwc_guide.write_text("pwc")
     hf_guide.write_text("hf")
     budget = ToolBudget(12, 4, 1024, 4096)
-    assert budget.authorize(
+    # The skill is inlined in the prompt, so rereading it wastes a tool round.
+    decision = budget.authorize(
         "hf-skill",
         "Read",
         {"file_path": str(hf_guide)},
         workspace=workspace,
         guide=pwc_guide,
         hf_guide=hf_guide,
-    ).allowed
+    )
+    assert not decision.allowed
+    assert "already included verbatim" in decision.reason
 
 
 def test_worker_contract_pins_restricted_cli_and_skill_digests():

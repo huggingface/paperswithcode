@@ -492,11 +492,11 @@ Source verification is safe and exact; it does not contact staging:
 
 ```bash
 uv run --env-file backend/keys.env pytest -q \
-  backend/tests/test_durable_external_turn_faults.py \
-  backend/tests/test_external_pi_fleet_qualification.py \
+  backend/tests/external_pi/test_durable_external_turn_faults.py \
+  backend/tests/external_pi/test_fleet_*.py \
   backend/tests/test_durable_qualification_cli.py
 uv run --isolated --with locust python -c \
   "import backend.loadtests.external_pi_fleet_locustfile"
 uv run --isolated --with locust --with pytest --with pydantic \
-  python -m pytest -q backend/tests/test_external_pi_fleet_qualification.py
+  python -m pytest -q backend/tests/external_pi/test_fleet_*.py
 ```

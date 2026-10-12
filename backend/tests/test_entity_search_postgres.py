@@ -155,6 +155,12 @@ def seeded_catalog(session_factory):
                 Dataset(id=902, name="Sparse Benchmark", slug="sparse-benchmark"),
                 Dataset(id=903, name="Trend Set Alpha", slug="trend-set-alpha"),
                 Dataset(id=904, name="Trend Set Beta", slug="trend-set-beta"),
+                Dataset(id=905, name="HumanEval", slug="humaneval"),
+                Dataset(
+                    id=906,
+                    name="BEDLAM (Human-Scene)",
+                    slug="bedlam-human-scene",
+                ),
             ]
         )
         session.add_all(
@@ -219,6 +225,14 @@ def seeded_catalog(session_factory):
                     task_id=900,
                     dataset_id=903,
                     model_name="Old",
+                    metrics={"Score": 1},
+                ),
+                Evaluation(
+                    id=3,
+                    paper_id=1,
+                    task_id=900,
+                    dataset_id=905,
+                    model_name="Recent",
                     metrics={"Score": 1},
                 ),
                 PaperMethod(paper_id=3, method_id=1005),
@@ -358,6 +372,12 @@ def test_entity_native_trends_break_textual_ties(session_factory):
         assert _slugs(DatasetService(session).search_datasets("trend set"))[:2] == [
             "trend-set-beta",
             "trend-set-alpha",
+        ]
+        # Hyphenated compounds and repeated words must not outrank trends for
+        # a single-term query.
+        assert _slugs(DatasetService(session).search_datasets("human"))[:2] == [
+            "humaneval",
+            "bedlam-human-scene",
         ]
         assert _slugs(MethodService(session).search_methods("usage method"))[:2] == [
             "usage-method-beta",

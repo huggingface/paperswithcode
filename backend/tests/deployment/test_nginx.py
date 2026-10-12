@@ -137,7 +137,8 @@ def test_spa_shell_never_reveals_initial_documents():
     )
     assert hiding_rule in shell
     assert shell.index(hiding_rule) < shell.index("<script>")
-    assert shell.index(hiding_rule) < shell.index('<link rel="stylesheet"')
+    # Vite injects the app stylesheet after these head links at build time.
+    assert shell.index(hiding_rule) < shell.index("<link")
     assert "<noscript>" not in shell
     assert '<footer hidden id="initial-discovery-footer"' in shell
     assert 'data-pwc-initial-document="paper"' not in shell

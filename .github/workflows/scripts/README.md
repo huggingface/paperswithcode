@@ -139,8 +139,10 @@ takes up to 40 arXiv papers from the last 10 days that are trending or featured
 on Hugging Face daily papers and have no X threads, and runs one X API v2
 recent search per paper over links to the paper (the arXiv ID in any URL,
 project page, official repositories), its short method name, and its title.
-Only original posts whose author's display name matches a paper author are
-kept (at most two per paper, most liked first). Each paper is searched at most
+Only original posts from the paper's own authors (display name, or first and
+last name in the handle) or from a business-verified account of one of the
+paper's linked organizations are kept; outside accounts never are (at most two
+per paper, most liked first). Each paper is searched at most
 three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
 job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
 it. It is report-only, storing matches on the scan row, unless
