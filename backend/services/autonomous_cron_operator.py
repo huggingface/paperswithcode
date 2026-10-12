@@ -201,9 +201,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "autonomous_cron_health": ("backend/tests/test_autonomous_cron_operator.py",),
     "autonomous_cron_audit": ("backend/tests/test_autonomous_cron_operator.py",),
     "monitor_chat_operational_alerts": (
-        "backend/tests/test_chat_operational_alerts.py",
+        "backend/tests/chat/test_operational_alerts.py",
     ),
-    "run_chat_synthetic_probe": ("backend/tests/test_chat_synthetic_probe.py",),
+    "run_chat_synthetic_probe": ("backend/tests/chat/test_synthetic_probe.py",),
 }
 
 

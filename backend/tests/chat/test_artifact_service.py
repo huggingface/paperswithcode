@@ -397,7 +397,7 @@ def test_latex_paper_version_cannot_claim_a_preview_without_its_pdf(db):
 
 
 def test_latex_foundation_migration_is_additive_and_rollback_is_non_destructive():
-    migrations = Path(__file__).parents[1] / "database" / "migrations"
+    migrations = Path(__file__).parents[2] / "database" / "migrations"
     migration = (migrations / "expand_chat_artifact_foundation.sql").read_text()
     rollback = (migrations / "rollback_expand_chat_artifact_foundation.sql").read_text()
 

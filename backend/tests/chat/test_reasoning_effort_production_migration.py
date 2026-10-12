@@ -2,7 +2,7 @@ from pathlib import Path
 
 
 MIGRATION = (
-    Path(__file__).parents[1]
+    Path(__file__).parents[2]
     / "database"
     / "migrations"
     / "add_chat_reasoning_effort_production.sql"

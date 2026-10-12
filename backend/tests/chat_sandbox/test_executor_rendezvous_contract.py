@@ -20,7 +20,7 @@ from backend.services.chat_executor_admission import (
 )
 from backend.services.chat_sandbox_provider import ExecutorLaunchBundle, SandboxError
 
-REPOSITORY = Path(__file__).resolve().parents[2]
+REPOSITORY = Path(__file__).resolve().parents[3]
 
 
 def test_python_admission_rejects_identifiers_rust_would_reject() -> None:

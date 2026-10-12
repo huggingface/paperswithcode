@@ -18,7 +18,7 @@ from backend.chat_sandbox_worker.mcp_app_registry import (
 )
 from backend.config import Settings
 
-REPOSITORY = Path(__file__).resolve().parents[2]
+REPOSITORY = Path(__file__).resolve().parents[3]
 
 
 def _settings(**overrides) -> Settings:

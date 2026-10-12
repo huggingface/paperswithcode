@@ -148,6 +148,7 @@ def test_every_declared_job_has_bounded_source_and_runtime_contract():
             for path in contract.source_paths
         )
         assert contract.test_paths
+        assert all(Path(path).is_file() for path in contract.test_paths)
         if contract.retry_command is not None:
             assert job_name in COMMANDS
             assert contract.retry_command == ("pwc-cron", job_name)

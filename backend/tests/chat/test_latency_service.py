@@ -621,7 +621,7 @@ def test_active_spend_status_requires_timezone_aware_now(db):
 
 def test_latency_migration_is_environment_scoped_and_least_privilege():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database"
         / "migrations"
         / "add_chat_turn_latency.sql"
@@ -637,7 +637,7 @@ def test_latency_migration_is_environment_scoped_and_least_privilege():
 
 def test_qualification_metadata_migration_is_environment_scoped_and_least_privilege():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database"
         / "migrations"
         / "add_chat_qualification_metadata.sql"
@@ -706,7 +706,7 @@ def test_marking_external_pi_is_idempotent_and_leaves_modal_turns_billed(db):
 
 def test_external_pi_backend_migration_is_environment_scoped():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database"
         / "migrations"
         / "allow_external_pi_latency_backend.sql"

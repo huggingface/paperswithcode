@@ -147,7 +147,7 @@ def test_pool_readiness_requires_exact_live_registration(monkeypatch, invalid):
 def test_workspace_requests_pool_only_for_persistent_transport(
     monkeypatch, remote, legacy, expected
 ):
-    from backend.tests.test_chat_external_executor_workspace import (
+    from backend.tests.chat_sandbox.executor_workspace_harness import (
         setup_manager,
         TURN_CLAIM,
     )

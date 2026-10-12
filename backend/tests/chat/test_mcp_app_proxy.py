@@ -188,7 +188,7 @@ def test_frontend_host_uses_same_origin_proxy_path():
     from pathlib import Path
 
     source = (
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[3]
         / "frontend/src/components/chat/mcpAppRegistry.ts"
     ).read_text(encoding="utf-8")
     assert 'EXCALIDRAW_HOST_PATH = "/api/v1/chat/mcp-apps/excalidraw"' in source

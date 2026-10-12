@@ -901,7 +901,7 @@ def test_scope_turn_fence_events_are_atomically_unique(engine, event_type):
 
 def test_qualification_evidence_migration_matches_content_free_model_contract():
     sql = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_qualification_evidence_events.sql"
     ).read_text()
 
@@ -922,7 +922,7 @@ def test_qualification_evidence_migration_matches_content_free_model_contract():
 
 def test_forward_repair_is_additive_ordered_idempotent_and_refuses_lossy_data():
     sql = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/repair_chat_qualification_evidence_contract.sql"
     ).read_text()
 
@@ -956,11 +956,11 @@ def test_postgresql_fresh_evidence_catalog_and_repair_are_exact_and_idempotent()
         configured.url.set(database="postgres"), isolation_level="AUTOCOMMIT"
     )
     initial_sql = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_qualification_evidence_events.sql"
     ).read_text()
     repair_sql = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/repair_chat_qualification_evidence_contract.sql"
     ).read_text()
     database = None

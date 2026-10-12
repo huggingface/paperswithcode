@@ -8,7 +8,7 @@ from backend.chat_sandbox_worker.prompt import render
 from backend.config import Settings
 from backend.services.chat_sandbox_provider import sandbox_environment
 
-SKILL = Path(__file__).resolve().parents[1] / "chat_sandbox_worker" / "HF_CLI_SKILL.md"
+SKILL = Path(__file__).resolve().parents[2] / "chat_sandbox_worker" / "HF_CLI_SKILL.md"
 
 
 @pytest.mark.parametrize(

@@ -52,7 +52,7 @@ from backend.services.chat_executor_admission import (
 
 
 MIGRATION = (
-    Path(__file__).parents[1]
+    Path(__file__).parents[2]
     / "database/migrations/add_chat_executor_registrations.sql"
 )
 TABLES = (

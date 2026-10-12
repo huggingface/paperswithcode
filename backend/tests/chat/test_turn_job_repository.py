@@ -1133,7 +1133,7 @@ def test_stale_session_cannot_overwrite_a_newer_committed_terminal(tmp_path):
 
 def test_turn_job_migration_is_guarded_and_preserves_schema_ownership():
     migration = (
-        Path(__file__).parents[1] / "database/migrations/add_chat_turn_jobs.sql"
+        Path(__file__).parents[2] / "database/migrations/add_chat_turn_jobs.sql"
     ).read_text()
 
     assert "current_schema() NOT IN ('staging', 'public')" in migration
@@ -1148,8 +1148,8 @@ def test_turn_job_migration_is_guarded_and_preserves_schema_ownership():
     assert "FROM pwc_staging;" in migration
 
     migration_readme = (
-        Path(__file__).parents[1] / "database/migrations/README.md"
+        Path(__file__).parents[2] / "database/migrations/README.md"
     ).read_text()
-    deployment = (Path(__file__).parents[2] / "docs/deployment.md").read_text()
+    deployment = (Path(__file__).parents[3] / "docs/deployment.md").read_text()
     assert "`add_chat_turn_jobs.sql`" in migration_readme
     assert "`add_chat_turn_jobs.sql`" in deployment

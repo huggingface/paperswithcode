@@ -29,7 +29,7 @@ NOW = datetime(2026, 9, 4, 12, tzinfo=UTC)
 
 def test_transport_circuit_migration_sets_environment_role_boundaries():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_executor_transport_circuit.sql"
     ).read_text()
     lowered = migration.lower()

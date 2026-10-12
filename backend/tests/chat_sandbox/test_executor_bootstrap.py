@@ -526,7 +526,7 @@ def test_generation_transition_cannot_replace_existing_generation() -> None:
 
 
 def test_public_interoperability_vector_matches_protocol_messages() -> None:
-    root = Path(__file__).parents[2]
+    root = Path(__file__).parents[3]
     vector = json.loads(
         (root / "executor_transport/vectors/bootstrap_v1.json").read_text()
     )

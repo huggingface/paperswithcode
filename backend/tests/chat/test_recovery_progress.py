@@ -152,7 +152,7 @@ def test_saved_progress_retry_keeps_native_leaf_and_prior_failure():
 @pytest.mark.parametrize("expired", [False, True])
 def test_poster_retry_preserves_mode_lease_and_persisted_request(monkeypatch, expired):
     from datetime import timedelta
-    from backend.tests.test_chat_turn_admission_characterization import (
+    from backend.tests.chat.admission_harness import (
         _Result,
         _ScriptedDB,
         _owned_service,

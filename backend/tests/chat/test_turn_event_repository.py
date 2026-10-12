@@ -263,7 +263,7 @@ def test_model_and_migration_define_the_bounded_event_journal():
         for index in table.indexes
     )
     migration = (
-        Path(__file__).parents[1] / "database/migrations/add_chat_turn_event_chunks.sql"
+        Path(__file__).parents[2] / "database/migrations/add_chat_turn_event_chunks.sql"
     ).read_text()
 
     assert str(ChatTurnJob.__table__.c.event_sequence.server_default.arg) == "0"
@@ -291,7 +291,7 @@ def test_terminal_cleanup_index_is_partial_and_migrated():
         for index in ChatTurnJob.__table__.indexes
     )
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_turn_terminal_cleanup_index.sql"
     ).read_text()
 

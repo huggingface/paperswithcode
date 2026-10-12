@@ -30,12 +30,12 @@ from backend.services.chat_turn_job_repository import (
     ChatOverload,
     IdempotencyMismatch,
 )
-from backend.tests.test_chat_turn_admission_characterization import (
+from backend.tests.chat.admission_harness import (
     _Result,
     _ScriptedDB,
     _session,
 )
-from backend.tests.test_chat_turn_admission_decomposition import (
+from backend.tests.chat.transactional_admission_harness import (
     _TransactionalScriptedDB,
 )
 

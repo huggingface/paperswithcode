@@ -381,7 +381,7 @@ def test_unknown_provider_cost_retains_turn_reserve_until_reconciled(service, db
 
 def test_migration_pins_capacity_spend_and_owner_guards():
     migration = (
-        Path(__file__).parents[1] / "database/migrations/add_chat_turn_reservations.sql"
+        Path(__file__).parents[2] / "database/migrations/add_chat_turn_reservations.sql"
     ).read_text()
 
     assert "turn_limit = 32" in migration

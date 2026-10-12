@@ -11,7 +11,7 @@ from backend.services.chat_session_service import (
     ChatServiceError,
 )
 from backend.services.chat_turn_mode import resolve_turn_mode
-from backend.tests.test_chat_turn_admission_characterization import (
+from backend.tests.chat.admission_harness import (
     _Result,
     _ScriptedDB,
     _session,
