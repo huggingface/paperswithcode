@@ -130,6 +130,25 @@ class _Clock:
         self.now += timedelta(seconds=seconds)
 
 
+class _ClockedSpend(ChatSandboxSpendService):
+    """Default every spend timestamp to the harness clock, not the wall clock."""
+
+    def __init__(self, db, settings: Settings, clock: _Clock) -> None:
+        super().__init__(db, settings, utcnow=clock.utcnow)
+        self.clock = clock
+
+    def status(self, now: datetime | None = None) -> dict:
+        return super().status(now or self.clock.now)
+
+    def terminate(self, sandbox_id, reason, *, confirmed, now=None) -> None:
+        return super().terminate(
+            sandbox_id, reason, confirmed=confirmed, now=now or self.clock.now
+        )
+
+    def record_kill_sweep(self, *, complete, now=None):
+        return super().record_kill_sweep(complete=complete, now=now or self.clock.now)
+
+
 class _Provider:
     def __init__(self, probe: _TransactionProbe) -> None:
         self.probe = probe
@@ -298,6 +317,9 @@ class _Harness:
         )
         self.sleep_calls: list[float] = []
 
+    def spend(self, db) -> _ClockedSpend:
+        return _ClockedSpend(db, self.settings, self.clock)
+
     async def sleep(self, seconds: float) -> None:
         self.probe.outside_transaction("sleep")
         self.sleep_calls.append(seconds)
@@ -306,7 +328,7 @@ class _Harness:
     def trip(self, *, seconds_ago: float = 0) -> None:
         at = self.clock.now - timedelta(seconds=seconds_ago)
         with self.sessions() as db, db.begin():
-            ChatSandboxSpendService(db, self.settings).trip("test_trip", at)
+            self.spend(db).trip("test_trip", at)
 
     def add_lease(
         self,
@@ -459,6 +481,7 @@ class _Harness:
             "pool": self.pool,
             "transport": self.transport,
             "provider": self.provider,
+            "spend_factory": self.spend,
             "utcnow": self.clock.utcnow,
             "sleeper": self.sleep,
         }
@@ -706,7 +729,7 @@ def test_confirmed_provider_accounting_failure_falls_back_to_uncertain_once():
 
     class Spend:
         def __init__(self, db) -> None:
-            self.delegate = ChatSandboxSpendService(db, harness.settings)
+            self.delegate = harness.spend(db)
 
         def status(self):
             return self.delegate.status()
@@ -1008,7 +1031,7 @@ def test_same_coordinator_serializes_concurrent_enforcement_end_to_end():
 
     class Spend:
         def __init__(self, db) -> None:
-            self.delegate = ChatSandboxSpendService(db, harness.settings)
+            self.delegate = harness.spend(db)
 
         def status(self):
             spend_events.append("status")
