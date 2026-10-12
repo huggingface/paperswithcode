@@ -5,6 +5,9 @@ before pagination. It shares response hydration, while scoped feeds share the
 entire ORM pipeline. Ordering policies preserve public endpoint differences.
 """
 
+import threading
+import time
+from collections import OrderedDict
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -40,6 +43,46 @@ GENERAL_ORDERING = FeedOrdering(nulls_last=True, case_insensitive_direction=True
 SCOPED_ORDERING = FeedOrdering(id_tiebreaker=True, fallback_to_date=True)
 
 
+# Exact feed totals cost a scan of every matching paper, while the page itself
+# is a short index walk. Feed responses are already HTTP-cacheable for 60 s, so
+# reuse a total for that long; infinite scroll then counts once, not per page.
+COUNT_CACHE_TTL_SECONDS = 60
+COUNT_CACHE_MAX_ENTRIES = 1024
+_count_cache: OrderedDict[tuple[str, str], tuple[float, int]] = OrderedDict()
+_count_cache_lock = threading.Lock()
+
+
+def cached_count(query: Query[DBPaper], bind) -> int:
+    """Return ``query``'s row count, cached briefly on PostgreSQL."""
+    if bind.dialect.name != "postgresql":
+        return query.count()
+    compiled = query.statement.compile(dialect=bind.dialect)
+    key = (str(bind.url), f"{compiled}|{sorted(compiled.params.items())!r}")
+    now = time.monotonic()
+    with _count_cache_lock:
+        cached = _count_cache.get(key)
+    if cached and now - cached[0] < COUNT_CACHE_TTL_SECONDS:
+        return cached[1]
+    count = query.count()
+    with _count_cache_lock:
+        _count_cache[key] = (now, count)
+        _count_cache.move_to_end(key)
+        while len(_count_cache) > COUNT_CACHE_MAX_ENTRIES:
+            _count_cache.popitem(last=False)
+    return count
+
+
+def search_filter(query: Query[DBPaper], search: str, bind) -> Query[DBPaper]:
+    """Case-insensitive substring match on title or abstract."""
+    pattern = f"%{search}%"
+    title, abstract = DBPaper.title, DBPaper.abstract
+    if search.isascii() and bind.dialect.name == "postgresql":
+        # ILIKE under the database's en_US.UTF-8 collation is ~2.5x slower
+        # than under "C", which folds ASCII patterns the same way.
+        title, abstract = title.collate("C"), abstract.collate("C")
+    return query.filter(or_(title.ilike(pattern), abstract.ilike(pattern)))
+
+
 class PaperFeedExecutor:
     def __init__(self, papers: "PaperService"):
         self.papers = papers
@@ -73,13 +116,9 @@ class PaperFeedExecutor:
             query = query.filter(family_repository_exists_clause(official_only=True))
         if has_hf_artifacts:
             query = self.papers.apply_has_hf_artifacts_filter(query)
+        bind = self.papers.db.get_bind()
         if search:
-            query = query.filter(
-                or_(
-                    DBPaper.title.ilike(f"%{search}%"),
-                    DBPaper.abstract.ilike(f"%{search}%"),
-                )
-            )
+            query = search_filter(query, search, bind)
         if start_date is not None:
             query = query.filter(DBPaper.date_published >= start_date)
         if end_date is not None:
@@ -116,7 +155,7 @@ class PaperFeedExecutor:
                 terms.append(sort(DBPaper.id))
             query = query.order_by(*terms)
 
-        count = query.order_by(None).count()
+        count = cached_count(query.order_by(None), bind)
         rows = query.offset((page - 1) * page_size).limit(page_size).all()
         return self.page(
             rows,
