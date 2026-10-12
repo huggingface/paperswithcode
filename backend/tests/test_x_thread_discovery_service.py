@@ -225,3 +225,14 @@ def test_make_x_search_uses_full_archive_window(monkeypatch):
     assert archive_url == X_ARCHIVE_SEARCH_URL
     assert archive["start_time"] == "2026-05-13T00:00:00Z"
     assert archive["sort_order"] == "relevancy"
+
+
+def test_build_query_keeps_project_path_on_shared_hosts():
+    query = build_query(
+        None,
+        "ROWBench: Do Video Models Render What the Program Specifies?",
+        ["https://alaya-lab.github.io/PROWBench"],
+        [],
+    )
+    assert 'url:"alaya-lab.github.io/PROWBench"' in query
+    assert 'url:"alaya-lab.github.io"' not in query

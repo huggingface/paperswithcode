@@ -234,8 +234,9 @@ def build_query(
     for url in project_urls:
         host = urlsplit(url).netloc.removeprefix("www.")
         path = urlsplit(url).path.strip("/")
-        # Shared hosts (github.io pages live under the host itself) stay specific.
-        target = host if host.endswith(".github.io") or not path else f"{host}/{path}"
+        # Keep the path: one host (a lab's github.io site) often serves many
+        # projects, and the bare host would match posts about all of them.
+        target = f"{host}/{path}" if path else host
         terms.append(f'url:"{target}"')
     for url in repo_urls:
         parts = urlsplit(url).path.strip("/").split("/")
