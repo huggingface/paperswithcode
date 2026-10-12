@@ -255,3 +255,43 @@ def test_run_continues_after_one_failure_emits_summary_then_raises(monkeypatch):
         "failed": 1,
     }
     assert job.vacuum_analyze_table.call_count == 6
+
+
+def _tldr_job(api_key):
+    job = HuggingFaceDailyPapersJob.__new__(HuggingFaceDailyPapersJob)
+    job.logger = MagicMock()
+    job.settings = SimpleNamespace(openai_api_key=api_key)
+    return job
+
+
+def test_generate_tldr_uses_luna_when_configured(monkeypatch):
+    calls = []
+
+    def fake_generate(client, title, abstract, *, api_key):
+        calls.append((title, abstract, api_key))
+        return "Luna TL;DR."
+
+    monkeypatch.setattr(importer_module, "generate_paper_tldr", fake_generate)
+
+    assert _tldr_job("sk-test")._generate_tldr("T", "A") == "Luna TL;DR."
+    assert calls == [("T", "A", "sk-test")]
+
+
+@pytest.mark.parametrize("api_key, abstract", [("", "A"), ("sk-test", "")])
+def test_generate_tldr_skips_without_key_or_abstract(monkeypatch, api_key, abstract):
+    monkeypatch.setattr(
+        importer_module, "generate_paper_tldr", MagicMock(side_effect=AssertionError)
+    )
+
+    assert _tldr_job(api_key)._generate_tldr("T", abstract) is None
+
+
+def test_generate_tldr_falls_back_on_http_error(monkeypatch):
+    def failing_generate(client, title, abstract, *, api_key):
+        raise importer_module.httpx.ConnectError("down")
+
+    monkeypatch.setattr(importer_module, "generate_paper_tldr", failing_generate)
+    job = _tldr_job("sk-test")
+
+    assert job._generate_tldr("T", "A") is None
+    job.logger.warning.assert_called_once()

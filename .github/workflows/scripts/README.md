@@ -191,7 +191,9 @@ pages for papers that still have `urls_extracted = false`.
 
 `import_hf_daily_papers.py` runs hourly, imports the current day's Hugging Face
 papers that are not yet in the database, and auto-tags tasks/methods using
-keyword matching. It also links curated organization payloads for both new and
+keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
+(`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
+key is missing or the call fails, the Hugging Face `ai_summary` is stored instead. It also links curated organization payloads for both new and
 already-existing papers.
 
 The three MMTEB v2 jobs consume the official MTEB leaderboard API's precomputed

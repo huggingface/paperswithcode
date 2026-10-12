@@ -27,6 +27,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import aiohttp
+import httpx
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
@@ -37,6 +38,7 @@ from backend.database.paper_merge import (
 from backend.services.organization_sync_service import (
     link_daily_paper_organizations,
 )
+from backend.services.paper_tldr_service import generate_paper_tldr
 from backend.utils.hf_daily_papers import fetch_hf_daily_papers
 from scripts.utils.cron_helpers import DatabaseCronJob
 from scripts.utils.hf_paper_importer import HuggingFacePaperImporterMixin
@@ -207,7 +209,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         title = (paper_info.get("title") or "").strip()
         abstract = (paper_info.get("summary") or "").strip()
         date_published = self.parse_published_at(paper_info.get("publishedAt"))
-        tldr = paper_info.get("ai_summary")
+        tldr = self._generate_tldr(title, abstract) or paper_info.get("ai_summary")
 
         paper_id = self.insert_paper(arxiv_id, title, abstract, date_published, tldr)
         if not paper_id:
@@ -232,6 +234,19 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
             paper_id,
             paper_data.get("organization") or paper_info.get("organization"),
         )
+
+    def _generate_tldr(self, title: str, abstract: str) -> Optional[str]:
+        """Luna TL;DR in the catalog voice; None falls back to the HF ai_summary."""
+        if not self.settings.openai_api_key or not abstract:
+            return None
+        try:
+            with httpx.Client(timeout=60) as client:
+                return generate_paper_tldr(
+                    client, title, abstract, api_key=self.settings.openai_api_key
+                )
+        except httpx.HTTPError as exc:
+            self.logger.warning("TL;DR generation failed for %r: %s", title, exc)
+            return None
 
     def _merge_external_duplicate(
         self, arxiv_id: str, paper_id: int, title: str
