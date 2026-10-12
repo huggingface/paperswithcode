@@ -630,8 +630,14 @@ class ChatSettings(
         """Keep non-Posterly research artifacts across the legacy host launcher."""
 
         if self.environment == "staging" and self.chat_scope_guardrail_enabled:
-            self.chat_artifacts_enabled = True
-            self.chat_artifact_shared_preview_enabled = True
+            qualification = self.chat_latex_compiler_qualification_mode
+            private_paper = (
+                self.chat_latex_paper_enabled or self.chat_latex_compiler_jobs_enabled
+            )
+            self.chat_artifacts_enabled = not qualification
+            self.chat_artifact_shared_preview_enabled = not (
+                qualification or private_paper
+            )
         return self
 
     @property

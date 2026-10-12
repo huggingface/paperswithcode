@@ -226,6 +226,35 @@ def test_staging_scope_policy_preserves_non_posterly_artifact_foundation() -> No
         )
 
 
+def test_staging_scope_policy_preserves_private_paper_preview_boundaries() -> None:
+    qualification = _settings(
+        environment="staging",
+        chat_latex_compiler_qualification_mode=True,
+        chat_artifacts_enabled=True,
+        chat_artifact_shared_preview_enabled=True,
+        chat_posterly_enabled=False,
+        chat_artifact_storage_backend="hf_bucket",
+        chat_artifact_hf_bucket_id="org/staging-artifacts",
+    )
+    assert qualification.chat_artifacts_enabled is False
+    assert qualification.chat_artifact_shared_preview_enabled is False
+    validate_chat_scope_guardrail_configuration(qualification)
+
+    activation = _settings(
+        environment="staging",
+        chat_latex_paper_enabled=True,
+        chat_latex_compiler_jobs_enabled=True,
+        chat_artifacts_enabled=True,
+        chat_artifact_shared_preview_enabled=False,
+        chat_posterly_enabled=False,
+        chat_artifact_storage_backend="hf_bucket",
+        chat_artifact_hf_bucket_id="org/staging-artifacts",
+    )
+    assert activation.chat_artifacts_enabled is True
+    assert activation.chat_artifact_shared_preview_enabled is False
+    validate_chat_scope_guardrail_configuration(activation)
+
+
 def test_valid_glm_decision_is_not_second_guessed_by_luna() -> None:
     calls: list[str] = []
 

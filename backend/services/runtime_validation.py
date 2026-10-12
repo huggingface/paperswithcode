@@ -245,6 +245,13 @@ def validate_private_paper_runtime(settings: Settings) -> None:
             raise RuntimeError(
                 "private paper qualification must keep user features disabled"
             )
+        if (
+            settings.chat_artifacts_enabled
+            or settings.chat_artifact_shared_preview_enabled
+        ):
+            raise RuntimeError(
+                "private paper qualification must disable user-facing artifacts"
+            )
         return
     if not all(user_paper_flags):
         raise RuntimeError("private paper runtime flags must be coherent")

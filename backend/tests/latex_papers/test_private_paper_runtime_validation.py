@@ -129,6 +129,21 @@ def test_deployed_staging_paper_runtime_requires_bound_root_evidence(
     assert runtime_validation.validate_runtime(settings) == profile_features("staging")
 
 
+def test_compiler_qualification_disables_user_facing_artifacts(tmp_path: Path) -> None:
+    settings = _armed_settings(tmp_path)
+    settings.chat_latex_paper_enabled = False
+    settings.chat_latex_compiler_jobs_enabled = False
+    settings.chat_latex_compiler_qualification_mode = True
+    settings.chat_artifacts_enabled = False
+    settings.chat_artifact_shared_preview_enabled = False
+
+    runtime_validation.validate_private_paper_runtime(settings)
+
+    settings.chat_artifacts_enabled = True
+    with pytest.raises(RuntimeError, match="user-facing artifacts"):
+        runtime_validation.validate_private_paper_runtime(settings)
+
+
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
