@@ -193,7 +193,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
         "backend/tests/test_historical_reference_backfill_cli.py",
     ),
     "link_methods_by_references": (
-        "backend/tests/test_link_methods_by_references_weekly.py",
+        "backend/tests/taxonomy/test_link_methods_by_references_weekly.py",
     ),
     "link_papers_by_task_keywords": ("backend/tests/test_cron_dashboard.py",),
     "review_submissions": ("backend/tests/test_autonomous_submission_schedule.py",),
