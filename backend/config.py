@@ -503,7 +503,7 @@ class Settings(BaseSettings):
     chat_title_max_call_microusd: int = Field(default=10_000, ge=1)
     chat_title_input_microusd_per_token: int = Field(default=1, ge=1)
     chat_title_output_microusd_per_token: int = Field(default=2, ge=1)
-    chat_session_limit: int = Field(default=100, ge=1, le=1000)
+    chat_session_limit: int = Field(default=500, ge=1, le=1000)
     chat_session_message_limit: int = Field(default=200, ge=2, le=2000)
     chat_session_byte_limit: int = Field(default=25 * 1024 * 1024, ge=1024)
     chat_user_byte_limit: int = Field(default=100 * 1024 * 1024, ge=1024)
