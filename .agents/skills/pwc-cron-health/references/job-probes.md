@@ -157,7 +157,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `discover_x_threads`
 
 - **Effect:** Prints a JSON summary (`papers_scanned`, `papers_matched`, `threads_linked`, `errors`, `matches`) and upserts `paper_x_thread_scans`. Links `paper_x_threads` only when `PWC_X_THREAD_DISCOVERY_APPLY=true`; every link is a `paper_x_threads` catalog mutation event by `x-thread-discovery`. Exits 0 with an `x_thread_discovery_skipped` warning when `X_API_BEARER_TOKEN` is unset, and 1 only when every search failed.
-- **Independent proof:** Open one matched post from the JSON and confirm its author is a paper author introducing that paper; with apply on, confirm the paper page's X threads card shows it.
+- **Independent proof:** Open one matched post from the JSON and confirm it is a paper author or the paper's own organization (business-verified account) introducing that paper, never an outside account; with apply on, confirm the paper page's X threads card shows it.
 - **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
 
 ## `scan_model_releases`
