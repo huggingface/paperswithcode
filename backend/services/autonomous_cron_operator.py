@@ -143,8 +143,18 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
 }
 
 _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
-    "extract_urls": ("backend/tests/test_url_extraction_agent.py",),
-    "paper_markdown_backfill": ("backend/tests/test_paper_markdown_backfill.py",),
+    "extract_urls": ("backend/tests/paper/test_url_extraction_agent.py",),
+    "paper_markdown_backfill": (
+        "backend/tests/paper/test_markdown_dispatch.py",
+        "backend/tests/paper/test_markdown_mount_recovery.py",
+        "backend/tests/paper/test_markdown_pdf_sources.py",
+        "backend/tests/paper/test_markdown_publication.py",
+        "backend/tests/paper/test_markdown_repair.py",
+        "backend/tests/paper/test_markdown_semantics.py",
+        "backend/tests/paper/test_markdown_stalled_jobs.py",
+        "backend/tests/paper/test_markdown_storage_bridge.py",
+        "backend/tests/paper/test_markdown_worker_lifecycle.py",
+    ),
     "update_hot_github_trending": ("backend/tests/test_hot_github_trending.py",),
     "update_github_stars": ("backend/tests/test_update_github_stars.py",),
     "update_citations": ("backend/tests/test_update_citations_cron.py",),
@@ -172,7 +182,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_frontiercode": ("backend/tests/test_frontiercode_sync_service.py",),
     "sync_coarena": ("backend/tests/test_coarena_sync_service.py",),
     "sync_arc_prize": ("backend/tests/test_arc_prize_sync_service.py",),
-    "import_hf_daily_papers": ("backend/tests/test_import_hf_daily_papers.py",),
+    "import_hf_daily_papers": ("backend/tests/paper/test_import_hf_daily_papers.py",),
     "enqueue_hf_daily_paper_curation": ("backend/tests/test_cron_dashboard.py",),
     "enqueue_hf_trending_model_curation": (
         "backend/tests/test_hf_trending_model_curation.py",
@@ -185,7 +195,7 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "calculate_organization_trending_scores": (
         "backend/tests/test_organization_trending_service.py",
     ),
-    "refresh_paper_embeddings": ("backend/tests/test_incremental_paper_embeddings.py",),
+    "refresh_paper_embeddings": ("backend/tests/paper/test_incremental_embeddings.py",),
     "preload_thumbnails": ("backend/tests/test_preload_thumbnails.py",),
     "mirror_thumbnails_to_disk": ("backend/tests/test_thumbnail_service.py",),
     "backfill_method_keywords": ("backend/tests/test_cron_dashboard.py",),
