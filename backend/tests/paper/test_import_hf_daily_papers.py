@@ -8,7 +8,7 @@ from unittest.mock import MagicMock
 import aiohttp
 import pytest
 
-WORKFLOWS_DIR = Path(__file__).parents[2] / ".github" / "workflows"
+WORKFLOWS_DIR = Path(__file__).parents[3] / ".github" / "workflows"
 if str(WORKFLOWS_DIR) not in sys.path:
     sys.path.append(str(WORKFLOWS_DIR))
 

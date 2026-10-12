@@ -16,7 +16,7 @@ import pytest
 
 from deploy.nginx_validate import ARXIV_PDF_LOCATION, location_block
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 PDF = bytes(range(256)) * 4096
 
 

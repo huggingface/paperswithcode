@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 SCRIPT = (
-    Path(__file__).resolve().parents[1]
+    Path(__file__).resolve().parents[2]
     / "scripts"
     / "migrate_paper_markdown_versions.py"
 )

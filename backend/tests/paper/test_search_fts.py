@@ -33,7 +33,7 @@ from backend.services.paper_retrieval_service import PaperRetrievalService
 from backend.services.paper_service import PaperService
 
 
-MIGRATIONS = Path(__file__).parents[1] / "database" / "migrations"
+MIGRATIONS = Path(__file__).parents[2] / "database" / "migrations"
 
 
 @pytest.fixture(scope="module")

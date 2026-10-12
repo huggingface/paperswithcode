@@ -32,7 +32,7 @@ def pgvector_engine():
             "CREATE TABLE IF NOT EXISTS papers (id bigserial PRIMARY KEY)"
         )
         migration = (
-            Path(__file__).parents[1] / "database/migrations/add_paper_embeddings.sql"
+            Path(__file__).parents[2] / "database/migrations/add_paper_embeddings.sql"
         ).read_text(encoding="utf-8")
         with connection.connection.driver_connection.cursor() as cursor:
             cursor.execute(migration)

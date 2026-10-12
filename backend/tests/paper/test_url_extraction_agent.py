@@ -205,7 +205,7 @@ def test_modal_results_are_correlated_when_returned_out_of_order(monkeypatch):
 
 def test_workflow_isolates_modal_discovery_from_vps_persistence():
     workflow_path = (
-        Path(__file__).resolve().parents[2]
+        Path(__file__).resolve().parents[3]
         / ".github"
         / "workflows"
         / "cron-extract-urls.yml"

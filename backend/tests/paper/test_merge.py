@@ -62,7 +62,7 @@ def test_record_paper_merge_redirect_writes_to_shared_catalog_table():
 
 def test_paper_redirects_migration_preserves_staging_read_only_boundary():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database"
         / "migrations"
         / "add_paper_redirects.sql"
