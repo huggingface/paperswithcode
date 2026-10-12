@@ -268,6 +268,16 @@ export class PapersApi {
     );
   }
 
+  updateXThreads(paperId: string, xThreads: string[]): Promise<Paper> {
+    return paperCuration.mutatePaper(
+      paperId,
+      "x_threads",
+      xThreads,
+      `/papers/${paperId}/x-threads`,
+      { method: "PUT", body: JSON.stringify({ x_threads: xThreads }) },
+    );
+  }
+
   updateSourceUrl(paperId: string, sourceUrl: string): Promise<Paper> {
     return paperCuration.mutatePaper(
       paperId,

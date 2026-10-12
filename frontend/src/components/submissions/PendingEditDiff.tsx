@@ -805,6 +805,13 @@ function PendingEditDiff({ edit }: PendingEditDiffProps) {
         proposedPayload={edit.proposed_payload}
       />;
       break;
+    case "x_threads":
+      content = <ResourceDiff
+        label="X threads"
+        currentItems={(edit.current_payload?.x_threads ?? []).map(({ url }) => ({ url, is_official: false }))}
+        proposedItems={edit.proposed_payload.x_threads.map((url) => ({ url, is_official: false }))}
+      />;
+      break;
     case "new_task":
       content = <TaxonomySuggestionDiff kind="task" proposedPayload={edit.proposed_payload} />;
       break;

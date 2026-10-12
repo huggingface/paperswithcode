@@ -25,6 +25,7 @@ from backend.models.database import (
     PaperProjectPage,
     PaperRepository,
     PaperTask,
+    PaperXThread,
     Repository,
 )
 from backend.services.evaluation_service import EvaluationService
@@ -271,6 +272,8 @@ def merge_external_paper_into_arxiv(
         "hf_artifact_links_created": 0,
         "project_pages_merged": 0,
         "project_pages_moved": 0,
+        "x_threads_merged": 0,
+        "x_threads_moved": 0,
         "conferences_merged": 0,
         "conferences_moved": 0,
         "organizations_merged": 0,
@@ -418,6 +421,28 @@ def merge_external_paper_into_arxiv(
             link.paper_id = arxiv_paper_id
             stats["project_pages_moved"] += 1
             arxiv_pages.add(link.project_page_id)
+
+    arxiv_threads = {
+        row.tweet_id: row.position
+        for row in db.query(PaperXThread)
+        .filter(PaperXThread.paper_id == arxiv_paper_id)
+        .all()
+    }
+    next_position = max(arxiv_threads.values(), default=-1) + 1
+    for row in (
+        db.query(PaperXThread)
+        .filter(PaperXThread.paper_id == external_id)
+        .order_by(PaperXThread.position)
+        .all()
+    ):
+        if row.tweet_id in arxiv_threads:
+            db.delete(row)
+            stats["x_threads_merged"] += 1
+        else:
+            row.paper_id = arxiv_paper_id
+            row.position = next_position
+            next_position += 1
+            stats["x_threads_moved"] += 1
 
     arxiv_conferences = {
         link.conference_id

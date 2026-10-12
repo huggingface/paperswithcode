@@ -316,6 +316,7 @@ class PaperService:
             relations.repository_coverage.get(db_paper.id, (False, 0))
         )
         project_pages = relations.project_pages.get(db_paper.id) or None
+        x_threads = relations.x_threads.get(db_paper.id) or None
 
         # Create the API model
         paper_data = {
@@ -355,6 +356,7 @@ class PaperService:
             "code_repository_count": code_repository_count,
             "repositories": repositories,
             "project_pages": project_pages,
+            "x_threads": x_threads,
             "tasks": tasks,
             "methods": methods,
             "introduced_benchmarks": introduced_benchmarks,

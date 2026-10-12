@@ -37,6 +37,7 @@ const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
   "repositories",
   "project_pages",
   "source_url",
+  "x_threads",
   "new_task",
   "new_method",
   "new_benchmark",

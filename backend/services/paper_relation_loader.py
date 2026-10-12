@@ -21,6 +21,7 @@ from backend.models.papers import (
     RelatedPaperSummary,
     Repository,
     TaskSummary,
+    XThread,
 )
 from backend.models.database import (
     Author as DBAuthor,
@@ -41,6 +42,7 @@ from backend.models.database import (
     PaperRelation as DBPaperRelation,
     PaperRepository as DBPaperRepository,
     PaperTask,
+    PaperXThread as DBPaperXThread,
     ProjectPage as DBProjectPage,
     Repository as DBRepository,
     Task as DBTask,
@@ -84,6 +86,7 @@ class PaperRelations:
     repositories: dict[int, list[Repository]] = field(default_factory=dict)
     repository_coverage: dict[int, tuple[bool, int]] = field(default_factory=dict)
     project_pages: dict[int, list[ProjectPage]] = field(default_factory=dict)
+    x_threads: dict[int, list[XThread]] = field(default_factory=dict)
 
 
 _RelationValue = TypeVar("_RelationValue")
@@ -302,6 +305,19 @@ class PaperRelationLoader:
                         else None
                     ),
                 ),
+            )
+
+        x_thread_rows = (
+            self.db.query(DBPaperXThread)
+            .filter(DBPaperXThread.paper_id.in_(unique_ids))
+            .order_by(DBPaperXThread.paper_id, DBPaperXThread.position)
+            .all()
+        )
+        for row in x_thread_rows:
+            _append_relation(
+                relations.x_threads,
+                row.paper_id,
+                XThread.model_validate(row, from_attributes=True),
             )
 
         return relations
