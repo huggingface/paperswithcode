@@ -373,7 +373,7 @@ def test_final_active_qualification_failure_disables_and_refreshes(tmp_path: Pat
 
 def test_installed_flat_layout_direct_helper_loads_lifecycle_modules(tmp_path: Path):
     installed = tmp_path / "paperswithcode-deploy"
-    shutil.copytree(Path(__file__).parents[2] / "deploy", installed)
+    shutil.copytree(Path(__file__).parents[3] / "deploy", installed)
     environment = os.environ.copy()
     environment["PYTHONPATH"] = str(installed)
 
@@ -835,7 +835,7 @@ with activation_signal_context():
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -928,7 +928,7 @@ with activation_signal_context():
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -988,7 +988,7 @@ except ShadowActivationInterrupted:
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -1085,7 +1085,7 @@ except ShadowActivationInterrupted:
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -1169,7 +1169,7 @@ except ShadowActivationInterrupted:
 """
     process = subprocess.run(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         text=True,
         capture_output=True,
         check=False,
@@ -1228,7 +1228,7 @@ except ShadowActivationRecoveryRequired:
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
@@ -1281,7 +1281,7 @@ assert signal.getsignal(signal.SIGINT) is prior_int
 """
     process = subprocess.Popen(
         [sys.executable, "-c", script, str(tmp_path)],
-        cwd=Path(__file__).parents[2],
+        cwd=Path(__file__).parents[3],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,

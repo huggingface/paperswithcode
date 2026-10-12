@@ -41,6 +41,7 @@ served by nginx in production.
   | --- | --- |
   | Chat sandbox, executor, worker, broker | `uv run pytest backend/tests/chat_sandbox -q` |
   | Chat gateway | `uv run pytest backend/tests/chat_gateway -q` |
+  | External Pi fleet, slots, turn runner, workers | `uv run pytest backend/tests/external_pi -q` |
   | Deployment, releases, nginx, host environment | `uv run pytest backend/tests/deployment -q` |
 
 For scripts that mutate domain data, use the existing services where possible.

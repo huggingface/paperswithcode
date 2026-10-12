@@ -727,7 +727,7 @@ def test_final_claim_revalidation_refreshes_the_locked_registry_row():
 
 def test_worker_registry_migration_is_additive_and_environment_scoped():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_external_worker_registry.sql"
     ).read_text()
 

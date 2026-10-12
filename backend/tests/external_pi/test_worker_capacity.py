@@ -321,7 +321,7 @@ def test_legacy_single_endpoint_requires_explicit_worker_identity():
 
 def test_capacity_reservation_migration_is_additive_and_environment_scoped():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_external_worker_reservations.sql"
     ).read_text()
 

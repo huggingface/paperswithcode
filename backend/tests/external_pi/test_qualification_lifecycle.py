@@ -388,7 +388,7 @@ def test_transient_start_uses_exact_units_users_and_filesystem_restrictions(
 
 
 def test_system_python_imports_launchers_from_release_shaped_fixture(tmp_path: Path):
-    source_root = Path(__file__).resolve().parents[2]
+    source_root = Path(__file__).resolve().parents[3]
     release = tmp_path / "0123456789ab-staging"
     release.symlink_to(source_root, target_is_directory=True)
     for launcher in (
