@@ -17,7 +17,7 @@ import pytest
 from deploy.nginx_validate import validate
 from deploy.nginx_validate import location_block
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 PRODUCTION = (ROOT / "deploy/nginx/paperswithcode.co.conf").read_text()
 STAGING = (ROOT / "deploy/nginx/staging.paperswithcode.co.conf").read_text()
 

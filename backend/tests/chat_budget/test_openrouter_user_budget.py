@@ -194,7 +194,7 @@ def test_byok_verification_reports_a_rejected_key_as_invalid():
 
 def test_migration_is_staging_owned_idempotent_and_secret_safe():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_chat_openrouter_user_budget.sql"
     ).read_text()
     assert "current_schema() <> 'staging'" in migration
