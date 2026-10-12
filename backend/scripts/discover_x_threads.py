@@ -3,6 +3,10 @@
 Search X for posts in which authors introduce recent trending papers. The job
 is report-only unless PWC_X_THREAD_DISCOVERY_APPLY=true (or --apply), in which
 case author matches are linked through the audited `x_threads` section.
+
+`--backfill-days N` instead scans older papers from the last N days once each
+with full-archive search. X allows 300 archive searches per 15 minutes, so run
+backfill batches at least 15 minutes apart.
 """
 
 from __future__ import annotations
@@ -35,9 +39,16 @@ def main() -> int:
         action="store_true",
         help="Print stored unlinked matches without searching X",
     )
+    parser.add_argument(
+        "--backfill-days",
+        type=int,
+        help="Scan never-scanned papers from the last N days with full-archive search",
+    )
     args = parser.parse_args()
     if not 1 <= args.max_papers <= 200:
         parser.error("--max-papers must be between 1 and 200")
+    if args.backfill_days is not None and not 1 <= args.backfill_days <= 730:
+        parser.error("--backfill-days must be between 1 and 730")
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     apply = args.apply or os.environ.get("PWC_X_THREAD_DISCOVERY_APPLY") == "true"
 
@@ -52,7 +63,11 @@ def main() -> int:
             logger.warning("x_thread_discovery_skipped X_API_BEARER_TOKEN is not set")
             return 0
         report = discover_x_threads(
-            db, make_x_search(token), apply=apply, max_papers=args.max_papers
+            db,
+            make_x_search(token, full_archive=args.backfill_days is not None),
+            apply=apply,
+            max_papers=args.max_papers,
+            backfill_days=args.backfill_days,
         )
     finally:
         try:

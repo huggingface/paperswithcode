@@ -1,17 +1,22 @@
 """Discover X threads in which authors introduce recent trending papers.
 
-For each candidate paper the job runs one X API v2 recent search for posts that
+For each candidate paper the job runs one X API v2 search for posts that
 link the paper (arXiv/HF paper URLs, project page, official repository) or
 name it (method short name, title). Only original posts from the paper's own
 authors (matched by display name or handle) or from a business-verified account
 of one of its linked organizations are kept; outside accounts never are. Matches are stored on the
 paper's scan row and, when applying, linked through the audited `x_threads`
 curation section, which captures the preview shown on the paper page.
+
+The scheduled run uses recent search (last 7 days) on newly trending papers.
+A backfill run uses full-archive search, bounded to the weeks around each
+paper's publication, on older papers that were never scanned.
 """
 
 from __future__ import annotations
 
 import re
+import time
 import unicodedata
 import uuid
 from dataclasses import dataclass, field
@@ -36,11 +41,17 @@ from backend.services.catalog_errors import CatalogError
 from backend.services.paper_curation_service import PaperCurationService
 
 X_SEARCH_URL = "https://api.x.com/2/tweets/search/recent"
+X_ARCHIVE_SEARCH_URL = "https://api.x.com/2/tweets/search/all"
+# Full-archive search allows one request per second per app.
+ARCHIVE_REQUEST_INTERVAL = 1.1
 MAX_QUERY_LENGTH = 512
 MAX_SCANS_PER_PAPER = 3
 RESCAN_AFTER = timedelta(hours=20)
 CANDIDATE_WINDOW_DAYS = 10
 MAX_THREADS_PER_PAPER = 2
+# Backfill searches from a week before publication to two months after it.
+ARCHIVE_WINDOW_BEFORE = timedelta(days=7)
+ARCHIVE_WINDOW_AFTER = timedelta(days=60)
 ACTOR = {
     "source": "cron",
     "hf_subject": "system:x-thread-discovery",
@@ -48,7 +59,7 @@ ACTOR = {
     "role": "admin",
 }
 
-Search = Callable[[str], dict]
+Search = Callable[[str, date | None], dict]
 
 
 @dataclass
@@ -92,19 +103,55 @@ class DiscoveryReport:
         }
 
 
-def make_x_search(bearer_token: str, *, timeout: float = 30) -> Search:
-    """Return a recent-search function bound to an X API bearer token."""
+def archive_window(published: date, now: datetime) -> tuple[str, str]:
+    """Return the full-archive start/end times around a paper's publication."""
+    start = (
+        datetime.combine(published, datetime.min.time(), UTC) - ARCHIVE_WINDOW_BEFORE
+    )
+    # X rejects end times later than ten seconds ago.
+    end = min(
+        start + ARCHIVE_WINDOW_BEFORE + ARCHIVE_WINDOW_AFTER, now - timedelta(minutes=1)
+    )
+    return (
+        start.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        end.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    )
 
-    def search(query: str) -> dict:
+
+def make_x_search(
+    bearer_token: str, *, full_archive: bool = False, timeout: float = 30
+) -> Search:
+    """Return a search function bound to an X API bearer token.
+
+    Recent search ignores the publication date; full-archive search uses it to
+    bound the window and returns the most relevant posts in it.
+    """
+    last_request = 0.0
+
+    def search(query: str, published: date | None) -> dict:
+        nonlocal last_request
+        params = {
+            "query": query,
+            "max_results": 25,
+            "tweet.fields": "author_id,created_at,public_metrics,conversation_id",
+            "expansions": "author_id",
+            "user.fields": "name,username,verified_type",
+        }
+        url = X_SEARCH_URL
+        if full_archive:
+            url = X_ARCHIVE_SEARCH_URL
+            params["sort_order"] = "relevancy"
+            if published:
+                params["start_time"], params["end_time"] = archive_window(
+                    published, datetime.now(UTC)
+                )
+            time.sleep(
+                max(0.0, last_request + ARCHIVE_REQUEST_INTERVAL - time.monotonic())
+            )
+            last_request = time.monotonic()
         response = httpx.get(
-            X_SEARCH_URL,
-            params={
-                "query": query,
-                "max_results": 25,
-                "tweet.fields": "author_id,created_at,public_metrics,conversation_id",
-                "expansions": "author_id",
-                "user.fields": "name,username,verified_type",
-            },
+            url,
+            params=params,
             headers={"Authorization": f"Bearer {bearer_token}"},
             timeout=timeout,
         )
@@ -251,8 +298,19 @@ def match_posts(
     return sorted(best.values(), key=lambda m: -m["likes"])[:MAX_THREADS_PER_PAPER]
 
 
-def candidate_papers(db: Session, *, today: date, limit: int) -> list[Paper]:
-    """Recent trending or HF-featured arXiv papers that still lack X threads."""
+def candidate_papers(
+    db: Session, *, today: date, limit: int, backfill_days: int | None = None
+) -> list[Paper]:
+    """Trending or HF-featured arXiv papers that still lack X threads.
+
+    Scheduled runs take recent papers and rescan them a few times while
+    authors may still post. Backfill runs take older papers once each, newest
+    first, skipping every paper that already has a scan row.
+    """
+    if backfill_days:
+        return backfill_candidate_papers(
+            db, today=today, limit=limit, days=backfill_days
+        )
     since = today - timedelta(days=CANDIDATE_WINDOW_DAYS)
     rescan_before = datetime.now(UTC) - RESCAN_AFTER
     scan = PaperXThreadScan
@@ -281,6 +339,30 @@ def candidate_papers(db: Session, *, today: date, limit: int) -> list[Paper]:
                 Paper.hf_daily_featured_on.desc().nullslast(),
                 Paper.id.desc(),
             )
+            .limit(limit)
+        )
+    )
+
+
+def backfill_candidate_papers(
+    db: Session, *, today: date, limit: int, days: int
+) -> list[Paper]:
+    since = today - timedelta(days=days)
+    return list(
+        db.scalars(
+            select(Paper)
+            .where(
+                Paper.is_latest_version,
+                Paper.source == "arxiv",
+                Paper.date_published >= since,
+                or_(
+                    Paper.hf_daily_featured_on.is_not(None),
+                    Paper.trending_score > 0,
+                ),
+                ~exists().where(PaperXThread.paper_id == Paper.id),
+                ~exists().where(PaperXThreadScan.paper_id == Paper.id),
+            )
+            .order_by(Paper.date_published.desc(), Paper.id.desc())
             .limit(limit)
         )
     )
@@ -325,10 +407,14 @@ def discover_x_threads(
     apply: bool,
     max_papers: int,
     today: date | None = None,
+    backfill_days: int | None = None,
 ) -> DiscoveryReport:
     report = DiscoveryReport(apply=apply)
     curation = PaperCurationService(db)
-    for paper in candidate_papers(db, today=today or date.today(), limit=max_papers):
+    papers = candidate_papers(
+        db, today=today or date.today(), limit=max_papers, backfill_days=backfill_days
+    )
+    for paper in papers:
         authors = [author.name for author in paper.authors]
         organizations = [organization.name for organization in paper.organizations]
         project_urls, repo_urls = _paper_links(db, paper.id)
@@ -336,7 +422,7 @@ def discover_x_threads(
         result = PaperScanResult(paper.id, paper.arxiv_id, paper.title, query)
         report.papers.append(result)
         try:
-            response = search(query)
+            response = search(query, paper.date_published)
         except httpx.HTTPStatusError as error:
             result.error = f"X search HTTP {error.response.status_code}"
             if error.response.status_code in {401, 403, 429}:

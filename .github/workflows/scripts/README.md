@@ -155,6 +155,17 @@ uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads 
 uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads --max-papers 5
 ```
 
+To backfill older papers, `--backfill-days N` takes trending or HF-featured
+arXiv papers from the last N days that have no X threads and no scan row,
+newest first, and scans each once with full-archive search (included in X's
+pay-per-use plan), limited to one week before to two months after
+publication. X allows 300 archive searches per 15 minutes, so run batches of
+at most 200 papers at least 15 minutes apart:
+
+```bash
+sudo pwc-cron discover_x_threads --backfill-days 180 --max-papers 200
+```
+
 `scan_model_releases.py` is a read-only radar for model releases that neither
 the daily-paper import (arXiv only) nor the trending-model curation (Hub
 weights only) can see, such as API-only or blog-first launches. Every three
