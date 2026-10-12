@@ -27,8 +27,18 @@ export function formatMetricValue(v: number | string | null | undefined): string
   if (v === null || v === undefined || v === "") return "—";
   const n = typeof v === "string" ? parseFloat(v) : v;
   if (!Number.isFinite(n)) return String(v);
-  if (Math.abs(n) >= 100) return n.toFixed(0);
-  if (Math.abs(n) >= 10) return n.toFixed(1);
-  if (Math.abs(n) < 1) return n.toFixed(3);
-  return n.toFixed(2);
+  if (Math.abs(n) >= 100) return roundHalfUp(n, 0);
+  if (Math.abs(n) >= 10) return roundHalfUp(n, 1);
+  if (Math.abs(n) < 1) return roundHalfUp(n, 3);
+  return roundHalfUp(n, 2);
+}
+
+// `toFixed` rounds the binary float, so 30.55 becomes "30.6" but 22.95 becomes
+// "22.9". Shift the decimal point in the shortest decimal representation so ties
+// round away from zero consistently.
+function roundHalfUp(n: number, digits: number): string {
+  const text = String(Math.abs(n));
+  if (text.includes("e")) return n.toFixed(digits);
+  const rounded = Number(`${Math.round(Number(`${text}e${digits}`))}e-${digits}`);
+  return (n < 0 ? -rounded : rounded).toFixed(digits);
 }
