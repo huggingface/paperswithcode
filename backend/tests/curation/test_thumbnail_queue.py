@@ -427,7 +427,7 @@ def test_scoped_helper_waits_for_terminal_thumbnail_status(monkeypatch, capsys):
 
 
 def test_deployment_keeps_thumbnail_mutation_out_of_web_service():
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     backend_unit = (root / "deploy/systemd/paperswithcode-backend@.service").read_text()
     cron_launcher = (root / "deploy/cron_launcher.py").read_text()
     timer_service = (

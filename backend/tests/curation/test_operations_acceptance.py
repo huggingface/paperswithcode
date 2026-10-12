@@ -274,7 +274,7 @@ def test_no_capability_manifest_can_create_or_mutate_taxonomy():
 def test_rollout_units_are_packaged_but_not_implicitly_enabled():
     from pathlib import Path
 
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     for timer in (
         root / "deploy/autonomous/submission-review.timer",
         root / "deploy/autonomous/autonomous-cron-health.timer",

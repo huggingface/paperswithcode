@@ -39,10 +39,10 @@ from backend.services.autonomous_operations_repository import (
 
 NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
 MIGRATION = (
-    Path(__file__).parents[1] / "database/migrations/add_autonomous_operations.sql"
+    Path(__file__).parents[2] / "database/migrations/add_autonomous_operations.sql"
 )
 CURATION_MIGRATION = (
-    Path(__file__).parents[1]
+    Path(__file__).parents[2]
     / "database/migrations/add_curation_autonomous_operator.sql"
 )
 

@@ -30,7 +30,7 @@ from backend.services.cron_registry import get_cron_job
 from deploy import cron_launcher, install_host_layout
 
 
-ROOT = Path(__file__).parents[2]
+ROOT = Path(__file__).parents[3]
 
 
 class FakeJobsApi:

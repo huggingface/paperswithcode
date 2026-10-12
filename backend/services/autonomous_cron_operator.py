@@ -175,11 +175,11 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "import_hf_daily_papers": ("backend/tests/test_import_hf_daily_papers.py",),
     "enqueue_hf_daily_paper_curation": ("backend/tests/test_cron_dashboard.py",),
     "enqueue_hf_trending_model_curation": (
-        "backend/tests/test_hf_trending_model_curation.py",
+        "backend/tests/curation/test_trending_model_curation.py",
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "export_enrichment_dashboard": (
-        "backend/tests/test_enrichment_dashboard_export.py",
+        "backend/tests/curation/test_enrichment_dashboard_export.py",
     ),
     "sync_hf_organizations": ("backend/tests/test_organization_sync_service.py",),
     "calculate_organization_trending_scores": (
@@ -196,8 +196,8 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
         "backend/tests/test_link_methods_by_references_weekly.py",
     ),
     "link_papers_by_task_keywords": ("backend/tests/test_cron_dashboard.py",),
-    "review_submissions": ("backend/tests/test_autonomous_submission_schedule.py",),
-    "process_curation_thumbnails": ("backend/tests/test_curation_thumbnail_queue.py",),
+    "review_submissions": ("backend/tests/curation/test_submission_schedule.py",),
+    "process_curation_thumbnails": ("backend/tests/curation/test_thumbnail_queue.py",),
     "autonomous_cron_health": ("backend/tests/test_autonomous_cron_operator.py",),
     "autonomous_cron_audit": ("backend/tests/test_autonomous_cron_operator.py",),
     "monitor_chat_operational_alerts": (
@@ -582,7 +582,7 @@ def build_cron_repair_contracts(
                     (
                         *_FOCUSED_TESTS.get(definition.id, ()),
                         "backend/tests/test_autonomous_cron_operator.py",
-                        "backend/tests/test_autonomous_cron_probe.py",
+                        "backend/tests/curation/test_cron_probe.py",
                         "backend/tests/test_cron_health.py",
                     )
                 )

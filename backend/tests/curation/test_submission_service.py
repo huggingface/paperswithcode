@@ -6,7 +6,7 @@ import base64
 import uuid
 import os
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime, timedelta
+from datetime import timedelta
 from decimal import Decimal
 from hashlib import sha256
 from pathlib import Path
@@ -52,6 +52,26 @@ from backend.services.autonomous_submission_service import (
     AutonomousSubmissionDecision,
     AutonomousSubmissionService,
 )
+from backend.tests.curation.submission_harness import (
+    NOW,
+    _run,
+    _service,
+)
+
+
+@pytest.fixture
+def db():
+    engine = create_engine("sqlite+pysqlite:///:memory:")
+    for model in (
+        AutonomousOperatorState,
+        AutonomousRun,
+        PendingPaperEdit,
+        AutonomousSubmissionClaim,
+    ):
+        model.__table__.create(engine)
+    with Session(engine, expire_on_commit=False) as session:
+        yield session
+    engine.dispose()
 
 
 @compiles(BigInteger, "sqlite")
@@ -64,8 +84,7 @@ def _compile_jsonb_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-NOW = datetime(2026, 8, 28, 12, tzinfo=UTC)
-MIGRATIONS = Path(__file__).parents[1] / "database/migrations"
+MIGRATIONS = Path(__file__).parents[2] / "database/migrations"
 HUMAN_ONLY = {
     "new_task",
     "new_method",
@@ -85,21 +104,6 @@ ALL_TYPES = [
     *sorted(HUMAN_ONLY),
     "new_external_paper",
 ]
-
-
-@pytest.fixture
-def db():
-    engine = create_engine("sqlite+pysqlite:///:memory:")
-    for model in (
-        AutonomousOperatorState,
-        AutonomousRun,
-        PendingPaperEdit,
-        AutonomousSubmissionClaim,
-    ):
-        model.__table__.create(engine)
-    with Session(engine, expire_on_commit=False) as session:
-        yield session
-    engine.dispose()
 
 
 @pytest.fixture
@@ -151,41 +155,6 @@ def postgres_engine():
         engine.dispose()
 
 
-def _run(db: Session, run_id: uuid.UUID) -> None:
-    if db.get(AutonomousOperatorState, "global") is None:
-        db.add_all(
-            [
-                AutonomousOperatorState(
-                    operator=operator,
-                    enabled=operator == "submissions",
-                    manual_mode=False,
-                    revision=1,
-                    updated_by="admin:test",
-                    updated_at=NOW,
-                )
-                for operator in (
-                    "global",
-                    "submissions",
-                    "cron_health",
-                    "chat_reliability",
-                )
-            ]
-        )
-    db.add(
-        AutonomousRun(
-            id=run_id,
-            operator="submissions",
-            dry_run=False,
-            manifest_revision="submission-review-v1",
-            status="completed",
-            capability_requests=[],
-            evidence_digests=[],
-            created_at=NOW,
-        )
-    )
-    db.commit()
-
-
 def _edit(db: Session, edit_type: str, age: int, *, payload=None) -> PendingPaperEdit:
     row = PendingPaperEdit(
         hf_username="submitter",
@@ -202,17 +171,6 @@ def _edit(db: Session, edit_type: str, age: int, *, payload=None) -> PendingPape
     db.add(row)
     db.flush()
     return row
-
-
-def _service(db: Session, *, applied=None) -> AutonomousSubmissionService:
-    return AutonomousSubmissionService(
-        db,
-        signing_secret=b"test-signing-secret-with-sufficient-entropy",
-        callback_base_url="https://paperswithcode.co/api/v1",
-        clock=lambda: NOW,
-        decision_applier=applied,
-        remote_budget_usd=Decimal("5"),
-    )
 
 
 def _attest(

@@ -26,7 +26,7 @@ from backend.services.pending_edit_errors import (
 )
 from backend.services.pending_edit_mutations import PendingEditMutationService
 from backend.services.pending_edit_service import PendingEditService
-from backend.tests.test_autonomous_submission_service import _run, _service
+from backend.tests.curation.submission_harness import _run, _service
 from backend.tests import test_pending_edit_noop as fixtures
 
 db_session = fixtures.db_session

@@ -683,7 +683,7 @@ def test_sandbox_check_runner_is_installed_and_rejects_out_of_scope(
 
 def test_release_broker_schema_is_a_checked_in_root_owned_migration():
     migration = (
-        Path(__file__).parents[1]
+        Path(__file__).parents[2]
         / "database/migrations/add_autonomous_release_broker.sql"
     ).read_text(encoding="utf-8")
 
