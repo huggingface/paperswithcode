@@ -89,3 +89,22 @@ def test_rank_leaderboard_uses_dominant_task_metric_and_direction():
         task_slug="a",
     )
     assert [row.entry.first.model_name for row in requested.rows] == ["other"]
+
+
+def test_markdown_html_handles_nested_syntax_and_backslash_links():
+    html = markdown_html(
+        "**See [DETR](/paper/2005.12872) now** and "
+        "[Transformer](https://en.wikipedia.org/wiki/Transformer_(ml)) "
+        "`a**b**c` [x](/\\evil.example)"
+    )
+    assert '<strong>See <a href="/paper/2005.12872">DETR</a> now</strong>' in html
+    assert '<a href="https://en.wikipedia.org/wiki/Transformer_(ml)">' in html
+    assert "<code>a**b**c</code>" in html
+    assert "evil.example" not in html and "x" in html
+    assert "**" not in html.replace("<code>a**b**c</code>", "")
+    assert (
+        markdown_plain_text(
+            "[Transformer](https://en.wikipedia.org/wiki/Transformer_(ml))"
+        )
+        == "Transformer"
+    )

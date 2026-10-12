@@ -503,7 +503,7 @@ class DiscoveryPageService:
                     published=paper.date_published if paper else None,
                 )
             )
-        if not ranked.rows and not task_slug:
+        if not paper_links and not task_slug:
             paper_links = list(
                 self._papers_for_relation(
                     PaperDataset,
