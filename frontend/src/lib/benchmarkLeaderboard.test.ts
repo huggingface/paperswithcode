@@ -133,4 +133,62 @@ describe("benchmark leaderboard model", () => {
     expect(result.points.map((point) => point.date)).toEqual(["2025-01-15", "2025-06-15"]);
     expect(result.points.map((point) => point.isSota)).toEqual([true, true]);
   });
+  it("plots curated rows at the date the result was reported", () => {
+    const result = computeSeries([
+      evaluation({
+        id: "vadv2",
+        model_name: "VADv2",
+        // The Bench2Drive score only appeared in arXiv v2.
+        evaluated_on: "2026-04-17",
+        paper_published_date: "2024-02-20",
+        updated_at: "2026-10-11T09:00:00Z",
+        metrics: { "Driving Score": 60 },
+      }),
+      evaluation({
+        id: "reproduction",
+        model_name: "DiffusionDrive-temp",
+        // External reproduction dated by the reporting paper.
+        external: true,
+        evaluated_on: "2025-09-28",
+        paper_published_date: "2024-11-22",
+        metrics: { "Driving Score": 70 },
+      }),
+      evaluation({
+        id: "undated",
+        model_name: "TCP",
+        paper_published_date: "2022-06-16",
+        metrics: { "Driving Score": 40 },
+      }),
+    ], "Driving Score", "↑");
+
+    expect(result.points.map((point) => [point.modelName, point.date])).toEqual([
+      ["TCP", "2022-06-16"],
+      ["DiffusionDrive-temp", "2025-09-28"],
+      ["VADv2", "2026-04-17"],
+    ]);
+    expect(result.points.map((point) => point.isSota)).toEqual([true, true, false]);
+  });
+
+  it("ignores evaluated_on stamps a sync rewrote on the row's update day", () => {
+    const result = computeSeries([
+      evaluation({
+        id: "synced",
+        model_name: "Synced",
+        evaluated_on: "2026-10-12",
+        updated_at: "2026-10-12T03:15:00+00:00",
+        paper_published_date: "2025-03-01",
+      }),
+      evaluation({
+        id: "curated",
+        model_name: "Curated",
+        evaluated_on: "2025-08-01",
+        paper_published_date: "2025-01-01",
+      }),
+    ], "Accuracy", "↑");
+
+    expect(result.points.map((point) => [point.modelName, point.date])).toEqual([
+      ["Synced", "2025-03-01"],
+      ["Curated", "2025-08-01"],
+    ]);
+  });
 });

@@ -137,13 +137,57 @@ export function storedRankForMetric(e: MergedEvaluation, metric: string): number
   return e.ranksByMetric[metric] ?? e.best_rank ?? 9999;
 }
 
+/** UTC calendar date of an ISO timestamp, or "" when it cannot be parsed. */
+function utcDate(timestamp: string): string {
+  const time = Date.parse(timestamp);
+  return Number.isNaN(time) ? "" : new Date(time).toISOString().slice(0, 10);
+}
+
+/**
+ * The `evaluated_on` value most rows of a leaderboard share, when that looks
+ * like a snapshot stamp rather than per-result report dates: at least two
+ * rows share it, covering more than half of the dated rows. Snapshot imports
+ * and leaderboard syncs that stamp a generation date (ARC Prize, DeepSWE,
+ * BOOM) produce this shape; hand-curated leaderboards such as Bench2Drive do not.
+ */
+function leaderboardFetchStamp(evals: Evaluation[]): string | null {
+  const counts = new Map<string, number>();
+  for (const e of evals) {
+    if (e.evaluated_on) counts.set(e.evaluated_on, (counts.get(e.evaluated_on) ?? 0) + 1);
+  }
+  const dated = Array.from(counts.values()).reduce((sum, n) => sum + n, 0);
+  for (const [stamp, n] of counts) {
+    if (n >= 2 && n * 2 > dated) return stamp;
+  }
+  return null;
+}
+
+/**
+ * When a result first appeared. Curated rows store the reporting date in
+ * `evaluated_on` (e.g. VADv2's Bench2Drive score only appeared in arXiv v2,
+ * and external reproductions carry the reporting paper's date), so it wins
+ * over the evaluated paper's first arXiv date. Managed syncs (Artificial
+ * Analysis, TabArena, Open ASR/TTS, ...) instead rewrite `evaluated_on` with
+ * the fetch date on every run, which would stack every point on one vertical
+ * line (#298); those stamps match the row's `updated_at` day or the
+ * leaderboard's shared snapshot stamp and fall back to the paper date.
+ */
+function chartDate(e: Evaluation, fetchStamp: string | null): string {
+  const reported = e.evaluated_on;
+  if (reported && reported !== fetchStamp && reported !== utcDate(e.updated_at)) {
+    return reported;
+  }
+  return e.paper_published_date || "";
+}
+
 /**
  * Compute the SOTA progression (running best) from evaluations sorted by
- * paper.published. Mirrors the v1 Benchmark.tsx logic, but ranks SOTA by the
- * currently selected metric's value + direction rather than by the row's
- * stored `best_rank` (which only describes the row's own `best_metric`
- * leaderboard, so it doesn't match alternate metric tabs like Recall on a
- * benchmark whose primary metric is F1).
+ * the date each result was reported (see `chartDate`). Mirrors the v1
+ * Benchmark.tsx logic, but ranks SOTA by the currently selected metric's
+ * value + direction rather than by the row's stored `best_rank` (which only
+ * describes the row's own `best_metric` leaderboard, so it doesn't match
+ * alternate metric tabs like Recall on a benchmark whose primary metric is
+ * F1).
  */
 export function computeSeries(
   evals: Evaluation[],
@@ -152,15 +196,11 @@ export function computeSeries(
 ): { points: ChartPoint[]; sota: number; sotaModel: string } {
   if (evals.length === 0) return { points: [], sota: 0, sotaModel: "" };
 
-  // Sort by the paper's published date so the time axis follows when the
-  // result appeared, not the evaluation row's `evaluated_on` stamp. Managed
-  // syncs (Artificial Analysis, TabArena, Open ASR/TTS) set `evaluated_on`
-  // to the fetch date, which would stack every point on one vertical line.
+  const fetchStamp = leaderboardFetchStamp(evals);
   const items = evals
     .map((e) => {
       const value = parseMetricValue(e.metrics?.[bestMetric]);
-      const date = e.paper_published_date || "";
-      return { eval: e, value, date };
+      return { eval: e, value, date: chartDate(e, fetchStamp) };
     })
     .filter((x): x is { eval: Evaluation; value: number; date: string } =>
       x.value !== null && !!x.date,
