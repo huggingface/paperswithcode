@@ -7,7 +7,7 @@ from sqlalchemy.dialects import postgresql
 from backend.models.database import ChatSandboxComputeInterval
 from backend.scripts import qualify_chat_sandbox_spend
 from backend.services.chat_sandbox_spend_service import ChatSandboxSpendService
-from backend.tests.test_chat_sandbox_spend_service import factory, settings
+from backend.tests.chat_sandbox.test_spend_service import factory, settings
 
 
 def test_deliver_all_spend_alerts_drains_bounded_batches(monkeypatch):
