@@ -5,8 +5,8 @@ Conference service for listing conferences and conference-scoped taxonomy.
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import and_, asc, case, func
-from sqlalchemy.orm import Session
+from sqlalchemy import asc, case, func
+from sqlalchemy.orm import Session, load_only
 
 from backend.models.conferences import (
     Conference,
@@ -266,31 +266,29 @@ class ConferenceService:
 
             area_rows = self.db.query(DBArea).order_by(DBArea.name).all()
 
-            paper_count_col = func.count(func.distinct(PaperConference.paper_id)).label(
-                "paper_count"
+            # Start from this conference's papers rather than every task's
+            # paper links; tasks without conference papers are not listed.
+            paper_counts = dict(
+                self.db.query(
+                    PaperTask.task_id,
+                    func.count(func.distinct(PaperConference.paper_id)),
+                )
+                .join(PaperConference, PaperConference.paper_id == PaperTask.paper_id)
+                .filter(PaperConference.conference_id == conference.id)
+                .group_by(PaperTask.task_id)
+                .all()
             )
             task_rows = (
-                self.db.query(DBTask, paper_count_col)
-                .outerjoin(
-                    PaperTask,
-                    DBTask.id == PaperTask.task_id,
-                )
-                .outerjoin(
-                    PaperConference,
-                    and_(
-                        PaperTask.paper_id == PaperConference.paper_id,
-                        PaperConference.conference_id == conference.id,
-                    ),
-                )
-                .group_by(DBTask.id)
+                self.db.query(DBTask)
+                .options(load_only(DBTask.name, DBTask.slug, DBTask.area_id))
+                .filter(DBTask.id.in_(paper_counts))
                 .order_by(DBTask.name)
                 .all()
             )
 
             tasks_by_area: dict[Optional[int], list[ConferenceTaskSummary]] = {}
-            for db_task, paper_count in task_rows:
-                if not paper_count:
-                    continue
+            for db_task in task_rows:
+                paper_count = paper_counts[db_task.id]
                 summary = ConferenceTaskSummary(
                     id=str(db_task.id),
                     name=db_task.name,
