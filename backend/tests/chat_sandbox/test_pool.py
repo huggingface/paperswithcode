@@ -17,6 +17,7 @@ from backend.models.database import (
     ChatSandboxLease,
     ChatSandboxPool,
     ChatSession,
+    ChatTurnLatency,
 )
 from backend.services import chat_sandbox_service
 from backend.services.chat_sandbox_acquisition_coordinator import (
@@ -77,6 +78,7 @@ def _database():
     ChatSession.__table__.create(engine)
     ChatSandboxPool.__table__.create(engine)
     ChatSandboxLease.__table__.create(engine)
+    ChatTurnLatency.__table__.create(engine)
     return sessionmaker(bind=engine, expire_on_commit=False)
 
 
