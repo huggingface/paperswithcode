@@ -26,9 +26,9 @@ from sqlalchemy.sql import func, text
 from backend.models.database.base import Base
 
 if TYPE_CHECKING:
-    from backend.models.database import Paper
     from backend.models.database.chat_artifacts import ChatArtifact, ChatArtifactVersion
     from backend.models.database.chat_sandbox import ChatSandboxLease
+    from backend.models.database.papers import Paper
 
 
 class ChatSession(Base):

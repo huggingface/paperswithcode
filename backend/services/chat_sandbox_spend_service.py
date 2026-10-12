@@ -33,6 +33,9 @@ from backend.services.chat_sandbox_capacity_repository import (
 )
 
 METERING_CLOCK_SKEW_SECONDS = 5
+# Modal enforces at most a 24-hour ``timeout`` on every sandbox, so no
+# provider instance can bill past its creation plus this bound.
+PROVIDER_MAX_SANDBOX_LIFETIME_SECONDS = 86_400
 
 
 class ChatComputeDisabled(RuntimeError):
@@ -368,14 +371,31 @@ class ChatSandboxSpendService:
             )
         return len(rows)
 
-    @staticmethod
+    def _provider_bounded_terminal_at(
+        self, interval: ChatSandboxComputeInterval, observed_at: datetime
+    ) -> datetime:
+        """Clamp a late-observed confirmed end to the provider's hard timeout.
+
+        Reconciliation can confirm a sandbox ended long after it actually did;
+        metering it until that observation would bill time the provider never
+        ran (or charged) it.
+        """
+
+        started = self._aware(interval.provider_created_at or interval.reserved_at)
+        return min(
+            observed_at,
+            started + timedelta(seconds=PROVIDER_MAX_SANDBOX_LIFETIME_SECONDS),
+        )
+
     def _settle_reconciled_interval(
+        self,
         interval: ChatSandboxComputeInterval,
         *,
         terminal_at: datetime,
         reason: str,
         now: datetime,
     ) -> None:
+        terminal_at = self._provider_bounded_terminal_at(interval, terminal_at)
         interval.termination_requested_at = (
             interval.termination_requested_at or terminal_at
         )
@@ -1065,7 +1085,7 @@ class ChatSandboxSpendService:
         row.termination_requested_at = row.termination_requested_at or now
         row.terminal_reason = reason
         if confirmed:
-            row.terminal_at = now
+            row.terminal_at = self._provider_bounded_terminal_at(row, now)
             row.reserved_microusd = 0
             row.reconciliation_state = "confirmed"
         else:

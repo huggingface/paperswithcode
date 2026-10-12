@@ -2887,7 +2887,7 @@ class ChatStreamOrchestrator:
                     answer,
                     [],
                     [],
-                    [],
+                    [{"kind": "answer", "text": answer, "done": True}],
                     finish_reason,
                 )
                 if self.title_token:
