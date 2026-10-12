@@ -22,6 +22,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
 | `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
+| local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
@@ -131,6 +132,26 @@ history and stores them on repositories for the trending API/view pipeline.
 
 `update_citations.py` pulls citation counts from Semantic Scholar for ArXiv
 papers. Runs are bounded so hourly Actions do not pile up under API throttling.
+
+`discover_x_threads.py` finds X posts in which authors introduce recent
+papers and links them to the paper page's "X threads" card. Twice a day it
+takes up to 40 arXiv papers from the last 10 days that are trending or featured
+on Hugging Face daily papers and have no X threads, and runs one X API v2
+recent search per paper over links to the paper (the arXiv ID in any URL,
+project page, official repositories), its short method name, and its title.
+Only original posts whose author's display name matches a paper author are
+kept (at most two per paper, most liked first). Each paper is searched at most
+three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
+job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
+it. It is report-only, storing matches on the scan row, unless
+`PWC_X_THREAD_DISCOVERY_APPLY=true`, which links matches through the audited
+`x_threads` curation section as actor `x-thread-discovery`. Review stored
+matches, or run it by hand, with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads --show-candidates
+uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads --max-papers 5
+```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither
 the daily-paper import (arXiv only) nor the trending-model curation (Hub

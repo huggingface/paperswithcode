@@ -33,6 +33,7 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_security_hardening_submissions.sql` | Stable-subject submission provenance, applied/result review audit fields, idempotency/rate-limit indexes, user profiles/aliases, and suspension state |
 | `allow_taxonomy_suggestions_without_paper.sql` | nullable paper association for suggestions submitted from taxonomy directories |
 | `add_conference_suggestion_edit_type.sql` | conference suggestions submitted from the conference directory |
+| `add_paper_x_threads.sql` | Paper-scoped `paper_x_threads` previews for the paper-page X threads card plus the `x_threads` pending-edit type; apply as `postgres` for `public`, then again with `search_path=staging,public`, before deploying code that reads the table |
 | `add_user_bookmarks.sql` + `run_add_user_bookmarks.py` | user bookmarks |
 | `add_chat_sessions.sql` | Authenticated chat sessions, UI messages, and opaque Agent SDK transcript storage |
 | `add_chat_primary_paper.sql` | Common chat-session primary-paper binding plus durable reader-context snapshots; apply to each enabled environment before activating code that uses the shared chat ORM |

@@ -90,6 +90,7 @@ from backend.models.papers import (
     RepositoryTrendingTask as RepositoryTrendingTask,
     TaskSummary as TaskSummary,
     VersionComparison as VersionComparison,
+    XThread as XThread,
 )
 from backend.models.conferences import (
     Conference as Conference,

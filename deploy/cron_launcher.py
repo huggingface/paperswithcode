@@ -407,6 +407,16 @@ COMMANDS: dict[str, Job] = {
             "Analysis models for releases without a paper row"
         ),
     ),
+    "discover_x_threads": job(
+        "-m",
+        "backend.scripts.discover_x_threads",
+        timeout="30m",
+        idempotency=(
+            "search X once per bounded candidate paper; link author posts only "
+            "when PWC_X_THREAD_DISCOVERY_APPLY=true, through the audited x_threads "
+            "section"
+        ),
+    ),
     "export_enrichment_dashboard": job(
         "-m",
         "backend.scripts.export_enrichment_dashboard",

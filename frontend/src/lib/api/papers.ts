@@ -174,7 +174,10 @@ export class PapersApi {
     return this.request(`/tasks/${taskId}/papers${query(params)}`);
   }
 
-  forMethod(methodId: string, params?: PaperFeedParams): Promise<PaginatedResponse<Paper>> {
+  forMethod(
+    methodId: string,
+    params?: PaperFeedParams & { repository_limit?: number },
+  ): Promise<PaginatedResponse<Paper>> {
     return this.request(`/methods/${encodeURIComponent(methodId)}/papers${query(params)}`);
   }
 
@@ -268,6 +271,16 @@ export class PapersApi {
       projectPages,
       `/papers/${paperId}/project-pages`,
       { method: "PUT", body: JSON.stringify({ project_pages: projectPages }) },
+    );
+  }
+
+  updateXThreads(paperId: string, xThreads: string[]): Promise<Paper> {
+    return paperCuration.mutatePaper(
+      paperId,
+      "x_threads",
+      xThreads,
+      `/papers/${paperId}/x-threads`,
+      { method: "PUT", body: JSON.stringify({ x_threads: xThreads }) },
     );
   }
 

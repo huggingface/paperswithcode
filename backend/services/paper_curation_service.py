@@ -19,6 +19,7 @@ from backend.models.database import (
     PaperProjectPage,
     PaperRepository,
     PaperTask,
+    PaperXThread,
     ProjectPage,
     Repository,
 )
@@ -35,6 +36,7 @@ from backend.services.catalog_mutation_service import (
 from backend.services.hf_artifact_service import collect_explicit_hf_artifacts
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_service import PaperService
+from backend.services.x_thread_service import X_THREAD_FIELDS, parse_x_post_id
 from backend.utils.auth import ensure_fresh_contributor_actor
 
 
@@ -58,6 +60,7 @@ class PaperCurationService:
         "project_pages",
         "hf_artifacts",
         "source_url",
+        "x_threads",
     }
 
     def __init__(self, db: Session):
@@ -198,6 +201,13 @@ class PaperCurationService:
             }
         elif section == "source_url":
             value = {"source": paper.source, "source_url": paper.source_url}
+        elif section == "x_threads":
+            value = [
+                {field: getattr(row, field) for field in X_THREAD_FIELDS}
+                for row in self.db.query(PaperXThread)
+                .filter(PaperXThread.paper_id == paper_id)
+                .order_by(PaperXThread.position)
+            ]
         else:
             raise ValueError(f"Unsupported paper curation section: {section}")
         result = {"paper_id": paper_id, "section": section, "value": value}
@@ -341,6 +351,9 @@ class PaperCurationService:
             "source_url": lambda: self.paper_associations.update_source_url(
                 paper_id, payload["source_url"], commit=False
             ),
+            "x_threads": lambda: self.paper_associations.update_x_threads(
+                paper_id, payload["x_threads"], commit=False
+            ),
         }
         CatalogMutationService(self.db).mutate(
             actor=actor,
@@ -390,6 +403,11 @@ class PaperCurationService:
             new.update(payload["hf_datasets"])
             new.update(payload["hf_spaces"])
             return not old.issubset(new)
+        if section == "x_threads":
+            old = {row["tweet_id"] for row in before or []}
+            return not old.issubset(
+                {parse_x_post_id(url) for url in payload["x_threads"]}
+            )
         return False
 
     def restore_snapshot(self, event) -> None:
@@ -418,6 +436,8 @@ class PaperCurationService:
                 key: (value or {}).get(key, [])
                 for key in ("hf_models", "hf_datasets", "hf_spaces")
             }
+        elif section == "x_threads":
+            payload = {}  # Restored from captured previews below.
         else:
             payload = {"source_url": (value or {}).get("source_url")}
 
@@ -445,6 +465,18 @@ class PaperCurationService:
                 commit=False,
             ),
             "source_url": lambda: self._restore_source_url(paper_id, value or {}),
+            # Restore the captured previews rather than re-fetching from X.
+            "x_threads": lambda: self.paper_associations.replace_x_threads(
+                paper_id,
+                [
+                    {
+                        **row,
+                        "posted_at": _datetime_value(row["posted_at"]),
+                        "fetched_at": _datetime_value(row["fetched_at"]),
+                    }
+                    for row in value or []
+                ],
+            ),
         }
         callbacks[section]()
         if section in {"tasks", "organizations"}:

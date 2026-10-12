@@ -240,6 +240,9 @@ class Paper(BaseModel):
     project_pages: Optional[List["ProjectPage"]] = Field(
         None, description="Project pages associated with this paper"
     )
+    x_threads: Optional[List["XThread"]] = Field(
+        None, description="X (formerly Twitter) posts introducing this paper"
+    )
     tasks: Optional[List["TaskSummary"]] = Field(
         None, description="AI/ML tasks associated with this paper"
     )
@@ -867,6 +870,27 @@ class PaperProjectPage(BaseModel):
     def ensure_string_project_page_id(cls, v):
         """Ensure project_page_id is always a string."""
         return str(v)
+
+
+class XThread(BaseModel):
+    """An X post introducing a paper, with the preview captured when linked."""
+
+    url: str = Field(..., description="Canonical x.com URL of the post")
+    tweet_id: str = Field(..., description="X post ID")
+    author_name: str = Field(..., description="Display name of the post author")
+    author_handle: str = Field(..., description="X handle without the leading @")
+    author_avatar_url: Optional[str] = Field(None, description="Author avatar URL")
+    text: str = Field(..., description="Post text with links expanded")
+    posted_at: Optional[datetime] = Field(
+        None, description="When the post was published"
+    )
+    like_count: Optional[int] = Field(None, description="Likes when previewed")
+    reply_count: Optional[int] = Field(None, description="Replies when previewed")
+    media_url: Optional[str] = Field(None, description="First photo or video thumbnail")
+    media_type: Optional[Literal["photo", "video"]] = Field(
+        None, description="Kind of the first attached media"
+    )
+    fetched_at: datetime = Field(..., description="When the preview was captured")
 
 
 class ProjectPageWithPapers(BaseModel):

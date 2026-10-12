@@ -1,5 +1,6 @@
 """Method mention trends derived from the union of paper-method evidence."""
 
+import time
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import func, inspect, or_, text
@@ -16,6 +17,36 @@ from backend.services.paper_method_link_service import (
     shift_month,
 )
 from backend.services.catalog_errors import CatalogNotFoundError
+
+
+# Catalog-wide monthly paper counts are identical for every method trend and
+# cost a full scan of `papers`, so share them briefly across requests.
+CATALOG_MONTH_COUNTS_TTL_SECONDS = 300
+_catalog_month_counts: dict[tuple[str, date], tuple[float, dict[date, int]]] = {}
+
+
+def postgres_catalog_month_counts(db: Session, generated_on: date) -> dict[date, int]:
+    """Latest-version papers per publication month up to `generated_on`."""
+    key = (str(db.get_bind().url), generated_on)
+    cached = _catalog_month_counts.get(key)
+    if cached and time.monotonic() - cached[0] < CATALOG_MONTH_COUNTS_TTL_SECONDS:
+        return cached[1]
+    counts = dict(
+        db.execute(
+            text("""
+                SELECT date_trunc('month', date_published)::date AS month_start,
+                       count(*) AS paper_count
+                FROM papers
+                WHERE is_latest_version
+                  AND date_published <= :generated_on
+                GROUP BY 1
+                """),
+            {"generated_on": generated_on},
+        ).all()
+    )
+    _catalog_month_counts.clear()
+    _catalog_month_counts[key] = (time.monotonic(), counts)
+    return counts
 
 
 class MethodTrendService:
@@ -49,8 +80,10 @@ class MethodTrendService:
         baseline_start = recent_start - timedelta(days=baseline_days)
         query_start = min(history_start, baseline_start)
 
+        # paper_methods is unique per (paper, method), so the join yields each
+        # paper once; no DISTINCT needed.
         rows = (
-            self.db.query(DBPaper.id, DBPaper.date_published)
+            self.db.query(DBPaper.date_published)
             .join(PaperMethod, PaperMethod.paper_id == DBPaper.id)
             .filter(
                 PaperMethod.method_id == method.id,
@@ -58,11 +91,11 @@ class MethodTrendService:
                 DBPaper.date_published >= query_start,
                 DBPaper.date_published <= generated_on,
             )
-            .distinct()
             .all()
         )
         undated_count = (
-            self.db.query(func.count(func.distinct(DBPaper.id)))
+            self.db.query(func.count())
+            .select_from(DBPaper)
             .join(PaperMethod, PaperMethod.paper_id == DBPaper.id)
             .filter(
                 PaperMethod.method_id == method.id,
@@ -74,7 +107,7 @@ class MethodTrendService:
         )
         counts: dict[date, int] = {}
         recent_count = baseline_count = 0
-        for _paper_id, published_on in rows:
+        for (published_on,) in rows:
             bucket = month_start(published_on)
             counts[bucket] = counts.get(bucket, 0) + 1
             if published_on > recent_start:
@@ -97,20 +130,13 @@ class MethodTrendService:
                 bucket = month_start(published_on)
                 catalog[bucket] = catalog.get(bucket, 0) + 1
         else:
-            catalog = dict(
-                self.db.execute(
-                    text("""
-                        SELECT date_trunc('month', date_published)::date AS month_start,
-                               count(DISTINCT id) AS paper_count
-                        FROM papers
-                        WHERE is_latest_version
-                          AND date_published >= :history_start
-                          AND date_published <= :generated_on
-                        GROUP BY 1
-                        """),
-                    {"history_start": history_start, "generated_on": generated_on},
-                ).all()
-            )
+            catalog = {
+                month: count
+                for month, count in postgres_catalog_month_counts(
+                    self.db, generated_on
+                ).items()
+                if month >= history_start
+            }
         coverage_available = self.db.bind.dialect.name == "postgresql" and inspect(
             self.db.bind
         ).has_table("method_reference_backfill_months")

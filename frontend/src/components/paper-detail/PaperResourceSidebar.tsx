@@ -9,6 +9,7 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 
 import { CopyToBucketCard, paperArtifactBucketName } from "./CopyToBucketCard";
 import { RelatedPapersCard } from "./RelatedPapersCard";
+import { XThreadsCard } from "./XThreadsCard";
 
 const REPO_PREVIEW_LIMIT = 3;
 const HF_LINK_PREVIEW_LIMIT = 3;
@@ -33,6 +34,7 @@ export function PaperResourceSidebar({
   onCopyCitation,
   onEditHfArtifacts,
   onEditRepositories,
+  onEditXThreads,
   paper,
   relatedIsLoading,
   relatedPapers,
@@ -45,6 +47,7 @@ export function PaperResourceSidebar({
   onCopyCitation: () => void;
   onEditHfArtifacts: () => void;
   onEditRepositories: () => void;
+  onEditXThreads: () => void;
   paper: Paper;
   relatedIsLoading: boolean;
   relatedPapers?: RelatedPaperRecommendation[];
@@ -113,6 +116,7 @@ export function PaperResourceSidebar({
       </div>
 
       <HuggingFaceArtifactsCard viewer={hfArtifactViewer} onEdit={onEditHfArtifacts} />
+      <XThreadsCard threads={paper.x_threads ?? []} onEdit={onEditXThreads} />
       <CopyToBucketCard
         githubUrls={sortedRepos.map(({ url }) => url)}
         hfModelUrls={allHfArtifactUrls.models}

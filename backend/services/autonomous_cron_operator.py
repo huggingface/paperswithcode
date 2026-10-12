@@ -116,6 +116,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
         "backend/services/hf_trending_model_curation_service.py",
     ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
+    "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
     "export_enrichment_dashboard": ("backend/services/enrichment_dashboard_export.py",),
     "sync_hf_organizations": ("backend/services/organization_sync_service.py",),
     "calculate_organization_trending_scores": (
@@ -173,11 +174,14 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_coarena": ("backend/tests/evaluation/test_coarena_sync.py",),
     "sync_arc_prize": ("backend/tests/evaluation/test_arc_prize_sync.py",),
     "import_hf_daily_papers": ("backend/tests/test_import_hf_daily_papers.py",),
-    "enqueue_hf_daily_paper_curation": ("backend/tests/test_cron_dashboard.py",),
+    "enqueue_hf_daily_paper_curation": (
+        "backend/tests/cron/test_job_health_contracts.py",
+    ),
     "enqueue_hf_trending_model_curation": (
         "backend/tests/test_hf_trending_model_curation.py",
     ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
+    "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
     "export_enrichment_dashboard": (
         "backend/tests/test_enrichment_dashboard_export.py",
     ),
@@ -188,22 +192,24 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "refresh_paper_embeddings": ("backend/tests/test_incremental_paper_embeddings.py",),
     "preload_thumbnails": ("backend/tests/test_preload_thumbnails.py",),
     "mirror_thumbnails_to_disk": ("backend/tests/test_thumbnail_service.py",),
-    "backfill_method_keywords": ("backend/tests/test_cron_dashboard.py",),
+    "backfill_method_keywords": ("backend/tests/cron/test_job_health_contracts.py",),
     "backfill_method_references": (
         "backend/tests/test_historical_reference_backfill_cli.py",
     ),
     "link_methods_by_references": (
         "backend/tests/test_link_methods_by_references_weekly.py",
     ),
-    "link_papers_by_task_keywords": ("backend/tests/test_cron_dashboard.py",),
+    "link_papers_by_task_keywords": (
+        "backend/tests/cron/test_job_health_contracts.py",
+    ),
     "review_submissions": ("backend/tests/test_autonomous_submission_schedule.py",),
     "process_curation_thumbnails": ("backend/tests/test_curation_thumbnail_queue.py",),
     "autonomous_cron_health": ("backend/tests/test_autonomous_cron_operator.py",),
     "autonomous_cron_audit": ("backend/tests/test_autonomous_cron_operator.py",),
     "monitor_chat_operational_alerts": (
-        "backend/tests/test_chat_operational_alerts.py",
+        "backend/tests/chat/test_operational_alerts.py",
     ),
-    "run_chat_synthetic_probe": ("backend/tests/test_chat_synthetic_probe.py",),
+    "run_chat_synthetic_probe": ("backend/tests/chat/test_synthetic_probe.py",),
 }
 
 
@@ -583,7 +589,7 @@ def build_cron_repair_contracts(
                         *_FOCUSED_TESTS.get(definition.id, ()),
                         "backend/tests/test_autonomous_cron_operator.py",
                         "backend/tests/test_autonomous_cron_probe.py",
-                        "backend/tests/test_cron_health.py",
+                        "backend/tests/cron/test_health.py",
                     )
                 )
             ),

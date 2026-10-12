@@ -27,6 +27,7 @@ EDIT_SECTIONS = frozenset(
         "project_pages",
         "hf_artifacts",
         "source_url",
+        "x_threads",
     }
 )
 

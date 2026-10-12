@@ -8,7 +8,8 @@ export type PaperEditSection =
   | "project-pages"
   | "hf-artifacts"
   | "organizations"
-  | "source-url";
+  | "source-url"
+  | "x-threads";
 
 const FRESH_AUTH_EDIT_SECTIONS: Record<string, PaperEditSection> = {
   tasks: "tasks",
@@ -19,6 +20,7 @@ const FRESH_AUTH_EDIT_SECTIONS: Record<string, PaperEditSection> = {
   hf_artifacts: "hf-artifacts",
   organizations: "organizations",
   source_url: "source-url",
+  x_threads: "x-threads",
 };
 
 export function parseFreshAuthEditSection(
