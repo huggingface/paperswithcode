@@ -3,9 +3,11 @@
 The lifecycle owns every step whose correctness does not depend on the
 protocol: capability authorization, turn metering, budget reservation and the
 ambiguous-dispatch boundary, upstream transport, streaming, tracing, and
-settlement. A protocol adapter supplies the narrow pieces that do differ:
-request normalization, upstream headers, usage extraction, provider error
-mapping, and response framing.
+settlement, including every database transaction those steps need. A
+protocol adapter supplies only the narrow, side-effect-free pieces that do
+differ: request normalization, upstream headers, usage extraction, provider
+error mapping, and response framing. A ledger records accounting state in the
+sessions the lifecycle hands it.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import uuid
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from typing import Any, Literal, Protocol
+from typing import Any, Protocol
 
 import anyio
 import httpx
@@ -108,6 +110,19 @@ def record_provider_error(capability_id: uuid.UUID, code: str) -> None:
             error_db.commit()
 
 
+def revoke_provider_credential(
+    ledger: ProviderLedger, capability_id: uuid.UUID, code: str
+) -> None:
+    """Revoke a rejected user credential and record why, atomically."""
+
+    with db_manager.session_local() as credential_db:
+        ledger.revoke_credential(credential_db)
+        row = credential_db.get(ChatTurnCapability, capability_id)
+        if row is not None:
+            ChatCapabilityService(credential_db).record_provider_error(row, code)
+        credential_db.commit()
+
+
 def qualification_scope_claim(
     row: ChatTurnCapability, db: Session, settings: Settings
 ) -> uuid.UUID | None:
@@ -167,10 +182,10 @@ def _elapsed_ms(started: float) -> int:
     return round((time.perf_counter() - started) * 1000)
 
 
-async def close_upstream(upstream: Any, client: Any, *, shield: bool = True) -> None:
-    """Close the upstream stream, by default even inside a cancelled scope."""
+async def close_upstream(upstream: Any, client: Any) -> None:
+    """Close the upstream stream even inside an already-cancelled scope."""
 
-    with anyio.CancelScope(shield=shield):
+    with anyio.CancelScope(shield=True):
         await upstream.aclose()
         await client.aclose()
 
@@ -210,6 +225,7 @@ class ProviderError:
     error: HTTPException | None
     usage: Any = None
     record: bool = True
+    revokes_credential: bool = False
 
 
 class UsageStream(Protocol):
@@ -224,36 +240,40 @@ class UsageStream(Protocol):
 
 
 class ProviderLedger(Protocol):
-    """Accounting for one provider call across its dispatch boundaries."""
+    """Accounting for one provider call across its dispatch boundaries.
+
+    Every method writes to the session it receives and never commits.
+    """
 
     name: str
+    metered: bool
     call_id: uuid.UUID | None
 
     async def reserve(
         self, db: Session, *, turn_id: uuid.UUID, call_sequence: int
-    ) -> None:
-        """Reserve the bounded maximum in ``db``; the lifecycle commits."""
+    ) -> None: ...
 
-    def mark_dispatched(self, db: Session) -> None:
-        """Mark the ambiguous-dispatch boundary in ``db``; the lifecycle commits."""
+    def mark_dispatched(self, db: Session) -> None: ...
 
     def trace_accounting(self) -> dict[str, Any]: ...
 
-    def mark_unknown(self, error_code: str) -> None:
+    def mark_unknown(self, db: Session, error_code: str) -> None:
         """Bytes may have reached the provider, but no response arrived."""
 
     def settle_rejected(
         self,
+        db: Session,
         failure: ProviderError,
         *,
         provider_request_id: str | None,
         latency_ms: int,
     ) -> None: ...
 
-    def record_ttft(self, elapsed_ms: int) -> None: ...
+    def record_ttft(self, db: Session, elapsed_ms: int) -> None: ...
 
     def settle(
         self,
+        db: Session,
         usage: UsageStream,
         *,
         provider_request_id: str | None,
@@ -262,6 +282,8 @@ class ProviderLedger(Protocol):
         error_code: str | None,
     ) -> Any:
         """Settle the call and return the usage to record on its trace."""
+
+    def revoke_credential(self, db: Session) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -291,13 +313,9 @@ class PreparedProviderCall:
 
 
 class ProviderProtocol(Protocol):
-    """The protocol-specific hooks of one provider endpoint."""
+    """The side-effect-free hooks of one provider wire protocol."""
 
-    receipt_phase: Literal["entry", "dispatch"]
-    transport_error_code: str
-    releases_request_session: bool
-    shields_upstream_close: bool
-    logs_stream_completion: bool
+    transport_error: ProviderError
 
     def check_available(self) -> None: ...
 
@@ -324,8 +342,6 @@ class ProviderProtocol(Protocol):
     def usage_extractor(self) -> UsageStream: ...
 
     def provider_request_id(self, upstream: httpx.Response) -> str | None: ...
-
-    def transport_failure(self) -> ProviderError: ...
 
     async def map_provider_status(
         self, upstream: httpx.Response, call: PreparedProviderCall
@@ -362,9 +378,7 @@ class ProviderCallLifecycle:
             turn_id = uuid.UUID(turn)
         except ValueError:
             raise HTTPException(status_code=403, detail="Capability rejected") from None
-        received_at = datetime.now(UTC)
-        if protocol.receipt_phase == "entry":
-            record_gateway_timing(settings, turn_id, received_at=received_at)
+        record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
         token = self.authenticate()
         parsed = protocol.parse(await request.body())
         try:
@@ -375,12 +389,9 @@ class ProviderCallLifecycle:
         call = protocol.prepare(
             parsed, row, self.db, lambda: self.owner(row), turn_id=turn_id
         )
-        capability_id = row.id
         call_sequence, trace_id = self._meter(row, turn_id, call)
         ledger = call.ledger
-        await self._reserve(ledger, capability_id, turn_id, call_sequence)
-        if protocol.receipt_phase == "dispatch":
-            record_gateway_timing(settings, turn_id, received_at=received_at)
+        await self._reserve(call, turn_id, call_sequence)
         # Persist the ambiguous-dispatch boundary before any network bytes can
         # reach the provider. A crash after this point retains the full bound.
         ledger.mark_dispatched(self.db)
@@ -397,12 +408,11 @@ class ProviderCallLifecycle:
             offered_tool_names=inventory["offered_tool_names"],
             offered_tool_digest=inventory["offered_tool_digest"],
         )
-        if protocol.releases_request_session:
-            # A FastAPI yield dependency otherwise retains this connection until
-            # the StreamingResponse finishes. At fleet concurrency that exhausts
-            # the pool while the gateway is merely waiting on the provider,
-            # blocking sibling calls. Later accounting uses short-lived sessions.
-            self.db.close()
+        # A FastAPI yield dependency otherwise retains this connection until the
+        # StreamingResponse finishes. At fleet concurrency that exhausts the pool
+        # while the gateway is merely waiting on the provider, blocking sibling
+        # calls. Later accounting uses short-lived sessions.
+        self.db.close()
         client = httpx.AsyncClient(timeout=180, follow_redirects=False)
         try:
             upstream = await client.send(
@@ -416,10 +426,10 @@ class ProviderCallLifecycle:
             )
         except httpx.HTTPError:
             await client.aclose()
-            ledger.mark_unknown(protocol.transport_error_code)
-            failure = protocol.transport_failure()
+            failure = protocol.transport_error
+            self._account(ledger, lambda db: ledger.mark_unknown(db, failure.code))
             if failure.record:
-                record_provider_error(capability_id, failure.code)
+                record_provider_error(call.capability_id, failure.code)
             provider_trace.finish(
                 usage=protocol.usage_extractor().result(),
                 status_code=None,
@@ -435,29 +445,79 @@ class ProviderCallLifecycle:
         )
 
         request_id = protocol.provider_request_id(upstream)
-        rejection = await protocol.map_provider_status(upstream, call)
-        if rejection is not None and rejection.error is None:
-            if rejection.record:
-                record_provider_error(capability_id, rejection.code)
-        elif rejection is not None:
-            await upstream.aclose()
-            await client.aclose()
-            record_provider_error(capability_id, rejection.code)
-            ledger.settle_rejected(
-                rejection,
-                provider_request_id=request_id,
-                latency_ms=_elapsed_ms(self.started),
+        failure = await protocol.map_provider_status(upstream, call)
+        if failure is not None and failure.revokes_credential:
+            revoke_provider_credential(ledger, call.capability_id, failure.code)
+        elif failure is not None and failure.record:
+            record_provider_error(call.capability_id, failure.code)
+        if failure is not None and failure.error is not None:
+            await close_upstream(upstream, client)
+            self._account(
+                ledger,
+                lambda db: ledger.settle_rejected(
+                    db,
+                    failure,
+                    provider_request_id=request_id,
+                    latency_ms=_elapsed_ms(self.started),
+                ),
             )
             provider_trace.finish(
-                usage=rejection.usage,
+                usage=failure.usage,
                 status_code=upstream.status_code,
-                error_code=rejection.code,
+                error_code=failure.code,
                 tool_call_returned=False,
             )
-            raise rejection.error
+            raise failure.error
 
         usage = protocol.usage_extractor()
-        shield = protocol.shields_upstream_close
+
+        def settle(*, phase: str, ttft_ms: int | None, cancelled: bool) -> None:
+            error_code = protocol.stream_error_code(
+                usage, upstream.status_code, cancelled=cancelled
+            )
+            trace_usage = self._settle(
+                ledger,
+                usage,
+                phase=phase,
+                provider_request_id=request_id,
+                ttft_ms=ttft_ms,
+                error_code=error_code,
+            )
+            provider_trace.finish(
+                usage=trace_usage,
+                status_code=upstream.status_code,
+                error_code=error_code,
+                tool_call_returned=usage.saw_tool_call,
+            )
+            logger.info(
+                "chat provider stream complete call_class=research turn=%s "
+                "duration_ms=%.1f",
+                opaque_turn(turn_id),
+                (time.perf_counter() - self.started) * 1000,
+            )
+
+        def first_bytes(elapsed_ms: int) -> None:
+            record_gateway_timing(
+                settings,
+                turn_id,
+                phase="upstream_first_body_byte",
+                elapsed_ms=elapsed_ms,
+            )
+
+        def first_token(elapsed_ms: int) -> None:
+            provider_trace.first_byte(elapsed_ms)
+            self._account(ledger, lambda db: ledger.record_ttft(db, elapsed_ms))
+
+        headers = protocol.response_headers(upstream)
+        if not call.stream:
+            body = await upstream.aread()
+            usage.inspect_complete_response(body)
+            elapsed_ms = _elapsed_ms(self.started)
+            first_token(elapsed_ms)
+            first_bytes(elapsed_ms)
+            await close_upstream(upstream, client)
+            settle(phase="response", ttft_ms=elapsed_ms, cancelled=False)
+            return Response(body, status_code=upstream.status_code, headers=headers)
 
         async def chunks():
             first_body_byte_ms: int | None = None
@@ -469,82 +529,21 @@ class ProviderCallLifecycle:
                     elapsed_ms = _elapsed_ms(self.started)
                     if first_body_byte_ms is None:
                         first_body_byte_ms = elapsed_ms
-                        record_gateway_timing(
-                            settings,
-                            turn_id,
-                            phase="upstream_first_body_byte",
-                            elapsed_ms=first_body_byte_ms,
-                        )
+                        first_bytes(elapsed_ms)
                     if ttft_ms is None and usage.saw_token_delta:
                         ttft_ms = elapsed_ms
-                        provider_trace.first_byte(ttft_ms)
-                        ledger.record_ttft(ttft_ms)
+                        first_token(elapsed_ms)
                     yield chunk
             except (asyncio.CancelledError, GeneratorExit):
                 cancelled = True
                 raise
             finally:
-                await close_upstream(upstream, client, shield=shield)
-                error_code = protocol.stream_error_code(
-                    usage, upstream.status_code, cancelled=cancelled
-                )
-                trace_usage = self._settle(
-                    ledger,
-                    usage,
-                    phase="stream",
-                    provider_request_id=request_id,
-                    ttft_ms=ttft_ms,
-                    error_code=error_code,
-                )
-                provider_trace.finish(
-                    usage=trace_usage,
-                    status_code=upstream.status_code,
-                    error_code=error_code,
-                    tool_call_returned=usage.saw_tool_call,
-                )
-                if protocol.logs_stream_completion:
-                    logger.info(
-                        "chat provider stream complete call_class=research turn=%s "
-                        "duration_ms=%.1f",
-                        opaque_turn(turn_id),
-                        (time.perf_counter() - self.started) * 1000,
-                    )
+                await close_upstream(upstream, client)
+                settle(phase="stream", ttft_ms=ttft_ms, cancelled=cancelled)
 
-        headers = protocol.response_headers(upstream)
-        if call.stream:
-            return StreamingResponse(
-                chunks(), status_code=upstream.status_code, headers=headers
-            )
-        body = await upstream.aread()
-        usage.inspect_complete_response(body)
-        elapsed_ms = _elapsed_ms(self.started)
-        provider_trace.first_byte(elapsed_ms)
-        ledger.record_ttft(elapsed_ms)
-        record_gateway_timing(
-            settings,
-            turn_id,
-            phase="upstream_first_body_byte",
-            elapsed_ms=elapsed_ms,
+        return StreamingResponse(
+            chunks(), status_code=upstream.status_code, headers=headers
         )
-        await close_upstream(upstream, client, shield=shield)
-        error_code = protocol.stream_error_code(
-            usage, upstream.status_code, cancelled=False
-        )
-        trace_usage = self._settle(
-            ledger,
-            usage,
-            phase="response",
-            provider_request_id=request_id,
-            ttft_ms=elapsed_ms,
-            error_code=error_code,
-        )
-        provider_trace.finish(
-            usage=trace_usage,
-            status_code=upstream.status_code,
-            error_code=error_code,
-            tool_call_returned=usage.saw_tool_call,
-        )
-        return Response(body, status_code=upstream.status_code, headers=headers)
 
     def _meter(
         self,
@@ -591,18 +590,30 @@ class ProviderCallLifecycle:
 
     async def _reserve(
         self,
-        ledger: ProviderLedger,
-        capability_id: uuid.UUID,
+        call: PreparedProviderCall,
         turn_id: uuid.UUID,
         call_sequence: int,
     ) -> None:
         try:
-            await ledger.reserve(self.db, turn_id=turn_id, call_sequence=call_sequence)
+            await call.ledger.reserve(
+                self.db, turn_id=turn_id, call_sequence=call_sequence
+            )
             self.db.commit()
         except ProviderReservationRejected as rejected:
             self.db.rollback()
-            record_provider_error(capability_id, rejected.code)
+            record_provider_error(call.capability_id, rejected.code)
             raise rejected.http_error() from None
+
+    @staticmethod
+    def _account(ledger: ProviderLedger, write: Callable[[Session], Any]) -> Any:
+        """Run one ledger write in its own short-lived accounting transaction."""
+
+        if not ledger.metered:
+            return None
+        with db_manager.session_local() as accounting_db:
+            result = write(accounting_db)
+            accounting_db.commit()
+        return result
 
     def _settle(
         self,
@@ -614,13 +625,19 @@ class ProviderCallLifecycle:
         ttft_ms: int | None,
         error_code: str | None,
     ) -> Any:
+        if not ledger.metered:
+            return usage.result()
         try:
-            return ledger.settle(
-                usage,
-                provider_request_id=provider_request_id,
-                latency_ms=_elapsed_ms(self.started),
-                ttft_ms=ttft_ms,
-                error_code=error_code,
+            return self._account(
+                ledger,
+                lambda db: ledger.settle(
+                    db,
+                    usage,
+                    provider_request_id=provider_request_id,
+                    latency_ms=_elapsed_ms(self.started),
+                    ttft_ms=ttft_ms,
+                    error_code=error_code,
+                ),
             )
         except Exception as error:
             logger.error(

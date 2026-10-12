@@ -193,6 +193,22 @@ def test_chat_runtime_descriptor_rejects_partial_and_armed_legacy_states(
     )
 
 
+@pytest.mark.parametrize("limit", [100, 1000])
+def test_chat_runtime_descriptor_pins_the_reviewed_active_chat_quota(
+    settings_factory, limit
+):
+    settings, _release = settings_factory("staging")
+    assert settings.chat_session_limit == 500
+    assert runtime_validation.validate_chat_runtime_descriptor(settings) is True
+
+    settings.chat_session_limit = limit
+    with pytest.raises(RuntimeError) as exc_info:
+        runtime_validation.validate_chat_runtime_descriptor(settings)
+    assert str(exc_info.value) == (
+        "chat retention quotas must remain 500 active chats and 100 MB"
+    )
+
+
 def test_chat_provider_policy_isolated_from_capacity(settings_factory):
     settings, _release = settings_factory("staging")
     settings.chat_max_concurrency = 999

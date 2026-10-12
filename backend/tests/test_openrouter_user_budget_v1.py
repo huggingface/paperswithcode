@@ -14,7 +14,11 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend import chat_gateway_app as gateway
-from backend.services.chat_provider_gateway import anthropic_messages, lifecycle
+from backend.services.chat_provider_gateway import (
+    anthropic_messages,
+    ledgers,
+    lifecycle,
+)
 from backend.config import Settings
 from backend.routers import chat as chat_router
 from backend.services import chat_admission_billing as chat_billing
@@ -283,9 +287,7 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
         lambda *_args: ("https://openrouter.ai/api/v1/messages", "token", None),
     )
     monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
-    monkeypatch.setattr(
-        anthropic_messages, "require_openrouter_budget", slow_budget_check
-    )
+    monkeypatch.setattr(ledgers, "require_openrouter_budget", slow_budget_check)
     monkeypatch.setattr(lifecycle, "record_provider_error", lambda *_args: None)
     with pytest.raises(HTTPException) as error:
         asyncio.run(
@@ -365,10 +367,8 @@ def test_gateway_reports_funded_abuse_limit_without_dispatch(monkeypatch):
         lambda *_args: ("https://openrouter.ai/api/v1/messages", "token", None),
     )
     monkeypatch.setattr(lifecycle, "ChatCapabilityService", FakeCapabilityService)
-    monkeypatch.setattr(
-        anthropic_messages, "OpenRouterUserBudgetService", LimitedBudgetService
-    )
-    monkeypatch.setattr(anthropic_messages, "require_openrouter_budget", allow_budget)
+    monkeypatch.setattr(ledgers, "OpenRouterUserBudgetService", LimitedBudgetService)
+    monkeypatch.setattr(ledgers, "require_openrouter_budget", allow_budget)
     monkeypatch.setattr(
         lifecycle, "record_provider_error", lambda *args: recorded.append(args)
     )

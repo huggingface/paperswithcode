@@ -16,7 +16,7 @@ describe("PrivacyView chat retention", () => {
     render(<PrivacyView />);
 
     const retention = screen.getByText(/Private chats are retained until you delete them/i);
-    expect(retention).toHaveTextContent("100 active chats");
+    expect(retention).toHaveTextContent("500 active chats");
     expect(retention).toHaveTextContent("100 MB");
     expect(retention).toHaveTextContent(/Archiving.*does not delete/i);
     expect(retention).toHaveTextContent(/unlisted snapshot/i);

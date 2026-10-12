@@ -398,7 +398,7 @@ const SettingsView: React.FC = () => {
         <div className="settings-note settings-note-flush">
           <span>
             Chats are private and retained until you delete them. You can keep up
-            to 100 active chats and 100 MB of chat data. Archiving removes chats
+            to 500 active chats and 100 MB of chat data. Archiving removes chats
             from the active list and frees active-chat quota, but does not delete
             them. Deleting a chat permanently removes its durable transcript,
             workspace reference, and any public share link after deletion is
