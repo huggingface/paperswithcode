@@ -362,6 +362,28 @@ def test_known_client_only_routes_keep_the_spa_shell(client, path):
     assert '<div id="root"></div>' in response.text
 
 
+@pytest.mark.parametrize(
+    "listing", ["all", "oral", "spotlight", "outstanding", "best-paper-finalists"]
+)
+def test_conference_listing_paths_render_the_spa_shell(client, monkeypatch, listing):
+    calls = []
+
+    def conference_listing(self, slug, name):
+        calls.append((slug, name))
+        return _page(robots="noindex,follow")
+
+    monkeypatch.setattr(DiscoveryPageService, "conference_listing", conference_listing)
+    response = client.get(f"/conferences/icml-2026/{listing}")
+    assert response.status_code == 200
+    assert '<script src="/assets/app.js"></script>' in response.text
+    assert calls == [("icml-2026", listing)]
+
+
+def test_conference_listing_for_unknown_conference_is_404(client, monkeypatch):
+    monkeypatch.setattr(DiscoveryPageService, "conference", lambda self, slug: None)
+    assert client.get("/conferences/missing/oral").status_code == 404
+
+
 def test_legacy_aliases_redirect_permanently(client):
     assert client.get("/task/safe", follow_redirects=False).status_code == 301
     alias = client.get("/organizations/example", follow_redirects=False)

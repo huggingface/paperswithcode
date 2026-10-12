@@ -37,12 +37,23 @@ from backend.services.leaderboard_ranking_service import (
     RankableTask,
     rank_leaderboard,
 )
+from backend.services.conference_service import ConferenceService
 from backend.services.sitemap_service import eligible_paper_filter
 from backend.utils.urls import get_paper_route_identifier
 from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
 
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 DISCOVERY_PAPER_LIMIT = 20
+
+# Reserved /conferences/{slug}/{listing} paths rendered by ConferenceTaskView
+# as presentation and award listings rather than task filters.
+CONFERENCE_LISTINGS = {
+    "all": "All papers",
+    "oral": "Oral papers",
+    "spotlight": "Spotlight papers",
+    "outstanding": "Outstanding papers",
+    "best-paper-finalists": "Best paper finalists",
+}
 LEADERBOARD_ROW_LIMIT = 100
 TASK_BENCHMARK_LIMIT = 50
 
@@ -600,7 +611,53 @@ class DiscoveryPageService:
             papers,
         )
 
+    def conference_listing(self, slug: str, listing: str) -> Optional[DiscoveryPage]:
+        page = self.conference(slug)
+        if page is None:
+            return None
+        conference = self.db.query(Conference).filter(Conference.slug == slug).one()
+        query = (
+            self.db.query(Paper)
+            .join(PaperConference, PaperConference.paper_id == Paper.id)
+            .filter(
+                PaperConference.conference_id == conference.id,
+                eligible_paper_filter(),
+            )
+        )
+        if listing in ("oral", "spotlight"):
+            query = query.filter(
+                Paper.proceeding == f"{conference.name} {listing.capitalize()}"
+            )
+        elif listing == "outstanding":
+            query = query.filter(
+                PaperConference.award.in_(ConferenceService.OUTSTANDING_AWARDS)
+            )
+        elif listing == "best-paper-finalists":
+            query = query.filter(
+                PaperConference.award == ConferenceService.BEST_PAPER_FINALIST_AWARD
+            )
+        papers = (
+            query.order_by(
+                Paper.trending_score.desc().nullslast(),
+                Paper.date_published.desc().nullslast(),
+                Paper.id.desc(),
+            )
+            .limit(DISCOVERY_PAPER_LIMIT)
+            .all()
+        )
+        label = CONFERENCE_LISTINGS[listing]
+        return replace(
+            page,
+            paper_links=tuple(
+                self._paper_link(paper, f"{label} at {page.heading}")
+                for paper in papers
+            ),
+            robots="noindex,follow",
+        )
+
     def conference_task(self, slug: str, task_slug: str) -> Optional[DiscoveryPage]:
+        if task_slug in CONFERENCE_LISTINGS:
+            return self.conference_listing(slug, task_slug)
         page = self.conference(slug)
         task = self.db.query(Task).filter(Task.slug == task_slug).one_or_none()
         if page is None or task is None:
