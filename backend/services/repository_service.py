@@ -242,66 +242,41 @@ class RepositoryService:
         except Exception as error:
             raise DatabaseError(f"Failed to fetch repositories: {error}") from error
 
-    def get_repositories_for_paper(
-        self, paper_id: str, include_relationship_data: bool = True
-    ) -> List[PaperRepository]:
+    def get_repositories_for_paper(self, paper_id: str) -> List[Repository]:
         """
         Get all repositories associated with a specific paper.
 
-        Args:
-            paper_id: Paper ID
-            include_relationship_data: Whether to include relationship metadata
-
-        Returns:
-            List of PaperRepository objects with embedded repository data
+        Official repositories come first, then the most-starred ones. Each
+        repository's ``is_official`` comes from the paper-repository link.
 
         Raises:
-            PaperNotFoundError: If paper not found
+            PaperNotFoundError: If the paper ID is invalid or not found
         """
         try:
-            # First check if paper exists
-            paper = self.db.query(DBPaper).filter(DBPaper.id == int(paper_id)).first()
-            if not paper:
-                raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
-
-            # Get paper-repository relationships with repository data
-            relationships = (
-                self.db.query(DBPaperRepository, DBRepository)
-                .join(DBRepository, DBPaperRepository.repository_id == DBRepository.id)
-                .filter(DBPaperRepository.paper_id == int(paper_id))
-                .all()
-            )
-
-            # Convert to API models
-            result = []
-            for paper_repo, repo in relationships:
-                # Create Repository object with is_official from junction table
-                api_repo = Repository(
-                    id=str(repo.id),
-                    url=repo.url,
-                    owner=repo.owner,
-                    name=repo.name,
-                    num_stars=repo.num_stars,
-                    is_official=paper_repo.is_official,  # Use junction table value
-                    source=repo.source,
-                    created_at=repo.created_at.date() if repo.created_at else None,
-                    updated_at=repo.updated_at.date() if repo.updated_at else None,
-                )
-
-                paper_repo_data = {
-                    "paper_id": str(paper_repo.paper_id),
-                    "repository_id": str(paper_repo.repository_id),
-                    "repository": api_repo if include_relationship_data else None,
-                }
-
-                result.append(PaperRepository(**paper_repo_data))
-
-            return result
-
+            db_paper_id = int(paper_id)
         except ValueError:
             raise PaperNotFoundError(f"Invalid paper ID: {paper_id}")
-        except Exception as e:
-            raise DatabaseError(f"Failed to fetch repositories for paper: {str(e)}")
+
+        if self.db.query(DBPaper.id).filter(DBPaper.id == db_paper_id).first() is None:
+            raise PaperNotFoundError(f"Paper with ID {paper_id} not found")
+
+        rows = (
+            self.db.query(DBPaperRepository.is_official, DBRepository)
+            .join(DBRepository, DBPaperRepository.repository_id == DBRepository.id)
+            .filter(DBPaperRepository.paper_id == db_paper_id)
+            .order_by(
+                desc(DBPaperRepository.is_official),
+                desc(DBRepository.num_stars).nullslast(),
+                DBRepository.id,
+            )
+            .all()
+        )
+        return [
+            self._db_repository_to_api(repository).model_copy(
+                update={"is_official": bool(is_official)}
+            )
+            for is_official, repository in rows
+        ]
 
     def create_or_update_repository(
         self,
