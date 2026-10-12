@@ -18,11 +18,11 @@ When the user asks **"should we add X?"**, briefly judge whether the technique i
 For a typical new method with a source paper:
 
 1. Confirm the method does not already exist (`slug`, `name`, `keywords`).
-2. Confirm the source `papers` row exists (import first if needed).
+2. Decide whether the method has an introducing paper at all (see No introducing paper). If it does, confirm the source `papers` row exists (import first if needed).
 3. Write metadata + migration SQL.
 4. Add hero image: save seed PNG under `/tmp/paperswithcode_entity_image_seeds/methods/<slug>.png`, then import into SQL (see Thumbnail).
 5. Apply migration to the live DB.
-6. Link **all local papers that cite the source paper** (see Citation linking).
+6. Link papers: **all local papers that cite the source paper** (see Citation linking), or, for a method without an introducing paper, a reviewed candidate set (see No introducing paper).
 7. Verify API + report production URL.
 
 Skip citation linking only when the user explicitly asks for the method row alone.
@@ -38,6 +38,20 @@ Method source links should point to the canonical source that introduced the met
 
 Be careful about provenance. The source paper is the paper that introduced, named, or formally described the method. A later explainer, implementation tutorial, or model card can be useful for `code_snippet_url`, `image_url`, and `image_credit`, but it is not the canonical source if an introducing paper exists.
 
+### No introducing paper
+
+Not every method has an introducing paper. Broad techniques and research areas often grew out of many earlier works before one paper made them popular. Examples are Neural Architecture Search, which started with neuroevolution of network topologies years before Zoph & Le (1611.01578) popularized the term. Others are product or tooling concepts that come from docs or blog posts, such as MCP, function calling and context engineering. Before setting `source_paper_id`, check whether there were clear precursors. A paper that popularized, named or scaled up a technique is not its introducing paper if earlier work already did the same thing. When the user asks to tag a paper "with method X", that paper is not automatically X's source. If the provenance is contested, treat the method as having no introducing paper.
+
+For such methods:
+
+- Keep `source_paper_id = NULL`. Put an authoritative explainer in `source_url` and `source_title`: a well-known survey, a canonical reference, or official docs. Do not insert a `source` evidence row, and do not add an "Introduced" banner.
+- Leave `introduced_year = NULL` unless the origin year is well established.
+- In the description, credit the seminal and popularizing papers with relative `/paper/...` links instead of calling either one "the original".
+- `image_credit` may still point to the paper the figure came from.
+- Skip `link_papers_by_source_citations.py`, because there is no source to collect citations from. The hourly `backfill_method_references` CRON also skips methods without a source paper. Instead, collect candidates from titles and abstracts (and from the citers of seminal papers), then review each one. Insert the true positives with `'manual'` evidence, and write the reviewed negatives to `paper_method_exclusions`. The daily keyword backfill honors those exclusions and would otherwise re-link papers that only mention the method in passing. `add_neural_architecture_search_method.sql` is the reference migration.
+
+For methods that do have a source paper, keep in mind that the hourly reference backfill links every local paper citing it. For broad, highly cited sources, that citation signal can be poor: only 41% of NAS citers were NAS papers. So review those citers as well, and write exclusions for the ones that don't belong.
+
 ## Workflow
 
 ### 1. Understand the requested method
@@ -50,7 +64,7 @@ Be careful about provenance. The source paper is the paper that introduced, name
 
 - Query `papers` by arXiv id or PapersWithCode paper URL.
 - If no local paper row exists for a non-ArXiv resource, use the `add-external-paper` skill first, then return here.
-- If the user says there is no source paper, set `source_url`/`source_title` and keep `source_paper_id = NULL`.
+- If the user says there is no source paper, or the method has no clear introducing paper (see No introducing paper), set `source_url`/`source_title` and keep `source_paper_id = NULL`.
 - For model-family follow-ups (GPT-2 → GPT-3, Conformer → Fast Conformer), use `pwc paper lineage add` when the user also wants predecessor/successor paper links.
 
 ### 3. Choose metadata
@@ -170,6 +184,8 @@ with db_manager.engine.begin() as conn:
     conn.execute(text(sql))
 PY
 ```
+
+If the migration contains paper titles in SQL comments (curated lists), run it with `conn.connection.cursor().execute(sql)` instead. `text()` treats `:word` as a bind parameter, and `exec_driver_sql` fails on `%`.
 
 ### 6. Citation linking
 

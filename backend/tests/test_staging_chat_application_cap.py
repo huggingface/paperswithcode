@@ -7,7 +7,7 @@ import pytest
 from backend.config import Settings
 from backend.scripts.manage_chat_sandbox_circuit import reviewed_higher_caps_allowed
 from backend.services.runtime_validation import validate_chat_capacity_and_spend_policy
-from backend.tests.test_deployment_runtime import deployed_settings, make_bundle
+from backend.tests.deployment.harness import deployed_settings, make_bundle
 from deploy.configure_host_env import decoded_value
 from deploy.configure_staging_chat_application_cap import raised_values
 
