@@ -3,8 +3,13 @@ from datetime import datetime, timedelta, timezone
 from email.utils import format_datetime
 
 import httpx
+import pytest
 
-from backend.services.arxiv_service import ArxivPdfUnavailableError, ArxivService
+from backend.services.arxiv_service import (
+    ArxivPdfUnavailableError,
+    ArxivService,
+    citation_author_display_name,
+)
 from backend.routers.papers import _arxiv_metadata_error
 
 
@@ -149,6 +154,21 @@ def test_abs_page_fallback_extracts_required_metadata():
         "Kimi Team",
     ]
     assert metadata.categories == ["cs.LG", "cs.CL"]
+
+
+@pytest.mark.parametrize(
+    ("citation_name", "display_name"),
+    [
+        ("Tao, Leitian", "Leitian Tao"),
+        ("Rojas Cardenas, Cristian", "Cristian Rojas Cardenas"),
+        ("Walas, Krzysztof, Tadeusz", "Krzysztof Tadeusz Walas"),
+        ("King, Martin Luther, Jr.", "Martin Luther King Jr."),
+        ("Jerry G. Myers,", "Jerry G. Myers"),
+        ("Kimi Team", "Kimi Team"),
+    ],
+)
+def test_citation_author_display_name(citation_name, display_name):
+    assert citation_author_display_name(citation_name) == display_name
 
 
 def test_router_maps_arxiv_rate_limit_to_429():

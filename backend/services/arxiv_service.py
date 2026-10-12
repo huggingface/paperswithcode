@@ -86,12 +86,22 @@ class ArxivPdfUnavailableError(Exception):
     """Raised when arXiv confirms that a requested PDF does not exist."""
 
 
-def _citation_author_display_name(name: str) -> str:
-    """Turn arXiv's "Last, First[, Suffix]" citation_author into "First Last[ Suffix]"."""
-    parts = [part.strip() for part in name.split(",")]
-    if len(parts) == 1:
-        return parts[0]
-    return " ".join([parts[1], parts[0], *parts[2:]]).strip()
+NAME_SUFFIXES = {"Jr", "Jr.", "Sr", "Sr.", "II", "III", "IV"}
+
+
+def citation_author_display_name(name: str) -> str:
+    """Turn a "Last, First[, Middle][, Suffix]" citation name into "First Middle Last Suffix".
+
+    arXiv abs pages (citation_author) and conference programs use this order;
+    the catalog stores "First Last". Names without a comma are returned as is.
+    """
+    parts = [part.strip() for part in name.split(",") if part.strip()]
+    if len(parts) < 2:
+        return " ".join(parts)
+    last, given = parts[0], parts[1:]
+    suffixes = [part for part in given if part in NAME_SUFFIXES]
+    given = [part for part in given if part not in NAME_SUFFIXES]
+    return " ".join([*given, last, *suffixes])
 
 
 class ArxivService:
@@ -201,7 +211,7 @@ class ArxivService:
         title = meta_content("citation_title")
         abstract = meta_content("citation_abstract")
         authors = [
-            _citation_author_display_name(tag["content"])
+            citation_author_display_name(tag["content"])
             for tag in soup.find_all("meta", attrs={"name": "citation_author"})
             if tag.get("content", "").strip()
         ]
