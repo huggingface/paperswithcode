@@ -36,6 +36,8 @@ export type MergedEvaluation = Evaluation & {
 
 export const PARAMETER_FILTERS = [
   { label: "All", maxParametersExclusive: undefined },
+  { label: "<10M", maxParametersExclusive: 10_000_000 },
+  { label: "<100M", maxParametersExclusive: 100_000_000 },
   { label: "<1B", maxParametersExclusive: 1_000_000_000 },
   { label: "<3B", maxParametersExclusive: 3_000_000_000 },
   { label: "<6B", maxParametersExclusive: 6_000_000_000 },
