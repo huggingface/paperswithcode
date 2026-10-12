@@ -9,6 +9,7 @@ from html.parser import HTMLParser
 from urllib.parse import quote, urljoin, urlsplit, urlunsplit
 
 from backend.services.discovery_page_service import DiscoveryPage
+from backend.services.discovery_text_service import markdown_plain_text
 from backend.services.paper_seo_service import NamedLink, PaperSeoDocument
 from backend.services.sitemap_service import PRODUCTION_ORIGIN, ArchivePage
 
@@ -98,9 +99,49 @@ def render_discovery_markdown(page: DiscoveryPage) -> str:
         [
             f"# {_markdown_text(page.heading)}",
             "",
-            _markdown_text(page.description),
+            _markdown_text(markdown_plain_text(page.body_markdown or page.description)),
         ]
     )
+    if page.trends_markdown:
+        lines.extend(["", "## Current research directions", ""])
+        lines.extend(
+            f"- {_markdown_text(markdown_plain_text(item))}"
+            for item in page.trends_markdown
+        )
+    board = page.leaderboard
+    if board is not None:
+        metric = _markdown_text(board.metric)
+        lines.extend(
+            [
+                "",
+                f"## {_markdown_text(page.heading)} leaderboard",
+                "",
+                f"| Rank | Model | {metric} | Paper | Date |",
+                "| --- | --- | --- | --- | --- |",
+            ]
+        )
+        for row in board.rows:
+            paper = _markdown_text(row.paper_title or "")
+            if row.paper_route_identifier:
+                paper = (
+                    _link(row.paper_title, f"/paper/{row.paper_route_identifier}")
+                    or paper
+                )
+            cells = (
+                str(row.rank) if row.rank is not None else "—",
+                _markdown_text(row.model),
+                _markdown_text(row.score) if row.score is not None else "—",
+                paper,
+                row.published.isoformat() if row.published else "",
+            )
+            lines.append(f"| {' | '.join(cells)} |")
+    benchmarks = [
+        rendered
+        for item in page.benchmark_links
+        if (rendered := _link(item.label, item.href)) is not None
+    ]
+    if benchmarks:
+        lines.extend(["", "## Benchmarks", "", *(f"- {item}" for item in benchmarks)])
     related = [
         rendered
         for item in page.entity_links

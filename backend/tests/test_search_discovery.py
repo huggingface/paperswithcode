@@ -74,26 +74,35 @@ def test_robots_policies_are_environment_aware_and_end_with_newline():
     assert "X-Robots-Tag" not in production_headers
 
 
+def _query(*, one=None, rows=()):
+    result = MagicMock()
+    for method in (
+        "filter",
+        "join",
+        "outerjoin",
+        "order_by",
+        "group_by",
+        "limit",
+    ):
+        getattr(result, method).return_value = result
+    result.one_or_none.return_value = one
+    result.all.return_value = rows
+    return result
+
+
 @pytest.mark.parametrize("linked", [True, False])
 def test_empty_task_benchmark_requires_association(client, linked):
     """A configured leaderboard can render before its first score is imported."""
-
-    def query(*, one=None, rows=()):
-        result = MagicMock()
-        for method in ("filter", "join", "order_by", "limit"):
-            getattr(result, method).return_value = result
-        result.one_or_none.return_value = one
-        result.all.return_value = rows
-        return result
-
+    tasks = [(1, "other-task", "Other task")]
+    if linked:
+        tasks.insert(0, (775, "audio-editing", "Audio editing"))
     db = MagicMock()
     db.query.side_effect = [
-        query(one=SimpleNamespace(id=2590, name="MMAE", description="Audio edits")),
-        # The sidebar's bounded task list need not include the selected task.
-        query(rows=[("other-task", "Other task")]),
-        query(),
-        query(one=SimpleNamespace(id=775)),
-        query(one=object() if linked else None),
+        _query(one=SimpleNamespace(id=2590, name="MMAE", description="Audio edits")),
+        _query(one=SimpleNamespace(id=775, slug="audio-editing")),
+        _query(rows=tasks),
+        _query(),  # evaluations
+        _query(),  # configured leaderboard metrics
     ]
     client.app.dependency_overrides[get_database_session] = lambda: db
 
@@ -104,6 +113,161 @@ def test_empty_task_benchmark_requires_association(client, linked):
         assert "MMAE" in response.text
         assert 'id="root"' in response.text
         assert "Page not found" not in response.text
+
+
+def _evaluation(id, paper_id, model, metrics, best_metric, best_rank, task_id=7):
+    return SimpleNamespace(
+        id=id,
+        paper_id=paper_id,
+        task_id=task_id,
+        model_name=model,
+        harness=None,
+        metrics=metrics,
+        best_metric=best_metric,
+        best_rank=best_rank,
+    )
+
+
+def _paper_row(id, title, eligible=True):
+    return SimpleNamespace(
+        id=id,
+        title=title,
+        source="arxiv",
+        arxiv_id=f"2601.0000{id}",
+        date_published=date(2026, 1, id),
+        eligible=eligible,
+    )
+
+
+def test_benchmark_page_ranks_leaderboard_like_the_spa():
+    """Stored ranks are stale; the page re-ranks by value like the SPA does."""
+    db = MagicMock()
+    db.query.side_effect = [
+        _query(
+            one=SimpleNamespace(
+                id=19, name="MMLU", description="**Massive** multitask test."
+            )
+        ),
+        _query(rows=[(7, "multi-task-language-understanding", "Language")]),
+        _query(
+            rows=[
+                _evaluation(1, 1, "Old leader", {"Accuracy": "80.5"}, "Accuracy", 1),
+                _evaluation(
+                    2, 2, "New leader", {"Accuracy": "91.2 ± 0.1"}, "Accuracy", 2
+                ),
+                _evaluation(3, 3, "Tied", {"Accuracy": 80.5}, "Accuracy", 3),
+                _evaluation(4, 4, "Unscored", {"F1": "70"}, "F1", None),
+            ]
+        ),
+        _query(rows=[(7, "Accuracy"), (7, "F1")]),
+        _query(rows=[("Accuracy", "higher_is_better")]),
+        _query(
+            rows=[
+                _paper_row(1, "Old paper"),
+                _paper_row(2, "New paper"),
+                _paper_row(3, "Tied paper"),
+                _paper_row(4, "Hidden paper", eligible=False),
+            ]
+        ),
+    ]
+
+    page = DiscoveryPageService(db).benchmark("mmlu")
+
+    assert page.title == (
+        "MMLU Leaderboard: state of the art results | Papers with Code"
+    )
+    board = page.leaderboard
+    assert board.metric == "Accuracy"
+    assert [(row.rank, row.model, row.score) for row in board.rows] == [
+        (1, "New leader", "91.2 ± 0.1"),
+        (2, "Old leader", "80.5"),
+        (2, "Tied", "80.5"),
+        (None, "Unscored", None),
+    ]
+    assert board.rows[0].paper_route_identifier == "2601.00002"
+    assert board.rows[3].paper_route_identifier is None
+    assert page.description.startswith(
+        "New leader leads the MMLU leaderboard with Accuracy 91.2 ± 0.1."
+    )
+    assert len(page.description) <= 155
+    assert page.body_markdown == "**Massive** multitask test."
+    assert [link.href for link in page.breadcrumbs] == [
+        "/",
+        "/tasks",
+        "/tasks/multi-task-language-understanding",
+    ]
+    assert page.robots == "index,follow"
+
+    document = render_discovery_document(page)
+    assert "<table>" in document
+    assert "<strong>Massive</strong>" in document
+    assert '<a href="/paper/2601.00002">New paper</a>' in document
+    assert "Relevant papers" not in document
+    assert 'href="/benchmark"' not in document
+
+
+def test_task_page_renders_markdown_trends_and_benchmark_links():
+    db = MagicMock()
+    db.query.side_effect = [
+        _query(
+            one=SimpleNamespace(
+                id=2,
+                parent_id=None,
+                name="Object Detection",
+                description=(
+                    "Object detection finds **objects** in [images](/tasks/vision). "
+                    + "It is used widely in robotics and driving. " * 6
+                ),
+                research_trends=["**Trend.** See [DETR](/paper/2005.12872)."],
+            )
+        ),
+        _query(rows=[]),  # related tasks
+        _query(rows=[("coco", "COCO", 120), ("lvis", "LVIS", 0)]),
+        _query(rows=[]),  # tagged papers
+    ]
+
+    page = DiscoveryPageService(db).task("object-detection")
+
+    assert len(page.description) <= 155
+    assert "**" not in page.description and "](" not in page.description
+    assert page.description.startswith("Object detection finds objects in images.")
+    assert [link.href for link in page.benchmark_links] == [
+        "/benchmark/coco",
+        "/benchmark/lvis",
+    ]
+    assert [link.href for link in page.breadcrumbs] == ["/", "/tasks"]
+
+    document = render_discovery_document(page)
+    assert '<a href="/tasks/vision">images</a>' in document
+    assert "<strong>objects</strong>" in document
+    assert '<a href="/paper/2005.12872">DETR</a>' in document
+    assert '<a href="/benchmark/coco">COCO</a>' in document
+    assert "**" not in document and "](" not in document
+
+
+def test_discovery_shell_sets_per_page_social_tags(client, monkeypatch):
+    monkeypatch.setattr(
+        discovery_pages,
+        "load_index_html",
+        lambda: (
+            "<!doctype html><html><head><title>Generic</title>"
+            '<meta property="og:url" content="https://paperswithcode.co/" />'
+            '<meta property="og:title" content="Papers with Code" />'
+            '<meta name="twitter:description" content="Generic" />'
+            '<meta property="og:image" content="https://paperswithcode.co/og.png" />'
+            '</head><body><div id="root"></div></body></html>'
+        ),
+    )
+    monkeypatch.setattr(DiscoveryPageService, "task", lambda self, slug: _page())
+    text = client.get("/tasks/safe").text
+    assert text.count('property="og:url"') == 1
+    assert (
+        '<meta property="og:url" content="https://paperswithcode.co/tasks/safe">'
+        in text
+    )
+    assert '<meta property="og:title" content="Safe task">' in text
+    assert text.count('name="twitter:description"') == 1
+    assert 'property="og:image"' in text
 
 
 def test_robots_get_and_head_are_plain_text(client):

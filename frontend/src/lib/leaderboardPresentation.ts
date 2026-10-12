@@ -74,6 +74,8 @@ export interface LeaderboardPresentationInput {
   };
 }
 
+// backend/services/leaderboard_ranking_service.py mirrors the default ranking
+// for crawlable benchmark HTML; keep the two in step.
 export function deriveLeaderboardPresentation(
   input: LeaderboardPresentationInput,
 ) {

@@ -15,6 +15,7 @@ from backend.models.database import (
     Dataset,
     Evaluation,
     Method,
+    Metric,
     Organization,
     Paper,
     PaperAuthor,
@@ -25,6 +26,16 @@ from backend.models.database import (
     PaperTask,
     Task,
     TaskDataset,
+    TaskDatasetMetric,
+)
+from backend.services.discovery_text_service import (
+    markdown_plain_text,
+    meta_description,
+)
+from backend.services.leaderboard_ranking_service import (
+    RankableEvaluation,
+    RankableTask,
+    rank_leaderboard,
 )
 from backend.services.sitemap_service import eligible_paper_filter
 from backend.utils.urls import get_paper_route_identifier
@@ -32,6 +43,8 @@ from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
 
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 DISCOVERY_PAPER_LIMIT = 20
+LEADERBOARD_ROW_LIMIT = 100
+TASK_BENCHMARK_LIMIT = 50
 
 # Curated landing page for GPT-6 Astra robotics work (/astra-for-robotics).
 ASTRA_ROBOTICS_PATH = "/astra-for-robotics"
@@ -61,6 +74,25 @@ class DiscoveryPaperLink:
 
 
 @dataclass(frozen=True)
+class DiscoveryLeaderboardRow:
+    rank: Optional[int]
+    model: str
+    score: Optional[str]
+    paper_route_identifier: Optional[str]
+    paper_title: Optional[str]
+    published: Optional[date]
+
+
+@dataclass(frozen=True)
+class DiscoveryLeaderboard:
+    metric: str
+    lower_is_better: bool
+    task_name: Optional[str]
+    rows: tuple[DiscoveryLeaderboardRow, ...]
+    total_rows: int
+
+
+@dataclass(frozen=True)
 class DiscoveryPage:
     kind: str
     canonical_path: str
@@ -71,10 +103,25 @@ class DiscoveryPage:
     entity_links: tuple[DiscoveryLink, ...]
     paper_links: tuple[DiscoveryPaperLink, ...]
     robots: str = "index,follow"
+    # Inline Markdown shown in the page body; ``description`` is the short
+    # plain-text summary used for meta tags.
+    body_markdown: Optional[str] = None
+    trends_markdown: tuple[str, ...] = ()
+    benchmark_links: tuple[DiscoveryLink, ...] = ()
+    leaderboard: Optional[DiscoveryLeaderboard] = None
 
     @property
     def canonical_url(self) -> str:
         return f"{PRODUCTION_ORIGIN}{self.canonical_path}"
+
+
+# Index pages that exist for each entity kind's breadcrumb trail.
+INDEX_BREADCRUMBS = {
+    "Task": DiscoveryLink("/tasks", "Tasks"),
+    "Method": DiscoveryLink("/methods", "Methods"),
+    "Conference": DiscoveryLink("/conferences", "Conferences"),
+    "Organization": DiscoveryLink("/organizations", "Organizations"),
+}
 
 
 class DiscoveryPageService:
@@ -159,13 +206,16 @@ class DiscoveryPageService:
             ),
         )
 
-    def task(self, slug: str) -> Optional[DiscoveryPage]:
-        canonical_slug = canonical_task_slug(slug)
-        entity = None
+    def _task_by_slug(self, slug: str) -> Optional[Task]:
         for candidate in task_slug_candidates(slug):
             entity = self.db.query(Task).filter(Task.slug == candidate).one_or_none()
             if entity is not None:
-                break
+                return entity
+        return None
+
+    def task(self, slug: str) -> Optional[DiscoveryPage]:
+        canonical_slug = canonical_task_slug(slug)
+        entity = self._task_by_slug(slug)
         if entity is None:
             return None
         related = (
@@ -178,28 +228,45 @@ class DiscoveryPageService:
             .limit(10)
             .all()
         )
-        datasets = (
-            self.db.query(Dataset.slug, Dataset.name)
+        # Most-evaluated leaderboards first, so crawlers reach the benchmark
+        # pages that carry this task's results.
+        evaluation_count = func.count(Evaluation.id)
+        benchmarks = (
+            self.db.query(Dataset.slug, Dataset.name, evaluation_count)
             .join(TaskDataset, TaskDataset.dataset_id == Dataset.id)
+            .outerjoin(
+                Evaluation,
+                (Evaluation.dataset_id == Dataset.id)
+                & (Evaluation.task_id == entity.id),
+            )
             .filter(TaskDataset.task_id == entity.id, Dataset.slug.is_not(None))
-            .order_by(Dataset.name.asc())
-            .limit(10)
+            .group_by(Dataset.id)
+            .order_by(evaluation_count.desc(), Dataset.name.asc())
+            .limit(TASK_BENCHMARK_LIMIT)
             .all()
         )
         links = [DiscoveryLink(f"/tasks/{s}", n) for s, n in related]
-        links.extend(DiscoveryLink(f"/benchmark/{s}", n) for s, n in datasets)
         papers = self._papers_for_relation(
             PaperTask, PaperTask.task_id == entity.id, f"Tagged with {entity.name}"
         )
         description = entity.description or (
             f"Research papers, benchmarks, and methods for {entity.name}."
         )
-        if entity.research_trends:
-            description = f"{description} Current directions include: " + "; ".join(
-                str(item) for item in entity.research_trends[:3]
-            )
-        return self._entity_page(
-            "Task", f"/tasks/{canonical_slug}", entity.name, description, links, papers
+        return replace(
+            self._entity_page(
+                "Task",
+                f"/tasks/{canonical_slug}",
+                entity.name,
+                description,
+                links,
+                papers,
+            ),
+            trends_markdown=tuple(
+                str(item) for item in (entity.research_trends or [])[:3]
+            ),
+            benchmark_links=tuple(
+                DiscoveryLink(f"/benchmark/{s}", n) for s, n, _ in benchmarks
+            ),
         )
 
     def astra_for_robotics(self) -> DiscoveryPage:
@@ -300,49 +367,143 @@ class DiscoveryPageService:
         entity = self.db.query(Dataset).filter(Dataset.slug == slug).one_or_none()
         if entity is None:
             return None
-        tasks = (
-            self.db.query(Task.slug, Task.name)
-            .join(TaskDataset, TaskDataset.task_id == Task.id)
-            .filter(TaskDataset.dataset_id == entity.id, Task.slug.is_not(None))
-            .order_by(Task.name.asc())
-            .limit(10)
-            .all()
-        )
-        evaluation_query = (
-            self.db.query(Paper, Evaluation.model_name, Evaluation.best_metric)
-            .join(Evaluation, Evaluation.paper_id == Paper.id)
-            .filter(Evaluation.dataset_id == entity.id, eligible_paper_filter())
-        )
+        requested = None
         if task_slug:
-            task = None
-            for candidate in task_slug_candidates(task_slug):
-                task = self.db.query(Task).filter(Task.slug == candidate).one_or_none()
-                if task is not None:
-                    break
-            if task is None:
+            requested = self._task_by_slug(task_slug)
+            if requested is None:
                 return None
-            evaluation_query = evaluation_query.filter(Evaluation.task_id == task.id)
-        evaluation_rows = (
-            evaluation_query.order_by(
+        tasks = [
+            RankableTask(int(task_id), task_slug_value, name)
+            for task_id, task_slug_value, name in (
+                self.db.query(Task.id, Task.slug, Task.name)
+                .join(TaskDataset, TaskDataset.task_id == Task.id)
+                .filter(TaskDataset.dataset_id == entity.id)
+                .order_by(Task.name.asc())
+                .all()
+            )
+        ]
+        # Same rows and order as the SPA's `ordering=best_rank` request.
+        evaluations = [
+            RankableEvaluation(
+                id=int(row.id),
+                paper_id=int(row.paper_id),
+                task_id=int(row.task_id),
+                model_name=row.model_name,
+                harness=row.harness,
+                metrics=row.metrics or {},
+                best_metric=row.best_metric,
+                best_rank=row.best_rank,
+            )
+            for row in self.db.query(
+                Evaluation.id,
+                Evaluation.paper_id,
+                Evaluation.task_id,
+                Evaluation.model_name,
+                Evaluation.harness,
+                Evaluation.metrics,
+                Evaluation.best_metric,
+                Evaluation.best_rank,
+            )
+            .filter(Evaluation.dataset_id == entity.id)
+            .order_by(
                 Evaluation.best_rank.asc().nullslast(),
-                Paper.date_published.desc().nullslast(),
-                Paper.id.desc(),
+                Evaluation.best_metric.asc().nullslast(),
+                Evaluation.id.asc(),
             )
-            .limit(DISCOVERY_PAPER_LIMIT)
             .all()
+        ]
+        # A task filter needs the leaderboard association or evaluations.
+        if requested is not None:
+            task_ids = {task.id for task in tasks}
+            task_ids.update(evaluation.task_id for evaluation in evaluations)
+            if requested.id not in task_ids:
+                return None
+        configured: dict[int, list[str]] = {}
+        for task_id, metric_name in (
+            self.db.query(TaskDatasetMetric.task_id, Metric.name)
+            .join(Metric, Metric.id == TaskDatasetMetric.metric_id)
+            .filter(TaskDatasetMetric.dataset_id == entity.id)
+            .order_by(Metric.name.ilike("%overall%").desc(), Metric.name.asc())
+            .all()
+        ):
+            configured.setdefault(int(task_id), []).append(metric_name)
+        metric_names = {name for names in configured.values() for name in names}
+        for evaluation in evaluations:
+            metric_names.update(evaluation.metrics)
+        directions = dict(
+            self.db.query(Metric.name, Metric.direction)
+            .filter(Metric.name.in_(metric_names))
+            .all()
+            if metric_names
+            else []
         )
-        seen: set[int] = set()
-        paper_links = []
-        for paper, model_name, metric in evaluation_rows:
-            if int(paper.id) in seen:
-                continue
-            seen.add(int(paper.id))
-            label = f"Evaluation on {entity.name}"
-            context = " · ".join(
-                value for value in (label, model_name, metric) if value
+        ranked = rank_leaderboard(
+            tasks=tasks,
+            evaluations=evaluations,
+            configured_metrics=configured,
+            directions=directions,
+            task_slug=requested.slug if requested is not None else None,
+        )
+        shown = ranked.rows[:LEADERBOARD_ROW_LIMIT]
+        paper_ids = {row.entry.first.paper_id for row in shown}
+        papers = {
+            int(paper.id): paper
+            for paper in (
+                self.db.query(
+                    Paper.id,
+                    Paper.title,
+                    Paper.source,
+                    Paper.arxiv_id,
+                    Paper.date_published,
+                    eligible_paper_filter().label("eligible"),
+                )
+                .filter(Paper.id.in_(paper_ids))
+                .all()
+                if paper_ids
+                else []
             )
-            paper_links.append(self._paper_link(paper, context))
-        if not paper_links and not task_slug:
+        }
+        rows = []
+        paper_links: list[DiscoveryPaperLink] = []
+        for row in shown:
+            first = row.entry.first
+            paper = papers.get(first.paper_id)
+            model = first.model_name or (paper.title if paper else "") or "—"
+            route = None
+            if paper is not None and paper.eligible:
+                route = get_paper_route_identifier(
+                    paper.source, paper.arxiv_id, int(paper.id)
+                )
+                if len(paper_links) < DISCOVERY_PAPER_LIMIT and all(
+                    link.route_identifier != route for link in paper_links
+                ):
+                    paper_links.append(
+                        DiscoveryPaperLink(
+                            route,
+                            paper.title,
+                            paper.date_published,
+                            " · ".join(
+                                value
+                                for value in (
+                                    f"Evaluation on {entity.name}",
+                                    first.model_name,
+                                    ranked.metric,
+                                )
+                                if value
+                            ),
+                        )
+                    )
+            rows.append(
+                DiscoveryLeaderboardRow(
+                    rank=row.rank,
+                    model=model,
+                    score=None if row.raw_value is None else str(row.raw_value),
+                    paper_route_identifier=route,
+                    paper_title=paper.title if paper else None,
+                    published=paper.date_published if paper else None,
+                )
+            )
+        if not ranked.rows and not task_slug:
             paper_links = list(
                 self._papers_for_relation(
                     PaperDataset,
@@ -350,31 +511,55 @@ class DiscoveryPageService:
                     f"Reports results on {entity.name}",
                 )
             )
-        if task_slug and not paper_links:
-            association = (
-                self.db.query(TaskDataset)
-                .filter(
-                    TaskDataset.dataset_id == entity.id,
-                    TaskDataset.task_id == task.id,
-                )
-                .one_or_none()
-            )
-            if association is None:
-                return None
-        description = (
+        body = (
             entity.description
             or entity.short_description
             or (
                 f"Comparable results and research papers for the {entity.name} benchmark."
             )
         )
-        return self._entity_page(
-            "Benchmark",
-            f"/benchmark/{slug}",
-            entity.name,
-            description,
-            [DiscoveryLink(f"/tasks/{s}", n) for s, n in tasks],
-            paper_links,
+        leader = rows[0] if rows and rows[0].rank == 1 else None
+        if leader is not None:
+            scope = f"{ranked.task.name} results" if ranked.task else "results"
+            description = meta_description(
+                f"{leader.model} leads the {entity.name} leaderboard with "
+                f"{ranked.metric} {leader.score}. Compare {len(ranked.rows)} "
+                f"ranked {scope} with papers and code."
+            )
+        else:
+            description = meta_description(markdown_plain_text(body))
+        breadcrumbs = [DiscoveryLink("/", "Home"), INDEX_BREADCRUMBS["Task"]]
+        if ranked.task is not None and ranked.task.slug:
+            breadcrumbs.append(
+                DiscoveryLink(f"/tasks/{ranked.task.slug}", ranked.task.name)
+            )
+        return DiscoveryPage(
+            kind="Benchmark",
+            canonical_path=f"/benchmark/{slug}",
+            title=(
+                f"{entity.name} Leaderboard: state of the art results "
+                "| Papers with Code"
+            ),
+            description=description,
+            heading=entity.name,
+            breadcrumbs=tuple(breadcrumbs),
+            entity_links=tuple(
+                DiscoveryLink(f"/tasks/{task.slug}", task.name)
+                for task in tasks[:10]
+                if task.slug
+            ),
+            paper_links=tuple(paper_links),
+            robots="index,follow" if paper_links else "noindex,follow",
+            body_markdown=body,
+            leaderboard=DiscoveryLeaderboard(
+                metric=ranked.metric,
+                lower_is_better=ranked.lower_is_better,
+                task_name=ranked.task.name if ranked.task else None,
+                rows=tuple(rows),
+                total_rows=len(ranked.rows),
+            )
+            if rows
+            else None,
         )
 
     def conference(self, slug: str) -> Optional[DiscoveryPage]:
@@ -573,16 +758,15 @@ class DiscoveryPageService:
 
     @staticmethod
     def _entity_page(kind, path, name, description, links, papers) -> DiscoveryPage:
+        index = INDEX_BREADCRUMBS.get(kind)
         return DiscoveryPage(
             kind=kind,
             canonical_path=path,
             title=f"{name} — papers and benchmarks | Papers with Code",
-            description=description,
+            description=meta_description(markdown_plain_text(description)),
             heading=name,
-            breadcrumbs=(
-                DiscoveryLink("/", "Home"),
-                DiscoveryLink(path.rsplit("/", 1)[0] or "/", f"{kind}s"),
-            ),
+            breadcrumbs=(DiscoveryLink("/", "Home"),) + ((index,) if index else ()),
+            body_markdown=description,
             entity_links=tuple(links),
             paper_links=tuple(papers),
             robots="index,follow" if papers else "noindex,follow",
