@@ -673,7 +673,7 @@ def test_inactive_cron_timer_is_not_implicitly_disabled(operator_enabled):
 def test_autonomous_cron_units_install_under_registered_names():
     from deploy.install_host_layout import SYSTEMD_UNITS
 
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     installer = (root / "deploy/install_deploy_tools.py").read_text()
     for job_id in ("autonomous_cron_health", "autonomous_cron_audit"):
         job = get_cron_job(job_id)

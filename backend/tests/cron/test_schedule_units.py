@@ -15,7 +15,7 @@ import pytest
 from backend.services.cron_health import discover_scheduled_duties
 from backend.services.cron_registry import list_cron_jobs
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 UNIT_DIR = ROOT / "deploy" / "systemd" / "cron"
 
 

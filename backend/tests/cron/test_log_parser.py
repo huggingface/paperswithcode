@@ -13,7 +13,7 @@ from backend.services.cron_health import evaluate_job_health
 from backend.services.cron_registry import get_cron_job
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+REPO_ROOT = Path(__file__).resolve().parents[3]
 WORKFLOW_SCRIPTS = REPO_ROOT / ".github" / "workflows"
 
 

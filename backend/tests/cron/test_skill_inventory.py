@@ -3,7 +3,7 @@ from pathlib import Path
 
 
 SCRIPT = (
-    Path(__file__).resolve().parents[2]
+    Path(__file__).resolve().parents[3]
     / ".agents/skills/pwc-cron-health/scripts/check_inventory.py"
 )
 spec = importlib.util.spec_from_file_location("cron_skill_inventory", SCRIPT)
