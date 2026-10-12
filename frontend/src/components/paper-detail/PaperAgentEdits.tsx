@@ -3,7 +3,7 @@ import { Check, Copy, History } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useInfiniteQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { AgentLogos } from "./AgentLogos";
+import { AgentLogoList, AgentLogos } from "./AgentLogos";
 import { paperEditsApi } from "@/lib/api/paperEdits";
 
 export function PaperAgentEdits({ paperId, isAdmin }: { paperId: number; isAdmin: boolean }) {
@@ -22,6 +22,7 @@ export function PaperAgentEdits({ paperId, isAdmin }: { paperId: number; isAdmin
           <DialogTitle>Edit this paper with your agent</DialogTitle>
           <DialogDescription>Spotted a missing code link, a wrong task, or a missing benchmark result? Your favorite coding agent can fix it for you.</DialogDescription>
         </DialogHeader>
+        <AgentLogoList />
         <ol className="list-decimal space-y-1 pl-5 text-sm text-muted-foreground">
           <li>Copy the prompt below.</li>
           <li>Paste it into Claude Code, Codex, Cursor, OpenCode, or another coding agent, and tell it what to change.</li>
