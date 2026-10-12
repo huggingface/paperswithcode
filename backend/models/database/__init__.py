@@ -162,6 +162,7 @@ from backend.models.database.resources import (
     ProjectPage,
     PaperProjectPage,
     PaperXThread,
+    PaperXThreadScan,
     PaperRepository,
 )
 from backend.models.database.taxonomy import (
@@ -298,6 +299,7 @@ __all__ = [
     "ProjectPage",
     "PaperProjectPage",
     "PaperXThread",
+    "PaperXThreadScan",
     "PaperRepository",
     "Area",
     "Task",
