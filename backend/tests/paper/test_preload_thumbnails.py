@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock
 
-WORKFLOWS_SCRIPTS_PATH = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+WORKFLOWS_SCRIPTS_PATH = Path(__file__).resolve().parents[3] / ".github" / "workflows"
 if str(WORKFLOWS_SCRIPTS_PATH) not in sys.path:
     sys.path.insert(0, str(WORKFLOWS_SCRIPTS_PATH))
 

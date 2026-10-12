@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock
 
 
-WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
+WORKFLOWS = Path(__file__).resolve().parents[3] / ".github" / "workflows"
 sys.path.insert(0, str(WORKFLOWS))
 SCRIPT = WORKFLOWS / "scripts" / "hourly" / "update_citations.py"
 SPEC = importlib.util.spec_from_file_location("update_citations_cron", SCRIPT)
