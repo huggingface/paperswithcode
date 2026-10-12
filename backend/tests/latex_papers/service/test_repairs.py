@@ -235,3 +235,21 @@ def test_repair_budget_leaves_the_failed_human_source_intact_after_three_attempt
     assert (
         exhausted.descriptor.preview_head.version_id == initial.preview_head.version_id
     )
+
+
+def test_repair_wait_covers_a_full_compile_inside_the_cli_timeout():
+    import re
+
+    from backend.services import latex_paper_service
+
+    cli = (
+        Path(__file__).resolve().parents[3] / "chat_sandbox_worker" / "paper_cli.py"
+    ).read_text()
+    cli_timeout = int(re.search(r"urlopen\(request, timeout=(\d+)\)", cli).group(1))
+    wait = (
+        latex_paper_service._REPAIR_POLL_ATTEMPTS
+        * latex_paper_service._REPAIR_POLL_SECONDS
+    )
+
+    assert wait >= 90
+    assert wait + 15 <= cli_timeout

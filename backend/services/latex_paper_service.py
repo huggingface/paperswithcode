@@ -53,8 +53,10 @@ from latex_compiler_contract import CompilerJobState, CompilerResult, EnvelopeEr
 _PAPER_IDENTIFIER = "latex-paper"
 _PREVIEW_PDF = "preview.pdf"
 _MAX_REPAIR_ATTEMPTS = 3
-_REPAIR_POLL_ATTEMPTS = 20
-_REPAIR_POLL_SECONDS = 0.25
+# A per-job Sandbox cold start plus a 120-second latexmk run must fit, while the
+# whole repair stays inside pwc-paper's 130-second request timeout.
+_REPAIR_POLL_SECONDS = 1.0
+_REPAIR_POLL_ATTEMPTS = 110
 _AUDIT_PROVENANCE_KEY = "_audit_provenance"
 
 logger = logging.getLogger(__name__)
