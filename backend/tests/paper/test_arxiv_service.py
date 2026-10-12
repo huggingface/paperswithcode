@@ -119,8 +119,10 @@ def test_abs_page_fallback_extracts_required_metadata():
         <html>
           <head>
             <meta name="citation_title" content="A Useful Paper">
-            <meta name="citation_author" content="Ada Lovelace">
-            <meta name="citation_author" content="Grace Hopper">
+            <meta name="citation_author" content="Lovelace, Ada">
+            <meta name="citation_author" content="Hopper, Grace Brewster Murray">
+            <meta name="citation_author" content="King, Martin Luther, Jr.">
+            <meta name="citation_author" content="Kimi Team">
             <meta name="citation_date" content="2026/05/20">
             <meta name="citation_online_date" content="2026/05/21">
             <meta name="citation_pdf_url" content="https://arxiv.org/pdf/2605.18736">
@@ -140,7 +142,12 @@ def test_abs_page_fallback_extracts_required_metadata():
     assert metadata.success is True
     assert metadata.fallback_used is True
     assert metadata.version == "v2"
-    assert metadata.authors == ["Ada Lovelace", "Grace Hopper"]
+    assert metadata.authors == [
+        "Ada Lovelace",
+        "Grace Brewster Murray Hopper",
+        "Martin Luther King Jr.",
+        "Kimi Team",
+    ]
     assert metadata.categories == ["cs.LG", "cs.CL"]
 
 
