@@ -7,6 +7,7 @@ including pagination, filtering, hierarchical relationships, and paper associati
 
 from datetime import date, datetime, timedelta, timezone
 import math
+import time
 from typing import Optional, List
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, case, and_, cast, Float
@@ -57,6 +58,13 @@ from backend.services.entity_search import (
     postgres_search_expressions,
     prepare_entity_search,
 )
+
+
+# Trending domains depend only on the date windows and the request filters,
+# while the homepage asks for the same ranking on every visit. Papers arrive in
+# daily imports, so a short shared cache keeps the ranking current.
+TRENDING_TASKS_TTL_SECONDS = 600
+_trending_tasks_cache: dict[tuple, tuple[float, TrendingTasks]] = {}
 
 
 class TaskService:
@@ -310,6 +318,43 @@ class TaskService:
         min_share_lift: float = 1.0,
         today: Optional[date] = None,
     ) -> TrendingTasks:
+        """Return trending tasks, briefly cached on PostgreSQL."""
+        today = today or datetime.now(timezone.utc).date()
+        args = (
+            limit,
+            recent_days,
+            baseline_days,
+            level,
+            min_recent_papers,
+            min_baseline_papers,
+            min_share_lift,
+            today,
+        )
+        bind = self.db.get_bind()
+        if bind.dialect.name != "postgresql":
+            return self._compute_trending_tasks(*args)
+        key = (str(bind.url), *args)
+        cached = _trending_tasks_cache.get(key)
+        now = time.monotonic()
+        if cached and now - cached[0] < TRENDING_TASKS_TTL_SECONDS:
+            return cached[1]
+        result = self._compute_trending_tasks(*args)
+        if len(_trending_tasks_cache) >= 256:
+            _trending_tasks_cache.clear()
+        _trending_tasks_cache[key] = (now, result)
+        return result
+
+    def _compute_trending_tasks(
+        self,
+        limit: int,
+        recent_days: int,
+        baseline_days: int,
+        level: Optional[int],
+        min_recent_papers: int,
+        min_baseline_papers: int,
+        min_share_lift: float,
+        today: date,
+    ) -> TrendingTasks:
         """
         Rank tasks by how over-indexed they are in recent papers vs baseline.
 
@@ -329,7 +374,6 @@ class TaskService:
         never surface.
         """
         try:
-            today = today or datetime.now(timezone.utc).date()
             recent_start = today - timedelta(days=recent_days)
             baseline_start = recent_start - timedelta(days=baseline_days)
 
