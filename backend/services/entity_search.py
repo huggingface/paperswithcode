@@ -209,11 +209,25 @@ def postgres_search_expressions(model, terms: EntitySearchTerms, *, full_name=No
             normalized_vector.op("@@")(prefix_query),
         )
         lexical_match = model.search_vector.op("@@")(lexical_query)
-        relevance = func.greatest(
-            func.coalesce(func.ts_rank_cd(model.search_vector, lexical_query, 32), 0.0),
-            func.coalesce(func.ts_rank_cd(model.search_vector, prefix_query, 32), 0.0),
-            func.coalesce(func.ts_rank_cd(normalized_vector, prefix_query, 32), 0.0),
-        )
+        # A single term's cover density only counts its repetitions (and the
+        # raw-name vector double-counts hyphenated compounds such as
+        # "human-scene"), so treat single-term matches as textual ties that
+        # entity trends break, like `deterministic_match`. Multi-term queries
+        # rank adjacency on the separator-normalized name.
+        if len(terms.tokens) == 1:
+            relevance = case((prefix_match, 1.0), else_=0.0)
+        else:
+            relevance = func.greatest(
+                func.coalesce(
+                    func.ts_rank_cd(model.search_vector, lexical_query, 32), 0.0
+                ),
+                func.coalesce(
+                    func.ts_rank_cd(
+                        func.setweight(normalized_vector, "A"), prefix_query, 32
+                    ),
+                    0.0,
+                ),
+            )
     else:
         prefix_match = literal(False)
         lexical_match = literal(False)
