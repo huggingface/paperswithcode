@@ -28,7 +28,10 @@ from backend.models.database import PaperTask
 from backend.models.database import Task as DBTask
 from backend.models.database import OrganizationTrendingHistory
 from backend.services.sitemap_service import eligible_paper_filter
-from backend.services.trending_ranking_service import active_paper_score_components
+from backend.services.trending_ranking_service import (
+    active_paper_score_components,
+    correlated_paper_score_expressions,
+)
 from backend.config import get_settings
 from backend.utils.exceptions import DatabaseError, PaperNotFoundError
 from backend.utils.organization_logos import organization_logo_path
@@ -188,13 +191,14 @@ class OrganizationService:
             top_by_org: dict[int, DBPaper] = {}
             if rows:
                 org_ids = [row[0].id for row in rows]
-                repo_stats, active_score = active_paper_score_components(
-                    self.db, get_settings().trending_ranking_mode
+                active_score, _max_stars = correlated_paper_score_expressions(
+                    get_settings().trending_ranking_mode
                 )
+                # Rank ids only, then load just each organization's top paper
+                # instead of every eligible paper row.
                 candidates = (
-                    self.db.query(PaperOrganization.organization_id, DBPaper)
+                    self.db.query(PaperOrganization.organization_id, DBPaper.id)
                     .join(DBPaper, DBPaper.id == PaperOrganization.paper_id)
-                    .outerjoin(repo_stats, repo_stats.c.paper_id == DBPaper.id)
                     .filter(
                         PaperOrganization.organization_id.in_(org_ids),
                         eligible_paper_filter(),
@@ -207,8 +211,19 @@ class OrganizationService:
                     )
                     .all()
                 )
-                for organization_id, paper in candidates:
-                    top_by_org.setdefault(organization_id, paper)
+                top_paper_ids: dict[int, int] = {}
+                for organization_id, paper_id in candidates:
+                    top_paper_ids.setdefault(organization_id, paper_id)
+                papers = {
+                    paper.id: paper
+                    for paper in self.db.query(DBPaper).filter(
+                        DBPaper.id.in_(top_paper_ids.values())
+                    )
+                }
+                top_by_org = {
+                    organization_id: papers[paper_id]
+                    for organization_id, paper_id in top_paper_ids.items()
+                }
 
             results = [
                 self._organization_to_api(
