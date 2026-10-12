@@ -211,8 +211,13 @@ class PaperRelationLoader:
         self,
         paper_ids: Sequence[int],
         relations: PaperRelations,
+        repository_limit: int | None = None,
     ) -> PaperRelations:
-        """Add repositories and project pages to an existing projection."""
+        """Add repositories and project pages to an existing projection.
+
+        `repository_limit` keeps only each paper's leading repositories
+        (official first, then most starred) for card surfaces.
+        """
         unique_ids = self._unique_ids(paper_ids)
         if not unique_ids:
             return relations
@@ -236,14 +241,16 @@ class PaperRelationLoader:
             .order_by(
                 requested.id,
                 desc(DBPaperRepository.is_official),
-                desc(DBRepository.num_stars),
+                desc(DBRepository.num_stars).nullslast(),
             )
             .all()
         )
         seen_repositories: dict[int, set[int]] = {}
         for paper_id, is_official, repository in repository_rows:
             seen = seen_repositories.setdefault(int(paper_id), set())
-            if repository.id in seen:
+            if repository.id in seen or (
+                repository_limit is not None and len(seen) >= repository_limit
+            ):
                 continue
             seen.add(repository.id)
             _append_relation(

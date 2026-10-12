@@ -160,6 +160,7 @@ class PaperService:
         db_papers: Sequence[DBPaper],
         *,
         include_resources: bool = False,
+        repository_limit: int | None = None,
     ) -> list[Paper]:
         """Hydrate paper rows with the relations rendered by card surfaces."""
         papers = list(db_papers)
@@ -167,7 +168,7 @@ class PaperService:
         loader = PaperRelationLoader(self.db)
         relations = loader.load_cards(paper_ids)
         if include_resources:
-            loader.load_resources(paper_ids, relations)
+            loader.load_resources(paper_ids, relations, repository_limit)
         return [self._to_api_paper(paper, relations) for paper in papers]
 
     def hydrate_details(

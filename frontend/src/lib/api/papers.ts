@@ -167,7 +167,10 @@ export class PapersApi {
     });
   }
 
-  forTask(taskId: string, params?: PaperFeedParams): Promise<PaginatedResponse<Paper>> {
+  forTask(
+    taskId: string,
+    params?: PaperFeedParams & { repository_limit?: number },
+  ): Promise<PaginatedResponse<Paper>> {
     return this.request(`/tasks/${taskId}/papers${query(params)}`);
   }
 
