@@ -11,7 +11,7 @@ import pytest
 
 from backend.services import runtime_validation
 from backend.services import openrouter_budget_service
-from backend.tests.test_deployment_runtime import deployed_settings, make_bundle
+from backend.tests.deployment.harness import deployed_settings, make_bundle
 from deploy.release import profile_features
 
 

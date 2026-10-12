@@ -33,7 +33,13 @@ served by nginx in production.
 - Add the HTTP adapter in `backend/routers/` and register it in
   `backend/main.py`.
 - Inject database sessions with `get_database_session`.
-- Add focused tests under `backend/tests/`.
+- Add focused tests under `backend/tests/`. Subsystem suites live in their own
+  package with an explicit `harness.py` for shared builders; run only the suite
+  you touched:
+
+  | Subsystem | Targeted command |
+  | --- | --- |
+  | Deployment, releases, nginx, host environment | `uv run pytest backend/tests/deployment -q` |
 
 For scripts that mutate domain data, use the existing services where possible.
 Run them with `uv run --env-file backend/keys.env …`.
