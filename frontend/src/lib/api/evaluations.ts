@@ -115,14 +115,15 @@ export class EvaluationsApi {
   private async allPages(params: EvaluationQuery): Promise<Evaluation[]> {
     const pageSize = 100;
     const firstPage = await this.list({ ...params, page_size: pageSize });
-    const results = [...firstPage.results];
-    let nextPage = firstPage.next_page;
-    while (nextPage) {
-      const page = await this.list({ ...params, page: nextPage, page_size: pageSize });
-      results.push(...page.results);
-      nextPage = page.next_page;
-    }
-    return results;
+    if (!firstPage.next_page) return firstPage.results;
+    // The first page reports the total, so fetch the rest concurrently.
+    const pageCount = Math.ceil(firstPage.count / pageSize);
+    const remaining = await Promise.all(
+      Array.from({ length: pageCount - 1 }, (_, index) =>
+        this.list({ ...params, page: index + 2, page_size: pageSize }),
+      ),
+    );
+    return [firstPage, ...remaining].flatMap((page) => page.results);
   }
 }
 
