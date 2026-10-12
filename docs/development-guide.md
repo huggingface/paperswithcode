@@ -42,6 +42,7 @@ served by nginx in production.
   | Chat sandbox, executor, worker, broker | `uv run pytest backend/tests/chat_sandbox -q` |
   | Chat gateway | `uv run pytest backend/tests/chat_gateway -q` |
   | Deployment, releases, nginx, host environment | `uv run pytest backend/tests/deployment -q` |
+  | Evaluations, ranks, leaderboard badges, leaderboard syncs | `uv run pytest backend/tests/evaluation -q` |
 
 For scripts that mutate domain data, use the existing services where possible.
 Run them with `uv run --env-file backend/keys.env …`.

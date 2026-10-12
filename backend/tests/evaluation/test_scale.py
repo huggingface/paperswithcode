@@ -74,7 +74,7 @@ def test_score_evidence_survives_proposal_serialization_and_matches_job_schema()
     payload = body.model_dump(mode="json")
     schema = json.loads(
         (
-            Path(__file__).resolve().parents[2]
+            Path(__file__).resolve().parents[3]
             / "jobs/schemas/curation_proposal.schema.json"
         ).read_text()
     )
