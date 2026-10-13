@@ -149,10 +149,23 @@ eligible result from a model introduced by the paper, exactly as required by
 gamma sweeps, or other ablation rows. Apply the same best-eligible-only rule to
 `blocked_evaluations` inside benchmark gaps.
 
+Before picking that best result, read every results table, including appendix
+and supplementary tables, for larger or better configurations of the introduced
+model (for example Large or Huge variants, longer schedules, or higher
+resolution) on the same benchmark and protocol. A main-text table that reports
+only a Base model is not the paper's best result when an appendix table reports
+a better Large model under the same protocol.
+
 Compare each proposed score with the paper's existing row on that leaderboard,
 including other sizes of the same family. If the existing result is equal or
 better under the configured metric direction and scale, omit the new variant and
-report `already_present`. If the new result is better, provide primary evidence
+report `already_present` with that leaderboard's `task_id`, `dataset_id`,
+`metric`, and the paper's best eligible score as `value` on the leaderboard
+scale. The server rejects `already_present` unless this paper already has an
+equal or better row on that exact leaderboard. Rows from other papers ranking
+higher are never a reason to skip a paper-native result; submit it. Include
+`task_id`, `dataset_id`, and `metric` on any other outcome that names a
+configured leaderboard, so `not_applicable` skips appear in the admin report. If the new result is better, provide primary evidence
 and the existing row's full before-state in `evaluation_removals` to consolidate
 onto the new best result. Explain the best-result replacement; do not call an
 accurately reported older score factually wrong. Never insert a second variant

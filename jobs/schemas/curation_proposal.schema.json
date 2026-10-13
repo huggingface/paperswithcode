@@ -295,7 +295,11 @@
               "properties": {
                 "benchmark": {"type": "string", "minLength": 1, "maxLength": 500},
                 "disposition": {"enum": ["evaluation", "already_present", "benchmark_gap", "not_paper_native", "not_applicable"]},
-                "detail": {"type": "string", "minLength": 1, "maxLength": 2000}
+                "detail": {"type": "string", "minLength": 1, "maxLength": 2000},
+                "task_id": {"type": "integer", "minimum": 1, "description": "Configured leaderboard task. Required for already_present; include whenever the outcome names a configured leaderboard."},
+                "dataset_id": {"type": "integer", "minimum": 1, "description": "Configured leaderboard dataset. Required for already_present; include whenever the outcome names a configured leaderboard."},
+                "metric": {"type": "string", "minLength": 1, "maxLength": 200, "description": "Exact configured metric name. Required for already_present."},
+                "value": {"type": "number", "description": "This paper's best eligible score on the leaderboard scale. Required for already_present; the server checks that this paper already has an equal or better row."}
               },
               "additionalProperties": false
             }
