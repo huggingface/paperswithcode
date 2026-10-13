@@ -268,7 +268,7 @@ class CodexCurationCallbackService:
             review = BenchmarkGapReviewService(self.db, settings, self.job_service)
             try:
                 scope = (
-                    {"review": review.review_context()}
+                    {"review": review.review_context(row)}
                     if row.kind == "review-benchmark-gaps"
                     else {"benchmark": review.creation_context(row)}
                 )
@@ -842,6 +842,12 @@ class CodexCurationCallbackService:
             response["thumbnail"] = serialize_thumbnail(row)
         return response
 
+    @staticmethod
+    def _review_scope(row) -> list[str]:
+        if row.review_scope is None:
+            raise ValueError("Read the review context before applying decisions")
+        return row.review_scope
+
     def _apply_benchmark_gap(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
         """Apply one overseer review or one benchmark creation in a transaction."""
         try:
@@ -854,7 +860,7 @@ class CodexCurationCallbackService:
             )
             result = (
                 review.apply_review(
-                    body.review_benchmark_gaps, reported_before=row.created_at
+                    body.review_benchmark_gaps, scope=self._review_scope(row)
                 )
                 if row.kind == "review-benchmark-gaps"
                 else review.apply_add_benchmark(row, body.add_benchmark)

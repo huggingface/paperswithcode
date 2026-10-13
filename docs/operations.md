@@ -701,11 +701,13 @@ datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
 Both kinds run on the existing curator image: the runner treats them as
 paper-less jobs, `jobs/url_preflight.py` skips paper sources for them, and the
 instructions live in the bootstrapped `remote-paper-curation` skill. Apply
-`backend/database/migrations/add_benchmark_gap_review.sql` as `postgres` before
-deploying, then install and enable the timer:
+`backend/database/migrations/add_benchmark_gap_review.sql` and
+`add_benchmark_gap_review_scope.sql` as `postgres` before deploying, then
+install and enable the timer:
 
 ```bash
 sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review.sql
+sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review_scope.sql
 sudo systemctl enable --now pwc-cron-enqueue-benchmark-gap-review.timer
 ```
 

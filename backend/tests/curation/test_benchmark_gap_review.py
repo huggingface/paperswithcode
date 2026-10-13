@@ -264,7 +264,7 @@ def test_review_applies_each_decision_and_queues_creation(db):
 
 def test_review_rejects_ineligible_candidates_and_merge_chains(db):
     approved = add_candidate(db, "Approved", status="approved")
-    with pytest.raises(ValueError, match="not eligible"):
+    with pytest.raises(ValueError, match="outside this review's batch"):
         service(db).apply_review(
             ReviewBenchmarkGapsMutation(
                 summary="x",
@@ -787,33 +787,65 @@ def test_first_creation_job_of_an_approval_counts_toward_backoff(db):
     assert candidate.status == "candidate"
 
 
-def test_review_must_decide_every_candidate_in_the_batch(db):
+def test_review_decides_exactly_the_batch_it_was_served(db):
     first = add_candidate(db, "Tiny-ImageNet", papers=16)
     skipped = add_candidate(db, "ModelNet40", papers=9)
-    late = add_candidate(
+    gone = add_candidate(db, "LaterRejected", papers=4)
+    review = service(db)
+    job = review.job_service.enqueue_benchmark_job(
         db,
-        "BrandNewBench",
-        papers=3,
-        first_seen_at=datetime.now(UTC) + timedelta(minutes=5),
+        kind="review-benchmark-gaps",
+        benchmark_candidate_id=None,
+        requested_by="test",
+        settings=get_settings(),
+        priority=10,
     )
-    only_first = ReviewBenchmarkGapsMutation(
-        summary="x",
-        decisions=[{"candidate_id": first.id, "decision": "approve", "reason": "x"}],
-    )
+    served = review.review_context(job)["candidates"]
+    assert [item["id"] for item in served] == [
+        str(first.id),
+        str(skipped.id),
+        str(gone.id),
+    ]
+    # After the snapshot: a new candidate outranks the batch, one leaves it.
+    late = add_candidate(db, "BrandNewBench", papers=30)
+    gone.status = "rejected"
+    gone.reviewed_paper_count = 4
+    assert review.review_context(job)["candidates"][0]["id"] == str(first.id)
 
     with pytest.raises(ValueError, match=f"1 have no decision: {skipped.id}"):
-        service(db).apply_review(only_first, reported_before=datetime.now(UTC))
+        review.apply_review(
+            ReviewBenchmarkGapsMutation(
+                summary="x",
+                decisions=[
+                    {"candidate_id": first.id, "decision": "approve", "reason": "x"}
+                ],
+            ),
+            scope=job.review_scope,
+        )
+    with pytest.raises(ValueError, match="outside this review's batch"):
+        review.apply_review(
+            ReviewBenchmarkGapsMutation(
+                summary="x",
+                decisions=[
+                    {"candidate_id": late.id, "decision": "approve", "reason": "x"}
+                ],
+            ),
+            scope=job.review_scope,
+        )
 
-    result = service(db).apply_review(
+    result = review.apply_review(
         ReviewBenchmarkGapsMutation(
             summary="x",
             decisions=[
                 {"candidate_id": first.id, "decision": "approve", "reason": "x"},
                 {"candidate_id": skipped.id, "decision": "defer", "reason": "x"},
+                {"candidate_id": gone.id, "decision": "approve", "reason": "x"},
             ],
         ),
-        reported_before=datetime.now(UTC),
+        scope=job.review_scope,
     )
 
     assert result["decisions"] == {"approve": 1, "defer": 1}
+    assert result["skipped_no_longer_eligible"] == [str(gone.id)]
+    assert gone.status == "rejected"
     assert late.status == "candidate" and late.reviewed_at is None

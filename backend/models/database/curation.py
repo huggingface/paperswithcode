@@ -120,6 +120,8 @@ class PaperCurationJob(Base):
     )
     paper_route: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Candidate ids a review-benchmark-gaps job was served; it must decide each.
+    review_scope: Mapped[Optional[list]] = mapped_column(JSONB, nullable=True)
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
     parent_workflow_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
