@@ -52,6 +52,7 @@ BUDGET_EXHAUSTED_FOLLOWUP = (
 # (max_turns, max_budget_usd) per stage; override with e.g. RETRIEVAL_MAX_TURNS.
 STAGE_LIMIT_DEFAULTS = {"retrieval": (12, 1.50), "aggregation": (8, 1.00)}
 MAX_RETRIES = 3
+MAX_CONSECUTIVE_AGGREGATION_FAILURES = 2
 SILENT_EXIT_THRESHOLD = 2
 
 DEADLINE_TYPES = [
@@ -398,6 +399,7 @@ def pipeline_result(
     change_set: dict | None = None,
     skipped_aggregation: bool = False,
     error: str | None = None,
+    aggregation_failed: bool = False,
 ) -> dict:
     if status not in STATUSES:
         raise ValueError(f"invalid conference status: {status!r}")
@@ -407,6 +409,7 @@ def pipeline_result(
         "change_set": change_set,
         "total_cost_usd": round(total_cost_usd, 4),
         "skipped_aggregation": skipped_aggregation,
+        "aggregation_failed": aggregation_failed,
         "error": error,
     }
 
@@ -579,6 +582,10 @@ async def _consume(label: str, query_iter, state: dict) -> None:
                 state["cost"] += message.total_cost_usd
             if message.structured_output:
                 state["result"] = message.structured_output
+            elif message.is_error:
+                # e.g. "API Error: 400 ... does not support this model".
+                detail = message.result or message.subtype or "agent run failed"
+                state["result"] = {"status": "error", "error": str(detail)[:500]}
 
 
 async def _run_agent_once(
@@ -760,15 +767,16 @@ async def research_series(manifest: dict, *, num_retrieval_agents: int) -> dict:
             total_cost_usd=total,
             error=aggregated.get("error", "aggregation timeout"),
         )
-    if not has_structured_output(aggregated) and all_agree_update(results):
-        # Aggregation exited silently but retrieval unanimously proposed an update.
-        aggregated = valid_results(results)[0]
     if not has_structured_output(aggregated):
+        # No unverified fallback to a retrieval result: a misconfigured
+        # aggregation model must fail loudly instead of applying data that no
+        # majority vote checked.
         return pipeline_result(
             status="error",
             reasoning="aggregation produced no structured output",
             total_cost_usd=total,
             error=aggregated.get("error", "aggregation produced no structured output"),
+            aggregation_failed=True,
         )
     if aggregated.get("requires_update") is not True:
         return pipeline_result(
@@ -793,6 +801,7 @@ async def main_async() -> int:
         f"{num_agents} retrieval agents each",
         flush=True,
     )
+    consecutive_aggregation_failures = 0
     for manifest in series_list:
         started = time.monotonic()
         try:
@@ -809,6 +818,15 @@ async def main_async() -> int:
             flush=True,
         )
         print(encode_result_line(result), flush=True)
+        if result.get("aggregation_failed"):
+            consecutive_aggregation_failures += 1
+        elif not result.get("skipped_aggregation"):
+            consecutive_aggregation_failures = 0
+        if consecutive_aggregation_failures >= MAX_CONSECUTIVE_AGGREGATION_FAILURES:
+            # Systemic (model/CLI/credential) failure: stop paying for retrieval.
+            # No DONE marker, so the VPS records the sweep as failed.
+            print("aborting sweep: aggregation keeps failing", flush=True)
+            return 1
     print(f"{DONE_MARKER} {len(series_list)}", flush=True)
     return 0
 
