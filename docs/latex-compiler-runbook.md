@@ -99,11 +99,36 @@ Paper turns run only on the Modal sandbox worker. External Pi admission accepts
 ordinary research, so the backend refuses to boot with paper flags and
 `PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=true`, and activation refuses to write
 that combination. Before activation, move staging chat back to the sandbox
-worker: set external Pi admission off, and confirm the pinned staging Modal
-image (`PWC_CHAT_MODAL_IMAGE_VERSION`) was published from a commit that bakes
-the current `paper_cli.py` and paper guides. Republish and repin the image if
-either file changed since it was built. External Pi admission stays off while
-papers are enabled; re-enable it only after the disable transition below.
+worker:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-external-pi-disable-only \
+  --confirm DISABLE_STAGING_EXTERNAL_PI
+```
+
+This turns admission off together with every switch that requires it (the
+remote executor transport, remote workspace tools, the safe CLI fast path and
+lazy workspaces) and restores the sandbox-worker pool, prewarm and concurrency
+baseline. It first saves the exact prior value of each key it changes to the
+root-only `/etc/paperswithcode/staging-external-pi-profile.env`. Deploy staging
+and confirm ordinary chat works on the sandbox worker before activating papers.
+
+The pinned staging chat image (`PWC_CHAT_MODAL_IMAGE_VERSION`) must bake the
+current `paper_cli.py` and paper guides; republish and repin it when either
+changes. External Pi admission stays off while papers are enabled. After the
+paper disable transition below, restore the saved external Pi profile and
+deploy staging:
+
+```bash
+sudo python deploy/configure_host_env.py \
+  --legacy-env /etc/paperswithcode/staging.env \
+  --staging-external-pi-enable-only \
+  --confirm ENABLE_STAGING_EXTERNAL_PI
+```
+
+The enable transition refuses to run while either paper gate is on.
 
 Only after every required check passes may an operator configure the coherent
 user-facing state and deploy staging again:

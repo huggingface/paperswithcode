@@ -1151,6 +1151,65 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
 }
 
 
+# Admission off returns staging chat to the Modal sandbox worker, which is the
+# only path that runs private paper turns. Every switch that requires admission
+# turns off with it, and the pool, prewarm and concurrency values return to the
+# sandbox-worker baseline.
+_STAGING_EXTERNAL_PI_OFF = {
+    "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "false",
+    "PWC_CHAT_EXECUTOR_REMOTE_TRANSPORT_ENABLED": "false",
+    "PWC_CHAT_SAFE_CLI_FAST_PATH_ENABLED": "false",
+    **_STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED,
+    "PWC_CHAT_MAX_CONCURRENCY": "2",
+    "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+}
+STAGING_EXTERNAL_PI_PROFILE_BACKUP = CONFIG_ROOT / "staging-external-pi-profile.env"
+_ABSENT_KEYS = "PWC_STAGING_EXTERNAL_PI_ABSENT_KEYS"
+_STAGING_PAPER_GATES = (
+    "PWC_CHAT_LATEX_PAPER_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+)
+
+
+def staging_external_pi_disable_values(
+    current: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Turn staging external Pi admission off and capture what it replaces.
+
+    Returns the values to write and the exact prior lines of every changed key,
+    so the enable transition restores staging's own tuned profile.
+    """
+
+    if _decoded_flag(current, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") != "true":
+        raise ValueError("staging external Pi admission is already off")
+    backup = {key: current[key] for key in _STAGING_EXTERNAL_PI_OFF if key in current}
+    absent = sorted(set(_STAGING_EXTERNAL_PI_OFF) - set(current))
+    backup[_ABSENT_KEYS] = f"{_ABSENT_KEYS}={','.join(absent)}"
+    return dict(_STAGING_EXTERNAL_PI_OFF), backup
+
+
+def staging_external_pi_enable_lines(
+    current: dict[str, str], backup: dict[str, str]
+) -> dict[str, str]:
+    """Restore the saved external Pi profile once papers are off again."""
+
+    if any(_decoded_flag(current, key) == "true" for key in _STAGING_PAPER_GATES):
+        raise ValueError(
+            "disable the staging LaTeX paper feature before enabling external Pi"
+        )
+    if (
+        _ABSENT_KEYS not in backup
+        or _decoded_flag(backup, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") != "true"
+    ):
+        raise ValueError("no saved staging external Pi profile to restore")
+    absent = {key for key in decoded_value(backup[_ABSENT_KEYS]).split(",") if key}
+    if set(backup) - {_ABSENT_KEYS} | absent != set(_STAGING_EXTERNAL_PI_OFF):
+        raise ValueError("saved staging external Pi profile is incomplete")
+    restored = {key: line for key, line in current.items() if key not in absent}
+    restored.update({key: line for key, line in backup.items() if key != _ABSENT_KEYS})
+    return restored
+
+
 def staging_durable_external_qualification_values(
     current: dict[str, str], *, enabled: bool
 ) -> dict[str, str]:
@@ -1770,6 +1829,8 @@ def main() -> int:
         "--staging-latex-paper-activation-enable-only", action="store_true"
     )
     parser.add_argument("--staging-latex-paper-disable-only", action="store_true")
+    parser.add_argument("--staging-external-pi-disable-only", action="store_true")
+    parser.add_argument("--staging-external-pi-enable-only", action="store_true")
     parser.add_argument("--staging-modal-rate-release-id")
     parser.add_argument("--staging-modal-rate-microusd-per-second", type=int)
     parser.add_argument("--staging-chat-pi-prewarm-enable-only", action="store_true")
@@ -1950,6 +2011,48 @@ def main() -> int:
             "pwc-staging",
         )
         print(f"configured staging LaTeX paper {mode} state; no service was restarted")
+        return 0
+    external_pi_modes = {
+        "staging_external_pi_disable_only": "DISABLE_STAGING_EXTERNAL_PI",
+        "staging_external_pi_enable_only": "ENABLE_STAGING_EXTERNAL_PI",
+    }
+    selected_external_pi_modes = [
+        name for name in external_pi_modes if getattr(args, name)
+    ]
+    if selected_external_pi_modes:
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key not in external_pi_modes and isinstance(value, bool) and value
+        ]
+        if (
+            len(selected_external_pi_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("staging external Pi mode must run alone")
+        selected = selected_external_pi_modes[0]
+        if args.confirm != external_pi_modes[selected]:
+            parser.error(f"--confirm must be {external_pi_modes[selected]}")
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            if selected == "staging_external_pi_disable_only":
+                values, backup = staging_external_pi_disable_values(current)
+                # Save the profile first so a failed write cannot lose it.
+                write_env(STAGING_EXTERNAL_PI_PROFILE_BACKUP, backup, "root")
+                lines = assign(current, values)
+            else:
+                lines = staging_external_pi_enable_lines(
+                    current, read_lines(STAGING_EXTERNAL_PI_PROFILE_BACKUP)
+                )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(CONFIG_ROOT / "staging.env", lines, "pwc-staging")
+        if selected == "staging_external_pi_enable_only":
+            STAGING_EXTERNAL_PI_PROFILE_BACKUP.unlink()
+        state = "off" if selected == "staging_external_pi_disable_only" else "on"
+        print(f"set staging external Pi admission {state}; no service was restarted")
         return 0
     modal_rate_modes = (
         args.staging_modal_rate_evidence_install_only,
