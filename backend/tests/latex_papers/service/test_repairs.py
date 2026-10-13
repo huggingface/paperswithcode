@@ -246,13 +246,66 @@ def test_repair_wait_covers_a_full_compile_inside_the_cli_timeout():
         Path(__file__).resolve().parents[3] / "chat_sandbox_worker" / "paper_cli.py"
     ).read_text()
     cli_timeout = int(re.search(r"urlopen\(request, timeout=(\d+)\)", cli).group(1))
-    wait = (
+    deadline = latex_paper_service._REPAIR_DEADLINE_SECONDS
+
+    assert deadline >= 90
+    # Polling stops at the deadline; the result read and storage need the rest.
+    assert deadline + 25 <= cli_timeout
+    assert (
         latex_paper_service._REPAIR_POLL_ATTEMPTS
         * latex_paper_service._REPAIR_POLL_SECONDS
+        >= deadline
     )
 
-    assert wait >= 90
-    assert wait + 15 <= cli_timeout
+
+def test_repair_cancels_at_its_wall_clock_deadline(db, settings, monkeypatch):
+    from backend.services import latex_paper_service
+
+    class SlowCompiler(_Compiler):
+        def __init__(self):
+            super().__init__(CompilerJobState.QUEUED)
+            self.canceled = False
+
+        def status(self, job_id: str):
+            # Each poll is slow: the compile never finishes inside the budget.
+            clock[0] += 30.0
+            return super().status(job_id)
+
+        def cancel(self, job_id: str):
+            self.canceled = True
+            return super().cancel(job_id)
+
+    clock = [0.0]
+    compiler = _Compiler()
+    storage = LocalArtifactStorage(Path(settings.chat_artifact_local_dir))
+    service = LatexPaperService(db, settings, storage=storage, compiler=compiler)
+    initial = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=_session(db)
+    )
+    compiler.state = CompilerJobState.FAILED
+    failed = service.save_human_version(
+        owner_id="owner-1",
+        artifact_id=initial.artifact_id,
+        expected_parent_version_id=initial.source_head.version_id,
+        files={"main.tex": b"\\documentclass{article}\\badcommand"},
+    )
+    slow = SlowCompiler()
+    service.compiler = slow
+    monkeypatch.setattr(latex_paper_service.time, "sleep", lambda _: None)
+    monkeypatch.setattr(latex_paper_service.time, "monotonic", lambda: clock[0])
+
+    outcome = service.repair_failed_version(
+        owner_id="owner-1",
+        artifact_id=initial.artifact_id,
+        expected_parent_version_id=failed.source_head.version_id,
+        files={"main.tex": b"\\documentclass{article}\\stillslow"},
+        provenance={"selected_model": "test-model", "repair": True},
+    )
+
+    assert slow.canceled is True
+    assert outcome.repaired is False
+    assert outcome.exhausted is False
+    assert clock[0] <= latex_paper_service._REPAIR_DEADLINE_SECONDS + 30.0
 
 
 def test_edit_context_checks_out_a_compiled_head_but_repair_context_does_not(

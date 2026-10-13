@@ -1169,6 +1169,9 @@ _STAGING_EXTERNAL_PI_OFF = {
     "PWC_CHAT_BLANK_POOL_MIN": "1",
     "PWC_CHAT_BLANK_POOL_MAX": "1",
 }
+# A full staging rebuild keeps whichever side of the transition is installed,
+# so it can never mix paper gates with a stale external Pi profile.
+STAGING_RUNTIME_PASSTHROUGH_KEYS.update(_STAGING_EXTERNAL_PI_OFF)
 STAGING_EXTERNAL_PI_PROFILE_BACKUP = CONFIG_ROOT / "staging-external-pi-profile.env"
 _ABSENT_KEYS = "PWC_STAGING_EXTERNAL_PI_ABSENT_KEYS"
 _STAGING_PAPER_GATES = (
