@@ -23,6 +23,7 @@ from backend.models.evaluations import EvaluationCreateData, EvaluationUpdateReq
 
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.pending_edit_errors import PendingEditError
+from backend.utils.slug_utils import slugify
 from backend.services.x_thread_service import MAX_X_THREADS_PER_PAPER, parse_x_post_id
 from backend.utils.public_urls import PublicUrlValidationError, normalize_public_url
 
@@ -374,6 +375,13 @@ HF_URL_PREFIX = re.compile(r"^(?:https?://)?(?:www\.)?huggingface\.co/", re.IGNO
 HF_HANDLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
 
 
+def organization_slug(payload: Payload) -> str:
+    """Slug for a suggested organization, falling back to its HF handle."""
+    return (slugify(payload["name"]) or slugify(payload.get("hf_slug") or ""))[
+        :100
+    ].strip("-")
+
+
 def _validate_new_organization(payload: Payload) -> Payload:
     output = _suggestion_base(payload)
     hf_slug = payload.get("hf_slug")
@@ -392,6 +400,10 @@ def _validate_new_organization(payload: Payload) -> Payload:
     if not output.get("hf_slug") and not output.get("website_url"):
         raise PendingEditError(
             "Organization suggestions need a Hugging Face handle or a website"
+        )
+    if not organization_slug(output):
+        raise PendingEditError(
+            "Organization name needs Latin letters or digits, or a Hugging Face handle"
         )
     if payload.get("image") is not None:
         output["image"] = _normalize_suggestion_image(payload["image"])

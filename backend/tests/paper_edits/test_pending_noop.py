@@ -1288,3 +1288,27 @@ def test_organization_suggestion_approval_refuses_existing_hf_handle(
         PendingEditService(db_session).approve(
             edit_id=row.id, reviewer_username="admin"
         )
+
+
+def test_organization_suggestion_slug_falls_back_to_hf_handle(
+    db_session, paper_fixture
+):
+    row = _organization_suggestion(db_session, name="智谱", hf_slug="zai-org")
+    reviewed = PendingEditService(db_session).approve(
+        edit_id=row.id, reviewer_username="admin"
+    )
+    organization = db_session.get(DBOrganization, int(reviewed.result_entity_id))
+    assert (organization.name, organization.slug) == ("智谱", "zai-org")
+
+
+def test_organization_suggestion_rejects_unsluggable_name_without_handle(
+    db_session,
+):
+    with pytest.raises(PendingEditError, match="Latin letters or digits"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="new_organization",
+            proposed_payload={"name": "智谱", "website_url": "https://example.org"},
+        )
+    _no_rows_created(db_session)

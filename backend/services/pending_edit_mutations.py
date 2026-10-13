@@ -47,10 +47,10 @@ from backend.services.paper_service import PaperService
 from backend.services.pending_edit_errors import PendingEditError
 from backend.services.pending_edit_payloads import (
     Payload,
+    organization_slug,
     validate_payload,
 )
 from backend.services.task_service import TaskService
-from backend.utils.slug_utils import slugify
 from backend.services.catalog_errors import CatalogNotFoundError, CatalogValidationError
 from backend.services.evaluation_commands import (
     apply_evaluation_command,
@@ -410,9 +410,7 @@ class PendingEditMutationService:
         actor_hf_subject: str | None,
         actor_username: str | None,
     ) -> tuple[str, str]:
-        slug = slugify(payload["name"])[:100].strip("-")
-        if not slug:
-            raise PendingEditError("Organization name does not produce a valid slug")
+        slug = organization_slug(payload)
         hf_slug = payload.get("hf_slug")
         duplicate = Organization.slug == slug
         if hf_slug:

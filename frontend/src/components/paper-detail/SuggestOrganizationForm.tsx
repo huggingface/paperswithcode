@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useMutation } from "@tanstack/react-query";
-import { Link } from "react-router-dom";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -56,8 +55,8 @@ export function SuggestOrganizationForm({ paperId, initialName }: Props) {
   if (suggest.isSuccess) {
     return (
       <p className="rounded border p-3 text-sm">
-        Thanks! "{name.trim()}" was submitted for review. Once approved, it is created and added to
-        this paper. Track it on <Link className="underline" to="/submissions">your submissions</Link>.
+        Thanks! "{name.trim()}" was submitted for review. Once an admin approves it, the organization
+        is created and added to this paper.
       </p>
     );
   }
