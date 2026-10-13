@@ -544,3 +544,41 @@ def test_following_direct_navigation_serves_spa_without_catalog_lookup(
     response = getattr(TestClient(app), method)("/following")
     assert response.status_code == 200
     assert response.headers["cache-control"] == "no-store"
+
+
+def test_feed_hydrates_standard_cards_in_ranked_order(db, now, monkeypatch):
+    from backend.services.paper_service import PaperService
+
+    task = Task(name="Card task", slug="card-task")
+    db.add(task)
+    db.flush()
+    older = paper(db, now, "card-old", days=2)
+    newer = paper(db, now, "card-new", days=1)
+    external = Paper(
+        title="External",
+        source="external",
+        source_url="https://example.com/report",
+        date_published=now.date(),
+        is_latest_version=True,
+        abstract="External abstract",
+    )
+    db.add(external)
+    db.flush()
+    for row in [older, newer, external]:
+        tagged(db, row, task)
+    follow(db, "task", task, now)
+    monkeypatch.setattr(
+        PaperService,
+        "_resolve_thumbnail_url",
+        lambda self, row: f"/api/thumbnails/{row.id}.png",
+    )
+    entries = follows.feed_entries(db, "alice", now, 0, 2)
+    assert [e.paper.id for e in entries] == [str(external.id), str(newer.id)]
+    assert entries[0].paper.source == "external"
+    assert entries[1].paper.thumbnail_url == f"/api/thumbnails/{newer.id}.png"
+    assert entries[1].paper.abstract == newer.abstract
+    assert entries[1].paper.tasks[0].slug == task.slug
+    assert [e.paper.id for e in follows.feed_entries(db, "alice", now, 2, 2)] == [
+        str(older.id)
+    ]
+    assert follows.feed_entries(db, "bob", now, 0, 2) == []

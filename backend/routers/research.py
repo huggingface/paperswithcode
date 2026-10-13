@@ -13,7 +13,7 @@ from backend.models.database.research import ResearchSubscription
 from backend.models.research import (
     FollowKind,
     FollowView,
-    ResearchEntry,
+    ResearchFeedEntry,
     SubscriptionUpdate,
     SubscriptionView,
 )
@@ -56,17 +56,16 @@ def unfollow(
     service.set_follow(db, user["hf_subject"], kind, entity_id, False)
 
 
-@router.get("/me/following", response_model=list[ResearchEntry])
+@router.get("/me/following", response_model=list[ResearchFeedEntry])
 def following(
     offset: int = Query(0, ge=0),
     limit: int = Query(40, ge=1, le=100),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
-    entries = service.matching_entries(
-        db, user["hf_subject"], datetime.now(timezone.utc)
+    return service.feed_entries(
+        db, user["hf_subject"], datetime.now(timezone.utc), offset, limit
     )
-    return service.diverse(entries, offset + limit)[offset:]
 
 
 def subscription_view(db, sub, request):

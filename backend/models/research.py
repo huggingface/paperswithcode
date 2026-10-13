@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Literal
 from pydantic import BaseModel, Field
 
+from backend.models.papers import Paper
+
 FollowKind = Literal["task", "method", "benchmark", "author", "organization"]
 
 
@@ -38,3 +40,7 @@ class ResearchEntry(BaseModel):
     strength: int = 0
     scores: list[dict] = Field(default_factory=list)
     events: list[str] = Field(default_factory=list)
+
+
+class ResearchFeedEntry(ResearchEntry):
+    paper: Paper
