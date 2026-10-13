@@ -347,3 +347,50 @@
   -webkit-line-clamp: 2;
 }
 .github-preview-stats { font-variant-numeric: tabular-nums; }
+.catalog-preview-pop.catalog-preview-pop {
+  width: min(320px, calc(100vw - 24px));
+  padding: 0;
+  border: 1px solid var(--hairline);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  color: var(--ink);
+  box-shadow: 0 14px 44px -12px rgba(30, 28, 20, 0.4);
+  overflow: hidden;
+}
+.catalog-preview-card { display: grid; }
+.catalog-preview-image {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  object-fit: cover;
+  background: var(--bg-subtle);
+  border-bottom: 1px solid var(--hairline);
+}
+.catalog-preview-meta {
+  display: grid;
+  gap: 3px;
+  padding: 12px 14px 14px;
+}
+.catalog-preview-meta strong {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-size: 15px;
+  line-height: 1.25;
+}
+.catalog-preview-meta p {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 3px 0 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+.catalog-preview-kind,
+.catalog-preview-stats {
+  color: var(--ink-faint);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+.catalog-preview-stats { margin-top: 4px; }

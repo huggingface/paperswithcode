@@ -54,6 +54,12 @@ def test_system_prompt_requires_machine_readable_s2_results_and_linked_titles():
     assert "Never leave a paper title as unlinked plain text" in TEMPLATE
 
 
+def test_system_prompt_links_catalog_entities_for_preview_cards():
+    for scheme in ("task:<slug>", "method:<slug>", "benchmark:<slug>"):
+        assert scheme in TEMPLATE
+    assert "link each model name to the paper that reported its result" in TEMPLATE
+
+
 def test_resolve_citations_includes_hover_preview_metadata(monkeypatch):
     paper = SimpleNamespace(
         id="9",
