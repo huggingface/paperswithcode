@@ -23,8 +23,6 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
-| local `pwc-cron-sweep-conference-deadlines.timer` | `35 2 * * 0` | `pwc-cron sweep_conference_deadlines` | `backend/scripts/sweep_conference_deadlines.py` |
-| local `pwc-cron-refresh-conference-deadlines.timer` | `40 7,19 * * *` | `pwc-cron refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
@@ -135,40 +133,6 @@ history and stores them on repositories for the trending API/view pipeline.
 `update_citations.py` pulls citation counts from Semantic Scholar for ArXiv
 papers. Runs are bounded so hourly Actions do not pile up under API throttling.
 
-`sweep_conference_deadlines.py` (weekly) and `refresh_conference_deadlines.py`
-(twice daily) keep https://paperswithcode.co/ai-deadlines current. The
-`conferences` / `conference_deadlines` rows are the source of truth;
-huggingface/ai-deadlines YAML is no longer imported. Each run first collects
-finished sweeps: it reads one result per conference from the Hugging Face Job
-logs, validates the change set, and applies the accepted part through the
-guarded writer in `backend/services/conference_deadline_service.py` (no
-deletes, past editions and past deadlines are immutable, shifts over 120 days
-and unsourced editions are rejected, every change is a catalog mutation event by
-`conference-deadline-agent` with before/after values). Then it launches at most
-one Job, which runs the Claude Agent SDK research pipeline ported from
-ai-deadlines (`backend/services/conference_deadline_agent.py`: retrieval agents,
-majority-vote aggregation, fail-closed tool budget, wall-clock caps) off-box.
-The weekly sweep researches up to 30 conferences with 3 retrieval agents,
-prioritizing those whose next edition is missing and those with a deadline
-within 120 days; the daily pass (launched at most once per 20 hours) checks
-deadlines within three weeks and overdue top-tier conferences with one agent.
-Sweeps are recorded in `conference_deadline_sweeps`. The jobs need
-`PWC_CONFERENCE_DEADLINES_ANTHROPIC_API_KEY` in `production-cron.env` plus HF
-Jobs credentials (`PWC_CONFERENCE_DEADLINES_HF_NAMESPACE`/`_HF_TOKEN`, falling
-back to `PWC_CODEX_JOBS_NAMESPACE`/`_TOKEN`), and exit 1 without them.
-Operate them by hand with:
-
-```bash
-uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines status
-uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines plan --mode weekly
-uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines launch --series cvpr,icml
-uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines collect --dry-run
-```
-
-Correct a deadline by hand with `PUT /api/v1/conferences/{slug}/deadlines`
-(admin; the body's list replaces the edition's deadlines, and a missing edition
-is created when `short_name` is given).
-
 `discover_x_threads.py` finds X posts in which authors introduce recent
 papers and links them to the paper page's "X threads" card. Twice a day it
 takes up to 40 arXiv papers from the last 10 days that are trending or featured
@@ -183,7 +147,11 @@ three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
 job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
 it. It is report-only, storing matches on the scan row, unless
 `PWC_X_THREAD_DISCOVERY_APPLY=true`, which links matches through the audited
-`x_threads` curation section as actor `x-thread-discovery`. Review stored
+`x_threads` curation section as actor `x-thread-discovery`. Before linking,
+each match is reviewed by gpt-5.6-sol (`PWC_OPENAI_API_KEY`, from
+`production.env`): it rejects posts about a sibling project, multi-paper
+acceptance lists, and congratulation replies, and the verdict and reason are
+stored with the candidate. Without the key the job links nothing. Review stored
 matches, or run it by hand, with:
 
 ```bash
@@ -200,6 +168,14 @@ at most 200 papers at least 15 minutes apart:
 
 ```bash
 sudo pwc-cron discover_x_threads --backfill-days 180 --max-papers 200
+```
+
+`--review-linked-since YYYY-MM-DD` re-reviews threads the job linked since that
+date (hand-curated threads are never touched) and, in apply mode, unlinks the
+ones the reviewer rejects:
+
+```bash
+sudo pwc-cron discover_x_threads --review-linked-since 2026-10-12
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither
@@ -229,7 +205,10 @@ pages for papers that still have `urls_extracted = false`.
 papers that are not yet in the database, and auto-tags tasks/methods using
 keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
 (`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
-key is missing or the call fails, the Hugging Face `ai_summary` is stored instead. It also links curated organization payloads for both new and
+key is missing or the call fails, the Hugging Face `ai_summary` is stored instead.
+Each run also fills a TL;DR for up to 50 latest-version papers that have an
+abstract but no TL;DR, which covers papers added through the admin API, the
+`paper index` CLI, or external-resource ingestion. It also links curated organization payloads for both new and
 already-existing papers.
 
 The three MMTEB v2 jobs consume the official MTEB leaderboard API's precomputed
