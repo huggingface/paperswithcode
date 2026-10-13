@@ -45,6 +45,12 @@ from backend.services.catalog_errors import (
 RankScopes = set[tuple[int, int, str]]
 
 _PAPER_REF = re.compile(r"^paper:(\d+)$", re.IGNORECASE)
+# Hugging Face paper pages and their markdown mirrors are surfaces of the arXiv
+# paper, e.g. https://huggingface.co/papers/2111.12993.md.
+_HF_PAPER_URL = re.compile(
+    r"^https?://(?:www\.)?huggingface\.co/papers/(\d{4}\.\d{4,5})(?:v\d+)?(?:\.md)?/?(?:[?#].*)?$",
+    re.IGNORECASE,
+)
 _CVF_OPENACCESS_PATH = re.compile(
     r"^/content/([^/]+)/(?:html|papers)/([^/]+?)(?:\.(?:html|pdf))?$",
     re.IGNORECASE,
@@ -70,6 +76,10 @@ def _normalize_url_for_match(url: Optional[str]) -> Optional[str]:
     parsed_arxiv = parse_arxiv_url(raw)
     if parsed_arxiv:
         return f"arxiv:{parsed_arxiv[0].lower()}"
+
+    hf_paper = _HF_PAPER_URL.match(raw)
+    if hf_paper:
+        return f"arxiv:{hf_paper.group(1)}"
 
     parsed = urlparse(raw)
     if not parsed.scheme and raw.startswith("/paper/"):
