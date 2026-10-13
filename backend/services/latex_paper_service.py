@@ -424,6 +424,12 @@ class LatexPaperService:
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
+            if actor_type == "ai" and self._is_ai_replay(
+                owner_id, artifact, expected_parent_version_id, files
+            ):
+                return _paper_descriptor(artifact).model_copy(
+                    update={"editing_enabled": self._editing_enabled()}
+                )
             raise ArtifactError(
                 "paper_conflict",
                 "This paper was updated elsewhere. Reload its latest version before saving.",
@@ -532,6 +538,7 @@ class LatexPaperService:
         version.storage_state = "ready"
         # Advance source before compilation so a failed compile remains a durable,
         # repairable human version while the previous PDF remains the preview head.
+        self._supersede_pending_head(artifact)
         artifact.source_head_version_id = version.id
         self._compile(version, bundle, manifest.root_document)
         self.db.flush()
@@ -706,6 +713,7 @@ class LatexPaperService:
                 "artifact_storage_failed", "Figure storage failed"
             ) from error
         version.storage_state = "ready"
+        self._supersede_pending_head(artifact)
         artifact.source_head_version_id = version.id
         self._compile(version, bundle, manifest.root_document)
         self.db.flush()
@@ -833,6 +841,7 @@ class LatexPaperService:
                 "artifact_storage_failed", "Paper source storage failed"
             ) from error
         version.storage_state = "ready"
+        self._supersede_pending_head(artifact)
         artifact.source_head_version_id = version.id
         self._compile(version, bundle, manifest.root_document)
         self.db.flush()
@@ -900,6 +909,12 @@ class LatexPaperService:
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
+            if self._is_ai_replay(
+                owner_id, artifact, expected_parent_version_id, files
+            ):
+                return LatexPaperRepairOutcome(
+                    self._descriptor(artifact), repaired=True, exhausted=False
+                )
             raise ArtifactError(
                 "paper_conflict",
                 "This paper was updated elsewhere. Reload before repairing.",
@@ -1097,6 +1112,39 @@ class LatexPaperService:
         return LatexPaperRepairOutcome(
             self._descriptor(artifact), repaired=True, exhausted=False
         )
+
+    def _is_ai_replay(
+        self,
+        owner_id: str,
+        artifact: ChatArtifact,
+        expected_parent_version_id: uuid.UUID,
+        files: Mapping[str, bytes],
+    ) -> bool:
+        """Whether this AI candidate already became the head of its parent.
+
+        A gateway can drop the reply to a draft or repair that the service has
+        already published. The retried candidate then names the old head, and
+        returning the current head keeps the retry from reporting a conflict.
+        """
+        if artifact.source_head_version_id is None:
+            return False
+        head = self._version(owner_id, artifact.id, artifact.source_head_version_id)
+        if (
+            head.actor_type != "ai"
+            or head.parent_version_id != expected_parent_version_id
+        ):
+            return False
+        parent = self._version(owner_id, artifact.id, expected_parent_version_id)
+        root_document = LatexPaperManifest.model_validate(
+            parent.source_manifest
+        ).root_document
+        normalized_files = self._validate_human_files(
+            files, root_document=root_document
+        )
+        _, bundle = self._source_bundle(
+            self._bundle_files(normalized_files, self._figure_blobs_for_version(parent))
+        )
+        return hashlib.sha256(bundle).hexdigest() == head.source_digest
 
     def repair_context(
         self, *, owner_id: str, artifact_id: uuid.UUID
@@ -1830,7 +1878,19 @@ class LatexPaperService:
         version.compile_diagnostics = result_diagnostics
         version.compile_status = "succeeded"
         version.compiled_pdf_path = _PREVIEW_PDF
-        version.artifact.preview_head_version_id = version.id
+        preview_id = version.artifact.preview_head_version_id
+        preview_number = (
+            self.db.scalar(
+                select(ChatLatexPaperVersion.version).where(
+                    ChatLatexPaperVersion.id == preview_id
+                )
+            )
+            if preview_id is not None
+            else None
+        )
+        # A late result for an older version must not replace a newer preview.
+        if preview_number is None or preview_number < version.version:
+            version.artifact.preview_head_version_id = version.id
 
     def delete_version(
         self, owner_id: str, artifact_id: uuid.UUID, version_id: uuid.UUID
@@ -1908,6 +1968,31 @@ class LatexPaperService:
         self.db.execute(delete(ChatArtifact).where(ChatArtifact.id == artifact.id))
         self.db.flush()
         self._delete_orphaned_blobs(blob_digests)
+
+    def _supersede_pending_head(self, artifact: ChatArtifact) -> None:
+        """Settle a head that a newer version replaces while it still compiles.
+
+        Owner polls follow only the current head, so its pending compile would
+        otherwise stay "compiling" in history and, if reconciled later, move the
+        preview back to an older version.
+        """
+        if artifact.source_head_version_id is None:
+            return
+        head = self.db.get(ChatLatexPaperVersion, artifact.source_head_version_id)
+        if head is None or head.compile_status not in {"queued", "compiling"}:
+            return
+        self._cancel_pending_provider_jobs([head])
+        head.compile_status = "failed"
+        head.compile_diagnostics = {
+            "job_id": str(head.id),
+            "failure_category": "superseded",
+            "errors": [
+                {
+                    "severity": "error",
+                    "message": "A newer version replaced this one before it compiled",
+                }
+            ],
+        }
 
     def _cancel_pending_provider_jobs(
         self, versions: list[ChatLatexPaperVersion]

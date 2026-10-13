@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from sqlalchemy import func, select
 
 from backend.models.database import (
     ChatLatexPaperFigureBlob,
 )
 from backend.services.chat_artifact_service import (
+    ArtifactError,
     LocalArtifactStorage,
 )
 from backend.services.latex_paper_service import LatexPaperService
@@ -344,3 +346,90 @@ def test_edit_context_checks_out_a_compiled_head_but_repair_context_does_not(
     assert files["main.tex"] == source
     with pytest.raises(ArtifactError, match="has not failed"):
         service.repair_context(owner_id="owner-1", artifact_id=initial.artifact_id)
+
+
+def test_retried_ai_draft_and_repair_return_the_head_they_already_published(
+    db, settings
+):
+    """A gateway can drop the reply after the service published the candidate."""
+    compiler = _Compiler()
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    initial = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=_session(db)
+    )
+    assert initial.source_head is not None
+    compiler.state = CompilerJobState.FAILED
+    broken = {"main.tex": b"\\documentclass{article}\\badcommand"}
+    draft = service.save_ai_version(
+        owner_id="owner-1",
+        artifact_id=initial.artifact_id,
+        expected_parent_version_id=initial.source_head.version_id,
+        files=broken,
+        model_identity="selected-model",
+    )
+    assert draft.source_head is not None
+    assert (
+        service.save_ai_version(
+            owner_id="owner-1",
+            artifact_id=initial.artifact_id,
+            expected_parent_version_id=initial.source_head.version_id,
+            files=broken,
+            model_identity="selected-model",
+        ).source_head
+        == draft.source_head
+    )
+
+    compiler.state = CompilerJobState.SUCCEEDED
+    fixed = {
+        "main.tex": b"\\documentclass{article}\\begin{document}Fixed\\end{document}"
+    }
+    repair = {
+        "owner_id": "owner-1",
+        "artifact_id": initial.artifact_id,
+        "expected_parent_version_id": draft.source_head.version_id,
+        "provenance": {"model": "selected-model", "repair": True},
+    }
+    repaired = service.repair_failed_version(files=fixed, **repair)
+    replayed = service.repair_failed_version(files=fixed, **repair)
+
+    assert replayed.repaired is True
+    assert replayed.descriptor.source_head == repaired.descriptor.source_head
+    assert (
+        service.list_history(owner_id="owner-1", artifact_id=initial.artifact_id)
+        .items[0]
+        .version
+        == 3
+    )
+    with pytest.raises(ArtifactError, match="updated elsewhere"):
+        service.repair_failed_version(
+            files={"main.tex": b"\\documentclass{article}different"}, **repair
+        )
+
+
+def test_paper_cli_retries_once_when_an_edge_proxy_drops_the_reply(monkeypatch):
+    import io
+    import json
+    import urllib.error
+
+    from backend.chat_sandbox_worker import paper_cli
+
+    replies = [
+        urllib.error.HTTPError("url", 502, "Bad Gateway", {}, io.BytesIO(b"")),
+        io.BytesIO(json.dumps({"paper": {"artifact_id": "a"}}).encode()),
+    ]
+
+    def urlopen(request, timeout):
+        reply = replies.pop(0)
+        if isinstance(reply, Exception):
+            raise reply
+        return reply
+
+    monkeypatch.setattr(paper_cli.urllib.request, "urlopen", urlopen)
+
+    assert paper_cli._command("begin-edit") == {"paper": {"artifact_id": "a"}}
+    assert replies == []

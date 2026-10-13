@@ -302,3 +302,36 @@ def test_scaffold_preloads_the_packages_authors_cannot_add():
         assert f"\\usepackage{{{package}}}" in preamble, package
     # hyperref must load after natbib to patch its citation links.
     assert preamble.index("{natbib}") < preamble.index("{hyperref}")
+
+
+def test_draft_settles_a_scaffold_compile_it_supersedes(db, settings):
+    """Owner polls follow only the head, so a replaced compile must not pend forever."""
+    compiler = _Compiler(CompilerJobState.COMPILING)
+    service = LatexPaperService(
+        db,
+        settings,
+        storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+        compiler=compiler,
+    )
+    scaffold = service.create_neutral_scaffold(
+        owner_id="owner-1", session_id=_session(db)
+    )
+    assert scaffold.source_head is not None
+    assert scaffold.source_head.compile_status == "compiling"
+
+    compiler.state = CompilerJobState.SUCCEEDED
+    draft = service.save_ai_version(
+        owner_id="owner-1",
+        artifact_id=scaffold.artifact_id,
+        expected_parent_version_id=scaffold.source_head.version_id,
+        files={
+            "main.tex": b"\\documentclass{article}\\begin{document}Draft\\end{document}"
+        },
+        model_identity="selected-model",
+    )
+
+    superseded = db.get(ChatLatexPaperVersion, scaffold.source_head.version_id)
+    assert superseded.compile_status == "failed"
+    assert superseded.compile_diagnostics["failure_category"] == "superseded"
+    assert draft.source_head is not None
+    assert draft.preview_head == draft.source_head
