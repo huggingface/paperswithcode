@@ -5,14 +5,15 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
 
-const { getOrganizations, updatePaperOrganizations, submit } = vi.hoisted(() => ({
+const { getOrganizations, syncOrganization, updatePaperOrganizations, submit } = vi.hoisted(() => ({
   submit: vi.fn(),
+  syncOrganization: vi.fn(),
   getOrganizations: vi.fn(),
   updatePaperOrganizations: vi.fn(),
 }));
 
 vi.mock("@/lib/api/catalog", () => ({
-  catalogApi: { organizations: getOrganizations },
+  catalogApi: { organizations: getOrganizations, syncOrganization },
 }));
 
 vi.mock("@/lib/api/papers", () => ({
@@ -30,7 +31,11 @@ const organizations = {
   ],
 };
 
-function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct" | "pending" = "direct") {
+function renderDialog(
+  initialOrganizationIds: number[] = [],
+  submitMode: "direct" | "pending" = "direct",
+  canCreate = false,
+) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -44,6 +49,7 @@ function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct
         paperId="42"
         initialOrganizationIds={initialOrganizationIds}
         submitMode={submitMode}
+        canCreate={canCreate}
       />
     </QueryClientProvider>,
   );
@@ -55,6 +61,7 @@ beforeEach(() => {
   getOrganizations.mockResolvedValue(organizations);
   updatePaperOrganizations.mockReset();
   updatePaperOrganizations.mockResolvedValue({ id: "42", title: "Updated" });
+  syncOrganization.mockReset();
   submit.mockReset();
   submit.mockResolvedValue({ id: "pending-1" });
 });
@@ -125,4 +132,38 @@ describe("EditOrganizationsDialog", () => {
    expect(updatePaperOrganizations).not.toHaveBeenCalled();
    expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Original" });
    expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(false);
+ });
+
+ it("hides organization creation from non-admins", async () => {
+   const user = userEvent.setup();
+   renderDialog();
+   await screen.findByText("NVIDIA");
+   await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "prime intellect");
+   expect(screen.queryByRole("textbox", { name: "Hugging Face organization" })).not.toBeInTheDocument();
+ });
+
+ it("creates a missing organization from Hugging Face and selects it", async () => {
+   const user = userEvent.setup();
+   renderDialog([], "direct", true);
+   await screen.findByText("NVIDIA");
+   await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "prime intellect");
+   syncOrganization.mockResolvedValue({ organization: "prime-intellect", linked: 0 });
+   getOrganizations.mockResolvedValue({
+     count: 4,
+     results: [...organizations.results, { id: "9", name: "Prime Intellect", slug: "prime-intellect", is_featured: true }],
+   });
+   await user.type(
+     screen.getByRole("textbox", { name: "Hugging Face organization" }),
+     "https://huggingface.co/PrimeIntellect/",
+   );
+   await user.click(screen.getByRole("button", { name: "Create" }));
+
+   expect(await screen.findByRole("checkbox", { name: "Prime Intellect" })).toBeChecked();
+   expect(syncOrganization).toHaveBeenCalledWith({
+     hf_slug: "PrimeIntellect",
+     slug: "prime-intellect",
+     skip_missing_papers: true,
+   });
+   await user.click(screen.getByRole("button", { name: "Save changes" }));
+   await waitFor(() => expect(updatePaperOrganizations).toHaveBeenCalledWith("42", [9]));
  });

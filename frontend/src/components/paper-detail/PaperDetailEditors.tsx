@@ -128,6 +128,7 @@ export function PaperDetailEditors({
         initialOrganizationIds={(paper.organizations ?? []).map(({ id }) => Number(id))}
         submitMode={editSubmitMode}
         isAuthor={isLinkedAuthor}
+        canCreate={isAdmin}
       />
     ),
   };
