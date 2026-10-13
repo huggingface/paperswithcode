@@ -634,6 +634,16 @@ class BenchmarkGapReviewService:
                         "open or promoted candidate"
                     )
                 self._merge(candidate, target)
+                if target.status == "promoted":
+                    # The leaderboard exists already; score the new papers.
+                    self.db.flush()
+                    BenchmarkGapService(self.db).enqueue_evidence_rechecks(
+                        target,
+                        trigger=TRIGGER,
+                        priority=RECHECK_PRIORITY,
+                        settings=self.settings,
+                        job_service=self.job_service,
+                    )
             counts[decision.decision] += 1
         self.db.flush()
         return {
@@ -945,6 +955,13 @@ class BenchmarkGapReviewService:
                 PaperCurationJob.benchmark_candidate_id == candidate.id,
                 PaperCurationJob.kind == "add-benchmark",
                 PaperCurationJob.status.in_({"failed", "canceled"}),
+                # Count only the current approval; reviewed_at moves on each
+                # overseer approval and creation-job decision.
+                *(
+                    [PaperCurationJob.created_at >= candidate.reviewed_at]
+                    if candidate.reviewed_at is not None
+                    else []
+                ),
             )
             .scalar()
             or 0

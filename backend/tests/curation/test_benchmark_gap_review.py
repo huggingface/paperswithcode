@@ -699,3 +699,58 @@ def test_dispatch_keeps_a_two_job_lane_for_benchmark_gap_work(db, monkeypatch):
 
     assert sorted(row.status for row in gap_jobs) == ["queued", "running", "running"]
     assert daily.status == "running"
+
+
+def test_failure_backoff_counts_only_the_current_approval(db):
+    candidate, job, _source, _parent = creation_setup(db)
+    review = service(db)
+    job.status = "failed"
+    job.created_at = datetime(2026, 1, 1, tzinfo=UTC)
+    candidate.reviewed_at = datetime(2026, 2, 1, tzinfo=UTC)
+    retry = review.job_service.enqueue_benchmark_job(
+        db,
+        kind="add-benchmark",
+        benchmark_candidate_id=candidate.id,
+        requested_by="test",
+        settings=get_settings(),
+        priority=20,
+    )
+    retry.created_at = datetime(2026, 2, 2, tzinfo=UTC)
+    retry.status = "failed"
+    db.flush()
+
+    review.handle_terminal_job(retry)
+
+    assert candidate.status == "approved"
+
+
+def test_merging_into_a_promoted_candidate_rechecks_the_new_papers(db):
+    for paper_id in range(1, 6):
+        add_paper(db, paper_id, f"2601.0000{paper_id}")
+    promoted = add_candidate(db, "ModelNet40", papers=3, status="promoted")
+    add_evidence(db, promoted, [1, 2, 3])
+    alias = add_candidate(db, "ModelNet-40", papers=3)
+    add_evidence(db, alias, [3, 4, 5])
+
+    service(db).apply_review(
+        ReviewBenchmarkGapsMutation(
+            summary="Alias of a configured benchmark.",
+            decisions=[
+                {
+                    "candidate_id": alias.id,
+                    "decision": "merge",
+                    "merge_into_candidate_id": promoted.id,
+                    "reason": "Same benchmark.",
+                }
+            ],
+        )
+    )
+
+    rechecked = sorted(
+        row.paper_id
+        for row in db.query(PaperCurationJob).filter(
+            PaperCurationJob.kind == "add-evals",
+            PaperCurationJob.trigger == "benchmark-gap-cron",
+        )
+    )
+    assert rechecked == [1, 2, 3, 4, 5]

@@ -87,10 +87,38 @@ BEGIN
             ADD COLUMN IF NOT EXISTS merged_into_id UUID
                 REFERENCES staging.benchmark_curation_candidates(id) ON DELETE SET NULL,
             ADD COLUMN IF NOT EXISTS resolution JSONB;
+        ALTER TABLE staging.benchmark_curation_candidates
+            DROP CONSTRAINT IF EXISTS benchmark_curation_candidates_status_check;
+        ALTER TABLE staging.benchmark_curation_candidates
+            ADD CONSTRAINT benchmark_curation_candidates_status_check
+            CHECK (status IN ('candidate', 'approved', 'promoted', 'rejected', 'merged'));
+        CREATE INDEX IF NOT EXISTS idx_staging_benchmark_curation_candidates_review
+            ON staging.benchmark_curation_candidates (status, distinct_paper_count);
     END IF;
     IF to_regclass('staging.paper_curation_jobs') IS NOT NULL THEN
         ALTER TABLE staging.paper_curation_jobs
             ADD COLUMN IF NOT EXISTS benchmark_candidate_id UUID;
+        IF to_regclass('staging.benchmark_curation_candidates') IS NOT NULL
+            AND NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE conname = 'paper_curation_jobs_benchmark_candidate_id_fkey'
+                  AND conrelid = 'staging.paper_curation_jobs'::regclass
+            ) THEN
+            ALTER TABLE staging.paper_curation_jobs
+                ADD CONSTRAINT paper_curation_jobs_benchmark_candidate_id_fkey
+                FOREIGN KEY (benchmark_candidate_id)
+                REFERENCES staging.benchmark_curation_candidates(id) ON DELETE CASCADE;
+        END IF;
+        CREATE INDEX IF NOT EXISTS idx_staging_paper_curation_jobs_benchmark_candidate
+            ON staging.paper_curation_jobs (benchmark_candidate_id, created_at);
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_staging_active_benchmark_candidate_job
+            ON staging.paper_curation_jobs (benchmark_candidate_id)
+            WHERE kind = 'add-benchmark'
+              AND status IN ('queued', 'dispatching', 'running');
+        CREATE UNIQUE INDEX IF NOT EXISTS uq_staging_active_benchmark_gap_review
+            ON staging.paper_curation_jobs (kind)
+            WHERE kind = 'review-benchmark-gaps'
+              AND status IN ('queued', 'dispatching', 'running');
         ALTER TABLE staging.paper_curation_jobs
             DROP CONSTRAINT IF EXISTS paper_curation_jobs_kind_check;
         ALTER TABLE staging.paper_curation_jobs
