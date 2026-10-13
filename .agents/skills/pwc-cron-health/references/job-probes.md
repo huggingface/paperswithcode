@@ -284,3 +284,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 - **Contract:** English and all-language Open TTS datasets have separate managed rows and WER/RTFx metrics.
 - **Proof:** Compare each dataset independently with the official source; recompute the English macro-average across Seed-TTS and CV3-Eval, verify model identity, units, stale-row removal and rank direction. Freshness in one lane does not prove the other.
+
+## `send_research_digests`
+
+Hourly timer; new digests cover the week ending Monday at 08:00 UTC. The other
+runs are no-ops outside the 23-hour retry window. Delivery is intentionally
+disabled until all Resend launch gates are configured. Do not enable gates or
+send test mail as a health probe. Inspect aggregate `research_digests` counts
+by window/status, never recipient addresses or payloads. `uncertain` requires
+provider reconciliation before any manual resend; provider idempotency lasts
+24 hours. A disabled/no-work outcome is healthy during staged rollout.

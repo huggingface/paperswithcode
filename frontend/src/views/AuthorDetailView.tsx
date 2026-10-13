@@ -1,3 +1,4 @@
+import ResearchFollowButton from "@/components/ResearchFollowButton";
 import { paperQueryKeys } from "@/lib/paperQueryKeys";
 import React from "react";
 import { Link, useParams } from "react-router-dom";
@@ -30,6 +31,7 @@ const AuthorDetailView: React.FC = () => {
       <h1 className="feed-title">
         {author.data?.full_name ?? <Skeleton className="h-10 w-64 inline-block" />}
       </h1>
+          {author.data && <ResearchFollowButton kind="author" entityId={author.data.id} />}
       {author.data?.hf_username && (
         <a
           href={`https://huggingface.co/${author.data.hf_username}`}

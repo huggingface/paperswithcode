@@ -1,3 +1,4 @@
+import ResearchFollowButton from "@/components/ResearchFollowButton";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -181,6 +182,7 @@ export const OrganizationPaperFeed: React.FC<{
             ) : null}
             {organization?.name ?? <Skeleton className="h-12 w-64" />}
           </h1>
+          {organization && <ResearchFollowButton kind="organization" entityId={organization.id} />}
           {organization && (
             <div className="feed-subtitle">
               {organization.paper_count?.toLocaleString() ?? 0} papers

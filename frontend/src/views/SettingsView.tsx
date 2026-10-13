@@ -1,3 +1,4 @@
+import ResearchSettings from "@/components/ResearchSettings";
 /**
  * Account settings view (`/settings`).
  *
@@ -179,6 +180,7 @@ const SettingsView: React.FC = () => {
           <span className="sr-only">Loading settings…</span>
         </div>
       ) : <div className="settings-page-content">
+      <ResearchSettings />
       {user && <section className="settings-section">
         <h2 className="settings-section-title">Catalog access</h2>
         <div className="settings-note settings-note-flush">

@@ -1,3 +1,4 @@
+import ResearchFollowButton from "@/components/ResearchFollowButton";
 import React, { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -445,6 +446,7 @@ const TagBrowseView: React.FC = () => {
             TASK
           </div>
           <h1 className="domain-mega-title">{taskName}</h1>
+          <ResearchFollowButton kind="task" entityId={task.id} />
           {task.description && (
             <MarkdownText className="task-explainer" text={task.description} />
           )}

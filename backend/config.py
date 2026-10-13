@@ -28,6 +28,13 @@ class Settings(BaseSettings, ChatSettings):
 
     model_config = SettingsConfigDict(env_file=["keys.env"], env_prefix="PWC_")
 
+    research_email_enabled: bool = False
+    resend_api_key: str = ""
+    resend_from: str = ""
+    resend_domain_verified: bool = False
+    resend_webhook_secret: str = ""
+    resend_webhooks_ready: bool = False
+
     # Server configuration
     host: str = Field(default="0.0.0.0", description="Host to bind the server")
     port: int = Field(default=8000, description="Port to bind the server")

@@ -1,3 +1,4 @@
+import ResearchFeedTabs from "@/components/ResearchFeedTabs";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -392,6 +393,7 @@ const FeedView: React.FC = () => {
         </div>
       </div>
 
+      <ResearchFeedTabs />
       <div className="layout-with-sidebar">
         <aside className="sidebar">
           <div className="sidebar-section sidebar-section-top-domains">

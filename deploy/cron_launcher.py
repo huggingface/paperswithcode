@@ -114,6 +114,13 @@ def job(
 
 
 COMMANDS: dict[str, Job] = {
+    "send_research_digests": job(
+        "-m",
+        "backend.scripts.send_research_digests",
+        timeout="45m",
+        health_job="send_research_digests",
+        idempotency="weekly account outbox and immutable Resend key; retries stop before 24h",
+    ),
     "create_eval_verification_issues": job(
         "-m",
         "backend.scripts.create_eval_verification_issues",

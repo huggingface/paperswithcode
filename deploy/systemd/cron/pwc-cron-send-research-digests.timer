@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Send Monday 08:00 UTC research digests and retry within 23 hours
+
+[Timer]
+OnCalendar=*-*-* *:00:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-send-research-digests.service
+
+[Install]
+WantedBy=timers.target
