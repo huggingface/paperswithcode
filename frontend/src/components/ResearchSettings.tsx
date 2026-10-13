@@ -25,10 +25,15 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
   const change = useMutation({
     mutationFn: ({ follow, enabled }: { follow: ResearchFollow; enabled: boolean }) =>
       researchApi.setFollow(follow.kind, follow.entity_id, enabled),
-    onSuccess: async (_, { follow, enabled }) => {
+    onSuccess: (_, { follow, enabled }) => {
+      // Update the cached list in the same render as `unfollowed` so a row never flips state late.
+      const queryKey = ['research-follows', user?.hf_subject];
+      client.setQueryData<ResearchFollow[]>(queryKey, current => enabled
+        ? [...(current ?? []), follow]
+        : (current ?? []).filter(f => followKey(f) !== followKey(follow)));
       setUnfollowed(rows => enabled ? rows.filter(r => followKey(r) !== followKey(follow)) : [...rows, follow]);
-      await client.invalidateQueries({ queryKey: ['research-follows', user?.hf_subject] });
-      await client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
+      void client.invalidateQueries({ queryKey });
+      void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
     },
   });
   const active = new Set(follows.map(followKey));
