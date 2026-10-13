@@ -18,6 +18,9 @@ WORKSPACE = Path("/workspace")
 EVENT_PREFIX = "@@PWC_PAPER@@"
 MAX_RESPONSE = 3 * 1024 * 1024
 _RETRYABLE_STATUSES = {502, 503, 504}
+# Reads repeat safely, and the service replays a draft that it already
+# published. A repeated create or repair would not, so those are not retried.
+_RETRYABLE_OPERATIONS = {"begin-edit", "edit-context", "repair-context", "draft"}
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
@@ -38,8 +41,12 @@ def _command(operation: str, **values: object) -> dict:
             break
         except urllib.error.HTTPError as error:
             # An edge proxy can drop the reply to a request the backend still
-            # completes. Draft and repair replays return the published head.
-            if attempt == 0 and error.code in _RETRYABLE_STATUSES:
+            # completes.
+            if (
+                attempt == 0
+                and operation in _RETRYABLE_OPERATIONS
+                and error.code in _RETRYABLE_STATUSES
+            ):
                 continue
             detail = error.read(8 * 1024).decode(errors="replace")
             raise RuntimeError(

@@ -61,6 +61,7 @@ def test_pwc_paper_command_keeps_the_paper_budget_after_research_spends_the_defa
     )
     hooks = WorkerToolHooks(settings)
     hooks.budget.calls = 12
+    hooks.budget.tool_rounds_started = hooks.budget.maximum_rounds
 
     def decision(tool_id: str, command: str) -> str:
         output = asyncio.run(

@@ -440,18 +440,22 @@ class WorkerToolHooks:
         tool_id = tool_use_id or str(hook_input.get("tool_use_id") or "")
         name = str(hook_input.get("tool_name") or "")
         arguments = hook_input.get("tool_input") or {}
-        self.budget.register_call(tool_id)
         command = arguments.get("command") if name == "Bash" else None
         # Research before `pwc-paper create` must not starve the command that
         # activates the paper budget, so paper commands always use that budget.
+        paper_budget = (
+            isinstance(command, str) and _pwc_paper_command(command) is not None
+        )
+        self.budget.register_call(
+            tool_id,
+            self.settings.chat_latex_paper_max_tool_rounds if paper_budget else None,
+        )
         decision = self.budget.authorize(
             tool_id,
             name,
             arguments,
             maximum_calls=(
-                self.settings.chat_latex_paper_max_tool_calls
-                if isinstance(command, str) and _pwc_paper_command(command) is not None
-                else None
+                self.settings.chat_latex_paper_max_tool_calls if paper_budget else None
             ),
         )
         if not decision.allowed:

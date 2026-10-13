@@ -116,7 +116,9 @@ class ToolBudget:
     def seed_urls(self, urls: list[str]) -> None:
         self.fetchable_urls = set(urls)
 
-    def register_round(self, tool_ids: list[str]) -> None:
+    def register_round(
+        self, tool_ids: list[str], maximum_rounds: int | None = None
+    ) -> None:
         pending = [
             tool_id for tool_id in tool_ids if tool_id not in self.round_by_tool_id
         ]
@@ -126,11 +128,11 @@ class ToolBudget:
         round_number = self.tool_rounds_started
         for tool_id in pending:
             self.round_by_tool_id[tool_id] = round_number
-        if round_number > self.maximum_rounds:
+        if round_number > max(self.maximum_rounds, maximum_rounds or 0):
             self.tool_rounds_denied += 1
             self.close(ANSWER_NOW_REASON)
 
-    def register_call(self, tool_id: str) -> None:
+    def register_call(self, tool_id: str, maximum_rounds: int | None = None) -> None:
         # Pre-tool hooks run before the streamed assistant-message boundary that
         # registers the complete batch. Starts without an intervening result are
         # therefore parallel calls from the same assistant turn.
@@ -141,7 +143,7 @@ class ToolBudget:
             round_number = self.round_by_tool_id[next(iter(self.active_round_tool_ids))]
             self.round_by_tool_id[tool_id] = round_number
         else:
-            self.register_round([tool_id])
+            self.register_round([tool_id], maximum_rounds)
         self.active_round_tool_ids.add(tool_id)
 
     def complete_call(self, tool_id: str) -> None:

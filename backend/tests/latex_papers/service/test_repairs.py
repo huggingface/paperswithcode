@@ -433,3 +433,22 @@ def test_paper_cli_retries_once_when_an_edge_proxy_drops_the_reply(monkeypatch):
 
     assert paper_cli._command("begin-edit") == {"paper": {"artifact_id": "a"}}
     assert replies == []
+
+
+def test_paper_cli_does_not_retry_a_create_whose_reply_was_lost(monkeypatch):
+    import io
+    import urllib.error
+
+    from backend.chat_sandbox_worker import paper_cli
+
+    calls = []
+
+    def urlopen(request, timeout):
+        calls.append(request)
+        raise urllib.error.HTTPError("url", 502, "Bad Gateway", {}, io.BytesIO(b""))
+
+    monkeypatch.setattr(paper_cli.urllib.request, "urlopen", urlopen)
+
+    with pytest.raises(RuntimeError):
+        paper_cli._command("create", title="Survey")
+    assert len(calls) == 1
