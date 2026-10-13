@@ -33,8 +33,8 @@ restart, cleanup, rollback, or nginx reload.
 | Apply a checked-in nginx template | `pwc-nginx` |
 | Inspect registered scheduled jobs | `pwc-cron status` |
 
-Never move `current` or `previous` manually, edit a release directory, run
-`start_services.sh` or `stop_services.sh`, serve `frontend/dist`, invoke
+Never move `current` or `previous` manually, edit a release directory, serve
+`frontend/dist`, invoke
 `systemctl restart` as a substitute for a deployment, or delete release
 directories directly. These bypass candidate qualification, feature-manifest
 validation, smoke checks, and atomic rollback.

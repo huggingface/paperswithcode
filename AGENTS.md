@@ -106,8 +106,7 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   `paperswithcode-backend@staging` on `:8001`, and nginx serves each environment's
   `current/frontend-dist`.
 - Use `pwc-status`, `pwc-deploy`, and `pwc-rollback` for lifecycle operations.
-  Use `pwc-nginx` separately for nginx changes. Retired service scripts never
-  mutate live state.
+  Use `pwc-nginx` separately for nginx changes.
 - Scheduled production work must use the installed `pwc-cron` allowlist. Never
   run a production job from `.github/workflows/scripts/` or source
   `backend/keys.env` into a deployed process.

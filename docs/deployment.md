@@ -1298,9 +1298,8 @@ boundary without creating an authenticated session.
 ## Development
 
 Use `uv run --env-file backend/keys.env ...` for local backend commands and
-`npm run dev` for a localhost frontend. `start_services.sh` and
-`stop_services.sh` are non-mutating retirement notices; `check_services.sh`
-delegates to `pwc-status`.
+`npm run dev` for a localhost frontend. `check_services.sh` delegates to
+`pwc-status`.
 
 ### Production executor certificate renewal
 
