@@ -58,8 +58,6 @@ backend/outputs/
 backend/few_shot_pdfs_cache/
 backend/database/logs/
 backend/database/repos_and_pages_setup/cache
-backend/database/evaluations_setup/_mteb_top50_preview/
-backend/database/evaluations_setup/_mmteb_top50_preview/
 .github/workflows/scripts/backfill/checkpoint.json
 .github/workflows/scripts/data/trending_pin_state.json
 

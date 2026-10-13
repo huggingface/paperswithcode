@@ -90,9 +90,6 @@ sudo netstat -tlnp | grep 5432
 # Inspect active sessions
 sudo -u postgres psql -c "SELECT pid, usename, client_addr, query FROM pg_stat_activity;"
 
-# Run schema migrations or SQL files
-uv run --env-file backend/keys.env python backend/database/papers_setup/add_hf_papers.py
-
 # One-off update (example: set method image URL)
 PGPASSWORD="$PWC_DB_PASSWORD" psql -h localhost -U paperswithcode_user -d paperswithcode_hf \
   -c "UPDATE methods SET image_url = 'https://example.com/image.png' WHERE name ILIKE 'function calling';"

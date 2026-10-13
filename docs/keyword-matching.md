@@ -19,7 +19,7 @@
 | `backend/database/tasks_setup/link_papers_by_task_keywords.py` | simple | Same matcher as the weekly cron; run manually for immediate backfills. |
 | `backend/database/methods_setup/link_papers_by_keywords.py` | longest | Retag corpus for methods while honoring hierarchical names. |
 
-The consolidation replaced dozens of one-off scripts—refer to `backend/database/{tasks_setup,methods_setup}/archive/` for historical imports.
+The consolidation replaced dozens of one-off scripts; use git history for historical imports.
 
 ### Running Bulk Linking
 

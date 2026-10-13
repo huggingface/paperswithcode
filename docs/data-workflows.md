@@ -33,7 +33,7 @@ curl "http://localhost:8000/api/v1/datasets/?name=Video-MMLU"
 curl "http://localhost:8000/api/v1/datasets/?task=9"
 ```
 
-For one-off imports, use scripts in `backend/database/datasets_setup/` (remember `uv run --env-file backend/keys.env …`).
+For one-off imports, use the `add-benchmark` and `add-evals` skills under `.agents/skills/` (remember `uv run --env-file backend/keys.env …`).
 
 ## Adding Evaluation Results
 
@@ -93,7 +93,7 @@ When reading data for a parent task page:
 
 ### Bulk Imports
 
-- `backend/database/evaluations_setup/` contains scripts with the same service calls used by the API.
+- `backend/database/evaluations_setup/paper_eval_import.py` wraps the same service calls used by the API for scripted imports.
 - Always run the validation script afterwards (see below).
 
 ## Metric Naming & Direction
