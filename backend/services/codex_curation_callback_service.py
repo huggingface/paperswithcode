@@ -63,7 +63,7 @@ from backend.services.curation_thumbnail_queue_service import (
 )
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
-from backend.services.metric_value_service import parse_metric_value
+from backend.services.leaderboard_ranking_service import parse_metric_value
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
 from backend.services.paper_service import PaperService
@@ -761,6 +761,10 @@ class CodexCurationCallbackService:
                 )
             if removed:
                 row.mutation_result["evaluations_removed"] = removed
+            if row.kind == "add-evals":
+                skipped = self._skipped_configured_leaderboards(body)
+                if skipped:
+                    row.mutation_result["skipped_configured_leaderboards"] = skipped
             self.db.commit()
         except Exception as exc:
             from backend.models.database import PaperCurationSchedulerState
@@ -1057,6 +1061,7 @@ class CodexCurationCallbackService:
                     raise CodexCurationEvaluationPaperMismatchError(
                         "Evaluation removal does not match job paper"
                     )
+            self._validate_already_present_outcomes(row, body)
             return
         if body.benchmark_gaps:
             raise CodexCurationEvaluationsNotAllowedError(
@@ -1151,6 +1156,131 @@ class CodexCurationCallbackService:
                 raise ValueError("Source coverage has an invalid inspection status")
             if not isinstance(item.get("benchmark_outcomes"), list):
                 raise ValueError("Source coverage must include benchmark outcomes")
+
+    @staticmethod
+    def _benchmark_outcomes(body: ApplyMutationRequest, dispositions: set[str]):
+        for source in body.source_coverage:
+            outcomes = (
+                source.get("benchmark_outcomes") if isinstance(source, dict) else None
+            )
+            for outcome in outcomes if isinstance(outcomes, list) else []:
+                if (
+                    isinstance(outcome, dict)
+                    and outcome.get("disposition") in dispositions
+                ):
+                    yield source.get("url"), outcome
+
+    def _validate_already_present_outcomes(
+        self, row, body: ApplyMutationRequest
+    ) -> None:
+        """Allow an ``already_present`` skip only when this paper's own row is at least as good.
+
+        Higher-ranked rows from other papers never make a paper-native result
+        redundant, so the outcome must name the exact leaderboard and the
+        paper's best eligible score, and an existing row of this paper on that
+        leaderboard must be equal or better under the metric direction.
+        """
+        removed_ids = {item.evaluation_id for item in body.evaluation_removals}
+        for _url, outcome in self._benchmark_outcomes(body, {"already_present"}):
+            label = outcome.get("benchmark")
+            task_id = outcome.get("task_id")
+            dataset_id = outcome.get("dataset_id")
+            metric_name = outcome.get("metric")
+            value = parse_metric_value(outcome.get("value"))
+            if (
+                not isinstance(task_id, int)
+                or not isinstance(dataset_id, int)
+                or not isinstance(metric_name, str)
+                or not metric_name
+                or value is None
+            ):
+                raise ValueError(
+                    f"already_present outcome {label!r} must name task_id, "
+                    "dataset_id, metric, and value (this paper's best eligible "
+                    "score on that leaderboard's scale)"
+                )
+            metric = (
+                self.db.query(Metric)
+                .join(TaskDatasetMetric, TaskDatasetMetric.metric_id == Metric.id)
+                .filter(
+                    TaskDatasetMetric.task_id == task_id,
+                    TaskDatasetMetric.dataset_id == dataset_id,
+                    Metric.name == metric_name,
+                )
+                .one_or_none()
+            )
+            if metric is None:
+                raise ValueError(
+                    f"already_present outcome {label!r} names metric "
+                    f"{metric_name!r} that is not configured for task {task_id} "
+                    f"and dataset {dataset_id}"
+                )
+            existing_scores = [
+                score
+                for evaluation in self.db.query(Evaluation)
+                .filter(
+                    Evaluation.paper_id == row.paper_id,
+                    Evaluation.task_id == task_id,
+                    Evaluation.dataset_id == dataset_id,
+                )
+                .all()
+                if evaluation.id not in removed_ids
+                and (
+                    score := parse_metric_value(
+                        (evaluation.metrics or {}).get(metric_name)
+                    )
+                )
+                is not None
+            ]
+            lower_is_better = metric.direction == "lower_is_better"
+            if not any(
+                math.isclose(score, value, rel_tol=1e-9, abs_tol=1e-9)
+                or (score < value if lower_is_better else score > value)
+                for score in existing_scores
+            ):
+                raise ValueError(
+                    f"Benchmark {label!r} is not already_present: this paper has "
+                    f"no row on task {task_id} / dataset {dataset_id} / "
+                    f"{metric_name} that is equal to or better than {value:g}. "
+                    "Rows from other papers ranking higher never justify a skip; "
+                    "submit the paper's best eligible result as an evaluation."
+                )
+
+    def _skipped_configured_leaderboards(
+        self, body: ApplyMutationRequest
+    ) -> list[dict[str, Any]]:
+        """List skips that name a configured leaderboard so losses stay auditable."""
+        skipped = []
+        for url, outcome in self._benchmark_outcomes(
+            body, {"already_present", "not_applicable"}
+        ):
+            task_id = outcome.get("task_id")
+            dataset_id = outcome.get("dataset_id")
+            if not isinstance(task_id, int) or not isinstance(dataset_id, int):
+                continue
+            configured = (
+                self.db.query(TaskDataset)
+                .filter(
+                    TaskDataset.task_id == task_id,
+                    TaskDataset.dataset_id == dataset_id,
+                )
+                .one_or_none()
+            )
+            if configured is None:
+                continue
+            skipped.append(
+                {
+                    "source_url": url,
+                    "benchmark": outcome.get("benchmark"),
+                    "disposition": outcome.get("disposition"),
+                    "task_id": task_id,
+                    "dataset_id": dataset_id,
+                    "metric": outcome.get("metric"),
+                    "value": outcome.get("value"),
+                    "detail": outcome.get("detail"),
+                }
+            )
+        return skipped
 
     def _validate_scheduled_policy(
         self, row, body: ApplyMutationRequest
@@ -1511,13 +1641,8 @@ class CodexCurationCallbackService:
             )
             .all()
         )
-        values = []
-        for (metrics,) in rows:
-            raw = metrics[metric_name]
-            value = parse_metric_value(raw.rstrip("%") if isinstance(raw, str) else raw)
-            if value is not None and math.isfinite(value):
-                values.append(value)
-        return values
+        values = (parse_metric_value(metrics[metric_name]) for (metrics,) in rows)
+        return [value for value in values if value is not None]
 
     def _matching_evaluations(self, item) -> list[Evaluation]:
         return (

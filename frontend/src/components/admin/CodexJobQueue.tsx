@@ -74,6 +74,36 @@ function resultText(job: CodexPaperJob) {
   return null;
 }
 
+type SkippedLeaderboard = {
+  benchmark?: string;
+  disposition?: string;
+  task_id?: number;
+  dataset_id?: number;
+  metric?: string | null;
+  value?: number | null;
+  detail?: string;
+};
+
+function SkippedLeaderboards({ mutationResult }: { mutationResult: Record<string, unknown> | null }) {
+  const skipped = mutationResult?.skipped_configured_leaderboards;
+  if (!Array.isArray(skipped) || skipped.length === 0) return null;
+  return (
+    <div className="mt-2 rounded border border-amber-500 bg-amber-50 p-2 text-xs text-amber-900">
+      <div className="font-medium">Skipped configured leaderboards ({skipped.length})</div>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        {(skipped as SkippedLeaderboard[]).map((item, index) => (
+          <li key={index}>
+            {item.benchmark} · {item.disposition} · task {item.task_id} / dataset {item.dataset_id}
+            {item.metric ? ` / ${item.metric}` : ""}
+            {item.value != null ? ` = ${item.value}` : ""}
+            {item.detail ? ` — ${item.detail}` : ""}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps) {
   const queryClient = useQueryClient();
   const [trigger, setTrigger] = useState("");
@@ -260,6 +290,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                               {detail}
                             </p>
                           )}
+                          <SkippedLeaderboards mutationResult={job.mutation_result} />
                           <div className="mt-2 flex gap-2">
                             {(["failed", "canceled"] as string[]).includes(job.status) && (
                               <Button size="sm" variant="outline" onClick={() => retryJob.mutate(job.id)}>Retry</Button>
@@ -304,6 +335,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                             </div>
                           )}
                           {stage.proposal && <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap">{JSON.stringify(stage.proposal, null, 2)}</pre>}
+                          <SkippedLeaderboards mutationResult={stage.mutation_result} />
                           {stage.mutation_result && <details className="mt-2"><summary>Accepted callback result and before/after state</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap">{JSON.stringify(stage.mutation_result, null, 2)}</pre></details>}
                           {stage.trace_status === "complete" && (
                             <a className="mt-2 inline-flex items-center gap-1 hover:underline" href={`/api/v1/admin/codex-curation/jobs/${stage.id}/trace`} target="_blank" rel="noreferrer">

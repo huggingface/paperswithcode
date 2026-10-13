@@ -38,6 +38,7 @@ export interface XThread {
   reply_count?: number | null;
   media_url?: string | null;
   media_type?: "photo" | "video" | null;
+  video_url?: string | null;
   fetched_at: string;
 }
 

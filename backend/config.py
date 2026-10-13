@@ -231,7 +231,8 @@ class Settings(BaseSettings, ChatSettings):
     conference_deadlines_hf_token: str = Field(default="")
     conference_deadlines_job_image: str = Field(default="python:3.12-slim")
     conference_deadlines_job_flavor: str = Field(default="cpu-basic")
-    conference_deadlines_sdk_version: str = Field(default="0.2.115")
+    # 0.2.165 bundles Claude Code 2.1.294; claude-opus-5-5 needs >= 2.1.280.
+    conference_deadlines_sdk_version: str = Field(default="0.2.165")
     conference_deadlines_retrieval_model: str = Field(default="claude-sonnet-5-5")
     conference_deadlines_aggregation_model: str = Field(default="claude-opus-5-5")
     conference_deadlines_weekly_limit: int = Field(default=30, ge=1, le=80)

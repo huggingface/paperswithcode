@@ -16,6 +16,7 @@ import { Input } from "@/components/ui/input";
 import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { slugify } from "@/lib/slug";
 import { PendingEditNotice } from "./PendingEditNotice";
 
 interface Props {
@@ -25,7 +26,10 @@ interface Props {
   initialOrganizationIds: number[];
   submitMode: "direct" | "pending";
   isAuthor?: boolean;
+  canCreate?: boolean;
 }
+
+const HF_URL_PREFIX = /^(?:https?:\/\/)?(?:www\.)?huggingface\.co\//i;
 
 export const EditOrganizationsDialog = ({
   open,
@@ -34,14 +38,17 @@ export const EditOrganizationsDialog = ({
   initialOrganizationIds,
   submitMode,
   isAuthor,
+  canCreate = false,
 }: Props) => {
   const [selected, setSelected] = useState<number[]>(initialOrganizationIds);
   const [searchQuery, setSearchQuery] = useState("");
+  const [hfHandle, setHfHandle] = useState("");
   const queryClient = useQueryClient();
   useEffect(() => {
     if (open) {
       setSelected(initialOrganizationIds);
       setSearchQuery("");
+      setHfHandle("");
     }
   }, [initialOrganizationIds, open]);
   const organizations = useQuery({
@@ -65,6 +72,26 @@ export const EditOrganizationsDialog = ({
       .sort((a, b) => rank(a.name) - rank(b.name))
       .map(({ organization }) => organization);
   }, [organizations.data?.results, searchQuery]);
+  // Creating an organization syncs it from its Hugging Face namespace, links
+  // already-indexed papers, and selects it here so Save attaches this paper.
+  const create = useMutation({
+    mutationFn: async () => {
+      const result = await catalogApi.syncOrganization({
+        hf_slug: hfHandle.trim().replace(HF_URL_PREFIX, "").replace(/\/+$/, ""),
+        slug: slugify(searchQuery) || undefined,
+        skip_missing_papers: true,
+      });
+      await queryClient.invalidateQueries({ queryKey: ["organizations"] });
+      const refreshed = await organizations.refetch();
+      return refreshed.data?.results.find(({ slug }) => slug === result.organization);
+    },
+    onSuccess: (organization) => {
+      if (!organization) return;
+      setSelected((current) => [...current, Number(organization.id)]);
+      setSearchQuery(organization.name);
+      setHfHandle("");
+    },
+  });
   const save = useMutation({
     mutationFn: async () => {
       const removes = initialOrganizationIds.some((id) => !selected.includes(id));
@@ -99,7 +126,9 @@ export const EditOrganizationsDialog = ({
         <DialogHeader>
           <DialogTitle>Edit organizations</DialogTitle>
           <DialogDescription>
-            Associate existing organizations with this paper. Organization creation remains admin-only.
+            {canCreate
+              ? "Associate organizations with this paper, or create a missing one from Hugging Face."
+              : "Associate existing organizations with this paper. Organization creation remains admin-only."}
           </DialogDescription>
         </DialogHeader>
         {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
@@ -152,11 +181,36 @@ export const EditOrganizationsDialog = ({
             </p>
           )}
         </div>
+        {canCreate && !organizations.isLoading && displayedOrganizations.length === 0 && searchQuery.trim() && (
+          <form
+            className="space-y-2 rounded border p-3"
+            onSubmit={(event) => {
+              event.preventDefault();
+              create.mutate();
+            }}
+          >
+            <p className="text-sm font-medium">
+              Create "{searchQuery.trim()}" as /organizations/{slugify(searchQuery)}
+            </p>
+            <div className="flex gap-2">
+              <Input
+                aria-label="Hugging Face organization"
+                placeholder="Hugging Face handle or URL"
+                value={hfHandle}
+                onChange={(event) => setHfHandle(event.target.value)}
+              />
+              <Button type="submit" variant="outline" disabled={!hfHandle.trim() || create.isPending}>
+                {create.isPending ? "Creating..." : "Create"}
+              </Button>
+            </div>
+            {create.error && <p className="text-sm text-destructive">{create.error.message}</p>}
+          </form>
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || create.isPending}>
             {submitMode === "pending" ? "Submit test edit" : "Save changes"}
           </Button>
         </DialogFooter>

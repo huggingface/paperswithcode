@@ -38,6 +38,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
 | `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
 | `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
+| `cron-sync-physics-iq-verified.yml` | `28 * * * *` | `pwc-cron sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -237,6 +238,21 @@ warning instead of failing.
 word- and page-level grounding F1 on the Document Understanding task, and omits
 the grounding metrics for systems that return no evidence (upstream reports
 0.00 for both).
+
+`sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
+official `google-deepmind/physics-IQ-benchmark` README (the
+physics-iq-verified.anates.ai site has no JSON endpoint) and fails on any
+layout change or a row count outside 30–300. It applies an explicit import
+policy: best-of-N runs reranked by a third-party reward model (WMReward, MBR
+consensus) and Physical Registry rows (anonymous manuscript) are excluded, and
+each reviewed model keeps its best single-generation run per track (I2V, V2V).
+Exact leaderboard labels map to reviewed `(paper, model_name)` identities; the
+job never creates papers, so unreviewed labels and unresolved papers are
+logged as warnings. It creates missing mapped rows, revises a row's score and
+methodology when the leaderboard changes (a stored value that rounds to the
+published precision is unchanged), and adopts matching hand-imported rows by
+prefixing their methodology. Managed rows that drop off the leaderboard are
+reported, never deleted, and rows outside the managed set are never touched.
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

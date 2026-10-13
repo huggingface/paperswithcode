@@ -717,9 +717,13 @@ def sweep_settings():
 
 
 def test_job_command_runs_the_worker_as_a_non_root_user():
-    command = sweeps.job_command("0.2.115")
+    version = Settings().conference_deadlines_sdk_version
+    # claude-opus-5-5 (aggregation) needs a bundled Claude Code >= 2.1.280;
+    # claude-agent-sdk 0.2.165 bundles 2.1.294, 0.2.115 bundled 2.1.206.
+    assert tuple(int(x) for x in version.split(".")) >= (0, 2, 165)
+    command = sweeps.job_command(version)
     assert command[:2] == ["bash", "-c"]
-    assert "claude-agent-sdk==0.2.115" in command[2]
+    assert f"claude-agent-sdk=={version}" in command[2]
     assert "su agent -c" in command[2]
 
 
@@ -878,6 +882,40 @@ def test_a_sweep_where_every_conference_failed_is_not_applied(db):
     assert report["series"][0]["error"] == "boom"
 
 
+def test_a_sweep_whose_aggregations_all_failed_is_not_fresh(db):
+    sweep = ConferenceDeadlineSweep(
+        mode="weekly",
+        status="running",
+        hf_job_id="job-1",
+        series=["cvpr", "icml"],
+        launched_at=NOW,
+    )
+    db.add(sweep)
+    db.commit()
+    lines = [
+        agent.encode_result_line(
+            {
+                "series": "cvpr",
+                "status": "error",
+                "aggregation_failed": True,
+                "error": "API Error: 400",
+            }
+        ),
+        agent.encode_result_line(
+            {"series": "icml", "status": "no_changes", "skipped_aggregation": True}
+        ),
+        f"{agent.DONE_MARKER} 2",
+    ]
+    runner = sweeps.ConferenceDeadlineSweeps(db, sweep_settings(), FakeApi(lines=lines))
+    [report] = runner.collect(now=NOW)
+    db.refresh(sweep)
+    assert (report["status"], sweep.error) == (
+        "failed",
+        "every aggregation failed (see results)",
+    )
+    assert sweep.changes_applied == 0
+
+
 def test_running_jobs_are_left_alone_until_terminal(db):
     db.add(
         ConferenceDeadlineSweep(
@@ -916,6 +954,20 @@ def test_research_failures_are_errors_not_no_changes():
     assert "CLIConnectionError" in failed["error"]
 
 
+def test_run_agent_does_not_retry_terminal_limits(monkeypatch):
+    import asyncio
+
+    attempts = []
+
+    async def fake_once(**_kwargs):
+        attempts.append(1)
+        return {"status": "limit", "error": "error_max_budget_usd"}, 1.5, 2
+
+    monkeypatch.setattr(agent, "_run_agent_once", fake_once)
+    result, cost = asyncio.run(agent.run_agent(label="t"))
+    assert result["status"] == "limit" and len(attempts) == 1 and cost == 1.5
+
+
 def test_run_agent_retries_sdk_errors(monkeypatch):
     import asyncio
 
@@ -935,6 +987,46 @@ def test_run_agent_retries_sdk_errors(monkeypatch):
     result, cost = asyncio.run(agent.run_agent(label="t"))
     assert result["requires_update"] is False and len(attempts) == 2
     assert cost == pytest.approx(0.3)
+
+
+def test_failed_aggregation_never_falls_back_to_a_retrieval_result(monkeypatch):
+    import asyncio
+
+    proposal = {
+        "requires_update": True,
+        "reasoning": "CFP out",
+        "source_urls": [SOURCE],
+        "editions": [],
+    }
+
+    async def fake_run_agent(**kwargs):
+        if "aggregation" in kwargs["label"]:
+            return {"status": "error", "error": "API Error: 400 unsupported model"}, 0.0
+        return dict(proposal), 0.1
+
+    monkeypatch.setattr(agent, "run_agent", fake_run_agent)
+    manifest = series_manifest(cvpr_series(), NOW.date())
+    result = asyncio.run(agent.research_series(manifest, num_retrieval_agents=3))
+    assert result["status"] == "error" and result["aggregation_failed"]
+    assert result["change_set"] is None
+    assert "unsupported model" in result["error"]
+
+
+def test_worker_aborts_after_consecutive_aggregation_failures(monkeypatch, capsys):
+    import asyncio
+
+    calls = []
+
+    async def fake_research(manifest, **_kwargs):
+        calls.append(manifest["series"])
+        return agent.pipeline_result(status="error", error="x", aggregation_failed=True)
+
+    payload = {"sweep_id": 1, "series": [{"series": s} for s in ("a", "b", "c")]}
+    monkeypatch.setattr(agent, "research_series", fake_research)
+    monkeypatch.setenv("PWC_DEADLINE_MANIFEST", agent.encode_payload(payload))
+    assert asyncio.run(agent.main_async()) == 1
+    assert calls == ["a", "b"]
+    assert agent.DONE_MARKER not in capsys.readouterr().out
 
 
 def test_short_circuit_distinguishes_timeouts_from_no_changes():
@@ -980,3 +1072,99 @@ def test_change_set_schema_matches_the_validator():
         "enum"
     ]
     assert tuple(enum) == service.AGENT_DEADLINE_TYPES
+
+
+def _collect(db, results):
+    sweep = ConferenceDeadlineSweep(
+        mode="weekly",
+        status="running",
+        hf_job_id="job-1",
+        series=[r["series"] for r in results],
+        launched_at=NOW,
+    )
+    db.add(sweep)
+    db.commit()
+    lines = [agent.encode_result_line(r) for r in results]
+    lines.append(f"{agent.DONE_MARKER} {len(results)}")
+    runner = sweeps.ConferenceDeadlineSweeps(db, sweep_settings(), FakeApi(lines=lines))
+    return runner.collect(now=NOW)[0]["status"]
+
+
+def test_aggregation_timeouts_and_crashes_also_make_a_sweep_stale(db):
+    timeout = agent.pipeline_result(status="timeout", aggregation_failed=True)
+    crash = agent.pipeline_result(status="error", error="boom", aggregation_failed=True)
+    quiet = agent.pipeline_result(status="no_changes", skipped_aggregation=True)
+    results = [
+        {**timeout, "series": "cvpr"},
+        {**crash, "series": "icml"},
+        {**quiet, "series": "acl"},
+    ]
+    assert _collect(db, results) == "failed"
+
+
+def test_one_verified_aggregation_keeps_a_sweep_fresh(db):
+    failed = agent.pipeline_result(status="error", error="x", aggregation_failed=True)
+    verified = agent.pipeline_result(status="no_changes")
+    results = [{**failed, "series": "cvpr"}, {**verified, "series": "icml"}]
+    assert agent.aggregation_succeeded(verified)
+    assert _collect(db, results) == "applied"
+
+
+def test_short_circuits_do_not_reset_the_abort_streak(monkeypatch, capsys):
+    import asyncio
+
+    outcomes = iter(
+        [
+            agent.pipeline_result(status="error", error="x", aggregation_failed=True),
+            agent.pipeline_result(status="no_changes", skipped_aggregation=True),
+            agent.pipeline_result(status="timeout", aggregation_failed=True),
+            agent.pipeline_result(status="no_changes"),
+        ]
+    )
+
+    async def fake_research(_manifest, **_kwargs):
+        return next(outcomes)
+
+    payload = {"sweep_id": 1, "series": [{"series": s} for s in "abcd"]}
+    monkeypatch.setattr(agent, "research_series", fake_research)
+    monkeypatch.setenv("PWC_DEADLINE_MANIFEST", agent.encode_payload(payload))
+    assert asyncio.run(agent.main_async()) == 1
+    assert "d: " not in capsys.readouterr().out
+
+
+def test_limit_results_are_not_runtime_errors():
+    import asyncio
+
+    from claude_agent_sdk import ResultMessage
+
+    def run(**fields):
+        message = ResultMessage(
+            duration_ms=1, duration_api_ms=1, num_turns=1, session_id="s", **fields
+        )
+
+        async def stream():
+            yield message
+
+        state = {
+            "messages": 0,
+            "result": {},
+            "cost": 0.0,
+            "session_id": None,
+            "hit_max_turns": False,
+        }
+        asyncio.run(agent._consume("t", stream(), state))
+        return state
+
+    limited = run(subtype="error_max_turns", is_error=True)
+    assert limited["result"] == {} and limited["hit_max_turns"]
+    for subtype in ("error_max_budget_usd", "error_max_structured_output_retries"):
+        capped = run(subtype=subtype, is_error=True)
+        assert capped["result"] == {"status": "limit", "error": subtype}
+        assert not capped["hit_max_turns"]
+    api_error = run(
+        subtype="success", is_error=True, result="API Error: 400 unsupported model"
+    )
+    assert api_error["result"] == {
+        "status": "error",
+        "error": "API Error: 400 unsupported model",
+    }

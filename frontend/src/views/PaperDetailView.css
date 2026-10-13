@@ -266,7 +266,8 @@
   background: var(--bg-subtle);
   aspect-ratio: 16 / 9;
 }
-.x-thread-media img {
+.x-thread-media img,
+.x-thread-media video {
   width: 100%;
   height: 100%;
   object-fit: cover;

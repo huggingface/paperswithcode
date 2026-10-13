@@ -890,6 +890,9 @@ class XThread(BaseModel):
     media_type: Optional[Literal["photo", "video"]] = Field(
         None, description="Kind of the first attached media"
     )
+    video_url: Optional[str] = Field(
+        None, description="MP4 of the first video or GIF, for inline playback"
+    )
     fetched_at: datetime = Field(..., description="When the preview was captured")
 
 
