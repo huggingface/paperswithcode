@@ -479,3 +479,50 @@ def test_empty_week_and_no_carryover(db, now, monkeypatch):
         delivery.prepare_digest(db, "alice", end + timedelta(days=7)).status == "empty"
     )
     assert delivery.prepare_digest(db, "alice", end + timedelta(days=8)) is None
+
+
+def test_hourly_job_closes_pending_outboxes_after_window_even_for_opted_out_users(
+    db, now, monkeypatch
+):
+    from contextlib import nullcontext
+    from backend.scripts import send_research_digests as job
+
+    _, end = delivery.weekly_window(now)
+    after_window = end + timedelta(hours=24)
+    db.add_all(
+        [
+            ResearchDigest(
+                hf_subject="attempted",
+                window_end=end,
+                status="pending",
+                payload={},
+                first_attempt_at=end,
+            ),
+            ResearchDigest(
+                hf_subject="unattempted", window_end=end, status="pending", payload={}
+            ),
+            ResearchDigest(
+                hf_subject="sent",
+                window_end=end,
+                status="sent",
+                payload={},
+                first_attempt_at=end,
+            ),
+        ]
+    )
+    db.commit()
+    monkeypatch.setattr(job, "delivery_ready", lambda: True)
+    monkeypatch.setattr(job, "datetime", SimpleNamespace(now=lambda tz: after_window))
+    monkeypatch.setattr(
+        job, "db_manager", SimpleNamespace(session_local=lambda: nullcontext(db))
+    )
+    monkeypatch.setattr(
+        job,
+        "deliver_digest",
+        lambda *args: pytest.fail("Outside-window job must not send"),
+    )
+    job.main()
+    assert db.get(ResearchDigest, ("attempted", end)).status == "uncertain"
+    assert db.get(ResearchDigest, ("unattempted", end)).status == "expired"
+    assert db.get(ResearchDigest, ("sent", end)).status == "sent"
+    assert delivery.expire_pending_digests(db, after_window) == 0

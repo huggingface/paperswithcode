@@ -10,6 +10,7 @@ from backend.services.research_delivery_service import (
     weekly_window,
     prepare_digest,
     deliver_digest,
+    expire_pending_digests,
 )
 
 
@@ -18,6 +19,10 @@ def main():
         print("Research digest delivery disabled; no messages prepared or sent.")
         return
     now = datetime.now(timezone.utc)
+    with db_manager.session_local() as db:
+        expired = expire_pending_digests(db, now)
+    if expired:
+        print(f"Closed {expired} research digests outside their retry window.")
     _, end = weekly_window(now)
     if now - end >= timedelta(hours=23):
         print("Outside weekly delivery/retry window; no work.")

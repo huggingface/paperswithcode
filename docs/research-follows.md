@@ -37,6 +37,8 @@ Every attempt rechecks opt-in, destination, and address suppression. An
 ambiguous request retries with the same Resend key and payload for less than
 23 hours, within the provider's 24-hour idempotency retention. After that it
 is marked `uncertain`; reconcile it with Resend before any manual resend.
+The hourly job closes old pending outboxes before checking its delivery window,
+including accounts that have since opted out. Unattempted old digests expire.
 Unsubscribe GET shows confirmation, POST disables email without removing
 follows, and List-Unsubscribe supports one-click POST. Signed webhooks verify
 the raw payload and reject timestamps outside five minutes. Bounce/complaint

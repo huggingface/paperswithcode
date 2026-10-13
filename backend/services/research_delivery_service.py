@@ -9,7 +9,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import case, select, update
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -119,6 +119,25 @@ def prepare_digest(db: Session, subject: str, now: datetime) -> ResearchDigest |
     )
     db.commit()
     return db.get(ResearchDigest, (subject, end))
+
+
+def expire_pending_digests(db: Session, now: datetime) -> int:
+    """Close old outboxes even when the hourly run is outside its send window."""
+    result = db.execute(
+        update(ResearchDigest)
+        .where(
+            ResearchDigest.status == "pending",
+            ResearchDigest.window_end <= now - timedelta(hours=23),
+        )
+        .values(
+            status=case(
+                (ResearchDigest.first_attempt_at.is_not(None), "uncertain"),
+                else_="expired",
+            )
+        )
+    )
+    db.commit()
+    return result.rowcount
 
 
 def deliver_digest(db: Session, subject: str, end: datetime, now: datetime) -> str:
