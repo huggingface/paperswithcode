@@ -471,10 +471,14 @@ def discover_x_threads(
                         "reason": verdict.reason,
                     }
             except (httpx.HTTPError, KeyError, ValueError) as error:
-                # Unreviewed matches are never linked; the next scan retries.
+                # Unreviewed matches are never linked. Like a failed search,
+                # the scan is not recorded, so the next run retries the paper.
                 result.error = f"review failed: {error}"
-                for match in result.matches:
-                    match.pop("review", None)
+                result.matches = []
+                status = getattr(getattr(error, "response", None), "status_code", None)
+                if status in {401, 403, 429}:
+                    break  # Credentials or quota: every later review would fail too.
+                continue
         approved = [
             match
             for match in result.matches
@@ -504,56 +508,70 @@ def discover_x_threads(
 def review_linked_threads(
     db: Session, review: Review, *, apply: bool, linked_since: datetime
 ) -> list[dict[str, Any]]:
-    """Re-review threads the job linked since a date; unlink rejected ones.
+    """Re-review posts the job linked since a date; unlink rejected ones.
 
-    Only papers the job itself linked (scan row with `linked_at`) are touched,
-    so hand-curated threads stay as they are.
+    Only posts the job itself matched (recorded in the paper's scan row) are
+    reviewed. Every other thread on the paper, including hand-curated ones,
+    is kept when a rejected post is unlinked.
     """
     curation = PaperCurationService(db)
-    rows = db.scalars(
-        select(PaperXThread)
-        .join(PaperXThreadScan, PaperXThreadScan.paper_id == PaperXThread.paper_id)
-        .where(
-            PaperXThreadScan.linked_at.is_not(None),
-            PaperXThread.created_at >= linked_since,
-        )
-        .order_by(PaperXThread.paper_id, PaperXThread.position)
-    ).all()
-    by_paper: dict[int, list[PaperXThread]] = {}
-    for row in rows:
-        by_paper.setdefault(row.paper_id, []).append(row)
     rejected: list[dict[str, Any]] = []
-    for paper_id, threads in by_paper.items():
-        paper = db.get(Paper, paper_id)
-        keep: list[str] = []
+    scans = db.scalars(
+        select(PaperXThreadScan)
+        .where(PaperXThreadScan.linked_at.is_not(None))
+        .order_by(PaperXThreadScan.paper_id)
+    ).all()
+    for scan in scans:
+        matched = {
+            candidate["url"].rstrip("/").rsplit("/", 1)[-1]: candidate
+            for candidate in scan.candidates
+        }
+        threads = db.scalars(
+            select(PaperXThread)
+            .where(PaperXThread.paper_id == scan.paper_id)
+            .order_by(PaperXThread.position)
+        ).all()
+        paper = db.get(Paper, scan.paper_id)
+        rejected_urls: set[str] = set()
         for thread in threads:
-            match = {
-                "author": thread.author_name,
-                "handle": thread.author_handle,
-                "text": thread.text,
-                "urls": [],
-            }
-            verdict = review(paper, match)
-            if verdict.approve:
-                keep.append(thread.url)
+            candidate = matched.get(thread.tweet_id)
+            if candidate is None or thread.created_at < linked_since:
                 continue
+            verdict = review(
+                paper,
+                {
+                    "author": thread.author_name,
+                    "handle": thread.author_handle,
+                    "text": candidate.get("text") or thread.text,
+                    "urls": candidate.get("urls", []),
+                },
+            )
+            if verdict.approve:
+                continue
+            rejected_urls.add(thread.url)
             rejected.append(
                 {
-                    "paper_id": paper_id,
+                    "paper_id": scan.paper_id,
                     "title": paper.title,
                     "url": thread.url,
                     "reason": verdict.reason,
                 }
             )
-        if apply and len(keep) < len(threads):
+        if apply and rejected_urls:
             curation.update(
-                paper_id=paper_id,
+                paper_id=scan.paper_id,
                 section="x_threads",
-                payload={"x_threads": keep},
+                payload={
+                    "x_threads": [
+                        thread.url
+                        for thread in threads
+                        if thread.url not in rejected_urls
+                    ]
+                },
                 actor=ACTOR,
                 idempotency_key=str(uuid.uuid4()),
                 expected_version=None,
-                request_id=f"x-thread-review:{paper_id}",
+                request_id=f"x-thread-review:{scan.paper_id}",
             )
             db.commit()
     return rejected
