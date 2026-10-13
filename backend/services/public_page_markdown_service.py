@@ -108,6 +108,24 @@ def render_discovery_markdown(page: DiscoveryPage) -> str:
             f"- {_markdown_text(markdown_plain_text(item))}"
             for item in page.trends_markdown
         )
+    if page.top_models:
+        lines.extend(
+            [
+                "",
+                f"## Best {_markdown_text(page.heading)} models",
+                "",
+                "| Benchmark | Best model | Best open model |",
+                "| --- | --- | --- |",
+            ]
+        )
+        for top in page.top_models:
+            cells = (
+                _link(top.benchmark.label, top.benchmark.href)
+                or _markdown_text(top.benchmark.label),
+                _markdown_text(top.model),
+                _markdown_text(top.open_model) if top.open_model else "—",
+            )
+            lines.append(f"| {' | '.join(cells)} |")
     board = page.leaderboard
     if board is not None:
         metric = _markdown_text(board.metric)

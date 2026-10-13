@@ -38,6 +38,7 @@ from backend.services.leaderboard_ranking_service import (
     rank_leaderboard,
 )
 from backend.services.conference_service import ConferenceService
+from backend.services.dataset_service import DatasetService
 from backend.services.sitemap_service import eligible_paper_filter
 from backend.utils.urls import get_paper_route_identifier
 from backend.utils.task_slugs import canonical_task_slug, task_slug_candidates
@@ -56,6 +57,8 @@ CONFERENCE_LISTINGS = {
 }
 LEADERBOARD_ROW_LIMIT = 100
 TASK_BENCHMARK_LIMIT = 50
+# Most-evaluated benchmarks summarized in a task page's "Best models" table.
+TASK_TOP_MODEL_BENCHMARKS = 5
 
 # Curated landing page for GPT-6 Astra robotics work (/astra-for-robotics).
 ASTRA_ROBOTICS_PATH = "/astra-for-robotics"
@@ -104,6 +107,15 @@ class DiscoveryLeaderboard:
 
 
 @dataclass(frozen=True)
+class DiscoveryTopModel:
+    """The leading model, and leading open model, on one task benchmark."""
+
+    benchmark: DiscoveryLink
+    model: str
+    open_model: Optional[str]
+
+
+@dataclass(frozen=True)
 class DiscoveryPage:
     kind: str
     canonical_path: str
@@ -120,6 +132,8 @@ class DiscoveryPage:
     trends_markdown: tuple[str, ...] = ()
     benchmark_links: tuple[DiscoveryLink, ...] = ()
     leaderboard: Optional[DiscoveryLeaderboard] = None
+    top_models: tuple[DiscoveryTopModel, ...] = ()
+    top_models_as_of: Optional[date] = None
 
     @property
     def canonical_url(self) -> str:
@@ -224,7 +238,7 @@ class DiscoveryPageService:
                 return entity
         return None
 
-    def task(self, slug: str) -> Optional[DiscoveryPage]:
+    def task(self, slug: str, today: date | None = None) -> Optional[DiscoveryPage]:
         canonical_slug = canonical_task_slug(slug)
         entity = self._task_by_slug(slug)
         if entity is None:
@@ -243,7 +257,7 @@ class DiscoveryPageService:
         # pages that carry this task's results.
         evaluation_count = func.count(Evaluation.id)
         benchmarks = (
-            self.db.query(Dataset.slug, Dataset.name, evaluation_count)
+            self.db.query(Dataset.id, Dataset.slug, Dataset.name, evaluation_count)
             .join(TaskDataset, TaskDataset.dataset_id == Dataset.id)
             .outerjoin(
                 Evaluation,
@@ -263,7 +277,7 @@ class DiscoveryPageService:
         description = entity.description or (
             f"Research papers, benchmarks, and methods for {entity.name}."
         )
-        return replace(
+        page = replace(
             self._entity_page(
                 "Task",
                 f"/tasks/{canonical_slug}",
@@ -276,8 +290,61 @@ class DiscoveryPageService:
                 str(item) for item in (entity.research_trends or [])[:3]
             ),
             benchmark_links=tuple(
-                DiscoveryLink(f"/benchmark/{s}", n) for s, n, _ in benchmarks
+                DiscoveryLink(f"/benchmark/{s}", n) for _, s, n, _ in benchmarks
             ),
+        )
+        top_models = self._task_top_models(entity.id, benchmarks)
+        if not top_models:
+            return page
+        as_of = today or date.today()
+        month = as_of.strftime("%B %Y")
+        leader = top_models[0]
+        open_note = (
+            f"; the best open model there is {leader.open_model}"
+            if leader.open_model and leader.open_model != leader.model
+            else ""
+        )
+        summary = (
+            f"{leader.model} leads {leader.benchmark.label} for {entity.name}"
+            f"{open_note}. Compare the best {entity.name} models across "
+            f"{len(top_models)} benchmarks with papers and code."
+        )
+        return replace(
+            page,
+            title=(
+                f"Best {entity.name} Models ({month}): leaderboards and papers "
+                "| Papers with Code"
+            ),
+            description=meta_description(summary),
+            top_models=top_models,
+            top_models_as_of=as_of,
+        )
+
+    def _task_top_models(
+        self, task_id: int, benchmarks
+    ) -> tuple[DiscoveryTopModel, ...]:
+        """Summarize the leading models on a task's most-evaluated benchmarks.
+
+        Uses the same best-result selection as the task page's benchmark list,
+        so the crawlable summary agrees with what the SPA shows.
+        """
+        evaluated = [row for row in benchmarks if row[3]][:TASK_TOP_MODEL_BENCHMARKS]
+        if not evaluated:
+            return ()
+        dataset_ids = [int(row[0]) for row in evaluated]
+        datasets = DatasetService(self.db)
+        best = datasets._best_results_for_datasets(dataset_ids, [task_id])
+        best_open = datasets._best_results_for_datasets(
+            dataset_ids, [task_id], is_open=True
+        )
+        return tuple(
+            DiscoveryTopModel(
+                benchmark=DiscoveryLink(f"/benchmark/{slug}", name),
+                model=best[dataset_id]["model_name"],
+                open_model=best_open.get(dataset_id, {}).get("model_name"),
+            )
+            for dataset_id, slug, name, _ in evaluated
+            if dataset_id in best
         )
 
     def astra_for_robotics(self) -> DiscoveryPage:

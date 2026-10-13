@@ -64,6 +64,32 @@ def _leaderboard_section(page: DiscoveryPage, board: DiscoveryLeaderboard) -> st
     )
 
 
+def _top_models_section(page: DiscoveryPage) -> str:
+    rows = "".join(
+        "<tr>"
+        f"<td>{_link(top.benchmark.href, top.benchmark.label)}</td>"
+        f"<td>{escape(top.model)}</td>"
+        f"<td>{escape(top.open_model) if top.open_model else '—'}</td>"
+        "</tr>"
+        for top in page.top_models
+    )
+    as_of = (
+        f" as of {page.top_models_as_of.strftime('%B %Y')}"
+        if page.top_models_as_of
+        else ""
+    )
+    return (
+        '<section aria-labelledby="top-models-heading">'
+        f'<h2 id="top-models-heading">Best {escape(page.heading)} models</h2>'
+        f"<p>The top-ranked model on each of the most-evaluated "
+        f"{escape(page.heading)} benchmarks{as_of}.</p>"
+        "<table><thead><tr>"
+        '<th scope="col">Benchmark</th><th scope="col">Best model</th>'
+        '<th scope="col">Best open model</th>'
+        f"</tr></thead><tbody>{rows}</tbody></table></section>"
+    )
+
+
 def render_discovery_document(page: DiscoveryPage) -> str:
     breadcrumbs = "".join(_link(link.href, link.label) for link in page.breadcrumbs)
     entity_links = "".join(
@@ -91,6 +117,7 @@ def render_discovery_document(page: DiscoveryPage) -> str:
         + f"<header><p>{escape(page.kind)}</p><h1>{escape(page.heading)}</h1>"
         + markdown_html(page.body_markdown or page.description)
         + "</header>"
+        + (_top_models_section(page) if page.top_models else "")
         + (
             '<section aria-labelledby="trends-heading">'
             '<h2 id="trends-heading">Current research directions</h2>'

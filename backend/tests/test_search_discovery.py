@@ -12,6 +12,7 @@ from backend.main import create_app
 from backend.routers import discovery_pages
 from backend.routers.search_discovery import robots_policy
 from backend.services.discovery_html_service import render_discovery_document
+from backend.services.public_page_markdown_service import render_discovery_markdown
 from backend.services.discovery_page_service import (
     DiscoveryLink,
     DiscoveryPage,
@@ -206,7 +207,11 @@ def test_benchmark_page_ranks_leaderboard_like_the_spa():
     assert 'href="/benchmark"' not in document
 
 
-def test_task_page_renders_markdown_trends_and_benchmark_links():
+def test_task_page_renders_markdown_trends_and_benchmark_links(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.dataset_service.DatasetService._best_results_for_datasets",
+        lambda *args, **kwargs: {},
+    )
     db = MagicMock()
     db.query.side_effect = [
         _query(
@@ -222,7 +227,7 @@ def test_task_page_renders_markdown_trends_and_benchmark_links():
             )
         ),
         _query(rows=[]),  # related tasks
-        _query(rows=[("coco", "COCO", 120), ("lvis", "LVIS", 0)]),
+        _query(rows=[(1, "coco", "COCO", 120), (2, "lvis", "LVIS", 0)]),
         _query(rows=[]),  # tagged papers
     ]
 
@@ -243,6 +248,89 @@ def test_task_page_renders_markdown_trends_and_benchmark_links():
     assert '<a href="/paper/2005.12872">DETR</a>' in document
     assert '<a href="/benchmark/coco">COCO</a>' in document
     assert "**" not in document and "](" not in document
+
+
+def _top_model_task_db(benchmarks):
+    db = MagicMock()
+    db.query.side_effect = [
+        _query(
+            one=SimpleNamespace(
+                id=2,
+                parent_id=None,
+                name="OCR",
+                description="Optical character recognition reads text in images.",
+                research_trends=[],
+            )
+        ),
+        _query(rows=[]),  # related tasks
+        _query(rows=benchmarks),
+        _query(rows=[]),  # tagged papers
+    ]
+    return db
+
+
+def test_task_page_summarizes_best_models(monkeypatch):
+    calls = []
+
+    def best_results(self, dataset_ids, task_ids, is_open=None):
+        calls.append((dataset_ids, task_ids, is_open))
+        if is_open:
+            return {1: {"model_name": "olmOCR <2>"}}
+        return {1: {"model_name": "Gemini 3 Pro"}, 3: {"model_name": "GPT-6"}}
+
+    monkeypatch.setattr(
+        "backend.services.dataset_service.DatasetService._best_results_for_datasets",
+        best_results,
+    )
+    db = _top_model_task_db(
+        [
+            (1, "olmocr-bench", "olmOCR-Bench", 40),
+            (3, "omnidocbench", "OmniDocBench", 12),
+            (4, "unscored", "Unscored", 0),
+        ]
+    )
+
+    page = DiscoveryPageService(db).task("ocr", today=date(2026, 10, 13))
+
+    assert calls == [([1, 3], [2], None), ([1, 3], [2], True)]
+    assert page.title == (
+        "Best OCR Models (October 2026): leaderboards and papers | Papers with Code"
+    )
+    assert page.description.startswith(
+        "Gemini 3 Pro leads olmOCR-Bench for OCR; the best open model there is olmOCR <2>."
+    )
+    assert len(page.description) <= 155
+    assert [(top.model, top.open_model) for top in page.top_models] == [
+        ("Gemini 3 Pro", "olmOCR <2>"),
+        ("GPT-6", None),
+    ]
+
+    document = render_discovery_document(page)
+    assert '<h2 id="top-models-heading">Best OCR models</h2>' in document
+    assert "as of October 2026" in document
+    assert '<a href="/benchmark/olmocr-bench">olmOCR-Bench</a>' in document
+    assert "olmOCR &lt;2&gt;" in document
+
+    markdown = render_discovery_markdown(page)
+    assert "## Best OCR models" in markdown
+    assert (
+        "| [olmOCR\\-Bench](https://paperswithcode.co/benchmark/olmocr-bench)"
+        in markdown
+    )
+
+
+def test_task_page_without_evaluations_keeps_generic_title(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.dataset_service.DatasetService._best_results_for_datasets",
+        lambda *args, **kwargs: pytest.fail("no evaluated benchmarks to summarize"),
+    )
+    db = _top_model_task_db([(4, "unscored", "Unscored", 0)])
+
+    page = DiscoveryPageService(db).task("ocr")
+
+    assert page.title == "OCR — papers and benchmarks | Papers with Code"
+    assert page.top_models == ()
+    assert "top-models-heading" not in render_discovery_document(page)
 
 
 def test_discovery_shell_sets_per_page_social_tags(client, monkeypatch):
