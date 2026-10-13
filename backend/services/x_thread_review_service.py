@@ -28,6 +28,8 @@ Reject when:
 - the post only congratulates, thanks, or reacts to someone else without presenting the paper;
 - nothing in the post (name, title, topic, links) ties it to this paper.
 
+Every post was found by an X search for this paper's arXiv ID, project page, repository, method name, or title, and was written by one of its authors or its organization. A post whose visible text is only a link (an X Article or a bare link) is therefore most likely about this paper: approve it unless something in it points to a different paper.
+
 Judge from the paper's title, method name, abstract, and the post's text and links. Answer in JSON."""
 
 SCHEMA = {
@@ -74,7 +76,7 @@ def review_post(
             "store": False,
             "max_output_tokens": 4000,
             "reasoning": {"effort": "medium"},
-            "prompt_cache_key": "pwc-x-thread-review-v2",
+            "prompt_cache_key": "pwc-x-thread-review-v3",
             "text": {
                 "format": {
                     "type": "json_schema",
