@@ -32,5 +32,7 @@ intermediate failures are not paper versions.
 Use `pwc` first for catalog evidence, `s2` for citation identities beyond the
 catalog, and restricted `hf` only for relevant public Hub evidence. Preserve
 unknown facts as TODOs. Never fabricate bibliography entries, results, or
-claim-level support. The project uses pdfLaTeX, BibTeX, and natbib; do not add
-packages, shell escape, remote files, or unsupported assets.
+claim-level support. The project uses pdfLaTeX, BibTeX, and natbib, and its
+preamble already loads amsmath, amssymb, graphicx, booktabs, url, and hyperref.
+Keep that preamble; do not add packages, shell escape, remote files, or
+unsupported assets.

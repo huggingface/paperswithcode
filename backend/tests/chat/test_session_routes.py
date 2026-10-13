@@ -334,6 +334,9 @@ def test_delete_session_reports_success_only_after_durable_and_workspace_verific
             pass
 
         def delete_session(self, *_args):
+            # Paper deletion makes blocking provider calls: never on the loop.
+            with pytest.raises(RuntimeError):
+                asyncio.get_running_loop()
             events.append("delete")
             return receipt
 

@@ -82,10 +82,18 @@ class LatexPaperRepairOutcome:
 
 def _neutral_scaffold(title: str) -> dict[str, bytes]:
     safe_title = " ".join(title.split()) or "Untitled Research Draft"
+    # Authors may not add packages, so preload the standard ones a research
+    # paper needs for math, figures, tables and links.
     return {
         "main.tex": f"""\\documentclass{{article}}
 \\usepackage[utf8]{{inputenc}}
+\\usepackage{{amsmath}}
+\\usepackage{{amssymb}}
+\\usepackage{{graphicx}}
+\\usepackage{{booktabs}}
+\\usepackage{{url}}
 \\usepackage{{natbib}}
+\\usepackage{{hyperref}}
 \\title{{{safe_title}}}
 \\author{{TODO: Author name}}
 \\date{{}}
