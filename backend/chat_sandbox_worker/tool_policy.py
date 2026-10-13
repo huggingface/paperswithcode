@@ -168,6 +168,7 @@ class ToolBudget:
         s2_guide: Path = Path("/opt/pwc/S2_CLI_SKILL.md"),
         posterly_publish_guide: Path = Path("/opt/pwc/POSTERLY_PUBLISH.md"),
         posterly_root: Path = Path("/opt/posterly"),
+        maximum_calls: int | None = None,
     ) -> Decision:
         if tool_id not in self.round_by_tool_id:
             # Compatibility fallback for callers that do not expose an SDK
@@ -179,7 +180,7 @@ class ToolBudget:
         if name not in ALLOWED_TOOLS:
             self.denied_calls += 1
             return Decision(False, _UNAVAILABLE_TOOL_REASON)
-        if self.calls >= self.maximum_calls:
+        if self.calls >= max(self.maximum_calls, maximum_calls or 0):
             self.close()
             self.denied_calls += 1
             return Decision(False, ANSWER_NOW_REASON)
