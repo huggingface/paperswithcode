@@ -11,8 +11,11 @@ The feed shows papers with known publication dates from today through 30 days
 ago (UTC), includes task descendants, and combines associations across arXiv
 versions. It displays the latest version but excludes a paper if any version
 was published before the cutoff. Direct matches weigh two; inherited task
-matches weigh one. Distinct matching interests add strength. Each interest
-ranks by strength, publication date, popularity, then canonical ID; round-robin
+matches weigh one. Distinct matching interests add strength. The feed ranks
+matches with the home feed's trending order
+(`PaperService.apply_scoped_trending_order`), so it follows
+`PWC_TRENDING_RANKING_MODE`. Weekly digests instead rank each interest by
+strength, publication date, popularity, then canonical ID; round-robin
 selection balances coverage and counts each paper once. Up to 100 interests
 may be followed. Feed pages contain 40 entries.
 
