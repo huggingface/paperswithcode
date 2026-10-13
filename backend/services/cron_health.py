@@ -736,7 +736,7 @@ def _read_systemd_pair(timer_unit: str, service_unit: str) -> Optional[Dict[str,
     timer = _systemd_show(
         timer_unit,
         "LoadState,ActiveState,SubState,UnitFileState,LastTriggerUSec,"
-        "NextElapseUSecRealtime",
+        "NextElapseUSecRealtime,ActiveEnterTimestamp",
     )
     service = _systemd_show(
         service_unit,
@@ -762,6 +762,7 @@ def _read_systemd_pair(timer_unit: str, service_unit: str) -> Optional[Dict[str,
         "timer_state": timer.get("ActiveState"),
         "timer_substate": timer.get("SubState"),
         "last_trigger_at": timer.get("LastTriggerUSec") or None,
+        "timer_activated_at": timer.get("ActiveEnterTimestamp") or None,
         "next_trigger_at": timer.get("NextElapseUSecRealtime") or None,
         "service_result": service.get("Result") or None,
         "exec_main_status": int(service.get("ExecMainStatus") or 0),
@@ -1098,6 +1099,21 @@ def _execution_health(
         if previous_expected and (
             completed is None or completed < previous_expected - grace
         ):
+            activated = _parse_log_timestamp(evidence.get("timer_activated_at"))
+            last_trigger = _parse_log_timestamp(evidence.get("last_trigger_at"))
+            if (
+                activated is not None
+                and previous_expected < activated
+                and (last_trigger is None or last_trigger < activated)
+            ):
+                return {
+                    **base,
+                    "status": "healthy",
+                    "reason": (
+                        "timer enabled after the last scheduled slot; "
+                        "first systemd invocation pending"
+                    ),
+                }
             late = now > previous_expected + grace
             return {
                 **base,

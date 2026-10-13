@@ -349,6 +349,78 @@ def test_post_reboot_overdue_systemd_slot_is_broken():
     )
 
 
+def _systemd_execution(job_id, **evidence):
+    job = get_cron_job(job_id)
+    assert job is not None
+    return evaluate_job_health(
+        job,
+        {"status": "unknown", "is_running": False, "work_metrics": {}},
+        lock_state={"exists": False, "held": False, "stale": False},
+        systemd_status={
+            "available": True,
+            "enabled": True,
+            "timer_active": True,
+            "service_result": "success",
+            "exec_main_status": 0,
+            "last_trigger_at": None,
+            "last_started_at": None,
+            "last_completed_at": None,
+            "boot_started_at": "2026-08-01T00:00:00Z",
+            **evidence,
+        },
+        process_running=False,
+        now=NOW,
+    )["execution_health"]
+
+
+def test_timer_enabled_after_last_slot_awaits_first_invocation():
+    # The weekly slot was Sun 2026-08-23 02:35; the timer went live afterwards.
+    execution = _systemd_execution(
+        "sweep_conference_deadlines",
+        timer_activated_at="Fri 2026-08-28 08:12:57 UTC",
+    )
+
+    assert execution["status"] == "healthy"
+    assert execution["reason"] == (
+        "timer enabled after the last scheduled slot; first systemd invocation pending"
+    )
+
+
+def test_timer_activated_before_last_slot_is_still_overdue():
+    execution = _systemd_execution(
+        "sweep_conference_deadlines",
+        timer_activated_at="2026-08-20T08:00:00Z",
+    )
+
+    assert execution["status"] == "broken"
+    assert execution["reason"] == "expected systemd invocation is overdue"
+
+
+def test_timer_triggered_since_activation_without_exit_is_still_overdue():
+    execution = _systemd_execution(
+        "sweep_conference_deadlines",
+        timer_activated_at="2026-08-28T08:12:57Z",
+        last_trigger_at="2026-08-28T09:00:00Z",
+    )
+
+    assert execution["status"] == "broken"
+    assert execution["reason"] == "expected systemd invocation is overdue"
+
+
+def test_pre_reboot_slot_stays_unknown_when_reboot_reactivated_timer():
+    execution = _systemd_execution(
+        "mirror_thumbnails_to_disk",
+        last_trigger_at="2026-08-28T05:00:00Z",
+        boot_started_at="2026-08-28T08:00:00Z",
+        timer_activated_at="2026-08-28T08:00:05Z",
+    )
+
+    assert execution["status"] == "unknown"
+    assert execution["reason"] == (
+        "pre-reboot systemd slot lacks persistent terminal evidence"
+    )
+
+
 def test_systemd_invocation_queued_behind_a_dependency_is_running():
     job = get_cron_job("calculate_trending_scores")
     assert job is not None

@@ -121,7 +121,7 @@ def test_systemd_adapter_reads_only_registry_units():
             (),
             {
                 "returncode": 0,
-                "stdout": "UnitFileState=enabled\nActiveState=active\nSubState=waiting\nLastTriggerUSec=Fri 2026-08-14 12:19:00 UTC\nNextElapseUSecRealtime=\n",
+                "stdout": "UnitFileState=enabled\nActiveState=active\nSubState=waiting\nLastTriggerUSec=Fri 2026-08-14 12:19:00 UTC\nNextElapseUSecRealtime=\nActiveEnterTimestamp=Fri 2026-08-14 08:00:10 UTC\n",
             },
         )(),
         type(
@@ -154,6 +154,7 @@ def test_systemd_adapter_reads_only_registry_units():
     assert status["service_result"] == "success"
     assert status["service_start_queued"] is True
     assert status["boot_started_at"] == "2026-08-14T08:00:00Z"
+    assert status["timer_activated_at"] == "Fri 2026-08-14 08:00:10 UTC"
     assert [call.args[0][2] for call in run.call_args_list] == [
         job.systemd_timer,
         job.systemd_service,
