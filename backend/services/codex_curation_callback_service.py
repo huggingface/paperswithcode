@@ -63,6 +63,7 @@ from backend.services.curation_thumbnail_queue_service import (
 )
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
+from backend.services.metric_value_service import parse_metric_value
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
 from backend.services.paper_service import PaperService
@@ -71,8 +72,6 @@ from backend.services.trending_model_resolution_service import (
     model_family_key,
 )
 from backend.utils.source_urls import source_url_identity
-
-_NUMERIC_SCORE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE]-?\d+)?")
 
 
 class CodexCurationPaperNotFoundError(LookupError):
@@ -1514,9 +1513,10 @@ class CodexCurationCallbackService:
         )
         values = []
         for (metrics,) in rows:
-            text = str(metrics[metric_name]).rstrip("%")
-            if _NUMERIC_SCORE.fullmatch(text):
-                values.append(float(text))
+            raw = metrics[metric_name]
+            value = parse_metric_value(raw.rstrip("%") if isinstance(raw, str) else raw)
+            if value is not None and math.isfinite(value):
+                values.append(value)
         return values
 
     def _matching_evaluations(self, item) -> list[Evaluation]:

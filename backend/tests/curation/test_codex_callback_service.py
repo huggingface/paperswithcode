@@ -915,6 +915,17 @@ def test_scheduled_evaluation_accepts_configured_metric_names(
         ),
         (
             [
+                {"GenEval Score": "92.1 ± 0.3"},
+                {"GenEval Score": "88.4+/-1.1"},
+                {"GenEval Score": "95%"},
+            ],
+            0.923,
+            "0-100",
+            0.923,
+            "looks like a 0-1 fraction",
+        ),
+        (
+            [
                 {"GenEval Score": "92.1"},
                 {"GenEval Score": "n/a"},
                 {"GenEval Score": 95},
