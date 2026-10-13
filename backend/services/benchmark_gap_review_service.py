@@ -475,7 +475,10 @@ class BenchmarkGapReviewService:
         """Serve the job's frozen batch, recording it on first read."""
         now = _now()
         if row.review_scope is None:
-            row.review_scope = self._batch_ids(now)
+            # Lock the job so overlapping first reads record a single batch.
+            self.db.refresh(row, with_for_update=True)
+            if row.review_scope is None:
+                row.review_scope = self._batch_ids(now)
             self.db.commit()
         candidates = {
             str(item.id): item
@@ -651,7 +654,9 @@ class BenchmarkGapReviewService:
             if item.candidate_id not in eligible
         ]
         merge_sources = {
-            item.candidate_id for item in mutation.decisions if item.decision == "merge"
+            item.candidate_id
+            for item in mutation.decisions
+            if item.decision == "merge" and item.candidate_id in eligible
         }
         counts: Counter[str] = Counter()
         for decision in mutation.decisions:

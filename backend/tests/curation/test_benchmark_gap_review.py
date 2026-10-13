@@ -849,3 +849,38 @@ def test_review_decides_exactly_the_batch_it_was_served(db):
     assert result["skipped_no_longer_eligible"] == [str(gone.id)]
     assert gone.status == "rejected"
     assert late.status == "candidate" and late.reviewed_at is None
+
+
+def test_skipped_merges_do_not_block_eligible_merges_into_them(db):
+    keep = add_candidate(db, "Tiny-ImageNet", papers=5)
+    middle = add_candidate(db, "TinyImageNet", papers=4)
+    alias = add_candidate(db, "Tiny ImageNet 200", papers=3)
+    scope = [str(keep.id), str(middle.id), str(alias.id)]
+    # Deferred after the snapshot: no longer eligible, still a merge target.
+    middle.deferred_until = datetime.now(UTC) + timedelta(days=1)
+
+    result = service(db).apply_review(
+        ReviewBenchmarkGapsMutation(
+            summary="x",
+            decisions=[
+                {"candidate_id": keep.id, "decision": "approve", "reason": "x"},
+                {
+                    "candidate_id": middle.id,
+                    "decision": "merge",
+                    "merge_into_candidate_id": keep.id,
+                    "reason": "x",
+                },
+                {
+                    "candidate_id": alias.id,
+                    "decision": "merge",
+                    "merge_into_candidate_id": middle.id,
+                    "reason": "x",
+                },
+            ],
+        ),
+        scope=scope,
+    )
+
+    assert result["decisions"] == {"approve": 1, "merge": 1}
+    assert result["skipped_no_longer_eligible"] == [str(middle.id)]
+    assert alias.merged_into_id == middle.id
