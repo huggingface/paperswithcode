@@ -291,3 +291,14 @@ def test_paper_heads_point_only_at_versions_already_inserted(db, settings):
         ):
             assert inserted, "a head pointer was written before its version row"
     assert inserted == 2
+
+
+def test_scaffold_preloads_the_packages_authors_cannot_add():
+    from backend.services.latex_paper_service import _neutral_scaffold
+
+    source = _neutral_scaffold("Survey")["main.tex"].decode()
+    preamble = source.split("\\begin{document}", 1)[0]
+    for package in ("amsmath", "amssymb", "graphicx", "booktabs", "url", "natbib"):
+        assert f"\\usepackage{{{package}}}" in preamble, package
+    # hyperref must load after natbib to patch its citation links.
+    assert preamble.index("{natbib}") < preamble.index("{hyperref}")
