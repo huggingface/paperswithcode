@@ -4,7 +4,12 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
 import UserMenu from "@/components/UserMenu";
-import { isAuthDisabled, isChatEnabled } from "@/lib/apiUrl";
+import {
+  CANONICAL_CHAT_URL,
+  isAuthDisabled,
+  isChatEnabled,
+  isChatMirror,
+} from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 
 type HeaderIconName = "search" | "bookmark" | "menu" | "close";
@@ -30,9 +35,6 @@ interface HeaderProps {
 
 const FEEDBACK_URL =
   "https://github.com/huggingface/paperswithcode-feedback/issues";
-// The Space mirror can't carry the HF session cookie that chat requires, so
-// its Chat link opens the canonical site instead of an in-app route.
-const CANONICAL_CHAT_URL = "https://paperswithcode.co/chat";
 const PWC_MCP_URL = "https://github.com/huggingface/pwc-cli#mcp-server";
 const PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY =
   "pwc:announcement:pwc-mcp:v1:dismissed";
@@ -91,7 +93,7 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   const authDisabled = isAuthDisabled();
   const chatLink: HeaderNavLink | null = isChatEnabled()
     ? { to: "/chat", label: "Chat", end: false, badge: "New" }
-    : authDisabled
+    : isChatMirror()
       ? { to: "/chat", label: "Chat", end: false, badge: "New", href: CANONICAL_CHAT_URL }
       : null;
   const navLinks: readonly HeaderNavLink[] = chatLink

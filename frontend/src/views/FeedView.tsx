@@ -13,7 +13,12 @@ import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import WebSearchToggle from "@/components/chat/WebSearchToggle";
 import { chatApi } from "@/lib/api/chat";
 import { catalogApi } from "@/lib/api/catalog";
-import { isChatEnabled, isStagingEnvironment } from "@/lib/apiUrl";
+import {
+  CANONICAL_CHAT_URL,
+  isChatEnabled,
+  isChatMirror,
+  isStagingEnvironment,
+} from "@/lib/apiUrl";
 import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
 import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
@@ -106,9 +111,11 @@ const parseOrderBy = (value: string | null): OrderBy => {
 };
 
 // Inline "ask the assistant" box between the feed title and the paper list.
-// Submitting hands the question off to the dedicated chat page.
+// Submitting hands the question off to the dedicated chat page; on the Space
+// mirror that page lives on the canonical site and opens in a new tab.
 export const AskAssistant: React.FC = () => {
   const navigate = useNavigate();
+  const mirror = isChatMirror();
   const models = isStagingEnvironment()
     ? STAGING_FALLBACK_CHAT_MODELS
     : PRODUCTION_FALLBACK_CHAT_MODELS;
@@ -168,6 +175,12 @@ export const AskAssistant: React.FC = () => {
   const submit = async (nextDraft = draft) => {
     const q = nextDraft.text.trim();
     if (!q || launching) return;
+    if (mirror) {
+      const params = new URLSearchParams({ q, model: selectedModel });
+      window.open(`${CANONICAL_CHAT_URL}?${params}`, "_blank", "noopener");
+      setDraft({ text: "", paperMentions: [] });
+      return;
+    }
     setLaunching(true);
     queueChatLaunch(nextDraft, selectedModel, {
       webSearchEnabled: webSearchAvailable && webSearchEnabled,
@@ -185,9 +198,11 @@ export const AskAssistant: React.FC = () => {
 
   return (
     <>
-      <div className="ask-home-new">
-        Hint: type @ to bring papers into context
-      </div>
+      {!mirror && (
+        <div className="ask-home-new">
+          Hint: type @ to bring papers into context
+        </div>
+      )}
       <div className="ask-home">
         <div className="ask-home-textarea-wrap">
           <PaperMentionHighlights
@@ -239,11 +254,13 @@ export const AskAssistant: React.FC = () => {
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
             />
-            <ReasoningEffortPicker
-              value={reasoningEffort}
-              onChange={setReasoningEffort}
-              disabled={launching}
-            />
+            {!mirror && (
+              <ReasoningEffortPicker
+                value={reasoningEffort}
+                onChange={setReasoningEffort}
+                disabled={launching}
+              />
+            )}
             {webSearchAvailable && (
               <WebSearchToggle
                 enabled={webSearchEnabled}
@@ -404,7 +421,7 @@ const FeedView: React.FC = () => {
         </aside>
 
         <div className="feed-main">
-          {isChatEnabled() && (
+          {(isChatEnabled() || isChatMirror()) && (
             <div className="feed-chat">
               <AskAssistant />
             </div>
