@@ -307,7 +307,8 @@ class DiscoveryPageService:
         summary = (
             f"{leader.model} leads {leader.benchmark.label} for {entity.name}"
             f"{open_note}. Compare the best {entity.name} models across "
-            f"{len(top_models)} benchmarks with papers and code."
+            + f"{len(top_models)} benchmark{'s' if len(top_models) != 1 else ''}"
+            + " with papers and code."
         )
         return replace(
             page,
@@ -332,16 +333,34 @@ class DiscoveryPageService:
         if not evaluated:
             return ()
         dataset_ids = [int(row[0]) for row in evaluated]
-        datasets = DatasetService(self.db)
-        best = datasets._best_results_for_datasets(dataset_ids, [task_id])
-        best_open = datasets._best_results_for_datasets(
-            dataset_ids, [task_id], is_open=True
+        best = DatasetService(self.db)._best_results_for_datasets(
+            dataset_ids, [task_id]
         )
+        if not best:
+            return ()
+        # The open leader must come from the overall leader's metric; an
+        # open-only primary metric could name another leaderboard's winner.
+        open_leaders: dict[int, str] = {}
+        for dataset_id, metric, model_name in (
+            self.db.query(
+                Evaluation.dataset_id, Evaluation.best_metric, Evaluation.model_name
+            )
+            .filter(
+                Evaluation.dataset_id.in_(dataset_ids),
+                Evaluation.task_id == task_id,
+                Evaluation.is_open.is_(True),
+                Evaluation.model_name.is_not(None),
+            )
+            .order_by(Evaluation.best_rank.asc().nullslast(), Evaluation.id.asc())
+            .all()
+        ):
+            if dataset_id in best and metric == best[dataset_id]["metric"]:
+                open_leaders.setdefault(dataset_id, model_name)
         return tuple(
             DiscoveryTopModel(
                 benchmark=DiscoveryLink(f"/benchmark/{slug}", name),
                 model=best[dataset_id]["model_name"],
-                open_model=best_open.get(dataset_id, {}).get("model_name"),
+                open_model=open_leaders.get(dataset_id),
             )
             for dataset_id, slug, name, _ in evaluated
             if dataset_id in best

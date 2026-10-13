@@ -365,6 +365,7 @@ class DatasetService:
                 best_results.setdefault(
                     dataset_id,
                     {
+                        "metric": metric,
                         "model_name": model_name,
                         "paper_id": paper_id,
                         "paper_route": arxiv_id or str(paper_id),

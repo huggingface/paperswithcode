@@ -250,7 +250,7 @@ def test_task_page_renders_markdown_trends_and_benchmark_links(monkeypatch):
     assert "**" not in document and "](" not in document
 
 
-def _top_model_task_db(benchmarks):
+def _top_model_task_db(benchmarks, open_rows=()):
     db = MagicMock()
     db.query.side_effect = [
         _query(
@@ -265,6 +265,7 @@ def _top_model_task_db(benchmarks):
         _query(rows=[]),  # related tasks
         _query(rows=benchmarks),
         _query(rows=[]),  # tagged papers
+        _query(rows=list(open_rows)),  # open evaluations, best rank first
     ]
     return db
 
@@ -274,9 +275,10 @@ def test_task_page_summarizes_best_models(monkeypatch):
 
     def best_results(self, dataset_ids, task_ids, is_open=None):
         calls.append((dataset_ids, task_ids, is_open))
-        if is_open:
-            return {1: {"model_name": "olmOCR <2>"}}
-        return {1: {"model_name": "Gemini 3 Pro"}, 3: {"model_name": "GPT-6"}}
+        return {
+            1: {"metric": "Overall", "model_name": "Gemini 3 Pro"},
+            3: {"metric": "Edit distance", "model_name": "GPT-6"},
+        }
 
     monkeypatch.setattr(
         "backend.services.dataset_service.DatasetService._best_results_for_datasets",
@@ -287,18 +289,26 @@ def test_task_page_summarizes_best_models(monkeypatch):
             (1, "olmocr-bench", "olmOCR-Bench", 40),
             (3, "omnidocbench", "OmniDocBench", 12),
             (4, "unscored", "Unscored", 0),
-        ]
+        ],
+        open_rows=[
+            # Leads a different metric leaderboard, so it is not the open leader.
+            (1, "Tables", "Table Model"),
+            (1, "Overall", "olmOCR <2>"),
+            (1, "Overall", "Runner-up"),
+        ],
     )
 
     page = DiscoveryPageService(db).task("ocr", today=date(2026, 10, 13))
 
-    assert calls == [([1, 3], [2], None), ([1, 3], [2], True)]
+    assert calls == [([1, 3], [2], None)]
     assert page.title == (
         "Best OCR Models (October 2026): leaderboards and papers | Papers with Code"
     )
     assert page.description.startswith(
-        "Gemini 3 Pro leads olmOCR-Bench for OCR; the best open model there is olmOCR <2>."
+        "Gemini 3 Pro leads olmOCR-Bench for OCR; the best open model there is "
+        "olmOCR <2>."
     )
+    assert "across 2 benchmarks" in page.description
     assert len(page.description) <= 155
     assert [(top.model, top.open_model) for top in page.top_models] == [
         ("Gemini 3 Pro", "olmOCR <2>"),
@@ -316,6 +326,24 @@ def test_task_page_summarizes_best_models(monkeypatch):
     assert (
         "| [olmOCR\\-Bench](https://paperswithcode.co/benchmark/olmocr-bench)"
         in markdown
+    )
+
+
+def test_task_page_with_open_leader_on_one_benchmark(monkeypatch):
+    monkeypatch.setattr(
+        "backend.services.dataset_service.DatasetService._best_results_for_datasets",
+        lambda *args, **kwargs: {1: {"metric": "Overall", "model_name": "olmOCR"}},
+    )
+    db = _top_model_task_db(
+        [(1, "olmocr-bench", "olmOCR-Bench", 40)],
+        open_rows=[(1, "Overall", "olmOCR")],
+    )
+
+    page = DiscoveryPageService(db).task("ocr", today=date(2026, 10, 13))
+
+    assert page.description.startswith(
+        "olmOCR leads olmOCR-Bench for OCR. Compare the best OCR models across "
+        "1 benchmark with"
     )
 
 
