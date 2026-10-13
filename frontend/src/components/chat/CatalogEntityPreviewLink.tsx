@@ -46,11 +46,18 @@ const KIND_LABEL: Record<CatalogEntityKind, string> = {
   benchmark: "Benchmark",
 };
 
+/** A benchmark's `paper_count` counts leaderboard rows, not papers. */
+const COUNT_NOUN: Record<CatalogEntityKind, [string, string]> = {
+  task: ["paper", "papers"],
+  method: ["paper", "papers"],
+  benchmark: ["entry", "entries"],
+};
+
 interface CatalogEntityPreview {
   name: string;
   description: string | null;
   imageUrl: string | null;
-  paperCount: number | null;
+  count: number | null;
   detail: string | null;
 }
 
@@ -61,7 +68,7 @@ async function fetchPreview({ kind, slug }: CatalogEntityRef): Promise<CatalogEn
       name: task.name,
       description: task.description ?? null,
       imageUrl: task.image_url ?? null,
-      paperCount: task.paper_count ?? null,
+      count: task.paper_count ?? null,
       detail: null,
     };
   }
@@ -71,7 +78,7 @@ async function fetchPreview({ kind, slug }: CatalogEntityRef): Promise<CatalogEn
       name: method.full_name || method.name,
       description: method.description ?? null,
       imageUrl: method.image_url ?? null,
-      paperCount: method.paper_count ?? null,
+      count: method.paper_count ?? null,
       detail: method.introduced_year ? `Introduced ${method.introduced_year}` : null,
     };
   }
@@ -80,7 +87,7 @@ async function fetchPreview({ kind, slug }: CatalogEntityRef): Promise<CatalogEn
     name: dataset.full_name || dataset.name,
     description: dataset.description ?? null,
     imageUrl: null,
-    paperCount: dataset.paper_count ?? null,
+    count: dataset.paper_count ?? null,
     detail: dataset.introduced_year ? `Introduced ${dataset.introduced_year}` : null,
   };
 }
@@ -105,8 +112,8 @@ const CatalogEntityCard: React.FC<{
   const [imageFailed, setImageFailed] = React.useState(false);
   const imageUrl = assetUrl(preview.imageUrl);
   const stats = [
-    preview.paperCount != null
-      ? `${preview.paperCount.toLocaleString()} ${preview.paperCount === 1 ? "paper" : "papers"}`
+    preview.count != null
+      ? `${preview.count.toLocaleString()} ${COUNT_NOUN[kind][preview.count === 1 ? 0 : 1]}`
       : null,
     preview.detail,
   ].filter(Boolean);

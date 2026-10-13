@@ -76,7 +76,7 @@ describe("catalog entity citations", () => {
     expect(
       screen.getByText("ImageNet-1k is a dataset used for image classification."),
     ).toBeInTheDocument();
-    expect(screen.getByText("245 papers · Introduced 2014")).toBeInTheDocument();
+    expect(screen.getByText("245 entries · Introduced 2014")).toBeInTheDocument();
     expect(catalog.getDatasetBySlug).toHaveBeenCalledWith("imagenet-1k");
   });
 
