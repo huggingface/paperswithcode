@@ -174,22 +174,25 @@ Use `source = 'manual'` on `paper_conferences` for admin/script imports unless a
 
 ### 6. Optional: deadlines
 
-When the user provides submission/rebuttal dates, insert rows into `conference_deadlines` (check for existing rows first to avoid duplicates):
+The database is the source of truth for https://paperswithcode.co/ai-deadlines
+(the huggingface/ai-deadlines YAML repo is no longer imported). Scheduled sweeps
+(`sweep_conference_deadlines` / `refresh_conference_deadlines`) research new
+editions and deadline changes; to set or correct an edition's deadlines by hand,
+use the audited admin endpoint. The list replaces the edition's deadlines, dates
+are local times in each deadline's timezone (write `AoE` for Anywhere on Earth),
+and `short_name` creates the edition when the slug does not exist yet:
 
-```sql
-INSERT INTO conference_deadlines (
-    conference_id, deadline_type, label, deadline_at, timezone
-)
-SELECT c.id, 'abstract', 'Abstract deadline', '2025-11-15 23:59:00+00', 'AoE'
-FROM conferences c
-WHERE c.slug = '<slug>'
-  AND NOT EXISTS (
-      SELECT 1 FROM conference_deadlines cd
-      WHERE cd.conference_id = c.id AND cd.deadline_type = 'abstract'
-  );
+```bash
+curl -X PUT https://paperswithcode.co/api/v1/conferences/<series>-<year>/deadlines \
+  -H "X-Admin-Token: $PWC_ADMIN_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"short_name": "CVPR", "url": "https://cvpr.thecvf.com/Conferences/2027",
+       "deadlines": [
+         {"type": "abstract", "label": "Abstract Submission", "date": "2026-11-06 23:59:59", "timezone": "AoE"},
+         {"type": "paper", "label": "Paper Submission", "date": "2026-11-13 23:59:59", "timezone": "AoE"}
+       ]}'
 ```
 
-Adjust `deadline_type`, labels, and timestamps to match the venue's published schedule.
+Deadline series and edition slugs follow `<series>-<year>` (e.g. `cvpr-2027`).
 
 ## Database Access
 

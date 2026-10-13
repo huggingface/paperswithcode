@@ -417,6 +417,25 @@ COMMANDS: dict[str, Job] = {
             "section"
         ),
     ),
+    "sweep_conference_deadlines": job(
+        "-m",
+        "backend.scripts.sweep_conference_deadlines",
+        timeout="30m",
+        idempotency=(
+            "apply finished off-box deadline research Jobs through the guarded, "
+            "audited writer (no deletes, past editions immutable), then launch "
+            "at most one Hugging Face Job"
+        ),
+    ),
+    "refresh_conference_deadlines": job(
+        "-m",
+        "backend.scripts.refresh_conference_deadlines",
+        timeout="30m",
+        idempotency=(
+            "apply finished off-box deadline research Jobs through the guarded, "
+            "audited writer, then launch at most one light Job per 20 hours"
+        ),
+    ),
     "export_enrichment_dashboard": job(
         "-m",
         "backend.scripts.export_enrichment_dashboard",

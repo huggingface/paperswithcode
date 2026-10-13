@@ -1260,6 +1260,29 @@ def _tabarena_contract(
     return status, reasons
 
 
+def _conference_deadlines_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    overdue = context.db.get("top_tier_overdue")
+    if overdue is None:
+        return _worse_output(status, "unknown"), reasons + [
+            "conference deadline freshness evidence is unavailable"
+        ]
+    without = context.db.get("top_tier_without_upcoming")
+    total = context.db.get("top_tier_series")
+    note = (
+        f"{without} of {total} top-tier conferences have no upcoming deadline; "
+        f"{overdue} are overdue by last cycle's calendar"
+    )
+    if overdue >= 3:
+        return _worse_output(status, "degraded"), reasons + [
+            note + "; check the latest sweep's results and add editions by hand"
+        ]
+    return status, reasons + [note]
+
+
 def _workflow_output_contract(
     status: str,
     reasons: List[str],
@@ -1920,6 +1943,7 @@ OUTPUT_POLICIES = {
     "enrichment_snapshot": OutputPolicy(_enrichment_snapshot_contract),
     "generic": OutputPolicy(lambda status, reasons, _context: (status, reasons)),
     "tabarena": OutputPolicy(_tabarena_contract),
+    "conference_deadlines": OutputPolicy(_conference_deadlines_contract),
     "github_stars": OutputPolicy(_github_stars_contract),
     "hot_github_trending": OutputPolicy(_hot_github_trending_contract),
     "repository_trending": OutputPolicy(_trending_contract),

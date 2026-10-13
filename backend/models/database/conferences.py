@@ -11,10 +11,11 @@ from sqlalchemy import (
     Index,
     Integer,
     LargeBinary,
+    Numeric,
     String,
     Text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func, text
 
@@ -115,6 +116,33 @@ class ConferenceDeadline(Base):
             f"<ConferenceDeadline(id={self.id}, "
             f"conference_id={self.conference_id}, type='{self.deadline_type}')>"
         )
+
+
+class ConferenceDeadlineSweep(Base):
+    """One off-box research sweep over conference deadlines (pwc-cron ledger)."""
+
+    __tablename__ = "conference_deadline_sweeps"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    # launching | running | applied | failed
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    hf_job_id: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    series: Mapped[list] = mapped_column(JSONB, nullable=False)
+    launched_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    changes_applied: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cost_usd: Mapped[Optional[float]] = mapped_column(Numeric(10, 4), nullable=True)
+    results: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+    error: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    __table_args__ = (
+        Index("idx_conference_deadline_sweeps_status", "status", "finished_at"),
+    )
 
 
 class PaperConference(Base):

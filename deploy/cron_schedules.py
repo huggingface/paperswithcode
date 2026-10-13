@@ -133,6 +133,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Scan official lab news for unindexed model releases every three hours",
     ),
     TimerSpec(
+        job="sweep_conference_deadlines",
+        on_calendar=("Sun *-*-* 02:35:00",),
+        description="Research AI conference deadlines off-box weekly",
+    ),
+    TimerSpec(
+        job="refresh_conference_deadlines",
+        on_calendar=("*-*-* 07:40:00", "*-*-* 19:40:00"),
+        description="Collect deadline research and check imminent deadlines daily",
+    ),
+    TimerSpec(
         job="discover_x_threads",
         on_calendar=("*-*-* 08,20:22:00",),
         description="Discover author X threads for trending papers twice daily",
