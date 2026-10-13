@@ -754,3 +754,33 @@ def test_merging_into_a_promoted_candidate_rechecks_the_new_papers(db):
         )
     )
     assert rechecked == [1, 2, 3, 4, 5]
+
+
+def test_first_creation_job_of_an_approval_counts_toward_backoff(db):
+    candidate = add_candidate(db, "ModelNet40", papers=4)
+    review = service(db)
+    [first_id] = review.apply_review(
+        ReviewBenchmarkGapsMutation(
+            summary="x",
+            decisions=[
+                {"candidate_id": candidate.id, "decision": "approve", "reason": "x"}
+            ],
+        )
+    )["creation_jobs_queued"]
+    db.flush()
+    first = db.get(PaperCurationJob, uuid.UUID(first_id))
+    first.status = "failed"
+    review.handle_terminal_job(first)
+    second = review.job_service.enqueue_benchmark_job(
+        db,
+        kind="add-benchmark",
+        benchmark_candidate_id=candidate.id,
+        requested_by="test",
+        settings=get_settings(),
+        priority=20,
+    )
+    second.status = "failed"
+
+    review.handle_terminal_job(second)
+
+    assert candidate.status == "candidate"

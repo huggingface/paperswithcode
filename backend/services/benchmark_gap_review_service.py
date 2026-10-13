@@ -18,7 +18,7 @@ from collections import Counter
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.config import Settings
@@ -605,7 +605,8 @@ class BenchmarkGapReviewService:
                     f"Candidate {decision.candidate_id} is not eligible for review"
                 )
             candidate.review_reason = decision.reason
-            candidate.reviewed_at = now
+            # Database time, like the created_at of jobs queued in this transaction.
+            candidate.reviewed_at = func.now()
             if decision.decision == "approve":
                 candidate.status = "approved"
                 candidate.deferred_until = None
@@ -708,7 +709,8 @@ class BenchmarkGapReviewService:
             )
         now = _now()
         candidate.review_reason = mutation.reason
-        candidate.reviewed_at = now
+        # Database time, like the created_at of jobs queued in this transaction.
+        candidate.reviewed_at = func.now()
         if mutation.decision == "reject":
             candidate.status = "rejected"
             candidate.reviewed_paper_count = candidate.distinct_paper_count
@@ -949,6 +951,11 @@ class BenchmarkGapReviewService:
         if candidate is None or candidate.status != "approved":
             return
         self.db.flush()
+        reviewed_at = (
+            select(BenchmarkCurationCandidate.reviewed_at)
+            .where(BenchmarkCurationCandidate.id == candidate.id)
+            .scalar_subquery()
+        )
         failures = (
             self.db.query(func.count(PaperCurationJob.id))
             .filter(
@@ -956,11 +963,11 @@ class BenchmarkGapReviewService:
                 PaperCurationJob.kind == "add-benchmark",
                 PaperCurationJob.status.in_({"failed", "canceled"}),
                 # Count only the current approval; reviewed_at moves on each
-                # overseer approval and creation-job decision.
-                *(
-                    [PaperCurationJob.created_at >= candidate.reviewed_at]
-                    if candidate.reviewed_at is not None
-                    else []
+                # overseer approval and creation-job decision. Compare in SQL so
+                # both timestamps come from the database clock.
+                or_(
+                    reviewed_at.is_(None),
+                    PaperCurationJob.created_at >= reviewed_at,
                 ),
             )
             .scalar()
