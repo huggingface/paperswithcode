@@ -329,7 +329,7 @@ def _authorize_pwc_mcp(
         ChatCapabilityService(db).meter_catalog(
             capability,
             operation,
-            maximum_searches=settings.chat_max_direct_search_calls,
+            maximum_searches=_catalog_search_limit(capability, settings),
         )
         db.commit()
     except CapabilityError:
@@ -337,6 +337,15 @@ def _authorize_pwc_mcp(
         raise HTTPException(
             status_code=429, detail="Tool execution limit reached"
         ) from None
+
+
+def _catalog_search_limit(capability: ChatTurnCapability, settings: Settings) -> int:
+    # A paper turn researches before `pwc-paper create` activates it. Title
+    # lookups count as searches, so the research allowance would stop the
+    # turn before it could create the paper.
+    if "paper" in capability.scopes:
+        return settings.chat_latex_paper_max_direct_search_calls
+    return settings.chat_max_direct_search_calls
 
 
 def _session_header(request: Request) -> str:
@@ -418,13 +427,13 @@ def catalog(
             ChatCapabilityService(db).meter_catalog(
                 capability,
                 operation,
-                maximum_searches=settings.chat_max_direct_search_calls,
+                maximum_searches=_catalog_search_limit(capability, settings),
             )
         else:
             ChatCapabilityService(db).meter_catalog(
                 capability,
                 body.operation,
-                maximum_searches=settings.chat_max_direct_search_calls,
+                maximum_searches=_catalog_search_limit(capability, settings),
             )
         db.commit()
     except CapabilityError:
