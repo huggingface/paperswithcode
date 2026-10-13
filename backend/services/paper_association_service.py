@@ -392,7 +392,8 @@ class PaperAssociationService:
                 PaperXThread(
                     paper_id=paper_id,
                     position=position,
-                    **{field: row[field] for field in X_THREAD_FIELDS},
+                    # Snapshots taken before a field existed leave it unset.
+                    **{field: row.get(field) for field in X_THREAD_FIELDS},
                 )
             )
         self.db.flush()

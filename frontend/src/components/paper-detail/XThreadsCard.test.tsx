@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { XThread } from "@/lib/api/papers.types";
 
@@ -21,7 +21,25 @@ const thread: XThread = {
   fetched_at: "2026-10-12T09:00:00Z",
 };
 
+function stubIntersection(isIntersecting: boolean) {
+  vi.stubGlobal("IntersectionObserver", class {
+    constructor(private callback: IntersectionObserverCallback) {}
+    observe() {
+      this.callback([{ isIntersecting } as IntersectionObserverEntry], this as never);
+    }
+    disconnect() {}
+  });
+}
+
 describe("XThreadsCard", () => {
+  beforeEach(() => {
+    stubIntersection(false);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders a linked preview of each post", () => {
     render(<XThreadsCard threads={[thread]} onEdit={() => undefined} />);
 
@@ -34,6 +52,26 @@ describe("XThreadsCard", () => {
     expect(screen.getByText("♥ 1.7k")).toBeInTheDocument();
     expect(screen.getByLabelText("Video")).toBeInTheDocument();
     expect(screen.getByText("1 post")).toBeInTheDocument();
+  });
+
+  it("plays the video inline once visible, fetched without a referrer", async () => {
+    const videoUrl = "https://video.twimg.com/1/vid/640x360/x.mp4";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(new Blob(["mp4"])));
+    vi.stubGlobal("fetch", fetchMock);
+    stubIntersection(true);
+    vi.stubGlobal("URL", Object.assign(URL, {
+      createObjectURL: vi.fn(() => "blob:x-thread"),
+      revokeObjectURL: vi.fn(),
+    }));
+    vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue(undefined);
+
+    const { container } = render(
+      <XThreadsCard threads={[{ ...thread, video_url: videoUrl }]} onEdit={() => undefined} />,
+    );
+
+    await waitFor(() => expect(container.querySelector("video")).toHaveAttribute("src", "blob:x-thread"));
+    expect(fetchMock).toHaveBeenCalledWith(videoUrl, expect.objectContaining({ referrerPolicy: "no-referrer" }));
+    expect(container.querySelector("video")).toHaveAttribute("poster", thread.media_url);
   });
 
   it("shows an empty state with an edit entry point", async () => {
