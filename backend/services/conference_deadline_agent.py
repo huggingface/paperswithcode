@@ -423,14 +423,22 @@ def retrieval_short_circuit(results: list[dict], total_cost: float) -> dict:
             error="retrieval agent wall-clock timeout",
         )
     if not valid:
-        reasoning = "retrieval produced no structured output"
-    else:
-        reasons = [r["reasoning"] for r in valid if r.get("reasoning")]
-        reasoning = (
-            max(reasons, key=len)
-            if reasons
-            else "retrieval agents did not propose an update"
+        # Research never produced an answer (SDK errors or silent exits): this
+        # is a failure, not evidence that nothing changed.
+        errors = sorted({str(r["error"]) for r in results if r.get("error")})
+        return pipeline_result(
+            status="error",
+            reasoning="retrieval produced no structured output",
+            total_cost_usd=total_cost,
+            skipped_aggregation=True,
+            error="; ".join(errors)[:1000] or "retrieval produced no structured output",
         )
+    reasons = [r["reasoning"] for r in valid if r.get("reasoning")]
+    reasoning = (
+        max(reasons, key=len)
+        if reasons
+        else "retrieval agents did not propose an update"
+    )
     return pipeline_result(
         status="no_changes",
         reasoning=reasoning,
@@ -611,7 +619,11 @@ async def _run_agent_once(
             await _consume(label, query(prompt=user_prompt, options=options), state)
         except Exception as exc:  # The SDK surfaces CLI failures as exceptions.
             _log(label, f"error: {type(exc).__name__}: {exc}")
-            state["result"] = {**state["result"], "error": str(exc)}
+            state["result"] = {
+                **state["result"],
+                "status": "error",
+                "error": f"{type(exc).__name__}: {exc}",
+            }
         if state["hit_max_turns"] and not has_structured_output(state["result"]):
             # One no-tools follow-up: answer from what was already seen.
             _log(label, "error_max_turns without structured output; no-tools follow-up")
@@ -657,17 +669,22 @@ async def _run_agent_once(
 
 
 async def run_agent(**kwargs) -> tuple[dict, float]:
-    """Retry SDK silent exits (only a SystemMessage, empty result); never timeouts."""
+    """Retry SDK errors and silent exits (only a SystemMessage); never timeouts."""
     total = 0.0
     result: dict = {}
     for attempt in range(1, MAX_RETRIES + 1):
         result, cost, messages = await _run_agent_once(**kwargs)
         total += cost
-        if result.get("status") == "timeout":
+        if result.get("status") == "timeout" or has_structured_output(result):
             return result, total
-        if result or messages > SILENT_EXIT_THRESHOLD or attempt == MAX_RETRIES:
+        silent_exit = not result and messages <= SILENT_EXIT_THRESHOLD
+        failed = result.get("status") == "error"
+        if not (silent_exit or failed) or attempt == MAX_RETRIES:
             return result, total
-        _log(kwargs["label"], f"SDK silent exit; retrying ({attempt}/{MAX_RETRIES})")
+        _log(
+            kwargs["label"],
+            f"SDK error or silent exit; retrying ({attempt}/{MAX_RETRIES})",
+        )
         await asyncio.sleep(2 * attempt)
     return result, total
 

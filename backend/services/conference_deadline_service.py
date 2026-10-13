@@ -462,16 +462,12 @@ class SeriesState:
         return min(upcoming) if upcoming else None
 
     def cadence_years(self) -> int:
-        """2 for biennial series (ICCV, ECCV), detected from edition years.
+        """2 for the known biennial series (ICCV, ECCV), else 1.
 
-        Proceedings-only rows count: older editions often have no deadlines.
+        Not inferred from year gaps: one skipped or missing edition would make
+        an annual series look biennial.
         """
-        years = sorted({e.year for e in self.editions}, reverse=True)
-        if self.series in BIENNIAL_SERIES:
-            return 2
-        if len(years) >= 2 and years[0] - years[1] == 2:
-            return 2
-        return 1
+        return 2 if self.series in BIENNIAL_SERIES else 1
 
     def expected_next_deadline(self) -> Optional[datetime]:
         """Last edition's first deadline, one cycle later."""
@@ -901,8 +897,13 @@ def _plan_deadlines(
     change: EditionChange,
     now: datetime,
 ) -> None:
-    year_start = datetime(change.year - 1, 1, 1, tzinfo=timezone.utc)
-    year_end = datetime(change.year + 1, 1, 1, tzinfo=timezone.utc)
+    # Submissions open up to a year ahead; camera-ready and other
+    # post-conference deadlines can fall early in the following year. The
+    # one-day margins keep AoE / UTC+14 times on the boundary days inside.
+    year_start = datetime(change.year - 1, 1, 1, tzinfo=timezone.utc) - timedelta(
+        days=1
+    )
+    year_end = datetime(change.year + 1, 7, 1, tzinfo=timezone.utc) + timedelta(days=1)
     matched_ids: set[int] = set()
     instants = {d.deadline_at for d in current}
     for proposal in change.deadlines:
@@ -1256,8 +1257,7 @@ WITH editions AS (
 ),
 ranked AS (
     SELECT *,
-           row_number() OVER (PARTITION BY series ORDER BY year DESC) AS rn,
-           lead(year) OVER (PARTITION BY series ORDER BY year DESC) AS previous_year
+           row_number() OVER (PARTITION BY series ORDER BY year DESC) AS rn
     FROM editions
 ),
 series AS (
@@ -1266,7 +1266,7 @@ series AS (
            bool_or(r.last_deadline > now()) AS has_upcoming,
            max(r.first_deadline + make_interval(
                days => 365 * CASE
-                   WHEN r.series IN ('iccv', 'eccv') OR r.year - r.previous_year = 2
+                   WHEN r.series IN ('iccv', 'eccv')
                    THEN 2 ELSE 1 END
            )) FILTER (WHERE r.rn = 1) AS expected_next
     FROM ranked r

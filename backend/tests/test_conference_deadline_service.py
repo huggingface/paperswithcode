@@ -241,6 +241,24 @@ def test_biennial_series_expects_the_next_edition_two_years_later():
     assert iccv.expected_next_deadline().year == 2027
 
 
+def test_a_skipped_year_does_not_make_an_annual_series_biennial():
+    series = cvpr_series()
+    series.editions.insert(
+        0, EditionState(slug="cvpr-2024", year=2024, end_date=date(2024, 6, 21))
+    )
+    series.editions.pop()  # 2024 and ... no 2025/2026 row with deadlines left
+    series.editions.append(
+        EditionState(
+            slug="cvpr-2026",
+            year=2026,
+            end_date=date(2026, 6, 7),
+            deadlines=[deadline(1, "paper", "2025-11-15 11:59:59")],
+        )
+    )
+    assert series.cadence_years() == 1
+    assert year_labels(series, NOW.date())[2027] == "MISSING_NEXT_YEAR"
+
+
 def test_weekly_selection_puts_missing_top_tier_editions_first():
     imminent = neurips_series()
     imminent.editions[0].deadlines = [deadline(30, "paper", "2026-11-20 11:59:59")]
@@ -409,6 +427,31 @@ def test_implausible_shifts_and_out_of_cycle_dates_are_rejected():
     assert result.changes == []
     assert "implausibly large" in result.rejections[0]
     assert "outside the 2027 cycle" in result.rejections[1]
+
+
+def test_post_conference_and_boundary_aoe_deadlines_fit_the_cycle():
+    result = plan(
+        neurips_series(),
+        {
+            "year": 2027,
+            "deadlines": [
+                {
+                    "type": "camera_ready",
+                    "label": "Final version",
+                    "date": "2028-01-20 23:59:59",
+                    "timezone": "AoE",
+                },
+                {
+                    "type": "registration",
+                    "label": "Registration",
+                    "date": "2027-12-31 23:59:59",
+                    "timezone": "AoE",
+                },
+            ],
+        },
+    )
+    assert not result.rejections
+    assert [c.kind for c in result.changes] == ["add_deadline", "add_deadline"]
 
 
 def test_omitted_deadlines_are_never_deleted_and_duplicates_skipped():
@@ -813,6 +856,28 @@ def test_partial_or_invalid_results_fail_the_sweep(db):
     assert report["series"][0]["status"] == "invalid"
 
 
+def test_a_sweep_where_every_conference_failed_is_not_applied(db):
+    sweep = ConferenceDeadlineSweep(
+        mode="daily",
+        status="running",
+        hf_job_id="job-1",
+        series=["cvpr"],
+        launched_at=NOW,
+    )
+    db.add(sweep)
+    db.commit()
+    lines = [
+        agent.encode_result_line(
+            {"series": "cvpr", "status": "error", "error": "boom"}
+        ),
+        f"{agent.DONE_MARKER} 1",
+    ]
+    runner = sweeps.ConferenceDeadlineSweeps(db, sweep_settings(), FakeApi(lines=lines))
+    [report] = runner.collect(now=NOW)
+    assert report["status"] == "failed"
+    assert report["series"][0]["error"] == "boom"
+
+
 def test_running_jobs_are_left_alone_until_terminal(db):
     db.add(
         ConferenceDeadlineSweep(
@@ -841,6 +906,35 @@ def test_tool_budget_nudges_on_the_last_search_then_denies():
     assert state.on_post_tool_use("WebFetch") == agent.BUDGET_EXHAUSTED_MESSAGE
     assert state.should_deny_pre_tool_use("mcp__exa__search")
     assert not state.should_deny_pre_tool_use("StructuredOutput")
+
+
+def test_research_failures_are_errors_not_no_changes():
+    failed = agent.retrieval_short_circuit(
+        [{"status": "error", "error": "CLIConnectionError: boom"}, {}], 0.0
+    )
+    assert failed["status"] == "error"
+    assert "CLIConnectionError" in failed["error"]
+
+
+def test_run_agent_retries_sdk_errors(monkeypatch):
+    import asyncio
+
+    attempts = []
+
+    async def fake_once(**_kwargs):
+        attempts.append(1)
+        if len(attempts) == 1:
+            return {"status": "error", "error": "boom"}, 0.1, 5
+        return {"requires_update": False, "reasoning": "ok"}, 0.2, 9
+
+    async def no_sleep(_seconds):
+        return None
+
+    monkeypatch.setattr(agent, "_run_agent_once", fake_once)
+    monkeypatch.setattr(agent.asyncio, "sleep", no_sleep)
+    result, cost = asyncio.run(agent.run_agent(label="t"))
+    assert result["requires_update"] is False and len(attempts) == 2
+    assert cost == pytest.approx(0.3)
 
 
 def test_short_circuit_distinguishes_timeouts_from_no_changes():
