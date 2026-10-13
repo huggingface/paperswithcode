@@ -5,7 +5,10 @@
 -- scoped `add-benchmark` curation job per approved candidate.
 --
 -- Run as the schema owner (postgres) before deploying the release that reads
--- these columns. Updates `public` and, when present, the `staging` copies.
+-- these columns. Updates `public` and, when present, the `staging` copies. The
+-- staging job table predates `candidate_id` and names its trigger check
+-- differently, so staging gets the columns, kind check, foreign key, and
+-- unique-active indexes but keeps its own trigger and scope checks.
 -- Idempotent: safe to re-run.
 
 BEGIN;
@@ -127,28 +130,6 @@ BEGIN
                 'add-evals', 'enrich-paper', 'resolve-model-paper',
                 'review-benchmark-gaps', 'add-benchmark'
             ));
-        ALTER TABLE staging.paper_curation_jobs
-            DROP CONSTRAINT IF EXISTS paper_curation_jobs_trigger_check;
-        ALTER TABLE staging.paper_curation_jobs
-            ADD CONSTRAINT paper_curation_jobs_trigger_check
-            CHECK (trigger IN (
-                'admin', 'hf-daily-cron', 'hf-trending-cron', 'benchmark-promotion',
-                'benchmark-gap-cron'
-            ));
-        ALTER TABLE staging.paper_curation_jobs
-            DROP CONSTRAINT IF EXISTS paper_curation_jobs_scope_check;
-        ALTER TABLE staging.paper_curation_jobs
-            ADD CONSTRAINT paper_curation_jobs_scope_check
-            CHECK (
-                (kind = 'resolve-model-paper' AND candidate_id IS NOT NULL
-                    AND paper_id IS NULL AND benchmark_candidate_id IS NULL)
-                OR (kind = 'add-benchmark' AND benchmark_candidate_id IS NOT NULL
-                    AND paper_id IS NULL AND candidate_id IS NULL)
-                OR (kind = 'review-benchmark-gaps' AND paper_id IS NULL
-                    AND candidate_id IS NULL AND benchmark_candidate_id IS NULL)
-                OR (kind IN ('add-evals', 'enrich-paper') AND paper_id IS NOT NULL
-                    AND candidate_id IS NULL AND benchmark_candidate_id IS NULL)
-            );
     END IF;
 END
 $$;
