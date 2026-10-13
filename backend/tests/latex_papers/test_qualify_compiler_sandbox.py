@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
+import pytest
+
 
 def test_qualification_settings_disable_all_user_facing_artifacts() -> None:
     from backend.config import Settings
@@ -64,7 +68,13 @@ def test_qualification_report_is_bounded_and_never_contains_case_source() -> Non
     assert "private manuscript source" not in str(payload)
 
 
-def test_sandbox_qualification_uses_the_transport_contract() -> None:
+@pytest.mark.parametrize(
+    ("failure_category", "expected"),
+    [("compiler_error", "failed"), ("invalid_bundle", "rejected")],
+)
+def test_sandbox_qualification_uses_the_transport_contract(
+    failure_category: str, expected: str
+) -> None:
     from backend.scripts.qualify_latex_compiler_sandbox import run_case
     from backend.services.latex_compiler_qualification_service import (
         QualificationCase,
@@ -85,15 +95,17 @@ def test_sandbox_qualification_uses_the_transport_contract() -> None:
         def status(self, job_id: str) -> CompilerStatus:
             return CompilerStatus(job_id=job_id, state=CompilerJobState.FAILED)
 
-        def result(self, job_id: str) -> None:
+        def result(self, job_id: str) -> SimpleNamespace:
             self.results.append(job_id)
+            return SimpleNamespace(failure_category=failure_category)
 
     compiler = Compiler()
     outcome, elapsed = run_case(
-        QualificationCase("synthetic", b"private manuscript source", "failed"), compiler
+        QualificationCase("synthetic", b"private manuscript source", expected),
+        compiler,
     )
 
-    assert outcome == "failed"
+    assert outcome == expected
     assert elapsed >= 0
     assert compiler.submitted[0][1] == b"private manuscript source"
     assert compiler.results

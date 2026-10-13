@@ -120,7 +120,11 @@ def run_case(
         }:
             # Read and validate the terminal response so the disposable VM is
             # released by the transport. Do not expose its content.
-            compiler.result(job_id)
+            result = compiler.result(job_id)
+            # The compiler refuses an unsafe archive while unpacking it, before
+            # LaTeX runs, and reports that as an invalid_bundle failure.
+            if result.failure_category == "invalid_bundle":
+                return "rejected", _elapsed_ms(started)
             return status.state.value, _elapsed_ms(started)
         time.sleep(POLL_SECONDS)
         status = compiler.status(job_id)
