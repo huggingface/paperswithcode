@@ -132,7 +132,8 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "artificial-analysis-provider-voice-tts-arena" in (
         artificial_analysis_job.db_freshness_query
     )
-    assert "LEAST(" in artificial_analysis_job.db_freshness_query
+    assert "missing_fresh_datasets" in artificial_analysis_job.db_freshness_query
+    assert "stale_evaluations" in artificial_analysis_job.db_freshness_query
 
     keyword_job = _job("backfill_method_keywords")
     assert "method_keyword_backfill_runs" in keyword_job.db_freshness_query
