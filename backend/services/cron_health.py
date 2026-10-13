@@ -1101,12 +1101,12 @@ def _execution_health(
         ):
             # Restarts and reboots also move ActiveEnterTimestamp, but the
             # Persistent=true stamp keeps LastTriggerUSec, so only a timer that
-            # has never fired or completed was installed after the slot.
+            # has never fired was installed after the slot. Manual runs before
+            # activation leave completion evidence but owe no timer slot.
             activated = _parse_log_timestamp(evidence.get("timer_activated_at"))
             if (
                 activated is not None
                 and previous_expected < activated
-                and completed is None
                 and not evidence.get("last_trigger_at")
             ):
                 return {

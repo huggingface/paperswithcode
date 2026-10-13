@@ -416,15 +416,17 @@ def test_reactivated_or_triggered_timer_is_still_overdue(last_trigger_at):
     assert execution["reason"] == "expected systemd invocation is overdue"
 
 
-def test_reactivated_timer_with_stale_completion_is_still_overdue():
+def test_new_timer_with_pre_activation_manual_run_awaits_first_invocation():
     execution = _systemd_execution(
         "sweep_conference_deadlines",
         timer_activated_at="2026-08-28T08:12:57Z",
         last_completed_at="2026-08-16T02:40:00Z",
     )
 
-    assert execution["status"] == "broken"
-    assert execution["reason"] == "expected systemd invocation is overdue"
+    assert execution["status"] == "healthy"
+    assert execution["reason"] == (
+        "timer enabled after the last scheduled slot; first systemd invocation pending"
+    )
 
 
 def test_pre_reboot_slot_stays_unknown_when_reboot_reactivated_timer():
