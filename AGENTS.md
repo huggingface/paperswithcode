@@ -86,6 +86,11 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   environment, and review the live result with the smoke checks below. Report
   the PR, release, and verification. If a check or review service fails or stays
   unavailable, investigate and report the blocker instead of bypassing the gate.
+- Once the task's merged commit is live in production and its smoke checks
+  pass, remove the task's worktree and delete its local and remote branch.
+  First confirm the worktree is clean and that `main` contains the branch's
+  changes (for a squash merge, compare the branch diff against the merge
+  commit's diff). Clean up only the task's own worktree and branch.
 - Never force-push. If local and remote `main` have diverged, stop and resolve the
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
