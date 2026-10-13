@@ -52,6 +52,42 @@ failures once with:
 sudo pwc-cron process_curation_thumbnails --retry-failed
 ```
 
+## AI conference deadlines
+
+`pwc-cron sweep_conference_deadlines` (weekly, Sun 02:35 UTC) and
+`pwc-cron refresh_conference_deadlines` (07:40 and 19:40 UTC) keep https://paperswithcode.co/ai-deadlines current. The
+`conferences` / `conference_deadlines` rows are the source of truth;
+huggingface/ai-deadlines YAML is no longer imported. Each run first collects
+finished sweeps: it reads one result per conference from the Hugging Face Job
+logs, validates the change set, and applies the accepted part through the
+guarded writer in `backend/services/conference_deadline_service.py` (no
+deletes, past editions and past deadlines are immutable, shifts over 120 days
+and unsourced editions are rejected, every change is a catalog mutation event by
+`conference-deadline-agent` with before/after values). Then it launches at most
+one Job, which runs the Claude Agent SDK research pipeline ported from
+ai-deadlines (`backend/services/conference_deadline_agent.py`: retrieval agents,
+majority-vote aggregation, fail-closed tool budget, wall-clock caps) off-box.
+The weekly sweep researches up to 30 conferences with 3 retrieval agents,
+prioritizing those whose next edition is missing and those with a deadline
+within 120 days; the daily pass (launched at most once per 20 hours) checks
+deadlines within three weeks and overdue top-tier conferences with one agent.
+Sweeps are recorded in `conference_deadline_sweeps`. The jobs need
+`PWC_CONFERENCE_DEADLINES_ANTHROPIC_API_KEY` in `production-cron.env` plus HF
+Jobs credentials (`PWC_CONFERENCE_DEADLINES_HF_NAMESPACE`/`_HF_TOKEN`, falling
+back to `PWC_CODEX_JOBS_NAMESPACE`/`_TOKEN`), and exit 1 without them.
+Operate them by hand with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines status
+uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines plan --mode weekly
+uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines launch --series cvpr,icml
+uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines collect --dry-run
+```
+
+Correct a deadline by hand with `PUT /api/v1/conferences/{slug}/deadlines`
+(admin; the body's list replaces the edition's deadlines, and a missing edition
+is created when `short_name` is given).
+
 ## Autonomous submission reviewer
 
 The packaged `submission-review.timer` invokes the immutable-release

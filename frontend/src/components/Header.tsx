@@ -4,7 +4,12 @@ import { NavLink, useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
 import UserMenu from "@/components/UserMenu";
-import { isAuthDisabled, isChatEnabled } from "@/lib/apiUrl";
+import {
+  CANONICAL_CHAT_URL,
+  isAuthDisabled,
+  isChatEnabled,
+  isChatMirror,
+} from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 
 type HeaderIconName = "search" | "bookmark" | "menu" | "close";
@@ -39,6 +44,7 @@ type HeaderNavLink = {
   label: string;
   end: boolean;
   badge?: string;
+  href?: string;
 };
 
 const NAV_LINKS: readonly HeaderNavLink[] = [
@@ -85,8 +91,13 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   const isReaderRoute = location.pathname.startsWith("/pdf/");
   const returnTo = `${location.pathname}${location.search}` || "/";
   const authDisabled = isAuthDisabled();
-  const navLinks: readonly HeaderNavLink[] = isChatEnabled()
-    ? [NAV_LINKS[0], { to: "/chat", label: "Chat", end: false, badge: "New" }, ...NAV_LINKS.slice(1)]
+  const chatLink: HeaderNavLink | null = isChatEnabled()
+    ? { to: "/chat", label: "Chat", end: false, badge: "New" }
+    : isChatMirror()
+      ? { to: "/chat", label: "Chat", end: false, badge: "New", href: CANONICAL_CHAT_URL }
+      : null;
+  const navLinks: readonly HeaderNavLink[] = chatLink
+    ? [NAV_LINKS[0], chatLink, ...NAV_LINKS.slice(1)]
     : NAV_LINKS;
 
   React.useLayoutEffect(() => {
@@ -134,17 +145,34 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
             </span>
           </NavLink>
           <nav className="nav" ref={navRef}>
-            {navLinks.map(({ to, label, end, badge }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={({ isActive }) => `nav-item${badge ? " nav-item-with-badge" : ""}${isActive ? " active" : ""}`}
-              >
-                <span>{label}</span>
-                {badge && <span className="nav-new-badge" aria-hidden="true">{badge}</span>}
-              </NavLink>
-            ))}
+            {navLinks.map(({ to, label, end, badge, href }) => {
+              const content = (
+                <>
+                  <span>{label}</span>
+                  {badge && <span className="nav-new-badge" aria-hidden="true">{badge}</span>}
+                </>
+              );
+              return href ? (
+                <a
+                  key={to}
+                  href={href}
+                  target="_blank"
+                  rel="noreferrer"
+                  className={`nav-item${badge ? " nav-item-with-badge" : ""}`}
+                >
+                  {content}
+                </a>
+              ) : (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={end}
+                  className={({ isActive }) => `nav-item${badge ? " nav-item-with-badge" : ""}${isActive ? " active" : ""}`}
+                >
+                  {content}
+                </NavLink>
+              );
+            })}
             <span
               ref={navIndicatorRef}
               className="nav-indicator"
@@ -235,18 +263,24 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
               <HeaderIcon name="search" size={14} />
               <span>Search papers, authors, domains…</span>
             </button>
-            {navLinks.map(({ to, label, end, badge }) => (
-              <NavLink
-                key={to}
-                to={to}
-                end={end}
-                className={`mobile-nav-link${badge ? " mobile-nav-link-with-badge" : ""}`}
-                onClick={closeMobile}
-              >
-                <span>{label}</span>
-                {badge && <span className="nav-new-badge" aria-hidden="true">{badge}</span>}
-              </NavLink>
-            ))}
+            {navLinks.map(({ to, label, end, badge, href }) => {
+              const className = `mobile-nav-link${badge ? " mobile-nav-link-with-badge" : ""}`;
+              const content = (
+                <>
+                  <span>{label}</span>
+                  {badge && <span className="nav-new-badge" aria-hidden="true">{badge}</span>}
+                </>
+              );
+              return href ? (
+                <a key={to} href={href} target="_blank" rel="noreferrer" className={className} onClick={closeMobile}>
+                  {content}
+                </a>
+              ) : (
+                <NavLink key={to} to={to} end={end} className={className} onClick={closeMobile}>
+                  {content}
+                </NavLink>
+              );
+            })}
             <a
               className="mobile-nav-link"
               href={FEEDBACK_URL}

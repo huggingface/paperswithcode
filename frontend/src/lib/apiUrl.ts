@@ -130,6 +130,18 @@ export function isChatEnabled(): boolean {
   return lowered === "1" || lowered === "true" || lowered === "yes";
 }
 
+/**
+ * Canonical chat page for builds that can't host chat themselves. The Hugging
+ * Face Space mirror can't carry the HF session cookie that chat requires, so
+ * its chat entry points open this page in a new tab instead.
+ */
+export const CANONICAL_CHAT_URL = "https://paperswithcode.co/chat";
+
+/** `true` for the Space mirror: chat entry points hand off to the canonical site. */
+export function isChatMirror(): boolean {
+  return isAuthDisabled() && !isChatEnabled();
+}
+
 function enabledBuildFlag(value: unknown): boolean {
   return ["1", "true", "yes"].includes(String(value ?? "").trim().toLowerCase());
 }

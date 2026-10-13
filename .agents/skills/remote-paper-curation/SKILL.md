@@ -82,6 +82,9 @@ or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
 
+Query every benchmark the paper reports under its exact name and common
+variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match
+may be a different task, such as an inpainting board named `ImageNet`.
 Try exact names and common spelling variants, but reject semantically different
 datasets or splits even when their names are similar. The `taxonomy` command
 searches only task and method names. Never use an empty taxonomy result to
@@ -149,10 +152,13 @@ eligible result from a model introduced by the paper, exactly as required by
 gamma sweeps, or other ablation rows. Apply the same best-eligible-only rule to
 `blocked_evaluations` inside benchmark gaps.
 
-Compare each proposed score with the paper's existing row on that leaderboard,
-including other sizes of the same family. If the existing result is equal or
-better under the configured metric direction and scale, omit the new variant and
-report `already_present`. If the new result is better, provide primary evidence
+Compare each proposed score with this paper's own existing row on that
+leaderboard (same `paper_id`), including other sizes of the same family. If
+that row is equal or better under the configured metric direction and scale,
+omit the new variant and report `already_present`. Rows from other papers never
+make a result `already_present`: a paper-native result belongs on its
+leaderboard whatever its rank, so never skip it because other models score
+higher. If the new result is better, provide primary evidence
 and the existing row's full before-state in `evaluation_removals` to consolidate
 onto the new best result. Explain the best-result replacement; do not call an
 accurately reported older score factually wrong. Never insert a second variant

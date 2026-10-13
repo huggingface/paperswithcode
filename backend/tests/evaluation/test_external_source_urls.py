@@ -63,6 +63,18 @@ def test_evaluation_is_external_false_for_same_arxiv_paper():
     )
 
 
+def test_hugging_face_paper_page_is_the_same_arxiv_paper():
+    for url in (
+        "https://huggingface.co/papers/2111.12993",
+        "https://huggingface.co/papers/2111.12993.md",
+        "https://huggingface.co/papers/2111.12993v2/",
+    ):
+        assert not evaluation_is_external(url, "2111.12993", 80367)
+    assert evaluation_is_external(
+        "https://huggingface.co/papers/2010.11929.md", "2111.12993", 80367
+    )
+
+
 class _FakePaper:
     def __init__(
         self,

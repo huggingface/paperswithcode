@@ -43,7 +43,7 @@ export interface PaperCardProps {
   year: number | null;
   /** /api/thumbnails url or paper-supplied thumbnail; null otherwise */
   thumbnailUrl: string | null;
-  /** AI-generated TL;DR; null until the generation pipeline ships */
+  /** Short feed-style TL;DR; null when the paper has none */
   tldr: string | null;
   /** number of arxiv versions; null until version-list is loaded */
   version: string;
