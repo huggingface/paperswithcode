@@ -889,6 +889,105 @@ def test_scheduled_evaluation_accepts_configured_metric_names(
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
 
 
+@pytest.mark.parametrize(
+    "board,source_value,source_scale,stored,error",
+    [
+        (
+            [{"GenEval Score": "92.1"}, {"GenEval Score": 88.4}, {"GenEval Score": 95}],
+            0.923,
+            "0-100",
+            0.923,
+            "looks like a 0-1 fraction",
+        ),
+        (
+            [{"GenEval Score": "92.1"}, {"GenEval Score": 88.4}, {"GenEval Score": 95}],
+            0.923,
+            "0-1",
+            92.3,
+            None,
+        ),
+        (
+            [{"GenEval Score": "92.1"}, {"GenEval Score": 0.9}, {"GenEval Score": 95}],
+            0.8,
+            "0-100",
+            0.8,
+            None,
+        ),
+        (
+            [
+                {"GenEval Score": "92.1"},
+                {"GenEval Score": "n/a"},
+                {"GenEval Score": 95},
+            ],
+            0.923,
+            "0-100",
+            0.923,
+            None,
+        ),
+    ],
+)
+def test_scheduled_evaluation_checks_sub_one_percent_against_leaderboard(
+    board, source_value, source_scale, stored, error
+):
+    from backend.models.database import Evaluation, Metric, Paper
+
+    paper = SimpleNamespace(
+        id=42, source="arxiv", source_url=None, arxiv_id="2601.00001"
+    )
+
+    class Query:
+        def __init__(self, model):
+            self.model = model
+
+        def join(self, *_args):
+            return self
+
+        def filter(self, *_args):
+            return self
+
+        def one_or_none(self):
+            return SimpleNamespace(supports_harness=False)
+
+        def all(self):
+            if self.model is Metric:
+                return [SimpleNamespace(name="GenEval Score", scale="0-100")]
+            if self.model is Evaluation.metrics:
+                return [(metrics,) for metrics in board]
+            return []
+
+    class Database:
+        def get(self, model, _key):
+            return paper if model is Paper else None
+
+        def query(self, model):
+            return Query(model)
+
+    row = SimpleNamespace(
+        kind="add-evals",
+        paper_id=42,
+        trigger="hf-daily-cron",
+        trace_status="preapply_stored",
+    )
+    evaluation = _evaluation(model_name="Useful Model")
+    evaluation.metrics = {"GenEval Score": stored}
+    body = ApplyMutationRequest(
+        evaluations=[evaluation],
+        evaluation_removals=[],
+        benchmark_gaps=[],
+        validation_evidence=[],
+        score_evidence=[
+            _score_evidence(source_value=source_value, source_scale=source_scale)
+        ],
+    )
+    service = _service(Database(), SimpleNamespace())
+    if error:
+        with pytest.raises(ValueError, match=error):
+            service._validate_scheduled_policy(row, body)
+        return
+    result = service._validate_scheduled_policy(row, body)
+    assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
+
+
 def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
     from backend.models.database import Evaluation, Paper
 

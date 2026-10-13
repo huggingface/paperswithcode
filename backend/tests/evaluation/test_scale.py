@@ -6,7 +6,10 @@ from pydantic import ValidationError
 
 from backend.models.curation import ApplyMutationRequest
 from backend.models.evaluations import EvaluationScoreEvidence
-from backend.services.evaluation_scale_service import validate_source_score
+from backend.services.evaluation_scale_service import (
+    validate_board_scale,
+    validate_source_score,
+)
 
 
 def evidence(value, scale):
@@ -83,3 +86,50 @@ def test_score_evidence_survives_proposal_serialization_and_matches_job_schema()
         ApplyMutationRequest.model_validate(payload).score_evidence
         == body.score_evidence
     )
+
+
+PERCENT_BOARD = [92.1, 88.4, 95.0, 71.3]
+
+
+@pytest.mark.parametrize(
+    "target,source,suggested",
+    [("0-100", 0.923, "submit 92.3"), ("percentage", 1.0, "submit 100")],
+)
+def test_board_rejects_fraction_declared_as_percent(target, source, suggested):
+    with pytest.raises(ValueError, match=suggested):
+        validate_board_scale(target, evidence(source, "0-100"), lambda: PERCENT_BOARD)
+
+
+def test_one_genuine_sub_one_row_does_not_disable_the_board_check():
+    board = [0.44, *range(15, 100)]  # AIME-like: a lone weak model below 1
+    with pytest.raises(ValueError, match="at least 18"):
+        validate_board_scale("0-100", evidence(0.714, "0-100"), lambda: board)
+
+
+@pytest.mark.parametrize(
+    "target,source,units,board",
+    [
+        # Converted fractions and ordinary percentages are not ambiguous.
+        ("0-100", 0.923, "0-1", PERCENT_BOARD),
+        ("0-100", 92.3, "0-100", PERCENT_BOARD),
+        ("0-100", 0, "0-100", PERCENT_BOARD),
+        # Too few rows, or a board whose low tail genuinely scores near zero.
+        ("0-100", 0.9, "0-100", [92.1, 88.4]),
+        ("0-100", 0.9, "0-100", [0.5, 1.2, 2.4, 3.1]),
+        ("0-100", 0.9, "0-100", [37.1, 95.0, 0.9, 54.4]),
+        ("0-100", 0.9, "0-100", [1.06, 2.5, 3.0, *range(20, 67)]),
+        # Only 0-100 leaderboards are checked.
+        ("0-1", 0.923, "0-100", PERCENT_BOARD),
+        ("seconds", 0.9, "native", PERCENT_BOARD),
+    ],
+)
+def test_board_accepts_unambiguous_or_supported_scores(target, source, units, board):
+    validate_board_scale(target, evidence(source, units), lambda: board)
+
+
+def test_board_values_load_only_for_ambiguous_scores():
+    def fail():
+        raise AssertionError("board values should not be loaded")
+
+    validate_board_scale("0-100", evidence(92.3, "0-100"), fail)
+    validate_board_scale("0-1", evidence(0.5, "0-100"), fail)

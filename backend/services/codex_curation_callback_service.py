@@ -38,6 +38,7 @@ from backend.models.database import (
 )
 from backend.services.evaluation_scale_service import (
     metric_scale_bounds,
+    validate_board_scale,
     validate_source_score,
 )
 from backend.services.benchmark_gap_service import BenchmarkGapService
@@ -70,6 +71,8 @@ from backend.services.trending_model_resolution_service import (
     model_family_key,
 )
 from backend.utils.source_urls import source_url_identity
+
+_NUMERIC_SCORE = re.compile(r"-?\d+(?:\.\d+)?(?:[eE]-?\d+)?")
 
 
 class CodexCurationPaperNotFoundError(LookupError):
@@ -1380,10 +1383,12 @@ class CodexCurationCallbackService:
                 if not math.isfinite(numeric):
                     raise ValueError("Evaluation metric must be finite")
                 self._validate_metric_scale(configured[metric_name].scale, numeric)
-                validate_source_score(
+                evidence = score_evidence[(item.task_id, item.dataset_id, metric_name)]
+                validate_source_score(configured[metric_name].scale, numeric, evidence)
+                validate_board_scale(
                     configured[metric_name].scale,
-                    numeric,
-                    score_evidence[(item.task_id, item.dataset_id, metric_name)],
+                    evidence,
+                    lambda: self._board_metric_values(item, metric_name),
                 )
             matches = self._matching_evaluations(item)
             if matches:
@@ -1494,6 +1499,25 @@ class CodexCurationCallbackService:
             raise ValueError(
                 f"Evaluation metric value {value:g} is outside configured scale {scale}"
             )
+
+    def _board_metric_values(self, item, metric_name: str) -> list[float]:
+        """Numeric values of one metric on a leaderboard, excluding this paper."""
+        rows = (
+            self.db.query(Evaluation.metrics)
+            .filter(
+                Evaluation.task_id == item.task_id,
+                Evaluation.dataset_id == item.dataset_id,
+                Evaluation.paper_id != item.paper_id,
+                Evaluation.metrics.has_key(metric_name),
+            )
+            .all()
+        )
+        values = []
+        for (metrics,) in rows:
+            text = str(metrics[metric_name]).rstrip("%")
+            if _NUMERIC_SCORE.fullmatch(text):
+                values.append(float(text))
+        return values
 
     def _matching_evaluations(self, item) -> list[Evaluation]:
         return (
