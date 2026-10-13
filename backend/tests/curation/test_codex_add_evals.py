@@ -835,7 +835,8 @@ def test_late_invalid_enrichment_input_rolls_back_before_enqueue(monkeypatch):
             },
         )
 
-    assert response.status_code == 500
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Invalid method IDs: {999}"}
     assert database.rollbacks == 1
     assert database.commits == 0
     assert paper.tasks_changed is False

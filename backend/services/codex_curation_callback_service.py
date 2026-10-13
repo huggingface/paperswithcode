@@ -108,14 +108,13 @@ def _requires_scheduled_dispatch_pause(_exc: Exception) -> bool:
     return False
 
 
-def _retryable_scheduled_validation(row, exc: Exception) -> bool:
+def _retryable_validation(row, exc: Exception) -> bool:
     """Allow one correction only for ordinary, proposal-fixable validation."""
     prior_rejection = (getattr(row, "validation_summary", None) or {}).get(
         "status"
     ) == "rejected"
     return bool(
-        getattr(row, "trigger", "admin") != "admin"
-        and not prior_rejection
+        not prior_rejection
         and (
             type(exc) is ValueError
             or isinstance(
@@ -636,9 +635,7 @@ class CodexCurationCallbackService:
                     self.db.get(type(row), row.id) if not mutation_closed else None
                 )
                 if rejected is not None:
-                    retryable_validation = _retryable_scheduled_validation(
-                        rejected, exc
-                    )
+                    retryable_validation = _retryable_validation(rejected, exc)
                     rejected.proposal = body.model_dump(mode="json")
                     rejected.validation_summary = {
                         "status": "rejected",
@@ -780,9 +777,7 @@ class CodexCurationCallbackService:
             )
             should_commit = False
             if rejected_row is not None:
-                retryable_validation = _retryable_scheduled_validation(
-                    rejected_row, exc
-                )
+                retryable_validation = _retryable_validation(rejected_row, exc)
                 rejected_row.proposal = body.model_dump(mode="json")
                 rejected_row.validation_summary = {
                     "status": "rejected",

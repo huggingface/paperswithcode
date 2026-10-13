@@ -381,9 +381,8 @@ def apply_mutation(
         db.rollback()
         raise HTTPException(status_code=423, detail=str(error)) from error
     except (LookupError, RuntimeError, ValueError) as error:
-        if getattr(row, "kind", None) == "resolve-model-paper" or (
-            getattr(row, "trigger", "admin") != "admin"
-            and isinstance(error, ValueError)
+        if getattr(row, "kind", None) == "resolve-model-paper" or isinstance(
+            error, ValueError
         ):
             raise HTTPException(status_code=422, detail=str(error)) from error
         raise

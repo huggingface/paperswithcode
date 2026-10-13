@@ -504,17 +504,16 @@ def test_late_evaluation_failure_rolls_back_the_whole_apply():
     assert row.applied_at is None
 
 
+@pytest.mark.parametrize("trigger", ["hf-trending-cron", "admin"])
 @pytest.mark.parametrize(
     "error_type", [ValueError, CodexCurationEvaluationsNotAllowedError]
 )
-def test_scheduled_validation_failure_keeps_job_open_for_one_corrected_apply(
-    error_type,
-):
+def test_validation_failure_keeps_job_open_for_one_corrected_apply(error_type, trigger):
     row = SimpleNamespace(
         id=42,
         kind="add-evals",
         status="running",
-        trigger="hf-trending-cron",
+        trigger=trigger,
         submitted_at=None,
         applied_at=None,
         paper_id=42,
@@ -1140,6 +1139,41 @@ def test_apply_rejections_keep_http_contract(
     assert response.json() == {"detail": detail}
     assert database.commits == 0
     assert database.rollbacks == 1
+
+
+def test_admin_validation_rejection_returns_detail_to_worker(monkeypatch):
+    from backend.routers import codex_curation_callbacks
+
+    row = SimpleNamespace(
+        kind="add-evals",
+        trigger="admin",
+        status="running",
+        submitted_at=None,
+        applied_at=None,
+        paper_id=42,
+    )
+
+    class Service:
+        def apply(self, *_args, **_kwargs):
+            raise ValueError("Benchmark 'CIFAR-100' is not already_present")
+
+    settings = get_settings().model_copy(update={"codex_jobs_enabled": True})
+    monkeypatch.setattr(codex_curation_callbacks, "_callback_job", lambda *_args: row)
+    monkeypatch.setattr(codex_curation_callbacks, "_service", lambda _db: Service())
+    app = create_app()
+    app.dependency_overrides[get_settings] = lambda: settings
+    app.dependency_overrides[get_database_session] = lambda: _MutationDatabase()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/v1/admin/codex-curation/jobs/"
+            "00000000-0000-0000-0000-000000000042/apply",
+            headers={"Authorization": "Bearer scoped-token"},
+            json={"evaluations": []},
+        )
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "Benchmark 'CIFAR-100' is not already_present"}
 
 
 def test_callback_auth_errors_and_disabled_precedence_are_stable():
