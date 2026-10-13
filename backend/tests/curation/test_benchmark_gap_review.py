@@ -122,6 +122,7 @@ def add_candidate(
     **fields,
 ) -> BenchmarkCurationCandidate:
     fields.setdefault("identity_key", uuid.uuid4().hex)
+    fields.setdefault("first_seen_at", datetime.now(UTC))
     candidate = BenchmarkCurationCandidate(
         id=uuid.uuid4(),
         canonical_name=name,
@@ -131,7 +132,6 @@ def add_candidate(
         status=status,
         distinct_paper_count=papers,
         confidence=confidence,
-        first_seen_at=datetime.now(UTC),
         last_seen_at=datetime.now(UTC),
         **fields,
     )
@@ -291,6 +291,7 @@ def test_review_rejects_ineligible_candidates_and_merge_chains(db):
                         "merge_into_candidate_id": c.id,
                         "reason": "x",
                     },
+                    {"candidate_id": c.id, "decision": "approve", "reason": "x"},
                 ],
             )
         )
@@ -784,3 +785,35 @@ def test_first_creation_job_of_an_approval_counts_toward_backoff(db):
     review.handle_terminal_job(second)
 
     assert candidate.status == "candidate"
+
+
+def test_review_must_decide_every_candidate_in_the_batch(db):
+    first = add_candidate(db, "Tiny-ImageNet", papers=16)
+    skipped = add_candidate(db, "ModelNet40", papers=9)
+    late = add_candidate(
+        db,
+        "BrandNewBench",
+        papers=3,
+        first_seen_at=datetime.now(UTC) + timedelta(minutes=5),
+    )
+    only_first = ReviewBenchmarkGapsMutation(
+        summary="x",
+        decisions=[{"candidate_id": first.id, "decision": "approve", "reason": "x"}],
+    )
+
+    with pytest.raises(ValueError, match=f"1 have no decision: {skipped.id}"):
+        service(db).apply_review(only_first, reported_before=datetime.now(UTC))
+
+    result = service(db).apply_review(
+        ReviewBenchmarkGapsMutation(
+            summary="x",
+            decisions=[
+                {"candidate_id": first.id, "decision": "approve", "reason": "x"},
+                {"candidate_id": skipped.id, "decision": "defer", "reason": "x"},
+            ],
+        ),
+        reported_before=datetime.now(UTC),
+    )
+
+    assert result["decisions"] == {"approve": 1, "defer": 1}
+    assert late.status == "candidate" and late.reviewed_at is None

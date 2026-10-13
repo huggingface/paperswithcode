@@ -591,9 +591,32 @@ class BenchmarkGapReviewService:
 
     # Overseer decisions
 
-    def apply_review(self, mutation: ReviewBenchmarkGapsMutation) -> dict:
+    def apply_review(
+        self,
+        mutation: ReviewBenchmarkGapsMutation,
+        *,
+        reported_before: datetime | None = None,
+    ) -> dict:
+        """Apply one decision per candidate in the review batch.
+
+        Every batch candidate first reported before ``reported_before`` (the
+        review job's creation) must be decided; later arrivals wait a day.
+        """
         now = _now()
         eligible = {item.id for item in self.eligible_query(now).all()}
+        decided = {item.candidate_id for item in mutation.decisions}
+        missing = [
+            str(item.id)
+            for item in self.eligible_query(now).limit(REVIEW_BATCH_LIMIT)
+            if item.id not in decided
+            and (reported_before is None or item.first_seen_at < reported_before)
+        ]
+        if missing:
+            raise ValueError(
+                f"Decide every candidate in context.review.candidates; "
+                f"{len(missing)} have no decision: {', '.join(missing[:20])}"
+                + (" ..." if len(missing) > 20 else "")
+            )
         merge_sources = {
             item.candidate_id for item in mutation.decisions if item.decision == "merge"
         }

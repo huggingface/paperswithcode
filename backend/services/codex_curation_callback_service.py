@@ -853,7 +853,9 @@ class CodexCurationCallbackService:
                 self.db, get_settings(), self.job_service
             )
             result = (
-                review.apply_review(body.review_benchmark_gaps)
+                review.apply_review(
+                    body.review_benchmark_gaps, reported_before=row.created_at
+                )
                 if row.kind == "review-benchmark-gaps"
                 else review.apply_add_benchmark(row, body.add_benchmark)
             )

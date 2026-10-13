@@ -282,9 +282,12 @@ python jobs/curation_api.py catalog "ScanObjectNN"
 
 ### `review-benchmark-gaps`: the daily overseer
 
-`context.review.candidates` lists every eligible gap (reported by at least
-three distinct papers), strongest evidence first. Decide each one with the
-whole list in view:
+`context.review.candidates` lists every eligible gap in today's batch
+(reported by at least three distinct papers), strongest evidence first.
+Return exactly one decision for every candidate in that list, up to 150; the
+server rejects a proposal that leaves any candidate out. Triage from the
+summaries in the context; do not research candidates one by one (the
+`add-benchmark` job does that). Decide each one with the whole list in view:
 
 - `merge` duplicates into the candidate to keep, for example `TinyImageNet`
   into `Tiny-ImageNet` (`merge_into_candidate_id`). Never merge distinct
@@ -303,7 +306,9 @@ whole list in view:
   exact task and metric.
 
 Give a specific reason per decision; the reasons are the audit trail. Decide
-only candidates from the context.
+only candidates from the context. Build the proposal with a short Python
+script that walks `/tmp/context.json` and writes your decision for every
+candidate id, so none is dropped.
 
 ```json
 {
