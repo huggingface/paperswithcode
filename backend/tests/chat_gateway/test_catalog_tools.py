@@ -72,7 +72,8 @@ def test_gateway_catalog_returns_not_found_for_unknown_task(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+        "backend.chat_gateway_app._scope",
+        lambda *_args, **_kwargs: SimpleNamespace(scopes=["catalog"]),
     )
     monkeypatch.setattr(
         ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
@@ -111,7 +112,8 @@ def test_gateway_catalog_maps_typed_not_found_errors(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+        "backend.chat_gateway_app._scope",
+        lambda *_args, **_kwargs: SimpleNamespace(scopes=["catalog"]),
     )
     monkeypatch.setattr(
         ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
@@ -657,7 +659,8 @@ def test_gateway_paper_read_returns_controlled_upstream_error(monkeypatch):
             pass
 
     monkeypatch.setattr(
-        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+        "backend.chat_gateway_app._scope",
+        lambda *_args, **_kwargs: SimpleNamespace(scopes=["catalog"]),
     )
     monkeypatch.setattr(
         ChatCapabilityService, "meter_catalog", lambda *_args, **_kwargs: None
