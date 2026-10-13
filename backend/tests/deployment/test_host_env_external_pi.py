@@ -161,3 +161,19 @@ def test_cli_round_trip_only_touches_protected_staging_files(
     else:
         assert staging_lines == _lines(_EXTERNAL_PROFILE)
         assert not backup_path.exists()
+
+
+def test_full_staging_rebuild_keeps_the_installed_external_pi_state():
+    for profile in (
+        _lines(_EXTERNAL_PROFILE),
+        configure_host_env.assign(
+            _lines(_EXTERNAL_PROFILE),
+            configure_host_env.staging_external_pi_disable_values(
+                _lines(_EXTERNAL_PROFILE)
+            )[0],
+        ),
+    ):
+        kept = configure_host_env.staging_runtime_passthrough(profile)
+        for key in configure_host_env._STAGING_EXTERNAL_PI_OFF:
+            if key in profile:
+                assert kept[key] == profile[key], key

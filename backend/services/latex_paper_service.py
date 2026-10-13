@@ -57,6 +57,9 @@ _MAX_REPAIR_ATTEMPTS = 3
 # whole repair stays inside pwc-paper's 130-second request timeout.
 _REPAIR_POLL_SECONDS = 1.0
 _REPAIR_POLL_ATTEMPTS = 110
+# Wall-clock budget from submission to result, leaving room for the result
+# read and storage writes inside pwc-paper's 130-second request.
+_REPAIR_DEADLINE_SECONDS = 100.0
 _AUDIT_PROVENANCE_KEY = "_audit_provenance"
 
 logger = logging.getLogger(__name__)
@@ -363,8 +366,11 @@ class LatexPaperService:
             display_metadata=_audit_metadata(manifest.display_metadata, provenance),
             actor_type=actor_type,
         )
-        artifact.source_head_version_id = version.id
         self.db.add(version)
+        self.db.flush()
+        # The head columns carry no ORM foreign key, so point at the version
+        # only after its row exists; PostgreSQL checks the key immediately.
+        artifact.source_head_version_id = version.id
         self.db.flush()
         try:
             for path, data in files.items():
@@ -917,6 +923,7 @@ class LatexPaperService:
         compiler = self.compiler or compiler_transport_from_settings(self.settings)
         result: CompilerResult | None = None
         submitted = False
+        deadline = time.monotonic() + _REPAIR_DEADLINE_SECONDS
         try:
             status = compiler.submit(
                 job_id=str(candidate_id),
@@ -924,12 +931,15 @@ class LatexPaperService:
                 entrypoint=parent_manifest.root_document,
             )
             submitted = True
-            for _ in range(_REPAIR_POLL_ATTEMPTS + 1):
+            for _ in range(_REPAIR_POLL_ATTEMPTS):
                 if status.state in {
                     CompilerJobState.SUCCEEDED,
                     CompilerJobState.FAILED,
                 }:
                     result = compiler.result(str(candidate_id))
+                    break
+                if time.monotonic() >= deadline:
+                    compiler.cancel(str(candidate_id))
                     break
                 time.sleep(_REPAIR_POLL_SECONDS)
                 status = compiler.status(str(candidate_id))
