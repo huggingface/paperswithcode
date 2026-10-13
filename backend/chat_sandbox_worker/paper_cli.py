@@ -17,6 +17,7 @@ BROKER = "http://127.0.0.1:8765"
 WORKSPACE = Path("/workspace")
 EVENT_PREFIX = "@@PWC_PAPER@@"
 MAX_RESPONSE = 3 * 1024 * 1024
+_RETRYABLE_STATUSES = {502, 503, 504}
 _DIRECTORY_OPEN_FLAGS = (
     os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
 )
@@ -30,12 +31,20 @@ def _command(operation: str, **values: object) -> dict:
         {"Content-Type": "application/json"},
         method="POST",
     )
-    try:
-        with urllib.request.urlopen(request, timeout=130) as response:
-            data = response.read(MAX_RESPONSE + 1)
-    except urllib.error.HTTPError as error:
-        detail = error.read(8 * 1024).decode(errors="replace")
-        raise RuntimeError(detail or f"Paper request failed ({error.code})") from None
+    for attempt in range(2):
+        try:
+            with urllib.request.urlopen(request, timeout=130) as response:
+                data = response.read(MAX_RESPONSE + 1)
+            break
+        except urllib.error.HTTPError as error:
+            # An edge proxy can drop the reply to a request the backend still
+            # completes. Draft and repair replays return the published head.
+            if attempt == 0 and error.code in _RETRYABLE_STATUSES:
+                continue
+            detail = error.read(8 * 1024).decode(errors="replace")
+            raise RuntimeError(
+                detail or f"Paper request failed ({error.code})"
+            ) from None
     if len(data) > MAX_RESPONSE:
         raise RuntimeError("Paper response exceeded its bound")
     result = json.loads(data)
