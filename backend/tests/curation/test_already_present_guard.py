@@ -92,7 +92,12 @@ def _already_present(value=82.0, **overrides):
 
 
 def _evaluation(evaluation_id: int, score, metric="Top-1 Accuracy"):
-    return SimpleNamespace(id=evaluation_id, paper_id=PAPER_ID, metrics={metric: score})
+    return SimpleNamespace(
+        id=evaluation_id,
+        paper_id=PAPER_ID,
+        model_name="PolyViT-L",
+        metrics={metric: score},
+    )
 
 
 HIGHER = SimpleNamespace(name="Top-1 Accuracy", direction="higher_is_better")
@@ -119,6 +124,16 @@ def test_already_present_rejected_when_own_row_is_worse():
 
     with pytest.raises(ValueError, match="equal to or better than 82"):
         service._validate_mutation(_row(), _body(_already_present(82.0)))
+
+
+def test_rejection_names_the_stored_rows_so_a_retry_can_correct_the_value():
+    # PolyViT job e4360f72 copied the CIFAR-10 column (99.4) for CIFAR-100.
+    service = _service(_Database(metric=HIGHER, evaluations=[_evaluation(7, 93.9)]))
+
+    with pytest.raises(
+        ValueError, match=r"stored rows there: evaluation 7 'PolyViT-L' = 93\.9"
+    ):
+        service._validate_mutation(_row(), _body(_already_present(99.4)))
 
 
 @pytest.mark.parametrize("score", [82.0, "82%", 84.5, "82.0 ± 0.3", "83.1 (±0.2)"])

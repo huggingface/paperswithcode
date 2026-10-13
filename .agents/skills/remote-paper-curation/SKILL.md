@@ -164,7 +164,12 @@ leaderboard (same `paper_id`), including other sizes of the same family. If
 that row is equal or better under the configured metric direction and scale,
 omit the new variant and report `already_present` with that leaderboard's
 `task_id`, `dataset_id`, `metric`, and the paper's best eligible score as
-`value` on the leaderboard scale. The server rejects `already_present` unless
+`value` on the leaderboard scale. Before submitting, check each
+`already_present` value against that leaderboard's row in context
+`paper.evaluations`. When they differ, reread the source table column and
+model row: a mismatch usually means an adjacent column was copied. A rerun on a
+paper whose results are all stored is a valid proposal with no evaluations, in
+which every benchmark is `already_present`. The server rejects `already_present` unless
 this paper already has an equal or better row on that exact leaderboard. Rows
 from other papers never make a result `already_present`: a paper-native result
 belongs on its leaderboard whatever its rank, so never skip it because other

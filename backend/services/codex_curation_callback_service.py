@@ -1209,8 +1209,8 @@ class CodexCurationCallbackService:
                     f"{metric_name!r} that is not configured for task {task_id} "
                     f"and dataset {dataset_id}"
                 )
-            existing_scores = [
-                score
+            existing = [
+                (evaluation, score)
                 for evaluation in self.db.query(Evaluation)
                 .filter(
                     Evaluation.paper_id == row.paper_id,
@@ -1230,14 +1230,22 @@ class CodexCurationCallbackService:
             if not any(
                 math.isclose(score, value, rel_tol=1e-9, abs_tol=1e-9)
                 or (score < value if lower_is_better else score > value)
-                for score in existing_scores
+                for _evaluation, score in existing
             ):
+                stored = ", ".join(
+                    f"evaluation {evaluation.id} {evaluation.model_name!r} = {score:g}"
+                    for evaluation, score in existing
+                )
                 raise ValueError(
                     f"Benchmark {label!r} is not already_present: this paper has "
                     f"no row on task {task_id} / dataset {dataset_id} / "
                     f"{metric_name} that is equal to or better than {value:g}. "
-                    "Rows from other papers ranking higher never justify a skip; "
-                    "submit the paper's best eligible result as an evaluation."
+                    f"This paper's stored rows there: {stored or 'none'}. "
+                    "Recheck the source table column for this benchmark; if the "
+                    "stored row matches the paper's best eligible result, report "
+                    "that value. Rows from other papers ranking higher never "
+                    "justify a skip; otherwise submit the paper's best eligible "
+                    "result as an evaluation."
                 )
 
     def _skipped_configured_leaderboards(
