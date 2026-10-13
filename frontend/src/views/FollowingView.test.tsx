@@ -24,7 +24,7 @@ beforeEach(() => {
   auth.user = { hf_subject: 'alice', username: 'alice' };
   vi.stubEnv('VITE_CHAT_ENABLED', '0');
   vi.spyOn(catalogApi, 'topTasks').mockResolvedValue([]);
-  vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [] } as Awaited<ReturnType<typeof catalogApi.trendingTasks>>);
+  vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 });
   vi.spyOn(papersApi, 'list').mockResolvedValue({ count: 0, results: [], next_page: null, previous_page: null });
   vi.spyOn(researchApi, 'following').mockResolvedValue([{ paper, paper_key: 'arxiv:2610.12345',
     title: paper.title, url: '/paper/2610.12345', summary: 'Short summary.', published: paper.published,
