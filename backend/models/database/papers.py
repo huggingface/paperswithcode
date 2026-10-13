@@ -288,10 +288,24 @@ class Author(Base):
         Index("idx_authors_hf_username", "hf_username"),
         Index("idx_authors_hf_id", "hf_id"),
         Index("idx_authors_name", "name"),
+        Index("idx_authors_lower_name", func.lower(name)),
     )
 
     def __repr__(self) -> str:
         return f"<Author(id={self.id}, name='{self.name}', hf_username='{self.hf_username}')>"
+
+
+class AuthorAlias(Base):
+    """Former author ID merged into another author, kept so old URLs resolve."""
+
+    __tablename__ = "author_aliases"
+
+    alias_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    author_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("authors.id", ondelete="CASCADE"), nullable=False
+    )
+
+    __table_args__ = (Index("idx_author_aliases_author_id", "author_id"),)
 
 
 class PaperAuthor(Base):

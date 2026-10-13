@@ -35,8 +35,8 @@ from sqlalchemy.orm import Session
 
 from backend.database.paper_merge import find_arxiv_paper_for_title
 from backend.models.papers import Paper
+from backend.services.author_service import get_or_create_author_by_name
 from backend.models.database import (
-    Author as DBAuthor,
     Paper as DBPaper,
     PaperAuthor as DBPaperAuthor,
     PaperRepository as DBPaperRepository,
@@ -339,11 +339,7 @@ class ExternalResourceService:
                 continue
             seen.add(key)
 
-            db_author = self.db.query(DBAuthor).filter(DBAuthor.name == name).first()
-            if db_author is None:
-                db_author = DBAuthor(name=name)
-                self.db.add(db_author)
-                self.db.flush()
+            db_author = get_or_create_author_by_name(self.db, name)
 
             link = (
                 self.db.query(DBPaperAuthor)

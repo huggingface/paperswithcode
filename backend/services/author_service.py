@@ -11,7 +11,12 @@ from typing import Optional
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc, asc, or_
 
-from backend.models.database import Author as DBAuthor, Paper as DBPaper, PaperAuthor
+from backend.models.database import (
+    Author as DBAuthor,
+    AuthorAlias,
+    Paper as DBPaper,
+    PaperAuthor,
+)
 from backend.models.papers import (
     Author,
     Authors,
@@ -30,11 +35,40 @@ def normalize_arxiv_author_name(full_name: str) -> str:
     return re.sub(r"\s*\(.*?\)$", "", name)
 
 
+def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
+    """Return the author with this name, ignoring case, creating it if missing.
+
+    "Tom Aarsen" and "Tom AARSEN" are the same author. When several rows
+    already share a name, prefer the one linked to a Hugging Face account.
+    """
+    author = (
+        db.query(DBAuthor)
+        .filter(func.lower(DBAuthor.name) == name.lower())
+        .order_by(DBAuthor.hf_username.is_(None), DBAuthor.id)
+        .first()
+    )
+    if author is None:
+        author = DBAuthor(name=name)
+        db.add(author)
+        db.flush()
+    return author
+
+
 class AuthorService:
     """Service class for author-related operations."""
 
     def __init__(self, db: Session):
         self.db = db
+
+    def _resolve_author_id(self, author_id: str) -> int:
+        """Map an author ID merged into another author to the surviving ID."""
+        requested_id = int(author_id)
+        merged_into = (
+            self.db.query(AuthorAlias.author_id)
+            .filter(AuthorAlias.alias_id == requested_id)
+            .scalar()
+        )
+        return merged_into or requested_id
 
     def get_authors(
         self,
@@ -151,7 +185,7 @@ class AuthorService:
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
                 .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
-                .filter(DBAuthor.id == int(author_id))
+                .filter(DBAuthor.id == self._resolve_author_id(author_id))
                 .group_by(DBAuthor.id)
                 .first()
             )
@@ -209,9 +243,9 @@ class AuthorService:
             DatabaseError: If database query fails
         """
         try:
-            # Verify author exists
+            resolved_id = self._resolve_author_id(author_id)
             author_exists = (
-                self.db.query(DBAuthor).filter(DBAuthor.id == int(author_id)).first()
+                self.db.query(DBAuthor).filter(DBAuthor.id == resolved_id).first()
             )
 
             if not author_exists:
@@ -221,7 +255,7 @@ class AuthorService:
             query = (
                 self.db.query(DBPaper)
                 .join(PaperAuthor, DBPaper.id == PaperAuthor.paper_id)
-                .filter(PaperAuthor.author_id == int(author_id))
+                .filter(PaperAuthor.author_id == resolved_id)
             )
 
             # Apply latest version filter

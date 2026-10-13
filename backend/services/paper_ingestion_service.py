@@ -9,9 +9,12 @@ import time
 from sqlalchemy.orm import Session
 
 from backend.models.papers import Paper as ApiPaper
-from backend.models.database import Author, Paper, PaperAuthor
+from backend.models.database import Paper, PaperAuthor
 from backend.services.arxiv_service import ArxivService
-from backend.services.author_service import normalize_arxiv_author_name
+from backend.services.author_service import (
+    get_or_create_author_by_name,
+    normalize_arxiv_author_name,
+)
 from backend.services.paper_service import PaperService
 
 
@@ -69,11 +72,7 @@ class PaperIngestionService:
         paper = self.db.query(Paper).filter(Paper.id == paper_id).one()
         for order, full_name in enumerate(metadata.authors or (), start=1):
             name = normalize_arxiv_author_name(full_name)
-            author = self.db.query(Author).filter(Author.name == name).first()
-            if author is None:
-                author = Author(name=name)
-                self.db.add(author)
-                self.db.flush()
+            author = get_or_create_author_by_name(self.db, name)
             if (
                 self.db.query(PaperAuthor)
                 .filter(

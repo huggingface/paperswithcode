@@ -9,9 +9,13 @@ from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 
-from backend.models.database import Author, Base, Paper, PaperAuthor
+from backend.models.database import Author, AuthorAlias, Base, Paper, PaperAuthor
 from backend.services.arxiv_service import ArxivPaperMetadata
-from backend.services.author_service import normalize_arxiv_author_name
+from backend.services.author_service import (
+    AuthorService,
+    get_or_create_author_by_name,
+    normalize_arxiv_author_name,
+)
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 
@@ -98,3 +102,58 @@ def test_ingestion_normalizes_deduplicates_orders_and_commits_authors(
         assert links == [("Ada Lovelace", 1), ("Grace Hopper", 2)]
         assert persisted_db.query(Author).count() == 2
         assert persisted_db.query(PaperAuthor).count() == 2
+
+
+def test_author_lookup_ignores_case_and_prefers_hf_linked_row(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'authors.db'}")
+    Base.metadata.create_all(bind=engine, tables=[Author.__table__])
+    with sessionmaker(bind=engine)() as db:
+        unlinked = Author(name="Tom AARSEN")
+        linked = Author(name="Tom Aarsen", hf_username="tomaarsen")
+        db.add_all([unlinked, linked])
+        db.flush()
+
+        assert get_or_create_author_by_name(db, "TOM AARSEN").id == linked.id
+        assert get_or_create_author_by_name(db, "tom aarsen").id == linked.id
+
+        created = get_or_create_author_by_name(db, "Grace Hopper")
+        assert created.id not in {unlinked.id, linked.id}
+        assert get_or_create_author_by_name(db, "GRACE HOPPER").id == created.id
+        assert db.query(Author).count() == 3
+
+
+def test_merged_author_id_resolves_to_surviving_author(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'aliases.db'}")
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[
+            Paper.__table__,
+            Author.__table__,
+            PaperAuthor.__table__,
+            AuthorAlias.__table__,
+        ],
+    )
+    with sessionmaker(bind=engine)() as db:
+        db.add(Author(id=1, name="Tom Aarsen", hf_username="tomaarsen"))
+        db.add(
+            Paper(
+                id=1,
+                arxiv_id="2605.00001",
+                version="v1",
+                title="Sentence Embeddings",
+                abstract="",
+                is_latest_version=True,
+            )
+        )
+        db.flush()
+        db.add_all(
+            [PaperAuthor(paper_id=1, author_id=1), AuthorAlias(alias_id=2, author_id=1)]
+        )
+        db.commit()
+
+        author = AuthorService(db).get_author_by_id("2")
+        assert (author.id, author.full_name, author.paper_count) == (
+            "1",
+            "Tom Aarsen",
+            1,
+        )

@@ -144,6 +144,7 @@ from backend.models.database.organizations import (
 from backend.models.database.papers import (
     Paper,
     Author,
+    AuthorAlias,
     PaperAuthor,
     PaperTask,
     PaperMethod,
@@ -284,6 +285,7 @@ __all__ = [
     "OrganizationTrendingHistory",
     "Paper",
     "Author",
+    "AuthorAlias",
     "PaperAuthor",
     "PaperTask",
     "PaperMethod",
