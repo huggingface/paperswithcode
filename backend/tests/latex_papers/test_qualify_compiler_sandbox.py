@@ -14,11 +14,8 @@ def test_qualification_settings_disable_all_user_facing_artifacts() -> None:
         chat_posterly_enabled=False,
         chat_artifact_storage_backend="hf_bucket",
         chat_artifact_hf_bucket_id="nielsr/pwc-chat-artifacts-staging",
-        chat_latex_compiler_hf_sandbox_image=(
-            "registry.hf.space/"
-            "nielsr-pwc-latex-compiler-private-staging@sha256:" + "a" * 64
-        ),
-        chat_latex_compiler_hf_sandbox_namespace="nielsr",
+        chat_latex_compiler_modal_image_id="im-TestLatexCompilerImage0",
+        chat_latex_compiler_modal_environment="pwc-latex-staging",
     )
 
     assert settings.chat_artifacts_enabled is False

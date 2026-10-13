@@ -26,10 +26,8 @@ CONFIG_ROOT = Path("/etc/paperswithcode")
 APP_ROOT = Path("/srv/paperswithcode")
 PRODUCTION_CHAT_SEALED_CONFIG = CONFIG_ROOT / "production-chat-prepared.env"
 STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
-STAGING_LATEX_COMPILER_IMAGE = re.compile(
-    r"registry\.hf\.space/nielsr-pwc-latex-compiler-[a-z0-9-]+-staging"
-    r"@sha256:[0-9a-f]{64}"
-)
+STAGING_LATEX_COMPILER_IMAGE = re.compile(r"im-[A-Za-z0-9]{20,32}")
+STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT = "pwc-latex-staging"
 
 STAGING_EXCLUDED_PREFIXES = (
     "PWC_POSTGRES_BACKUP_",
@@ -81,13 +79,9 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "PWC_CHAT_TRACKIO_URL",
     "PWC_CHAT_TRACKIO_PROJECT",
     "PWC_CHAT_TRACKIO_HF_TOKEN",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
     "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID",
     "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
     "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
     "PWC_CHAT_LATEX_PAPER_ENABLED",
@@ -493,12 +487,8 @@ def staging_scope_guardrail_values(current: dict[str, str]) -> dict[str, str]:
 
 
 STAGING_LATEX_COMPILER_SOURCE_KEYS = {
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS",
-    "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT",
     "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
 }
 
@@ -514,20 +504,17 @@ def staging_latex_paper_install_values(source: dict[str, str]) -> dict[str, str]
     missing = sorted(STAGING_LATEX_COMPILER_SOURCE_KEYS - values.keys())
     if missing:
         raise ValueError("staging compiler source is missing: " + ", ".join(missing))
-    image = values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"]
+    image = values["PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID"]
     if STAGING_LATEX_COMPILER_IMAGE.fullmatch(image) is None:
-        raise ValueError("staging compiler requires an immutable staging image")
-    expected = {
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE": "nielsr",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR": "cpu-upgrade",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS": "180",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION": (
-            "sandbox-netns-v1"
-        ),
-    }
-    for key, expected_value in expected.items():
-        if values[key] != expected_value:
-            raise ValueError(f"{key} must be {expected_value}")
+        raise ValueError("staging compiler requires an immutable Modal image ID")
+    if (
+        values["PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT"]
+        != STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT
+    ):
+        raise ValueError(
+            "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT must be "
+            + STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT
+        )
     encoded_key = values["PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"]
     try:
         raw_key = base64.b64decode(
@@ -565,12 +552,11 @@ def staging_latex_paper_mode_values(
             or not decoded_value(current["PWC_HF_TOKEN"]).strip()
         ):
             raise ValueError("staging compiler requires PWC_HF_TOKEN")
-        sandbox_token = decoded_value(
-            current["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN"]
-        ).strip()
-        hf_token = decoded_value(current["PWC_HF_TOKEN"]).strip()
-        if sandbox_token == hf_token:
-            raise ValueError("staging Sandbox credential must not reuse PWC_HF_TOKEN")
+        # The compiler has no credential of its own: the backend creates its
+        # sandboxes with the staging Modal workspace credential.
+        for key in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"):
+            if key not in current or not decoded_value(current[key]).strip():
+                raise ValueError(f"staging compiler requires {key}")
     # Paper turns run only on the Modal sandbox worker; external Pi admission
     # accepts ordinary research and the backend refuses to boot otherwise.
     if (
@@ -1954,12 +1940,6 @@ def main() -> int:
                         "staging compiler source must be a protected root-only file"
                     )
                 values = staging_latex_paper_install_values(legacy)
-                sandbox_token = values["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN"]
-                hf_line = current.get("PWC_HF_TOKEN")
-                if hf_line and decoded_value(hf_line).strip() == sandbox_token:
-                    raise ValueError(
-                        "staging Sandbox credential must not reuse PWC_HF_TOKEN"
-                    )
             else:
                 values = staging_latex_paper_mode_values(current, mode=mode)
         except ValueError as error:

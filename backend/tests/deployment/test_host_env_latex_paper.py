@@ -20,12 +20,8 @@ def test_staging_private_paper_runtime_configuration_is_preserved():
         "PWC_CHAT_LATEX_PAPER_ENABLED",
         "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
         "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION",
+        "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID",
+        "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT",
         "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
         "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED",
         "PWC_CHAT_ARTIFACT_STORAGE_BACKEND",
@@ -45,26 +41,25 @@ def _staging_latex_paper_source() -> dict[str, str]:
     )
     signing_key = base64.urlsafe_b64encode(private_key).rstrip(b"=").decode()
     values = {
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE": (
-            "registry.hf.space/nielsr-pwc-latex-compiler-private-staging@sha256:"
-            + "a" * 64
-        ),
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_NAMESPACE": "nielsr",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_TOKEN": "hf_sandbox_secret",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_FLAVOR": "cpu-upgrade",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IDLE_TIMEOUT_SECONDS": "180",
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_EGRESS_POLICY_ATTESTATION": (
-            "sandbox-netns-v1"
-        ),
+        "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID": "im-StagingLatexCompiler01",
+        "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT": "pwc-latex-staging",
         "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY": signing_key,
     }
     return {key: f"{key}={value}" for key, value in values.items()}
+
+
+_STAGING_IDENTITY = {
+    "PWC_HF_TOKEN": "hf_staging_identity",
+    "MODAL_TOKEN_ID": "ak-staging",
+    "MODAL_TOKEN_SECRET": "as-staging",
+}
 
 
 def _installed_lines(**extra: str) -> dict[str, str]:
     values = configure_host_env.staging_latex_paper_install_values(
         _staging_latex_paper_source()
     )
+    values.update(_STAGING_IDENTITY)
     values.update(extra)
     return {key: f"{key}={value}" for key, value in values.items()}
 
@@ -86,15 +81,21 @@ def test_staging_latex_paper_install_values_are_validated_and_disabled():
     )
 
     invalid = _staging_latex_paper_source()
-    invalid["PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE"] = (
-        "PWC_CHAT_LATEX_COMPILER_HF_SANDBOX_IMAGE=latest"
+    invalid["PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID"] = (
+        "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID=latest"
     )
-    with pytest.raises(ValueError, match="immutable staging image"):
+    with pytest.raises(ValueError, match="immutable Modal image ID"):
         configure_host_env.staging_latex_paper_install_values(invalid)
+    chat_environment = _staging_latex_paper_source()
+    chat_environment["PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT"] = (
+        "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT=pwc-chat-staging"
+    )
+    with pytest.raises(ValueError, match="must be pwc-latex-staging"):
+        configure_host_env.staging_latex_paper_install_values(chat_environment)
 
 
 def test_staging_latex_paper_modes_are_coherent_and_fail_closed():
-    current = _installed_lines(PWC_HF_TOKEN="hf_staging_identity")
+    current = _installed_lines()
 
     assert configure_host_env.staging_latex_paper_mode_values(
         current, mode="qualification"
@@ -123,16 +124,16 @@ def test_staging_latex_paper_modes_are_coherent_and_fail_closed():
     with pytest.raises(ValueError, match="compiler configuration"):
         configure_host_env.staging_latex_paper_mode_values({}, mode="qualification")
 
-    reused = _installed_lines(PWC_HF_TOKEN="hf_sandbox_secret")
-    with pytest.raises(ValueError, match="must not reuse PWC_HF_TOKEN"):
-        configure_host_env.staging_latex_paper_mode_values(reused, mode="activation")
+    for key in ("PWC_HF_TOKEN", "MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"):
+        missing = _installed_lines(**{key: ""})
+        with pytest.raises(ValueError, match=f"requires {key}"):
+            configure_host_env.staging_latex_paper_mode_values(
+                missing, mode="activation"
+            )
 
 
 def test_staging_latex_paper_activation_requires_external_pi_admission_off():
-    current = _installed_lines(
-        PWC_HF_TOKEN="hf_staging_identity",
-        PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED="true",
-    )
+    current = _installed_lines(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED="true")
 
     with pytest.raises(ValueError, match="external Pi admission to be off"):
         configure_host_env.staging_latex_paper_mode_values(current, mode="activation")
@@ -177,7 +178,7 @@ def test_staging_latex_paper_modes_only_update_protected_staging_configuration(
     source.chmod(0o600)
     config_root = tmp_path / "config"
     config_root.mkdir()
-    installed = _installed_lines(PWC_HF_TOKEN="hf_staging_identity")
+    installed = _installed_lines()
     (config_root / "staging.env").write_text(
         "\n".join(installed.values()) + "\n", encoding="utf-8"
     )

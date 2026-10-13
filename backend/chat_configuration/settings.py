@@ -388,20 +388,11 @@ class ChatArtifactSettings(BaseModel):
     # Qualification may exercise a sealed Sandbox while paper/compiler job
     # admission remains off. This staging-only flag never enables user work.
     chat_latex_compiler_qualification_mode: bool = Field(default=False)
-    # A per-job HF Sandbox is the only application transport. The image is
-    # deliberately blank by default so staging cannot accidentally create a VM.
-    chat_latex_compiler_hf_sandbox_image: str = Field(default="", max_length=1000)
-    chat_latex_compiler_hf_sandbox_namespace: str = Field(default="", max_length=128)
-    chat_latex_compiler_hf_sandbox_token: str = Field(default="")
-    chat_latex_compiler_hf_sandbox_flavor: Literal["cpu-basic", "cpu-upgrade"] = Field(
-        default="cpu-upgrade"
-    )
-    chat_latex_compiler_hf_sandbox_idle_timeout_seconds: int = Field(
-        default=180, ge=60, le=600
-    )
-    chat_latex_compiler_hf_sandbox_egress_policy_attestation: str = Field(
-        default="", max_length=128
-    )
+    # A per-job, network-blocked Modal sandbox is the only application
+    # transport. The image is deliberately blank by default so staging cannot
+    # accidentally create a sandbox.
+    chat_latex_compiler_modal_image_id: str = Field(default="", max_length=64)
+    chat_latex_compiler_modal_environment: str = Field(default="", max_length=64)
     chat_latex_compiler_signing_private_key: str = Field(default="")
     chat_artifact_shared_preview_enabled: bool = Field(default=False)
     chat_artifact_storage_backend: Literal["local", "hf_bucket"] = Field(
