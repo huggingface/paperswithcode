@@ -121,7 +121,7 @@ def test_already_present_rejected_when_own_row_is_worse():
         service._validate_mutation(_row(), _body(_already_present(82.0)))
 
 
-@pytest.mark.parametrize("score", [82.0, "82%", 84.5])
+@pytest.mark.parametrize("score", [82.0, "82%", 84.5, "82.0 ± 0.3", "83.1 (±0.2)"])
 def test_already_present_accepted_when_own_row_is_equal_or_better(score):
     service = _service(_Database(metric=HIGHER, evaluations=[_evaluation(1, score)]))
 

@@ -62,6 +62,7 @@ from backend.services.curation_thumbnail_queue_service import (
 )
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_ranking_service import parse_metric_value
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
 from backend.services.paper_service import PaperService
@@ -1168,16 +1169,6 @@ class CodexCurationCallbackService:
                 ):
                     yield source.get("url"), outcome
 
-    @staticmethod
-    def _numeric_score(value: Any) -> float | None:
-        if isinstance(value, bool):
-            return None
-        try:
-            numeric = float(str(value).rstrip("%"))
-        except ValueError:
-            return None
-        return numeric if math.isfinite(numeric) else None
-
     def _validate_already_present_outcomes(
         self, row, body: ApplyMutationRequest
     ) -> None:
@@ -1194,7 +1185,7 @@ class CodexCurationCallbackService:
             task_id = outcome.get("task_id")
             dataset_id = outcome.get("dataset_id")
             metric_name = outcome.get("metric")
-            value = self._numeric_score(outcome.get("value"))
+            value = parse_metric_value(outcome.get("value"))
             if (
                 not isinstance(task_id, int)
                 or not isinstance(dataset_id, int)
@@ -1234,7 +1225,7 @@ class CodexCurationCallbackService:
                 .all()
                 if evaluation.id not in removed_ids
                 and (
-                    score := self._numeric_score(
+                    score := parse_metric_value(
                         (evaluation.metrics or {}).get(metric_name)
                     )
                 )
