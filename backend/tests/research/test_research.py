@@ -582,3 +582,34 @@ def test_feed_hydrates_standard_cards_in_ranked_order(db, now, monkeypatch):
         str(older.id)
     ]
     assert follows.feed_entries(db, "bob", now, 0, 2) == []
+
+
+def test_feed_uses_home_feed_trending_order(db, now, monkeypatch):
+    from backend.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "trending_ranking_mode", "composite")
+    task = Task(name="Trend task", slug="trend-task")
+    method = Method(name="Trend method")
+    db.add_all([task, method])
+    db.flush()
+    stale = paper(db, now, "trend-stale", days=1)
+    hot = paper(db, now, "trend-hot", days=3)
+    multi = paper(db, now, "trend-multi", days=2)
+    hot.trending_score, hot.trending_score_updated_at = 5.0, now
+    stale.trending_score = 9.0
+    stale.trending_score_updated_at = now - timedelta(days=2)
+    for row in [stale, hot, multi]:
+        tagged(db, row, task)
+    db.execute(
+        text("INSERT INTO paper_methods(paper_id,method_id) VALUES (:p,:m)"),
+        {"p": multi.id, "m": method.id},
+    )
+    follow(db, "task", task, now)
+    follow(db, "method", method, now)
+    db.flush()
+    # Trending wins over match strength; stale scores fall back to recency.
+    assert [e.paper.id for e in follows.feed_entries(db, "alice", now, 0, 3)] == [
+        str(hot.id),
+        str(stale.id),
+        str(multi.id),
+    ]
