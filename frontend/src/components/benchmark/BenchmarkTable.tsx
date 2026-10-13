@@ -31,6 +31,10 @@ function columnWidths(table: Element) {
   };
 }
 
+// Room for a classic page scrollbar, reserved before showing another metric
+// column while the page does not scroll yet.
+const SCROLLBAR_ALLOWANCE = 20;
+
 function renderBenchmarkPaperTitle(
   paperTitle: string | undefined,
   paperLabel: string | null,
@@ -52,7 +56,7 @@ export default function BenchmarkTable({
   showHarness: boolean;
   setMetric: (metric: string) => void;
   highlightRowRef: React.RefObject<HTMLTableRowElement>;
-  onFittingMetricCountChange: (count: number) => void;
+  onFittingMetricCountChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
   const { rows, visibleMetrics, activeMetric, arrow } = model;
   const [tableScrollElement, setTableScrollElement] =
@@ -65,14 +69,21 @@ export default function BenchmarkTable({
         tableScrollElement.scrollWidth > tableScrollElement.clientWidth,
       );
       const table = tableScrollElement.firstElementChild;
-      if (table)
-        onFittingMetricCountChange(
-          countFittingMetricColumns(
-            tableScrollElement.clientWidth,
-            columnWidths(table),
-            showHarness,
-          ),
-        );
+      if (!table) return;
+      const availableWidth = tableScrollElement.clientWidth;
+      const widths = columnWidths(table);
+      const page = document.documentElement;
+      const growSlack =
+        page.scrollHeight > page.clientHeight ? 0 : SCROLLBAR_ALLOWANCE;
+      onFittingMetricCountChange((current) =>
+        countFittingMetricColumns(
+          availableWidth,
+          widths,
+          showHarness,
+          current,
+          growSlack,
+        ),
+      );
     };
     const observer = new ResizeObserver(updateOverflow);
     observer.observe(tableScrollElement);

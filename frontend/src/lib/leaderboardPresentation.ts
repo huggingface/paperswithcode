@@ -250,14 +250,27 @@ export interface LeaderboardColumnWidths {
   metric: number;
 }
 
-/** How many metric columns fit in `availableWidth` beside the fixed columns. */
+/**
+ * How many metric columns fit in `availableWidth` beside the fixed columns,
+ * given the `current` count. Shrinks as soon as a column no longer fits, but
+ * grows only with `growSlack` spare pixels: showing another column can wrap
+ * paper titles and add a page scrollbar, which would narrow the table again
+ * and flip the count back and forth at a column boundary.
+ */
 export function countFittingMetricColumns(
   availableWidth: number,
   widths: LeaderboardColumnWidths,
   showHarness: boolean,
+  current = 1,
+  growSlack = 0,
 ): number {
   const remaining =
     availableWidth - widths.fixed - (showHarness ? widths.harness : 0);
   if (widths.metric <= 0) return 1;
-  return Math.max(1, Math.floor(remaining / widths.metric));
+  const fitting = Math.floor(remaining / widths.metric);
+  if (fitting < current) return Math.max(1, fitting);
+  const grown = Math.floor(
+    (remaining - growSlack) / widths.metric,
+  );
+  return Math.max(1, current, grown);
 }

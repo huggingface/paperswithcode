@@ -55,6 +55,14 @@ describe("leaderboard presentation", () => {
     expect(countFittingMetricColumns(1100, widths, false)).toBe(2);
     expect(countFittingMetricColumns(1100, widths, true)).toBe(1);
     expect(countFittingMetricColumns(300, widths, false)).toBe(1);
+    // Growing can reserve slack for a scrollbar; shrinking happens
+    // immediately, so a scrollbar that appears after the column is shown does
+    // not hide it again.
+    expect(countFittingMetricColumns(1060, widths, false, 1)).toBe(2);
+    expect(countFittingMetricColumns(1060, widths, false, 1, 20)).toBe(1);
+    expect(countFittingMetricColumns(1070, widths, false, 1, 20)).toBe(2);
+    expect(countFittingMetricColumns(1052, widths, false, 2, 20)).toBe(2);
+    expect(countFittingMetricColumns(1040, widths, false, 2, 20)).toBe(1);
   });
 
   it("resolves highlight before task URL before majority and shares case-insensitive metric selection", () => {
