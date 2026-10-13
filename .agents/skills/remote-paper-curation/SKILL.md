@@ -82,6 +82,9 @@ or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
 
+Query every benchmark the paper reports under its exact name and common
+variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match
+may be a different task, such as an inpainting board named `ImageNet`.
 Try exact names and common spelling variants, but reject semantically different
 datasets or splits even when their names are similar. The `taxonomy` command
 searches only task and method names. Never use an empty taxonomy result to
@@ -156,16 +159,18 @@ resolution) on the same benchmark and protocol. A main-text table that reports
 only a Base model is not the paper's best result when an appendix table reports
 a better Large model under the same protocol.
 
-Compare each proposed score with the paper's existing row on that leaderboard,
-including other sizes of the same family. If the existing result is equal or
-better under the configured metric direction and scale, omit the new variant and
-report `already_present` with that leaderboard's `task_id`, `dataset_id`,
-`metric`, and the paper's best eligible score as `value` on the leaderboard
-scale. The server rejects `already_present` unless this paper already has an
-equal or better row on that exact leaderboard. Rows from other papers ranking
-higher are never a reason to skip a paper-native result; submit it. Include
-`task_id`, `dataset_id`, and `metric` on any other outcome that names a
-configured leaderboard, so `not_applicable` skips appear in the admin report. If the new result is better, provide primary evidence
+Compare each proposed score with this paper's own existing row on that
+leaderboard (same `paper_id`), including other sizes of the same family. If
+that row is equal or better under the configured metric direction and scale,
+omit the new variant and report `already_present` with that leaderboard's
+`task_id`, `dataset_id`, `metric`, and the paper's best eligible score as
+`value` on the leaderboard scale. The server rejects `already_present` unless
+this paper already has an equal or better row on that exact leaderboard. Rows
+from other papers never make a result `already_present`: a paper-native result
+belongs on its leaderboard whatever its rank, so never skip it because other
+models score higher. Include `task_id`, `dataset_id`, and `metric` on any other
+outcome that names a configured leaderboard, so `not_applicable` skips appear in
+the admin report. If the new result is better, provide primary evidence
 and the existing row's full before-state in `evaluation_removals` to consolidate
 onto the new best result. Explain the best-result replacement; do not call an
 accurately reported older score factually wrong. Never insert a second variant

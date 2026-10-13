@@ -1,11 +1,39 @@
 import React, { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import type { LeaderboardPresentation } from "@/lib/leaderboardPresentation";
+import {
+  countFittingMetricColumns,
+  type LeaderboardPresentation,
+} from "@/lib/leaderboardPresentation";
 import { formatMetricValue } from "@/lib/utils";
 import { formatParameterCount } from "@/lib/benchmarkLeaderboard";
 import LatexTitle from "@/components/LatexTitle";
 import ClosedSourceEvalBadge from "@/components/ClosedSourceEvalBadge";
 import ExternalSourceEvalBadge from "@/components/ExternalSourceEvalBadge";
+
+function cssPixels(style: CSSStyleDeclaration, name: string): number {
+  return parseFloat(style.getPropertyValue(name)) || 0;
+}
+
+// Reads the column widths from the table's CSS variables, which the
+// responsive breakpoints in benchmark-detail.css override.
+function columnWidths(table: Element) {
+  const style = getComputedStyle(table);
+  return {
+    fixed: [
+      "--bm-rank-width",
+      "--bm-model-width",
+      "--bm-parameters-width",
+      "--bm-paper-width",
+      "--bm-year-width",
+    ].reduce((total, name) => total + cssPixels(style, name), 0),
+    harness: cssPixels(style, "--bm-harness-width"),
+    metric: cssPixels(style, "--bm-metric-width"),
+  };
+}
+
+// Room for a classic page scrollbar, reserved before showing another metric
+// column while the page does not scroll yet.
+const SCROLLBAR_ALLOWANCE = 20;
 
 function renderBenchmarkPaperTitle(
   paperTitle: string | undefined,
@@ -22,11 +50,13 @@ export default function BenchmarkTable({
   showHarness,
   setMetric,
   highlightRowRef,
+  onFittingMetricCountChange,
 }: {
   model: LeaderboardPresentation;
   showHarness: boolean;
   setMetric: (metric: string) => void;
   highlightRowRef: React.RefObject<HTMLTableRowElement>;
+  onFittingMetricCountChange: React.Dispatch<React.SetStateAction<number>>;
 }) {
   const { rows, visibleMetrics, activeMetric, arrow } = model;
   const [tableScrollElement, setTableScrollElement] =
@@ -38,6 +68,22 @@ export default function BenchmarkTable({
         "has-horizontal-overflow",
         tableScrollElement.scrollWidth > tableScrollElement.clientWidth,
       );
+      const table = tableScrollElement.firstElementChild;
+      if (!table) return;
+      const availableWidth = tableScrollElement.clientWidth;
+      const widths = columnWidths(table);
+      const page = document.documentElement;
+      const growSlack =
+        page.scrollHeight > page.clientHeight ? 0 : SCROLLBAR_ALLOWANCE;
+      onFittingMetricCountChange((current) =>
+        countFittingMetricColumns(
+          availableWidth,
+          widths,
+          showHarness,
+          current,
+          growSlack,
+        ),
+      );
     };
     const observer = new ResizeObserver(updateOverflow);
     observer.observe(tableScrollElement);
@@ -46,7 +92,7 @@ export default function BenchmarkTable({
       observer.observe(tableScrollElement.firstElementChild);
     updateOverflow();
     return () => observer.disconnect();
-  }, [tableScrollElement]);
+  }, [tableScrollElement, showHarness, onFittingMetricCountChange]);
   return (
     <div
       ref={setTableScrollElement}

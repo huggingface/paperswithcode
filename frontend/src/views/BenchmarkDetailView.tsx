@@ -66,6 +66,7 @@ const BenchmarkDetailView: React.FC = () => {
   const [expandedMetricScope, setExpandedMetricScope] = useState<string | null>(null);
   const metricScope = `${datasetSlug}:${taskSlugFromQuery || ""}`;
   const showMoreMetrics = expandedMetricScope === metricScope;
+  const [fittingMetricCount, setFittingMetricCount] = useState(1);
 
   // Fetching the dataset with `include_paper=true` collapses the previous
   // dataset → paper waterfall into a single round trip.
@@ -166,6 +167,7 @@ const BenchmarkDetailView: React.FC = () => {
     hideClosed: preferences.hide_closed_source_evals,
     parameterBound,
     showMoreMetrics,
+    fittingMetricCount,
     ready: {
       evaluations: evalsQ.isSuccess,
       tasks: datasetTasksQ.isSuccess,
@@ -550,7 +552,7 @@ const BenchmarkDetailView: React.FC = () => {
             ) : <div className="no-results">No evaluations submitted yet.</div>
           ) : (
             <>
-            {orderedMetrics.length > 1 && (
+            {orderedMetrics.length > fittingMetricCount && (
               <div className="bm-metric-columns-control">
                 <button
                   type="button"
@@ -559,12 +561,12 @@ const BenchmarkDetailView: React.FC = () => {
                   aria-controls="benchmark-leaderboard"
                   onClick={() => setExpandedMetricScope(showMoreMetrics ? null : metricScope)}
                 >
-                  {showMoreMetrics ? "Show selected metric only" : `Show more metrics (${orderedMetrics.length - 1})`}
+                  {showMoreMetrics ? "Show fewer metrics" : `Show more metrics (${orderedMetrics.length - fittingMetricCount})`}
                 </button>
                 {showMoreMetrics && <span>Scroll metrics horizontally; model and paper details stay visible.</span>}
               </div>
             )}
-            <BenchmarkTable model={model} showHarness={showHarness} setMetric={setMetric} highlightRowRef={highlightRowRef} />
+            <BenchmarkTable model={model} showHarness={showHarness} setMetric={setMetric} highlightRowRef={highlightRowRef} onFittingMetricCountChange={setFittingMetricCount} />
             </>
           )}
         </div>

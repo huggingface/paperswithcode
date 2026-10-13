@@ -120,6 +120,8 @@ def _calendar_matches(calendar: str, moment: datetime) -> bool:
     def field_matches(spec: str, value: int) -> bool:
         if spec == "*":
             return True
+        if "," in spec:
+            return any(field_matches(part, value) for part in spec.split(","))
         if "/" in spec:
             start, step = spec.split("/")
             return value >= int(start) and (value - int(start)) % int(step) == 0

@@ -1,0 +1,13 @@
+[Unit]
+Description=Timer: Collect deadline research and check imminent deadlines daily
+
+[Timer]
+OnCalendar=*-*-* 07:40:00
+OnCalendar=*-*-* 19:40:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-refresh-conference-deadlines.service
+
+[Install]
+WantedBy=timers.target

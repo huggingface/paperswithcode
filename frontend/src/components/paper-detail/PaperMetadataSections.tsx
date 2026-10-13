@@ -30,7 +30,7 @@ export function PaperMetadataSections({
     <>
       {paper.tldr && (
         <>
-          <PaperSectionRule id="tldr" label="TL;DR · AI-generated" />
+          <PaperSectionRule id="tldr" label="TL;DR" />
           <div className="tldr-box">{paper.tldr}</div>
         </>
       )}

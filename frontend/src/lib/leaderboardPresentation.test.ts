@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Evaluation } from "@/lib/api/evaluations.types";
 import {
+  countFittingMetricColumns,
   deriveLeaderboardPresentation,
   type LeaderboardPresentationInput,
 } from "./leaderboardPresentation";
@@ -41,6 +42,29 @@ function derive(overrides: Partial<LeaderboardPresentationInput> = {}) {
 }
 
 describe("leaderboard presentation", () => {
+  it("shows every metric column that fits and keeps at least one", () => {
+    const evaluations = [
+      evaluation("one", { best_metric: "I2V", metrics: { I2V: 51, V2V: 61, MSE: 3 } }),
+    ];
+    expect(derive({ evaluations, fittingMetricCount: 2 }).visibleMetrics).toEqual(["I2V", "V2V"]);
+    expect(derive({ evaluations, fittingMetricCount: 0 }).visibleMetrics).toEqual(["I2V"]);
+    expect(
+      derive({ evaluations, fittingMetricCount: 1, showMoreMetrics: true }).visibleMetrics,
+    ).toEqual(["I2V", "V2V", "MSE"]);
+    const widths = { fixed: 608, harness: 140, metric: 220 };
+    expect(countFittingMetricColumns(1100, widths, false)).toBe(2);
+    expect(countFittingMetricColumns(1100, widths, true)).toBe(1);
+    expect(countFittingMetricColumns(300, widths, false)).toBe(1);
+    // Growing can reserve slack for a scrollbar; shrinking happens
+    // immediately, so a scrollbar that appears after the column is shown does
+    // not hide it again.
+    expect(countFittingMetricColumns(1060, widths, false, 1)).toBe(2);
+    expect(countFittingMetricColumns(1060, widths, false, 1, 20)).toBe(1);
+    expect(countFittingMetricColumns(1070, widths, false, 1, 20)).toBe(2);
+    expect(countFittingMetricColumns(1052, widths, false, 2, 20)).toBe(2);
+    expect(countFittingMetricColumns(1040, widths, false, 2, 20)).toBe(1);
+  });
+
   it("resolves highlight before task URL before majority and shares case-insensitive metric selection", () => {
     const evaluations = [
       evaluation("one"),

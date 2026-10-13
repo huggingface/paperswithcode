@@ -5,9 +5,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import Header from "@/components/Header";
 
+const buildFlags = vi.hoisted(() => ({ authDisabled: false, chatEnabled: true }));
+
 vi.mock("@/lib/apiUrl", () => ({
-  isAuthDisabled: () => false,
-  isChatEnabled: () => true,
+  CANONICAL_CHAT_URL: "https://paperswithcode.co/chat",
+  isAuthDisabled: () => buildFlags.authDisabled,
+  isChatEnabled: () => buildFlags.chatEnabled,
+  isChatMirror: () => buildFlags.authDisabled && !buildFlags.chatEnabled,
 }));
 
 vi.mock("@/lib/authContext", () => ({
@@ -18,7 +22,11 @@ vi.mock("@/components/HfSignInButton", () => ({
   default: () => <button type="button">Sign in</button>,
 }));
 
-beforeEach(() => localStorage.clear());
+beforeEach(() => {
+  localStorage.clear();
+  buildFlags.authDisabled = false;
+  buildFlags.chatEnabled = true;
+});
 afterEach(() => vi.restoreAllMocks());
 
 describe("Header navigation", () => {
@@ -71,6 +79,41 @@ describe("Header navigation", () => {
     expect(mobileLinks[1]).toHaveAccessibleName("Chat");
     expect(mobileLinks[2]).toHaveAccessibleName("Browse state-of-the-art");
     expect(within(mobileLinks[1]).getByText("New")).toBeVisible();
+  });
+
+  it("links Chat to the canonical site on the Hugging Face Space mirror", async () => {
+    buildFlags.authDisabled = true;
+    buildFlags.chatEnabled = false;
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <Header onOpenSearch={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    const desktopChat = within(screen.getByRole("navigation")).getAllByRole("link")[1];
+    expect(desktopChat).toHaveAccessibleName("Chat");
+    expect(desktopChat).toHaveAttribute("href", "https://paperswithcode.co/chat");
+    expect(desktopChat).toHaveAttribute("target", "_blank");
+
+    await user.click(screen.getByRole("button", { name: "Open menu" }));
+    const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
+    const mobileChat = within(mobilePanel).getAllByRole("link")[1];
+    expect(mobileChat).toHaveAccessibleName("Chat");
+    expect(mobileChat).toHaveAttribute("href", "https://paperswithcode.co/chat");
+  });
+
+  it("omits Chat when chat is disabled on the canonical site", () => {
+    buildFlags.chatEnabled = false;
+    render(
+      <MemoryRouter>
+        <Header onOpenSearch={vi.fn()} />
+      </MemoryRouter>,
+    );
+
+    expect(
+      within(screen.getByRole("navigation")).queryByRole("link", { name: "Chat" }),
+    ).not.toBeInTheDocument();
   });
 
   it("closes the mobile menu with its close button or Escape and restores focus", async () => {

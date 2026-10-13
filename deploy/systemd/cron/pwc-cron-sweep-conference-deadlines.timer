@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Research AI conference deadlines off-box weekly
+
+[Timer]
+OnCalendar=Sun *-*-* 02:35:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sweep-conference-deadlines.service
+
+[Install]
+WantedBy=timers.target
