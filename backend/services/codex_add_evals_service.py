@@ -9,6 +9,7 @@ import logging
 import os
 import secrets
 import subprocess
+import threading
 import time
 import uuid
 from collections.abc import Iterator
@@ -52,6 +53,9 @@ JobStatus = Literal[
 ]
 ACTIVE_STATUSES = {"dispatching", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
+# Admin pages poll job status every few seconds; reconcile lists every remote
+# Job in the namespace, so read paths share one call per process per interval.
+READ_RECONCILE_INTERVAL_SECONDS = 30.0
 CURATOR_COMMAND = "exec python3 /runner/run_paper_curation.py"
 CURATION_DISPATCH_LOCK_ID = 0x50574344
 CURATOR_BOOTSTRAP_PATHS = (
@@ -303,6 +307,8 @@ class CodexPaperJobService:
 
     def __init__(self, hf_api: HfApi | None = None) -> None:
         self._hf_api = hf_api
+        self._read_reconcile_lock = threading.Lock()
+        self._last_read_reconcile = float("-inf")
 
     def _api(self, settings: Settings) -> HfApi:
         return self._hf_api or HfApi(token=settings.codex_jobs_token)
@@ -1043,7 +1049,7 @@ class CodexPaperJobService:
     def get(
         self, db: Session, job_id: uuid.UUID, settings: Settings
     ) -> CodexPaperJob | None:
-        self.reconcile(db, settings)
+        self.reconcile_if_due(db, settings)
         row = db.get(PaperCurationJob, job_id)
         return self.serialize(row, settings) if row else None
 
@@ -1060,7 +1066,7 @@ class CodexPaperJobService:
         review_status: str | None = None,
     ) -> CodexPaperJobsResponse:
         """Return recent curation history plus counts for the full durable queue."""
-        self.reconcile(db, settings)
+        self.reconcile_if_due(db, settings)
         query = db.query(PaperCurationJob)
         if trigger:
             query = query.filter(PaperCurationJob.trigger == trigger)
@@ -1278,12 +1284,29 @@ class CodexPaperJobService:
         refreshed = db.get(PaperCurationJob, retried.id)
         return self.serialize(refreshed, settings)
 
+    def reconcile_if_due(self, db: Session, settings: Settings) -> None:
+        """Reconcile from polled read paths at most once per interval."""
+        if (
+            time.monotonic() - self._last_read_reconcile
+            < READ_RECONCILE_INTERVAL_SECONDS
+        ):
+            return
+        if not self._read_reconcile_lock.acquire(blocking=False):
+            return
+        try:
+            self._last_read_reconcile = time.monotonic()
+            self.reconcile(db, settings)
+        finally:
+            self._read_reconcile_lock.release()
+
     def reconcile(self, db: Session, settings: Settings) -> None:
         """Mark finished remote Jobs that failed to call back, then advance FIFO."""
-        active = (
-            db.query(PaperCurationJob)
-            .filter(PaperCurationJob.status.in_(ACTIVE_STATUSES))
-            .all()
+        active = dict(
+            db.execute(
+                select(PaperCurationJob.id, PaperCurationJob.hf_job_id).where(
+                    PaperCurationJob.status.in_(ACTIVE_STATUSES)
+                )
+            ).all()
         )
         if (
             not active
@@ -1291,29 +1314,44 @@ class CodexPaperJobService:
             or not settings.codex_jobs_token
         ):
             return
-        remote_jobs = {
-            str(job.id): job
+        # Never hold a pooled connection idle in transaction across the slow
+        # namespace-wide Hub call; that starved public requests on 2026-10-13.
+        db.commit()
+        remote_stages = {
+            str(job.id): str(getattr(getattr(job, "status", None), "stage", ""))
             for job in self._api(settings).list_jobs(
                 namespace=settings.codex_jobs_namespace
             )
         }
-        changed_rows: list[PaperCurationJob] = []
-        for row in active:
-            remote = remote_jobs.get(row.hf_job_id or "")
-            stage = str(getattr(getattr(remote, "status", None), "stage", ""))
-            if stage in {"ERROR", "DELETED", "COMPLETED"}:
+        ended_stages = {"ERROR", "DELETED", "COMPLETED", "CANCELED"}
+        if not any(
+            remote_stages.get(hf_job_id or "") in ended_stages
+            for hf_job_id in active.values()
+        ):
+            return
+        # Re-read: a callback may have finished a Job during the Hub call.
+        changed_rows = [
+            row
+            for row in db.query(PaperCurationJob)
+            .filter(
+                PaperCurationJob.id.in_(list(active)),
+                PaperCurationJob.status.in_(ACTIVE_STATUSES),
+            )
+            .all()
+            if remote_stages.get(row.hf_job_id or "") in ended_stages
+        ]
+        for row in changed_rows:
+            stage = remote_stages[row.hf_job_id]
+            if stage == "CANCELED":
+                row.status = "canceled"
+            else:
                 row.status = "failed"
                 row.error = (
                     "Hugging Face Job completed without submitting a result."
                     if stage == "COMPLETED"
                     else f"Hugging Face Job ended with {stage.lower()}."
                 )
-                row.finished_at = _now()
-                changed_rows.append(row)
-            elif stage == "CANCELED":
-                row.status = "canceled"
-                row.finished_at = _now()
-                changed_rows.append(row)
+            row.finished_at = _now()
         if changed_rows:
             for row in changed_rows:
                 self._advance_workflow(db, row, settings)

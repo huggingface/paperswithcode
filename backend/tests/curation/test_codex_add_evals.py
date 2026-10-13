@@ -873,3 +873,95 @@ def test_admin_can_list_curation_queue(monkeypatch):
     assert response.status_code == 200
     assert response.json()["jobs"][0]["paper_id"] == 42
     assert response.json()["summary"]["queued"] == 1
+
+
+class _ReconcileDb:
+    def __init__(self, events, rows):
+        self.events = events
+        self.rows = rows
+
+    def execute(self, _statement):
+        self.events.append("select")
+        return SimpleNamespace(
+            all=lambda: [(row.id, row.hf_job_id) for row in self.rows]
+        )
+
+    def query(self, _model):
+        self.events.append("reread")
+        query = SimpleNamespace(all=lambda: self.rows)
+        query.filter = lambda *_args: query
+        return query
+
+    def commit(self):
+        self.events.append("commit")
+
+
+class _ReconcileApi:
+    def __init__(self, events, stages):
+        self.events = events
+        self.stages = stages
+
+    def list_jobs(self, *, namespace):
+        self.events.append("list_jobs")
+        return [
+            SimpleNamespace(id=job_id, status=SimpleNamespace(stage=stage))
+            for job_id, stage in self.stages.items()
+        ]
+
+
+def _reconcile_settings():
+    return get_settings().model_copy(
+        update={"codex_jobs_enabled": True, "codex_jobs_token": "hf-token"}
+    )
+
+
+def test_reconcile_ends_read_transaction_before_listing_hub_jobs():
+    events = []
+    row = SimpleNamespace(id=uuid.uuid4(), hf_job_id="hf-running", status="running")
+    service = CodexPaperJobService(_ReconcileApi(events, {"hf-running": "RUNNING"}))
+
+    service.reconcile(_ReconcileDb(events, [row]), _reconcile_settings())
+
+    assert events == ["select", "commit", "list_jobs"]
+    assert row.status == "running"
+
+
+def test_reconcile_marks_jobs_that_ended_without_a_callback(monkeypatch):
+    events = []
+    failed = SimpleNamespace(id=uuid.uuid4(), hf_job_id="hf-error", status="running")
+    canceled = SimpleNamespace(
+        id=uuid.uuid4(), hf_job_id="hf-canceled", status="running"
+    )
+    service = CodexPaperJobService(
+        _ReconcileApi(events, {"hf-error": "ERROR", "hf-canceled": "CANCELED"})
+    )
+    monkeypatch.setattr(service, "_advance_workflow", lambda *_args: None)
+    monkeypatch.setattr(
+        service, "dispatch_next", lambda *_args: events.append("dispatch")
+    )
+
+    service.reconcile(_ReconcileDb(events, [failed, canceled]), _reconcile_settings())
+
+    assert events == ["select", "commit", "list_jobs", "reread", "commit", "dispatch"]
+    assert (failed.status, failed.error) == (
+        "failed",
+        "Hugging Face Job ended with error.",
+    )
+    assert canceled.status == "canceled"
+
+
+def test_polled_reads_share_one_reconcile_per_interval(monkeypatch):
+    service = CodexPaperJobService()
+    calls = []
+    monkeypatch.setattr(service, "reconcile", lambda *_args: calls.append(1))
+    clock = iter([100.0, 100.0, 110.0, 131.0, 131.0])
+    monkeypatch.setattr(
+        "backend.services.codex_add_evals_service.time.monotonic",
+        lambda: next(clock),
+    )
+
+    service.reconcile_if_due(None, None)
+    service.reconcile_if_due(None, None)
+    service.reconcile_if_due(None, None)
+
+    assert len(calls) == 2
