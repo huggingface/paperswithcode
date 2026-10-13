@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Evaluation } from "@/lib/api/evaluations.types";
 import {
+  countFittingMetricColumns,
   deriveLeaderboardPresentation,
   type LeaderboardPresentationInput,
 } from "./leaderboardPresentation";
@@ -41,6 +42,21 @@ function derive(overrides: Partial<LeaderboardPresentationInput> = {}) {
 }
 
 describe("leaderboard presentation", () => {
+  it("shows every metric column that fits and keeps at least one", () => {
+    const evaluations = [
+      evaluation("one", { best_metric: "I2V", metrics: { I2V: 51, V2V: 61, MSE: 3 } }),
+    ];
+    expect(derive({ evaluations, fittingMetricCount: 2 }).visibleMetrics).toEqual(["I2V", "V2V"]);
+    expect(derive({ evaluations, fittingMetricCount: 0 }).visibleMetrics).toEqual(["I2V"]);
+    expect(
+      derive({ evaluations, fittingMetricCount: 1, showMoreMetrics: true }).visibleMetrics,
+    ).toEqual(["I2V", "V2V", "MSE"]);
+    const widths = { fixed: 608, harness: 140, metric: 220 };
+    expect(countFittingMetricColumns(1100, widths, false)).toBe(2);
+    expect(countFittingMetricColumns(1100, widths, true)).toBe(1);
+    expect(countFittingMetricColumns(300, widths, false)).toBe(1);
+  });
+
   it("resolves highlight before task URL before majority and shares case-insensitive metric selection", () => {
     const evaluations = [
       evaluation("one"),
