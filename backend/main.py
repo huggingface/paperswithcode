@@ -545,6 +545,9 @@ def create_app() -> FastAPI:
     app.include_router(staging_access.router, prefix="/api/v1", tags=["staging-access"])
     app.include_router(bookmarks.router, prefix="/api/v1", tags=["bookmarks"])
     app.include_router(contributions.router, prefix="/api/v1", tags=["contributions"])
+    from backend.routers import research
+
+    app.include_router(research.router, prefix="/api/v1")
     app.include_router(preferences.router, prefix="/api/v1", tags=["preferences"])
     app.include_router(profiles.router, prefix="/api/v1", tags=["profiles"])
     app.include_router(

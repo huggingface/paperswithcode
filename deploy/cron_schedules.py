@@ -48,6 +48,11 @@ class TimerSpec:
 
 TIMERS: tuple[TimerSpec, ...] = (
     TimerSpec(
+        job="send_research_digests",
+        on_calendar=("*-*-* *:00:00",),
+        description="Send Monday 08:00 UTC research digests and retry within 23 hours",
+    ),
+    TimerSpec(
         job="create_eval_verification_issues",
         on_calendar=("*-*-* *:52:00",),
         description="Request verification of settled paper-native evaluations on GitHub",

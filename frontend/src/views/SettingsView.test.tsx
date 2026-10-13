@@ -1,3 +1,4 @@
+import { MemoryRouter } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -23,6 +24,7 @@ vi.mock("next-themes", () => ({
 
 vi.mock("@/lib/authContext", () => ({
   useAuth: () => mockAuth.state,
+  useOptionalAuth: () => mockAuth.state,
 }));
 
 vi.mock("@/lib/preferencesContext", () => ({
@@ -103,6 +105,8 @@ function mockProviderRequests(
 ) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input);
+    if (url.includes("/me/follows")) return jsonResponse([]);
+    if (url.includes("/me/research-email")) return jsonResponse({ enabled: false, email: null, suppressed: false, delivery_ready: false });
     if (url.includes("/chat/models")) return jsonResponse(providerModels(providers));
     if (url.includes("/me/inference-billing")) {
       if (init?.method === "PATCH") {
@@ -135,7 +139,7 @@ function renderSettings() {
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <SettingsView />
+      <MemoryRouter><SettingsView /></MemoryRouter>
     </QueryClientProvider>,
   );
 }
@@ -202,6 +206,8 @@ describe("SettingsView provider-aware chat billing", () => {
     });
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input);
+    if (url.includes("/me/follows")) return jsonResponse([]);
+    if (url.includes("/me/research-email")) return jsonResponse({ enabled: false, email: null, suppressed: false, delivery_ready: false });
       if (url.includes("/chat/models")) {
         return jsonResponse(providerModels(["huggingface"]));
       }
@@ -292,7 +298,7 @@ describe("SettingsView provider-aware chat billing", () => {
     renderSettings();
 
     expect(screen.getByText(/manage billing and credentials for the enabled chat providers/i)).toBeVisible();
-    expect(screen.getAllByRole("button", { name: "Sign in with Hugging Face" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Sign in with Hugging Face" })).toHaveLength(3);
   });
 });
 
@@ -319,6 +325,6 @@ describe("SettingsView chat-disabled boundary", () => {
     expect(screen.queryByRole("heading", { name: "Inference Providers" })).not.toBeInTheDocument();
     expect(screen.queryByRole("heading", { name: "OpenRouter" })).not.toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "Appearance" })).toBeVisible();
-    expect(fetchMock).not.toHaveBeenCalled();
+    expect(fetchMock.mock.calls.every(([url]) => String(url).includes("/me/follows") || String(url).includes("/me/research-email"))).toBe(true);
   });
 });

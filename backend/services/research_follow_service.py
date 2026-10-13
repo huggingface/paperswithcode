@@ -1,0 +1,316 @@
+"""Private follows, canonical paper matching, and deterministic diverse ranking."""
+
+from datetime import datetime, timedelta
+import re
+import secrets
+
+from fastapi import HTTPException
+from sqlalchemy import select, text
+from sqlalchemy.dialects.postgresql import insert
+from sqlalchemy.orm import Session
+
+from backend.models.database import Author, Dataset, Method, Organization, Task
+from backend.models.database.research import (
+    ResearchFollow,
+    ResearchSubscription,
+    ResearchSuppression,
+)
+from backend.models.research import FollowView, ResearchEntry
+
+ENTITIES = {
+    "task": (Task, "tasks"),
+    "method": (Method, "methods"),
+    "benchmark": (Dataset, "benchmark"),
+    "author": (Author, "authors"),
+    "organization": (Organization, "orgs"),
+}
+
+
+def follows(db: Session, subject: str) -> list[FollowView]:
+    rows = db.scalars(
+        select(ResearchFollow)
+        .where(ResearchFollow.hf_subject == subject)
+        .order_by(ResearchFollow.kind, ResearchFollow.entity_id)
+    ).all()
+    result = []
+    for kind, (model, route) in ENTITIES.items():
+        group = [row for row in rows if row.kind == kind]
+        entities = (
+            {
+                e.id: e
+                for e in db.scalars(
+                    select(model).where(model.id.in_([r.entity_id for r in group]))
+                )
+            }
+            if group
+            else {}
+        )
+        for row in group:
+            entity = entities.get(row.entity_id)
+            if entity:
+                slug = getattr(entity, "slug", None) or entity.id
+                result.append(
+                    FollowView(
+                        kind=kind,
+                        entity_id=row.entity_id,
+                        name=entity.name,
+                        url=f"/{route}/{slug}",
+                        created_at=row.created_at,
+                    )
+                )
+    return result
+
+
+def set_follow(
+    db: Session, subject: str, kind: str, entity_id: int, enabled: bool
+) -> None:
+    # Serialize mutations for the account, including the bounded follow count.
+    db.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:subject, 914))"),
+        {"subject": subject},
+    )
+    key = (subject, kind, entity_id)
+    existing = db.get(ResearchFollow, key)
+    if not enabled:
+        if existing:
+            db.delete(existing)
+        db.commit()
+        return
+    model, _ = ENTITIES[kind]
+    if db.get(model, entity_id) is None:
+        raise HTTPException(404, "Interest not found")
+    if existing is None:
+        if len(follows(db, subject)) >= 100:
+            raise HTTPException(409, "You can follow up to 100 interests")
+        db.add(ResearchFollow(hf_subject=subject, kind=kind, entity_id=entity_id))
+    db.commit()
+
+
+def subscription(db: Session, subject: str) -> ResearchSubscription:
+    db.execute(
+        insert(ResearchSubscription)
+        .values(
+            hf_subject=subject,
+            enabled=False,
+            unsubscribe_token=secrets.token_urlsafe(32),
+        )
+        .on_conflict_do_nothing()
+    )
+    db.flush()
+    return db.get(ResearchSubscription, subject)
+
+
+def suppressed(db: Session, email: str | None) -> bool:
+    return bool(email and db.get(ResearchSuppression, email.lower()))
+
+
+def short_summary(tldr: str | None, abstract: str | None) -> str:
+    words = re.sub(r"\s+", " ", tldr or abstract or "").strip().split()
+    if len(words) <= 60:
+        return " ".join(words)
+    head = " ".join(words[:60])
+    endings = list(re.finditer(r'[.!?](?:["\u201d])?(?=\s|$)', head))
+    if endings and endings[-1].end() >= len(head) // 2:
+        return head[: endings[-1].end()]
+    return head.rstrip(".,;:") + "…"
+
+
+def diverse(
+    entries: list[ResearchEntry], limit: int, rotation: int | None = None
+) -> list[ResearchEntry]:
+    """Round-robin interests; within each interest prefer strength, date, popularity."""
+    ranked = sorted(
+        entries,
+        key=lambda e: (
+            -e.strength,
+            -int(e.published.replace("-", "")),
+            -e.popularity,
+            e.paper_key,
+        ),
+    )
+    interests = sorted({interest for entry in ranked for interest in entry.interests})
+    if not interests:
+        return []
+    if rotation is None:
+        positions = {entry.paper_key: index for index, entry in enumerate(ranked)}
+        interests.sort(
+            key=lambda interest: min(
+                positions[e.paper_key] for e in ranked if interest in e.interests
+            )
+        )
+    else:
+        offset = rotation % len(interests)
+        interests = interests[offset:] + interests[:offset]
+    queues = {
+        interest: [e for e in ranked if interest in e.interests]
+        for interest in interests
+    }
+    selected, seen = [], set()
+    while len(selected) < limit:
+        progress = False
+        for interest in interests:
+            queue = queues[interest]
+            while queue and queue[0].paper_key in seen:
+                queue.pop(0)
+            if queue:
+                entry = queue.pop(0)
+                seen.add(entry.paper_key)
+                selected.append(entry)
+                progress = True
+                if len(selected) == limit:
+                    break
+        if not progress:
+            break
+    return selected
+
+
+# Match associations on every version, display the latest version, and apply the
+# earliest publication date. Recursive UNION (not UNION ALL) tolerates bad cycles.
+MATCH_SQL = """
+WITH RECURSIVE interests AS (
+ SELECT kind,entity_id,created_at FROM research_follows WHERE hf_subject=:subject
+), descendants(root,id) AS (
+ SELECT entity_id,entity_id FROM interests WHERE kind='task'
+ UNION SELECT d.root,t.id FROM tasks t JOIN descendants d ON t.parent_id=d.id
+), hits AS (
+ SELECT 'task'::text kind,d.root entity_id,pt.paper_id,
+        CASE WHEN d.root=pt.task_id THEN 2 ELSE 1 END strength
+ FROM descendants d JOIN paper_tasks pt ON pt.task_id=d.id
+ UNION ALL
+ SELECT 'method',i.entity_id,pm.paper_id,2 FROM interests i
+ JOIN paper_methods pm ON pm.method_id=i.entity_id WHERE i.kind='method'
+ UNION ALL
+ SELECT 'author',i.entity_id,pa.paper_id,2 FROM interests i
+ JOIN paper_authors pa ON pa.author_id=i.entity_id WHERE i.kind='author'
+ UNION ALL
+ SELECT 'organization',i.entity_id,po.paper_id,2 FROM interests i
+ JOIN paper_organizations po ON po.organization_id=i.entity_id WHERE i.kind='organization'
+ UNION ALL
+ SELECT 'benchmark',i.entity_id,e.paper_id,2 FROM interests i
+ JOIN evaluations e ON e.dataset_id=i.entity_id WHERE i.kind='benchmark'
+)
+SELECT DISTINCT h.kind,h.entity_id,h.strength,i.created_at followed_at,
+ p.id,p.arxiv_id,p.title,p.abstract,p.tldr,
+ COALESCE((SELECT min(v.date_published) FROM papers v WHERE v.arxiv_id=p.arxiv_id),p.date_published) date_published,
+ p.trending_score,
+ CASE WHEN p.arxiv_id IS NULL THEN 'paper:' || p.id ELSE 'arxiv:' || p.arxiv_id END paper_key
+FROM hits h JOIN interests i USING(kind,entity_id)
+JOIN papers source ON source.id=h.paper_id
+JOIN papers p ON (source.arxiv_id IS NOT NULL AND p.arxiv_id=source.arxiv_id AND p.is_latest_version)
+ OR (source.arxiv_id IS NULL AND p.id=source.id)
+WHERE p.date_published BETWEEN :cutoff AND :today
+AND NOT EXISTS (SELECT 1 FROM papers old WHERE old.arxiv_id=p.arxiv_id AND old.date_published<:cutoff)
+"""
+
+
+def matching_entries(
+    db: Session,
+    subject: str,
+    now: datetime,
+    *,
+    window_start: datetime | None = None,
+    window_end: datetime | None = None,
+    opted_in_at: datetime | None = None,
+) -> list[ResearchEntry]:
+    interest_map = {(f.kind, f.entity_id): f for f in follows(db, subject)}
+    if not interest_map:
+        return []
+    entries, strengths = {}, {}
+    # Events are limited to recent discovery; initial catalog backfill is feed-only.
+    events = {}
+    if window_start is not None:
+        for row in db.execute(
+            text("""SELECT r.*, e.metrics, e.model_name, d.name dataset_name
+            FROM research_events r LEFT JOIN evaluations e ON e.id=r.evaluation_id
+            LEFT JOIN datasets d ON d.id=r.dataset_id
+            WHERE r.discovered_at >= :start AND r.discovered_at < :end
+            AND (r.evaluation_id IS NULL OR e.id IS NOT NULL)"""),
+            {"start": window_start, "end": window_end},
+        ).mappings():
+            events.setdefault(row["paper_key"], []).append(row)
+    for row in db.execute(
+        text(MATCH_SQL),
+        {
+            "subject": subject,
+            "today": now.date(),
+            "cutoff": (now - timedelta(days=30)).date(),
+        },
+    ).mappings():
+        interest = interest_map.get((row["kind"], row["entity_id"]))
+        if interest is None:
+            continue
+        key = row["paper_key"]
+        eligible = []
+        if window_start is not None:
+            threshold = max(row["followed_at"], opted_in_at or row["followed_at"])
+            eligible = [
+                e
+                for e in events.get(key, [])
+                if e["discovered_at"] > threshold
+                and (
+                    e["evaluation_id"] is None
+                    or (
+                        row["kind"] == "benchmark"
+                        and e["dataset_id"] == row["entity_id"]
+                    )
+                )
+            ]
+            if not eligible:
+                continue
+        entry = entries.setdefault(
+            key,
+            ResearchEntry(
+                paper_key=key,
+                title=row["title"],
+                url=f"/paper/{row['arxiv_id'] or row['id']}",
+                summary=short_summary(row["tldr"], row["abstract"]),
+                published=row["date_published"].isoformat(),
+                popularity=float(row["trending_score"] or 0),
+            ),
+        )
+        interest_key = f"{interest.kind}:{interest.entity_id}"
+        reason = interest.name + (" (subtask)" if row["strength"] == 1 else "")
+        previous = strengths.get((key, interest_key), 0)
+        if row["strength"] > previous:
+            if previous:
+                entry.reasons.remove(interest.name + " (subtask)")
+            else:
+                entry.interests.append(interest_key)
+            entry.reasons.append(reason)
+            entry.strength += row["strength"] - previous
+            strengths[key, interest_key] = row["strength"]
+        for event in eligible:
+            if event["event_key"] not in entry.events:
+                entry.events.append(event["event_key"])
+                if event["evaluation_id"]:
+                    entry.scores.append(
+                        {
+                            "benchmark": event["dataset_name"],
+                            "model": event["model_name"],
+                            "metrics": event["metrics"],
+                        }
+                    )
+    # Feed benchmark scores are current, so corrections render without creating alerts.
+    if window_start is None and entries:
+        benchmark_ids = [i for (k, i) in interest_map if k == "benchmark"]
+        if benchmark_ids:
+            for row in db.execute(
+                text("""SELECT e.metrics,e.model_name,d.name,
+                CASE WHEN p.arxiv_id IS NULL THEN 'paper:' || p.id ELSE 'arxiv:' || p.arxiv_id END paper_key
+                FROM evaluations e JOIN datasets d ON d.id=e.dataset_id JOIN papers p ON p.id=e.paper_id
+                WHERE e.dataset_id=ANY(:ids) AND p.date_published BETWEEN :cutoff AND :today"""),
+                {
+                    "ids": benchmark_ids,
+                    "cutoff": (now - timedelta(days=30)).date(),
+                    "today": now.date(),
+                },
+            ).mappings():
+                if row["paper_key"] in entries:
+                    score = {
+                        "benchmark": row["name"],
+                        "model": row["model_name"],
+                        "metrics": row["metrics"],
+                    }
+                    if score not in entries[row["paper_key"]].scores:
+                        entries[row["paper_key"]].scores.append(score)
+    return list(entries.values())

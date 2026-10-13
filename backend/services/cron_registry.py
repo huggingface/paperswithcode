@@ -229,6 +229,26 @@ def validate_cron_jobs(jobs: Sequence[CronJobDefinition]) -> None:
 
 CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
+        id="send_research_digests",
+        display_name="Weekly Research Digests",
+        category="hourly",
+        schedule="0 * * * *",
+        script_path="backend/scripts/send_research_digests.py",
+        log_name="send_research_digests",
+        process_patterns=("backend.scripts.send_research_digests",),
+        lock_file="/var/lib/paperswithcode/production/cron-locks/send_research_digests.lock",
+        expected_runtime_minutes=45,
+        stale_after_minutes=180,
+        critical=False,
+        healthy_no_work_allowed=True,
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60),),
+        systemd_timer="pwc-cron-send-research-digests.timer",
+        systemd_service="pwc-cron-send-research-digests.service",
+        output_evaluator="generic",
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="paper_markdown_backfill",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=17),),

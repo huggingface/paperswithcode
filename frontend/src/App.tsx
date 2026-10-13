@@ -50,6 +50,7 @@ if (!useHashRouter && typeof window !== "undefined") {
 // pages they actually navigate to. Saves ~150-200 KB gzipped on first paint
 // for visitors landing on a single route.
 const AuthorizePaperEditView = React.lazy(() => import("@/views/AuthorizePaperEditView"));
+const FollowingView = React.lazy(() => import("@/views/FollowingView"));
 const FeedView = React.lazy(() => import("@/views/FeedView"));
 const ChatView = React.lazy(() => import("@/views/ChatView"));
 const SharedChatView = React.lazy(() => import("@/views/SharedChatView"));
@@ -268,6 +269,7 @@ const Shell: React.FC = () => {
         <React.Suspense fallback={<RouteFallback />}>
           <Routes>
             <Route path="/" element={<FeedView />} />
+            <Route path="/following" element={<FollowingView />} />
             {/* Keep new and persisted chats on the same route instance. A new
                 turn replaces /chat with /chat/:sessionId as soon as the server
                 allocates it; sibling routes would unmount ChatView and abort

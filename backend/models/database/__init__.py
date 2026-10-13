@@ -176,6 +176,11 @@ from backend.models.database.taxonomy import (
 
 
 __all__ = [
+    "ResearchFollow",
+    "ResearchSubscription",
+    "ResearchSuppression",
+    "ResearchDigest",
+    "ResearchEvent",
     "Base",
     "AutonomousSubmissionClaim",
     "AutonomousOperatorState",
@@ -309,3 +314,11 @@ __all__ = [
     "TaskSisterTask",
     "TaskRecommendedFramework",
 ]
+
+from backend.models.database.research import (
+    ResearchFollow,
+    ResearchSubscription,
+    ResearchSuppression,
+    ResearchDigest,
+    ResearchEvent,
+)

@@ -1,3 +1,4 @@
+import ResearchFollowButton from "@/components/ResearchFollowButton";
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
@@ -279,6 +280,7 @@ const BenchmarkDetailView: React.FC = () => {
 
         <div className="bm-title-row">
           <h1 className="bm-title">{dataset.name}</h1>
+          <ResearchFollowButton kind="benchmark" entityId={dataset.id} />
           {benchmarkTrend && (
             <div className="bm-title-trend" aria-label={`${dataset.name} reporting trend`}>
               <BenchmarkTrendSparkline
