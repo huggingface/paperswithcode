@@ -116,7 +116,7 @@ Inspect every job object, not only the summary, `critical_issues`, health score,
 - The admin `/status` response is cached stale-while-revalidate for about a minute. Prefer the fresh CLI build; use `force_refresh=true` only as corroboration.
 - Treat the paused/manual URL extraction entry as `not_applicable` for schedule cadence. Audit its last manual run only when one is claimed.
 - Validate expected schedule slots against workflow YAML/timers. Inspect several consecutive runs and queue age, not only the newest success—long jobs can accumulate queued scheduled runs.
-- A systemd job whose execution reason is `timer enabled after the last scheduled slot; first systemd invocation pending` is reported `healthy` because no slot was owed since the timer's `ActiveEnterTimestamp`. Manual `pwc-cron` runs do not count as invocations. Confirm the timer's `NEXT` in `systemctl list-timers` matches the registry schedule, then re-check after that slot.
+- A systemd job whose execution reason is `timer enabled after the last scheduled slot; first systemd invocation pending` is reported `healthy` because the timer has never triggered or completed and its last slot predates its `ActiveEnterTimestamp`. Manual `pwc-cron` runs do not count as invocations. Confirm the timer's `NEXT` in `systemctl list-timers` matches the registry schedule, then re-check after that slot.
 
 Useful bounded scheduler evidence:
 

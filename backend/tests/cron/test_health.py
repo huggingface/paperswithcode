@@ -396,11 +396,31 @@ def test_timer_activated_before_last_slot_is_still_overdue():
     assert execution["reason"] == "expected systemd invocation is overdue"
 
 
-def test_timer_triggered_since_activation_without_exit_is_still_overdue():
+@pytest.mark.parametrize(
+    "last_trigger_at",
+    [
+        # Restarted after an earlier trigger: the missed slot still counts.
+        "2026-08-16T02:35:00Z",
+        # Triggered after activation but never exited.
+        "2026-08-28T09:00:00Z",
+    ],
+)
+def test_reactivated_or_triggered_timer_is_still_overdue(last_trigger_at):
     execution = _systemd_execution(
         "sweep_conference_deadlines",
         timer_activated_at="2026-08-28T08:12:57Z",
-        last_trigger_at="2026-08-28T09:00:00Z",
+        last_trigger_at=last_trigger_at,
+    )
+
+    assert execution["status"] == "broken"
+    assert execution["reason"] == "expected systemd invocation is overdue"
+
+
+def test_reactivated_timer_with_stale_completion_is_still_overdue():
+    execution = _systemd_execution(
+        "sweep_conference_deadlines",
+        timer_activated_at="2026-08-28T08:12:57Z",
+        last_completed_at="2026-08-16T02:40:00Z",
     )
 
     assert execution["status"] == "broken"
