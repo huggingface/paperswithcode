@@ -493,7 +493,9 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
 
             {error && (
               <Alert variant="destructive" className="mb-4">
-                <AlertDescription>Failed to load papers. Please try again.</AlertDescription>
+                <AlertDescription>
+                  Failed to load papers. <button type="button" onClick={() => void infinite.refetch()}>Try again</button>
+                </AlertDescription>
               </Alert>
             )}
 
@@ -514,7 +516,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                   </div>
                 ))}
               </div>
-            ) : cards.length === 0 ? (
+            ) : cards.length === 0 ? (error ? null :
               <div className="no-results">{following ? <>No recent matches yet. Follow interests from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
