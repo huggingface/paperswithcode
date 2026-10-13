@@ -5,7 +5,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { researchApi } from '@/lib/api/research';
 import ResearchSettings from './ResearchSettings';
 import ResearchFollowButton from './ResearchFollowButton';
-import FollowingView from '@/views/FollowingView';
 
 const auth = vi.hoisted(() => ({ user: { hf_subject: 'alice', username: 'alice' }, isLoading: false }));
 vi.mock('@/lib/authContext', () => ({ useAuth: () => auth, useOptionalAuth: () => auth }));
@@ -38,14 +37,5 @@ describe('research follows', () => {
     expect(change).toHaveBeenCalledWith('task', '12', true);
     fireEvent.click(screen.getByRole('button', { name: 'Unfollow' }));
     await waitFor(() => expect(change).toHaveBeenCalledWith('task', '12', false));
-  });
-  it('shows match reasons and benchmark scores on the bookmarkable feed', async () => {
-    vi.spyOn(researchApi, 'following').mockResolvedValue([{ paper_key: 'a', title: 'A paper', url: '/paper/1',
-      summary: 'Summary.', published: '2026-10-10', reasons: ['Task (subtask)', 'Benchmark'],
-      scores: [{ benchmark: 'Benchmark', model: 'Model', metrics: { Accuracy: 91 } }] }]);
-    render(<FollowingView />, { wrapper });
-    expect(await screen.findByRole('link', { name: 'A paper' })).toHaveAttribute('href', '/paper/1');
-    expect(screen.getByText(/Task \(subtask\)/)).toBeInTheDocument();
-    expect(screen.getByText(/Accuracy: 91/)).toBeInTheDocument();
   });
 });

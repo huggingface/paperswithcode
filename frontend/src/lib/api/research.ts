@@ -1,3 +1,4 @@
+import type { Paper } from './papers.types';
 import { apiRequest } from './request';
 
 export type FollowKind = 'task' | 'method' | 'benchmark' | 'author' | 'organization';
@@ -15,6 +16,7 @@ export interface ResearchEmail {
   delivery_ready: boolean;
 }
 export interface ResearchEntry {
+  paper: Paper;
   paper_key: string;
   title: string;
   url: string;

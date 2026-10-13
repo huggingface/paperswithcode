@@ -1,7 +1,8 @@
 # Research follows and weekly email
 
 Follows are private and keyed by the immutable Hugging Face OAuth subject.
-The Following feed lives at `/following`; `/settings` manages interests and
+The Following tab sits beside Trending, Newest, and Most cited, using the same
+paper cards and thumbnails. Its bookmarkable feed lives at `/following`; `/settings` manages interests and
 explicit weekly-email opt-in. OAuth email access uses the existing
 `collect_email=true` flow and accepts only a verified identity email. No
 browser-supplied destination is accepted.

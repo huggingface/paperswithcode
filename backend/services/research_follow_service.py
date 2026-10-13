@@ -5,17 +5,24 @@ import re
 import secrets
 
 from fastapi import HTTPException
-from sqlalchemy import select, text
+from sqlalchemy import or_, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
-from backend.models.database import Author, Dataset, Method, Organization, Task
+from backend.models.database import (
+    Author,
+    Dataset,
+    Method,
+    Organization,
+    Task,
+    Paper as DBPaper,
+)
 from backend.models.database.research import (
     ResearchFollow,
     ResearchSubscription,
     ResearchSuppression,
 )
-from backend.models.research import FollowView, ResearchEntry
+from backend.models.research import FollowView, ResearchEntry, ResearchFeedEntry
 
 ENTITIES = {
     "task": (Task, "tasks"),
@@ -314,3 +321,41 @@ def matching_entries(
                     if score not in entries[row["paper_key"]].scores:
                         entries[row["paper_key"]].scores.append(score)
     return list(entries.values())
+
+
+def feed_entries(
+    db: Session, subject: str, now: datetime, offset: int, limit: int
+) -> list[ResearchFeedEntry]:
+    """Hydrate the ranked page with the same batch loader as public paper feeds."""
+    from backend.services.paper_service import PaperService
+
+    entries = diverse(matching_entries(db, subject, now), offset + limit)[offset:]
+    if not entries:
+        return []
+    arxiv_ids = [
+        e.paper_key.removeprefix("arxiv:")
+        for e in entries
+        if e.paper_key.startswith("arxiv:")
+    ]
+    paper_ids = [
+        int(e.paper_key.removeprefix("paper:"))
+        for e in entries
+        if e.paper_key.startswith("paper:")
+    ]
+    rows = db.scalars(
+        select(DBPaper).where(
+            or_(
+                DBPaper.arxiv_id.in_(arxiv_ids) & DBPaper.is_latest_version,
+                DBPaper.id.in_(paper_ids),
+            )
+        )
+    ).all()
+    papers = PaperService(db).hydrate_cards(rows, include_resources=True)
+    by_key = {
+        f"arxiv:{p.arxiv_id}" if p.arxiv_id else f"paper:{p.id}": p for p in papers
+    }
+    return [
+        ResearchFeedEntry(**e.model_dump(), paper=by_key[e.paper_key])
+        for e in entries
+        if e.paper_key in by_key
+    ]

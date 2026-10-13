@@ -1,4 +1,6 @@
-import ResearchFeedTabs from "@/components/ResearchFeedTabs";
+import HfSignInButton from "@/components/HfSignInButton";
+import { useOptionalAuth } from "@/lib/authContext";
+import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -34,7 +36,7 @@ import { useInfinitePapers } from "@/hooks/usePapers";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {
   readHomepagePaperDateRange,
   withHomepagePaperDateRange,
@@ -313,7 +315,10 @@ export const AskAssistant: React.FC = () => {
   );
 };
 
-const FeedView: React.FC = () => {
+const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
+  const navigate = useNavigate();
+  const auth = useOptionalAuth();
+  const user = auth?.user;
   const [searchParams, setSearchParams] = useSearchParams();
   const orderBy = parseOrderBy(searchParams.get("order_by"));
   const dateRange = readHomepagePaperDateRange(searchParams);
@@ -323,7 +328,8 @@ const FeedView: React.FC = () => {
   const setOrderBy = (nextOrderBy: OrderBy) => {
     const next = new URLSearchParams(searchParams);
     next.set("order_by", nextOrderBy);
-    setSearchParams(next);
+    if (following) navigate(`/?${next}`);
+    else setSearchParams(next);
   };
 
   const setHasCode = (active: boolean) => {
@@ -356,7 +362,8 @@ const FeedView: React.FC = () => {
     staleTime: 10 * 60 * 1000,
   });
 
-  const infinite = useInfinitePapers({
+  const publicFeed = useInfinitePapers({
+    enabled: !following,
     page_size: 30,
     order_by: orderBy,
     order_dir: "desc",
@@ -367,10 +374,20 @@ const FeedView: React.FC = () => {
     has_hf_artifacts: hasHfArtifacts,
   });
 
+  const followedFeed = useInfiniteQuery({
+    queryKey: ["research-feed", user?.hf_subject],
+    queryFn: ({ pageParam }) => researchApi.following(pageParam),
+    initialPageParam: 0,
+    getNextPageParam: (last, pages) => last.length === 40 ? pages.length * 40 : undefined,
+    enabled: following && !!user,
+  });
+  const infinite = following ? followedFeed : publicFeed;
   const cards = useMemo(() => {
-    const all = infinite.data?.pages.flatMap((p) => p.results) || [];
+    const all = following
+      ? followedFeed.data?.pages.flatMap(page => page.map(entry => entry.paper)) ?? []
+      : publicFeed.data?.pages.flatMap(page => page.results) ?? [];
     return all.map(transformPaperForCard);
-  }, [infinite.data]);
+  }, [following, followedFeed.data, publicFeed.data]);
 
   const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "400px" });
   useEffect(() => {
@@ -379,7 +396,7 @@ const FeedView: React.FC = () => {
     }
   }, [isIntersecting, infinite.hasNextPage, infinite.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const isLoading = infinite.isLoading;
+  const isLoading = infinite.isLoading || (following && auth?.isLoading);
   const error = infinite.error;
 
   return (
@@ -393,7 +410,6 @@ const FeedView: React.FC = () => {
         </div>
       </div>
 
-      <ResearchFeedTabs />
       <div className="layout-with-sidebar">
         <aside className="sidebar">
           <div className="sidebar-section sidebar-section-top-domains">
@@ -453,25 +469,26 @@ const FeedView: React.FC = () => {
                   {SORT_OPTIONS.map(([k, l]) => (
                     <button
                       key={k}
-                      className={`sort-btn ${orderBy === k ? "active" : ""}`}
+                      className={`sort-btn ${!following && orderBy === k ? "active" : ""}`}
                       onClick={() => setOrderBy(k)}
                     >
                       {l}
                     </button>
                   ))}
+                  <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => navigate("/following")}>following</button>
                 </div>
-                <PaperFeedFilters
+                {!following && <PaperFeedFilters
                   hasCode={hasCode}
                   hasHfArtifacts={hasHfArtifacts}
                   onHasCodeChange={setHasCode}
                   onHasHfArtifactsChange={setHasHfArtifacts}
-                />
+                />}
               </div>
-              <PaperDateFilter
+              {!following && <PaperDateFilter
                 startDate={dateRange.startDate}
                 endDate={dateRange.endDate}
                 onChange={(value) => setSearchParams(withHomepagePaperDateRange(searchParams, value))}
-              />
+              />}
             </div>
 
             {error && (
@@ -480,7 +497,9 @@ const FeedView: React.FC = () => {
               </Alert>
             )}
 
-            {isLoading ? (
+            {following && !auth?.isLoading && !user ? (
+              <HfSignInButton returnTo="/following" label="Sign in to see your follows" />
+            ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div key={i} className="paper-card">
@@ -496,7 +515,7 @@ const FeedView: React.FC = () => {
                 ))}
               </div>
             ) : cards.length === 0 ? (
-              <div className="no-results">No papers in this window.</div>
+              <div className="no-results">{following ? <>No recent matches yet. Follow interests from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">
