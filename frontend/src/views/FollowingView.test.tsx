@@ -60,3 +60,13 @@ it('asks signed-out visitors to sign in without fetching private papers', async 
   expect(await screen.findByRole('button', { name: 'Sign in with Hugging Face' })).toBeInTheDocument();
   expect(researchApi.following).not.toHaveBeenCalled();
 });
+
+it('offers a retry instead of claiming the feed is empty when loading fails', async () => {
+  vi.mocked(researchApi.following).mockRejectedValueOnce(new Error('Unavailable'));
+  renderFeed();
+  expect(await screen.findByRole('alert')).toHaveTextContent('Failed to load papers.');
+  expect(screen.queryByText(/No recent matches yet/)).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+  await screen.findByText('A paper');
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
