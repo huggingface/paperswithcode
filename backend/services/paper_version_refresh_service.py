@@ -323,9 +323,13 @@ class PaperVersionRefreshService:
     def _replace_paper_authors(self, paper_id: int, author_names: List[str]) -> None:
         self.db.query(PaperAuthor).filter(PaperAuthor.paper_id == paper_id).delete()
 
+        linked_ids: set[int] = set()
         for order, full_name in enumerate(author_names, start=1):
             name = normalize_arxiv_author_name(full_name)
             author = get_or_create_author_by_name(self.db, name)
+            if author.id in linked_ids:
+                continue
+            linked_ids.add(author.id)
             self.db.add(
                 PaperAuthor(
                     paper_id=paper_id,

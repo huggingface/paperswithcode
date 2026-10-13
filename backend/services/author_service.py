@@ -38,13 +38,14 @@ def normalize_arxiv_author_name(full_name: str) -> str:
 def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
     """Return the author with this name, ignoring case, creating it if missing.
 
-    "Tom Aarsen" and "Tom AARSEN" are the same author. When several rows
-    already share a name, prefer the one linked to a Hugging Face account.
+    "Tom Aarsen" and "Tom AARSEN" are the same author. An exact spelling wins,
+    so rows that share a name but belong to different Hugging Face accounts keep
+    their own papers; otherwise prefer the row linked to a Hugging Face account.
     """
     author = (
         db.query(DBAuthor)
         .filter(func.lower(DBAuthor.name) == name.lower())
-        .order_by(DBAuthor.hf_username.is_(None), DBAuthor.id)
+        .order_by(DBAuthor.name != name, DBAuthor.hf_username.is_(None), DBAuthor.id)
         .first()
     )
     if author is None:

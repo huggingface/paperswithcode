@@ -17,6 +17,7 @@ from backend.services.author_service import (
     normalize_arxiv_author_name,
 )
 from backend.services.paper_ingestion_service import PaperIngestionService
+from backend.services.paper_version_refresh_service import PaperVersionRefreshService
 
 
 @compiles(ARRAY, "sqlite")
@@ -122,6 +123,19 @@ def test_author_lookup_ignores_case_and_prefers_hf_linked_row(tmp_path) -> None:
         assert db.query(Author).count() == 3
 
 
+def test_author_lookup_keeps_exact_spelling_of_distinct_hf_accounts(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'authors.db'}")
+    Base.metadata.create_all(bind=engine, tables=[Author.__table__])
+    with sessionmaker(bind=engine)() as db:
+        first = Author(name="Wei Li", hf_username="weili")
+        second = Author(name="WEI LI", hf_username="wei-li-2")
+        db.add_all([first, second])
+        db.flush()
+
+        assert get_or_create_author_by_name(db, "Wei Li").id == first.id
+        assert get_or_create_author_by_name(db, "WEI LI").id == second.id
+
+
 def test_merged_author_id_resolves_to_surviving_author(tmp_path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'aliases.db'}")
     Base.metadata.create_all(
@@ -157,3 +171,36 @@ def test_merged_author_id_resolves_to_surviving_author(tmp_path) -> None:
             "Tom Aarsen",
             1,
         )
+
+
+def test_version_refresh_links_case_variant_names_once(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'refresh.db'}")
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[Paper.__table__, Author.__table__, PaperAuthor.__table__],
+    )
+    with sessionmaker(bind=engine)() as db:
+        db.add(
+            Paper(
+                id=1,
+                arxiv_id="2605.00002",
+                version="v2",
+                title="Refreshed",
+                abstract="",
+                is_latest_version=True,
+            )
+        )
+        db.flush()
+
+        PaperVersionRefreshService(
+            db, paper_factory=lambda _paper_id: None
+        )._replace_paper_authors(1, ["Tom Aarsen", "Grace Hopper", "TOM AARSEN"])
+        db.flush()
+
+        links = (
+            db.query(Author.name, PaperAuthor.author_order)
+            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+            .order_by(PaperAuthor.author_order)
+            .all()
+        )
+        assert links == [("Tom Aarsen", 1), ("Grace Hopper", 2)]
