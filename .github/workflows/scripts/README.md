@@ -147,7 +147,11 @@ three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
 job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
 it. It is report-only, storing matches on the scan row, unless
 `PWC_X_THREAD_DISCOVERY_APPLY=true`, which links matches through the audited
-`x_threads` curation section as actor `x-thread-discovery`. Review stored
+`x_threads` curation section as actor `x-thread-discovery`. Before linking,
+each match is reviewed by gpt-5.6-sol (`PWC_OPENAI_API_KEY`, from
+`production.env`): it rejects posts about a sibling project, multi-paper
+acceptance lists, and congratulation replies, and the verdict and reason are
+stored with the candidate. Without the key the job links nothing. Review stored
 matches, or run it by hand, with:
 
 ```bash
@@ -164,6 +168,14 @@ at most 200 papers at least 15 minutes apart:
 
 ```bash
 sudo pwc-cron discover_x_threads --backfill-days 180 --max-papers 200
+```
+
+`--review-linked-since YYYY-MM-DD` re-reviews threads the job linked since that
+date (hand-curated threads are never touched) and, in apply mode, unlinks the
+ones the reviewer rejects:
+
+```bash
+sudo pwc-cron discover_x_threads --review-linked-since 2026-10-12
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither

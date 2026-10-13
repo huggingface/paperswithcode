@@ -7,6 +7,8 @@ authors (matched by display name or handle) or from a business-verified account
 of one of its linked organizations are kept; outside accounts never are. Matches are stored on the
 paper's scan row and, when applying, linked through the audited `x_threads`
 curation section, which captures the preview shown on the paper page.
+When a reviewer is configured, each match is linked only after it approves
+that the post introduces this paper (see `x_thread_review_service`).
 
 The scheduled run uses recent search (last 7 days) on newly trending papers.
 A backfill run uses full-archive search, bounded to the weeks around each
@@ -39,6 +41,7 @@ from backend.models.database import (
 )
 from backend.services.catalog_errors import CatalogError
 from backend.services.paper_curation_service import PaperCurationService
+from backend.services.x_thread_review_service import ReviewVerdict
 
 X_SEARCH_URL = "https://api.x.com/2/tweets/search/recent"
 X_ARCHIVE_SEARCH_URL = "https://api.x.com/2/tweets/search/all"
@@ -60,6 +63,8 @@ ACTOR = {
 }
 
 Search = Callable[[str, date | None], dict]
+# Reviews one match (with post text and links) for one paper.
+Review = Callable[[Paper, dict], ReviewVerdict]
 
 
 @dataclass
@@ -84,6 +89,11 @@ class DiscoveryReport:
             "papers_scanned": len(self.papers),
             "papers_matched": sum(bool(p.matches) for p in self.papers),
             "threads_linked": sum(len(p.linked) for p in self.papers),
+            "matches_rejected": sum(
+                not m.get("review", {}).get("approve", True)
+                for p in self.papers
+                for m in p.matches
+            ),
             "errors": [
                 {"paper_id": p.paper_id, "error": p.error}
                 for p in self.papers
@@ -133,7 +143,9 @@ def make_x_search(
         params = {
             "query": query,
             "max_results": 25,
-            "tweet.fields": "author_id,created_at,public_metrics,conversation_id",
+            "tweet.fields": (
+                "author_id,created_at,public_metrics,conversation_id,entities,note_tweet"
+            ),
             "expansions": "author_id",
             "user.fields": "name,username,verified_type",
         }
@@ -257,6 +269,17 @@ def build_query(
     return "(" + " OR ".join(chosen) + ")" + suffix
 
 
+def post_text_and_urls(post: dict) -> tuple[str, list[str]]:
+    """Return a post's full text (long posts carry it in note_tweet) and links."""
+    note = post.get("note_tweet") or {}
+    entities = note.get("entities") or post.get("entities") or {}
+    urls = [
+        url.get("unwound_url") or url.get("expanded_url") or url.get("url", "")
+        for url in entities.get("urls", [])
+    ]
+    return note.get("text") or post.get("text", ""), [url for url in urls if url]
+
+
 def match_posts(
     response: dict,
     authors: list[str],
@@ -286,6 +309,7 @@ def match_posts(
         if earliest and created < earliest:
             continue
         likes = post.get("public_metrics", {}).get("like_count", 0)
+        text, urls = post_text_and_urls(post)
         match = {
             "url": f"https://x.com/{user['username']}/status/{post['id']}",
             "author": author,
@@ -293,6 +317,8 @@ def match_posts(
             "handle": user["username"],
             "likes": likes,
             "created_at": post["created_at"],
+            "text": text,
+            "urls": urls,
         }
         if author not in best or likes > best[author]["likes"]:
             best[author] = match
@@ -409,6 +435,7 @@ def discover_x_threads(
     max_papers: int,
     today: date | None = None,
     backfill_days: int | None = None,
+    review: Review | None = None,
 ) -> DiscoveryReport:
     report = DiscoveryReport(apply=apply)
     curation = PaperCurationService(db)
@@ -435,8 +462,26 @@ def discover_x_threads(
         result.matches = match_posts(
             response, authors, paper.date_published, organizations
         )
-        if apply and result.matches:
-            urls = [match["url"] for match in result.matches]
+        if review and result.matches:
+            try:
+                for match in result.matches:
+                    verdict = review(paper, match)
+                    match["review"] = {
+                        "approve": verdict.approve,
+                        "reason": verdict.reason,
+                    }
+            except (httpx.HTTPError, KeyError, ValueError) as error:
+                # Unreviewed matches are never linked; the next scan retries.
+                result.error = f"review failed: {error}"
+                for match in result.matches:
+                    match.pop("review", None)
+        approved = [
+            match
+            for match in result.matches
+            if not review or match.get("review", {}).get("approve")
+        ]
+        if apply and approved:
+            urls = [match["url"] for match in approved]
             try:
                 curation.update(
                     paper_id=paper.id,
@@ -454,6 +499,64 @@ def discover_x_threads(
         _record_scan(db, paper.id, result)
         db.commit()
     return report
+
+
+def review_linked_threads(
+    db: Session, review: Review, *, apply: bool, linked_since: datetime
+) -> list[dict[str, Any]]:
+    """Re-review threads the job linked since a date; unlink rejected ones.
+
+    Only papers the job itself linked (scan row with `linked_at`) are touched,
+    so hand-curated threads stay as they are.
+    """
+    curation = PaperCurationService(db)
+    rows = db.scalars(
+        select(PaperXThread)
+        .join(PaperXThreadScan, PaperXThreadScan.paper_id == PaperXThread.paper_id)
+        .where(
+            PaperXThreadScan.linked_at.is_not(None),
+            PaperXThread.created_at >= linked_since,
+        )
+        .order_by(PaperXThread.paper_id, PaperXThread.position)
+    ).all()
+    by_paper: dict[int, list[PaperXThread]] = {}
+    for row in rows:
+        by_paper.setdefault(row.paper_id, []).append(row)
+    rejected: list[dict[str, Any]] = []
+    for paper_id, threads in by_paper.items():
+        paper = db.get(Paper, paper_id)
+        keep: list[str] = []
+        for thread in threads:
+            match = {
+                "author": thread.author_name,
+                "handle": thread.author_handle,
+                "text": thread.text,
+                "urls": [],
+            }
+            verdict = review(paper, match)
+            if verdict.approve:
+                keep.append(thread.url)
+                continue
+            rejected.append(
+                {
+                    "paper_id": paper_id,
+                    "title": paper.title,
+                    "url": thread.url,
+                    "reason": verdict.reason,
+                }
+            )
+        if apply and len(keep) < len(threads):
+            curation.update(
+                paper_id=paper_id,
+                section="x_threads",
+                payload={"x_threads": keep},
+                actor=ACTOR,
+                idempotency_key=str(uuid.uuid4()),
+                expected_version=None,
+                request_id=f"x-thread-review:{paper_id}",
+            )
+            db.commit()
+    return rejected
 
 
 def stored_candidates(db: Session) -> list[dict[str, Any]]:

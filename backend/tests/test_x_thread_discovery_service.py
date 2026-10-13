@@ -16,6 +16,7 @@ from backend.services.x_thread_discovery_service import (
     make_x_search,
     match_posts,
     organization_matches,
+    post_text_and_urls,
     short_name,
 )
 
@@ -236,3 +237,29 @@ def test_build_query_keeps_project_path_on_shared_hosts():
     )
     assert 'url:"alaya-lab.github.io/PROWBench"' in query
     assert 'url:"alaya-lab.github.io"' not in query
+
+
+def test_post_text_and_urls_prefers_long_form_text_and_unwound_links():
+    post = {
+        "text": "Short https://t.co/x",
+        "entities": {
+            "urls": [{"url": "https://t.co/x", "expanded_url": "https://a.io"}]
+        },
+        "note_tweet": {
+            "text": "Long form text",
+            "entities": {
+                "urls": [
+                    {
+                        "url": "https://t.co/y",
+                        "expanded_url": "https://t.co/y",
+                        "unwound_url": "https://arxiv.org/abs/2610.00001",
+                    }
+                ]
+            },
+        },
+    }
+    assert post_text_and_urls(post) == (
+        "Long form text",
+        ["https://arxiv.org/abs/2610.00001"],
+    )
+    assert post_text_and_urls({"text": "Plain"}) == ("Plain", [])
