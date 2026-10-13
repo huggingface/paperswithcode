@@ -21,6 +21,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-import-hf-daily-papers.yml` | `0 * * * *` | `pwc-cron import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
 | `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
+| local `pwc-cron-enqueue-benchmark-gap-review.timer` | `35 6 * * *` | `pwc-cron enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
@@ -177,6 +178,22 @@ ones the reviewer rejects:
 
 ```bash
 sudo pwc-cron discover_x_threads --review-linked-since 2026-10-12
+```
+
+`enqueue_benchmark_gap_review.py` turns benchmark gaps that scheduled add-evals
+agents report into configured leaderboards. Once per UTC day it queues one
+`review-benchmark-gaps` overseer job that sees every candidate reported by at
+least three distinct papers (high or medium confidence, up to 150 per run) and
+approves, merges, rejects, or defers each. Each approved candidate gets one
+`add-benchmark` job, at most 20 per UTC day, that finds the introducing paper,
+the most specific task, and one to three metrics; the backend validates and
+writes the rows, then requeues add-evals for the papers that reported the gap.
+Rejected candidates return for review once their paper count doubles; deferred
+ones after 14 days. Both kinds share the scheduler pause and run at most two at
+a time. Inspect or dry-run it with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --status
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither

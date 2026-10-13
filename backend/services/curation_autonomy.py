@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     AutonomousRun,
+    BenchmarkCurationCandidate,
     Paper,
     PaperCurationJob,
     TrendingModelCandidate,
@@ -77,6 +78,23 @@ def curation_primary_authorization(
                 "missing" if candidate_id is None else str(candidate_id),
                 candidate_id is not None
                 and db.get(TrendingModelCandidate, candidate_id) is not None,
+            ),
+        )
+    if row.kind == "review-benchmark-gaps":
+        # The overseer's per-candidate decisions are checked again at apply.
+        return (
+            Capability.CREATE_BENCHMARK_FROM_GAP,
+            ResourceRef(ResourceKind.BENCHMARK_CANDIDATE, "review-queue", True),
+        )
+    if row.kind == "add-benchmark":
+        candidate_id = getattr(row, "benchmark_candidate_id", None)
+        return (
+            Capability.CREATE_BENCHMARK_FROM_GAP,
+            ResourceRef(
+                ResourceKind.BENCHMARK_CANDIDATE,
+                "missing" if candidate_id is None else str(candidate_id),
+                candidate_id is not None
+                and db.get(BenchmarkCurationCandidate, candidate_id) is not None,
             ),
         )
     if row.kind in {"add-evals", "enrich-paper"}:

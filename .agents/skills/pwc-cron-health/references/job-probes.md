@@ -172,6 +172,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Open `https://paperswithcode.co/api/v1/conferences/deadlines` and confirm the flagship series (CVPR, ICML, NeurIPS, ICLR, ACL, EMNLP) have their next edition once its official CFP is out; spot-check one recent change against the source URL stored in the sweep's `results`.
 - **Correctness:** `failed` sweeps with `missing_series` mean the Job timed out or crashed (inspect with `hf jobs logs <id>`); `invalid` series mean a change set failed validation; `rejections` list guarded changes (past edition/deadline, implausible shift, no source URL) that need a human via `PUT /api/v1/conferences/{slug}/deadlines`. A missing `PWC_CONFERENCE_DEADLINES_ANTHROPIC_API_KEY` or HF Jobs credential makes the run exit 1 with `SweepConfigurationError`.
 
+## `enqueue_benchmark_gap_review`
+
+- **Effect:** Once per UTC day queues one `review-benchmark-gaps` overseer job when candidates reported by at least three papers are waiting, plus `add-benchmark` jobs for approved candidates up to 20 per day. Both run on the shared curation queue (trigger `benchmark-gap-cron`, at most two active) and respect the scheduler pause; promotions requeue add-evals for the evidence papers. `--status` prints candidate counts by status and today's creation jobs.
+- **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
+- **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
+
 ## `scan_model_releases`
 
 - **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.

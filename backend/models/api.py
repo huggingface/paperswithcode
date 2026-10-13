@@ -102,7 +102,11 @@ from backend.models.conferences import (
     Conferences as Conferences,
 )
 from backend.models.curation import (
+    AddBenchmarkMutation as AddBenchmarkMutation,
     ApplyMutationRequest as ApplyMutationRequest,
+    BenchmarkGapReviewDecision as BenchmarkGapReviewDecision,
+    BenchmarkMetricChoice as BenchmarkMetricChoice,
+    BenchmarkSourcePaper as BenchmarkSourcePaper,
     CompleteJobRequest as CompleteJobRequest,
     CurationLink as CurationLink,
     CurationTraceFinalizeRequest as CurationTraceFinalizeRequest,
@@ -110,8 +114,12 @@ from backend.models.curation import (
     EnrichPaperMutation as EnrichPaperMutation,
     ExternalPaperProposal as ExternalPaperProposal,
     ModelReleaseProposal as ModelReleaseProposal,
+    NewBenchmarkDataset as NewBenchmarkDataset,
+    NewBenchmarkMetric as NewBenchmarkMetric,
+    NewBenchmarkTask as NewBenchmarkTask,
     PromoteBenchmarkCandidateRequest as PromoteBenchmarkCandidateRequest,
     ResolveModelPaperMutation as ResolveModelPaperMutation,
+    ReviewBenchmarkGapsMutation as ReviewBenchmarkGapsMutation,
 )
 from backend.models.errors import (
     ErrorResponse as ErrorResponse,

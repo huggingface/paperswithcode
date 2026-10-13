@@ -11,9 +11,10 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from backend.config import Settings
+from backend.config import Settings, get_settings
 from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
+    BenchmarkCurationCandidate,
     Dataset,
     Evaluation,
     HfArtifact,
@@ -40,6 +41,7 @@ from backend.services.evaluation_scale_service import (
     metric_scale_bounds,
     validate_source_score,
 )
+from backend.services.benchmark_gap_review_service import BenchmarkGapReviewService
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.autonomous_capabilities import (
     CAPABILITY_RESOURCE_KINDS,
@@ -52,6 +54,7 @@ from backend.services.autonomous_operations_repository import RunContext
 from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.codex_add_evals_service import (
+    BENCHMARK_GAP_KINDS,
     CodexPaperJobService,
     codex_paper_job_service,
 )
@@ -261,6 +264,25 @@ class CodexCurationCallbackService:
         }
 
     def context(self, row, settings: Settings) -> dict[str, Any]:
+        if getattr(row, "kind", None) in BENCHMARK_GAP_KINDS:
+            review = BenchmarkGapReviewService(self.db, settings, self.job_service)
+            try:
+                scope = (
+                    {"review": review.review_context()}
+                    if row.kind == "review-benchmark-gaps"
+                    else {"benchmark": review.creation_context(row)}
+                )
+            except LookupError as error:
+                raise CodexCurationPaperNotFoundError(str(error)) from error
+            return {
+                "job": self.job_service.serialize(row, settings).model_dump(
+                    mode="json"
+                ),
+                "retry_feedback": self._retry_feedback(row),
+                # The pinned runner prints paper.id; these jobs have no paper.
+                "paper": {"id": None},
+                **scope,
+            }
         if getattr(row, "kind", None) == "resolve-model-paper":
             candidate = self.db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
@@ -593,6 +615,8 @@ class CodexCurationCallbackService:
         return self._apply_authorized(row, body)
 
     def _apply_authorized(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
+        if row.kind in BENCHMARK_GAP_KINDS:
+            return self._apply_benchmark_gap(row, body)
         if row.kind == "resolve-model-paper":
             try:
                 if hasattr(self.db, "refresh"):
@@ -818,6 +842,52 @@ class CodexCurationCallbackService:
             response["thumbnail"] = serialize_thumbnail(row)
         return response
 
+    def _apply_benchmark_gap(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
+        """Apply one overseer review or one benchmark creation in a transaction."""
+        try:
+            if hasattr(self.db, "refresh"):
+                self.db.refresh(row, with_for_update=True)
+            self._validate_mutation(row, body)
+            validation = self._validate_scheduled_policy(row, body)
+            review = BenchmarkGapReviewService(
+                self.db, get_settings(), self.job_service
+            )
+            result = (
+                review.apply_review(body.review_benchmark_gaps)
+                if row.kind == "review-benchmark-gaps"
+                else review.apply_add_benchmark(row, body.add_benchmark)
+            )
+            now = datetime.now(UTC)
+            row.submitted_at = now
+            row.applied_at = now
+            row.proposal = body.model_dump(mode="json")
+            row.validation_summary = {
+                **validation,
+                "status": "accepted",
+                "validator_version": "benchmark-gap-policy-v1",
+                "post_write_verification": "passed",
+            }
+            row.mutation_result = result
+            self.db.commit()
+            return dict(result)
+        except Exception as exc:
+            self.db.rollback()
+            if not isinstance(exc, CodexCurationMutationClosedError):
+                rejected = self.db.get(type(row), row.id)
+                if rejected is not None:
+                    retryable_validation = _retryable_validation(rejected, exc)
+                    rejected.proposal = body.model_dump(mode="json")
+                    rejected.validation_summary = {
+                        "status": "rejected",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:2_000],
+                        "retryable": retryable_validation,
+                    }
+                    if not retryable_validation:
+                        rejected.submitted_at = datetime.now(UTC)
+                    self.db.commit()
+            raise
+
     def _mutation_projection(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
         """Bound the durable before/after trace to relations touched by this stage."""
         if not hasattr(self.db, "flush"):
@@ -1014,6 +1084,36 @@ class CodexCurationCallbackService:
             raise CodexCurationMutationClosedError(
                 "This job may no longer apply mutations"
             )
+        if row.kind in BENCHMARK_GAP_KINDS:
+            expected = (
+                "review_benchmark_gaps"
+                if row.kind == "review-benchmark-gaps"
+                else "add_benchmark"
+            )
+            unexpected = (
+                body.enrich,
+                body.resolve_model_paper,
+                body.review_benchmark_gaps if expected == "add_benchmark" else None,
+                body.add_benchmark if expected == "review_benchmark_gaps" else None,
+            )
+            if (
+                getattr(body, expected) is None
+                or any(value is not None for value in unexpected)
+                or any(
+                    (
+                        body.evaluations,
+                        body.evaluation_removals,
+                        body.benchmark_gaps,
+                        body.validation_evidence,
+                        body.score_evidence,
+                        body.source_coverage,
+                    )
+                )
+            ):
+                raise ValueError(f"{row.kind} jobs accept only {expected} payloads")
+            return
+        if body.review_benchmark_gaps is not None or body.add_benchmark is not None:
+            raise ValueError("Benchmark-gap payloads are allowed only for their jobs")
         if row.kind == "resolve-model-paper":
             if (
                 body.resolve_model_paper is None
@@ -1286,6 +1386,8 @@ class CodexCurationCallbackService:
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation requires a durable pre-apply trace"
             )
+        if row.kind in BENCHMARK_GAP_KINDS:
+            return {"policy": "benchmark-gap-v1"}
         if row.kind == "enrich-paper":
             mutation = body.enrich
             if mutation is None:
@@ -1583,7 +1685,20 @@ class CodexCurationCallbackService:
     ) -> tuple[tuple[Capability, ResourceRef], ...]:
         """Resolve the callback's closed mutation surface from catalog state."""
         capability, primary_resource = curation_primary_authorization(self.db, row)
-        if row.kind == "resolve-model-paper":
+        if row.kind == "review-benchmark-gaps" and body.review_benchmark_gaps:
+            return tuple(
+                (
+                    capability,
+                    ResourceRef(
+                        ResourceKind.BENCHMARK_CANDIDATE,
+                        str(decision.candidate_id),
+                        self.db.get(BenchmarkCurationCandidate, decision.candidate_id)
+                        is not None,
+                    ),
+                )
+                for decision in body.review_benchmark_gaps.decisions
+            )
+        if row.kind in {"resolve-model-paper", *BENCHMARK_GAP_KINDS}:
             return ((capability, primary_resource),)
         resources: list[ResourceRef] = [primary_resource]
         if body.enrich is not None:

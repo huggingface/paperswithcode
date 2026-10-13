@@ -100,6 +100,7 @@ def build_snapshot(
         """
         SELECT c.identity_key, c.canonical_name, c.gap_type, c.canonical_url,
                c.status AS review_status, c.distinct_paper_count,
+               c.review_reason, c.reviewed_at, c.resolution,
                p.id AS paper_id, p.title AS paper_title, e.created_at
         FROM benchmark_curation_candidates c
         JOIN benchmark_curation_evidence e ON e.candidate_id = c.id
@@ -135,6 +136,21 @@ def build_snapshot(
         FROM paper_curation_jobs j
         JOIN trending_model_candidates c ON c.id = j.candidate_id
         WHERE j.kind = 'resolve-model-paper'
+          AND j.created_at >= :start_ts AND j.created_at < :end_ts
+        ORDER BY j.created_at, j.id
+        """,
+        params,
+    )
+    benchmark_gap_jobs = _rows(
+        db,
+        """
+        SELECT j.id AS job_id, j.kind, j.status AS job_status,
+               j.benchmark_candidate_id, c.canonical_name, c.status AS candidate_status,
+               j.mutation_result, j.error, j.trace_uri, j.created_at, j.finished_at,
+               j.applied_at
+        FROM paper_curation_jobs j
+        LEFT JOIN benchmark_curation_candidates c ON c.id = j.benchmark_candidate_id
+        WHERE j.kind IN ('review-benchmark-gaps', 'add-benchmark')
           AND j.created_at >= :start_ts AND j.created_at < :end_ts
         ORDER BY j.created_at, j.id
         """,
@@ -214,6 +230,7 @@ def build_snapshot(
         "benchmark_gaps": clean(list(unique_gaps.values())),
         "trending_models": clean(trending_models),
         "trending_model_decisions": clean(trending_model_decisions),
+        "benchmark_gap_jobs": clean(benchmark_gap_jobs),
     }
 
 

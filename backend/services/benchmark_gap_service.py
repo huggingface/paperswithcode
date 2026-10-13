@@ -569,6 +569,10 @@ class BenchmarkGapService:
                 )
                 if row is not None:
                     row.identity_key = identity_key
+            # A reviewed duplicate keeps its identity; new reports join the
+            # candidate it was merged into.
+            while getattr(row, "merged_into_id", None) is not None:
+                row = self.db.get(BenchmarkCurationCandidate, row.merged_into_id)
             if row is None:
                 row = BenchmarkCurationCandidate(
                     id=uuid.uuid4(),
@@ -669,17 +673,55 @@ class BenchmarkGapService:
                 "Promotion metric does not match the captured paper evidence"
             )
 
-        policy_version = f"benchmark-promotion-{str(candidate.id)[:12]}"
+        rechecks = self.enqueue_evidence_rechecks(
+            candidate,
+            trigger="benchmark-promotion",
+            priority=50,
+            settings=settings,
+            job_service=job_service,
+        )
+        candidate.status = "promoted"
+        candidate.promoted_at = datetime.now(UTC)
+        self.db.commit()
+        job_service.dispatch_next(self.db, settings)
+        return {
+            "candidate_id": str(candidate.id),
+            "dataset_id": dataset_id,
+            "task_id": task_id,
+            "best_metric": best_metric,
+            **rechecks,
+        }
+
+    @staticmethod
+    def recheck_policy_version(candidate: BenchmarkCurationCandidate) -> str:
+        return f"benchmark-promotion-{str(candidate.id)[:12]}"
+
+    def enqueue_evidence_rechecks(
+        self,
+        candidate: BenchmarkCurationCandidate,
+        *,
+        trigger: str,
+        priority: int,
+        settings,
+        job_service,
+    ) -> dict[str, list]:
+        """Queue add-evals once for each paper that reported the candidate."""
+        policy_version = self.recheck_policy_version(candidate)
+        evidence_rows = (
+            self.db.query(BenchmarkCurationEvidence)
+            .filter(BenchmarkCurationEvidence.candidate_id == candidate.id)
+            .order_by(BenchmarkCurationEvidence.created_at)
+            .all()
+        )
         enqueued = []
         skipped_active: list[int] = []
-        paper_ids = sorted({int(item.paper_id) for item in evidence_rows})
-        for paper_id in paper_ids:
+        for paper_id in sorted({int(item.paper_id) for item in evidence_rows}):
             existing = (
                 self.db.query(PaperCurationJob)
                 .filter(
                     PaperCurationJob.paper_id == paper_id,
                     PaperCurationJob.kind == "add-evals",
-                    PaperCurationJob.trigger == "benchmark-promotion",
+                    PaperCurationJob.trigger == trigger,
                     PaperCurationJob.policy_version == policy_version,
                     PaperCurationJob.status.in_(
                         {"queued", "dispatching", "running", "completed"}
@@ -717,23 +759,14 @@ class BenchmarkGapService:
                     paper_title=paper.title,
                     requested_by=f"benchmark-promotion:{candidate.id}",
                     settings=settings,
-                    trigger="benchmark-promotion",
+                    trigger=trigger,
                     policy_version=policy_version,
-                    priority=50,
+                    priority=priority,
                     dispatch=False,
                     commit=False,
                 )
             )
-
-        candidate.status = "promoted"
-        candidate.promoted_at = datetime.now(UTC)
-        self.db.commit()
-        job_service.dispatch_next(self.db, settings)
         return {
-            "candidate_id": str(candidate.id),
-            "dataset_id": dataset_id,
-            "task_id": task_id,
-            "best_metric": best_metric,
             "enqueued_job_ids": [str(item.id) for item in enqueued],
             "skipped_active_paper_ids": skipped_active,
         }

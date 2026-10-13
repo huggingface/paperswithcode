@@ -1469,6 +1469,38 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="enqueue_benchmark_gap_review",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(6, 35),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-enqueue-benchmark-gap-review.timer",
+        systemd_service="pwc-cron-enqueue-benchmark-gap-review.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Benchmark Gap Review",
+        category="daily",
+        schedule="35 6 * * * (daily UTC)",
+        script_path="backend/scripts/enqueue_benchmark_gap_review.py",
+        log_name="enqueue_benchmark_gap_review",
+        process_patterns=("backend.scripts.enqueue_benchmark_gap_review",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "enqueue_benchmark_gap_review.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=1560,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(reviewed_at) AS last_write,
+                   count(*) FILTER (WHERE status = 'approved') AS approved,
+                   count(*) FILTER (WHERE status = 'promoted') AS promoted,
+                   count(*) FILTER (WHERE status = 'rejected') AS rejected
+            FROM benchmark_curation_candidates
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="scan_model_releases",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(180, offset_minutes=108),),

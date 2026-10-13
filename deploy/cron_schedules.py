@@ -128,6 +128,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Enqueue Hugging Face trending model curation hourly",
     ),
     TimerSpec(
+        job="enqueue_benchmark_gap_review",
+        on_calendar=("*-*-* 06:35:00",),
+        description="Review reported benchmark gaps and queue benchmark creation daily",
+    ),
+    TimerSpec(
         job="scan_model_releases",
         on_calendar=("*-*-* 01/3:48:00",),
         description="Scan official lab news for unindexed model releases every three hours",

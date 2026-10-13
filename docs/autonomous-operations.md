@@ -10,7 +10,13 @@ callbacks, retries, source publication, deployments, and data changes while the
 
 - Autonomous code may never create or mutate tasks, methods,
   benchmarks/datasets, metrics, or conferences. Those submissions stay pending
-  in their existing human review tabs.
+  in their existing human review tabs. The one exception is the curation
+  operator's `create_benchmark_from_gap` capability: the daily
+  `enqueue_benchmark_gap_review` job may configure a benchmark (dataset, task
+  link, up to three metrics, and a child task when no task fits) for a gap that
+  at least three papers reported and its overseer approved. Every write is
+  recorded in the candidate's `resolution` and can be rolled back from the
+  admin API while only the reporting papers have scores on it.
 - Database migrations, nginx or host changes, secret rotation, billing renewal,
   destructive repair, and ambiguous lock ownership always stop for a human.
 - One global source-repair lease fences every operator.

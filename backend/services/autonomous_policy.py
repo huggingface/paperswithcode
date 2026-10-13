@@ -34,6 +34,7 @@ _EXISTING_ONLY = frozenset(
         ResourceKind.PAPER,
         ResourceKind.EVALUATION,
         ResourceKind.TRENDING_MODEL_CANDIDATE,
+        ResourceKind.BENCHMARK_CANDIDATE,
         ResourceKind.DECLARED_CRON,
     }
 )

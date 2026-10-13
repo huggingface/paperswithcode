@@ -687,6 +687,35 @@ deploying source that uses this operator. The migration adds the disabled
 control row and expands only the autonomous operator constraints; it does not
 enable curation or release scheduled dispatch.
 
+### Benchmark-gap review
+
+`enqueue_benchmark_gap_review` (daily, 06:35 UTC) runs two more job kinds on
+the same queue under trigger `benchmark-gap-cron`: one `review-benchmark-gaps`
+overseer per day and up to 20 `add-benchmark` jobs per UTC day. They obey the
+scheduled dispatch pause and the curation operator switch, take at most two of
+the scheduled slots, and do not count toward the daily token guardrail or the
+failure-rate breaker. They use the curation operator's
+`create_benchmark_from_gap` capability, the only autonomous path that creates
+datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
+
+Both kinds run on the existing curator image: the runner treats them as
+paper-less jobs, `jobs/url_preflight.py` skips paper sources for them, and the
+instructions live in the bootstrapped `remote-paper-curation` skill. Apply
+`backend/database/migrations/add_benchmark_gap_review.sql` as `postgres` before
+deploying, then install and enable the timer:
+
+```bash
+sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review.sql
+sudo systemctl enable --now pwc-cron-enqueue-benchmark-gap-review.timer
+```
+
+Each promoted candidate records the rows it used or created in
+`benchmark_curation_candidates.resolution`. Roll back a wrong benchmark with
+`POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`
+(also on the admin curation queue). Rollback refuses while evidence rechecks
+are running or when papers outside the evidence set have scores on the
+leaderboard, and it marks the candidate rejected.
+
 Retry a terminal scheduled stage by its durable job UUID through the same
 allowlisted queue. Operator retries use priority 50 (ahead of ordinary daily
 work but behind priority-0 admin jobs), and repeating the command for an already

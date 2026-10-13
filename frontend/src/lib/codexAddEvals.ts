@@ -21,10 +21,11 @@ export interface CodexPaperJob {
   id: string;
   paper_id: number | null;
   candidate_id: string | null;
+  benchmark_candidate_id: string | null;
   paper_route: string | null;
   paper_title: string | null;
   requested_by: string;
-  kind: "add-evals" | "enrich-paper" | "resolve-model-paper";
+  kind: "add-evals" | "enrich-paper" | "resolve-model-paper" | "review-benchmark-gaps" | "add-benchmark";
   status: CodexPaperJobStatus;
   hf_job_id: string | null;
   hf_job_url: string | null;
@@ -38,7 +39,7 @@ export interface CodexPaperJob {
   attempt_count: number;
   thumbnail: CodexThumbnailResult | null;
   parent_workflow_id: string | null;
-  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion";
+  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion" | "benchmark-gap-cron";
   cohort_date: string | null;
   policy_version: string;
   repository_sha: string | null;
@@ -89,6 +90,17 @@ interface BenchmarkCurationCandidate {
   first_seen_at: string;
   last_seen_at: string;
   promoted_at: string | null;
+  review_reason: string | null;
+  reviewed_at: string | null;
+  deferred_until: string | null;
+  merged_into_id: string | null;
+  resolution: {
+    dataset_id: number;
+    task_id: number;
+    primary_metric: string;
+    created?: Record<string, unknown>;
+    rolled_back_at?: string;
+  } | null;
   evidence_paper_ids: number[];
 }
 
@@ -131,6 +143,17 @@ export async function promoteBenchmarkCandidate(
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new Error(body?.detail ?? `Could not promote benchmark candidate (${response.status}).`);
+  }
+}
+
+export async function rollbackBenchmarkCandidate(candidateId: string): Promise<void> {
+  const response = await fetch(
+    apiUrl(`/api/v1/admin/codex-curation/jobs/benchmark-candidates/${candidateId}/rollback`),
+    { method: "POST", credentials: "include" },
+  );
+  if (!response.ok) {
+    const body = await response.json().catch(() => null);
+    throw new Error(body?.detail ?? `Could not roll back benchmark candidate (${response.status}).`);
   }
 }
 

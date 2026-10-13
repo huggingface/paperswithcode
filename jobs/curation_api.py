@@ -214,6 +214,8 @@ def main() -> None:
     taxonomy.add_argument("query")
     leaderboards = sub.add_parser("leaderboards")
     leaderboards.add_argument("query")
+    catalog = sub.add_parser("catalog")
+    catalog.add_argument("query")
     apply = sub.add_parser("apply")
     apply.add_argument("json_file")
     thumbnail_status = sub.add_parser("thumbnail-status")
@@ -226,6 +228,8 @@ def main() -> None:
         request(f"taxonomy?q={urllib.parse.quote(args.query)}")
     elif args.command == "leaderboards":
         request(f"leaderboards?q={urllib.parse.quote(args.query)}")
+    elif args.command == "catalog":
+        request(f"catalog?q={urllib.parse.quote(args.query)}")
     elif args.command == "thumbnail-status":
         wait_for_thumbnail(args.wait_seconds, args.poll_seconds)
     else:

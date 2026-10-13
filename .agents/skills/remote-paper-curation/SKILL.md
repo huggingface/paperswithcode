@@ -256,3 +256,119 @@ Example:
 ```
 
 Finish with a concise audit report. The runner reports it to the VPS.
+
+## Benchmark-gap jobs
+
+Kinds `review-benchmark-gaps` and `add-benchmark` have no scoped paper
+(`context.paper.id` is null). Ignore the paper-enrichment rules in the runner
+prompt and follow only this section. Submit `evaluations`,
+`evaluation_removals`, `benchmark_gaps`, and `validation_evidence` as empty
+arrays plus exactly one of `review_benchmark_gaps` or `add_benchmark`. Each
+apply is one transaction; on a validation error, fix the cited field and apply
+once more.
+
+The context can be large. Read `/tmp/context.json` with `python3` or `jq`
+instead of printing it whole. Search datasets (configured or not), tasks, and
+metrics with:
+
+```bash
+python jobs/curation_api.py catalog "ScanObjectNN"
+```
+
+### `review-benchmark-gaps`: the daily overseer
+
+`context.review.candidates` lists every eligible gap (reported by at least
+three distinct papers), strongest evidence first. Decide each one with the
+whole list in view:
+
+- `merge` duplicates into the candidate to keep, for example `TinyImageNet`
+  into `Tiny-ImageNet` (`merge_into_candidate_id`). Never merge distinct
+  splits, versions, or subsets.
+- `reject` a candidate that is not a reusable public benchmark (a private or
+  paper-specific test set, a model or method name, a metric, a split label)
+  or that `catalog_name_matches` already covers completely. Watch for name
+  clashes: a match with the same name but a different domain (the graph
+  dataset `Chameleon` against a camouflaged-object benchmark `CHAMELEON`) is
+  not coverage.
+- `defer` when the evidence is too thin or contradictory to decide today.
+- `approve` the rest. Each approval queues one `add-benchmark` job that does
+  the deep research, so approve on reusability and demand, not on source
+  details. Approve leaderboard gaps (`task_dataset_association_missing`,
+  `metric_configuration_missing`) when the papers report results on that
+  exact task and metric.
+
+Give a specific reason per decision; the reasons are the audit trail. Decide
+only candidates from the context.
+
+```json
+{
+  "evaluations": [], "evaluation_removals": [], "benchmark_gaps": [],
+  "validation_evidence": [],
+  "review_benchmark_gaps": {
+    "summary": "Approved 9, merged 2 aliases, rejected 3 paper-specific sets.",
+    "decisions": [
+      {"candidate_id": "<uuid>", "decision": "approve",
+       "reason": "Standard public 200-class benchmark reported by 16 papers."},
+      {"candidate_id": "<uuid>", "decision": "merge",
+       "merge_into_candidate_id": "<uuid>",
+       "reason": "Same dataset as Tiny-ImageNet under another spelling."}
+    ]
+  }
+}
+```
+
+### `add-benchmark`: configure one approved benchmark
+
+`context.benchmark` holds the candidate, the overseer's reason, every
+reporting paper's protocol, metrics, sources, catalog near-matches, and
+related tasks. Decide:
+
+- `map_existing` when the dataset already exists (check `catalog` for every
+  name and alias first): give `existing_dataset_id` and the task and metrics
+  the reporting papers use. Missing task links and metrics are added.
+- `create` a new dataset otherwise. `source_paper` must be the paper that
+  introduced or formally describes the benchmark, never a later paper that only
+  evaluates on it; follow the reporting papers' citations. Prefer
+  `existing_paper_id`, then `arxiv_id`, then `external_paper` (a homepage or
+  technical report with a credible publication date) for a benchmark with no
+  paper. Include that paper's canonical URL (arXiv abs URL or `source_url`) in
+  `evidence_urls`.
+- `reject` a candidate that is not a reusable benchmark after all, or `defer`
+  when primary sources cannot be read.
+
+Task: choose the most specific existing task that matches what the papers
+measure, even when it differs from the reported task (COD10K belongs under
+camouflaged object detection, not the broad image segmentation task). Propose
+`new_task` only when no existing task fits; it must name an existing
+`parent_task_id` and give a description and comma-separated keywords.
+
+Metrics: list one to three, primary first, using the names the papers report.
+Reuse an existing metric whenever its definition matches (search `catalog`
+first); the server rejects a `new_metric` whose name matches an existing one.
+A new metric needs its full name, direction, scale (`0-100`, `0-1`, or a unit),
+and a definition.
+
+```json
+{
+  "evaluations": [], "evaluation_removals": [], "benchmark_gaps": [],
+  "validation_evidence": [],
+  "add_benchmark": {
+    "decision": "create",
+    "reason": "ModelNet40 is the standard CAD shape classification benchmark.",
+    "evidence_urls": ["https://arxiv.org/abs/1406.5670"],
+    "new_dataset": {
+      "name": "ModelNet40",
+      "full_name": "Princeton ModelNet 40-class subset",
+      "description": "12,311 CAD models from 40 categories ...",
+      "homepage": "https://modelnet.cs.princeton.edu/"
+    },
+    "source_paper": {"arxiv_id": "1406.5670"},
+    "existing_task_id": "<3D shape classification task id>",
+    "metrics": [{"existing_metric_id": "<Overall Accuracy metric id>"}],
+    "supports_harness": false
+  }
+}
+```
+
+After a successful create or map, the server requeues add-evals for every
+paper that reported the gap; do not add evaluation rows yourself.

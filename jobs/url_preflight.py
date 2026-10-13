@@ -27,6 +27,8 @@ TEMPLATE_REPOSITORIES = {"academicpages/academicpages.github.io", "alshedivat/al
 OCR_MARKDOWN_BUCKET_ID = "huggingface/pwc-papers-content"
 OCR_MARKDOWN_TOKEN_ENV = "PWC_PAPER_MARKDOWN_HF_TOKEN"
 
+BENCHMARK_GAP_KINDS = {"review-benchmark-gaps", "add-benchmark"}
+
 
 class _BucketRedirectHandler(urllib.request.HTTPRedirectHandler):
     """Strip bucket credentials before following a cross-origin redirect."""
@@ -492,16 +494,20 @@ def main() -> None:
     if len(sys.argv) != 3:
         raise SystemExit("usage: url_preflight.py CONTEXT.json OUTPUT.json")
     context = json.loads(Path(sys.argv[1]).read_text(encoding="utf-8"))
-    Path(sys.argv[2]).write_text(
-        json.dumps(
-            extract_candidates(
-                context,
-                source_cache_dir=Path(sys.argv[2]).resolve().parent / "paper-sources",
-            ),
-            indent=2,
-        ),
-        encoding="utf-8",
-    )
+    if (context.get("job") or {}).get("kind") in BENCHMARK_GAP_KINDS:
+        # Benchmark-gap jobs have no scoped paper; the agent reads sources itself.
+        result = {
+            "complete": True,
+            "candidates": [],
+            "source_documents": [],
+            "errors": [],
+        }
+    else:
+        result = extract_candidates(
+            context,
+            source_cache_dir=Path(sys.argv[2]).resolve().parent / "paper-sources",
+        )
+    Path(sys.argv[2]).write_text(json.dumps(result, indent=2), encoding="utf-8")
 
 
 if __name__ == "__main__":

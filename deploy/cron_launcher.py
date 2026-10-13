@@ -406,6 +406,15 @@ COMMANDS: dict[str, Job] = {
             "model-resolution and paper-curation workflows"
         ),
     ),
+    "enqueue_benchmark_gap_review": job(
+        "-m",
+        "backend.scripts.enqueue_benchmark_gap_review",
+        timeout="30m",
+        idempotency=(
+            "queue at most one daily overseer review of eligible benchmark-gap "
+            "candidates and at most 20 add-benchmark jobs per UTC day"
+        ),
+    ),
     "scan_model_releases": job(
         "-m",
         "backend.scripts.scan_model_releases",

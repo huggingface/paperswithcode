@@ -46,7 +46,21 @@ from jobs.curation_failure_codes import AWAITING_MARKDOWN, parse_failure_code
 
 logger = logging.getLogger(__name__)
 
-JobKind = Literal["add-evals", "enrich-paper", "resolve-model-paper"]
+JobKind = Literal[
+    "add-evals",
+    "enrich-paper",
+    "resolve-model-paper",
+    "review-benchmark-gaps",
+    "add-benchmark",
+]
+BENCHMARK_GAP_KINDS = frozenset({"review-benchmark-gaps", "add-benchmark"})
+BENCHMARK_GAP_TRIGGER = "benchmark-gap-cron"
+# Benchmark-gap work shares the scheduled pause and capacity, but gets its own
+# small lane so a constant daily backlog cannot starve it.
+SCHEDULED_TRIGGERS = frozenset(
+    {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER}
+)
+BENCHMARK_GAP_MAX_ACTIVE = 2
 JobStatus = Literal[
     "queued", "dispatching", "running", "completed", "failed", "canceled"
 ]
@@ -93,6 +107,7 @@ class CodexPaperJob(BaseModel):
     id: uuid.UUID
     paper_id: int | None
     candidate_id: uuid.UUID | None = None
+    benchmark_candidate_id: uuid.UUID | None = None
     paper_route: str | None
     paper_title: str | None
     requested_by: str
@@ -313,6 +328,7 @@ class CodexPaperJobService:
             id=row.id,
             paper_id=int(row.paper_id) if row.paper_id is not None else None,
             candidate_id=getattr(row, "candidate_id", None),
+            benchmark_candidate_id=getattr(row, "benchmark_candidate_id", None),
             paper_route=row.paper_route,
             paper_title=row.paper_title,
             requested_by=row.requested_by,
@@ -482,6 +498,51 @@ class CodexPaperJobService:
             db.refresh(row)
         return self.serialize(row, settings)
 
+    def enqueue_benchmark_job(
+        self,
+        db: Session,
+        *,
+        kind: JobKind,
+        benchmark_candidate_id: uuid.UUID | None,
+        requested_by: str,
+        settings: Settings,
+        priority: int,
+        retry_of_id: uuid.UUID | None = None,
+    ) -> PaperCurationJob:
+        """Add one unscoped review or candidate-scoped creation job (no commit)."""
+        if kind not in BENCHMARK_GAP_KINDS:
+            raise ValueError(f"{kind} is not a benchmark-gap job kind")
+        repository_sha = _git_revision()
+        row = PaperCurationJob(
+            id=uuid.uuid4(),
+            kind=kind,
+            paper_id=None,
+            benchmark_candidate_id=benchmark_candidate_id,
+            paper_route=None,
+            paper_title=None,
+            requested_by=requested_by,
+            status="queued",
+            trigger=BENCHMARK_GAP_TRIGGER,
+            cohort_date=_now().date(),
+            policy_version="benchmark-gap-v1",
+            priority=priority,
+            repository_sha=repository_sha if len(repository_sha) == 40 else None,
+            skill_sha256=_curator_skill_digest(kind),
+            bootstrap_bundle=(
+                _curator_bootstrap_bundle(repository_sha)
+                if len(repository_sha) == 40
+                else None
+            ),
+            model=settings.codex_jobs_model,
+            reasoning_effort=settings.codex_jobs_reasoning_effort,
+            codex_cli_version=settings.codex_jobs_cli_version,
+            validator_version="benchmark-gap-policy-v1",
+            retry_of_id=retry_of_id,
+        )
+        db.add(row)
+        db.flush()
+        return row
+
     def enqueue_resolved_candidate_workflow(
         self,
         db: Session,
@@ -577,7 +638,10 @@ class CodexPaperJobService:
             if len(active) >= settings.codex_jobs_max_active:
                 return
             scheduled_active = sum(
-                item.trigger in {"hf-daily-cron", "hf-trending-cron"} for item in active
+                item.trigger in SCHEDULED_TRIGGERS for item in active
+            )
+            benchmark_gap_active = sum(
+                item.trigger == BENCHMARK_GAP_TRIGGER for item in active
             )
             scheduler_state = db.get(PaperCurationSchedulerState, 1)
             usage_allowed = self._scheduled_usage_allowed(db, scheduler_state)
@@ -602,6 +666,12 @@ class CodexPaperJobService:
                 )
                 .first()
             )
+            if (
+                row is None
+                and scheduled_allowed
+                and benchmark_gap_active < BENCHMARK_GAP_MAX_ACTIVE
+            ):
+                row = self._next_benchmark_gap_row(db)
             if row is None and scheduled_allowed:
                 row = self._next_scheduled_row(db)
             if row is None:
@@ -667,6 +737,22 @@ class CodexPaperJobService:
             db.query(PaperCurationJob)
             .filter(
                 PaperCurationJob.trigger == "hf-trending-cron",
+                PaperCurationJob.status == "queued",
+            )
+            .order_by(
+                PaperCurationJob.priority,
+                PaperCurationJob.created_at,
+                PaperCurationJob.id,
+            )
+            .first()
+        )
+
+    @staticmethod
+    def _next_benchmark_gap_row(db: Session) -> PaperCurationJob | None:
+        return (
+            db.query(PaperCurationJob)
+            .filter(
+                PaperCurationJob.trigger == BENCHMARK_GAP_TRIGGER,
                 PaperCurationJob.status == "queued",
             )
             .order_by(
@@ -841,10 +927,7 @@ class CodexPaperJobService:
     def _dispatch_row(
         self, db: Session, settings: Settings, row: PaperCurationJob
     ) -> None:
-        if getattr(row, "trigger", "admin") in {
-            "hf-daily-cron",
-            "hf-trending-cron",
-        }:
+        if getattr(row, "trigger", "admin") in SCHEDULED_TRIGGERS:
             try:
                 authorize_curation_launch(db, row)
             except AutonomousCapabilityDenied as error:
@@ -966,7 +1049,7 @@ class CodexPaperJobService:
                 time.sleep(2**attempt)
         if observed == expected:
             return image
-        if row.trigger in {"hf-daily-cron", "hf-trending-cron"}:
+        if row.trigger in SCHEDULED_TRIGGERS:
             state = db.get(PaperCurationSchedulerState, 1)
             if state is not None:
                 state.paused_at = _now()
@@ -1024,6 +1107,8 @@ class CodexPaperJobService:
                     "candidate_id": (
                         str(row.candidate_id)
                         if getattr(row, "candidate_id", None) is not None
+                        else str(row.benchmark_candidate_id)
+                        if getattr(row, "benchmark_candidate_id", None) is not None
                         else ""
                     ),
                     "kind": row.kind,
@@ -1172,6 +1257,23 @@ class CodexPaperJobService:
                         if candidate.promoted_at
                         else None
                     ),
+                    "review_reason": candidate.review_reason,
+                    "reviewed_at": (
+                        candidate.reviewed_at.isoformat()
+                        if candidate.reviewed_at
+                        else None
+                    ),
+                    "deferred_until": (
+                        candidate.deferred_until.isoformat()
+                        if candidate.deferred_until
+                        else None
+                    ),
+                    "merged_into_id": (
+                        str(candidate.merged_into_id)
+                        if candidate.merged_into_id
+                        else None
+                    ),
+                    "resolution": candidate.resolution,
                     "evidence_paper_ids": sorted(
                         {int(item.paper_id) for item in evidence_rows}
                     ),
@@ -1243,7 +1345,18 @@ class CodexPaperJobService:
                 workflow.finished_at = None
                 # Check workflow ownership before enqueue can commit a new job.
                 db.flush()
-        if row.kind == "resolve-model-paper":
+        if row.kind in BENCHMARK_GAP_KINDS:
+            retried = self.enqueue_benchmark_job(
+                db,
+                kind=row.kind,
+                benchmark_candidate_id=row.benchmark_candidate_id,
+                requested_by="admin-retry",
+                settings=settings,
+                priority=row.priority if priority is None else priority,
+                retry_of_id=row.id,
+            )
+            db.commit()
+        elif row.kind == "resolve-model-paper":
             candidate = db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
                 raise LookupError("Trending model candidate no longer exists")
@@ -1504,6 +1617,13 @@ class CodexPaperJobService:
     def _advance_workflow(
         self, db: Session, row: PaperCurationJob, settings: Settings
     ) -> None:
+        if getattr(row, "kind", None) in BENCHMARK_GAP_KINDS:
+            from backend.services.benchmark_gap_review_service import (  # noqa: PLC0415
+                BenchmarkGapReviewService,
+            )
+
+            BenchmarkGapReviewService(db, settings, self).handle_terminal_job(row)
+            return
         if getattr(row, "parent_workflow_id", None) is None:
             return
         workflow = db.get(PaperCurationWorkflow, row.parent_workflow_id)

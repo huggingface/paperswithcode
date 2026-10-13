@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Review reported benchmark gaps and queue benchmark creation daily
+
+[Timer]
+OnCalendar=*-*-* 06:35:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-enqueue-benchmark-gap-review.service
+
+[Install]
+WantedBy=timers.target
