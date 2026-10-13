@@ -366,8 +366,11 @@ class LatexPaperService:
             display_metadata=_audit_metadata(manifest.display_metadata, provenance),
             actor_type=actor_type,
         )
-        artifact.source_head_version_id = version.id
         self.db.add(version)
+        self.db.flush()
+        # The head columns carry no ORM foreign key, so point at the version
+        # only after its row exists; PostgreSQL checks the key immediately.
+        artifact.source_head_version_id = version.id
         self.db.flush()
         try:
             for path, data in files.items():

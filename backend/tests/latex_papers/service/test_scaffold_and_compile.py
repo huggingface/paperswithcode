@@ -245,3 +245,49 @@ def test_quota_rejected_repair_candidate_keeps_the_failed_head_ephemeral(db, set
         )
         == 2
     )
+
+
+def test_paper_heads_point_only_at_versions_already_inserted(db, settings):
+    """PostgreSQL checks head foreign keys per statement; SQLite does not."""
+    from sqlalchemy import event
+
+    statements: list[str] = []
+
+    def record(_connection, _cursor, statement, *_args):
+        statements.append(" ".join(statement.split()).lower())
+
+    engine = db.get_bind()
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        compiler = _Compiler()
+        service = LatexPaperService(
+            db,
+            settings,
+            storage=LocalArtifactStorage(Path(settings.chat_artifact_local_dir)),
+            compiler=compiler,
+        )
+        initial = service.create_neutral_scaffold(
+            owner_id="owner-1", session_id=_session(db)
+        )
+        assert initial.source_head is not None
+        service.save_human_version(
+            owner_id="owner-1",
+            artifact_id=initial.artifact_id,
+            expected_parent_version_id=initial.source_head.version_id,
+            files={
+                "main.tex": b"\\documentclass{article}\\begin{document}x\\end{document}"
+            },
+        )
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+
+    inserted = 0
+    for statement in statements:
+        if statement.startswith("insert into chat_latex_paper_versions"):
+            inserted += 1
+        elif statement.startswith("update chat_artifacts") and (
+            "source_head_version_id" in statement
+            or "preview_head_version_id" in statement
+        ):
+            assert inserted, "a head pointer was written before its version row"
+    assert inserted == 2
