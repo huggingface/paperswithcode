@@ -211,10 +211,6 @@ export class CatalogApi {
     return this.request(`/organizations/${featuredOnly ? "?featured_only=true" : ""}`);
   }
 
-  syncOrganization(payload: { hf_slug: string; slug?: string; skip_missing_papers?: boolean }): Promise<{ organization: string; linked: number }> {
-    return this.request("/organizations/sync", { method: "POST", body: JSON.stringify(payload) });
-  }
-
   organizationIndex(): Promise<Organizations> {
     return this.request("/organizations/index/cards");
   }

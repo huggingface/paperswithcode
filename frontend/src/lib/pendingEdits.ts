@@ -93,6 +93,11 @@ const newConferencePayload = suggestionBase.extend({
   start_date: z.string().optional(),
   end_date: z.string().optional(),
 });
+const newOrganizationPayload = suggestionBase.extend({
+  hf_slug: z.string().optional(),
+  website_url: z.string().optional(),
+  image: suggestionImage.optional(),
+});
 
 const base = z.object({
   id: z.number(),
@@ -172,6 +177,7 @@ const newMethod = variant("new_method", newMethodPayload, record);
 const newBenchmark = variant("new_benchmark", newBenchmarkPayload, record);
 const newMetric = variant("new_metric", newMetricPayload, record);
 const newConference = variant("new_conference", newConferencePayload, record);
+const newOrganization = variant("new_organization", newOrganizationPayload, record);
 const newExternalPaper = variant(
   "new_external_paper",
   z.object({
@@ -199,6 +205,7 @@ const pendingPaperEditSchema = z.discriminatedUnion("edit_type", [
   newBenchmark,
   newMetric,
   newConference,
+  newOrganization,
   newExternalPaper,
 ]);
 

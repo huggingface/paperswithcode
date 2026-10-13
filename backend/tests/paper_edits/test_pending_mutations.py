@@ -96,7 +96,14 @@ def test_autonomous_pending_edit_resolves_taxonomy_ids_server_side():
 
 @pytest.mark.parametrize(
     "edit_type",
-    ["new_task", "new_method", "new_benchmark", "new_metric", "new_conference"],
+    [
+        "new_task",
+        "new_method",
+        "new_benchmark",
+        "new_metric",
+        "new_conference",
+        "new_organization",
+    ],
 )
 def test_autonomous_direct_service_call_cannot_create_human_only_taxonomy(edit_type):
     service = mutation_service(FakeDB(set()), [])

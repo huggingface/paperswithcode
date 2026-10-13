@@ -141,7 +141,14 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
 
 
 HUMAN_ONLY_EDIT_TYPES = frozenset(
-    {"new_task", "new_method", "new_benchmark", "new_metric", "new_conference"}
+    {
+        "new_task",
+        "new_method",
+        "new_benchmark",
+        "new_metric",
+        "new_conference",
+        "new_organization",
+    }
 )
 
 

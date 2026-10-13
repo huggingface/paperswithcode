@@ -50,6 +50,7 @@ const fixtures: Array<{
   { type: "new_benchmark", proposed: { benchmark: "New benchmark", task: "New task", description: "Benchmark description" }, expected: "New benchmark", secondaryExpected: "New task" },
   { type: "new_metric", proposed: { name: "New metric", description: "Metric description", direction: "higher_is_better", task_id: 1, dataset_id: 2 }, expected: "New metric" },
   { type: "new_conference", proposed: { name: "New conference", year: 2026, url: "https://example.com/conference" }, expected: "New conference" },
+  { type: "new_organization", proposed: { name: "Prime Intellect", hf_slug: "PrimeIntellect", website_url: "https://www.primeintellect.ai/" }, expected: "Prime Intellect", secondaryExpected: "https://huggingface.co/PrimeIntellect" },
   { type: "new_external_paper", proposed: { title: "External paper", source_url: "https://example.com/paper", authors: ["Ada"], date_published: "2026-08-10" }, expected: "External paper" },
 ];
 
