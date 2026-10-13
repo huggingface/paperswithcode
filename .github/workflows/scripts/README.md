@@ -147,11 +147,7 @@ three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
 job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
 it. It is report-only, storing matches on the scan row, unless
 `PWC_X_THREAD_DISCOVERY_APPLY=true`, which links matches through the audited
-`x_threads` curation section as actor `x-thread-discovery`. Before linking,
-each match is reviewed by gpt-5.6-sol (`PWC_OPENAI_API_KEY`, from
-`production.env`): it rejects posts about a sibling project, multi-paper
-acceptance lists, and congratulation replies, and the verdict and reason are
-stored with the candidate. Without the key the job links nothing. Review stored
+`x_threads` curation section as actor `x-thread-discovery`. Review stored
 matches, or run it by hand, with:
 
 ```bash
@@ -168,14 +164,6 @@ at most 200 papers at least 15 minutes apart:
 
 ```bash
 sudo pwc-cron discover_x_threads --backfill-days 180 --max-papers 200
-```
-
-`--review-linked-since YYYY-MM-DD` re-reviews threads the job linked since that
-date (hand-curated threads are never touched) and, in apply mode, unlinks the
-ones the reviewer rejects:
-
-```bash
-sudo pwc-cron discover_x_threads --review-linked-since 2026-10-12
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither
@@ -205,10 +193,7 @@ pages for papers that still have `urls_extracted = false`.
 papers that are not yet in the database, and auto-tags tasks/methods using
 keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
 (`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
-key is missing or the call fails, the Hugging Face `ai_summary` is stored instead.
-Each run also fills a TL;DR for up to 50 latest-version papers that have an
-abstract but no TL;DR, which covers papers added through the admin API, the
-`paper index` CLI, or external-resource ingestion. It also links curated organization payloads for both new and
+key is missing or the call fails, the Hugging Face `ai_summary` is stored instead. It also links curated organization payloads for both new and
 already-existing papers.
 
 The three MMTEB v2 jobs consume the official MTEB leaderboard API's precomputed
