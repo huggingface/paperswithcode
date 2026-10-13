@@ -1058,3 +1058,95 @@ def test_change_set_schema_matches_the_validator():
         "enum"
     ]
     assert tuple(enum) == service.AGENT_DEADLINE_TYPES
+
+
+def _collect(db, results):
+    sweep = ConferenceDeadlineSweep(
+        mode="weekly",
+        status="running",
+        hf_job_id="job-1",
+        series=[r["series"] for r in results],
+        launched_at=NOW,
+    )
+    db.add(sweep)
+    db.commit()
+    lines = [agent.encode_result_line(r) for r in results]
+    lines.append(f"{agent.DONE_MARKER} {len(results)}")
+    runner = sweeps.ConferenceDeadlineSweeps(db, sweep_settings(), FakeApi(lines=lines))
+    return runner.collect(now=NOW)[0]["status"]
+
+
+def test_aggregation_timeouts_and_crashes_also_make_a_sweep_stale(db):
+    timeout = agent.pipeline_result(status="timeout", aggregation_failed=True)
+    crash = agent.pipeline_result(status="error", error="boom", aggregation_failed=True)
+    quiet = agent.pipeline_result(status="no_changes", skipped_aggregation=True)
+    results = [
+        {**timeout, "series": "cvpr"},
+        {**crash, "series": "icml"},
+        {**quiet, "series": "acl"},
+    ]
+    assert _collect(db, results) == "failed"
+
+
+def test_one_verified_aggregation_keeps_a_sweep_fresh(db):
+    failed = agent.pipeline_result(status="error", error="x", aggregation_failed=True)
+    verified = agent.pipeline_result(status="no_changes")
+    results = [{**failed, "series": "cvpr"}, {**verified, "series": "icml"}]
+    assert agent.aggregation_succeeded(verified)
+    assert _collect(db, results) == "applied"
+
+
+def test_short_circuits_do_not_reset_the_abort_streak(monkeypatch, capsys):
+    import asyncio
+
+    outcomes = iter(
+        [
+            agent.pipeline_result(status="error", error="x", aggregation_failed=True),
+            agent.pipeline_result(status="no_changes", skipped_aggregation=True),
+            agent.pipeline_result(status="timeout", aggregation_failed=True),
+            agent.pipeline_result(status="no_changes"),
+        ]
+    )
+
+    async def fake_research(_manifest, **_kwargs):
+        return next(outcomes)
+
+    payload = {"sweep_id": 1, "series": [{"series": s} for s in "abcd"]}
+    monkeypatch.setattr(agent, "research_series", fake_research)
+    monkeypatch.setenv("PWC_DEADLINE_MANIFEST", agent.encode_payload(payload))
+    assert asyncio.run(agent.main_async()) == 1
+    assert "d: " not in capsys.readouterr().out
+
+
+def test_limit_results_are_not_runtime_errors():
+    import asyncio
+
+    from claude_agent_sdk import ResultMessage
+
+    def run(**fields):
+        message = ResultMessage(
+            duration_ms=1, duration_api_ms=1, num_turns=1, session_id="s", **fields
+        )
+
+        async def stream():
+            yield message
+
+        state = {
+            "messages": 0,
+            "result": {},
+            "cost": 0.0,
+            "session_id": None,
+            "hit_max_turns": False,
+        }
+        asyncio.run(agent._consume("t", stream(), state))
+        return state
+
+    limited = run(subtype="error_max_turns", is_error=True)
+    assert limited["result"] == {} and limited["hit_max_turns"]
+    api_error = run(
+        subtype="success", is_error=True, result="API Error: 400 unsupported model"
+    )
+    assert api_error["result"] == {
+        "status": "error",
+        "error": "API Error: 400 unsupported model",
+    }

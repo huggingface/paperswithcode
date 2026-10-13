@@ -414,6 +414,15 @@ def pipeline_result(
     }
 
 
+def aggregation_succeeded(result: dict) -> bool:
+    """A majority vote ran and produced a verified answer."""
+    return (
+        not result.get("skipped_aggregation")
+        and not result.get("aggregation_failed")
+        and result.get("status") in ("proposed", "no_changes")
+    )
+
+
 def retrieval_short_circuit(results: list[dict], total_cost: float) -> dict:
     """Result when nobody proposed an update, so the majority vote is skipped."""
     valid = valid_results(results)
@@ -582,7 +591,9 @@ async def _consume(label: str, query_iter, state: dict) -> None:
                 state["cost"] += message.total_cost_usd
             if message.structured_output:
                 state["result"] = message.structured_output
-            elif message.is_error:
+            elif message.is_error and not message.subtype.startswith("error_max"):
+                # Turn/budget/schema limits keep their own handling (the
+                # no-tools follow-up); only API/runtime failures are errors.
                 # e.g. "API Error: 400 ... does not support this model".
                 detail = message.result or message.subtype or "agent run failed"
                 state["result"] = {"status": "error", "error": str(detail)[:500]}
@@ -764,6 +775,7 @@ async def research_series(manifest: dict, *, num_retrieval_agents: int) -> dict:
         return pipeline_result(
             status="timeout",
             reasoning="aggregation agent wall-clock timeout",
+            aggregation_failed=True,
             total_cost_usd=total,
             error=aggregated.get("error", "aggregation timeout"),
         )
@@ -807,8 +819,12 @@ async def main_async() -> int:
         try:
             result = await research_series(manifest, num_retrieval_agents=num_agents)
         except Exception as exc:  # One broken conference must not end the sweep.
+            # Unknown stage: count it against aggregation so it neither
+            # resets the failure streak nor makes the sweep look verified.
             result = pipeline_result(
-                status="error", error=f"{type(exc).__name__}: {exc}"
+                status="error",
+                error=f"{type(exc).__name__}: {exc}",
+                aggregation_failed=True,
             )
         result["series"] = manifest["series"]
         result["seconds"] = round(time.monotonic() - started)
@@ -820,7 +836,7 @@ async def main_async() -> int:
         print(encode_result_line(result), flush=True)
         if result.get("aggregation_failed"):
             consecutive_aggregation_failures += 1
-        elif not result.get("skipped_aggregation"):
+        elif aggregation_succeeded(result):
             consecutive_aggregation_failures = 0
         if consecutive_aggregation_failures >= MAX_CONSECUTIVE_AGGREGATION_FAILURES:
             # Systemic (model/CLI/credential) failure: stop paying for retrieval.

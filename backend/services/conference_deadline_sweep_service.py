@@ -336,12 +336,12 @@ class ConferenceDeadlineSweeps:
         sweep.cost_usd = round(cost, 4)
         sweep.finished_at = now
         researched = [r for r in results if r.get("status") not in ("error", "timeout")]
-        # A sweep in which no attempted majority vote succeeded verified nothing
-        # (e.g. an aggregation model the bundled CLI cannot run): not fresh.
-        aggregated = [r for r in results if not r.get("skipped_aggregation")]
-        aggregation_broken = bool(aggregated) and all(
-            r.get("aggregation_failed") for r in aggregated
-        )
+        # A sweep in which aggregation failed (error, timeout, crash) and no
+        # majority vote succeeded verified nothing, e.g. an aggregation model
+        # the bundled CLI cannot run: never count it as fresh.
+        aggregation_broken = any(
+            r.get("aggregation_failed") for r in results
+        ) and not any(agent.aggregation_succeeded(r) for r in results)
         finished = stage == "COMPLETED" and completed and not missing
         if finished and researched and not aggregation_broken:
             sweep.status = "applied"
