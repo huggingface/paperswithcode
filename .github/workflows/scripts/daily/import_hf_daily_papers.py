@@ -79,6 +79,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         self.new_organization_links_count = 0
         self.unknown_organizations_seen = 0
         self.filled_tldrs_count = 0
+        self.tldr_fill_failures = 0
 
         self.task_case_sensitive_patterns = {}
         self.task_case_insensitive_patterns = {}
@@ -151,7 +152,8 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
             f"  - Unknown organizations seen: {self.unknown_organizations_seen}"
         )
         self.logger.info(
-            f"  - TL;DRs filled for other papers: {self.filled_tldrs_count}"
+            f"  - TL;DRs filled for other papers: {self.filled_tldrs_count} "
+            f"({self.tldr_fill_failures} failed)"
         )
         self.logger.info(f"  - Errors: {self.error_count}")
         self.logger.info(
@@ -251,15 +253,20 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
             (self.MISSING_TLDR_BATCH,),
         )
         for row in rows:
-            tldr = self._generate_tldr(row["title"], row["abstract"])
-            if not tldr:
-                continue
-            self.execute_query(
-                "UPDATE papers SET tldr = %s, updated_at = CURRENT_TIMESTAMP "
-                "WHERE id = %s AND COALESCE(tldr, '') = ''",
-                (tldr, row["id"]),
-            )
-            self.filled_tldrs_count += 1
+            try:
+                tldr = self._generate_tldr(row["title"], row["abstract"])
+                if not tldr:
+                    continue
+                self.execute_query(
+                    "UPDATE papers SET tldr = %s, updated_at = CURRENT_TIMESTAMP "
+                    "WHERE id = %s AND COALESCE(tldr, '') = ''",
+                    (tldr, row["id"]),
+                )
+                self.filled_tldrs_count += 1
+            except Exception as exc:
+                # Best-effort enrichment: never fail the import after papers landed.
+                self.tldr_fill_failures += 1
+                self.logger.error(f"Failed to fill TL;DR for paper {row['id']}: {exc}")
 
     def _generate_tldr(self, title: str, abstract: str) -> Optional[str]:
         """Luna TL;DR in the catalog voice; None falls back to the HF ai_summary."""
@@ -270,7 +277,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
                 return generate_paper_tldr(
                     client, title, abstract, api_key=self.settings.openai_api_key
                 )
-        except httpx.HTTPError as exc:
+        except (httpx.HTTPError, KeyError, ValueError) as exc:
             self.logger.warning("TL;DR generation failed for %r: %s", title, exc)
             return None
 
