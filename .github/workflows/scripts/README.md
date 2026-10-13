@@ -21,6 +21,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-import-hf-daily-papers.yml` | `0 * * * *` | `pwc-cron import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
 | `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
+| local `pwc-cron-enqueue-benchmark-gap-review.timer` | `35 6 * * *` | `pwc-cron enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
@@ -38,6 +39,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
 | `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
 | `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
+| `cron-sync-physics-iq-verified.yml` | `28 * * * *` | `pwc-cron sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -147,12 +149,51 @@ three times, at least 20 hours apart, tracked in `paper_x_thread_scans`. The
 job needs `X_API_BEARER_TOKEN` in `production-cron.env` and exits 0 without
 it. It is report-only, storing matches on the scan row, unless
 `PWC_X_THREAD_DISCOVERY_APPLY=true`, which links matches through the audited
-`x_threads` curation section as actor `x-thread-discovery`. Review stored
+`x_threads` curation section as actor `x-thread-discovery`. Before linking,
+each match is reviewed by gpt-5.6-sol (`PWC_OPENAI_API_KEY`, from
+`production.env`): it rejects posts about a sibling project, multi-paper
+acceptance lists, and congratulation replies, and the verdict and reason are
+stored with the candidate. Without the key the job links nothing. Review stored
 matches, or run it by hand, with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads --show-candidates
 uv run --env-file backend/keys.env python -m backend.scripts.discover_x_threads --max-papers 5
+```
+
+To backfill older papers, `--backfill-days N` takes trending or HF-featured
+arXiv papers from the last N days that have no X threads and no scan row,
+newest first, and scans each once with full-archive search (included in X's
+pay-per-use plan), limited to one week before to two months after
+publication. X allows 300 archive searches per 15 minutes, so run batches of
+at most 200 papers at least 15 minutes apart:
+
+```bash
+sudo pwc-cron discover_x_threads --backfill-days 180 --max-papers 200
+```
+
+`--review-linked-since YYYY-MM-DD` re-reviews threads the job linked since that
+date (hand-curated threads are never touched) and, in apply mode, unlinks the
+ones the reviewer rejects:
+
+```bash
+sudo pwc-cron discover_x_threads --review-linked-since 2026-10-12
+```
+
+`enqueue_benchmark_gap_review.py` turns benchmark gaps that scheduled add-evals
+agents report into configured leaderboards. Once per UTC day it queues one
+`review-benchmark-gaps` overseer job that sees every candidate reported by at
+least three distinct papers (high or medium confidence, up to 150 per run) and
+approves, merges, rejects, or defers each. Each approved candidate gets one
+`add-benchmark` job, at most 20 per UTC day, that finds the introducing paper,
+the most specific task, and one to three metrics; the backend validates and
+writes the rows, then requeues add-evals for the papers that reported the gap.
+Rejected candidates return for review once their paper count doubles; deferred
+ones after 14 days. Both kinds share the scheduler pause and run at most two at
+a time. Inspect or dry-run it with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --status
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither
@@ -180,7 +221,12 @@ pages for papers that still have `urls_extracted = false`.
 
 `import_hf_daily_papers.py` runs hourly, imports the current day's Hugging Face
 papers that are not yet in the database, and auto-tags tasks/methods using
-keyword matching. It also links curated organization payloads for both new and
+keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
+(`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
+key is missing or the call fails, the Hugging Face `ai_summary` is stored instead.
+Each run also fills a TL;DR for up to 50 latest-version papers that have an
+abstract but no TL;DR, which covers papers added through the admin API, the
+`paper index` CLI, or external-resource ingestion. It also links curated organization payloads for both new and
 already-existing papers.
 
 The three MMTEB v2 jobs consume the official MTEB leaderboard API's precomputed
@@ -209,6 +255,21 @@ warning instead of failing.
 word- and page-level grounding F1 on the Document Understanding task, and omits
 the grounding metrics for systems that return no evidence (upstream reports
 0.00 for both).
+
+`sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
+official `google-deepmind/physics-IQ-benchmark` README (the
+physics-iq-verified.anates.ai site has no JSON endpoint) and fails on any
+layout change or a row count outside 30–300. It applies an explicit import
+policy: best-of-N runs reranked by a third-party reward model (WMReward, MBR
+consensus) and Physical Registry rows (anonymous manuscript) are excluded, and
+each reviewed model keeps its best single-generation run per track (I2V, V2V).
+Exact leaderboard labels map to reviewed `(paper, model_name)` identities; the
+job never creates papers, so unreviewed labels and unresolved papers are
+logged as warnings. It creates missing mapped rows, revises a row's score and
+methodology when the leaderboard changes (a stored value that rounds to the
+published precision is unchanged), and adopts matching hand-imported rows by
+prefixing their methodology. Managed rows that drop off the leaderboard are
+reported, never deleted, and rows outside the managed set are never touched.
 
 `sync_hf_organizations.py` runs daily as an append-only reconciliation backstop
 for the strict 21-organization manifest. It validates HF organization pages,

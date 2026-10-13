@@ -82,6 +82,9 @@ or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
 
+Query every benchmark the paper reports under its exact name and common
+variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match
+may be a different task, such as an inpainting board named `ImageNet`.
 Try exact names and common spelling variants, but reject semantically different
 datasets or splits even when their names are similar. The `taxonomy` command
 searches only task and method names. Never use an empty taxonomy result to
@@ -149,10 +152,30 @@ eligible result from a model introduced by the paper, exactly as required by
 gamma sweeps, or other ablation rows. Apply the same best-eligible-only rule to
 `blocked_evaluations` inside benchmark gaps.
 
-Compare each proposed score with the paper's existing row on that leaderboard,
-including other sizes of the same family. If the existing result is equal or
-better under the configured metric direction and scale, omit the new variant and
-report `already_present`. If the new result is better, provide primary evidence
+Before picking that best result, read every results table, including appendix
+and supplementary tables, for larger or better configurations of the introduced
+model (for example Large or Huge variants, longer schedules, or higher
+resolution) on the same benchmark and protocol. A main-text table that reports
+only a Base model is not the paper's best result when an appendix table reports
+a better Large model under the same protocol.
+
+Compare each proposed score with this paper's own existing row on that
+leaderboard (same `paper_id`), including other sizes of the same family. If
+that row is equal or better under the configured metric direction and scale,
+omit the new variant and report `already_present` with that leaderboard's
+`task_id`, `dataset_id`, `metric`, and the paper's best eligible score as
+`value` on the leaderboard scale. Before submitting, check each
+`already_present` value against that leaderboard's row in context
+`paper.evaluations`. When they differ, reread the source table column and
+model row: a mismatch usually means an adjacent column was copied. A rerun on a
+paper whose results are all stored is a valid proposal with no evaluations, in
+which every benchmark is `already_present`. The server rejects `already_present` unless
+this paper already has an equal or better row on that exact leaderboard. Rows
+from other papers never make a result `already_present`: a paper-native result
+belongs on its leaderboard whatever its rank, so never skip it because other
+models score higher. Include `task_id`, `dataset_id`, and `metric` on any other
+outcome that names a configured leaderboard, so `not_applicable` skips appear in
+the admin report. If the new result is better, provide primary evidence
 and the existing row's full before-state in `evaluation_removals` to consolidate
 onto the new best result. Explain the best-result replacement; do not call an
 accurately reported older score factually wrong. Never insert a second variant
@@ -238,3 +261,119 @@ Example:
 ```
 
 Finish with a concise audit report. The runner reports it to the VPS.
+
+## Benchmark-gap jobs
+
+Kinds `review-benchmark-gaps` and `add-benchmark` have no scoped paper
+(`context.paper.id` is null). Ignore the paper-enrichment rules in the runner
+prompt and follow only this section. Submit `evaluations`,
+`evaluation_removals`, `benchmark_gaps`, and `validation_evidence` as empty
+arrays plus exactly one of `review_benchmark_gaps` or `add_benchmark`. Each
+apply is one transaction; on a validation error, fix the cited field and apply
+once more.
+
+The context can be large. Read `/tmp/context.json` with `python3` or `jq`
+instead of printing it whole. Search datasets (configured or not), tasks, and
+metrics with:
+
+```bash
+python jobs/curation_api.py catalog "ScanObjectNN"
+```
+
+### `review-benchmark-gaps`: the daily overseer
+
+`context.review.candidates` lists every eligible gap (reported by at least
+three distinct papers), strongest evidence first. Decide each one with the
+whole list in view:
+
+- `merge` duplicates into the candidate to keep, for example `TinyImageNet`
+  into `Tiny-ImageNet` (`merge_into_candidate_id`). Never merge distinct
+  splits, versions, or subsets.
+- `reject` a candidate that is not a reusable public benchmark (a private or
+  paper-specific test set, a model or method name, a metric, a split label)
+  or that `catalog_name_matches` already covers completely. Watch for name
+  clashes: a match with the same name but a different domain (the graph
+  dataset `Chameleon` against a camouflaged-object benchmark `CHAMELEON`) is
+  not coverage.
+- `defer` when the evidence is too thin or contradictory to decide today.
+- `approve` the rest. Each approval queues one `add-benchmark` job that does
+  the deep research, so approve on reusability and demand, not on source
+  details. Approve leaderboard gaps (`task_dataset_association_missing`,
+  `metric_configuration_missing`) when the papers report results on that
+  exact task and metric.
+
+Give a specific reason per decision; the reasons are the audit trail. Decide
+only candidates from the context.
+
+```json
+{
+  "evaluations": [], "evaluation_removals": [], "benchmark_gaps": [],
+  "validation_evidence": [],
+  "review_benchmark_gaps": {
+    "summary": "Approved 9, merged 2 aliases, rejected 3 paper-specific sets.",
+    "decisions": [
+      {"candidate_id": "<uuid>", "decision": "approve",
+       "reason": "Standard public 200-class benchmark reported by 16 papers."},
+      {"candidate_id": "<uuid>", "decision": "merge",
+       "merge_into_candidate_id": "<uuid>",
+       "reason": "Same dataset as Tiny-ImageNet under another spelling."}
+    ]
+  }
+}
+```
+
+### `add-benchmark`: configure one approved benchmark
+
+`context.benchmark` holds the candidate, the overseer's reason, every
+reporting paper's protocol, metrics, sources, catalog near-matches, and
+related tasks. Decide:
+
+- `map_existing` when the dataset already exists (check `catalog` for every
+  name and alias first): give `existing_dataset_id` and the task and metrics
+  the reporting papers use. Missing task links and metrics are added.
+- `create` a new dataset otherwise. `source_paper` must be the paper that
+  introduced or formally describes the benchmark, never a later paper that only
+  evaluates on it; follow the reporting papers' citations. Prefer
+  `existing_paper_id`, then `arxiv_id`, then `external_paper` (a homepage or
+  technical report with a credible publication date) for a benchmark with no
+  paper. Include that paper's canonical URL (arXiv abs URL or `source_url`) in
+  `evidence_urls`.
+- `reject` a candidate that is not a reusable benchmark after all, or `defer`
+  when primary sources cannot be read.
+
+Task: choose the most specific existing task that matches what the papers
+measure, even when it differs from the reported task (COD10K belongs under
+camouflaged object detection, not the broad image segmentation task). Propose
+`new_task` only when no existing task fits; it must name an existing
+`parent_task_id` and give a description and comma-separated keywords.
+
+Metrics: list one to three, primary first, using the names the papers report.
+Reuse an existing metric whenever its definition matches (search `catalog`
+first); the server rejects a `new_metric` whose name matches an existing one.
+A new metric needs its full name, direction, scale (`0-100`, `0-1`, or a unit),
+and a definition.
+
+```json
+{
+  "evaluations": [], "evaluation_removals": [], "benchmark_gaps": [],
+  "validation_evidence": [],
+  "add_benchmark": {
+    "decision": "create",
+    "reason": "ModelNet40 is the standard CAD shape classification benchmark.",
+    "evidence_urls": ["https://arxiv.org/abs/1406.5670"],
+    "new_dataset": {
+      "name": "ModelNet40",
+      "full_name": "Princeton ModelNet 40-class subset",
+      "description": "12,311 CAD models from 40 categories ...",
+      "homepage": "https://modelnet.cs.princeton.edu/"
+    },
+    "source_paper": {"arxiv_id": "1406.5670"},
+    "existing_task_id": "<3D shape classification task id>",
+    "metrics": [{"existing_metric_id": "<Overall Accuracy metric id>"}],
+    "supports_harness": false
+  }
+}
+```
+
+After a successful create or map, the server requeues add-evals for every
+paper that reported the gap; do not add evaluation rows yourself.

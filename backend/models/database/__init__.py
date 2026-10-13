@@ -90,6 +90,7 @@ from backend.models.database.chat_transcripts import (
 from backend.models.database.conferences import (
     Conference,
     ConferenceDeadline,
+    ConferenceDeadlineSweep,
     PaperConference,
 )
 from backend.models.database.curation import (
@@ -245,6 +246,7 @@ __all__ = [
     "ChatHarnessAssignmentAudit",
     "Conference",
     "ConferenceDeadline",
+    "ConferenceDeadlineSweep",
     "PaperConference",
     "TrendingModelCandidate",
     "TrendingModelCurationState",

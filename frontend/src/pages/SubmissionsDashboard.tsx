@@ -43,6 +43,7 @@ const EDIT_TYPE_FILTERS: Array<PendingEditType | "all"> = [
   "new_benchmark",
   "new_metric",
   "new_conference",
+  "new_organization",
   "new_external_paper",
 ];
 const COUNT_STATUSES: PendingEditStatus[] = ["pending", "approved", "rejected"];
@@ -79,6 +80,7 @@ const DIRECTORY_SUGGESTION_LABELS: Partial<
   new_benchmark: { title: "New benchmark", subtitle: "Benchmark suggestion" },
   new_metric: { title: "New metric", subtitle: "Metric suggestion" },
   new_conference: { title: "New conference", subtitle: "Conference suggestion" },
+  new_organization: { title: "New organization", subtitle: "Organization suggestion" },
   new_external_paper: { title: "External paper", subtitle: "External paper submission" },
 };
 

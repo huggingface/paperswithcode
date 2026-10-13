@@ -9,6 +9,7 @@ Submissions that match the paper's current state must be rejected with a
 import argparse
 import json
 import uuid
+from hashlib import sha256
 from contextlib import nullcontext
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -20,6 +21,7 @@ from backend.config import Settings
 from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
     CatalogMutationEvent,
+    PaperOrganization,
     PaperTask,
     PaperCurationSchedulerState,
     PaperCurationJob,
@@ -38,6 +40,9 @@ from backend.models.database import (
 )
 from backend.models.database import (
     Metric as DBMetric,
+)
+from backend.models.database import (
+    Organization as DBOrganization,
 )
 from backend.models.database import (
     Paper as DBPaper,
@@ -1202,3 +1207,108 @@ def test_malformed_evaluation_batch_rejected_without_partial_acceptance(
         assert row.status == "pending"
         assert row.applied_payload is None
     apply.assert_not_called()
+
+
+LOGO_DATA_URL = (
+    "data:image/png;base64,"
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4"
+    "//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
+)
+
+
+def _organization_suggestion(db_session, **overrides):
+    payload = {
+        "name": "Prime Intellect",
+        "hf_slug": "https://huggingface.co/PrimeIntellect/",
+        "website_url": "https://www.primeintellect.ai/",
+        "image": {
+            "file_name": "logo.png",
+            "mime_type": "image/png",
+            "data_url": LOGO_DATA_URL,
+        },
+        **overrides,
+    }
+    return PendingEditService(db_session).submit(
+        paper_id=1,
+        hf_username="alice",
+        hf_subject="hf-alice",
+        edit_type="new_organization",
+        proposed_payload=payload,
+    )
+
+
+def test_organization_suggestion_approval_creates_and_tags_paper(
+    db_session, paper_fixture
+):
+    row = _organization_suggestion(db_session)
+    assert row.proposed_payload["hf_slug"] == "PrimeIntellect"
+
+    reviewed = PendingEditService(db_session).approve(
+        edit_id=row.id, reviewer_username="admin"
+    )
+
+    organization = db_session.get(DBOrganization, int(reviewed.result_entity_id))
+    assert reviewed.result_entity_type == "organization"
+    assert (organization.slug, organization.hf_slug, organization.hf_url) == (
+        "prime-intellect",
+        "PrimeIntellect",
+        "https://huggingface.co/PrimeIntellect",
+    )
+    assert organization.website_url.startswith("https://www.primeintellect.ai")
+    assert organization.logo_mime_type == "image/png"
+    assert organization.logo_sha256 == sha256(organization.logo_data).hexdigest()
+    assert organization.is_featured is False
+    link = db_session.get(PaperOrganization, (1, organization.id))
+    assert (link.source, link.added_by_hf_username) == ("manual", "alice")
+
+    event = db_session.get(CatalogMutationEvent, reviewed.catalog_event_id)
+    assert event.entity_type == "submission_created_organization"
+    assert event.after_snapshot["paper_ids"] == [1]
+
+
+def test_organization_suggestion_requires_hf_handle_or_website(db_session):
+    with pytest.raises(PendingEditError, match="Hugging Face handle or a website"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="new_organization",
+            proposed_payload={"name": "Prime Intellect"},
+        )
+    _no_rows_created(db_session)
+
+
+def test_organization_suggestion_approval_refuses_existing_hf_handle(
+    db_session, paper_fixture
+):
+    db_session.add(DBOrganization(name="Prime", slug="prime", hf_slug="primeintellect"))
+    db_session.commit()
+    row = _organization_suggestion(db_session)
+
+    with pytest.raises(PendingEditError, match="/organizations/prime"):
+        PendingEditService(db_session).approve(
+            edit_id=row.id, reviewer_username="admin"
+        )
+
+
+def test_organization_suggestion_slug_falls_back_to_hf_handle(
+    db_session, paper_fixture
+):
+    row = _organization_suggestion(db_session, name="智谱", hf_slug="zai-org")
+    reviewed = PendingEditService(db_session).approve(
+        edit_id=row.id, reviewer_username="admin"
+    )
+    organization = db_session.get(DBOrganization, int(reviewed.result_entity_id))
+    assert (organization.name, organization.slug) == ("智谱", "zai-org")
+
+
+def test_organization_suggestion_rejects_unsluggable_name_without_handle(
+    db_session,
+):
+    with pytest.raises(PendingEditError, match="Latin letters or digits"):
+        PendingEditService(db_session).submit(
+            paper_id=None,
+            hf_username="alice",
+            edit_type="new_organization",
+            proposed_payload={"name": "智谱", "website_url": "https://example.org"},
+        )
+    _no_rows_created(db_session)

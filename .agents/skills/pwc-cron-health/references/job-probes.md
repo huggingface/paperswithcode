@@ -121,6 +121,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `extractbench` on task `document-understanding`; Value F1 plus Word Grounding F1 and Page Grounding F1 (omitted when upstream reports 0.00 for both); official `leaderboard.csv` in `run-llama/ExtractBench`; typically 30–400 upstream rows, of which only reviewed provider labels are published.
 - **Proof:** Diff the current CSV against managed rows (model label, three scores); confirm `extractbench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Value F1.
 
+## `sync_physics_iq_verified`
+
+- **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
+- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `physics_iq_verified_unreviewed` warnings are either mapped or covered by the exclusion rules, `missing_papers` is empty, and `missing_upstream` rows were investigated (they are never deleted automatically); verify ranks on both metrics.
+
 ## `sync_frontiercode`
 
 - **Contract:** `frontiercode-main` and `frontiercode-extended`; Score and Pass Rate; official Cognition JSON.
@@ -159,6 +164,19 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Prints a JSON summary (`papers_scanned`, `papers_matched`, `threads_linked`, `errors`, `matches`) and upserts `paper_x_thread_scans`. Links `paper_x_threads` only when `PWC_X_THREAD_DISCOVERY_APPLY=true`; every link is a `paper_x_threads` catalog mutation event by `x-thread-discovery`. Exits 0 with an `x_thread_discovery_skipped` warning when `X_API_BEARER_TOKEN` is unset, and 1 only when every search failed.
 - **Independent proof:** Open one matched post from the JSON and confirm it is a paper author or the paper's own organization (business-verified account) introducing that paper, never an outside account; with apply on, confirm the paper page's X threads card shows it.
 - **Correctness:** `X search HTTP 401/403` means a bad or unentitled token and `429` an exhausted quota (the run stops at the first one). A zero `papers_scanned` means every recent candidate already has threads or used its three scans.
+
+## `sweep_conference_deadlines` / `refresh_conference_deadlines`
+
+- **Effect:** Each run first collects finished sweeps (Hugging Face Jobs labelled `workflow=conference-deadlines`), validates every per-conference change set and applies the accepted part to `conferences` / `conference_deadlines` as `deadline_agent_create|update` catalog mutation events by `conference-deadline-agent`; then it launches at most one Job (weekly: up to 30 prioritized conferences with 3 retrieval agents; daily: imminent deadlines and overdue top-tier conferences with 1 agent, skipped when a sweep started in the last 20 h). The ledger is `conference_deadline_sweeps` (`running` → `applied` | `failed`, with per-series `results`, `changes_applied`, `cost_usd`). The research itself never runs on the VPS.
+- **Freshness metrics** (dashboard Database Metrics, same SQL as `uv run --env-file backend/keys.env python -m backend.scripts.conference_deadlines status`): `last_write` = latest applied sweep, `top_tier_series`, `top_tier_without_upcoming`, `top_tier_overdue` (no upcoming deadline although last cycle's first deadline + one cycle is under 30 days away). Three or more overdue top-tier conferences degrade the job.
+- **Independent proof:** Open `https://paperswithcode.co/api/v1/conferences/deadlines` and confirm the flagship series (CVPR, ICML, NeurIPS, ICLR, ACL, EMNLP) have their next edition once its official CFP is out; spot-check one recent change against the source URL stored in the sweep's `results`.
+- **Correctness:** `failed` sweeps with `missing_series` mean the Job timed out or crashed (inspect with `hf jobs logs <id>`); `invalid` series mean a change set failed validation; `rejections` list guarded changes (past edition/deadline, implausible shift, no source URL) that need a human via `PUT /api/v1/conferences/{slug}/deadlines`. A missing `PWC_CONFERENCE_DEADLINES_ANTHROPIC_API_KEY` or HF Jobs credential makes the run exit 1 with `SweepConfigurationError`.
+
+## `enqueue_benchmark_gap_review`
+
+- **Effect:** Once per UTC day queues one `review-benchmark-gaps` overseer job when candidates reported by at least three papers are waiting, plus `add-benchmark` jobs for approved candidates up to 20 per day. Both run on the shared curation queue (trigger `benchmark-gap-cron`, at most two active) and respect the scheduler pause; promotions requeue add-evals for the evidence papers. `--status` prints candidate counts by status and today's creation jobs.
+- **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
+- **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
 
 ## `scan_model_releases`
 

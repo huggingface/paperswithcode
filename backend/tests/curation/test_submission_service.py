@@ -91,6 +91,7 @@ HUMAN_ONLY = {
     "new_benchmark",
     "new_metric",
     "new_conference",
+    "new_organization",
 }
 ALL_TYPES = [
     "tasks",

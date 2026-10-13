@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 from datetime import date
 from typing import Any, Callable
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.models.taxonomy import TaskCreateRequest
@@ -15,7 +17,9 @@ from backend.models.database import (
     Evaluation,
     Method,
     Metric,
+    Organization,
     Paper,
+    PaperOrganization,
     Task,
     TaskDataset,
     TaskDatasetMetric,
@@ -43,6 +47,7 @@ from backend.services.paper_service import PaperService
 from backend.services.pending_edit_errors import PendingEditError
 from backend.services.pending_edit_payloads import (
     Payload,
+    organization_slug,
     validate_payload,
 )
 from backend.services.task_service import TaskService
@@ -135,6 +140,13 @@ class PendingEditMutationService:
         actor_hf_subject: str | None = None,
         actor_username: str | None = None,
     ) -> tuple[str, str]:
+        if edit_type == "new_organization":
+            return self._new_organization(
+                paper_id,
+                payload,
+                actor_hf_subject=actor_hf_subject,
+                actor_username=actor_username,
+            )
         if edit_type == "organizations":
             return self._paper_organizations(
                 paper_id,
@@ -389,6 +401,57 @@ class PendingEditMutationService:
             description=payload.get("description"),
         )
         return "conference", str(entity.id)
+
+    def _new_organization(
+        self,
+        paper_id: int | None,
+        payload: Payload,
+        *,
+        actor_hf_subject: str | None,
+        actor_username: str | None,
+    ) -> tuple[str, str]:
+        slug = organization_slug(payload)
+        hf_slug = payload.get("hf_slug")
+        duplicate = Organization.slug == slug
+        if hf_slug:
+            duplicate = duplicate | (
+                func.lower(Organization.hf_slug) == hf_slug.lower()
+            )
+        existing = self.db.query(Organization.slug).filter(duplicate).first()
+        if existing is not None:
+            raise PendingEditError(
+                f"Organization already exists as /organizations/{existing.slug}"
+            )
+        logo_data, logo_mime_type = self._decode_image(payload.get("image"))
+        entity = Organization(
+            name=payload["name"],
+            slug=slug,
+            hf_slug=hf_slug,
+            hf_url=f"https://huggingface.co/{hf_slug}" if hf_slug else None,
+            website_url=payload.get("website_url"),
+            description=payload.get("description"),
+            logo_data=logo_data,
+            logo_mime_type=logo_mime_type,
+            logo_sha256=hashlib.sha256(logo_data).hexdigest() if logo_data else None,
+        )
+        self.db.add(entity)
+        self.db.flush()
+        if paper_id is not None:
+            # Suggestions made from a paper page also tag that paper.
+            current_ids = [
+                row[0]
+                for row in self.db.query(PaperOrganization.organization_id).filter(
+                    PaperOrganization.paper_id == paper_id
+                )
+            ]
+            self.paper_associations.update_organizations(
+                paper_id,
+                [*current_ids, entity.id],
+                manual_added_by_hf_subject=actor_hf_subject,
+                manual_added_by_hf_username=actor_username,
+                commit=False,
+            )
+        return "organization", str(entity.id)
 
     def _paper_tasks(self, paper_id: int | None, payload: Payload) -> tuple[str, str]:
         paper_id = self._require_paper(paper_id)

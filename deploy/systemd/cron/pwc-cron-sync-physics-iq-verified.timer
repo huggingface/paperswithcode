@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Physics-IQ Verified leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:28:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-physics-iq-verified.service
+
+[Install]
+WantedBy=timers.target

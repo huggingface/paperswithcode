@@ -69,6 +69,7 @@ EditType = Literal[
     "new_benchmark",
     "new_metric",
     "new_conference",
+    "new_organization",
     "new_external_paper",
 ]
 StatusLiteral = Literal["pending", "approved", "rejected"]

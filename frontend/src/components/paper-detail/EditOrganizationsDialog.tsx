@@ -17,6 +17,7 @@ import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
 import { PendingEditNotice } from "./PendingEditNotice";
+import { SuggestOrganizationForm } from "./SuggestOrganizationForm";
 
 interface Props {
   open: boolean;
@@ -99,7 +100,7 @@ export const EditOrganizationsDialog = ({
         <DialogHeader>
           <DialogTitle>Edit organizations</DialogTitle>
           <DialogDescription>
-            Associate existing organizations with this paper. Organization creation remains admin-only.
+            Associate organizations with this paper. If one is missing, search for it and suggest it for review.
           </DialogDescription>
         </DialogHeader>
         {submitMode === "pending" && <PendingEditNotice isAuthor={isAuthor} />}
@@ -152,6 +153,9 @@ export const EditOrganizationsDialog = ({
             </p>
           )}
         </div>
+        {!organizations.isLoading && displayedOrganizations.length === 0 && searchQuery.trim() && (
+          <SuggestOrganizationForm key={searchQuery.trim()} paperId={paperId} initialName={searchQuery.trim()} />
+        )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel

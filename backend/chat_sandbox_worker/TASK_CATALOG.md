@@ -216,7 +216,6 @@ This compact index contains every current task and subtask. Treat names and slug
 - `table-question-answering` — Table question answering
 - `tabular-learning` — Tabular Learning
 - `temporal-graph-learning` — Temporal Graph Learning
-- `test-task` — Test Task
 - `text-classification` — Text classification
 - `text-reranking` — Text Reranking
 - `text-to-speech` — Text-to-speech

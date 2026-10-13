@@ -490,6 +490,57 @@ function SourceUrlDiff({ currentPayload, proposedPayload }: {
   );
 }
 
+function SuggestionLink({ url, empty }: { url?: string; empty: string }) {
+  return url ? (
+    <a className="submission-url-link" href={safeExternalHref(url) ?? undefined} target="_blank" rel="noopener noreferrer">
+      {url}
+    </a>
+  ) : (
+    <EmptyInline>{empty}</EmptyInline>
+  );
+}
+
+function OrganizationSuggestionDiff({ proposedPayload }: {
+  proposedPayload: {
+    name: string;
+    hf_slug?: string;
+    website_url?: string;
+    image?: { file_name: string; data_url?: string; url?: string };
+  };
+}) {
+  const { name, hf_slug: hfSlug, website_url: websiteUrl, image } = proposedPayload;
+  const logoUrl = image?.url
+    ? assetUrl(image.url)
+    : image?.data_url?.startsWith("data:image/")
+      ? image.data_url
+      : undefined;
+
+  return (
+    <div className="submission-diff-columns">
+      <DiffColumn title="Suggested organization name">
+        <span className="submission-diff-pill added">{name}</span>
+      </DiffColumn>
+      <DiffColumn title="Hugging Face organization">
+        <SuggestionLink url={hfSlug ? `https://huggingface.co/${hfSlug}` : undefined} empty="No Hugging Face organization provided" />
+      </DiffColumn>
+      <DiffColumn title="Website">
+        <SuggestionLink url={websiteUrl} empty="No website provided" />
+      </DiffColumn>
+      <DiffColumn title="Logo">
+        {logoUrl ? (
+          <img
+            src={logoUrl}
+            alt={image?.file_name ?? "Suggested logo"}
+            className="max-h-32 max-w-full rounded-md border border-border object-contain"
+          />
+        ) : (
+          <EmptyInline>No logo provided</EmptyInline>
+        )}
+      </DiffColumn>
+    </div>
+  );
+}
+
 function ExternalPaperSuggestionDiff({ proposedPayload }: {
   proposedPayload: {
     title?: string;
@@ -826,6 +877,9 @@ function PendingEditDiff({ edit }: PendingEditDiffProps) {
       break;
     case "new_conference":
       content = <TaxonomySuggestionDiff kind="conference" proposedPayload={edit.proposed_payload} />;
+      break;
+    case "new_organization":
+      content = <OrganizationSuggestionDiff proposedPayload={edit.proposed_payload} />;
       break;
     case "new_external_paper":
       content = <ExternalPaperSuggestionDiff proposedPayload={edit.proposed_payload} />;

@@ -1,6 +1,7 @@
 /**
  * Streaming-safe renderer for the assistant's Markdown answer text, including
- * inline paper citations of the form `[label](paper:<arxiv_id>)`.
+ * inline paper citations of the form `[label](paper:<arxiv_id>)` and catalog
+ * citations of the form `[label](task|method|benchmark:<slug>)`.
  *
  * Citations render as links to the paper page with a hover-preview card fed
  * by the metadata collected from earlier `search_papers` tool results. While
@@ -27,6 +28,11 @@ import {
 import { GitHubPreviewLink } from "@/components/chat/GitHubPreviewLink";
 import { WebPreviewLink } from "@/components/chat/WebPreviewLink";
 import { ExternalPaperPreviewLink } from "@/components/chat/ExternalPaperPreviewLink";
+import {
+  CatalogEntityPreviewLink,
+  isCatalogEntityHref,
+  parseCatalogEntityHref,
+} from "@/components/chat/CatalogEntityPreviewLink";
 import { PaperPreviewLink } from "@/components/paper-preview/PaperPreviewLink";
 import type { PaperPreviewData } from "@/components/paper-preview/paperPreviewData";
 import { parseGitHubRepoUrl } from "@/lib/github";
@@ -100,7 +106,9 @@ function withholdPartialCitation(text: string): string {
 }
 
 const chatUrlTransform = (url: string): string =>
-  url.startsWith("paper:") ? url : defaultUrlTransform(url);
+  url.startsWith("paper:") || isCatalogEntityHref(url)
+    ? url
+    : defaultUrlTransform(url);
 
 function isGitHubUrl(href: string): boolean {
   try {
@@ -145,6 +153,17 @@ export const ChatMarkdown: React.FC<{
               >
                 {children}
               </PaperCitation>
+            );
+          }
+          if (href && isCatalogEntityHref(href)) {
+            const entity = parseCatalogEntityHref(href);
+            if (!entity) {
+              return <span className="chat-invalid-citation">{children}</span>;
+            }
+            return (
+              <CatalogEntityPreviewLink entity={entity}>
+                {children}
+              </CatalogEntityPreviewLink>
             );
           }
           const huggingFaceRepo = href

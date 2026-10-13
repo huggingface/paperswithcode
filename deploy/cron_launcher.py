@@ -358,6 +358,15 @@ COMMANDS: dict[str, Job] = {
             "replace managed ExtractBench evaluation rows from the validated leaderboard.csv"
         ),
     ),
+    "sync_physics_iq_verified": job(
+        "-m",
+        "scripts.hourly.sync_physics_iq_verified",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Physics-IQ Verified evaluation rows from "
+            "the validated README table; never creates papers"
+        ),
+    ),
     "sync_coarena": job(
         "-m",
         "scripts.hourly.sync_coarena",
@@ -397,6 +406,15 @@ COMMANDS: dict[str, Job] = {
             "model-resolution and paper-curation workflows"
         ),
     ),
+    "enqueue_benchmark_gap_review": job(
+        "-m",
+        "backend.scripts.enqueue_benchmark_gap_review",
+        timeout="30m",
+        idempotency=(
+            "queue at most one daily overseer review of eligible benchmark-gap "
+            "candidates and at most 20 add-benchmark jobs per UTC day"
+        ),
+    ),
     "scan_model_releases": job(
         "-m",
         "backend.scripts.scan_model_releases",
@@ -415,6 +433,25 @@ COMMANDS: dict[str, Job] = {
             "search X once per bounded candidate paper; link author posts only "
             "when PWC_X_THREAD_DISCOVERY_APPLY=true, through the audited x_threads "
             "section"
+        ),
+    ),
+    "sweep_conference_deadlines": job(
+        "-m",
+        "backend.scripts.sweep_conference_deadlines",
+        timeout="30m",
+        idempotency=(
+            "apply finished off-box deadline research Jobs through the guarded, "
+            "audited writer (no deletes, past editions immutable), then launch "
+            "at most one Hugging Face Job"
+        ),
+    ),
+    "refresh_conference_deadlines": job(
+        "-m",
+        "backend.scripts.refresh_conference_deadlines",
+        timeout="30m",
+        idempotency=(
+            "apply finished off-box deadline research Jobs through the guarded, "
+            "audited writer, then launch at most one light Job per 20 hours"
         ),
     ),
     "export_enrichment_dashboard": job(

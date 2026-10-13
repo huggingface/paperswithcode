@@ -113,6 +113,11 @@ class PaperCurationJob(Base):
         ForeignKey("trending_model_candidates.id", ondelete="CASCADE"),
         nullable=True,
     )
+    benchmark_candidate_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("benchmark_curation_candidates.id", ondelete="CASCADE"),
+        nullable=True,
+    )
     paper_route: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     paper_title: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     requested_by: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -233,12 +238,19 @@ class PaperCurationJob(Base):
 
     __table_args__ = (
         CheckConstraint(
-            "kind IN ('add-evals', 'enrich-paper', 'resolve-model-paper')",
+            "kind IN ('add-evals', 'enrich-paper', 'resolve-model-paper', "
+            "'review-benchmark-gaps', 'add-benchmark')",
             name="paper_curation_jobs_kind_check",
         ),
         CheckConstraint(
-            "(kind = 'resolve-model-paper' AND candidate_id IS NOT NULL AND paper_id IS NULL) "
-            "OR (kind <> 'resolve-model-paper' AND candidate_id IS NULL AND paper_id IS NOT NULL)",
+            "(kind = 'resolve-model-paper' AND candidate_id IS NOT NULL "
+            "AND paper_id IS NULL AND benchmark_candidate_id IS NULL) "
+            "OR (kind = 'add-benchmark' AND benchmark_candidate_id IS NOT NULL "
+            "AND paper_id IS NULL AND candidate_id IS NULL) "
+            "OR (kind = 'review-benchmark-gaps' AND paper_id IS NULL "
+            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL) "
+            "OR (kind IN ('add-evals', 'enrich-paper') AND paper_id IS NOT NULL "
+            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL)",
             name="paper_curation_jobs_scope_check",
         ),
         CheckConstraint(
@@ -250,13 +262,19 @@ class PaperCurationJob(Base):
             name="paper_curation_jobs_thumbnail_status_check",
         ),
         CheckConstraint(
-            "trigger IN ('admin', 'hf-daily-cron', 'hf-trending-cron', 'benchmark-promotion')",
+            "trigger IN ('admin', 'hf-daily-cron', 'hf-trending-cron', "
+            "'benchmark-promotion', 'benchmark-gap-cron')",
             name="paper_curation_jobs_trigger_check",
         ),
         Index("idx_paper_curation_jobs_queue", "status", "created_at"),
         Index("idx_paper_curation_jobs_paper", "paper_id", "created_at"),
         Index("idx_paper_curation_jobs_candidate", "candidate_id", "created_at"),
         Index("idx_paper_curation_jobs_workflow", "parent_workflow_id", "created_at"),
+        Index(
+            "idx_paper_curation_jobs_benchmark_candidate",
+            "benchmark_candidate_id",
+            "created_at",
+        ),
         Index(
             "idx_paper_curation_jobs_dispatch",
             "status",
@@ -289,6 +307,30 @@ class PaperCurationJob(Base):
             ),
             sqlite_where=text(
                 "kind = 'resolve-model-paper' AND status IN ('queued', 'dispatching', 'running')"
+            ),
+        ),
+        Index(
+            "uq_active_benchmark_candidate_job",
+            "benchmark_candidate_id",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'add-benchmark' AND status IN ('queued', 'dispatching', 'running')"
+            ),
+            sqlite_where=text(
+                "kind = 'add-benchmark' AND status IN ('queued', 'dispatching', 'running')"
+            ),
+        ),
+        Index(
+            "uq_active_benchmark_gap_review",
+            "kind",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'review-benchmark-gaps' "
+                "AND status IN ('queued', 'dispatching', 'running')"
+            ),
+            sqlite_where=text(
+                "kind = 'review-benchmark-gaps' "
+                "AND status IN ('queued', 'dispatching', 'running')"
             ),
         ),
     )
@@ -386,7 +428,12 @@ class PaperCurationWorkflow(Base):
 
 
 class BenchmarkCurationCandidate(Base):
-    """Queryable aggregate of benchmark gaps reported by scheduled add-evals."""
+    """Queryable aggregate of benchmark gaps reported by scheduled add-evals.
+
+    Status moves from ``candidate`` through the daily review to ``approved``,
+    ``rejected``, or ``merged``; an approved candidate becomes ``promoted``
+    once its benchmark is configured.
+    """
 
     __tablename__ = "benchmark_curation_candidates"
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True)
@@ -409,6 +456,34 @@ class BenchmarkCurationCandidate(Base):
     )
     promoted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), nullable=True
+    )
+    review_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Paper count when last rejected; new evidence doubling it reopens review.
+    reviewed_paper_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    deferred_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    merged_into_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("benchmark_curation_candidates.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Catalog rows the creation job used or created, for audit and rollback.
+    resolution: Mapped[Optional[dict]] = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('candidate', 'approved', 'promoted', 'rejected', 'merged')",
+            name="benchmark_curation_candidates_status_check",
+        ),
+        Index(
+            "idx_benchmark_curation_candidates_review",
+            "status",
+            "distinct_paper_count",
+        ),
     )
 
 

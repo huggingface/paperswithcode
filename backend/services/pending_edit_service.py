@@ -52,6 +52,11 @@ from backend.services.user_profile_service import UserProfileError, UserProfileS
 from backend.utils.exceptions import PaperNotFoundError
 
 STATUSES = frozenset({"pending", "approved", "rejected"})
+
+# Human-only suggestions whose approval only records the decision; admins
+# create the entity separately. Approving an organization suggestion creates it.
+RECORD_ONLY_EDIT_TYPES = HUMAN_ONLY_EDIT_TYPES - {"new_organization"}
+
 logger = logging.getLogger(__name__)
 
 MEMBERSHIP_EDIT_FIELDS = {
@@ -444,7 +449,7 @@ class PendingEditService:
                 applied_payload = rebased_payload
             row.conflict_payload = None
 
-        is_administrative = row.edit_type in HUMAN_ONLY_EDIT_TYPES
+        is_administrative = row.edit_type in RECORD_ONLY_EDIT_TYPES
         result_type: str | None = None
         result_id: str | None = None
         before: Any = {}

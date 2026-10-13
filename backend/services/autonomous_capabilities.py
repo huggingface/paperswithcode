@@ -18,6 +18,7 @@ class Capability(StrEnum):
     APPLY_PAPER_METADATA_EDIT = "apply_paper_metadata_edit"
     CREATE_EXTERNAL_PAPER = "create_external_paper"
     RESOLVE_MODEL_PAPER = "resolve_model_paper"
+    CREATE_BENCHMARK_FROM_GAP = "create_benchmark_from_gap"
     RETRY_DECLARED_CRON = "retry_declared_cron"
     REPAIR_DECLARED_CRON_SOURCE = "repair_declared_cron_source"
     SWITCH_CHAT_PROVIDER = "switch_chat_provider"
@@ -34,6 +35,7 @@ class ResourceKind(StrEnum):
     EVALUATION = "evaluation"
     EXTERNAL_PAPER = "external_paper"
     TRENDING_MODEL_CANDIDATE = "trending_model_candidate"
+    BENCHMARK_CANDIDATE = "benchmark_candidate"
     DECLARED_CRON = "declared_cron"
     SOURCE_REPAIR = "source_repair"
     CHAT_PROVIDER = "chat_provider"
@@ -87,6 +89,9 @@ CAPABILITY_MANIFESTS: Mapping[Operator, frozenset[Capability]] = MappingProxyTyp
                 Capability.APPLY_EXISTING_LEADERBOARD_EVAL,
                 Capability.APPLY_PAPER_METADATA_EDIT,
                 Capability.RESOLVE_MODEL_PAPER,
+                # The one exception to the human-only taxonomy boundary: a
+                # benchmark-gap candidate reported by at least three papers.
+                Capability.CREATE_BENCHMARK_FROM_GAP,
             }
         ),
         Operator.CRON_HEALTH: frozenset(
@@ -129,6 +134,9 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
             Capability.RESOLVE_MODEL_PAPER: frozenset(
                 {ResourceKind.TRENDING_MODEL_CANDIDATE}
             ),
+            Capability.CREATE_BENCHMARK_FROM_GAP: frozenset(
+                {ResourceKind.BENCHMARK_CANDIDATE}
+            ),
             Capability.RETRY_DECLARED_CRON: frozenset({ResourceKind.DECLARED_CRON}),
             Capability.REPAIR_DECLARED_CRON_SOURCE: frozenset(
                 {ResourceKind.SOURCE_REPAIR}
@@ -141,7 +149,14 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
 
 
 HUMAN_ONLY_EDIT_TYPES = frozenset(
-    {"new_task", "new_method", "new_benchmark", "new_metric", "new_conference"}
+    {
+        "new_task",
+        "new_method",
+        "new_benchmark",
+        "new_metric",
+        "new_conference",
+        "new_organization",
+    }
 )
 
 

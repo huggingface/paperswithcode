@@ -22,6 +22,7 @@ import {
   retryCodexTrace,
   cancelCodexPaperJob,
   promoteBenchmarkCandidate,
+  rollbackBenchmarkCandidate,
   setCodexScheduler,
   type CodexPaperJob,
   type CodexPaperJobStatus,
@@ -40,6 +41,8 @@ const kindLabels: Record<CodexPaperJob["kind"], string> = {
   "add-evals": "Add evals",
   "enrich-paper": "Enrich paper",
   "resolve-model-paper": "Resolve model release",
+  "review-benchmark-gaps": "Review benchmark gaps",
+  "add-benchmark": "Add benchmark",
 };
 
 const statusIcons: Record<CodexPaperJobStatus, typeof Clock3> = {
@@ -74,6 +77,36 @@ function resultText(job: CodexPaperJob) {
   return null;
 }
 
+type SkippedLeaderboard = {
+  benchmark?: string;
+  disposition?: string;
+  task_id?: number;
+  dataset_id?: number;
+  metric?: string | null;
+  value?: number | null;
+  detail?: string;
+};
+
+function SkippedLeaderboards({ mutationResult }: { mutationResult: Record<string, unknown> | null }) {
+  const skipped = mutationResult?.skipped_configured_leaderboards;
+  if (!Array.isArray(skipped) || skipped.length === 0) return null;
+  return (
+    <div className="mt-2 rounded border border-amber-500 bg-amber-50 p-2 text-xs text-amber-900">
+      <div className="font-medium">Skipped configured leaderboards ({skipped.length})</div>
+      <ul className="mt-1 list-disc space-y-1 pl-4">
+        {(skipped as SkippedLeaderboard[]).map((item, index) => (
+          <li key={index}>
+            {item.benchmark} · {item.disposition} · task {item.task_id} / dataset {item.dataset_id}
+            {item.metric ? ` / ${item.metric}` : ""}
+            {item.value != null ? ` = ${item.value}` : ""}
+            {item.detail ? ` — ${item.detail}` : ""}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps) {
   const queryClient = useQueryClient();
   const [trigger, setTrigger] = useState("");
@@ -99,6 +132,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
       promoteBenchmarkCandidate(id, { dataset_id: Number(dataset), task_id: Number(task), best_metric: metric.trim() }),
     onSuccess: refresh,
   });
+  const rollbackCandidate = useMutation({ mutationFn: rollbackBenchmarkCandidate, onSuccess: refresh });
 
   const errorStatus = error && typeof error === "object" && "status" in error ? error.status : undefined;
 
@@ -178,7 +212,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
             </div>
             <div className="mb-5 grid gap-3 sm:grid-cols-5">
               <select aria-label="Trigger" className="rounded border px-2 py-1 text-sm" value={trigger} onChange={(event) => setTrigger(event.target.value)}>
-                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option>
+                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option>
               </select>
               <select aria-label="Status" className="rounded border px-2 py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="">All statuses</option>{Object.keys(statusStyles).map((value) => <option key={value}>{value}</option>)}
@@ -220,6 +254,13 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                               </Link>
                               <div className="mt-1 text-xs cron-muted">Paper #{job.paper_id}</div>
                             </>
+                          ) : job.kind === "review-benchmark-gaps" ? (
+                            <span className="font-medium">Benchmark-gap backlog</span>
+                          ) : job.kind === "add-benchmark" ? (
+                            <>
+                              <span className="font-medium">Benchmark candidate</span>
+                              <div className="mt-1 text-xs cron-muted">{job.benchmark_candidate_id}</div>
+                            </>
                           ) : (
                             <>
                               <span className="font-medium">Trending model discovery</span>
@@ -260,6 +301,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                               {detail}
                             </p>
                           )}
+                          <SkippedLeaderboards mutationResult={job.mutation_result} />
                           <div className="mt-2 flex gap-2">
                             {(["failed", "canceled"] as string[]).includes(job.status) && (
                               <Button size="sm" variant="outline" onClick={() => retryJob.mutate(job.id)}>Retry</Button>
@@ -304,6 +346,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                             </div>
                           )}
                           {stage.proposal && <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap">{JSON.stringify(stage.proposal, null, 2)}</pre>}
+                          <SkippedLeaderboards mutationResult={stage.mutation_result} />
                           {stage.mutation_result && <details className="mt-2"><summary>Accepted callback result and before/after state</summary><pre className="mt-2 max-h-64 overflow-auto whitespace-pre-wrap">{JSON.stringify(stage.mutation_result, null, 2)}</pre></details>}
                           {stage.trace_status === "complete" && (
                             <a className="mt-2 inline-flex items-center gap-1 hover:underline" href={`/api/v1/admin/codex-curation/jobs/${stage.id}/trace`} target="_blank" rel="noreferrer">
@@ -331,7 +374,24 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                       </div>
                       {candidate.canonical_url && <a className="mt-1 block hover:underline" href={candidate.canonical_url} target="_blank" rel="noreferrer">{candidate.canonical_url}</a>}
                       <div className="mt-1 cron-muted">Task evidence: {candidate.task_ids.join(", ") || "none"} · Papers: {candidate.evidence_paper_ids.join(", ")}</div>
-                      {candidate.status !== "promoted" && (
+                      {candidate.review_reason && (
+                        <div className="mt-1">
+                          Review{candidate.reviewed_at ? ` ${formatCronDate(candidate.reviewed_at)}` : ""}: {candidate.review_reason}
+                          {candidate.deferred_until && ` · deferred until ${formatCronDate(candidate.deferred_until)}`}
+                        </div>
+                      )}
+                      {candidate.resolution && (
+                        <div className="mt-1 cron-muted">
+                          Dataset #{candidate.resolution.dataset_id} · task #{candidate.resolution.task_id} · {candidate.resolution.primary_metric}
+                          {candidate.resolution.rolled_back_at && ` · rolled back ${formatCronDate(candidate.resolution.rolled_back_at)}`}
+                        </div>
+                      )}
+                      {candidate.status === "promoted" && candidate.resolution?.created && !candidate.resolution.rolled_back_at && (
+                        <Button className="mt-2" size="sm" variant="outline" disabled={rollbackCandidate.isPending} onClick={() => rollbackCandidate.mutate(candidate.id)}>
+                          Roll back automatic benchmark
+                        </Button>
+                      )}
+                      {!["promoted", "merged"].includes(candidate.status) && (
                         <div className="mt-3 flex flex-wrap gap-2">
                           {(["dataset", "task", "metric"] as const).map((field) => (
                             <input
@@ -350,6 +410,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                   );
                 })}
                 {promoteCandidate.error && <div className="cron-message cron-message--error">{promoteCandidate.error.message}</div>}
+                {rollbackCandidate.error && <div className="cron-message cron-message--error">{rollbackCandidate.error.message}</div>}
               </div>
             )}
             <p className="mt-4 text-xs cron-muted">

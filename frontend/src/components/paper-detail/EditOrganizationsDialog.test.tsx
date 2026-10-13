@@ -1,6 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { EditOrganizationsDialog } from "./EditOrganizationsDialog";
@@ -38,6 +39,7 @@ function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct
   queryClient.setQueryData(["organization-papers-infinite", "nvidia"], []);
   render(
     <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
       <EditOrganizationsDialog
         open
         onOpenChange={vi.fn()}
@@ -45,6 +47,7 @@ function renderDialog(initialOrganizationIds: number[] = [], submitMode: "direct
         initialOrganizationIds={initialOrganizationIds}
         submitMode={submitMode}
       />
+      </MemoryRouter>
     </QueryClientProvider>,
   );
   return queryClient;
@@ -125,4 +128,38 @@ describe("EditOrganizationsDialog", () => {
    expect(updatePaperOrganizations).not.toHaveBeenCalled();
    expect(client.getQueryData(["paper", "42"])).toEqual({ id: "42", title: "Original" });
    expect(client.getQueryState(["organization-papers-infinite", "nvidia"])?.isInvalidated).toBe(false);
+ });
+
+ it("lets anyone suggest a missing organization for review", async () => {
+   const user = userEvent.setup();
+   renderDialog([], "pending");
+   await screen.findByText("NVIDIA");
+   await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "Prime Intellect");
+
+   expect(screen.getByRole("textbox", { name: "Organization name" })).toHaveValue("Prime Intellect");
+   const submitButton = screen.getByRole("button", { name: "Submit for review" });
+   expect(submitButton).toBeDisabled();
+   await user.type(
+     screen.getByRole("textbox", { name: "Hugging Face organization" }),
+     "https://huggingface.co/PrimeIntellect",
+   );
+   await user.type(screen.getByRole("textbox", { name: "Website" }), "https://www.primeintellect.ai");
+   await user.upload(
+     screen.getByLabelText("Logo"),
+     new File([new Uint8Array([137, 80, 78, 71])], "logo.png", { type: "image/png" }),
+   );
+   await screen.findByAltText("Selected logo");
+   await user.click(submitButton);
+
+   await screen.findByText(/was submitted for review/);
+   expect(submit).toHaveBeenCalledWith({
+     paper_id: 42,
+     edit_type: "new_organization",
+     proposed_payload: {
+       name: "Prime Intellect",
+       hf_slug: "https://huggingface.co/PrimeIntellect",
+       website_url: "https://www.primeintellect.ai",
+       image: { file_name: "logo.png", mime_type: "image/png", data_url: "data:image/png;base64,iVBORw==" },
+     },
+   });
  });

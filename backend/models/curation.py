@@ -1,5 +1,6 @@
 """Paper curation mutation and job callback API contracts."""
 
+import uuid
 from datetime import date
 from typing import Literal
 
@@ -112,6 +113,157 @@ class ResolveModelPaperMutation(BaseModel):
         return self
 
 
+class BenchmarkGapReviewDecision(BaseModel):
+    """One overseer decision about a reported benchmark-gap candidate."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    candidate_id: uuid.UUID
+    decision: Literal["approve", "merge", "reject", "defer"]
+    reason: str = Field(min_length=1, max_length=2_000)
+    merge_into_candidate_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_merge_target(self):
+        if (self.decision == "merge") != (self.merge_into_candidate_id is not None):
+            raise ValueError("merge_into_candidate_id is required only for merge")
+        if self.merge_into_candidate_id == self.candidate_id:
+            raise ValueError("a candidate cannot merge into itself")
+        return self
+
+
+class ReviewBenchmarkGapsMutation(BaseModel):
+    """The daily overseer's decisions across the eligible gap backlog."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    summary: str = Field(min_length=1, max_length=4_000)
+    decisions: list[BenchmarkGapReviewDecision] = Field(min_length=1, max_length=300)
+
+    @model_validator(mode="after")
+    def validate_unique_candidates(self):
+        ids = [item.candidate_id for item in self.decisions]
+        if len(ids) != len(set(ids)):
+            raise ValueError("each candidate may have only one decision")
+        return self
+
+
+class BenchmarkSourcePaper(BaseModel):
+    """The paper that introduced the benchmark, never a later result paper."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    existing_paper_id: int | None = Field(default=None, gt=0)
+    arxiv_id: str | None = Field(default=None, pattern=r"^\d{4}\.\d{4,5}(?:v\d+)?$")
+    external_paper: ExternalPaperProposal | None = None
+
+    @model_validator(mode="after")
+    def validate_one_identity(self):
+        identities = (self.existing_paper_id, self.arxiv_id, self.external_paper)
+        if sum(value is not None for value in identities) != 1:
+            raise ValueError("source_paper requires exactly one paper identity")
+        return self
+
+
+class NewBenchmarkDataset(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    full_name: str | None = Field(default=None, max_length=500)
+    description: str = Field(min_length=1, max_length=4_000)
+    homepage: str | None = None
+    hf_url: str | None = None
+
+    _normalize_urls = field_validator("homepage", "hf_url", mode="before")(
+        normalize_optional_public_url
+    )
+
+
+class NewBenchmarkTask(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str = Field(min_length=1, max_length=4_000)
+    keywords: str = Field(min_length=1, max_length=1_000)
+    parent_task_id: int = Field(gt=0)
+
+
+class NewBenchmarkMetric(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=100)
+    full_name: str = Field(min_length=1, max_length=255)
+    direction: Literal["higher_is_better", "lower_is_better"]
+    scale: str | None = Field(default=None, max_length=50)
+    description: str = Field(min_length=1, max_length=2_000)
+
+
+class BenchmarkMetricChoice(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    existing_metric_id: int | None = Field(default=None, gt=0)
+    new_metric: NewBenchmarkMetric | None = None
+
+    @model_validator(mode="after")
+    def validate_one_metric(self):
+        if (self.existing_metric_id is None) == (self.new_metric is None):
+            raise ValueError("choose exactly one of existing_metric_id or new_metric")
+        return self
+
+
+class AddBenchmarkMutation(BaseModel):
+    """Typed result from one scoped benchmark-creation job.
+
+    ``metrics[0]`` is the leaderboard's primary metric.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    decision: Literal["create", "map_existing", "reject", "defer"]
+    reason: str = Field(min_length=1, max_length=4_000)
+    evidence_urls: list[str] = Field(min_length=1, max_length=20)
+    existing_dataset_id: int | None = Field(default=None, gt=0)
+    new_dataset: NewBenchmarkDataset | None = None
+    source_paper: BenchmarkSourcePaper | None = None
+    existing_task_id: int | None = Field(default=None, gt=0)
+    new_task: NewBenchmarkTask | None = None
+    metrics: list[BenchmarkMetricChoice] = Field(default_factory=list, max_length=3)
+    supports_harness: bool = False
+
+    @field_validator("evidence_urls", mode="before")
+    @classmethod
+    def normalize_evidence_urls(cls, values):
+        return [normalize_public_url(value) for value in values]
+
+    @model_validator(mode="after")
+    def validate_decision_shape(self):
+        catalog_fields = (
+            self.existing_dataset_id,
+            self.new_dataset,
+            self.source_paper,
+            self.existing_task_id,
+            self.new_task,
+        )
+        if self.decision in {"reject", "defer"}:
+            if any(value is not None for value in catalog_fields) or self.metrics:
+                raise ValueError(f"{self.decision} cannot include catalog changes")
+            return self
+        if (self.existing_task_id is None) == (self.new_task is None):
+            raise ValueError("choose exactly one of existing_task_id or new_task")
+        if not self.metrics:
+            raise ValueError("a leaderboard needs at least one metric")
+        if self.decision == "create":
+            if self.new_dataset is None or self.existing_dataset_id is not None:
+                raise ValueError(
+                    "create requires new_dataset and no existing_dataset_id"
+                )
+            if self.source_paper is None:
+                raise ValueError("create requires the benchmark's source_paper")
+        elif self.existing_dataset_id is None or self.new_dataset is not None:
+            raise ValueError("map_existing requires existing_dataset_id only")
+        return self
+
+
 class ApplyMutationRequest(BaseModel):
     evaluations: list[EvaluationCreateRequest] = Field(default_factory=list)
     evaluation_removals: list[EvaluationRemovalRequest] = Field(
@@ -125,6 +277,8 @@ class ApplyMutationRequest(BaseModel):
     )
     source_coverage: list[dict] = Field(default_factory=list, max_length=50)
     resolve_model_paper: ResolveModelPaperMutation | None = None
+    review_benchmark_gaps: ReviewBenchmarkGapsMutation | None = None
+    add_benchmark: AddBenchmarkMutation | None = None
 
 
 class PromoteBenchmarkCandidateRequest(BaseModel):
@@ -160,6 +314,14 @@ __all__ = [
     "ExternalPaperProposal",
     "ModelReleaseProposal",
     "ResolveModelPaperMutation",
+    "BenchmarkGapReviewDecision",
+    "ReviewBenchmarkGapsMutation",
+    "BenchmarkSourcePaper",
+    "NewBenchmarkDataset",
+    "NewBenchmarkTask",
+    "NewBenchmarkMetric",
+    "BenchmarkMetricChoice",
+    "AddBenchmarkMutation",
     "ApplyMutationRequest",
     "PromoteBenchmarkCandidateRequest",
     "CurationTracePreapplyRequest",

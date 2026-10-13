@@ -1,15 +1,22 @@
 from __future__ import annotations
 
-from datetime import date
+import time
+from datetime import UTC, date, datetime
 
+import httpx
 import pytest
 
 from backend.services.x_thread_discovery_service import (
     MAX_QUERY_LENGTH,
+    X_ARCHIVE_SEARCH_URL,
+    X_SEARCH_URL,
+    archive_window,
     author_matches,
     build_query,
+    make_x_search,
     match_posts,
     organization_matches,
+    post_text_and_urls,
     short_name,
 )
 
@@ -185,3 +192,74 @@ def test_match_posts_accepts_organization_accounts_but_not_outsiders():
     assert [(m["handle"], m["author"], m["kind"]) for m in matches] == [
         ("NVIDIARobotics", "NVIDIA", "organization")
     ]
+
+
+def test_archive_window_brackets_publication():
+    now = datetime(2026, 10, 12, 12, tzinfo=UTC)
+    assert archive_window(date(2026, 5, 20), now) == (
+        "2026-05-13T00:00:00Z",
+        "2026-07-19T00:00:00Z",
+    )
+
+
+def test_archive_window_ends_before_now_for_recent_papers():
+    now = datetime(2026, 10, 12, 12, tzinfo=UTC)
+    assert archive_window(date(2026, 10, 1), now)[1] == "2026-10-12T11:59:00Z"
+
+
+def test_make_x_search_uses_full_archive_window(monkeypatch):
+    calls = []
+
+    def fake_get(url, *, params, headers, timeout):
+        calls.append((url, params))
+        return httpx.Response(200, json={}, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx, "get", fake_get)
+    monkeypatch.setattr(time, "sleep", lambda seconds: None)
+
+    make_x_search("token")("q", date(2026, 5, 20))
+    make_x_search("token", full_archive=True)("q", date(2026, 5, 20))
+
+    (recent_url, recent), (archive_url, archive) = calls
+    assert recent_url == X_SEARCH_URL
+    assert "start_time" not in recent
+    assert archive_url == X_ARCHIVE_SEARCH_URL
+    assert archive["start_time"] == "2026-05-13T00:00:00Z"
+    assert archive["sort_order"] == "relevancy"
+
+
+def test_build_query_keeps_project_path_on_shared_hosts():
+    query = build_query(
+        None,
+        "ROWBench: Do Video Models Render What the Program Specifies?",
+        ["https://alaya-lab.github.io/PROWBench"],
+        [],
+    )
+    assert 'url:"alaya-lab.github.io/PROWBench"' in query
+    assert 'url:"alaya-lab.github.io"' not in query
+
+
+def test_post_text_and_urls_prefers_long_form_text_and_unwound_links():
+    post = {
+        "text": "Short https://t.co/x",
+        "entities": {
+            "urls": [{"url": "https://t.co/x", "expanded_url": "https://a.io"}]
+        },
+        "note_tweet": {
+            "text": "Long form text",
+            "entities": {
+                "urls": [
+                    {
+                        "url": "https://t.co/y",
+                        "expanded_url": "https://t.co/y",
+                        "unwound_url": "https://arxiv.org/abs/2610.00001",
+                    }
+                ]
+            },
+        },
+    }
+    assert post_text_and_urls(post) == (
+        "Long form text",
+        ["https://arxiv.org/abs/2610.00001"],
+    )
+    assert post_text_and_urls({"text": "Plain"}) == ("Plain", [])

@@ -48,6 +48,29 @@ POST = {
         {
             "type": "video",
             "media_url_https": "https://pbs.twimg.com/amplify_video_thumb/1/img/x.jpg",
+            "video_info": {
+                "variants": [
+                    {
+                        "content_type": "application/x-mpegURL",
+                        "url": "https://video.twimg.com/1/pl/x.m3u8",
+                    },
+                    {
+                        "bitrate": 2176000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/1/vid/1280x720/x.mp4",
+                    },
+                    {
+                        "bitrate": 832000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/1/vid/640x360/x.mp4",
+                    },
+                    {
+                        "bitrate": 256000,
+                        "content_type": "video/mp4",
+                        "url": "https://video.twimg.com/1/vid/480x270/x.mp4",
+                    },
+                ]
+            },
         }
     ],
 }
@@ -92,6 +115,58 @@ def test_preview_expands_links_and_drops_media_shortlink():
     assert preview.posted_at == datetime(2026, 10, 10, 18, 8, 49, tzinfo=UTC)
     assert (preview.like_count, preview.reply_count) == (729, 34)
     assert preview.media_type == "video"
+    assert preview.video_url == "https://video.twimg.com/1/vid/640x360/x.mp4"
+
+
+@pytest.mark.parametrize(
+    ("media", "video_url"),
+    [
+        # Animated GIFs are a single unrated MP4.
+        (
+            {
+                "type": "animated_gif",
+                "media_url_https": "https://pbs.twimg.com/tweet_video_thumb/g.jpg",
+                "video_info": {
+                    "variants": [
+                        {
+                            "bitrate": 0,
+                            "content_type": "video/mp4",
+                            "url": "https://video.twimg.com/tweet_video/g.mp4",
+                        }
+                    ]
+                },
+            },
+            "https://video.twimg.com/tweet_video/g.mp4",
+        ),
+        # Without a small enough variant, take the lightest one.
+        (
+            {
+                "type": "video",
+                "media_url_https": "https://pbs.twimg.com/v.jpg",
+                "video_info": {
+                    "variants": [
+                        {
+                            "bitrate": 10368000,
+                            "content_type": "video/mp4",
+                            "url": "https://video.twimg.com/1080.mp4",
+                        },
+                        {
+                            "bitrate": 2176000,
+                            "content_type": "video/mp4",
+                            "url": "https://video.twimg.com/720.mp4",
+                        },
+                    ]
+                },
+            },
+            "https://video.twimg.com/720.mp4",
+        ),
+        ({"type": "photo", "media_url_https": "https://pbs.twimg.com/p.jpg"}, None),
+    ],
+)
+def test_preview_picks_a_sidebar_sized_video(media, video_url):
+    preview = preview_from_syndication(POST | {"mediaDetails": [media]})
+
+    assert preview.video_url == video_url
 
 
 def test_unavailable_post_is_rejected():

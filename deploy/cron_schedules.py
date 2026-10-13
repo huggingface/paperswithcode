@@ -128,9 +128,24 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Enqueue Hugging Face trending model curation hourly",
     ),
     TimerSpec(
+        job="enqueue_benchmark_gap_review",
+        on_calendar=("*-*-* 06:35:00",),
+        description="Review reported benchmark gaps and queue benchmark creation daily",
+    ),
+    TimerSpec(
         job="scan_model_releases",
         on_calendar=("*-*-* 01/3:48:00",),
         description="Scan official lab news for unindexed model releases every three hours",
+    ),
+    TimerSpec(
+        job="sweep_conference_deadlines",
+        on_calendar=("Sun *-*-* 02:35:00",),
+        description="Research AI conference deadlines off-box weekly",
+    ),
+    TimerSpec(
+        job="refresh_conference_deadlines",
+        on_calendar=("*-*-* 07:40:00", "*-*-* 19:40:00"),
+        description="Collect deadline research and check imminent deadlines daily",
     ),
     TimerSpec(
         job="discover_x_threads",
@@ -187,6 +202,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         job="sync_extractbench",
         on_calendar=("*-*-* *:32:00",),
         description="Sync ExtractBench leaderboard hourly",
+    ),
+    TimerSpec(
+        job="sync_physics_iq_verified",
+        on_calendar=("*-*-* *:28:00",),
+        description="Sync Physics-IQ Verified leaderboard hourly",
     ),
     TimerSpec(
         job="sync_artificial_analysis",

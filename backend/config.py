@@ -223,6 +223,20 @@ class Settings(BaseSettings, ChatSettings):
     codex_jobs_cli_version: str = Field(default="0.75.0")
     codex_jobs_model: str = Field(default="gpt-5.6-luna")
     codex_jobs_reasoning_effort: str = Field(default="medium")
+    # AI conference deadline research runs off-box on Hugging Face Jobs (Claude
+    # Agent SDK); only the validated, bounded DB writes happen on the VPS.
+    # The HF namespace/token fall back to the curation Jobs credentials.
+    conference_deadlines_anthropic_api_key: str = Field(default="")
+    conference_deadlines_hf_namespace: str = Field(default="")
+    conference_deadlines_hf_token: str = Field(default="")
+    conference_deadlines_job_image: str = Field(default="python:3.12-slim")
+    conference_deadlines_job_flavor: str = Field(default="cpu-basic")
+    # 0.2.165 bundles Claude Code 2.1.294; claude-opus-5-5 needs >= 2.1.280.
+    conference_deadlines_sdk_version: str = Field(default="0.2.165")
+    conference_deadlines_retrieval_model: str = Field(default="claude-sonnet-5-5")
+    conference_deadlines_aggregation_model: str = Field(default="claude-opus-5-5")
+    conference_deadlines_weekly_limit: int = Field(default=30, ge=1, le=80)
+    conference_deadlines_daily_limit: int = Field(default=8, ge=1, le=30)
     codex_jobs_max_active: int = Field(default=4, ge=1, le=16)
     codex_jobs_max_scheduled_active: int = Field(default=3, ge=0, le=15)
     codex_curation_scheduler_enabled: bool = Field(default=False)

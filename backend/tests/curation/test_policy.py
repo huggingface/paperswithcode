@@ -65,6 +65,7 @@ def test_manifest_allows_only_declared_operator_capabilities(operator, capabilit
         Capability.SWITCH_CHAT_PROVIDER: ResourceKind.CHAT_PROVIDER,
         Capability.REPAIR_CHAT_SOURCE: ResourceKind.SOURCE_REPAIR,
         Capability.RESOLVE_MODEL_PAPER: ResourceKind.TRENDING_MODEL_CANDIDATE,
+        Capability.CREATE_BENCHMARK_FROM_GAP: ResourceKind.BENCHMARK_CANDIDATE,
     }[capability]
     decision = policy.authorize(
         object(),
@@ -121,6 +122,10 @@ def test_curation_capabilities_are_isolated_from_submission_review():
     assert Capability.RESOLVE_MODEL_PAPER in curation
     assert Capability.REVIEW_SUBMISSION not in curation
     assert Capability.RESOLVE_MODEL_PAPER not in submissions
+    # Benchmark creation from gaps is the curation operator's narrow exception;
+    # submission review keeps every taxonomy creation human-only.
+    assert Capability.CREATE_BENCHMARK_FROM_GAP in curation
+    assert Capability.CREATE_BENCHMARK_FROM_GAP not in submissions
 
 
 def test_unknown_and_mismatched_run_fail_closed():

@@ -2,7 +2,7 @@
 FastAPI router for conference endpoints.
 """
 
-from typing import Optional
+from typing import Any, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query, Response
 from sqlalchemy.orm import Session
@@ -16,7 +16,17 @@ from backend.models.conferences import (
     Conferences,
 )
 from backend.models.papers import Papers
+from backend.services.catalog_errors import (
+    CatalogPermissionError,
+    CatalogValidationError,
+)
+from backend.services.conference_deadline_service import (
+    AdminEditionDeadlines,
+    DeadlineValidationError,
+    admin_replace_edition,
+)
 from backend.services.conference_service import ConferenceService
+from backend.utils.auth import fresh_catalog_mutation_context
 from backend.utils.exceptions import PaperNotFoundError
 from backend.utils.entity_images import (
     IMAGE_CACHE_HEADERS,
@@ -46,6 +56,33 @@ def get_conference_deadlines(
     db: Session = Depends(get_database_session),
 ):
     return ConferenceService(db).get_conference_deadlines()
+
+
+@router.put(
+    "/{slug}/deadlines",
+    summary="Replace one conference edition's deadlines (admin)",
+)
+def replace_conference_deadlines(
+    body: AdminEditionDeadlines,
+    slug: str = Path(..., description="Edition slug (e.g., cvpr-2027)"),
+    context: dict = Depends(fresh_catalog_mutation_context),
+    db: Session = Depends(get_database_session),
+) -> dict[str, Any]:
+    """Correct an edition on /ai-deadlines by hand.
+
+    The deadline list in the body replaces the edition's deadlines (send the
+    complete list; omitted deadlines are deleted). Metadata fields are only
+    changed when present. A missing edition is created when `short_name` is
+    given. Dates are local times (`YYYY-MM-DD HH:MM[:SS]`) in each deadline's
+    timezone (`AoE`, `UTC`, `UTC-7`, or an IANA name). Every edit is recorded
+    in the catalog audit log with before/after snapshots.
+    """
+    if context["actor"]["role"] != "admin":
+        raise CatalogPermissionError("Only admins can edit conference deadlines")
+    try:
+        return admin_replace_edition(db, slug, body, context=context)
+    except DeadlineValidationError as exc:
+        raise CatalogValidationError(str(exc)) from exc
 
 
 @router.get(

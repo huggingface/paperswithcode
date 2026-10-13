@@ -13,7 +13,12 @@ import { usePaperMentions } from "@/components/chat/usePaperMentions";
 import WebSearchToggle from "@/components/chat/WebSearchToggle";
 import { chatApi } from "@/lib/api/chat";
 import { catalogApi } from "@/lib/api/catalog";
-import { isChatEnabled, isStagingEnvironment } from "@/lib/apiUrl";
+import {
+  CANONICAL_CHAT_URL,
+  isChatEnabled,
+  isChatMirror,
+  isStagingEnvironment,
+} from "@/lib/apiUrl";
 import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
 import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
@@ -106,9 +111,11 @@ const parseOrderBy = (value: string | null): OrderBy => {
 };
 
 // Inline "ask the assistant" box between the feed title and the paper list.
-// Submitting hands the question off to the dedicated chat page.
+// Submitting hands the question off to the dedicated chat page; on the Space
+// mirror that page lives on the canonical site and opens in a new tab.
 export const AskAssistant: React.FC = () => {
   const navigate = useNavigate();
+  const mirror = isChatMirror();
   const models = isStagingEnvironment()
     ? STAGING_FALLBACK_CHAT_MODELS
     : PRODUCTION_FALLBACK_CHAT_MODELS;
@@ -119,6 +126,9 @@ export const AskAssistant: React.FC = () => {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("low");
   const [launching, setLaunching] = useState(false);
+  // Set when the browser blocks the mirror's new tab, so the question survives
+  // as a link the visitor can open themselves.
+  const [blockedHandoffUrl, setBlockedHandoffUrl] = useState<string | null>(null);
   const placeholder = useRotatingChatPlaceholder(!question);
   const ref = useRef<HTMLTextAreaElement>(null);
   const availabilityQuery = useQuery({
@@ -168,6 +178,19 @@ export const AskAssistant: React.FC = () => {
   const submit = async (nextDraft = draft) => {
     const q = nextDraft.text.trim();
     if (!q || launching) return;
+    if (mirror) {
+      const params = new URLSearchParams({ q, model: selectedModel });
+      const url = `${CANONICAL_CHAT_URL}?${params}`;
+      const tab = window.open(url, "_blank");
+      if (!tab) {
+        setBlockedHandoffUrl(url);
+        return;
+      }
+      tab.opener = null;
+      setBlockedHandoffUrl(null);
+      setDraft({ text: "", paperMentions: [] });
+      return;
+    }
     setLaunching(true);
     queueChatLaunch(nextDraft, selectedModel, {
       webSearchEnabled: webSearchAvailable && webSearchEnabled,
@@ -185,9 +208,11 @@ export const AskAssistant: React.FC = () => {
 
   return (
     <>
-      <div className="ask-home-new">
-        Hint: type @ to bring papers into context
-      </div>
+      {!mirror && (
+        <div className="ask-home-new">
+          Hint: type @ to bring papers into context
+        </div>
+      )}
       <div className="ask-home">
         <div className="ask-home-textarea-wrap">
           <PaperMentionHighlights
@@ -227,6 +252,13 @@ export const AskAssistant: React.FC = () => {
             aria-describedby={mentions.message ? "ask-home-paper-mention-message" : undefined}
           />
         </div>
+        {blockedHandoffUrl && (
+          <div className="chat-paper-mention-message" role="alert">
+            <a href={blockedHandoffUrl} target="_blank" rel="noreferrer">
+              Open this question on paperswithcode.co
+            </a>
+          </div>
+        )}
         {mentions.message && (
           <div id="ask-home-paper-mention-message" className="chat-paper-mention-message" role="alert">
             {mentions.message}
@@ -239,11 +271,13 @@ export const AskAssistant: React.FC = () => {
               selectedModel={selectedModel}
               onModelChange={setSelectedModel}
             />
-            <ReasoningEffortPicker
-              value={reasoningEffort}
-              onChange={setReasoningEffort}
-              disabled={launching}
-            />
+            {!mirror && (
+              <ReasoningEffortPicker
+                value={reasoningEffort}
+                onChange={setReasoningEffort}
+                disabled={launching}
+              />
+            )}
             {webSearchAvailable && (
               <WebSearchToggle
                 enabled={webSearchEnabled}
@@ -404,7 +438,7 @@ const FeedView: React.FC = () => {
         </aside>
 
         <div className="feed-main">
-          {isChatEnabled() && (
+          {(isChatEnabled() || isChatMirror()) && (
             <div className="feed-chat">
               <AskAssistant />
             </div>

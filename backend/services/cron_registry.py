@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Literal, Optional, Sequence, Tuple
 
+from backend.services.conference_deadline_service import FRESHNESS_SQL
+
 
 @dataclass(frozen=True)
 class SchedulePolicy:
@@ -1157,6 +1159,45 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_physics_iq_verified",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=28),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-physics-iq-verified.timer",
+        systemd_service="pwc-cron-sync-physics-iq-verified.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Physics-IQ Verified Leaderboard",
+        category="hourly",
+        schedule="28 * * * * (hourly)",
+        script_path="hourly/sync_physics_iq_verified.py",
+        log_name="sync_physics_iq_verified",
+        process_patterns=("scripts.hourly.sync_physics_iq_verified",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "sync_physics_iq_verified.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'physics-iq-verified'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Physics-IQ Verified live sync.%'
+        """,
+        workflow_file="cron-sync-physics-iq-verified.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),
@@ -1428,6 +1469,38 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="enqueue_benchmark_gap_review",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(6, 35),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-enqueue-benchmark-gap-review.timer",
+        systemd_service="pwc-cron-enqueue-benchmark-gap-review.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Benchmark Gap Review",
+        category="daily",
+        schedule="35 6 * * * (daily UTC)",
+        script_path="backend/scripts/enqueue_benchmark_gap_review.py",
+        log_name="enqueue_benchmark_gap_review",
+        process_patterns=("backend.scripts.enqueue_benchmark_gap_review",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "enqueue_benchmark_gap_review.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=1560,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(reviewed_at) AS last_write,
+                   count(*) FILTER (WHERE status = 'approved') AS approved,
+                   count(*) FILTER (WHERE status = 'promoted') AS promoted,
+                   count(*) FILTER (WHERE status = 'rejected') AS rejected
+            FROM benchmark_curation_candidates
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="scan_model_releases",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(180, offset_minutes=108),),
@@ -1449,6 +1522,58 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=420,
         critical=False,
         healthy_no_work_allowed=True,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="sweep_conference_deadlines",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.weekly(6, 2, 35),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-sweep-conference-deadlines.timer",
+        systemd_service="pwc-cron-sweep-conference-deadlines.service",
+        systemd_extra_units=(),
+        output_evaluator="conference_deadlines",
+        display_name="Conference Deadlines Weekly Sweep",
+        category="weekly",
+        schedule="35 2 * * 0 (Sun 02:35 UTC)",
+        script_path="backend/scripts/sweep_conference_deadlines.py",
+        log_name="sweep_conference_deadlines",
+        process_patterns=("backend.scripts.sweep_conference_deadlines",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "sweep_conference_deadlines.lock"
+        ),
+        expected_runtime_minutes=30,
+        stale_after_minutes=11520,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query=FRESHNESS_SQL,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="refresh_conference_deadlines",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(720, offset_minutes=460),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-refresh-conference-deadlines.timer",
+        systemd_service="pwc-cron-refresh-conference-deadlines.service",
+        systemd_extra_units=(),
+        output_evaluator="conference_deadlines",
+        display_name="Conference Deadlines Daily Refresh",
+        category="daily",
+        schedule="40 7,19 * * * (collect twice daily, launch once daily)",
+        script_path="backend/scripts/refresh_conference_deadlines.py",
+        log_name="refresh_conference_deadlines",
+        process_patterns=("backend.scripts.refresh_conference_deadlines",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "refresh_conference_deadlines.lock"
+        ),
+        expected_runtime_minutes=30,
+        stale_after_minutes=11520,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query=FRESHNESS_SQL,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(

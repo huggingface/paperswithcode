@@ -55,6 +55,7 @@ _SAFE_RETRIES = frozenset(
         "import_hf_daily_papers",
         "enqueue_hf_daily_paper_curation",
         "enqueue_hf_trending_model_curation",
+        "enqueue_benchmark_gap_review",
         "export_enrichment_dashboard",
         "sync_hf_organizations",
         "calculate_organization_trending_scores",
@@ -105,6 +106,9 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "sync_programbench": ("backend/services/programbench_sync_service.py",),
     "sync_parsebench": ("backend/services/parsebench_sync_service.py",),
     "sync_extractbench": ("backend/services/extractbench_sync_service.py",),
+    "sync_physics_iq_verified": (
+        "backend/services/physics_iq_verified_sync_service.py",
+    ),
     "sync_frontiercode": ("backend/services/frontiercode_sync_service.py",),
     "sync_coarena": ("backend/services/coarena_sync_service.py",),
     "sync_arc_prize": ("backend/services/arc_prize_sync_service.py",),
@@ -115,8 +119,21 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "enqueue_hf_trending_model_curation": (
         "backend/services/hf_trending_model_curation_service.py",
     ),
+    "enqueue_benchmark_gap_review": (
+        "backend/services/benchmark_gap_review_service.py",
+    ),
     "scan_model_releases": ("backend/services/model_release_radar_service.py",),
     "discover_x_threads": ("backend/services/x_thread_discovery_service.py",),
+    "sweep_conference_deadlines": (
+        "backend/services/conference_deadline_service.py",
+        "backend/services/conference_deadline_sweep_service.py",
+        "backend/services/conference_deadline_agent.py",
+    ),
+    "refresh_conference_deadlines": (
+        "backend/services/conference_deadline_service.py",
+        "backend/services/conference_deadline_sweep_service.py",
+        "backend/services/conference_deadline_agent.py",
+    ),
     "export_enrichment_dashboard": ("backend/services/enrichment_dashboard_export.py",),
     "sync_hf_organizations": ("backend/services/organization_sync_service.py",),
     "calculate_organization_trending_scores": (
@@ -178,6 +195,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_programbench": ("backend/tests/evaluation/test_programbench_sync.py",),
     "sync_parsebench": ("backend/tests/evaluation/test_parsebench_sync.py",),
     "sync_extractbench": ("backend/tests/evaluation/test_extractbench_sync.py",),
+    "sync_physics_iq_verified": (
+        "backend/tests/evaluation/test_physics_iq_verified_sync.py",
+    ),
     "sync_frontiercode": ("backend/tests/evaluation/test_frontiercode_sync.py",),
     "sync_coarena": ("backend/tests/evaluation/test_coarena_sync.py",),
     "sync_arc_prize": ("backend/tests/evaluation/test_arc_prize_sync.py",),
@@ -188,8 +208,17 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "enqueue_hf_trending_model_curation": (
         "backend/tests/curation/test_trending_model_curation.py",
     ),
+    "enqueue_benchmark_gap_review": (
+        "backend/tests/curation/test_benchmark_gap_review.py",
+    ),
     "scan_model_releases": ("backend/tests/test_model_release_radar_service.py",),
     "discover_x_threads": ("backend/tests/test_x_thread_discovery_service.py",),
+    "sweep_conference_deadlines": (
+        "backend/tests/test_conference_deadline_service.py",
+    ),
+    "refresh_conference_deadlines": (
+        "backend/tests/test_conference_deadline_service.py",
+    ),
     "export_enrichment_dashboard": (
         "backend/tests/curation/test_enrichment_dashboard_export.py",
     ),

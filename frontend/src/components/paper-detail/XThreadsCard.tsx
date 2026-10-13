@@ -1,5 +1,6 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 
+import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import type { XThread } from "@/lib/api/papers.types";
 import { safeExternalHref } from "@/lib/safeExternalHref";
 
@@ -65,8 +66,81 @@ function Avatar({ thread }: { thread: XThread }) {
   );
 }
 
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
+
+/** Thumbnail that turns into a muted, looping video once scrolled into view.
+ *  X refuses video requests that carry our referrer, and `<video>` cannot drop
+ *  it, so the MP4 is fetched without one and played from a blob URL. Any
+ *  failure leaves the static thumbnail in place. */
+function XThreadMedia({ thread }: { thread: XThread }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  const [videoSrc, setVideoSrc] = useState<string | null>(null);
+  const [videoFailed, setVideoFailed] = useState(false);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const { targetRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
+  const videoUrl = thread.video_url;
+
+  useEffect(() => {
+    if (!videoUrl || videoSrc || videoFailed || !isIntersecting || prefersReducedMotion()) return;
+    const controller = new AbortController();
+    fetch(videoUrl, { referrerPolicy: "no-referrer", signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.blob();
+      })
+      .then((blob) => setVideoSrc(URL.createObjectURL(blob)))
+      .catch(() => {
+        if (!controller.signal.aborted) setVideoFailed(true);
+      });
+    return () => controller.abort();
+  }, [videoUrl, videoSrc, videoFailed, isIntersecting]);
+
+  useEffect(() => () => {
+    if (videoSrc) URL.revokeObjectURL(videoSrc);
+  }, [videoSrc]);
+
+  useEffect(() => {
+    const video = videoRef.current;
+    if (!video) return;
+    if (isIntersecting) video.play().catch(() => undefined);
+    else video.pause();
+  }, [isIntersecting, videoSrc]);
+
+  if (!thread.media_url || imageFailed) return null;
+  const playing = videoSrc && !videoFailed;
+  return (
+    <div className="x-thread-media" ref={targetRef}>
+      {playing ? (
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          poster={thread.media_url}
+          muted
+          loop
+          playsInline
+          autoPlay
+          aria-label="Video"
+          onError={() => setVideoFailed(true)}
+        />
+      ) : (
+        <>
+          <img
+            src={thread.media_url}
+            alt=""
+            loading="lazy"
+            referrerPolicy="no-referrer"
+            onError={() => setImageFailed(true)}
+          />
+          {thread.media_type === "video" && <span className="x-thread-play" aria-label="Video">▶</span>}
+        </>
+      )}
+    </div>
+  );
+}
+
 function XThreadPreview({ thread }: { thread: XThread }) {
-  const [mediaFailed, setMediaFailed] = useState(false);
   const href = safeExternalHref(thread.url);
   if (!href) return null;
 
@@ -81,18 +155,7 @@ function XThreadPreview({ thread }: { thread: XThread }) {
         <span className="x-thread-logo"><XLogo /></span>
       </div>
       <PostText text={thread.text} />
-      {thread.media_url && !mediaFailed && (
-        <div className="x-thread-media">
-          <img
-            src={thread.media_url}
-            alt=""
-            loading="lazy"
-            referrerPolicy="no-referrer"
-            onError={() => setMediaFailed(true)}
-          />
-          {thread.media_type === "video" && <span className="x-thread-play" aria-label="Video">▶</span>}
-        </div>
-      )}
+      <XThreadMedia thread={thread} />
       <div className="x-thread-meta">
         {thread.posted_at && <time dateTime={thread.posted_at}>{formatDate(thread.posted_at)}</time>}
         {thread.like_count != null && <span>♥ {formatCount(thread.like_count)}</span>}

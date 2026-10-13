@@ -43,6 +43,7 @@ CREATED_ENTITY_MODELS = {
     "dataset": Dataset,
     "metric": Metric,
     "conference": Conference,
+    "organization": Organization,
 }
 
 
@@ -318,6 +319,10 @@ class PendingEditSnapshotService:
         elif entity_type == "conference":
             snapshot["paper_ids"] = self._ids(
                 PaperConference.paper_id, PaperConference.conference_id, entity_id
+            )
+        elif entity_type == "organization":
+            snapshot["paper_ids"] = self._ids(
+                PaperOrganization.paper_id, PaperOrganization.organization_id, entity_id
             )
 
     def _ids(self, selected, foreign_key, entity_id: int) -> list[int]:

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import re
 from dataclasses import dataclass
 from datetime import date
 from io import BytesIO
@@ -22,6 +23,7 @@ from backend.models.evaluations import EvaluationCreateData, EvaluationUpdateReq
 
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.pending_edit_errors import PendingEditError
+from backend.utils.slug_utils import slugify
 from backend.services.x_thread_service import MAX_X_THREADS_PER_PAPER, parse_x_post_id
 from backend.utils.public_urls import PublicUrlValidationError, normalize_public_url
 
@@ -369,6 +371,45 @@ def _validate_new_conference(payload: Payload) -> Payload:
     return output
 
 
+HF_URL_PREFIX = re.compile(r"^(?:https?://)?(?:www\.)?huggingface\.co/", re.IGNORECASE)
+HF_HANDLE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$")
+
+
+def organization_slug(payload: Payload) -> str:
+    """Slug for a suggested organization, falling back to its HF handle."""
+    return (slugify(payload["name"]) or slugify(payload.get("hf_slug") or ""))[
+        :100
+    ].strip("-")
+
+
+def _validate_new_organization(payload: Payload) -> Payload:
+    output = _suggestion_base(payload)
+    hf_slug = payload.get("hf_slug")
+    if hf_slug is not None:
+        if not isinstance(hf_slug, str):
+            raise PendingEditError("Organization Hugging Face handle is invalid")
+        hf_slug = HF_URL_PREFIX.sub("", hf_slug.strip()).strip("/")
+        if hf_slug:
+            if not HF_HANDLE.fullmatch(hf_slug):
+                raise PendingEditError("Organization Hugging Face handle is invalid")
+            output["hf_slug"] = hf_slug
+    if payload.get("website_url"):
+        output["website_url"] = _public_url(
+            payload["website_url"], "Organization website URL is invalid"
+        )
+    if not output.get("hf_slug") and not output.get("website_url"):
+        raise PendingEditError(
+            "Organization suggestions need a Hugging Face handle or a website"
+        )
+    if not organization_slug(output):
+        raise PendingEditError(
+            "Organization name needs Latin letters or digits, or a Hugging Face handle"
+        )
+    if payload.get("image") is not None:
+        output["image"] = _normalize_suggestion_image(payload["image"])
+    return output
+
+
 def _validate_new_external_paper(payload: Payload) -> Payload:
     output: Payload = {
         "source_url": _public_url(
@@ -522,6 +563,7 @@ EDIT_SPECS: dict[str, EditSpec] = {
     "new_benchmark": EditSpec(_validate_new_benchmark, False),
     "new_metric": EditSpec(_validate_new_metric, False),
     "new_conference": EditSpec(_validate_new_conference, False),
+    "new_organization": EditSpec(_validate_new_organization, False),
     "new_external_paper": EditSpec(_validate_new_external_paper, False),
 }
 EDIT_TYPES = frozenset(EDIT_SPECS)

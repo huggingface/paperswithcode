@@ -30,8 +30,10 @@ from backend.models.database import (
 )
 from backend.services.autonomous_capabilities import AutonomousCapabilityDenied
 from backend.services.autonomous_operations_repository import RunContext
+from backend.services.benchmark_gap_review_service import BenchmarkGapReviewService
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.codex_add_evals_service import (
+    BENCHMARK_GAP_KINDS,
     CodexPaperJob,
     CodexPaperJobsResponse,
     codex_paper_job_service,
@@ -175,6 +177,23 @@ def promote_benchmark_candidate(
             settings=settings,
             job_service=codex_paper_job_service,
         )
+    except LookupError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@router.post("/benchmark-candidates/{candidate_id}/rollback")
+def rollback_benchmark_candidate(
+    candidate_id: uuid.UUID,
+    _admin: dict = Depends(require_hf_admin),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Remove a bot-created benchmark while only its evidence papers use it."""
+    _require_enabled(settings)
+    try:
+        return BenchmarkGapReviewService(db, settings).rollback(candidate_id)
     except LookupError as error:
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ValueError as error:
@@ -327,6 +346,23 @@ def search_leaderboards(
     return {"query": q, "leaderboards": _leaderboard_inventory(db, q)}
 
 
+@router.get("/{job_id}/catalog")
+def search_catalog(
+    job_id: uuid.UUID,
+    q: str = Query(min_length=1, max_length=120),
+    authorization: str | None = Header(default=None),
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Search datasets, tasks, and metrics for a benchmark-gap job."""
+    _require_enabled(settings)
+    row = _callback_job(job_id, authorization, db)
+    if row.kind not in BENCHMARK_GAP_KINDS:
+        raise HTTPException(status_code=403, detail="Catalog search is not in scope")
+    _consume_query(db, row, "taxonomy_query_count")
+    return BenchmarkGapReviewService(db, settings).catalog_search(q)
+
+
 @router.post("/{job_id}/apply")
 def apply_mutation(
     job_id: uuid.UUID,
@@ -381,10 +417,10 @@ def apply_mutation(
         db.rollback()
         raise HTTPException(status_code=423, detail=str(error)) from error
     except (LookupError, RuntimeError, ValueError) as error:
-        if getattr(row, "kind", None) == "resolve-model-paper" or (
-            getattr(row, "trigger", "admin") != "admin"
-            and isinstance(error, ValueError)
-        ):
+        if getattr(row, "kind", None) in {
+            "resolve-model-paper",
+            *BENCHMARK_GAP_KINDS,
+        } or isinstance(error, ValueError):
             raise HTTPException(status_code=422, detail=str(error)) from error
         raise
 

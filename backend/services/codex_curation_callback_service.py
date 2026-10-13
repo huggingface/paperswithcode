@@ -11,9 +11,10 @@ from urllib.parse import urlsplit
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from backend.config import Settings
+from backend.config import Settings, get_settings
 from backend.models.curation import ApplyMutationRequest
 from backend.models.database import (
+    BenchmarkCurationCandidate,
     Dataset,
     Evaluation,
     HfArtifact,
@@ -40,6 +41,7 @@ from backend.services.evaluation_scale_service import (
     metric_scale_bounds,
     validate_source_score,
 )
+from backend.services.benchmark_gap_review_service import BenchmarkGapReviewService
 from backend.services.benchmark_gap_service import BenchmarkGapService
 from backend.services.autonomous_capabilities import (
     CAPABILITY_RESOURCE_KINDS,
@@ -52,6 +54,7 @@ from backend.services.autonomous_operations_repository import RunContext
 from backend.services.autonomous_policy import AutonomousPolicy
 from backend.services.catalog_errors import CatalogValidationError
 from backend.services.codex_add_evals_service import (
+    BENCHMARK_GAP_KINDS,
     CodexPaperJobService,
     codex_paper_job_service,
 )
@@ -62,6 +65,7 @@ from backend.services.curation_thumbnail_queue_service import (
 )
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_ranking_service import parse_metric_value
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
 from backend.services.paper_service import PaperService
@@ -107,14 +111,13 @@ def _requires_scheduled_dispatch_pause(_exc: Exception) -> bool:
     return False
 
 
-def _retryable_scheduled_validation(row, exc: Exception) -> bool:
+def _retryable_validation(row, exc: Exception) -> bool:
     """Allow one correction only for ordinary, proposal-fixable validation."""
     prior_rejection = (getattr(row, "validation_summary", None) or {}).get(
         "status"
     ) == "rejected"
     return bool(
-        getattr(row, "trigger", "admin") != "admin"
-        and not prior_rejection
+        not prior_rejection
         and (
             type(exc) is ValueError
             or isinstance(
@@ -261,6 +264,25 @@ class CodexCurationCallbackService:
         }
 
     def context(self, row, settings: Settings) -> dict[str, Any]:
+        if getattr(row, "kind", None) in BENCHMARK_GAP_KINDS:
+            review = BenchmarkGapReviewService(self.db, settings, self.job_service)
+            try:
+                scope = (
+                    {"review": review.review_context()}
+                    if row.kind == "review-benchmark-gaps"
+                    else {"benchmark": review.creation_context(row)}
+                )
+            except LookupError as error:
+                raise CodexCurationPaperNotFoundError(str(error)) from error
+            return {
+                "job": self.job_service.serialize(row, settings).model_dump(
+                    mode="json"
+                ),
+                "retry_feedback": self._retry_feedback(row),
+                # The pinned runner prints paper.id; these jobs have no paper.
+                "paper": {"id": None},
+                **scope,
+            }
         if getattr(row, "kind", None) == "resolve-model-paper":
             candidate = self.db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
@@ -593,6 +615,8 @@ class CodexCurationCallbackService:
         return self._apply_authorized(row, body)
 
     def _apply_authorized(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
+        if row.kind in BENCHMARK_GAP_KINDS:
+            return self._apply_benchmark_gap(row, body)
         if row.kind == "resolve-model-paper":
             try:
                 if hasattr(self.db, "refresh"):
@@ -635,9 +659,7 @@ class CodexCurationCallbackService:
                     self.db.get(type(row), row.id) if not mutation_closed else None
                 )
                 if rejected is not None:
-                    retryable_validation = _retryable_scheduled_validation(
-                        rejected, exc
-                    )
+                    retryable_validation = _retryable_validation(rejected, exc)
                     rejected.proposal = body.model_dump(mode="json")
                     rejected.validation_summary = {
                         "status": "rejected",
@@ -759,6 +781,10 @@ class CodexCurationCallbackService:
                 )
             if removed:
                 row.mutation_result["evaluations_removed"] = removed
+            if row.kind == "add-evals":
+                skipped = self._skipped_configured_leaderboards(body)
+                if skipped:
+                    row.mutation_result["skipped_configured_leaderboards"] = skipped
             self.db.commit()
         except Exception as exc:
             from backend.models.database import PaperCurationSchedulerState
@@ -775,9 +801,7 @@ class CodexCurationCallbackService:
             )
             should_commit = False
             if rejected_row is not None:
-                retryable_validation = _retryable_scheduled_validation(
-                    rejected_row, exc
-                )
+                retryable_validation = _retryable_validation(rejected_row, exc)
                 rejected_row.proposal = body.model_dump(mode="json")
                 rejected_row.validation_summary = {
                     "status": "rejected",
@@ -817,6 +841,52 @@ class CodexCurationCallbackService:
         if getattr(row, "thumbnail_requested_at", None) is not None:
             response["thumbnail"] = serialize_thumbnail(row)
         return response
+
+    def _apply_benchmark_gap(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
+        """Apply one overseer review or one benchmark creation in a transaction."""
+        try:
+            if hasattr(self.db, "refresh"):
+                self.db.refresh(row, with_for_update=True)
+            self._validate_mutation(row, body)
+            validation = self._validate_scheduled_policy(row, body)
+            review = BenchmarkGapReviewService(
+                self.db, get_settings(), self.job_service
+            )
+            result = (
+                review.apply_review(body.review_benchmark_gaps)
+                if row.kind == "review-benchmark-gaps"
+                else review.apply_add_benchmark(row, body.add_benchmark)
+            )
+            now = datetime.now(UTC)
+            row.submitted_at = now
+            row.applied_at = now
+            row.proposal = body.model_dump(mode="json")
+            row.validation_summary = {
+                **validation,
+                "status": "accepted",
+                "validator_version": "benchmark-gap-policy-v1",
+                "post_write_verification": "passed",
+            }
+            row.mutation_result = result
+            self.db.commit()
+            return dict(result)
+        except Exception as exc:
+            self.db.rollback()
+            if not isinstance(exc, CodexCurationMutationClosedError):
+                rejected = self.db.get(type(row), row.id)
+                if rejected is not None:
+                    retryable_validation = _retryable_validation(rejected, exc)
+                    rejected.proposal = body.model_dump(mode="json")
+                    rejected.validation_summary = {
+                        "status": "rejected",
+                        "error_type": type(exc).__name__,
+                        "error": str(exc)[:2_000],
+                        "retryable": retryable_validation,
+                    }
+                    if not retryable_validation:
+                        rejected.submitted_at = datetime.now(UTC)
+                    self.db.commit()
+            raise
 
     def _mutation_projection(self, row, body: ApplyMutationRequest) -> dict[str, Any]:
         """Bound the durable before/after trace to relations touched by this stage."""
@@ -1014,6 +1084,36 @@ class CodexCurationCallbackService:
             raise CodexCurationMutationClosedError(
                 "This job may no longer apply mutations"
             )
+        if row.kind in BENCHMARK_GAP_KINDS:
+            expected = (
+                "review_benchmark_gaps"
+                if row.kind == "review-benchmark-gaps"
+                else "add_benchmark"
+            )
+            unexpected = (
+                body.enrich,
+                body.resolve_model_paper,
+                body.review_benchmark_gaps if expected == "add_benchmark" else None,
+                body.add_benchmark if expected == "review_benchmark_gaps" else None,
+            )
+            if (
+                getattr(body, expected) is None
+                or any(value is not None for value in unexpected)
+                or any(
+                    (
+                        body.evaluations,
+                        body.evaluation_removals,
+                        body.benchmark_gaps,
+                        body.validation_evidence,
+                        body.score_evidence,
+                        body.source_coverage,
+                    )
+                )
+            ):
+                raise ValueError(f"{row.kind} jobs accept only {expected} payloads")
+            return
+        if body.review_benchmark_gaps is not None or body.add_benchmark is not None:
+            raise ValueError("Benchmark-gap payloads are allowed only for their jobs")
         if row.kind == "resolve-model-paper":
             if (
                 body.resolve_model_paper is None
@@ -1055,6 +1155,7 @@ class CodexCurationCallbackService:
                     raise CodexCurationEvaluationPaperMismatchError(
                         "Evaluation removal does not match job paper"
                     )
+            self._validate_already_present_outcomes(row, body)
             return
         if body.benchmark_gaps:
             raise CodexCurationEvaluationsNotAllowedError(
@@ -1150,6 +1251,139 @@ class CodexCurationCallbackService:
             if not isinstance(item.get("benchmark_outcomes"), list):
                 raise ValueError("Source coverage must include benchmark outcomes")
 
+    @staticmethod
+    def _benchmark_outcomes(body: ApplyMutationRequest, dispositions: set[str]):
+        for source in body.source_coverage:
+            outcomes = (
+                source.get("benchmark_outcomes") if isinstance(source, dict) else None
+            )
+            for outcome in outcomes if isinstance(outcomes, list) else []:
+                if (
+                    isinstance(outcome, dict)
+                    and outcome.get("disposition") in dispositions
+                ):
+                    yield source.get("url"), outcome
+
+    def _validate_already_present_outcomes(
+        self, row, body: ApplyMutationRequest
+    ) -> None:
+        """Allow an ``already_present`` skip only when this paper's own row is at least as good.
+
+        Higher-ranked rows from other papers never make a paper-native result
+        redundant, so the outcome must name the exact leaderboard and the
+        paper's best eligible score, and an existing row of this paper on that
+        leaderboard must be equal or better under the metric direction.
+        """
+        removed_ids = {item.evaluation_id for item in body.evaluation_removals}
+        for _url, outcome in self._benchmark_outcomes(body, {"already_present"}):
+            label = outcome.get("benchmark")
+            task_id = outcome.get("task_id")
+            dataset_id = outcome.get("dataset_id")
+            metric_name = outcome.get("metric")
+            value = parse_metric_value(outcome.get("value"))
+            if (
+                not isinstance(task_id, int)
+                or not isinstance(dataset_id, int)
+                or not isinstance(metric_name, str)
+                or not metric_name
+                or value is None
+            ):
+                raise ValueError(
+                    f"already_present outcome {label!r} must name task_id, "
+                    "dataset_id, metric, and value (this paper's best eligible "
+                    "score on that leaderboard's scale)"
+                )
+            metric = (
+                self.db.query(Metric)
+                .join(TaskDatasetMetric, TaskDatasetMetric.metric_id == Metric.id)
+                .filter(
+                    TaskDatasetMetric.task_id == task_id,
+                    TaskDatasetMetric.dataset_id == dataset_id,
+                    Metric.name == metric_name,
+                )
+                .one_or_none()
+            )
+            if metric is None:
+                raise ValueError(
+                    f"already_present outcome {label!r} names metric "
+                    f"{metric_name!r} that is not configured for task {task_id} "
+                    f"and dataset {dataset_id}"
+                )
+            existing = [
+                (evaluation, score)
+                for evaluation in self.db.query(Evaluation)
+                .filter(
+                    Evaluation.paper_id == row.paper_id,
+                    Evaluation.task_id == task_id,
+                    Evaluation.dataset_id == dataset_id,
+                )
+                .all()
+                if evaluation.id not in removed_ids
+                and (
+                    score := parse_metric_value(
+                        (evaluation.metrics or {}).get(metric_name)
+                    )
+                )
+                is not None
+            ]
+            lower_is_better = metric.direction == "lower_is_better"
+            if not any(
+                math.isclose(score, value, rel_tol=1e-9, abs_tol=1e-9)
+                or (score < value if lower_is_better else score > value)
+                for _evaluation, score in existing
+            ):
+                stored = ", ".join(
+                    f"evaluation {evaluation.id} {evaluation.model_name!r} = {score:g}"
+                    for evaluation, score in existing
+                )
+                raise ValueError(
+                    f"Benchmark {label!r} is not already_present: this paper has "
+                    f"no row on task {task_id} / dataset {dataset_id} / "
+                    f"{metric_name} that is equal to or better than {value:g}. "
+                    f"This paper's stored rows there: {stored or 'none'}. "
+                    "Recheck the source table column for this benchmark; if the "
+                    "stored row matches the paper's best eligible result, report "
+                    "that value. Rows from other papers ranking higher never "
+                    "justify a skip; otherwise submit the paper's best eligible "
+                    "result as an evaluation."
+                )
+
+    def _skipped_configured_leaderboards(
+        self, body: ApplyMutationRequest
+    ) -> list[dict[str, Any]]:
+        """List skips that name a configured leaderboard so losses stay auditable."""
+        skipped = []
+        for url, outcome in self._benchmark_outcomes(
+            body, {"already_present", "not_applicable"}
+        ):
+            task_id = outcome.get("task_id")
+            dataset_id = outcome.get("dataset_id")
+            if not isinstance(task_id, int) or not isinstance(dataset_id, int):
+                continue
+            configured = (
+                self.db.query(TaskDataset)
+                .filter(
+                    TaskDataset.task_id == task_id,
+                    TaskDataset.dataset_id == dataset_id,
+                )
+                .one_or_none()
+            )
+            if configured is None:
+                continue
+            skipped.append(
+                {
+                    "source_url": url,
+                    "benchmark": outcome.get("benchmark"),
+                    "disposition": outcome.get("disposition"),
+                    "task_id": task_id,
+                    "dataset_id": dataset_id,
+                    "metric": outcome.get("metric"),
+                    "value": outcome.get("value"),
+                    "detail": outcome.get("detail"),
+                }
+            )
+        return skipped
+
     def _validate_scheduled_policy(
         self, row, body: ApplyMutationRequest
     ) -> dict[str, Any]:
@@ -1160,6 +1394,8 @@ class CodexCurationCallbackService:
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation requires a durable pre-apply trace"
             )
+        if row.kind in BENCHMARK_GAP_KINDS:
+            return {"policy": "benchmark-gap-v1"}
         if row.kind == "enrich-paper":
             mutation = body.enrich
             if mutation is None:
@@ -1457,7 +1693,20 @@ class CodexCurationCallbackService:
     ) -> tuple[tuple[Capability, ResourceRef], ...]:
         """Resolve the callback's closed mutation surface from catalog state."""
         capability, primary_resource = curation_primary_authorization(self.db, row)
-        if row.kind == "resolve-model-paper":
+        if row.kind == "review-benchmark-gaps" and body.review_benchmark_gaps:
+            return tuple(
+                (
+                    capability,
+                    ResourceRef(
+                        ResourceKind.BENCHMARK_CANDIDATE,
+                        str(decision.candidate_id),
+                        self.db.get(BenchmarkCurationCandidate, decision.candidate_id)
+                        is not None,
+                    ),
+                )
+                for decision in body.review_benchmark_gaps.decisions
+            )
+        if row.kind in {"resolve-model-paper", *BENCHMARK_GAP_KINDS}:
             return ((capability, primary_resource),)
         resources: list[ResourceRef] = [primary_resource]
         if body.enrich is not None:

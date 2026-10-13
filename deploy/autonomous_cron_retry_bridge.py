@@ -24,6 +24,7 @@ SAFE_JOBS = frozenset(
         "calculate_trending_scores",
         "enqueue_hf_daily_paper_curation",
         "enqueue_hf_trending_model_curation",
+        "enqueue_benchmark_gap_review",
         "export_enrichment_dashboard",
         "import_hf_daily_papers",
         "mirror_thumbnails_to_disk",

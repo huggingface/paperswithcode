@@ -388,6 +388,7 @@ class PaperXThread(Base):
     reply_count: Mapped[Optional[int]] = mapped_column(Integer)
     media_url: Mapped[Optional[str]] = mapped_column(String(1000))
     media_type: Mapped[Optional[str]] = mapped_column(String(16))
+    video_url: Mapped[Optional[str]] = mapped_column(String(1000))
     fetched_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False
     )

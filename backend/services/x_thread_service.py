@@ -39,6 +39,7 @@ class XPostPreview:
     reply_count: int | None
     media_url: str | None
     media_type: str | None
+    video_url: str | None
     fetched_at: datetime
 
 
@@ -54,6 +55,7 @@ X_THREAD_FIELDS = (
     "reply_count",
     "media_url",
     "media_type",
+    "video_url",
     "fetched_at",
 )
 
@@ -80,12 +82,37 @@ def _display_text(post: dict) -> str:
     return html.unescape(visible).strip()
 
 
-def _media(post: dict) -> tuple[str | None, str | None]:
+# Inline previews are sidebar-sized, so 360p (~0.8 Mbps) is sharp enough.
+_MAX_PREVIEW_VIDEO_BITRATE = 1_000_000
+
+
+def _video_url(media: dict) -> str | None:
+    """Pick the best MP4 at or below the preview bitrate, else the smallest."""
+    mp4s = sorted(
+        (
+            variant
+            for variant in (media.get("video_info") or {}).get("variants", [])
+            if variant.get("content_type") == "video/mp4" and variant.get("url")
+        ),
+        key=lambda variant: variant.get("bitrate") or 0,
+    )
+    if not mp4s:
+        return None
+    fitting = [
+        variant
+        for variant in mp4s
+        if (variant.get("bitrate") or 0) <= _MAX_PREVIEW_VIDEO_BITRATE
+    ]
+    return (fitting[-1] if fitting else mp4s[0])["url"]
+
+
+def _media(post: dict) -> tuple[str | None, str | None, str | None]:
     for media in post.get("mediaDetails") or []:
         if media.get("media_url_https"):
-            kind = "photo" if media.get("type") == "photo" else "video"
-            return media["media_url_https"], kind
-    return None, None
+            if media.get("type") == "photo":
+                return media["media_url_https"], "photo", None
+            return media["media_url_https"], "video", _video_url(media)
+    return None, None, None
 
 
 def _posted_at(value: str | None) -> datetime | None:
@@ -103,7 +130,7 @@ def preview_from_syndication(post: dict) -> XPostPreview:
     user = post["user"]
     tweet_id = post["id_str"]
     avatar = user.get("profile_image_url_https")
-    media_url, media_type = _media(post)
+    media_url, media_type, video_url = _media(post)
     return XPostPreview(
         tweet_id=tweet_id,
         url=f"https://x.com/{user['screen_name']}/status/{tweet_id}",
@@ -117,6 +144,7 @@ def preview_from_syndication(post: dict) -> XPostPreview:
         reply_count=post.get("conversation_count"),
         media_url=media_url,
         media_type=media_type,
+        video_url=video_url,
         fetched_at=datetime.now(UTC),
     )
 
