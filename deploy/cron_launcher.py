@@ -358,6 +358,15 @@ COMMANDS: dict[str, Job] = {
             "replace managed ExtractBench evaluation rows from the validated leaderboard.csv"
         ),
     ),
+    "sync_physics_iq_verified": job(
+        "-m",
+        "scripts.hourly.sync_physics_iq_verified",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Physics-IQ Verified evaluation rows from "
+            "the validated README table; never creates papers"
+        ),
+    ),
     "sync_coarena": job(
         "-m",
         "scripts.hourly.sync_coarena",

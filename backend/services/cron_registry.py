@@ -1157,6 +1157,45 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_physics_iq_verified",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=28),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-physics-iq-verified.timer",
+        systemd_service="pwc-cron-sync-physics-iq-verified.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync Physics-IQ Verified Leaderboard",
+        category="hourly",
+        schedule="28 * * * * (hourly)",
+        script_path="hourly/sync_physics_iq_verified.py",
+        log_name="sync_physics_iq_verified",
+        process_patterns=("scripts.hourly.sync_physics_iq_verified",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "sync_physics_iq_verified.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'physics-iq-verified'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code Physics-IQ Verified live sync.%'
+        """,
+        workflow_file="cron-sync-physics-iq-verified.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),

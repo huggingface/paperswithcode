@@ -121,6 +121,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `extractbench` on task `document-understanding`; Value F1 plus Word Grounding F1 and Page Grounding F1 (omitted when upstream reports 0.00 for both); official `leaderboard.csv` in `run-llama/ExtractBench`; typically 30–400 upstream rows, of which only reviewed provider labels are published.
 - **Proof:** Diff the current CSV against managed rows (model label, three scores); confirm `extractbench_unreviewed` warnings are either mapped or added to the reviewed exclusions; verify stale managed rows were deleted and ranks recomputed on Value F1.
 
+## `sync_physics_iq_verified`
+
+- **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
+- **Proof:** Diff the README table against managed rows (label, track, score at README precision, ± SD, date added); confirm `physics_iq_verified_unreviewed` warnings are either mapped or covered by the exclusion rules, `missing_papers` is empty, and `missing_upstream` rows were investigated (they are never deleted automatically); verify ranks on both metrics.
+
 ## `sync_frontiercode`
 
 - **Contract:** `frontiercode-main` and `frontiercode-extended`; Score and Pass Rate; official Cognition JSON.
