@@ -1039,19 +1039,19 @@ def test_scheduled_resolution_gets_one_validation_correction_attempt(monkeypatch
     )
 
     with pytest.raises(ValueError, match="canonical source evidence"):
-        service.apply(job, body)
+        service._apply_authorized(job, body)
     db.refresh(job)
     assert job.submitted_at is None
     assert job.validation_summary["retryable"] is True
 
     with pytest.raises(ValueError, match="canonical source evidence"):
-        service.apply(job, body)
+        service._apply_authorized(job, body)
     db.refresh(job)
     assert job.submitted_at is not None
     assert job.validation_summary["retryable"] is False
 
     with pytest.raises(RuntimeError, match="may no longer apply mutations"):
-        service.apply(job, body)
+        service._apply_authorized(job, body)
 
 
 def test_remote_proposal_schema_accepts_typed_model_resolution():
@@ -1171,7 +1171,7 @@ def test_callback_applies_resolution_and_records_job_result():
     db.add(row)
     db.commit()
 
-    result = CodexCurationCallbackService(db).apply(
+    result = CodexCurationCallbackService(db)._apply_authorized(
         row,
         ApplyMutationRequest(
             resolve_model_paper={
@@ -1236,7 +1236,7 @@ def test_callback_atomically_queues_thumbnail_for_external_resolution(
         service, "_allowed_resolution_paper_ids", lambda _candidate: {paper.id}
     )
 
-    result = service.apply(
+    result = service._apply_authorized(
         row,
         ApplyMutationRequest(
             resolve_model_paper={
