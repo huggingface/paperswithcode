@@ -20,11 +20,29 @@ describe('research follows', () => {
     vi.spyOn(researchApi, 'email').mockResolvedValue(preferences);
     const save = vi.spyOn(researchApi, 'setEmail').mockResolvedValue({ ...preferences, enabled: true });
     render(<ResearchSettings />, { wrapper });
-    expect(await screen.findByText('Destination: alice@example.com')).toBeInTheDocument();
-    expect(screen.getByText(/Email delivery is not available yet/)).toBeInTheDocument();
+    expect(await screen.findByText('alice@example.com')).toBeInTheDocument();
+    expect(screen.getByText(/Weekly emails have not launched yet/)).toBeInTheDocument();
     expect(save).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('switch'));
     await waitFor(() => expect(save).toHaveBeenCalledWith(true, expect.anything()));
+  });
+  it('groups follows by kind and lets an unfollow be undone in place before refetching', async () => {
+    const follow = { kind: 'method' as const, entity_id: 7, name: 'Mixture of Experts', url: '/methods/moe', created_at: '2026-10-03T10:00:00Z' };
+    const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([follow]);
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    const change = vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
+    render(<ResearchSettings />, { wrapper });
+    expect(await screen.findByRole('heading', { name: 'Methods' })).toBeInTheDocument();
+    expect(screen.getByRole('switch')).toBeDisabled();
+    // Refetches never settle, so every state change must come from the mutation itself.
+    list.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(screen.getByRole('button', { name: 'Unfollow Mixture of Experts' }));
+    await waitFor(() => expect(change).toHaveBeenCalledWith('method', 7, false));
+    expect(await screen.findByRole('button', { name: 'Follow Mixture of Experts' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Follow Mixture of Experts' }));
+    await waitFor(() => expect(change).toHaveBeenCalledWith('method', 7, true));
+    expect(await screen.findByRole('button', { name: 'Unfollow Mixture of Experts' })).toBeInTheDocument();
+    expect(screen.queryByText(/not following anything/)).not.toBeInTheDocument();
   });
   it('follows and unfollows with the stable entity id', async () => {
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);

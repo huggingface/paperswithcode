@@ -125,7 +125,7 @@ def short_summary(tldr: str | None, abstract: str | None) -> str:
 def diverse(
     entries: list[ResearchEntry], limit: int, rotation: int | None = None
 ) -> list[ResearchEntry]:
-    """Round-robin interests; within each interest prefer strength, date, popularity."""
+    """Round-robin digest interests; within each prefer strength, date, popularity."""
     ranked = sorted(
         entries,
         key=lambda e: (
@@ -326,36 +326,31 @@ def matching_entries(
 def feed_entries(
     db: Session, subject: str, now: datetime, offset: int, limit: int
 ) -> list[ResearchFeedEntry]:
-    """Hydrate the ranked page with the same batch loader as public paper feeds."""
+    """Rank matches with the home feed's trending order and hydrate standard cards."""
     from backend.services.paper_service import PaperService
 
-    entries = diverse(matching_entries(db, subject, now), offset + limit)[offset:]
+    entries = {e.paper_key: e for e in matching_entries(db, subject, now)}
     if not entries:
         return []
-    arxiv_ids = [
-        e.paper_key.removeprefix("arxiv:")
-        for e in entries
-        if e.paper_key.startswith("arxiv:")
-    ]
+    arxiv_ids = [k.removeprefix("arxiv:") for k in entries if k.startswith("arxiv:")]
     paper_ids = [
-        int(e.paper_key.removeprefix("paper:"))
-        for e in entries
-        if e.paper_key.startswith("paper:")
+        int(k.removeprefix("paper:")) for k in entries if k.startswith("paper:")
     ]
-    rows = db.scalars(
-        select(DBPaper).where(
-            or_(
-                DBPaper.arxiv_id.in_(arxiv_ids) & DBPaper.is_latest_version,
-                DBPaper.id.in_(paper_ids),
-            )
+    service = PaperService(db)
+    query = db.query(DBPaper).filter(
+        or_(
+            DBPaper.arxiv_id.in_(arxiv_ids) & DBPaper.is_latest_version,
+            DBPaper.id.in_(paper_ids),
         )
-    ).all()
-    papers = PaperService(db).hydrate_cards(rows, include_resources=True)
-    by_key = {
-        f"arxiv:{p.arxiv_id}" if p.arxiv_id else f"paper:{p.id}": p for p in papers
-    }
+    )
+    rows = service.apply_scoped_trending_order(query).offset(offset).limit(limit).all()
+    papers = service.hydrate_cards(rows, include_resources=True)
     return [
-        ResearchFeedEntry(**e.model_dump(), paper=by_key[e.paper_key])
-        for e in entries
-        if e.paper_key in by_key
+        ResearchFeedEntry(
+            **entries[
+                f"arxiv:{p.arxiv_id}" if p.arxiv_id else f"paper:{p.id}"
+            ].model_dump(),
+            paper=p,
+        )
+        for p in papers
     ]
