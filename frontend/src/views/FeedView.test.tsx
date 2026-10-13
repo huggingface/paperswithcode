@@ -60,7 +60,8 @@ describe("AskAssistant", () => {
   it("opens the canonical chat in a new tab on the Hugging Face Space mirror", async () => {
     vi.stubEnv("VITE_DISABLE_AUTH", "1");
     vi.stubEnv("VITE_CHAT_ENABLED", "0");
-    const open = vi.spyOn(window, "open").mockReturnValue(null);
+    const tab = { opener: window } as unknown as Window;
+    const open = vi.spyOn(window, "open").mockReturnValue(tab);
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     renderAskAssistant();
 
@@ -73,10 +74,26 @@ describe("AskAssistant", () => {
     expect(open).toHaveBeenCalledWith(
       `https://paperswithcode.co/chat?${params}`,
       "_blank",
-      "noopener",
     );
+    expect(tab.opener).toBeNull();
     expect(textarea).toHaveValue("");
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps the question as a link when the mirror's new tab is blocked", () => {
+    vi.stubEnv("VITE_DISABLE_AUTH", "1");
+    vi.stubEnv("VITE_CHAT_ENABLED", "0");
+    vi.spyOn(window, "open").mockReturnValue(null);
+    renderAskAssistant();
+
+    const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
+    fireEvent.change(textarea, { target: { value: "What is new in diffusion?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+
+    const params = new URLSearchParams({ q: "What is new in diffusion?", model: DEFAULT_CHAT_MODEL });
+    expect(textarea).toHaveValue("What is new in diffusion?");
+    expect(screen.getByRole("link", { name: "Open this question on paperswithcode.co" }))
+      .toHaveAttribute("href", `https://paperswithcode.co/chat?${params}`);
   });
 
   it("offers the four truthful staging model routes", () => {

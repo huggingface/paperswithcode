@@ -126,6 +126,9 @@ export const AskAssistant: React.FC = () => {
   const [webSearchEnabled, setWebSearchEnabled] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>("low");
   const [launching, setLaunching] = useState(false);
+  // Set when the browser blocks the mirror's new tab, so the question survives
+  // as a link the visitor can open themselves.
+  const [blockedHandoffUrl, setBlockedHandoffUrl] = useState<string | null>(null);
   const placeholder = useRotatingChatPlaceholder(!question);
   const ref = useRef<HTMLTextAreaElement>(null);
   const availabilityQuery = useQuery({
@@ -177,7 +180,14 @@ export const AskAssistant: React.FC = () => {
     if (!q || launching) return;
     if (mirror) {
       const params = new URLSearchParams({ q, model: selectedModel });
-      window.open(`${CANONICAL_CHAT_URL}?${params}`, "_blank", "noopener");
+      const url = `${CANONICAL_CHAT_URL}?${params}`;
+      const tab = window.open(url, "_blank");
+      if (!tab) {
+        setBlockedHandoffUrl(url);
+        return;
+      }
+      tab.opener = null;
+      setBlockedHandoffUrl(null);
       setDraft({ text: "", paperMentions: [] });
       return;
     }
@@ -242,6 +252,13 @@ export const AskAssistant: React.FC = () => {
             aria-describedby={mentions.message ? "ask-home-paper-mention-message" : undefined}
           />
         </div>
+        {blockedHandoffUrl && (
+          <div className="chat-paper-mention-message" role="alert">
+            <a href={blockedHandoffUrl} target="_blank" rel="noreferrer">
+              Open this question on paperswithcode.co
+            </a>
+          </div>
+        )}
         {mentions.message && (
           <div id="ask-home-paper-mention-message" className="chat-paper-mention-message" role="alert">
             {mentions.message}
