@@ -954,6 +954,20 @@ def test_research_failures_are_errors_not_no_changes():
     assert "CLIConnectionError" in failed["error"]
 
 
+def test_run_agent_does_not_retry_terminal_limits(monkeypatch):
+    import asyncio
+
+    attempts = []
+
+    async def fake_once(**_kwargs):
+        attempts.append(1)
+        return {"status": "limit", "error": "error_max_budget_usd"}, 1.5, 2
+
+    monkeypatch.setattr(agent, "_run_agent_once", fake_once)
+    result, cost = asyncio.run(agent.run_agent(label="t"))
+    assert result["status"] == "limit" and len(attempts) == 1 and cost == 1.5
+
+
 def test_run_agent_retries_sdk_errors(monkeypatch):
     import asyncio
 
@@ -1143,6 +1157,10 @@ def test_limit_results_are_not_runtime_errors():
 
     limited = run(subtype="error_max_turns", is_error=True)
     assert limited["result"] == {} and limited["hit_max_turns"]
+    for subtype in ("error_max_budget_usd", "error_max_structured_output_retries"):
+        capped = run(subtype=subtype, is_error=True)
+        assert capped["result"] == {"status": "limit", "error": subtype}
+        assert not capped["hit_max_turns"]
     api_error = run(
         subtype="success", is_error=True, result="API Error: 400 unsupported model"
     )

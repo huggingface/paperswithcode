@@ -583,18 +583,22 @@ async def _consume(label: str, query_iter, state: dict) -> None:
                     _log(label, f"result{flag}: {str(block.content)[:200]}")
         elif isinstance(message, ResultMessage):
             state["session_id"] = message.session_id
-            if message.subtype in ("error_max_turns", "error_max_budget_usd"):
+            if message.subtype.startswith("error_max"):
                 _log(label, f"limit reached: {message.subtype}")
-            if message.subtype == "error_max_turns":
-                state["hit_max_turns"] = True
             if message.total_cost_usd:
                 state["cost"] += message.total_cost_usd
             if message.structured_output:
                 state["result"] = message.structured_output
-            elif message.is_error and not message.subtype.startswith("error_max"):
-                # Turn/budget/schema limits keep their own handling (the
-                # no-tools follow-up); only API/runtime failures are errors.
-                # e.g. "API Error: 400 ... does not support this model".
+            elif message.subtype == "error_max_turns":
+                # Turn limit: the no-tools follow-up answers from what was seen.
+                state["hit_max_turns"] = True
+            elif message.subtype.startswith("error_max"):
+                # Budget / structured-output-retry limits are terminal: retrying
+                # or following up would spend past the cap.
+                state["result"] = {"status": "limit", "error": message.subtype}
+            elif message.is_error:
+                # API/runtime failure, e.g. "API Error: 400 ... does not
+                # support this model": retried by run_agent.
                 detail = message.result or message.subtype or "agent run failed"
                 state["result"] = {"status": "error", "error": str(detail)[:500]}
 
