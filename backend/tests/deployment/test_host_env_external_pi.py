@@ -25,6 +25,9 @@ _EXTERNAL_PROFILE = {
     "PWC_CHAT_BLANK_POOL_ENABLED": "false",
     "PWC_CHAT_PI_PREWARM_ENABLED": "false",
     "PWC_CHAT_MAX_CONCURRENCY": "32",
+    "PWC_CHAT_USER_MAX_CONCURRENCY": "1",
+    "PWC_CHAT_BLANK_POOL_MIN": "4",
+    "PWC_CHAT_BLANK_POOL_MAX": "4",
     "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "32",
     "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "16",
     "PWC_CHAT_EXTERNAL_PI_WORKER_MAX_SESSIONS": "32",
@@ -81,10 +84,11 @@ def test_external_pi_off_profile_passes_staging_runtime_validation(tmp_path: Pat
     # Staging runs every new session on Pi by default, which prewarm requires.
     settings.chat_default_agent_harness = "pi"
     settings.chat_new_session_pi_percentage = 100
-    values, _ = configure_host_env.staging_external_pi_disable_values(
-        _lines(_EXTERNAL_PROFILE)
-    )
-    for key, value in values.items():
+    external = dict(_EXTERNAL_PROFILE)
+    external.pop("UNRELATED_SETTING")
+    values, _ = configure_host_env.staging_external_pi_disable_values(_lines(external))
+    # Start from staging's external profile, then apply the off transition.
+    for key, value in {**external, **values}.items():
         field = key.removeprefix("PWC_").lower()
         current = getattr(settings, field)
         if isinstance(current, bool):
