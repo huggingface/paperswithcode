@@ -53,7 +53,9 @@ BEGIN
    e := 'result:' || md5(jsonb_build_array(k,NEW.task_id,NEW.dataset_id,
      coalesce(NEW.model_name,''),coalesce(NEW.harness,''))::text);
    INSERT INTO public.research_events(event_key,paper_key,paper_id,evaluation_id,dataset_id)
-   VALUES (e,k,p.id,NEW.id,NEW.dataset_id) ON CONFLICT DO NOTHING;
+   VALUES (e,k,p.id,NEW.id,NEW.dataset_id) ON CONFLICT (event_key) DO UPDATE
+   SET evaluation_id=EXCLUDED.evaluation_id, paper_id=EXCLUDED.paper_id;
+   -- Keep discovered_at unchanged while following the current corrected row.
  END IF;
  RETURN NEW;
 END $$;

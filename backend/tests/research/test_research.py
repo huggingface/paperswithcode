@@ -338,6 +338,10 @@ def test_new_results_not_corrections_or_reinsertions(db, now):
     )
     db.flush()
     assert db.scalar(text("SELECT count(*) FROM research_events")) == count
+    corrected = follows.matching_entries(
+        db, "alice", end, window_start=now - timedelta(days=7), window_end=end
+    )
+    assert corrected[0].scores[0]["metrics"] == {"Accuracy": 27}
     assert (
         follows.matching_entries(
             db,
