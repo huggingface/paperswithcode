@@ -49,6 +49,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
 
     DEFAULT_LOOKBACK_DAYS = 7
     DAILY_PAPERS_PAGE_SIZE = 50
+    MISSING_TLDR_BATCH = 50
 
     def __init__(
         self,
@@ -77,6 +78,7 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         self.new_methods_count = 0
         self.new_organization_links_count = 0
         self.unknown_organizations_seen = 0
+        self.filled_tldrs_count = 0
 
         self.task_case_sensitive_patterns = {}
         self.task_case_insensitive_patterns = {}
@@ -132,6 +134,8 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
                     arxiv_id = paper_data.get("paper", {}).get("id", "unknown")
                     self.logger.error(f"Failed to process paper {arxiv_id}: {e}")
 
+        self.fill_missing_tldrs()
+
         self.logger.info("Hugging Face daily papers import completed:")
         self.logger.info(f"  - Papers processed: {self.processed_count}")
         self.logger.info(f"  - New papers added: {self.new_papers_count}")
@@ -145,6 +149,9 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
         )
         self.logger.info(
             f"  - Unknown organizations seen: {self.unknown_organizations_seen}"
+        )
+        self.logger.info(
+            f"  - TL;DRs filled for other papers: {self.filled_tldrs_count}"
         )
         self.logger.info(f"  - Errors: {self.error_count}")
         self.logger.info(
@@ -234,6 +241,25 @@ class HuggingFaceDailyPapersJob(HuggingFacePaperImporterMixin, DatabaseCronJob):
             paper_id,
             paper_data.get("organization") or paper_info.get("organization"),
         )
+
+    def fill_missing_tldrs(self) -> None:
+        """Give papers created outside this import (admin API, CLI, external) a TL;DR."""
+        rows = self.execute_query(
+            "SELECT id, title, abstract FROM papers "
+            "WHERE is_latest_version AND abstract <> '' AND COALESCE(tldr, '') = '' "
+            "ORDER BY id DESC LIMIT %s",
+            (self.MISSING_TLDR_BATCH,),
+        )
+        for row in rows:
+            tldr = self._generate_tldr(row["title"], row["abstract"])
+            if not tldr:
+                continue
+            self.execute_query(
+                "UPDATE papers SET tldr = %s, updated_at = CURRENT_TIMESTAMP "
+                "WHERE id = %s AND COALESCE(tldr, '') = ''",
+                (tldr, row["id"]),
+            )
+            self.filled_tldrs_count += 1
 
     def _generate_tldr(self, title: str, abstract: str) -> Optional[str]:
         """Luna TL;DR in the catalog voice; None falls back to the HF ai_summary."""

@@ -193,7 +193,10 @@ pages for papers that still have `urls_extracted = false`.
 papers that are not yet in the database, and auto-tags tasks/methods using
 keyword matching. New papers get a feed-style TL;DR from `gpt-5.6-luna`
 (`backend/services/paper_tldr_service.py`, needs `PWC_OPENAI_API_KEY`); if that
-key is missing or the call fails, the Hugging Face `ai_summary` is stored instead. It also links curated organization payloads for both new and
+key is missing or the call fails, the Hugging Face `ai_summary` is stored instead.
+Each run also fills a TL;DR for up to 50 latest-version papers that have an
+abstract but no TL;DR, which covers papers added through the admin API, the
+`paper index` CLI, or external-resource ingestion. It also links curated organization payloads for both new and
 already-existing papers.
 
 The three MMTEB v2 jobs consume the official MTEB leaderboard API's precomputed

@@ -213,6 +213,7 @@ def test_run_continues_after_one_failure_emits_summary_then_raises(monkeypatch):
         "new_methods_count",
         "new_organization_links_count",
         "unknown_organizations_seen",
+        "filled_tldrs_count",
     ):
         setattr(job, name, 0)
     job.load_task_keywords = MagicMock()
@@ -228,10 +229,12 @@ def test_run_continues_after_one_failure_emits_summary_then_raises(monkeypatch):
     )
     job.vacuum_analyze_table = MagicMock()
     job.execute_query = MagicMock()
+    job.fill_missing_tldrs = MagicMock()
 
     with pytest.raises(RuntimeError, match="1 paper import failure"):
         job.run()
 
+    job.fill_missing_tldrs.assert_called_once_with()
     assert job.process_paper.call_count == 3
     assert job.execute_query.call_count == 2
     assert [call.args[1][1] for call in job.execute_query.call_args_list] == [
@@ -295,3 +298,30 @@ def test_generate_tldr_falls_back_on_http_error(monkeypatch):
 
     assert job._generate_tldr("T", "A") is None
     job.logger.warning.assert_called_once()
+
+
+def test_fill_missing_tldrs_updates_only_generated_rows(monkeypatch):
+    job = _tldr_job("sk-test")
+    job.filled_tldrs_count = 0
+    queries = []
+
+    def execute_query(query, params=None):
+        queries.append((query, params))
+        if query.startswith("SELECT"):
+            return [
+                {"id": 1, "title": "One", "abstract": "A1"},
+                {"id": 2, "title": "Two", "abstract": "A2"},
+            ]
+        return []
+
+    job.execute_query = execute_query
+    monkeypatch.setattr(
+        job, "_generate_tldr", lambda title, abstract: "TL" if title == "One" else None
+    )
+
+    job.fill_missing_tldrs()
+
+    updates = [params for query, params in queries if query.startswith("UPDATE")]
+    assert updates == [("TL", 1)]
+    assert job.filled_tldrs_count == 1
+    assert queries[0][1] == (HuggingFaceDailyPapersJob.MISSING_TLDR_BATCH,)
