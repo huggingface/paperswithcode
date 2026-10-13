@@ -210,7 +210,7 @@ export const EditOrganizationsDialog = ({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={() => save.mutate()} disabled={save.isPending}>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || create.isPending}>
             {submitMode === "pending" ? "Submit test edit" : "Save changes"}
           </Button>
         </DialogFooter>

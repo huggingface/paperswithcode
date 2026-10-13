@@ -147,7 +147,8 @@ describe("EditOrganizationsDialog", () => {
    renderDialog([], "direct", true);
    await screen.findByText("NVIDIA");
    await user.type(screen.getByRole("searchbox", { name: "Search organizations" }), "prime intellect");
-   syncOrganization.mockResolvedValue({ organization: "prime-intellect", linked: 0 });
+   let finishSync: (value: { organization: string; linked: number }) => void = () => {};
+   syncOrganization.mockReturnValue(new Promise((resolve) => { finishSync = resolve; }));
    getOrganizations.mockResolvedValue({
      count: 4,
      results: [...organizations.results, { id: "9", name: "Prime Intellect", slug: "prime-intellect", is_featured: true }],
@@ -157,6 +158,8 @@ describe("EditOrganizationsDialog", () => {
      "https://huggingface.co/PrimeIntellect/",
    );
    await user.click(screen.getByRole("button", { name: "Create" }));
+   expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+   finishSync({ organization: "prime-intellect", linked: 0 });
 
    expect(await screen.findByRole("checkbox", { name: "Prime Intellect" })).toBeChecked();
    expect(syncOrganization).toHaveBeenCalledWith({
