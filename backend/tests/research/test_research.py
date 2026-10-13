@@ -526,3 +526,21 @@ def test_hourly_job_closes_pending_outboxes_after_window_even_for_opted_out_user
     assert db.get(ResearchDigest, ("unattempted", end)).status == "expired"
     assert db.get(ResearchDigest, ("sent", end)).status == "sent"
     assert delivery.expire_pending_digests(db, after_window) == 0
+
+
+@pytest.mark.parametrize("method", ["get", "head"])
+def test_following_direct_navigation_serves_spa_without_catalog_lookup(
+    monkeypatch, method
+):
+    from backend.routers import discovery_pages
+
+    app = FastAPI()
+    app.include_router(discovery_pages.router)
+    # A private client route must not fall through to an organization lookup.
+    app.dependency_overrides[get_database_session] = lambda: object()
+    monkeypatch.setattr(
+        discovery_pages, "load_index_html", lambda: "<!doctype html><html>app</html>"
+    )
+    response = getattr(TestClient(app), method)("/following")
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "no-store"
