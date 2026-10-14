@@ -6,17 +6,19 @@ from types import SimpleNamespace
 import httpx
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
 from backend.database.connection import get_database_session
 from backend.main import create_app
 from backend.services import public_paper_metadata_service as service
 from backend.services.paper_service import PaperService
+from backend.utils.client_ip import get_proxied_client_ip
 from backend.utils.exceptions import PaperNotFoundError
 
 ABS_PAGE = b"""<html><head>
 <meta name="citation_title" content="Fresh &amp; Unindexed Paper" />
 <meta name="citation_author" content="Doe, Jane" />
-<meta name="citation_author" content="Roe, Rick" />
+<meta name="citation_author" content="Roe, Rick, Jr" />
 <meta name="citation_date" content="2026/10/13" />
 <meta name="citation_abstract" content="We release code at https://github.com/acme/fresh." />
 </head></html>"""
@@ -101,6 +103,7 @@ def _client(monkeypatch, upstream):
         ("10.48550/arXiv.2610.18869", ("arxiv", "2610.18869")),
         ("https://doi.org/10.48550/arXiv.2610.18869", ("arxiv", "2610.18869")),
         ("cs/0610046", ("arxiv", "cs/0610046")),
+        ("https://huggingface.co/papers/cs/0610046", ("arxiv", "cs/0610046")),
         ("10.1000/xyz123", ("doi", "10.1000/xyz123")),
         ("doi:10.1000/xyz123", ("doi", "10.1000/xyz123")),
         ("12345", ("catalog_id", "12345")),
@@ -129,7 +132,7 @@ def test_unindexed_arxiv_paper_falls_back_to_arxiv(monkeypatch, catalog):
     assert body["metadata_source"] == "arxiv"
     assert body["id"] == body["arxiv_id"] == "2610.18869"
     assert body["title"] == "Fresh & Unindexed Paper"
-    assert body["authors"] == ["Jane Doe", "Rick Roe"]
+    assert body["authors"] == ["Jane Doe", "Rick Roe Jr"]
     assert body["published"] == "2026-10-13"
     assert body["repositories"] == ["https://github.com/acme/fresh"]
     assert body["hf_url"] is None
@@ -313,3 +316,22 @@ def test_paper_endpoint_404_keeps_string_detail_and_adds_code(monkeypatch, catal
         "code": "paper_not_in_catalog",
     }
     assert upstream.calls == []
+
+
+def _request(client, real_ip):
+    headers = [(b"x-real-ip", real_ip.encode())] if real_ip else []
+    return Request({"type": "http", "client": client, "headers": headers})
+
+
+@pytest.mark.parametrize(
+    ("client", "real_ip", "expected"),
+    [
+        (None, "203.0.113.7", "203.0.113.7"),  # nginx over the unix socket
+        (None, "not-an-ip", None),
+        (None, None, None),
+        (("198.51.100.2", 1234), "203.0.113.7", "198.51.100.2"),  # untrusted peer
+        (("127.0.0.1", 1234), "203.0.113.7", "203.0.113.7"),
+    ],
+)
+def test_proxied_client_ip(client, real_ip, expected):
+    assert get_proxied_client_ip(_request(client, real_ip)) == expected

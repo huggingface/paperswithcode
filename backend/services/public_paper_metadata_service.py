@@ -30,6 +30,7 @@ import httpx
 from sqlalchemy.orm import Session
 
 from backend.models.papers import Paper
+from backend.services.arxiv_service import citation_author_display_name
 from backend.models.public_paper_metadata import PublicPaperLink, PublicPaperMetadata
 from backend.services.paper_service import PaperService
 from backend.utils.exceptions import PaperNotFoundError
@@ -125,7 +126,7 @@ def arxiv_reference(reference: str) -> str | None:
                 return None
             candidate = "/".join(parts[1:]).removesuffix(".pdf")
         elif host == "huggingface.co" and len(parts) >= 2 and parts[0] == "papers":
-            candidate = parts[1]
+            candidate = "/".join(parts[1:])
         elif host in {"doi.org", "dx.doi.org"}:
             candidate = urllib.parse.unquote(parsed.path.lstrip("/"))
         else:
@@ -399,7 +400,9 @@ def _from_arxiv_abs(arxiv_id: str, body: bytes) -> dict[str, Any] | None:
         "arxiv_id": arxiv_id,
         "doi": (meta.get("doi") or [None])[0],
         "title": " ".join(title.split()),
-        "authors": [_author_name(value) for value in meta.get("author", [])],
+        "authors": [
+            citation_author_display_name(value) for value in meta.get("author", [])
+        ],
         "abstract": abstract,
         "published": published,
         "url": f"https://arxiv.org/abs/{arxiv_id}",
@@ -451,12 +454,6 @@ def _github_repos(text: str) -> list[str]:
     return sorted(
         {url.rstrip(".").removesuffix(".git") for url in GITHUB_REPO.findall(text)}
     )
-
-
-def _author_name(value: str) -> str:
-    """arXiv citation meta lists "Family, Given"; show "Given Family"."""
-    family, _, given = value.partition(",")
-    return f"{given.strip()} {family.strip()}".strip() if given else value.strip()
 
 
 def available_at(record: dict[str, Any]) -> list[PublicPaperLink]:

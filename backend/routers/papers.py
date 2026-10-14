@@ -89,7 +89,7 @@ from backend.services.paper_bucket_service import (
     copy_paper_to_bucket,
 )
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
-from backend.utils.client_ip import get_client_ip
+from backend.utils.client_ip import get_client_ip, get_proxied_client_ip
 from backend.utils.public_urls import normalize_public_url
 from backend.utils.urls import (
     get_paper_route_identifier,
@@ -647,7 +647,9 @@ def get_public_paper_metadata(
     lookups are rate-limited per client.
     """
     try:
-        result = PublicPaperMetadataService(db).get(identifier, get_client_ip(request))
+        result = PublicPaperMetadataService(db).get(
+            identifier, get_proxied_client_ip(request)
+        )
     except PublicMetadataError as error:
         headers = {}
         if error.retry_after:
