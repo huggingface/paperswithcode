@@ -212,12 +212,15 @@ class Settings(BaseSettings, ChatSettings):
     codex_jobs_namespace: str = Field(default="")
     codex_jobs_token: str = Field(default="")
     codex_jobs_openai_api_key: str = Field(default="")
+    # Digest-pinned image built by .github/workflows/build-codex-curator-image.yml.
     codex_jobs_image: str = Field(
-        default="hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"
+        default=(
+            "cr.hf.co/nielsr/pwc-codex-curator:runner-87ebc81c234c"
+            "@sha256:12d5300aaf69c2ba77ac80994ee8526370e6d4a63193f9d19fcd433b569becb1"
+        )
     )
-    codex_jobs_image_revision: str = Field(
-        default="556b5d14b762684586030d3018999dae392200c9"
-    )
+    # Hub revision of a legacy Docker Space image; unused for registry digests.
+    codex_jobs_image_revision: str = Field(default="")
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
     codex_jobs_timeout_seconds: int = Field(default=5400, ge=300, le=14400)
     codex_jobs_cli_version: str = Field(default="0.75.0")

@@ -11,6 +11,11 @@ import pytest
 
 import deploy.configure_host_env as configure_host_env
 
+CURATOR_IMAGE = (
+    "cr.hf.co/nielsr/pwc-codex-curator:runner-87ebc81c234c"
+    "@sha256:12d5300aaf69c2ba77ac80994ee8526370e6d4a63193f9d19fcd433b569becb1"
+)
+
 
 def test_staging_chat_alert_values_are_distinct_https_destinations():
     values = configure_host_env.staging_chat_alert_values(
@@ -76,8 +81,8 @@ def test_production_codex_credentials_are_mapped_without_enabling_base_flags():
         "PWC_CODEX_JOBS_NAMESPACE": "nielsr",
         "PWC_CODEX_JOBS_OPENAI_API_KEY": "openai-secret",
         "PWC_CODEX_JOBS_TOKEN": "hf-secret",
-        "PWC_CODEX_JOBS_IMAGE": ("hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"),
-        "PWC_CODEX_JOBS_IMAGE_REVISION": ("556b5d14b762684586030d3018999dae392200c9"),
+        "PWC_CODEX_JOBS_IMAGE": CURATOR_IMAGE,
+        "PWC_CODEX_JOBS_IMAGE_REVISION": "",
         "PWC_CODEX_JOBS_CLI_VERSION": "0.75.0",
         "PWC_CODEX_JOBS_MODEL": "gpt-5.6-luna",
         "PWC_CODEX_JOBS_REASONING_EFFORT": "medium",
@@ -162,7 +167,7 @@ def test_production_codex_only_updates_app_and_cron_environments(
         )
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
-            == "556b5d14b762684586030d3018999dae392200c9"
+            == ""
         )
 
 
@@ -213,11 +218,11 @@ def test_production_codex_image_only_updates_no_other_values(
     assert configure_host_env.decoded_value(cron_lines["CRON_ONLY"]) == "keep"
     for lines in (app_lines, cron_lines):
         assert configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE"]) == (
-            "hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"
+            CURATOR_IMAGE
         )
         assert (
             configure_host_env.decoded_value(lines["PWC_CODEX_JOBS_IMAGE_REVISION"])
-            == "556b5d14b762684586030d3018999dae392200c9"
+            == ""
         )
 
 

@@ -623,8 +623,10 @@ Configuration is fail-closed. Production direct apply requires all of:
 - pinned model `gpt-5.6-luna`, medium reasoning, and Codex CLI version.
 
 The production image is published to the Hugging Face container registry as
-`cr.hf.co/nielsr/pwc-codex-curator` and pinned by digest
-(`cr.hf.co/nielsr/pwc-codex-curator@sha256:<digest>`). The **Build Codex
+`cr.hf.co/nielsr/pwc-codex-curator` and pinned by its runner tag plus digest
+(`cr.hf.co/nielsr/pwc-codex-curator:runner-<hash>@sha256:<digest>`). The digest
+decides what is pulled; the tag lets a test fail when the runner changes
+without a new image. The **Build Codex
 curator image** workflow builds `jobs/Dockerfile.codex-curator` on every `main`
 change to the Dockerfile or runner (or on manual dispatch), tags it with the
 commit SHA and `runner-<first 12 hex of the runner SHA-256>`, and prints the
@@ -661,10 +663,10 @@ the active release, apply the protected environment through the same qualified
 path with `--refresh-environment` instead.
 
 The current image probe is recorded at
-`https://huggingface.co/jobs/nielsr/6aa7ca705527934177edd5e7`; its command
+`https://huggingface.co/jobs/nielsr/6acf2858c6628814522382f0`; its command
 checks the Codex version, PyPDF2 version, full runner SHA-256, exact model, and
-scoped callback-token inheritance. The public Space avoids Docker Hub and does
-not require personal GitHub Packages access.
+scoped callback-token inheritance. The image is public, so Jobs pull it without
+registry credentials.
 
 The private application repository credential is never sent to a remote job.
 After authenticating with its paper-scoped callback token, the runner downloads

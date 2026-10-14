@@ -88,23 +88,22 @@ def test_release_manifest_pins_remote_worker_revision(tmp_path):
 def test_remote_job_uses_immutable_curator_image():
     settings = get_settings()
     assert settings.codex_jobs_image == (
-        "hf.co/spaces/nielsr/pwc-codex-curator-87ebc81c234c"
+        "cr.hf.co/nielsr/pwc-codex-curator:runner-87ebc81c234c"
+        "@sha256:12d5300aaf69c2ba77ac80994ee8526370e6d4a63193f9d19fcd433b569becb1"
     )
-    assert settings.codex_jobs_image_revision == (
-        "556b5d14b762684586030d3018999dae392200c9"
-    )
+    assert settings.codex_jobs_image_revision == ""
     assert settings.codex_jobs_namespace == ""
     assert CURATOR_COMMAND == "exec python3 /runner/run_paper_curation.py"
     assert "npm install" not in CURATOR_COMMAND
 
 
-def test_curator_space_name_and_dockerfile_pin_current_runner():
+def test_curator_image_and_dockerfile_pin_current_runner():
     runner_digest = hashlib.sha256(
         Path("jobs/run_paper_curation.py").read_bytes()
     ).hexdigest()
     settings = get_settings()
 
-    assert settings.codex_jobs_image.endswith(f"-{runner_digest[:12]}")
+    assert f":runner-{runner_digest[:12]}@sha256:" in settings.codex_jobs_image
     assert f'"{runner_digest}"' in Path("jobs/Dockerfile.codex-curator").read_text(
         encoding="utf-8"
     )

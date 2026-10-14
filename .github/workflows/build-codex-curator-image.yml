@@ -54,7 +54,7 @@ jobs:
           {
             echo "Pin \`PWC_CODEX_JOBS_IMAGE\` to:"
             echo
-            echo "    $IMAGE@$DIGEST"
+            echo "    $IMAGE:$RUNNER_TAG@$DIGEST"
             echo
             echo "Tags: \`$GITHUB_SHA\`, \`$RUNNER_TAG\`"
           } >> "$GITHUB_STEP_SUMMARY"
