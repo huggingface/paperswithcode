@@ -301,6 +301,18 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
         ),
         is_open=True,
     ),
+    "DeepSeek V4.1 Flash": PaperIdentity(arxiv_id="2609.19969", is_open=True),
+    "Gemini 4 Argon": external(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/",
+        "Gemini 4 Argon: our next era of frontier intelligence",
+        "2026-09-30",
+    ),
+    # Preview release without public weights; flip is_open when weights ship.
+    "Mistral Large 4 (Preview)": external(
+        "https://mistral.ai/news/mistral-large-4/",
+        "Mistral Large 4",
+        "2026-10-06",
+    ),
 }
 
 
