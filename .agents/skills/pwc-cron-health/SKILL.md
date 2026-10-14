@@ -192,6 +192,15 @@ List checks not completed, why, and the precise read-only evidence still needed.
 
 Propose the smallest corrective or diagnostic action, ordered by impact. Do not perform it without separate authorization.
 
+## Known blind spots and gotchas
+
+- `scan_model_releases` and `discover_x_threads` show `unknown`: their output goes to a different journal unit than the dashboard reads. Check their own units with `journalctl -u` before calling them broken or healthy.
+- A red job whose only evidence is an old systemd failure with fresh data (for example `link_papers_by_task_keywords` after one failed weekly run) needs `reset-failed`, not a code fix. Propose it; do not run it.
+- `sync_artificial_analysis` and the model-release radar share one Artificial Analysis key limited to 100 requests/day (resets about 04:48 UTC). Nightly 429s mean the budget is exhausted, not that the sync is broken.
+- Timer changes ship via `sudo python3 deploy/install_deploy_tools.py <sha>` run from the git checkout, not the release directory (`python` is not on root's PATH).
+- Never use `git stash` while auditing; the stash stack is shared across worktrees and sessions.
+- Accepting the dashboard's status for green jobs is not an audit. If any job is not independently verified, name it under "Unverified scope".
+
 ## Completion gate
 
 Before finishing, confirm:

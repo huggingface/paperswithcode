@@ -45,10 +45,10 @@ component after canonicalization.
 
 Canonical `source_url` should be the most durable primary surface for the release:
 
-- Technical report or blog post over a GitHub README when both exist.
+- **The paper PDF whenever one exists**, even when a project page or landing page also exists. Make the PDF the `source_url` and put the project/landing page in `project_pages`. Example: paper 123404 uses `https://sunovivid.github.io/correction-training/paper.pdf` as `source_url` and the project page as a project link.
+- Technical report or blog post over a GitHub README when no PDF exists.
 - HF model card when the model card is the release surface.
 - GitHub repo when the README is the only technical report.
-- External PDF when it is the canonical report and no HTML landing page exists.
 
 ## Collect Source Metadata
 
@@ -281,27 +281,14 @@ curl -s -X PUT "http://localhost:8000/api/v1/papers/<paper_id>/methods?method_id
   -H "X-Admin-Token: $ADMIN_TOKEN"
 ```
 
-If the local API rejects `X-Admin-Token` because the endpoint requires an HF admin session, use `PaperService` from a short Python script instead of hacking auth:
+If the local API rejects `X-Admin-Token` because the endpoint requires an HF admin session, use the CLI instead of hacking auth. It replaces the whole set, so pass the final list of ids:
 
 ```bash
-uv run --env-file backend/keys.env python - <<'PY'
-from backend.database.connection import get_database_session
-from backend.services.paper_service import PaperService
-
-paper_id = <paper_id>
-session_gen = get_database_session()
-db = next(session_gen)
-try:
-    service = PaperService(db)
-    service.update_paper_tasks(paper_id, [<task_id>, ...])
-    service.update_paper_methods(paper_id, [<method_id>, ...])
-finally:
-    try:
-        next(session_gen)
-    except StopIteration:
-        pass
-PY
+uv run --env-file backend/keys.env pwc paper update <paper_id> tasks <task_id> [<task_id> ...]
+uv run --env-file backend/keys.env pwc paper update <paper_id> methods <method_id> [<method_id> ...]
 ```
+
+(`PaperService.update_paper_tasks` / `update_paper_methods` no longer exist; do not call them.)
 
 Prefer a few high-confidence tags over broad keyword stuffing. A good external paper page should usually have 1-4 task tags and 1-5 method tags.
 

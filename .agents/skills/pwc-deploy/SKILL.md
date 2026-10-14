@@ -82,6 +82,10 @@ health/release identity, the SPA shell and hashed asset MIME types, a paper
 page, one paper API response, and the production chat-absence boundary. Report
 the immediately recoverable `previous` release.
 
+## Known transient failure: graceful drain
+
+A first `pwc-deploy` can fail with `external Pi worker did not prove graceful drain` while the old release keeps serving. Confirm with `pwc-status` that `current` is still the old release, then run the identical command again; it has succeeded on retry every time. Investigate only if the retry fails too.
+
 ## Roll back
 
 Rollback requires an explicit rollback request. Inspect `previous` first:

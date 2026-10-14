@@ -369,40 +369,17 @@ Use the keyword matches as *candidates*, not gospel — keyword matching over-fi
 
 ### 3. Apply tags (merge, don't clobber)
 
-`update_paper_tasks` / `update_paper_methods` **replace the entire set** for the paper (and mark task rows `source='manual'`). So you must pass the final desired list of ids — by default the **union of existing tags + your new ones**, or you'll delete tags the crons added.
+`pwc paper update <id> tasks|methods` **replaces the entire set** for the paper (and mark task rows `source='manual'`). So you must pass the final desired list of ids — by default the **union of existing tags + your new ones**, or you'll delete tags the crons added.
 
 **One allowed exception — drop clear false positives.** The keyword matcher and citation cron sometimes mis-tag a paper (e.g. a video virtual-try-on paper carrying a `hallucination` method tag because the abstract used the word "hallucinate", or a generic `object-detection` task on a paper that never does detection). If an existing tag is *clearly* wrong for this paper, you may omit it from the final list to remove it. Be conservative: only drop a tag you are confident is a mistake, and **always report every removal with a one-line reason**. When unsure, keep it.
 
 ```bash
-uv run --env-file backend/keys.env python - <<'PY'
-from backend.database.connection import get_database_session
-from backend.services.paper_service import PaperService
-
-paper_id = <paper_id>
-existing_task_ids = [<...>]    # from the include_resources read in Step 0
-existing_method_ids = [<...>]
-new_task_ids = [<...>]
-new_method_ids = [<...>]
-
-task_ids = sorted(set(existing_task_ids) | set(new_task_ids))
-method_ids = sorted(set(existing_method_ids) | set(new_method_ids))
-
-session_gen = get_database_session()
-db = next(session_gen)
-try:
-    svc = PaperService(db)
-    svc.update_paper_tasks(paper_id, task_ids)
-    svc.update_paper_methods(paper_id, method_ids)
-    print("tasks", task_ids, "methods", method_ids)
-finally:
-    try:
-        next(session_gen)
-    except StopIteration:
-        pass
-PY
+# ids = sorted union of existing ids (Step 0 read) and your new ones
+uv run --env-file backend/keys.env pwc paper update <paper_id> tasks <task_id> [<task_id> ...]
+uv run --env-file backend/keys.env pwc paper update <paper_id> methods <method_id> [<method_id> ...]
 ```
 
-The admin API (`PUT /papers/<id>/tasks?task_ids=..&task_ids=..`, same for methods, with `X-Admin-Token: $ADMIN_TOKEN`) works too, but the service path avoids auth friction. Either way, always pass the merged union.
+`PaperService.update_paper_tasks` / `update_paper_methods` no longer exist; use the CLI above. The admin API (`PUT /papers/<id>/tasks?task_ids=..&task_ids=..`, same for methods, with `X-Admin-Token: $ADMIN_TOKEN`) works too, but the CLI avoids auth friction. Either way, always pass the merged union.
 
 ## Verify
 

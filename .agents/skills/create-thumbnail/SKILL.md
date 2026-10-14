@@ -9,6 +9,9 @@ Create recognizable paper-card thumbnails from authoritative source material. A 
 
 ## Guardrails
 
+Skill scripts live under `.agents/skills/create-thumbnail/` (the canonical, tracked path). `.claude/skills/` is a gitignored symlink layer that may be missing in worktrees.
+
+
 - Work from the repository root and run repository Python with `uv run --env-file backend/keys.env ...`.
 - Read `docs/database.md` before database access.
 - Treat thumbnail publication as a data operation. Do not restart services or deploy application code.
@@ -64,7 +67,7 @@ Only for papers without an arXiv ID, use this priority order:
 4. The first page of an official direct PDF.
 5. A title card using the real title only when no meaningful artwork or PDF exists.
 
-Prefer a recognizable overview over a dense benchmark chart. Ignore badges, CI shields, unrelated dependencies, citation images, and images from unofficial forks.
+Prefer a recognizable overview over a dense benchmark chart. Skip artwork wider than about 2:1 (wide pipeline diagrams become unreadable on the portrait card) and use the first page of the PDF instead. Ignore badges, CI shields, unrelated dependencies, citation images, and images from unofficial forks.
 
 For GitHub, inspect both README references and the image assets in the repository tree:
 
@@ -105,6 +108,8 @@ uv run --env-file backend/keys.env pwc thumbnail PAPER_REFERENCE --json
 ```
 
 Do not run the raster compositor for an arXiv paper. For a non-arXiv direct PDF, use `ThumbnailService._convert_pdf_to_thumbnail` on the downloaded PDF, then publish the resulting image through the helper below. Inspect the render before publication.
+
+If `pwc thumbnail` or the automatic path yields the blank "Untitled resource" card for a non-arXiv PDF (seen with a 32 MB PDF), download the PDF to a local file, render page 1 with `ThumbnailService._convert_pdf_to_thumbnail` from that local copy, and publish the result with the helper below.
 
 ## 4. Publish without stale-cache collisions
 
