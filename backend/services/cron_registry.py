@@ -247,6 +247,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_service="pwc-cron-send-research-digests.service",
         output_evaluator="generic",
         workflow_freshness_required=False,
+        enablement_settings=("research_email_enabled",),
     ),
     CronJobDefinition(
         id="paper_markdown_backfill",

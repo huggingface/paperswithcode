@@ -732,3 +732,44 @@ def test_slug_rename_retires_only_owned_duplicate_with_same_binding(
             session.query(Evaluation).filter(Evaluation.methodology == "Manual").one()
         )
         assert manual.metrics == {aa.METRIC_NAME: 1.0}
+
+
+def test_sync_tags_paper_once_when_reviewed_slugs_share_it(monkeypatch):
+    session = _session()
+    session.autoflush = False  # Matches the production session factory.
+    session.add(
+        Paper(
+            id=7,
+            title="Shared Model",
+            arxiv_id="2608.00001",
+            source="arxiv",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    session.commit()
+    monkeypatch.setattr(
+        aa,
+        "MODEL_PAPER_IDENTITIES",
+        {
+            "shared-model": aa.PaperIdentity(arxiv_id="2608.00001"),
+            "shared-model-full": aa.PaperIdentity(arxiv_id="2608.00001"),
+        },
+    )
+    leaderboard = aa.ArtificialAnalysisLeaderboard(
+        "4.1",
+        [
+            aa.ArtificialAnalysisEntry(
+                slug, slug, {"intelligence": score}, date(2026, 8, 1)
+            )
+            for slug, score in (("shared-model", 40.0), ("shared-model-full", 45.0))
+        ],
+    )
+    result = aa.ArtificialAnalysisSyncService(session).sync(
+        leaderboard,
+        discovery=aa.ArtificialAnalysisDiscovery(
+            papers={"shared-model": 7, "shared-model-full": 7}
+        ),
+    )
+    assert result.indexes["intelligence"].created == 2
+    assert session.query(PaperTask).filter_by(paper_id=7, task_id=5).count() == 1

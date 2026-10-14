@@ -651,6 +651,7 @@ class ArtificialAnalysisSyncService:
                 papers[slug] = row.paper_id
                 selected.append(entry)
         stats.selected = len(selected)
+        tagged_paper_ids: set[int] = set()
         for entry in selected:
             paper_id = papers.get(entry.slug)
             if paper_id is None:
@@ -709,8 +710,10 @@ class ArtificialAnalysisSyncService:
             row.source_url = source_url
             row.external = True
             row.updated_at = now
+            # Several AA slugs can share a paper; the session does not autoflush.
             if (
-                self.db.query(PaperTask)
+                paper_id not in tagged_paper_ids
+                and self.db.query(PaperTask)
                 .filter(PaperTask.paper_id == paper_id, PaperTask.task_id == task.id)
                 .first()
                 is None
@@ -718,6 +721,7 @@ class ArtificialAnalysisSyncService:
                 self.db.add(
                     PaperTask(paper_id=paper_id, task_id=task.id, source="auto")
                 )
+            tagged_paper_ids.add(paper_id)
             stats.matched += 1
         self.db.flush()
         EvaluationService(self.db).recalculate_ranks(

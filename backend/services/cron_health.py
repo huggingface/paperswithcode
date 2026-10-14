@@ -900,7 +900,7 @@ def schedule_enabled(
         return None
     active_settings = settings or get_settings()
     cron_log_dir = getattr(active_settings, "cron_log_dir", None)
-    if cron_log_dir:
+    if job.id == "review_submissions" and cron_log_dir:
         state_path = Path(cron_log_dir) / "submission-review-schedule.json"
         try:
             state_raw = state_path.read_bytes()

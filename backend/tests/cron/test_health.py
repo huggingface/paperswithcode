@@ -644,6 +644,26 @@ def test_submission_schedule_reads_installer_reconciled_state(tmp_path):
     )
 
 
+def test_research_digest_schedule_follows_email_switch_not_submission_state(
+    tmp_path,
+):
+    job = get_cron_job("send_research_digests")
+    assert job is not None
+    (tmp_path / "submission-review-schedule.json").write_text(
+        json.dumps({"enabled": True})
+    )
+    for enabled in (False, True):
+        assert (
+            schedule_enabled(
+                job,
+                SimpleNamespace(
+                    cron_log_dir=str(tmp_path), research_email_enabled=enabled
+                ),
+            )
+            is enabled
+        )
+
+
 def test_persistent_execution_paths_follow_the_active_staging_environment():
     assert _persistent_execution_paths(
         SimpleNamespace(environment="staging", cron_log_dir="/tmp/staging-cron")
