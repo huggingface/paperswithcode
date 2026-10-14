@@ -87,7 +87,18 @@ def _hf_paper(*authors):
     }
 
 
-def test_claim_links_the_named_author_on_that_paper():
+def _links(session, paper_id=1):
+    return {
+        (link.author_id, link.author_order, link.claimed)
+        for link in session.query(PaperAuthor).filter_by(paper_id=paper_id)
+    }
+
+
+def _account_author(session, username):
+    return session.query(Author).filter_by(hf_username=username).one()
+
+
+def test_claim_moves_the_paper_to_the_accounts_own_author():
     session = _session()
     service = AuthorHfProfileSyncService(session)
 
@@ -95,17 +106,26 @@ def test_claim_links_the_named_author_on_that_paper():
         _hf_paper(_claim("Zihao  Yue", "yuezih", "hf-yuezih", "https://cdn/y.jpeg"))
     )
 
-    author = session.get(Author, 11)
-    assert author.hf_username == "yuezih"
+    author = _account_author(session, "yuezih")
+    assert author.id != 11
+    assert author.name == "Zihao Yue"
     assert author.hf_id == "hf-yuezih"
     assert author.hf_avatar_url == "https://cdn/y.jpeg"
     assert author.hf_status == "claimed_verified"
     assert author.hf_is_pro is True
-    assert session.get(Author, 10).hf_username is None
+    # The name-matched author keeps its other papers and gets no account.
+    assert session.get(Author, 11).hf_username is None
+    assert _links(session) == {
+        (10, 1, False),
+        (author.id, 2, True),
+        (12, 3, False),
+        (13, 4, False),
+    }
     assert service.stats.linked == 1
+    assert service.stats.claimed == 1
 
 
-def test_linked_account_refreshes_its_profile_without_moving():
+def test_linked_account_refreshes_its_profile_and_claims_the_paper():
     session = _session()
     service = AuthorHfProfileSyncService(session)
 
@@ -117,30 +137,70 @@ def test_linked_account_refreshes_its_profile_without_moving():
     )
 
     assert session.get(Author, 12).hf_avatar_url == "/avatars/new.svg"
+    assert (12, 3, True) in _links(session)
     assert service.stats.refreshed == 1
     assert service.stats.unchanged == 1
+    assert service.stats.claimed == 1
     assert service.stats.linked == 0
 
 
-def test_renamed_account_keeps_its_author():
+def test_account_claiming_a_paper_listed_under_a_namesake_takes_it_over():
     session = _session()
     service = AuthorHfProfileSyncService(session)
 
-    service.sync_paper(_hf_paper(_claim("Weikun Wang", "kunwang", "hf-kunwww")))
+    # An account that already has an author claims the "Ziyue Hua" slot of a
+    # paper it is not linked to yet: the name-matched author 10 loses it.
+    session.delete(session.get(PaperAuthor, (1, 12)))
+    session.commit()
+    service.sync_paper(_hf_paper(_claim("Ziyue Hua", "kunwww", "hf-kunwww")))
 
-    assert session.get(Author, 12).hf_username == "kunwang"
-    assert service.stats.refreshed == 1
+    assert _links(session) == {(12, 1, True), (11, 2, False), (13, 4, False)}
+    assert service.stats.linked == 0
+    assert service.stats.claimed == 1
 
 
-def test_namesake_unmatched_and_unknown_papers_are_left_alone():
+def test_claim_drops_the_name_matched_duplicate_of_a_linked_account():
+    session = _session()
+    # The account's author is stored as "W. Wang"; the paper also lists a
+    # name-only "Weikun Wang", which is the same person.
+    session.get(Author, 12).name = "W. Wang"
+    session.get(Author, 14).name = "Weikun Wang"
+    session.add(PaperAuthor(paper_id=1, author_id=14, author_order=5))
+    session.commit()
+    service = AuthorHfProfileSyncService(session)
+
+    service.sync_paper(_hf_paper(_claim("Weikun Wang", "kunwww", "hf-kunwww")))
+
+    links = _links(session)
+    assert (12, 3, True) in links
+    assert not any(author_id == 14 for author_id, _, _ in links)
+    assert service.stats.claimed == 1
+
+
+def test_unclaimed_namesake_link_moves_but_a_claimed_one_conflicts():
     session = _session()
     service = AuthorHfProfileSyncService(session)
+
+    # Author 13 ("someone") was matched to "Yang Liu" by name only.
+    service.sync_paper(_hf_paper(_claim("Yang Liu", "other-yang", "hf-other-yang")))
+    other = _account_author(session, "other-yang")
+    assert (other.id, 4, True) in _links(session)
+    assert session.get(Author, 13).hf_username == "someone"
+
+    # A second account claiming the same, now claimed, slot is a conflict.
+    service.sync_paper(_hf_paper(_claim("Yang Liu", "third-yang", "hf-third-yang")))
+    assert session.query(Author).filter_by(hf_username="third-yang").count() == 0
+    assert service.stats.conflicts == 1
+
+
+def test_unmatched_unknown_and_unconfirmed_claims_are_left_alone():
+    session = _session()
+    service = AuthorHfProfileSyncService(session)
+    pending = _claim("Zihao Yue", "yuezih", "hf-yuezih")
+    pending["status"] = "extracted_pending"
 
     service.sync_paper(
-        _hf_paper(
-            _claim("Yang Liu", "other-yang", "hf-other-yang"),
-            _claim("Unrelated Author", "unrelated", "hf-unrelated"),
-        )
+        _hf_paper(_claim("Unrelated Author", "unrelated", "hf-unrelated"), pending)
     )
     service.sync_paper(
         {
@@ -150,11 +210,15 @@ def test_namesake_unmatched_and_unknown_papers_are_left_alone():
         }
     )
 
-    assert session.get(Author, 13).hf_username == "someone"
+    assert (
+        session.query(Author)
+        .filter(Author.hf_username.in_(["unrelated", "yuezih"]))
+        .count()
+        == 0
+    )
     assert session.get(Author, 14).hf_username is None
-    assert session.get(Author, 11).hf_username is None
-    assert service.stats.conflicts == 1
     assert service.stats.unmatched == 1
+    assert service.stats.claims_seen == 1
     assert service.stats.papers_matched == 1
 
 
@@ -225,7 +289,10 @@ def test_stored_names_are_normalized_and_ambiguous_names_skipped():
         )
     )
 
-    assert session.get(Author, 21).hf_username == "yuezih"
+    author = _account_author(session, "yuezih")
+    assert author.name == "Zihao Yue"
+    assert (author.id, 6, True) in _links(session)
+    assert session.get(Author, 21).hf_username is None
     assert session.get(Author, 10).hf_username is None
     assert session.get(Author, 20).hf_username is None
     assert service.stats.linked == 1

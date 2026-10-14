@@ -14,6 +14,7 @@ from backend.services.author_service import (
     normalize_arxiv_author_name,
 )
 from backend.models.database import (
+    Author as DBAuthor,
     Evaluation as DBEvaluation,
     Paper as DBPaper,
     PaperAuthor,
@@ -149,7 +150,11 @@ class PaperVersionRefreshService:
             if previous_latest and previous_latest.id != target.id:
                 self._copy_curated_links(previous_latest.id, target.id)
 
-            self._replace_paper_authors(target.id, metadata.authors)
+            self._replace_paper_authors(
+                target.id,
+                metadata.authors,
+                previous_latest.id if previous_latest else None,
+            )
 
             (
                 self.db.query(DBPaper)
@@ -320,13 +325,31 @@ class PaperVersionRefreshService:
         values.update(defaults or {})
         self.db.add(model(**values))
 
-    def _replace_paper_authors(self, paper_id: int, author_names: List[str]) -> None:
+    def _replace_paper_authors(
+        self, paper_id: int, author_names: List[str], claims_from: Optional[int]
+    ) -> None:
+        # Keep Hugging Face claims (on this version or the previous latest one)
+        # attached to the claiming author instead of re-matching it by name.
+        claimed_authors = {
+            normalize_arxiv_author_name(author.name).casefold(): author
+            for author in (
+                self.db.query(DBAuthor)
+                .join(PaperAuthor, PaperAuthor.author_id == DBAuthor.id)
+                .filter(
+                    PaperAuthor.paper_id.in_({paper_id, claims_from or paper_id}),
+                    PaperAuthor.claimed,
+                )
+            )
+        }
         self.db.query(PaperAuthor).filter(PaperAuthor.paper_id == paper_id).delete()
 
         linked_ids: set[int] = set()
         for order, full_name in enumerate(author_names, start=1):
             name = normalize_arxiv_author_name(full_name)
-            author = get_or_create_author_by_name(self.db, name)
+            author = claimed_authors.get(name.casefold())
+            claimed = author is not None
+            if author is None:
+                author = get_or_create_author_by_name(self.db, name)
             if author.id in linked_ids:
                 continue
             linked_ids.add(author.id)
@@ -335,5 +358,6 @@ class PaperVersionRefreshService:
                     paper_id=paper_id,
                     author_id=author.id,
                     author_order=order,
+                    claimed=claimed,
                 )
             )

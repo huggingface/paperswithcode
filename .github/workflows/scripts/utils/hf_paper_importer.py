@@ -15,6 +15,7 @@ from urllib.parse import urlparse
 
 import aiohttp
 
+from backend.services.author_hf_profile_sync_service import UNCONFIRMED_STATUSES
 from backend.utils.github_utils import parse_github_url
 from backend.utils.keyword_matching import (
     apply_task_supersession_rules,
@@ -235,80 +236,72 @@ class HuggingFacePaperImporterMixin:
     ) -> None:
         """Create/update authors for a paper and (optionally) link them.
 
-        When `link_to_paper=False` only the author rows themselves are upserted
-        with HF info. Useful when enriching an existing paper that already has
-        its authors linked but where we want to backfill HF profile data.
+        An author claimed on HF is linked through the account's own author row
+        (created on first sight) and the link is marked claimed; anyone else is
+        matched by name to a row without an HF account, so a namesake's papers
+        never land on someone's profile.
+
+        When `link_to_paper=False` only the profiles of already known HF
+        accounts are refreshed; claims on existing papers are applied by the
+        `sync_hf_author_profiles` job.
         """
-        for author_data in authors_data:
+        for order, author_data in enumerate(authors_data, start=1):
             author_name = author_data.get("name")
             if not author_name:
                 continue
 
             user_info = author_data.get("user") or {}
-            hf_username = user_info.get("user")
-            hf_id = user_info.get("_id")
-            hf_avatar_url = user_info.get("avatarUrl")
-            hf_is_pro = bool(user_info.get("isPro", False))
-            hf_status = author_data.get("status")
-
-            author_id = self.get_or_create_author(
-                name=author_name,
-                hf_username=hf_username,
-                hf_id=hf_id,
-                hf_avatar_url=hf_avatar_url,
-                hf_status=hf_status,
-                hf_is_pro=hf_is_pro,
+            claimed = bool(
+                user_info.get("_id")
+                and user_info.get("user")
+                and not author_data.get("hidden")
+                and user_info.get("type", "user") == "user"
+                and author_data.get("status") not in UNCONFIRMED_STATUSES
             )
+            if claimed:
+                profile = (
+                    user_info["user"],
+                    user_info["_id"],
+                    user_info.get("avatarUrl"),
+                    author_data.get("status"),
+                    bool(user_info.get("isPro", False)),
+                )
+                author_id = self.find_hf_author(user_info["_id"], user_info["user"])
+                if author_id:
+                    self.update_author_hf_info(author_id, *profile)
+                elif link_to_paper:
+                    author_id = self.create_author(author_name, *profile)
+            elif link_to_paper:
+                author_id = self.get_or_create_author(author_name)
+            else:
+                continue
 
             if author_id and link_to_paper:
-                self.link_paper_author(paper_id, author_id)
+                self.link_paper_author(paper_id, author_id, order, claimed)
 
-    def get_or_create_author(
-        self,
-        name: str,
-        hf_username: Optional[str] = None,
-        hf_id: Optional[str] = None,
-        hf_avatar_url: Optional[str] = None,
-        hf_status: Optional[str] = None,
-        hf_is_pro: bool = False,
-    ) -> Optional[int]:
-        """Find an existing author or create a new one, enriching HF info."""
-        if hf_username:
-            results = self.execute_query(
-                "SELECT id FROM authors WHERE hf_username = %s", (hf_username,)
-            )
-            if results:
-                author_id = results[0]["id"]
-                self.update_author_hf_info(
-                    author_id, hf_username, hf_id, hf_avatar_url, hf_status, hf_is_pro
-                )
-                return author_id
-
-        if hf_id:
-            results = self.execute_query(
-                "SELECT id FROM authors WHERE hf_id = %s", (hf_id,)
-            )
-            if results:
-                author_id = results[0]["id"]
-                self.update_author_hf_info(
-                    author_id, hf_username, hf_id, hf_avatar_url, hf_status, hf_is_pro
-                )
-                return author_id
-
+    def find_hf_author(self, hf_id: str, hf_username: str) -> Optional[int]:
+        """Return the author row of this HF account, if it has one."""
         results = self.execute_query(
-            "SELECT id FROM authors WHERE LOWER(name) = LOWER(%s)", (name,)
+            "SELECT id FROM authors WHERE hf_id = %s OR hf_username = %s"
+            " ORDER BY hf_id = %s DESC, id LIMIT 1",
+            (hf_id, hf_username, hf_id),
+        )
+        return results[0]["id"] if results else None
+
+    def get_or_create_author(self, name: str) -> Optional[int]:
+        """Find the name-only author with this name (any case) or create one."""
+        results = self.execute_query(
+            """
+            SELECT id FROM authors
+            WHERE LOWER(name) = LOWER(%s) AND hf_id IS NULL AND hf_username IS NULL
+            ORDER BY name <> %s, id
+            LIMIT 1
+            """,
+            (name, name),
         )
         if results:
-            author_id = results[0]["id"]
-            if hf_username or hf_id:
-                self.update_author_hf_info(
-                    author_id, hf_username, hf_id, hf_avatar_url, hf_status, hf_is_pro
-                )
-            return author_id
-
-        return self.create_author(
-            name, hf_username, hf_id, hf_avatar_url, hf_status, hf_is_pro
-        )
+            return results[0]["id"]
+        return self.create_author(name)
 
     def create_author(
         self,
@@ -365,15 +358,17 @@ class HuggingFacePaperImporterMixin:
         except Exception as e:
             self.logger.error(f"Failed to update author {author_id} HF info: {e}")
 
-    def link_paper_author(self, paper_id: int, author_id: int) -> None:
+    def link_paper_author(
+        self, paper_id: int, author_id: int, author_order: int, claimed: bool
+    ) -> None:
         """Link a paper to an author (idempotent)."""
         query = """
-        INSERT INTO paper_authors (paper_id, author_id)
-        VALUES (%s, %s)
+        INSERT INTO paper_authors (paper_id, author_id, author_order, claimed)
+        VALUES (%s, %s, %s, %s)
         ON CONFLICT (paper_id, author_id) DO NOTHING
         """
         try:
-            self.execute_query(query, (paper_id, author_id))
+            self.execute_query(query, (paper_id, author_id, author_order, claimed))
         except Exception as e:
             self.logger.error(
                 f"Failed to link paper {paper_id} to author {author_id}: {e}"

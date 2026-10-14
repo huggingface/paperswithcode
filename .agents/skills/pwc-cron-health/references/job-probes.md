@@ -200,8 +200,8 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `sync_hf_author_profiles`
 
-- **Effect:** Fills `authors.hf_username`, `hf_id`, `hf_avatar_url`, `hf_status`, `hf_is_pro` from HF paper authorship claims of the last 30 days; refreshes already-linked accounts.
-- **Independent proof:** Sample recent HF papers with claimed authors (`/api/papers/<arxiv_id>`) and confirm the matching PwC author row on that paper carries the claimed username; check `HF_AUTHOR_PROFILES_SUMMARY` for a sane `linked`/`claims_seen` ratio.
+- **Effect:** Applies HF paper authorship claims of the last 30 days: moves the claimed paper's `paper_authors` link to the account's own author row (created with `hf_username`, `hf_id`, `hf_avatar_url`, `hf_status`, `hf_is_pro` on first sight), sets `paper_authors.claimed`, and refreshes already-linked accounts.
+- **Independent proof:** Sample recent HF papers with claimed authors (`/api/papers/<arxiv_id>`) and confirm the PwC paper links that account's author row with `claimed = true`; check `HF_AUTHOR_PROFILES_SUMMARY` for a sane `claimed`/`claims_seen` ratio.
 - **Trap:** `recent_writes` counts any author update, and a quiet day with no new claims is healthy; `unmatched` claims (name spelled differently on arXiv) are expected and never linked.
 
 ## `calculate_organization_trending_scores`

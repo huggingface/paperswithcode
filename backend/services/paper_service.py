@@ -14,7 +14,7 @@ import re
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Sequence
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc, asc, or_, func, text
+from sqlalchemy import and_, desc, asc, exists, or_, func, text
 
 from backend.models.database import (
     Paper as DBPaper,
@@ -29,6 +29,7 @@ from backend.models.database import (
     Framework as DBFramework,
     TaskFramework as DBTaskFramework,
     Author as DBAuthor,
+    PaperAuthor as DBPaperAuthor,
 )
 from backend.services.thumbnail_service import (
     ThumbnailService,
@@ -731,7 +732,14 @@ class PaperService:
                 )
 
             for author in resolved_authors:
-                query = query.filter(DBPaper.authors.any(DBAuthor.id == author.id))
+                # An author with a Hugging Face account has only its claimed papers.
+                author_links = [
+                    DBPaperAuthor.paper_id == DBPaper.id,
+                    DBPaperAuthor.author_id == author.id,
+                ]
+                if author.hf_id or author.hf_username:
+                    author_links.append(DBPaperAuthor.claimed)
+                query = query.filter(exists().where(*author_links))
 
             # Apply conference filter
             if conference:

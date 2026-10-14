@@ -478,10 +478,11 @@ COMMANDS: dict[str, Job] = {
     "sync_hf_author_profiles": job(
         "-m",
         "scripts.daily.sync_hf_author_profiles",
-        timeout="30m",
+        # A one-off `--days 10000` backfill walks all of HF in about an hour.
+        timeout="2h",
         idempotency=(
-            "fill or refresh HF profile fields on authors already linked to a "
-            "claimed paper; never creates authors or moves an account"
+            "move each claimed paper link to the claiming account's author and "
+            "mark it claimed; already claimed links and accounts are unchanged"
         ),
     ),
     "calculate_organization_trending_scores": job(

@@ -284,12 +284,14 @@ existing HF attribution.
 
 `sync_hf_author_profiles.py` walks `https://huggingface.co/api/papers` (newest
 first, 100 papers per request) back 30 days and applies each paper's HF
-authorship claims. A claim fills an author row only when that row is already
-linked to the paper under the claimed name and has no HF account; an account
-that is already linked keeps its author and gets its avatar, username, and Pro
-status refreshed. It never creates authors or moves an account, and logs
-namesakes and unmatched names as `conflicts` and `unmatched`. Pass `--days N`
-for a one-off historical backfill and `--dry-run` to roll back every batch.
+authorship claims. Each HF account has its own author row, which lists only
+the papers it claimed: a claim moves the paper's link from the author matched
+by that name to the account's row (created on first sight), marks the link
+`claimed`, and refreshes the avatar, username, and Pro status. It never moves an
+account between rows, ignores HF's unconfirmed `extracted_pending` guesses, and
+logs claims of an already claimed slot and unmatched names as `conflicts` and
+`unmatched`. Pass `--days N` for a one-off historical backfill (`--days 10000`
+walks all of HF, about an hour) and `--dry-run` to roll back every batch.
 
 `calculate_organization_trending_scores.py` runs after paper trending and
 organization sync. It upserts one raw snapshot per featured organization and UTC

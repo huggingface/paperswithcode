@@ -9,7 +9,7 @@ import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, asc, or_
+from sqlalchemy import func, desc, asc, or_, and_
 
 from backend.models.database import (
     Author as DBAuthor,
@@ -35,17 +35,32 @@ def normalize_arxiv_author_name(full_name: str) -> str:
     return re.sub(r"\s*\(.*?\)$", "", name)
 
 
-def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
-    """Return the author with this name, ignoring case, creating it if missing.
+def has_hf_account():
+    """SQL condition: the author row is linked to a Hugging Face account."""
+    return or_(DBAuthor.hf_id.isnot(None), DBAuthor.hf_username.isnot(None))
 
-    "Tom Aarsen" and "Tom AARSEN" are the same author. An exact spelling wins,
-    so rows that share a name but belong to different Hugging Face accounts keep
-    their own papers; otherwise prefer the row linked to a Hugging Face account.
+
+def listed_paper_link():
+    """SQL condition on a joined PaperAuthor/Author: the author lists this paper.
+
+    An author linked to a Hugging Face account lists only the papers it claimed
+    there; a name-only author lists every paper matched to its name.
+    """
+    return or_(PaperAuthor.claimed, ~has_hf_account())
+
+
+def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
+    """Return the name-only author with this name, ignoring case, or create it.
+
+    "Tom Aarsen" and "Tom AARSEN" are the same author, and an exact spelling
+    wins. Rows linked to a Hugging Face account are never matched by name: they
+    hold only the papers their account claimed, so a namesake's papers cannot
+    land on someone else's profile.
     """
     author = (
         db.query(DBAuthor)
-        .filter(func.lower(DBAuthor.name) == name.lower())
-        .order_by(DBAuthor.name != name, DBAuthor.hf_username.is_(None), DBAuthor.id)
+        .filter(func.lower(DBAuthor.name) == name.lower(), ~has_hf_account())
+        .order_by(DBAuthor.name != name, DBAuthor.id)
         .first()
     )
     if author is None:
@@ -103,7 +118,10 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
+                .outerjoin(
+                    PaperAuthor,
+                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
+                )
                 .group_by(DBAuthor.id)
             )
 
@@ -185,7 +203,10 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
+                .outerjoin(
+                    PaperAuthor,
+                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
+                )
                 .filter(DBAuthor.id == self._resolve_author_id(author_id))
                 .group_by(DBAuthor.id)
                 .first()
@@ -256,7 +277,8 @@ class AuthorService:
             query = (
                 self.db.query(DBPaper)
                 .join(PaperAuthor, DBPaper.id == PaperAuthor.paper_id)
-                .filter(PaperAuthor.author_id == resolved_id)
+                .join(DBAuthor, DBAuthor.id == PaperAuthor.author_id)
+                .filter(PaperAuthor.author_id == resolved_id, listed_paper_link())
             )
 
             # Apply latest version filter
@@ -337,7 +359,10 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
+                .outerjoin(
+                    PaperAuthor,
+                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
+                )
                 .filter(
                     or_(
                         DBAuthor.name.ilike(f"%{query}%"),

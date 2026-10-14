@@ -29,7 +29,7 @@ executes them from a checkout. GitHub Actions invokes the installed
 | `42 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` | Refresh paper-linked MMEB-v3 overall scores from the official MMEB Space. |
 | `35 */2 * * *` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` | Index missing reviewed model releases and refresh paper-linked Artificial Analysis Intelligence, Agentic, and text-to-speech Quality Elo scores. |
 | `20 2 * * *` | `.github/workflows/scripts/daily/sync_hf_organizations.py` | Reconcile the strict featured HF organization manifest and append new paper links. |
-| `50 2 * * *` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` | Link authors to the HF accounts that claimed their papers in the last 30 days and refresh avatars. |
+| `50 2 * * *` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` | Move papers claimed on HF in the last 30 days to the claiming account's author and refresh avatars. |
 | `40 3 * * *` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` | Snapshot organization momentum and refresh rolling 30-day ranks. |
 | `30 4 * * *` | `.github/workflows/scripts/daily/preload_thumbnails.py` | Generate and upload missing paper thumbnails to the HF bucket. |
 | `0 5 * * *` | `.github/workflows/scripts/daily/mirror_thumbnails_to_disk.py` | Mirror the entire thumbnail bucket prefix down to the VPS local cache so `/api/thumbnails/{filename}` always serves from local disk. |

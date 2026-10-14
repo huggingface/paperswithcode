@@ -35,6 +35,9 @@ def _compile_postgres_container_sqlite(_element, _compiler, **_kw):
     return "TEXT"
 
 
+# Tables SQLite can create: some chat tables need PostgreSQL functions.
+TABLES = [table for table in Base.metadata.sorted_tables if table.name != "chat_shares"]
+
 # Test database setup
 SQLALCHEMY_DATABASE_URL = "sqlite:///:memory:"
 
@@ -58,7 +61,7 @@ def override_get_database_session():
 @pytest.fixture
 def client():
     """Create test client with test database."""
-    Base.metadata.create_all(bind=engine)
+    Base.metadata.create_all(bind=engine, tables=TABLES)
 
     app = create_app()
     app.dependency_overrides[get_database_session] = override_get_database_session
@@ -66,7 +69,7 @@ def client():
     with TestClient(app) as test_client:
         yield test_client
 
-    Base.metadata.drop_all(bind=engine)
+    Base.metadata.drop_all(bind=engine, tables=TABLES)
 
 
 @pytest.fixture
@@ -110,11 +113,13 @@ def sample_authors():
     db.commit()
 
     # Create author-paper relationships
-    paper_author1 = PaperAuthor(paper_id=1, author_id=1)
-    paper_author2 = PaperAuthor(paper_id=2, author_id=1)
+    paper_author1 = PaperAuthor(paper_id=1, author_id=1, claimed=True)
+    paper_author2 = PaperAuthor(paper_id=2, author_id=1, claimed=True)
     paper_author3 = PaperAuthor(paper_id=1, author_id=2)
+    # Matched to Alice Johnson by name only; she never claimed it on HF.
+    paper_author4 = PaperAuthor(paper_id=2, author_id=3)
 
-    db.add_all([paper_author1, paper_author2, paper_author3])
+    db.add_all([paper_author1, paper_author2, paper_author3, paper_author4])
     db.commit()
     db.close()
 
@@ -175,6 +180,22 @@ def test_get_author_by_id(client, sample_authors):
     assert data["hf_username"] == "johndoe"
     assert data["hf_is_pro"] is True
     assert data["paper_count"] == 2
+
+
+def test_hf_author_lists_only_claimed_papers(client, sample_authors):
+    """An author with an HF account does not get namesake papers by name."""
+    author = client.get("/api/v1/authors/3").json()
+    papers = client.get("/api/v1/authors/3/papers").json()
+    listed = client.get("/api/v1/authors/?search=Alice").json()["results"]
+
+    assert author["paper_count"] == 0
+    assert papers["count"] == 0
+    assert [entry["paper_count"] for entry in listed] == [0]
+
+
+def test_name_only_author_lists_every_matched_paper(client, sample_authors):
+    """An author without an HF account lists all papers matched to its name."""
+    assert client.get("/api/v1/authors/2/papers").json()["count"] == 1
 
 
 def test_get_author_not_found(client, sample_authors):

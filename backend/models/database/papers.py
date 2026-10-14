@@ -320,6 +320,11 @@ class PaperAuthor(Base):
         BigInteger, ForeignKey("authors.id", ondelete="CASCADE"), primary_key=True
     )
     author_order: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    # The author claimed this paper on Hugging Face. Authors linked to an HF
+    # account list only claimed papers; everyone else is matched by name.
+    claimed: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=text("false"), nullable=False
+    )
 
     # Indexes
     __table_args__ = (
