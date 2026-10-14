@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import math
 import os
 from dataclasses import dataclass, field
@@ -31,7 +32,12 @@ from backend.services.external_resource_service import (
 from backend.services.model_release_identity_service import ModelReleaseIdentityService
 from backend.services.paper_ingestion_service import PaperIngestionService
 
+logger = logging.getLogger(__name__)
+
 API_ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models/free"
+# The free Data API key allows 100 requests per day and a full fetch costs one
+# request per 200-model page. The every-two-hours sync and the three-hourly
+# release radar share that budget.
 SOURCE_URL_PREFIX = "https://artificialanalysis.ai/models/"
 METRIC_NAME = "Score"
 MANAGED_METHODOLOGY_PREFIX = (
@@ -405,6 +411,11 @@ def fetch_artificial_analysis_leaderboard(
                 params={"page": page, "page_size": 200},
             )
             response.raise_for_status()
+            logger.info(
+                "artificial_analysis_api_quota remaining=%s limit=%s",
+                response.headers.get("x-ratelimit-remaining"),
+                response.headers.get("x-ratelimit-limit"),
+            )
             page_version, entries, pagination = _parse_page(response.json())
             if version is not None and page_version != version:
                 raise ValueError(

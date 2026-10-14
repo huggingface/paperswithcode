@@ -59,6 +59,7 @@ def _api_row(
 class _Response:
     def __init__(self, payload):
         self.payload = payload
+        self.headers = {"x-ratelimit-remaining": "99", "x-ratelimit-limit": "100"}
 
     def raise_for_status(self):
         return None

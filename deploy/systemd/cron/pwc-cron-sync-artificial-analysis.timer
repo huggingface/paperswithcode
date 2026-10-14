@@ -1,8 +1,8 @@
 [Unit]
-Description=Timer: Sync Artificial Analysis leaderboards hourly
+Description=Timer: Sync Artificial Analysis leaderboards every two hours
 
 [Timer]
-OnCalendar=*-*-* *:35:00
+OnCalendar=*-*-* 00/2:35:00
 RandomizedDelaySec=90
 AccuracySec=1m
 Persistent=true

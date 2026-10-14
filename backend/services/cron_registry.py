@@ -995,7 +995,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="sync_artificial_analysis",
         scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=35),),
+        schedule_policies=(SchedulePolicy.fixed(120, offset_minutes=35),),
         schedule_grace_minutes=20,
         systemd_timer="pwc-cron-sync-artificial-analysis.timer",
         systemd_service="pwc-cron-sync-artificial-analysis.service",
@@ -1003,7 +1003,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         output_evaluator="artificial_analysis",
         display_name="Sync Artificial Analysis Leaderboards",
         category="hourly",
-        schedule="35 * * * * (hourly)",
+        schedule="35 */2 * * * (every two hours)",
         script_path="hourly/sync_artificial_analysis.py",
         log_name="sync_artificial_analysis",
         process_patterns=("scripts.hourly.sync_artificial_analysis",),
@@ -1012,7 +1012,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             "sync_artificial_analysis.lock"
         ),
         expected_runtime_minutes=5,
-        stale_after_minutes=150,
+        stale_after_minutes=270,
         critical=False,
         healthy_no_work_allowed=False,
         db_freshness_query="""
@@ -1045,15 +1045,15 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             )
             SELECT max(updated_at) AS last_write,
                    count(*) FILTER (
-                     WHERE updated_at > now() - interval '2 hours 30 minutes'
+                     WHERE updated_at > now() - interval '3 hours'
                    ) AS recent_writes,
                    count(*) AS matched_evaluations,
                    count(*) FILTER (
                      WHERE updated_at IS NULL
-                        OR updated_at <= now() - interval '2 hours 30 minutes'
+                        OR updated_at <= now() - interval '3 hours'
                    ) AS stale_evaluations,
                    3 - count(DISTINCT dataset_slug) FILTER (
-                     WHERE updated_at > now() - interval '2 hours 30 minutes'
+                     WHERE updated_at > now() - interval '3 hours'
                    ) AS missing_fresh_datasets
             FROM managed_evaluations
         """,

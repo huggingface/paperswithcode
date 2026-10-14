@@ -34,7 +34,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-mmeb-v2.yml` | `12 * * * *` | `pwc-cron sync_mmeb_v2` | `.github/workflows/scripts/hourly/sync_mmeb.py v2` |
 | `cron-sync-mmeb-v3.yml` | `42 * * * *` | `pwc-cron sync_mmeb_v3` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` |
 | `cron-sync-deepswe.yml` | `25 * * * *` | `pwc-cron sync_deepswe` | `.github/workflows/scripts/hourly/sync_deepswe.py` |
-| `cron-sync-artificial-analysis.yml` | `35 * * * *` | `pwc-cron sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
+| `cron-sync-artificial-analysis.yml` | `35 */2 * * *` | `pwc-cron sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `cron-sync-programbench.yml` | `40 * * * *` | `pwc-cron sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
 | `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
 | `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |

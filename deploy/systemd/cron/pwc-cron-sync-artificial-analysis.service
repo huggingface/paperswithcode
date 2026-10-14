@@ -1,5 +1,5 @@
 [Unit]
-Description=Sync Artificial Analysis leaderboards hourly
+Description=Sync Artificial Analysis leaderboards every two hours
 After=network-online.target postgresql@16-main.service
 Wants=network-online.target
 

@@ -105,6 +105,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 - **Contract:** Intelligence Index and Agentic Index datasets, `Score`, official Artificial Analysis API/model URLs.
 - **Proof:** Compare each index independently; prevent cross-index row mixing and verify source URL/model identity.
+- **Budget:** The API key allows 100 requests/day (resets ~04:48 UTC); each full fetch costs 4+ requests and `scan_model_releases` shares the key. Check `artificial_analysis_api_quota remaining=` log lines; 429s late in the UTC day mean the budget is overspent.
 
 ## `sync_programbench`
 

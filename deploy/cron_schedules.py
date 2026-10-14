@@ -215,8 +215,8 @@ TIMERS: tuple[TimerSpec, ...] = (
     ),
     TimerSpec(
         job="sync_artificial_analysis",
-        on_calendar=("*-*-* *:35:00",),
-        description="Sync Artificial Analysis leaderboards hourly",
+        on_calendar=("*-*-* 00/2:35:00",),
+        description="Sync Artificial Analysis leaderboards every two hours",
     ),
     TimerSpec(
         job="sync_mmteb_reranking",
