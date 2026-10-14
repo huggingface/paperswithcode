@@ -1619,6 +1619,11 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=1500,
         critical=False,
         healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(last_scanned_at) AS last_write,
+                   count(*) FILTER (WHERE linked_at IS NOT NULL) AS linked_papers
+            FROM paper_x_thread_scans
+        """,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
