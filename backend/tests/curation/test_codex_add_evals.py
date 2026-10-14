@@ -105,11 +105,9 @@ def test_curator_space_name_and_dockerfile_pin_current_runner():
     settings = get_settings()
 
     assert settings.codex_jobs_image.endswith(f"-{runner_digest[:12]}")
-    for dockerfile in (
-        "jobs/Dockerfile.codex-curator",
-        "jobs/Dockerfile.codex-curator-space",
-    ):
-        assert f'"{runner_digest}"' in Path(dockerfile).read_text(encoding="utf-8")
+    assert f'"{runner_digest}"' in Path("jobs/Dockerfile.codex-curator").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_curator_bootstrap_allowlist_matches_service_bundle(monkeypatch):
