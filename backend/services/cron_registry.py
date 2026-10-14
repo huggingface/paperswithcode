@@ -1686,6 +1686,40 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_jobs=("run",),
     ),
     CronJobDefinition(
+        id="sync_hf_author_profiles",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(2, 50),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-sync-hf-author-profiles.timer",
+        systemd_service="pwc-cron-sync-hf-author-profiles.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync HF Author Profiles",
+        category="daily",
+        schedule="50 2 * * * (daily)",
+        script_path="daily/sync_hf_author_profiles.py",
+        log_name="sync_hf_author_profiles",
+        process_patterns=("scripts.daily.sync_hf_author_profiles",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_hf_author_profiles.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=1800,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE updated_at > now() - interval '30 hours'
+                   ) AS recent_writes,
+                   count(*) AS linked_authors
+            FROM authors
+            WHERE hf_username IS NOT NULL
+        """,
+        workflow_file="cron-sync-hf-author-profiles.yml",
+        workflow_jobs=("run",),
+    ),
+    CronJobDefinition(
         id="calculate_organization_trending_scores",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.daily(3, 40),),

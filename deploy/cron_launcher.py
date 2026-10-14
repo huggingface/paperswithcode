@@ -475,6 +475,15 @@ COMMANDS: dict[str, Job] = {
         timeout="2h",
         idempotency="append featured HF organization paper links",
     ),
+    "sync_hf_author_profiles": job(
+        "-m",
+        "scripts.daily.sync_hf_author_profiles",
+        timeout="30m",
+        idempotency=(
+            "fill or refresh HF profile fields on authors already linked to a "
+            "claimed paper; never creates authors or moves an account"
+        ),
+    ),
     "calculate_organization_trending_scores": job(
         "-m",
         "scripts.daily.calculate_organization_trending_scores",

@@ -136,6 +136,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     ),
     "export_enrichment_dashboard": ("backend/services/enrichment_dashboard_export.py",),
     "sync_hf_organizations": ("backend/services/organization_sync_service.py",),
+    "sync_hf_author_profiles": ("backend/services/author_hf_profile_sync_service.py",),
     "calculate_organization_trending_scores": (
         "backend/services/organization_trending_service.py",
     ),
@@ -223,6 +224,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
         "backend/tests/curation/test_enrichment_dashboard_export.py",
     ),
     "sync_hf_organizations": ("backend/tests/test_organization_sync_service.py",),
+    "sync_hf_author_profiles": (
+        "backend/tests/test_author_hf_profile_sync_service.py",
+    ),
     "calculate_organization_trending_scores": (
         "backend/tests/test_organization_trending_service.py",
     ),

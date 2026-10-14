@@ -196,6 +196,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Load the deployed manifest and compare every member with current HF profile/papers: slug, count, logo hash/MIME, imported arXiv IDs, and junction coverage.
 - **Trap:** The dashboard hard-codes a slug set and a fresh `last_hf_synced_at`; either can conceal partial reconciliation or manifest drift.
 
+## `sync_hf_author_profiles`
+
+- **Effect:** Fills `authors.hf_username`, `hf_id`, `hf_avatar_url`, `hf_status`, `hf_is_pro` from HF paper authorship claims of the last 30 days; refreshes already-linked accounts.
+- **Independent proof:** Sample recent HF papers with claimed authors (`/api/papers/<arxiv_id>`) and confirm the matching PwC author row on that paper carries the claimed username; check `HF_AUTHOR_PROFILES_SUMMARY` for a sane `linked`/`claims_seen` ratio.
+- **Trap:** `recent_writes` counts any author update, and a quiet day with no new claims is healthy; `unmatched` claims (name spelled differently on arXiv) are expected and never linked.
+
 ## `calculate_organization_trending_scores`
 
 - **Effect:** Writes one daily raw history row per featured organization, updates its trailing-30-day mean/timestamp, and prunes old history.

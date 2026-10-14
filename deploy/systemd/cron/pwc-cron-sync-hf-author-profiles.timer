@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link authors to their claimed Hugging Face profiles daily
+
+[Timer]
+OnCalendar=*-*-* 02:50:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-hf-author-profiles.service
+
+[Install]
+WantedBy=timers.target

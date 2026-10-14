@@ -83,6 +83,34 @@ describe("AuthorDetailView", () => {
     );
   });
 
+  it("shows the linked Hugging Face avatar and profile link", async () => {
+    vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
+      id: "7",
+      full_name: "Researcher",
+      hf_username: "researcher",
+      hf_avatar_url: "/avatars/default.svg",
+      paper_count: 1,
+    });
+    vi.spyOn(papersApi, "list").mockResolvedValue({
+      count: 1,
+      next_page: null,
+      previous_page: null,
+      results: [paper],
+    });
+
+    const { container } = renderAuthor();
+
+    expect(await screen.findByRole("heading", { name: "Researcher" })).toBeInTheDocument();
+    expect(container.querySelector(".author-avatar")).toHaveAttribute(
+      "src",
+      "https://huggingface.co/avatars/default.svg",
+    );
+    expect(screen.getByRole("link", { name: "@researcher on Hugging Face" })).toHaveAttribute(
+      "href",
+      "https://huggingface.co/researcher",
+    );
+  });
+
   it("never shows the previous author's papers while another author loads", async () => {
     vi.spyOn(papersApi, "getAuthor").mockImplementation(async (id) => ({
       id,

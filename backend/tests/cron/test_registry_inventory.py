@@ -27,8 +27,8 @@ def test_registry_covers_workflows_systemd_and_allowlist_exactly():
     summary = _dashboard_job_summary(
         [{"category": job.category, "status": "healthy"} for job in jobs]
     )
-    assert summary["total_jobs"] == 52
-    assert summary["scheduled_jobs"] == 51
+    assert summary["total_jobs"] == 53
+    assert summary["scheduled_jobs"] == 52
     assert summary["manual_jobs"] == 1
     assert len(by_id) == len(jobs), "duplicate dashboard job IDs"
 
@@ -103,6 +103,7 @@ def test_registry_includes_hf_artifacts_embeddings_and_method_backfills():
     assert "backfill_method_keywords" in job_ids
     assert "backfill_method_references" in job_ids
     assert "sync_hf_organizations" in job_ids
+    assert "sync_hf_author_profiles" in job_ids
     assert "sync_3d_arena" in job_ids
     assert "sync_tabarena" in job_ids
     assert "sync_open_asr" in job_ids

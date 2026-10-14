@@ -163,6 +163,19 @@
 .author-hero {
   margin: 8px 0 20px;
 }
+.author-hero-title {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+.author-avatar {
+  display: block;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  object-fit: cover;
+}
 .author-hero .feed-subtitle a {
   color: var(--accent-text);
   text-decoration: none;

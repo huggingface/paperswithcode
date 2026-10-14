@@ -188,6 +188,7 @@ export interface Author {
   id: string;
   full_name: string;
   hf_username?: string | null;
+  hf_avatar_url?: string | null;
   paper_count: number;
 }
 

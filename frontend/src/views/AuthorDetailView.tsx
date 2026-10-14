@@ -25,6 +25,9 @@ const SORT_OPTIONS: Array<[OrderBy, string]> = [
 const parseOrderBy = (value: string | null): OrderBy =>
   value === "date_published" || value === "citation_count" ? value : "trending";
 
+// HF returns default avatars as site-relative paths and uploads as CDN URLs.
+const hfAvatarSrc = (url: string) => (url.startsWith("/") ? `https://huggingface.co${url}` : url);
+
 const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const orderBy = parseOrderBy(searchParams.get("order_by"));
@@ -84,9 +87,27 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
 
       <header className="author-hero">
         <div className="organizations-eyebrow">AUTHOR</div>
-        <h1 className="feed-title">
-          {author.data?.full_name ?? <Skeleton className="h-12 w-64 inline-block" />}
-        </h1>
+        <div className="author-hero-title">
+          {author.data?.hf_username && author.data.hf_avatar_url && (
+            <a
+              href={`https://huggingface.co/${author.data.hf_username}`}
+              target="_blank"
+              rel="noopener noreferrer"
+              aria-label={`@${author.data.hf_username} on Hugging Face`}
+            >
+              <img
+                className="author-avatar"
+                src={hfAvatarSrc(author.data.hf_avatar_url)}
+                alt=""
+                width={56}
+                height={56}
+              />
+            </a>
+          )}
+          <h1 className="feed-title">
+            {author.data?.full_name ?? <Skeleton className="h-12 w-64 inline-block" />}
+          </h1>
+        </div>
         {author.data && (
           <div className="feed-subtitle">
             {author.data.paper_count.toLocaleString()}{" "}

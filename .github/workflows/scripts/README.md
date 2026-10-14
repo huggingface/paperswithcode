@@ -43,6 +43,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
+| `cron-sync-hf-author-profiles.yml` | `50 2 * * *` | `pwc-cron sync_hf_author_profiles` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` |
 | `cron-calculate-organization-trending-scores.yml` | `40 3 * * *` | `pwc-cron calculate_organization_trending_scores` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` |
 | `cron-refresh-paper-embeddings.yml` | `15 * * * *` | `.github/workflows/scripts/run_refresh_paper_embeddings.sh` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
 | `cron-update-hf-artifacts.yml` | `30 * * * *` | `pwc-cron update_hf_artifacts` | `.github/workflows/scripts/hourly/update_hf_artifacts.py` |
@@ -280,6 +281,15 @@ reported, never deleted, and rows outside the managed set are never touched.
 for the strict 21-organization manifest. It validates HF organization pages,
 imports missing ArXiv papers, caches validated logos, and never removes an
 existing HF attribution.
+
+`sync_hf_author_profiles.py` walks `https://huggingface.co/api/papers` (newest
+first, 100 papers per request) back 30 days and applies each paper's HF
+authorship claims. A claim fills an author row only when that row is already
+linked to the paper under the claimed name and has no HF account; an account
+that is already linked keeps its author and gets its avatar, username, and Pro
+status refreshed. It never creates authors or moves an account, and logs
+namesakes and unmatched names as `conflicts` and `unmatched`. Pass `--days N`
+for a one-off historical backfill and `--dry-run` to roll back every batch.
 
 `calculate_organization_trending_scores.py` runs after paper trending and
 organization sync. It upserts one raw snapshot per featured organization and UTC

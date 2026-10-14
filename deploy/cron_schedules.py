@@ -267,6 +267,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync featured Hugging Face organizations daily",
     ),
     TimerSpec(
+        job="sync_hf_author_profiles",
+        on_calendar=("*-*-* 02:50:00",),
+        description="Link authors to their claimed Hugging Face profiles daily",
+    ),
+    TimerSpec(
         job="export_enrichment_dashboard",
         on_calendar=("*-*-* 03:10:00",),
         description="Export the enrichment dashboard snapshot daily",
