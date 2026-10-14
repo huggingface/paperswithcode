@@ -1,6 +1,7 @@
 from backend.utils.urls import external_source_url_to_paper_url, parse_arxiv_url
 from backend.models.database import Repository as DBRepository
 from backend.services.evaluation_service import (
+    _source_match_keys,
     evaluation_external_flag,
     evaluation_is_external,
     evaluation_public_source_url,
@@ -192,6 +193,58 @@ def test_evaluation_is_external_true_for_file_in_unrelated_github_repository():
         104584,
         db,
     )
+
+
+def test_evaluation_is_external_false_for_file_in_linked_huggingface_model():
+    model_url = "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash"
+    db = _FakeDB(_FakePaper(paper_id=122015, hf_models=[model_url]))
+    for path in [
+        "resolve/main/DeepSeek_V41_Tech_Report.pdf",
+        "blob/main/README.md",
+        "raw/main/results.json",
+        "tree/main/eval",
+    ]:
+        assert not evaluation_is_external(
+            f"{model_url}/{path}", "2609.19969", 122015, db
+        )
+
+
+def test_evaluation_is_external_true_for_file_in_unrelated_huggingface_repo():
+    db = _FakeDB(
+        _FakePaper(
+            paper_id=122015,
+            hf_models=["https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash"],
+        )
+    )
+    for source_url in [
+        "https://huggingface.co/datasets/open-llm-leaderboard/results/blob/main/scores.csv",
+        "https://huggingface.co/spaces/lmarena-ai/leaderboard/blob/main/results.csv",
+        "https://huggingface.co/other-org/DeepSeek-V4.1-Flash/blob/main/README.md",
+    ]:
+        assert evaluation_is_external(source_url, "2609.19969", 122015, db)
+
+
+def test_huggingface_repo_keys_keep_repository_kinds_distinct():
+    assert _source_match_keys(
+        "https://huggingface.co/datasets/org/name/resolve/main/data.csv"
+    ) & _source_match_keys("https://huggingface.co/datasets/org/name")
+    assert not _source_match_keys(
+        "https://huggingface.co/datasets/org/name/resolve/main/data.csv"
+    ) & _source_match_keys("https://huggingface.co/org/name")
+    assert not _source_match_keys(
+        "https://huggingface.co/spaces/org/name/blob/main/app.py"
+    ) & _source_match_keys("https://huggingface.co/datasets/org/name")
+
+
+def test_huggingface_non_repository_paths_get_no_repo_key():
+    for url in [
+        "https://huggingface.co/papers/2609.19969",
+        "https://huggingface.co/docs/transformers",
+        "https://huggingface.co/blog/deepseek-v4",
+        "https://huggingface.co/collections/deepseek-ai/deepseek-v4",
+        "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/discussions/3",
+    ]:
+        assert not any(key.startswith("hfrepo:") for key in _source_match_keys(url))
 
 
 def test_evaluation_is_external_false_when_source_matches_same_paper():

@@ -56,6 +56,33 @@ _CVF_OPENACCESS_PATH = re.compile(
     re.IGNORECASE,
 )
 
+# First path segments on huggingface.co that are site sections, not model owners.
+_HUGGINGFACE_NON_REPO_ROOTS = frozenset(
+    {
+        "api",
+        "blog",
+        "buckets",
+        "changelog",
+        "chat",
+        "collections",
+        "docs",
+        "enterprise",
+        "join",
+        "learn",
+        "login",
+        "models",
+        "new",
+        "organizations",
+        "papers",
+        "posts",
+        "pricing",
+        "settings",
+        "tasks",
+    }
+)
+# Path segments after `{owner}/{repo}` that address files in the repository.
+_HUGGINGFACE_REPO_SUBPATHS = frozenset({"blob", "raw", "resolve", "tree"})
+
 
 def _looks_like_paper_slug(segment: str) -> bool:
     base = segment.rsplit(".", 1)[0] if "." in segment else segment
@@ -131,6 +158,22 @@ def _paper_route_keys(paper_id: int, paper_arxiv_id: Optional[str]) -> set[str]:
     return {key for key in keys if key}
 
 
+def _huggingface_repo_key(path_parts: list[str]) -> Optional[str]:
+    """`hfrepo:{kind}/{owner}/{repo}` for a Hugging Face repository URL path."""
+    kind = "model"
+    if path_parts and path_parts[0] in {"datasets", "spaces"}:
+        kind = path_parts[0].removesuffix("s")
+        path_parts = path_parts[1:]
+    if len(path_parts) < 2 or (
+        kind == "model" and path_parts[0] in _HUGGINGFACE_NON_REPO_ROOTS
+    ):
+        return None
+    if len(path_parts) > 2 and path_parts[2] not in _HUGGINGFACE_REPO_SUBPATHS:
+        return None
+    owner, repository = path_parts[0].lower(), path_parts[1].lower()
+    return f"hfrepo:{kind}/{owner}/{repository}"
+
+
 def _source_match_keys(url: Optional[str]) -> set[str]:
     """Normalized URL keys plus equivalence keys for alternate paper surfaces."""
     keys: set[str] = set()
@@ -162,6 +205,14 @@ def _source_match_keys(url: Optional[str]) -> set[str]:
         owner = path_parts[0].lower()
         repository = path_parts[1].removesuffix(".git").lower()
         keys.add(f"githubrepo:{owner}/{repository}")
+
+    # Files inside a linked Hugging Face model, dataset, or Space repository
+    # (README, tech report under /resolve/, results under /blob/) are likewise
+    # first-party evidence. Repository kinds stay distinct.
+    if netloc in {"huggingface.co", "hf.co"}:
+        hf_repo_key = _huggingface_repo_key(path_parts)
+        if hf_repo_key:
+            keys.add(hf_repo_key)
 
     cvf_match = _CVF_OPENACCESS_PATH.match(path)
     if cvf_match and netloc == "openaccess.thecvf.com":
