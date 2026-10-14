@@ -50,9 +50,9 @@ class FakeExternalThumbnailService:
         return None
 
     async def generate_external_thumbnail(
-        self, paper_id, source_url, force, title=None
+        self, paper_id, source_url, force, title=None, pdf_url=None
     ):
-        self.calls.append((paper_id, source_url, force, title))
+        self.calls.append((paper_id, source_url, force, title, pdf_url))
         return self.generated
 
 
@@ -113,6 +113,7 @@ def test_regenerate_external_thumbnail_persists_public_url(tmp_path: Path, monke
         source="external",
         source_url="https://example.com/report.pdf",
         title="External report",
+        conference_url_pdf=None,
         version="v1",
         thumbnail_url=None,
     )
@@ -131,7 +132,7 @@ def test_regenerate_external_thumbnail_persists_public_url(tmp_path: Path, monke
     assert paper.thumbnail_url == result.thumbnail_url
     assert db.commits == 1
     assert service.calls == [
-        (42, "https://example.com/report.pdf", True, "External report")
+        (42, "https://example.com/report.pdf", True, "External report", None)
     ]
 
 

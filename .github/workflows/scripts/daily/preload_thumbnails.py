@@ -107,6 +107,8 @@ class Candidate(NamedTuple):
     version: str
     source_url: Optional[str] = None
     thumbnail_url: Optional[str] = None
+    title: Optional[str] = None
+    pdf_url: Optional[str] = None
 
 
 class ThumbnailPreloadJob(CronJobBase):
@@ -505,7 +507,13 @@ class ThumbnailPreloadJob(CronJobBase):
             filters.append(DBPaper.id % shard_total == shard_index)
 
         query = (
-            session.query(DBPaper.id, DBPaper.source_url, DBPaper.thumbnail_url)
+            session.query(
+                DBPaper.id,
+                DBPaper.source_url,
+                DBPaper.thumbnail_url,
+                DBPaper.title,
+                DBPaper.conference_url_pdf,
+            )
             .filter(and_(*filters))
             .order_by(DBPaper.date_published.desc().nullslast(), DBPaper.id.desc())
         )
@@ -519,6 +527,8 @@ class ThumbnailPreloadJob(CronJobBase):
                 version="external",
                 source_url=row.source_url,
                 thumbnail_url=row.thumbnail_url,
+                title=row.title,
+                pdf_url=row.conference_url_pdf,
             )
 
     def _candidate_thumbnail_filename(self, candidate: Candidate) -> str:
@@ -618,6 +628,8 @@ class ThumbnailPreloadJob(CronJobBase):
                 candidate.paper_id,
                 candidate.source_url,
                 force=force,
+                title=candidate.title,
+                pdf_url=candidate.pdf_url,
             )
             self._persist_external_thumbnail_url(candidate.paper_id, filename)
         return "generated"

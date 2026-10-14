@@ -122,6 +122,7 @@ async def regenerate_paper_thumbnail(
             paper.source_url,
             force=force,
             title=paper.title,
+            pdf_url=paper.conference_url_pdf,
         )
         filename = build_external_thumbnail_filename(paper.id)
         cache_bust = str(generated_path.stat().st_mtime_ns)

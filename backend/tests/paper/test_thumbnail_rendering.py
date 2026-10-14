@@ -324,6 +324,43 @@ def test_permanent_external_pdf_error_generates_metadata_fallback(
     service._upload_to_bucket.assert_called_once_with(path, "external_42.jpg")
 
 
+def test_external_thumbnail_prefers_pdf_url_over_landing_page(
+    tmp_path: Path, monkeypatch
+):
+    service = _external_pdf_service()
+    service.get_external_filename = lambda _paper_id: "external_42.jpg"
+    service.get_existing_custom_thumbnail_path = MagicMock(return_value=None)
+    service._get_active_cache_path = MagicMock(
+        return_value=tmp_path / "external_42.jpg"
+    )
+    service._upload_to_bucket = MagicMock()
+    service._save_thumbnail = MagicMock()
+    service._convert_pdf_to_thumbnail = MagicMock(return_value="rendered")
+    service._render_external_metadata_thumbnail = MagicMock()
+    fetched: list[str] = []
+
+    async def fetch(url, **_kwargs):
+        fetched.append(url)
+        return SimpleNamespace(body=b"%PDF-example")
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    asyncio.run(
+        service.generate_external_thumbnail(
+            42,
+            "https://papers.miccai.org/miccai-2025/0001-Paper.html",
+            title="A MICCAI paper",
+            pdf_url="https://papers.miccai.org/miccai-2025/paper/0001_paper.pdf",
+        )
+    )
+
+    assert fetched == ["https://papers.miccai.org/miccai-2025/paper/0001_paper.pdf"]
+    service._convert_pdf_to_thumbnail.assert_called_once_with(b"%PDF-example")
+    service._render_external_metadata_thumbnail.assert_not_called()
+
+
 @pytest.mark.parametrize("safe_status_code", [403, 409, 413, 415, 422])
 def test_permanent_safe_fetch_error_uses_metadata_fallback(
     monkeypatch, safe_status_code: int

@@ -306,3 +306,43 @@ def test_run_async_tracks_confirmed_unavailable_separately(monkeypatch):
 
     assert job.unavailable == 1
     assert job.failures == 0
+
+
+def test_process_paper_passes_title_and_pdf_url_for_external_papers(tmp_path: Path):
+    from scripts.daily.preload_thumbnails import Candidate, ThumbnailPreloadJob
+
+    job = _make_job(cache_dir=tmp_path)
+    job.dry_run = False
+    job._persist_external_thumbnail_url = MagicMock()
+
+    thumbnail_service = MagicMock()
+    thumbnail_service._get_active_cache_path.return_value = tmp_path / "missing.jpg"
+    thumbnail_service._bucket_thumbnail_exists.return_value = False
+    captured: dict = {}
+
+    async def fake_generate(paper_id, source_url, **kwargs):
+        captured.update(kwargs)
+        return tmp_path / "external_7.jpg"
+
+    thumbnail_service.generate_external_thumbnail = fake_generate
+
+    import asyncio
+
+    status = asyncio.run(
+        ThumbnailPreloadJob._process_paper(
+            job,
+            thumbnail_service,
+            Candidate(
+                7,
+                None,
+                "external",
+                source_url="https://www.isca-archive.org/x/paper.html",
+                title="A Speech Paper",
+                pdf_url="https://www.isca-archive.org/x/paper.pdf",
+            ),
+        )
+    )
+
+    assert status == "generated"
+    assert captured["title"] == "A Speech Paper"
+    assert captured["pdf_url"] == "https://www.isca-archive.org/x/paper.pdf"

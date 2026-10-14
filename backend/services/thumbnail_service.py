@@ -58,6 +58,7 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "openai.com",
         "openaccess.thecvf.com",
         "openreview.net",
+        "papers.miccai.org",
         "papers.nips.cc",
         "proceedings.mlr.press",
         "proceedings.neurips.cc",
@@ -65,7 +66,9 @@ EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
         "raw.githubusercontent.com",
         "www.biorxiv.org",
         "www.cv-foundation.org",
+        "www.ecva.net",
         "www.github.com",
+        "www.isca-archive.org",
         "www.medrxiv.org",
         "www.nature.com",
         "www.openai.com",
@@ -838,12 +841,15 @@ class ThumbnailService:
         source_url: str,
         force: bool = False,
         title: str | None = None,
+        pdf_url: str | None = None,
     ) -> Path:
         """
         Generate a thumbnail for a non-ArXiv external paper.
 
-        Direct PDFs are rendered from their first page. bioRxiv and medRxiv
-        records can fall back to a metadata card when their PDF is unavailable.
+        Direct PDFs are rendered from their first page; `pdf_url` (e.g. the
+        paper's conference PDF) is tried before `source_url`, which is often
+        an HTML landing page. bioRxiv and medRxiv records can fall back to a
+        metadata card when their PDF is unavailable.
         """
         filename = self.get_external_filename(paper_id)
         if not force:
@@ -864,6 +870,8 @@ class ThumbnailService:
                 aws_access_key_id=settings.biorxiv_aws_access_key_id,
                 aws_secret_access_key=settings.biorxiv_aws_secret_access_key,
             )
+        if pdf_content is None and pdf_url:
+            pdf_content = await self._download_external_pdf(pdf_url)
         if pdf_content is None:
             pdf_content = await self._download_external_pdf(source_url)
         if pdf_content is not None:

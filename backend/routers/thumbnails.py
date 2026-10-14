@@ -149,7 +149,10 @@ async def generate_thumbnail(
             async def generate_external_in_background():
                 try:
                     await thumbnail_service.generate_external_thumbnail(
-                        paper.id, paper.source_url, title=paper.title
+                        paper.id,
+                        paper.source_url,
+                        title=paper.title,
+                        pdf_url=paper.conference_url_pdf,
                     )
                     filename = thumbnail_service.get_external_filename(paper.id)
                     thumbnail_url = build_custom_thumbnail_url(filename)
