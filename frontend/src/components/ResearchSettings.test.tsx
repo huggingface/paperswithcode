@@ -56,4 +56,18 @@ describe('research follows', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Unfollow' }));
     await waitFor(() => expect(change).toHaveBeenCalledWith('task', '12', false));
   });
+  it('explains following and links guests to Hugging Face sign-in', async () => {
+    vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    render(<ResearchFollowButton kind="method" entityId="3" />, { wrapper });
+    expect(await screen.findByText(/Get new papers using this method/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'your Following feed' })).toHaveAttribute('href', '/following');
+    auth.user = null as unknown as typeof auth.user;
+    try {
+      render(<ResearchFollowButton kind="method" entityId="3" />, { wrapper });
+      expect(screen.getByRole('link', { name: 'Follow' }).getAttribute('href')).toContain('/auth/hf/login');
+      expect(screen.getByText('Sign in to get new papers using this method.')).toBeInTheDocument();
+    } finally {
+      auth.user = { hf_subject: 'alice', username: 'alice' };
+    }
+  });
 });
