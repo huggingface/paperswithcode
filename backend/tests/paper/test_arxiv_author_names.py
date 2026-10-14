@@ -285,18 +285,17 @@ def _refresh_links(claimed_order, new_names, tmp_path):
         )
 
 
-def test_version_refresh_keeps_a_claim_whose_name_arxiv_respelled(tmp_path) -> None:
-    # The claim follows the respelled name, not its old position.
-    assert _refresh_links(2, ["T. Aarsen", "Grace Hopper", "Ada Byron"], tmp_path) == [
-        ("Tom Aarsen", "tomaarsen", True),
+def test_version_refresh_keeps_a_claim_under_another_case(tmp_path) -> None:
+    assert _refresh_links(2, ["Grace Hopper", "TOM  AARSEN"], tmp_path) == [
         ("Grace Hopper", None, False),
-        ("Ada Byron", None, False),
+        ("Tom Aarsen", "tomaarsen", True),
     ]
 
 
 def test_version_refresh_drops_a_claim_it_cannot_place(tmp_path) -> None:
-    # Tom left the author list; nobody inherits his claim by position.
-    assert _refresh_links(2, ["Grace Hopper", "Ada Byron"], tmp_path) == [
+    # A respelled name may be a namesake: neither it nor whoever now holds
+    # the old position inherits the claim.
+    assert _refresh_links(2, ["Grace Hopper", "T. Aarsen"], tmp_path) == [
         ("Grace Hopper", None, False),
-        ("Ada Byron", None, False),
+        ("T. Aarsen", None, False),
     ]
