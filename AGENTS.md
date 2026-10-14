@@ -80,6 +80,13 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   before merging. Do not treat
   an absent, queued, or in-progress review as approval. Bugbot runs only in this
   repository; do not wait for it in other repositories.
+- Waiting for Bugbot never ends the task or hands control back to the user.
+  A clean Bugbot pass only completes a check and posts no review or comment, so
+  no review notification will wake you. After every push, start a background
+  `gh pr checks <number> --repo huggingface/paperswithcode --watch --interval 30`
+  (bounded with `timeout 45m`) so its exit resumes you; this user-requested wait
+  overrides any default against polling CI. When it exits, read Bugbot's result
+  and threads and continue the workflow without asking the user to proceed.
 - For non-chat changes, once review is complete, all review findings are
   addressed, and required checks pass, merge without asking again. Fetch the
   merged `origin/main`, rerun proportionate validation, deploy that exact commit to the authorized
