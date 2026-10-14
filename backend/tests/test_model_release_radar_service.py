@@ -14,7 +14,11 @@ from backend.services.artificial_analysis_sync_service import (
     ArtificialAnalysisLeaderboard,
 )
 from backend.services.model_release_radar_service import (
+    WEB_SEARCH_PROVIDER,
+    WEB_SEARCH_QUERIES,
+    ExtractedRelease,
     ReleaseSource,
+    SearchHit,
     parse_article,
     parse_rss,
     release_model_name,
@@ -336,3 +340,136 @@ def test_title_match_and_source_failures_are_reported():
     ]
     assert [error["source"] for error in report.errors] == [MISTRAL.url]
     assert report.to_dict()["unindexed"] == 0
+
+
+WEB_HITS = [
+    SearchHit(
+        "https://reflection.ai/blog/introducing-beam",
+        "Introducing Beam: Reflection's 501B open-weight model",
+        date(2026, 10, 9),
+    ),
+    SearchHit(
+        "https://news.example.com/reflection-beam",
+        "Reflection releases Beam, a 501B open-weight model",
+        date(2026, 10, 10),
+    ),
+    SearchHit(
+        "https://news.example.com/kolibri",
+        "Aleph Alpha releases Kolibri weights",
+        date(2026, 10, 10),
+    ),
+    SearchHit(
+        "https://odyssey.ml/meet-odyssey-3",
+        "Meet Odyssey-3: Our Most Powerful Foundation World Model",
+        date(2026, 10, 9),
+    ),
+]
+
+
+def _release(lab, name, hit_ids, official=None, published="2026-10-09"):
+    return ExtractedRelease(
+        lab=lab,
+        model_name=name,
+        published=published,
+        hit_ids=hit_ids,
+        official_hit_id=official,
+    )
+
+
+def test_web_search_reports_releases_from_any_lab():
+    db = _session()
+    db.add(
+        Paper(
+            id=700,
+            title="Meet Odyssey-3: Our Most Powerful Foundation World Model",
+            source="external",
+            source_url="https://odyssey.ml/blog/odyssey-3",
+            version="v1",
+            is_latest_version=True,
+        )
+    )
+    db.commit()
+    searches: list[tuple[str, date]] = []
+    extracted: list[list[SearchHit]] = []
+
+    def search(query: str, since: date) -> list[SearchHit]:
+        searches.append((query, since))
+        # Every query returns the same coverage; hits are deduplicated.
+        return WEB_HITS
+
+    def extract(hits: list[SearchHit]) -> list[ExtractedRelease]:
+        extracted.append(hits)
+        return [
+            _release("Reflection", "Beam", [1], official=0),
+            _release("Aleph Alpha", "Kolibri", [2]),
+            _release("Odyssey", "Odyssey-3", [3]),
+            # Uncited and invented hit ids never become signals.
+            _release("Nobody", "Ghost-1", [42]),
+        ]
+
+    report = scan_model_releases(
+        db,
+        sources=(),
+        web_search=search,
+        extract_releases=extract,
+        today=TODAY,
+    )
+
+    assert [query for query, _ in searches] == list(WEB_SEARCH_QUERIES)
+    assert {since for _, since in searches} == {date(2026, 10, 8)}
+    assert len(extracted) == 1 and extracted[0] == WEB_HITS
+    by_name = {signal.model_name: signal for signal in report.signals}
+    assert set(by_name) == {"Beam", "Kolibri", "Odyssey-3"}
+    beam = by_name["Beam"]
+    # The lab's own page is the reported URL; the earliest cited hit dates it.
+    assert (beam.source, beam.url, beam.published, beam.status) == (
+        WEB_SEARCH_PROVIDER,
+        "https://reflection.ai/blog/introducing-beam",
+        date(2026, 10, 9),
+        "unindexed",
+    )
+    assert by_name["Kolibri"].url == "https://news.example.com/kolibri"
+    assert (by_name["Odyssey-3"].matched_by, by_name["Odyssey-3"].paper_id) == (
+        "title",
+        700,
+    )
+    assert report.sources_checked == 1 and report.errors == []
+
+
+def test_web_search_failure_is_reported_and_vendor_feed_wins():
+    def failing_search(query: str, since: date) -> list[SearchHit]:
+        raise httpx.HTTPStatusError(
+            "429 Too Many Requests",
+            request=httpx.Request("POST", "https://api.exa.ai/search"),
+            response=httpx.Response(429),
+        )
+
+    report = scan_model_releases(
+        _session(),
+        sources=(OPENAI,),
+        feeds=FakeFeeds(PAGES),
+        web_search=failing_search,
+        extract_releases=lambda hits: [],
+        today=TODAY,
+    )
+    assert [error["source"] for error in report.errors] == [WEB_SEARCH_PROVIDER]
+    assert report.sources_checked == 2
+
+    gpt_hit = SearchHit(
+        "https://news.example.com/gpt-6-1-sol",
+        "OpenAI launches GPT-6.1 Sol",
+        date(2026, 10, 9),
+    )
+    report = scan_model_releases(
+        _session(),
+        sources=(OPENAI,),
+        feeds=FakeFeeds(PAGES),
+        web_search=lambda query, since: [gpt_hit],
+        extract_releases=lambda hits: [_release("OpenAI", "GPT-6.1 Sol", [0])],
+        today=TODAY,
+    )
+    (signal,) = report.signals
+    assert (signal.source, signal.url) == (
+        OPENAI.url,
+        "https://openai.com/index/introducing-gpt-6-1-sol",
+    )

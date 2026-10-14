@@ -1,7 +1,8 @@
 """Production entrypoint for the model-release radar.
 
-Report recent official model releases (lab news feeds and unmapped Artificial
-Analysis leaderboard models) and whether a paper row already covers each one.
+Report recent model releases (lab news feeds, unmapped Artificial Analysis
+leaderboard models, and web news about any lab) and whether a paper row
+already covers each one.
 The scan is read-only; unindexed releases are logged as a warning for an
 operator to index with the add-external-paper and add-evals skills.
 """
@@ -18,6 +19,8 @@ from backend.services.artificial_analysis_sync_service import (
     fetch_artificial_analysis_leaderboard,
 )
 from backend.services.model_release_radar_service import (
+    ExaSearchClient,
+    OpenAIReleaseExtractor,
     format_unindexed,
     scan_model_releases,
 )
@@ -31,7 +34,12 @@ def main() -> int:
     parser.add_argument(
         "--skip-artificial-analysis",
         action="store_true",
-        help="Only scan lab news feeds",
+        help="Do not check the Artificial Analysis leaderboard",
+    )
+    parser.add_argument(
+        "--skip-web-search",
+        action="store_true",
+        help="Do not search web news for releases",
     )
     args = parser.parse_args()
     if not 1 <= args.lookback_days <= 90:
@@ -43,11 +51,26 @@ def main() -> int:
         or not os.environ.get("ARTIFICIAL_ANALYSIS_API_KEY")
         else fetch_artificial_analysis_leaderboard
     )
+    exa_key = os.environ.get("EXA_API_KEY")
+    openai_key = os.environ.get("OPENAI_API_KEY")
+    web_search = extract_releases = None
+    if not args.skip_web_search and exa_key and openai_key:
+        web_search = ExaSearchClient(exa_key).search
+        extract_releases = OpenAIReleaseExtractor(openai_key)
+    elif not args.skip_web_search:
+        logger.warning(
+            "model_release_radar_source_error web search needs EXA_API_KEY and "
+            "OPENAI_API_KEY"
+        )
     session = get_database_session()
     db = next(session)
     try:
         report = scan_model_releases(
-            db, lookback_days=args.lookback_days, fetch_leaderboard=fetch_leaderboard
+            db,
+            lookback_days=args.lookback_days,
+            fetch_leaderboard=fetch_leaderboard,
+            web_search=web_search,
+            extract_releases=extract_releases,
         )
     finally:
         try:

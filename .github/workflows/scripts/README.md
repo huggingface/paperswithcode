@@ -208,9 +208,14 @@ against `papers.source_url`, paper titles, `model_releases`, and
 `artificial-analysis` provider aliases. Unindexed releases are logged as a
 `model_release_radar_unindexed` warning for an operator to index with the
 `add-external-paper` and `add-evals` skills; scheduled jobs never create
-external papers. Labs without a reachable machine-readable feed (Meta, Qwen,
-Moonshot, Zhipu, xAI, MiniMax, Xiaomi) are covered through Artificial Analysis
-and the trending-model curation. Run it by hand with:
+external papers. Releases from any other lab (for example Reflection's Beam,
+Aleph Alpha's Kolibri, or Meta's Muse Wonder) are found through a web news
+search: four Exa news queries over the last three days (`EXA_API_KEY`, about
+$0.09 per run) whose deduplicated headlines `gpt-5.6-luna` turns into
+(lab, model, date, cited hits) releases (`OPENAI_API_KEY`). A web signal links
+the lab's own announcement page when one of the hits is from the lab, and a
+news article otherwise. Pass `--skip-web-search` to scan only the feeds and
+the leaderboard. Run it by hand with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.scan_model_releases --lookback-days 30
