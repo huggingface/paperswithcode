@@ -498,13 +498,14 @@ export const AssistantMessage: React.FC<{
   papers: Record<string, ChatPaperHit>;
   onToggleBlock: (messageId: string, blockIndex: number) => void;
   onRetryCompaction?: () => void;
+  onRetryWithLuna?: () => void;
   onArchiveOldChats?: () => void;
   onArchiveOldestChats?: () => void;
   archivePending?: "old" | "oldest" | null;
   hfBilling?: HfBillingGuidance | null;
   openRouterFallbackEnabled?: boolean;
   feedbackEnabled?: boolean;
-}> = ({ msg, papers, onToggleBlock, onRetryCompaction, onArchiveOldChats, onArchiveOldestChats, archivePending = null, hfBilling = null, openRouterFallbackEnabled = false, feedbackEnabled = false }) => {
+}> = ({ msg, papers, onToggleBlock, onRetryCompaction, onRetryWithLuna, onArchiveOldChats, onArchiveOldestChats, archivePending = null, hfBilling = null, openRouterFallbackEnabled = false, feedbackEnabled = false }) => {
   const [feedback, setFeedback] = React.useState<boolean | null>(null);
   const [feedbackPending, setFeedbackPending] = React.useState(false);
   const [feedbackError, setFeedbackError] = React.useState(false);
@@ -616,6 +617,7 @@ export const AssistantMessage: React.FC<{
           </a>
         )}
         {msg.errorCode === "hf_inference_billing_exhausted" && <>
+          {onRetryWithLuna && <button type="button" onClick={onRetryWithLuna}>Retry with GPT-5.6 Luna</button>}
           {hfBilling?.account_type === "Free" && !hfBilling.bill_to
             ? <a href={HF_PRO_URL} target="_blank" rel="noreferrer">
                 Upgrade to Hugging Face PRO — $9/month for 20× more included credits

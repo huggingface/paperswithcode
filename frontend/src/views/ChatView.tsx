@@ -518,13 +518,22 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const changeModel = async (model: string) => {
     const previousModel = selectedModel;
     setSelectedModel(model);
-    if (!routeSessionId) return;
+    if (!routeSessionId) return true;
     try {
       const updated = await updateSession(routeSessionId, { selected_model: model });
       patchSession(routeSessionId, { selected_model: updated.selected_model });
       setSessionError("");
+      return true;
     }
-    catch (error) { setSelectedModel(previousModel); setSessionError(error instanceof Error ? error.message : "Model change failed"); }
+    catch (error) {
+      setSelectedModel(previousModel);
+      setSessionError(error instanceof Error ? error.message : "Model change failed");
+      return false;
+    }
+  };
+  const lunaAvailable = models.some((model) => model.id === DEFAULT_CHAT_MODEL);
+  const retryWithLuna = async () => {
+    if (await changeModel(DEFAULT_CHAT_MODEL)) chat.retryLatest();
   };
 
   const changeReasoningEffort = async (effort: ReasoningEffort) => {
@@ -697,6 +706,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             onToggleBlock={chat.toggleBlock}
             onEditAndResend={chat.editAndResend}
             onRetryFromProgress={chat.retryFromProgress}
+            onRetryWithLuna={lunaAvailable ? () => void retryWithLuna() : undefined}
             onArchiveOld={() => void archive.archiveOld()}
             onArchiveOldest={() => void archive.archiveOldest()}
           />

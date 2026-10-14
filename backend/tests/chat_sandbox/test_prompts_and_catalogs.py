@@ -61,6 +61,17 @@ def test_system_prompt_prevents_unsupported_method_search_flags():
     assert '"reader_mode":false' in prompt
 
 
+def test_system_prompt_leads_with_code_and_grounds_implementation_claims():
+    prompt = render(web_search_enabled=True, hf_username="nielsrogge")
+
+    assert "lead the answer with the official repository" in prompt
+    assert "When code_repository_count is 0" in prompt
+    assert (
+        "use search_web to look for an official or community implementation" in prompt
+    )
+    assert "Never rank or rate implementation difficulty" in prompt
+
+
 def test_reader_system_prompt_profile_is_selected_by_trusted_metadata():
     prompt = render(reader_mode=True)
 

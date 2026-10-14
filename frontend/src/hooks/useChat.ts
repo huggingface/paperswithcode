@@ -694,6 +694,16 @@ export function useChat(options: UseChatOptions) {
     }, optimistic, snapshot);
   });
 
+  const retryLatest = useStableCallback(() => {
+    const latestUser = [...messagesRef.current].reverse().find((message) => message.role === "user");
+    if (!latestUser?.text) return false;
+    return editAndResend(latestUser.id, {
+      text: latestUser.text,
+      paperMentions: latestUser.paperMentions ?? [],
+      ...(latestUser.paperSelection ? { paperSelection: latestUser.paperSelection } : {}),
+    });
+  });
+
   const cancelCapacity = useCallback(() => {
     turn.cancelCapacity();
     setCapacityRequest(null);
@@ -870,6 +880,7 @@ export function useChat(options: UseChatOptions) {
     send,
     editAndResend,
     retryFromProgress,
+    retryLatest,
     retryCapacity,
     cancelCapacity,
     dismissDisabled: () => setDisabledRequest(null),

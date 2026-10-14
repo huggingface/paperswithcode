@@ -457,6 +457,25 @@ describe("AssistantMessage", () => {
     );
   });
 
+  it("offers an explicit Luna retry for exhausted HF billing", () => {
+    const onRetryWithLuna = vi.fn();
+    const msg: ChatMessageType = {
+      id: "assistant-1",
+      role: "assistant",
+      error: "Included usage is exhausted.",
+      errorCode: "hf_inference_billing_exhausted",
+    };
+    const { rerender } = render(
+      <AssistantMessage msg={msg} papers={{}} onToggleBlock={() => undefined} onRetryWithLuna={onRetryWithLuna} />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry with GPT-5.6 Luna" }));
+    expect(onRetryWithLuna).toHaveBeenCalledTimes(1);
+
+    rerender(<AssistantMessage msg={msg} papers={{}} onToggleBlock={() => undefined} />);
+    expect(screen.queryByRole("button", { name: "Retry with GPT-5.6 Luna" })).not.toBeInTheDocument();
+  });
+
   it("links a missing HF token directly to Settings", () => {
     renderAssistant({
       id: "assistant-1",

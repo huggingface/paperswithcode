@@ -14,6 +14,7 @@ interface ChatConversationProps {
   onToggleBlock: (messageId: string, blockIndex: number) => void;
   onEditAndResend: (messageId: string, draft: ChatDraft) => boolean;
   onRetryFromProgress?: () => boolean;
+  onRetryWithLuna?: () => void;
   onArchiveOld: () => void;
   onArchiveOldest: () => void;
 }
@@ -29,6 +30,7 @@ export function ChatConversation({
   onToggleBlock,
   onEditAndResend,
   onRetryFromProgress,
+  onRetryWithLuna,
   onArchiveOld,
   onArchiveOldest,
 }: ChatConversationProps) {
@@ -183,6 +185,9 @@ export function ChatConversation({
               onToggleBlock={toggleBlock}
               onRetryCompaction={!busy && message.id === messages.at(-1)?.id && userMessages.at(-1)?.revision
                 ? onRetryFromProgress
+                : undefined}
+              onRetryWithLuna={!busy && message.id === messages.at(-1)?.id && userMessages.at(-1)?.revision
+                ? onRetryWithLuna
                 : undefined}
               onArchiveOldChats={onArchiveOld}
               onArchiveOldestChats={onArchiveOldest}

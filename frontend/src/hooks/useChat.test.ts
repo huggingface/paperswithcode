@@ -678,6 +678,47 @@ describe("useChat editAndResend", () => {
     });
   });
 
+  it("retries the latest failed prompt in place", async () => {
+    let request: ChatStreamRequest | undefined;
+    streamChatMock.mockImplementation((next: ChatStreamRequest) => {
+      request = next;
+      return stream(
+        { type: "stream_start", request_id: "r1", session_id: "session-1" },
+        { type: "done", followups: [], finish_reason: "success" },
+      )();
+    });
+    getSessionMock.mockResolvedValue(sessionDetail("session-1", [
+      persistedUser("user-1", 1, "First"),
+      persistedAssistant("answer-1", 2, "First answer"),
+      persistedUser("user-2", 3, "Billing failed", 2),
+      persistedAssistant("answer-2", 4, "Retried answer"),
+    ]));
+    const { result } = renderChat();
+    act(() => result.current.load([
+      ...uiTurn("user-1", "First"),
+      { id: "user-2", role: "user", text: "Billing failed", revision: 1, status: "error" },
+      {
+        id: "user-2-answer",
+        role: "assistant",
+        error: "Included usage is exhausted.",
+        errorCode: "hf_inference_billing_exhausted",
+      },
+    ]));
+
+    act(() => {
+      expect(result.current.retryLatest()).toBe(true);
+    });
+
+    expect(request).toMatchObject({
+      message: "Billing failed",
+      session_id: "session-1",
+      replace_message_id: "user-2",
+      prior_revision: 1,
+    });
+    expect(request).not.toHaveProperty("retry_message_id");
+    await waitFor(() => expect(result.current.busy).toBe(false));
+  });
+
   it("rewinds a later prompt optimistically and sends its id and revision", async () => {
     let request: ChatStreamRequest | undefined;
     streamChatMock.mockImplementation((next: ChatStreamRequest) => {
