@@ -32,6 +32,18 @@ Chunk errors: 409 changed content version, 416 invalid byte range, 404 missing
 Markdown, 422 invalid query, and 503 storage unavailable. Error responses are
 not cacheable. Version-bound chunks may be cached for at most one hour.
 
+## Papers outside the catalog
+
+GET https://paperswithcode.co/api/v1/papers/{identifier}/public-metadata
+
+Accepts an arXiv ID (with or without version), an arXiv or Hugging Face paper
+URL, an arXiv DOI, or a DOI. Catalog papers return in_catalog=true with their
+catalog_id and catalog_url. Other papers are looked up on Hugging Face Papers,
+arXiv, and Crossref and return in_catalog=false, metadata_source, and an
+available_at list of labelled links where the paper can be read. 404 means no
+source knows the identifier; 429 and 503 carry Retry-After. GET
+/api/v1/papers/{id} still returns 404 for papers outside the catalog.
+
 ## Links
 
 - API schema: https://paperswithcode.co/docs

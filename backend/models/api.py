@@ -12,6 +12,10 @@ from backend.models.public_api import (
     LeaderboardMetric as LeaderboardMetric,
     LeaderboardMetrics as LeaderboardMetrics,
 )
+from backend.models.public_paper_metadata import (
+    PublicPaperLink as PublicPaperLink,
+    PublicPaperMetadata as PublicPaperMetadata,
+)
 
 from backend.models.chat import (
     ChatAvailabilityResponse as ChatAvailabilityResponse,

@@ -21,7 +21,7 @@ from fastapi import (
     Request,
     Response,
 )
-from fastapi.responses import RedirectResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
@@ -50,6 +50,11 @@ from backend.services.paper_service import (
     PaperService,
 )
 from backend.services.paper_reference_service import PaperReferenceService
+from backend.models.public_paper_metadata import PublicPaperMetadata
+from backend.services.public_paper_metadata_service import (
+    PublicMetadataError,
+    PublicPaperMetadataService,
+)
 from backend.services.badge_service import (
     render_leaderboard_badge,
     resolve_leaderboard_badge_target,
@@ -609,6 +614,62 @@ def get_trending_papers(
 
 
 @router.get(
+    "/papers/{identifier:path}/public-metadata",
+    response_model=PublicPaperMetadata,
+    summary="Get public metadata for a paper, even one outside the catalog",
+    responses={
+        400: {"description": "Unrecognised identifier"},
+        404: {"description": "Neither the catalog nor any public source knows it"},
+        429: {"description": "Too many uncached lookups"},
+        503: {"description": "Public metadata sources are unavailable"},
+    },
+)
+def get_public_paper_metadata(
+    request: Request,
+    response: Response,
+    identifier: str = Path(
+        ...,
+        description=(
+            "arXiv ID (with or without version), arXiv or Hugging Face paper "
+            "URL, arXiv DOI, DOI, or Papers With Code paper ID."
+        ),
+    ),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Return paper metadata whether or not Papers With Code has indexed it.
+
+    Catalog papers return `in_catalog: true` with their catalog ID and page.
+    Other papers are looked up on Hugging Face Papers, arXiv, and Crossref
+    and return `in_catalog: false`, the `metadata_source`, and an
+    `available_at` list of labelled links where the paper can be read.
+    Upstream results (hits and misses) are cached for an hour, and uncached
+    lookups are rate-limited per client.
+    """
+    try:
+        result = PublicPaperMetadataService(db).get(identifier, get_client_ip(request))
+    except PublicMetadataError as error:
+        headers = {}
+        if error.retry_after:
+            headers["Retry-After"] = str(error.retry_after)
+        if error.status_code in {400, 404}:
+            headers["Cache-Control"] = "public, max-age=3600"
+        else:
+            headers["Cache-Control"] = "no-store"
+        return JSONResponse(
+            status_code=error.status_code,
+            content={"detail": {"code": error.code, "message": error.message}},
+            headers=headers,
+        )
+    response.headers["Cache-Control"] = (
+        "public, max-age=60, stale-while-revalidate=300"
+        if result.in_catalog
+        else "public, max-age=3600"
+    )
+    return result
+
+
+@router.get(
     "/papers/{paper_id}",
     response_model=Paper,
     summary="Get paper by ArXiv ID or database ID",
@@ -642,7 +703,12 @@ def get_paper_by_id(
             paper_id, include_resources=include_resources
         )
     except PaperNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e))
+        # ``code`` sits beside the unchanged string ``detail`` so existing
+        # clients keep working; /public-metadata covers unindexed papers.
+        return JSONResponse(
+            status_code=404,
+            content={"detail": str(e), "code": "paper_not_in_catalog"},
+        )
 
 
 @router.get(
