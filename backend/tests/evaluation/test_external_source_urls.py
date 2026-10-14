@@ -236,10 +236,33 @@ def test_huggingface_repo_keys_keep_repository_kinds_distinct():
     ) & _source_match_keys("https://huggingface.co/datasets/org/name")
 
 
+def test_huggingface_repo_keys_match_namespace_less_repos_and_any_case():
+    pairs = [
+        (
+            "https://huggingface.co/gpt2/resolve/main/README.md",
+            "https://huggingface.co/gpt2",
+        ),
+        (
+            "https://huggingface.co/datasets/squad/blob/main/README.md",
+            "https://huggingface.co/datasets/squad",
+        ),
+        (
+            "https://huggingface.co/Datasets/Org/Name/Resolve/main/data.csv",
+            "https://huggingface.co/datasets/org/name",
+        ),
+    ]
+    for file_url, repo_url in pairs:
+        assert _source_match_keys(file_url) & _source_match_keys(repo_url)
+    assert not _source_match_keys(
+        "https://huggingface.co/gpt2/resolve/main/README.md"
+    ) & _source_match_keys("https://huggingface.co/datasets/gpt2")
+
+
 def test_huggingface_non_repository_paths_get_no_repo_key():
     for url in [
         "https://huggingface.co/papers/2609.19969",
         "https://huggingface.co/docs/transformers",
+        "https://huggingface.co/Papers/2609.19969",
         "https://huggingface.co/blog/deepseek-v4",
         "https://huggingface.co/collections/deepseek-ai/deepseek-v4",
         "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash/discussions/3",

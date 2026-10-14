@@ -159,19 +159,24 @@ def _paper_route_keys(paper_id: int, paper_arxiv_id: Optional[str]) -> set[str]:
 
 
 def _huggingface_repo_key(path_parts: list[str]) -> Optional[str]:
-    """`hfrepo:{kind}/{owner}/{repo}` for a Hugging Face repository URL path."""
+    """`hfrepo:{kind}/{repo id}` for a Hugging Face repository URL path.
+
+    Handles `{owner}/{repo}` ids and legacy namespace-less ids such as `gpt2`.
+    """
+    parts = [part.lower() for part in path_parts]
     kind = "model"
-    if path_parts and path_parts[0] in {"datasets", "spaces"}:
-        kind = path_parts[0].removesuffix("s")
-        path_parts = path_parts[1:]
-    if len(path_parts) < 2 or (
-        kind == "model" and path_parts[0] in _HUGGINGFACE_NON_REPO_ROOTS
-    ):
+    if parts and parts[0] in {"datasets", "spaces"}:
+        kind = parts[0].removesuffix("s")
+        parts = parts[1:]
+    elif parts and parts[0] in _HUGGINGFACE_NON_REPO_ROOTS:
         return None
-    if len(path_parts) > 2 and path_parts[2] not in _HUGGINGFACE_REPO_SUBPATHS:
+    if not parts:
         return None
-    owner, repository = path_parts[0].lower(), path_parts[1].lower()
-    return f"hfrepo:{kind}/{owner}/{repository}"
+    # The repo id ends where a file action (blob/resolve/raw/tree) starts.
+    id_length = 1 if len(parts) > 1 and parts[1] in _HUGGINGFACE_REPO_SUBPATHS else 2
+    if len(parts) > id_length and parts[id_length] not in _HUGGINGFACE_REPO_SUBPATHS:
+        return None
+    return f"hfrepo:{kind}/{'/'.join(parts[:id_length])}"
 
 
 def _source_match_keys(url: Optional[str]) -> set[str]:
