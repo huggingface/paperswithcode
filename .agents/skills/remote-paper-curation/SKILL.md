@@ -287,28 +287,52 @@ python jobs/curation_api.py catalog "ScanObjectNN"
 Return exactly one decision for every candidate in that list, up to 150; the
 server rejects a proposal that leaves any candidate out. Triage from the
 summaries in the context; do not research candidates one by one (the
-`add-benchmark` job does that). Decide each one with the whole list in view:
+`add-benchmark` job does that).
+
+You are the quality gate, not a rubber stamp: three papers mentioning a name
+does not make it a benchmark worth a leaderboard. Every approval queues
+catalog writes (at most 20 a day), and a wrong one lands a leaderboard on the
+wrong task or metric. Read each candidate's `reported_tasks` and
+`reported_metrics` (distinct reporting papers per task and metric),
+`reported_splits`, `recommendations`, `evidence_papers`, and catalog matches
+before deciding. Decide each one with the whole list in view:
 
 - `merge` duplicates into the candidate to keep, for example `TinyImageNet`
   into `Tiny-ImageNet` (`merge_into_candidate_id`). Never merge distinct
   splits, versions, or subsets.
-- `reject` a candidate that is not a reusable public benchmark (a private or
-  paper-specific test set, a model or method name, a metric, a split label)
-  or that `catalog_name_matches` already covers completely. Watch for name
-  clashes: a match with the same name but a different domain (the graph
-  dataset `Chameleon` against a camouflaged-object benchmark `CHAMELEON`) is
-  not coverage.
-- `defer` when the evidence is too thin or contradictory to decide today.
-- `approve` the rest. Each approval queues one `add-benchmark` job that does
-  the deep research, so approve on reusability and demand, not on source
+- `reject` a candidate that is not a reusable public benchmark: a private or
+  paper-specific test set, a model or method name, a metric, a training
+  corpus, a split or subset label (`Avg. OOD`, `test-dev`, `hard`), a
+  benchmark suite the catalog already splits into its members, or a name that
+  `catalog_name_matches` already covers completely. Watch for name clashes: a
+  match with the same name but a different domain (the graph dataset
+  `Chameleon` against a camouflaged-object benchmark `CHAMELEON`) is not
+  coverage.
+- `defer` when you cannot yet say which benchmark and protocol the papers
+  mean: an ambiguous or generic name (`ShapeNet`, `Matterport3D`, and
+  `DomainNet` each back several unrelated protocols), papers split between
+  unrelated tasks or metrics (ShapeNet reported for reconstruction with
+  Chamfer distance by most papers and for generation with FID by one),
+  `recommendations` that are mostly not `add_candidate`, or evidence too
+  thin or contradictory to decide today.
+- `approve` only when you can name the established public benchmark, the task
+  most reporting papers evaluate, and the primary metric they share. Each
+  approval queues one `add-benchmark` job that does the deep research, so
+  approve on reusability, demand, and a consistent protocol, not on source
   details. Approve leaderboard gaps (`task_dataset_association_missing`,
   `metric_configuration_missing`) when the papers report results on that
   exact task and metric.
 
-Give a specific reason per decision; the reasons are the audit trail. Decide
-only candidates from the context. Build the proposal with a short Python
-script that walks `/tmp/context.json` and writes your decision for every
-candidate id, so none is dropped.
+The reasons are the audit trail, and the server enforces that they are
+candidate-specific: it rejects the proposal when two approve, reject, or defer
+reasons match after removing each candidate's own names and all digits (a
+template such as "`{name}` is a standard benchmark reported by `{n}` papers").
+Write each reason from that candidate's evidence: what it measures, the task
+and metric its papers share or disagree on, and why that leads to the
+decision. Merge reasons may repeat. Decide only candidates from the context.
+Build the proposal with a short Python script that walks `/tmp/context.json`
+and holds your hand-written decision and reason for every candidate id, so
+none is dropped.
 
 ```json
 {
@@ -318,7 +342,9 @@ candidate id, so none is dropped.
     "summary": "Approved 9, merged 2 aliases, rejected 3 paper-specific sets.",
     "decisions": [
       {"candidate_id": "<uuid>", "decision": "approve",
-       "reason": "Standard public 200-class benchmark reported by 16 papers."},
+       "reason": "Public 200-class ImageNet subset; 15 of 16 papers report top-1 Accuracy for image classification."},
+      {"candidate_id": "<uuid>", "decision": "defer",
+       "reason": "ShapeNet names a shape repository, not one protocol: 6 papers report reconstruction Chamfer distance, 1 generation FID."},
       {"candidate_id": "<uuid>", "decision": "merge",
        "merge_into_candidate_id": "<uuid>",
        "reason": "Same dataset as Tiny-ImageNet under another spelling."}
@@ -331,7 +357,11 @@ candidate id, so none is dropped.
 
 `context.benchmark` holds the candidate, the overseer's reason, every
 reporting paper's protocol, metrics, sources, catalog near-matches, and
-related tasks. Decide:
+related tasks. `candidate.reported_tasks` and `candidate.reported_metrics`
+count distinct reporting papers per proposed task and metric, and
+`evidence_consensus` lists the leading ones: the task ids and primary metric
+names reported by at least half as many papers as the most common one.
+Decide:
 
 - `map_existing` when the dataset already exists (check `catalog` for every
   name and alias first): give `existing_dataset_id` and the task and metrics
@@ -346,17 +376,34 @@ related tasks. Decide:
 - `reject` a candidate that is not a reusable benchmark after all, or `defer`
   when primary sources cannot be read.
 
-Task: choose the most specific existing task that matches what the papers
-measure, even when it differs from the reported task (COD10K belongs under
-camouflaged object detection, not the broad image segmentation task). Propose
-`new_task` only when no existing task fits; it must name an existing
-`parent_task_id` and give a description and comma-separated keywords.
+Task: start from `evidence_consensus.task_ids` and choose the most specific
+existing task, at or below one of them, that matches what the papers measure
+(COD10K belongs under camouflaged object detection, not the broad image
+segmentation task). When the benchmark measures a distinct setting rather
+than the plain task (domain adaptation or generalization for Office-Home,
+PACS, or DomainNet; robustness to spurious correlations for Waterbirds),
+use or propose that more specific task instead of filling the generic
+leaderboard. Propose `new_task` only when no existing task fits; it must name
+an existing `parent_task_id` and give a description and comma-separated
+keywords. The server rejects a task (or a new task's parent) that is neither a
+consensus task nor one of its descendants. When the papers' own proposals are
+wrong, for example because the evidence lacks the right task, say why in
+`task_choice_reason`; it is recorded with the leaderboard.
 
-Metrics: list one to three, primary first, using the names the papers report.
-Reuse an existing metric whenever its definition matches (search `catalog`
-first); the server rejects a `new_metric` whose name matches an existing one.
-A new metric needs its full name, direction, scale (`0-100`, `0-1`, or a unit),
-and a definition.
+Metrics: list one to three, primary first, using what the papers report. The
+primary metric must be one of `evidence_consensus.primary_metrics` (matched by
+name or full name, ignoring case and punctuation); never substitute a metric
+from another protocol (retrieval mAP@200 for a benchmark the papers score by
+classification accuracy). The server rejects any other primary metric unless
+`metric_choice_reason` explains it, for example that `OA` is the existing
+`Overall Accuracy` metric. Reuse an existing metric whenever its definition
+matches (search `catalog` first); the server rejects a `new_metric` whose name
+matches an existing one. A new metric needs its full name, direction, scale
+(`0-100`, `0-1`, or a unit), and a definition.
+
+When the reporting papers split between unrelated protocols and no single
+task and metric serve most of them, `defer` with that reason instead of
+choosing one.
 
 ```json
 {

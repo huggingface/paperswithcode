@@ -229,6 +229,11 @@ class AddBenchmarkMutation(BaseModel):
     new_task: NewBenchmarkTask | None = None
     metrics: list[BenchmarkMetricChoice] = Field(default_factory=list, max_length=3)
     supports_harness: bool = False
+    # Justify a task or primary metric the reporting papers do not mostly use.
+    task_choice_reason: str | None = Field(default=None, min_length=1, max_length=2_000)
+    metric_choice_reason: str | None = Field(
+        default=None, min_length=1, max_length=2_000
+    )
 
     @field_validator("evidence_urls", mode="before")
     @classmethod

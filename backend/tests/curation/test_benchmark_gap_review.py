@@ -128,7 +128,7 @@ def add_candidate(
         canonical_name=name,
         gap_type=gap_type,
         task_ids=task_ids or [],
-        aliases=[],
+        aliases=fields.pop("aliases", []),
         status=status,
         distinct_paper_count=papers,
         confidence=confidence,
@@ -140,7 +140,7 @@ def add_candidate(
     return candidate
 
 
-def add_evidence(db, candidate, paper_ids, *, metric="Accuracy"):
+def add_evidence(db, candidate, paper_ids, *, metric="Accuracy", task_id=None):
     job = PaperCurationJob(
         id=uuid.uuid4(),
         kind="add-evals",
@@ -166,7 +166,10 @@ def add_evidence(db, candidate, paper_ids, *, metric="Accuracy"):
                     "proposed_benchmark": {
                         "canonical_sources": [
                             {"kind": "paper", "url": "https://arxiv.org/abs/1406.5670"}
-                        ]
+                        ],
+                        "task_candidates": (
+                            [{"task_id": task_id}] if task_id is not None else []
+                        ),
                     },
                     "assessment": {"recommendation": "add_candidate"},
                 },
@@ -496,7 +499,8 @@ def test_rollback_removes_created_rows_unless_others_use_them(db):
                         "description": "Accuracy averaged over classes.",
                     }
                 }
-            ]
+            ],
+            metric_choice_reason="Test: rollback must remove the new metric.",
         ),
     )
     dataset = db.query(Dataset).filter(Dataset.slug == "modelnet40").one()
@@ -838,7 +842,7 @@ def test_review_decides_exactly_the_batch_it_was_served(db):
             summary="x",
             decisions=[
                 {"candidate_id": first.id, "decision": "approve", "reason": "x"},
-                {"candidate_id": skipped.id, "decision": "defer", "reason": "x"},
+                {"candidate_id": skipped.id, "decision": "defer", "reason": "y"},
                 {"candidate_id": gone.id, "decision": "approve", "reason": "x"},
             ],
         ),
@@ -884,3 +888,187 @@ def test_skipped_merges_do_not_block_eligible_merges_into_them(db):
     assert result["decisions"] == {"approve": 1, "merge": 1}
     assert result["skipped_no_longer_eligible"] == [str(middle.id)]
     assert alias.merged_into_id == middle.id
+
+
+def test_review_refuses_one_templated_reason_across_candidates(db):
+    tiny = add_candidate(db, "Tiny-ImageNet", papers=16)
+    pets = add_candidate(db, "OxfordPets", papers=8, aliases=["Oxford-IIIT Pet"])
+    alias = add_candidate(db, "TinyImageNet", papers=3)
+    other_alias = add_candidate(db, "Tiny ImageNet", papers=3)
+
+    def decisions(tiny_reason, pets_reason):
+        merge = "Same dataset as Tiny-ImageNet under another spelling."
+        return ReviewBenchmarkGapsMutation(
+            summary="x",
+            decisions=[
+                {"candidate_id": tiny.id, "decision": "approve", "reason": tiny_reason},
+                {"candidate_id": pets.id, "decision": "approve", "reason": pets_reason},
+                # Merges may share a reason.
+                *(
+                    {
+                        "candidate_id": item.id,
+                        "decision": "merge",
+                        "merge_into_candidate_id": tiny.id,
+                        "reason": merge,
+                    }
+                    for item in (alias, other_alias)
+                ),
+            ],
+        )
+
+    with pytest.raises(ValueError, match="2 decisions reuse 1 templates"):
+        service(db).apply_review(
+            decisions(
+                "Tiny-ImageNet is a standard public benchmark reported by 16 papers.",
+                "Oxford-IIIT Pet is a standard public benchmark reported by 8 papers.",
+            )
+        )
+
+    result = service(db).apply_review(
+        decisions(
+            "Tiny-ImageNet: 200-class ImageNet subset; 15 of 16 papers report "
+            "top-1 Accuracy under Image Classification.",
+            "OxfordPets already exists as a dataset without a classification "
+            "leaderboard; 7 papers report Accuracy.",
+        )
+    )
+
+    assert result["decisions"] == {"approve": 2, "merge": 2}
+
+
+def votes_setup(db):
+    for paper_id in range(1, 6):
+        add_paper(db, paper_id, f"2601.0000{paper_id}")
+    add_paper(db, 10, "1406.5670", "DomainNet")
+    db.add_all(
+        [
+            Task(id=1, name="Image Classification", slug="image-classification"),
+            Task(id=7, name="Embedding models", slug="embedding-models"),
+            Task(id=23, name="Retrieval", slug="retrieval", parent_id=7),
+            Task(
+                id=50, name="Domain Adaptation", slug="domain-adaptation", parent_id=1
+            ),
+            Metric(id=3, name="Accuracy", direction="higher_is_better"),
+            Metric(id=4, name="mAP@200", direction="higher_is_better"),
+        ]
+    )
+    db.flush()
+    # The first report proposed Retrieval, so the candidate's task_ids do too.
+    candidate = add_candidate(
+        db, "DomainNet", papers=5, status="approved", task_ids=[23]
+    )
+    add_evidence(db, candidate, [1], metric="mAP@200", task_id=23)
+    add_evidence(db, candidate, [2, 3, 4, 5], metric="Accuracy", task_id=1)
+    # A paper reported twice still counts once.
+    add_evidence(db, candidate, [3, 2], metric="Accuracy", task_id=1)
+    job = service(db).job_service.enqueue_benchmark_job(
+        db,
+        kind="add-benchmark",
+        benchmark_candidate_id=candidate.id,
+        requested_by="test",
+        settings=get_settings(),
+        priority=20,
+    )
+    return candidate, job
+
+
+def domainnet_mutation(**overrides) -> AddBenchmarkMutation:
+    return create_mutation(
+        **{
+            "reason": "DomainNet is the standard domain adaptation benchmark.",
+            "new_dataset": {"name": "DomainNet", "description": "345 classes."},
+            "new_task": None,
+            "existing_task_id": 1,
+            "metrics": [{"existing_metric_id": 3}],
+            **overrides,
+        }
+    )
+
+
+def test_contexts_count_reporting_papers_per_task_and_metric(db):
+    candidate, job = votes_setup(db)
+
+    context = service(db).creation_context(job)
+
+    summary = context["candidate"]
+    assert [(item["id"], item["papers"]) for item in summary["reported_tasks"]] == [
+        (1, 4),
+        (23, 1),
+    ]
+    assert [(item["name"], item["papers"]) for item in summary["reported_metrics"]] == [
+        ("Accuracy", 4),
+        ("mAP@200", 1),
+    ]
+    assert context["evidence_consensus"] == {
+        "task_ids": [1],
+        "primary_metrics": ["Accuracy"],
+    }
+    assert {item["id"] for item in context["related_tasks"]} == {1, 23, 50}
+
+
+def test_creation_holds_task_and_metric_to_the_reporting_papers(db):
+    candidate, job = votes_setup(db)
+    review = service(db)
+
+    with pytest.raises(ValueError, match=r"Image Classification \(1\): 4 papers"):
+        review.apply_add_benchmark(job, domainnet_mutation(existing_task_id=23))
+    with pytest.raises(ValueError, match="Accuracy: 4 papers"):
+        review.apply_add_benchmark(
+            job, domainnet_mutation(metrics=[{"existing_metric_id": 4}])
+        )
+    with pytest.raises(ValueError, match="Accuracy: 4 papers"):
+        review.apply_add_benchmark(
+            job,
+            domainnet_mutation(
+                metrics=[
+                    {
+                        "new_metric": {
+                            "name": "Prec@200",
+                            "full_name": "Precision at 200",
+                            "direction": "higher_is_better",
+                            "description": "Retrieval precision.",
+                        }
+                    }
+                ]
+            ),
+        )
+
+    # A descendant of a leading task fits, as does an explained choice.
+    result = review.apply_add_benchmark(
+        job,
+        domainnet_mutation(
+            existing_task_id=50,
+            metrics=[{"existing_metric_id": 3}, {"existing_metric_id": 4}],
+        ),
+    )
+
+    assert result["task_id"] == 50 and result["primary_metric"] == "Accuracy"
+    assert candidate.resolution["task_choice_reason"] is None
+
+
+def test_creation_accepts_an_explained_task_or_metric_choice(db):
+    candidate, job = votes_setup(db)
+
+    service(db).apply_add_benchmark(
+        job,
+        domainnet_mutation(
+            existing_task_id=23,
+            metrics=[{"existing_metric_id": 4}],
+            task_choice_reason="Explained task.",
+            metric_choice_reason="Explained metric.",
+        ),
+    )
+
+    assert candidate.status == "promoted"
+    assert candidate.resolution["task_choice_reason"] == "Explained task."
+    assert candidate.resolution["metric_choice_reason"] == "Explained metric."
+
+
+def test_creation_without_task_votes_falls_back_to_candidate_tasks(db):
+    candidate, job, _source, parent = creation_setup(db)
+    candidate.task_ids = [999]
+    db.add(Task(id=999, name="Point Clouds", slug="point-clouds"))
+    db.flush()
+
+    with pytest.raises(ValueError, match=r"Point Clouds \(999\)"):
+        service(db).apply_add_benchmark(job, create_mutation())

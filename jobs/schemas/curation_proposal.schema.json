@@ -204,7 +204,19 @@
             "additionalProperties": false
           }
         },
-        "supports_harness": {"type": "boolean"}
+        "supports_harness": {"type": "boolean"},
+        "task_choice_reason": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Required when the task is not one the reporting papers mostly propose, or a descendant of one."
+        },
+        "metric_choice_reason": {
+          "type": ["string", "null"],
+          "minLength": 1,
+          "maxLength": 2000,
+          "description": "Required when the primary metric is not one the reporting papers mostly report."
+        }
       },
       "additionalProperties": false
     },

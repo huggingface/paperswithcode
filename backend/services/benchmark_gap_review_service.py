@@ -82,6 +82,45 @@ def _utc_midnight(now: datetime) -> datetime:
     return datetime.combine(now.date(), datetime.min.time(), UTC)
 
 
+def _leading(votes: Counter) -> set:
+    """Choices reported by at least half as many papers as the most common one."""
+    top = max(votes.values(), default=0)
+    return {key for key, count in votes.items() if 2 * count >= top}
+
+
+def _evidence_votes(
+    evidence: list[BenchmarkCurationEvidence],
+) -> tuple[Counter[int], Counter[str], dict[str, dict]]:
+    """Distinct reporting papers per proposed task and per reported metric.
+
+    Metrics are keyed by ``_name_key``; ``spellings`` keeps the first reported
+    name and direction for each key.
+    """
+    tasks: dict[int, set[int]] = {}
+    metrics: dict[str, set[int]] = {}
+    spellings: dict[str, dict] = {}
+    for row in evidence:
+        payload = row.payload or {}
+        paper_id = int(row.paper_id)
+        proposed = payload.get("proposed_benchmark") or {}
+        for task in proposed.get("task_candidates") or []:
+            if isinstance(task, dict) and task.get("task_id"):
+                tasks.setdefault(int(task["task_id"]), set()).add(paper_id)
+        for metric in (payload.get("protocol") or {}).get("metrics") or []:
+            key = _name_key(metric.get("name")) if isinstance(metric, dict) else ""
+            if key:
+                metrics.setdefault(key, set()).add(paper_id)
+                spellings.setdefault(
+                    key,
+                    {"name": metric["name"], "direction": metric.get("direction")},
+                )
+    return (
+        Counter({key: len(papers) for key, papers in tasks.items()}),
+        Counter({key: len(papers) for key, papers in metrics.items()}),
+        spellings,
+    )
+
+
 def _paper_url(paper: Paper) -> str:
     route = get_paper_route_identifier(paper.source, paper.arxiv_id, paper.id)
     return f"https://paperswithcode.co/paper/{route}"
@@ -354,7 +393,7 @@ class BenchmarkGapReviewService:
         catalog: dict[int, dict],
         index: dict[str, set[int]],
     ) -> dict:
-        metrics: Counter[tuple[str, str]] = Counter()
+        task_votes, metric_votes, spellings = _evidence_votes(evidence)
         sources: Counter[str] = Counter()
         source_details: dict[str, dict] = {}
         splits: Counter[str] = Counter()
@@ -364,9 +403,6 @@ class BenchmarkGapReviewService:
         for row in evidence:
             payload = row.payload or {}
             protocol = payload.get("protocol") or {}
-            for metric in protocol.get("metrics") or []:
-                if isinstance(metric, dict) and metric.get("name"):
-                    metrics[(metric["name"], metric.get("direction") or "")] += 1
             splits.update(value for value in protocol.get("splits") or [] if value)
             proposed = payload.get("proposed_benchmark") or {}
             for source in proposed.get("canonical_sources") or []:
@@ -401,14 +437,20 @@ class BenchmarkGapReviewService:
             "last_seen_at": candidate.last_seen_at.isoformat()
             if candidate.last_seen_at
             else None,
+            # Distinct reporting papers per proposed task and per metric.
             "reported_tasks": [
-                tasks[task_id]
+                {**tasks[task_id], "papers": count}
+                for task_id, count in task_votes.most_common(6)
+                if task_id in tasks
+            ]
+            or [
+                {**tasks[task_id], "papers": None}
                 for task_id in candidate.task_ids or []
                 if task_id in tasks
             ],
             "reported_metrics": [
-                {"name": name, "direction": direction, "papers": count}
-                for (name, direction), count in metrics.most_common(6)
+                {**spellings[key], "papers": count}
+                for key, count in metric_votes.most_common(8)
             ],
             "reported_splits": [value for value, _ in splits.most_common(5)],
             "reported_sources": [
@@ -442,6 +484,11 @@ class BenchmarkGapReviewService:
         evidence = self._evidence_by_candidate([item.id for item in candidates])
         tasks = self._task_labels(
             {task_id for item in candidates for task_id in item.task_ids or []}
+            | {
+                task_id
+                for rows in evidence.values()
+                for task_id in _evidence_votes(rows)[0]
+            }
         )
         paper_ids = {int(row.paper_id) for rows in evidence.values() for row in rows}
         papers = (
@@ -509,15 +556,8 @@ class BenchmarkGapReviewService:
             raise LookupError("Benchmark candidate not found")
         evidence = self._evidence_by_candidate([candidate.id]).get(candidate.id, [])
         summary = self._summaries([candidate])[0]
-        task_ids = set(candidate.task_ids or [])
-        children = (
-            {
-                int(task.id)
-                for task in self.db.query(Task).filter(Task.parent_id.in_(task_ids))
-            }
-            if task_ids
-            else set()
-        )
+        task_votes, metric_votes, spellings = _evidence_votes(evidence)
+        leading_tasks = _leading(self._task_votes(candidate, task_votes))
         papers = (
             {
                 int(paper.id): paper
@@ -555,9 +595,43 @@ class BenchmarkGapReviewService:
         return {
             "candidate": summary,
             "overseer_reason": candidate.review_reason,
+            # What apply_add_benchmark accepts without a *_choice_reason.
+            "evidence_consensus": {
+                "task_ids": sorted(leading_tasks),
+                "primary_metrics": [
+                    spellings[key]["name"] for key in sorted(_leading(metric_votes))
+                ],
+            },
             "reports": reports,
-            "related_tasks": list(self._task_labels(task_ids | children).values()),
+            "related_tasks": list(
+                self._task_labels(
+                    set(candidate.task_ids or [])
+                    | set(task_votes)
+                    | self._descendants(leading_tasks)
+                ).values()
+            ),
         }
+
+    def _task_votes(
+        self, candidate: BenchmarkCurationCandidate, votes: Counter[int]
+    ) -> Counter[int]:
+        """Paper votes per task, or the candidate's tasks for vote-less evidence."""
+        return votes or Counter(dict.fromkeys(candidate.task_ids or [], 1))
+
+    def _descendants(self, task_ids: set[int]) -> set[int]:
+        children: dict[int, list[int]] = {}
+        for task_id, parent_id in self.db.query(Task.id, Task.parent_id).filter(
+            Task.parent_id.isnot(None)
+        ):
+            children.setdefault(int(parent_id), []).append(int(task_id))
+        found: set[int] = set()
+        pending = list(task_ids)
+        while pending:
+            for child in children.get(pending.pop(), []):
+                if child not in found:
+                    found.add(child)
+                    pending.append(child)
+        return found
 
     def catalog_search(self, query: str) -> dict:
         """Datasets (configured or not), tasks, and metrics for a creation job."""
@@ -648,6 +722,7 @@ class BenchmarkGapReviewService:
                 f"{len(missing)} have no decision: {', '.join(missing[:20])}"
                 + (" ..." if len(missing) > 20 else "")
             )
+        self._check_specific_reasons(mutation, eligible)
         skipped = [
             str(item.candidate_id)
             for item in mutation.decisions
@@ -714,6 +789,36 @@ class BenchmarkGapReviewService:
             "creation_jobs_queued": self.queue_approved_creations(now),
         }
 
+    def _check_specific_reasons(
+        self, mutation: ReviewBenchmarkGapsMutation, eligible: set[uuid.UUID]
+    ) -> None:
+        """Refuse one templated reason reused across approvals, rejects, or defers.
+
+        Two reasons count as the same template when they match after removing
+        each candidate's own names, digits, and punctuation.
+        """
+        templates: dict[str, list[str]] = {}
+        for decision in mutation.decisions:
+            if decision.decision == "merge" or decision.candidate_id not in eligible:
+                continue
+            candidate = self.db.get(BenchmarkCurationCandidate, decision.candidate_id)
+            text = decision.reason.lower()
+            for name in sorted(
+                {candidate.canonical_name, *(candidate.aliases or [])},
+                key=len,
+                reverse=True,
+            ):
+                text = text.replace(name.lower(), " ")
+            template = " ".join(re.findall(r"[a-z]+", text))
+            templates.setdefault(template, []).append(decision.reason)
+        repeated = [reasons for reasons in templates.values() if len(reasons) > 1]
+        if repeated:
+            raise ValueError(
+                "Give each candidate a reason grounded in its own evidence; "
+                f"{sum(len(reasons) for reasons in repeated)} decisions reuse "
+                f"{len(repeated)} templates, for example {repeated[0][0]!r}"
+            )
+
     def _merge(
         self, source: BenchmarkCurationCandidate, target: BenchmarkCurationCandidate
     ) -> None:
@@ -779,6 +884,7 @@ class BenchmarkGapReviewService:
             candidate.deferred_until = now + timedelta(days=DEFER_DAYS)
             return {"status": "deferred", "candidate_id": str(candidate.id)}
 
+        self._check_evidence_fit(candidate, mutation)
         created: dict[str, Any] = {"metric_ids": [], "task_dataset_metric_ids": []}
         task = self._resolve_task(mutation, created)
         metrics = [self._resolve_metric(choice, created) for choice in mutation.metrics]
@@ -848,6 +954,8 @@ class BenchmarkGapReviewService:
             "primary_metric": metrics[0].name,
             "source_paper_id": int(paper.id) if paper is not None else None,
             "created": created,
+            "task_choice_reason": mutation.task_choice_reason,
+            "metric_choice_reason": mutation.metric_choice_reason,
         }
         rechecks = BenchmarkGapService(self.db).enqueue_evidence_rechecks(
             candidate,
@@ -864,6 +972,54 @@ class BenchmarkGapReviewService:
             "recheck_job_ids": rechecks["enqueued_job_ids"],
             "skipped_active_paper_ids": rechecks["skipped_active_paper_ids"],
         }
+
+    def _check_evidence_fit(
+        self, candidate: BenchmarkCurationCandidate, mutation: AddBenchmarkMutation
+    ) -> None:
+        """Hold the task and primary metric to what the reporting papers use.
+
+        The task (or a new task's parent) must be a leading proposed task or one
+        of its descendants, and the primary metric a leading reported metric,
+        unless the job explains its choice.
+        """
+        evidence = self._evidence_by_candidate([candidate.id]).get(candidate.id, [])
+        task_votes, metric_votes, spellings = _evidence_votes(evidence)
+        task_votes = self._task_votes(candidate, task_votes)
+        if task_votes and mutation.task_choice_reason is None:
+            leading = _leading(task_votes)
+            chosen = mutation.existing_task_id or mutation.new_task.parent_task_id
+            if chosen not in leading | self._descendants(leading):
+                labels = self._task_labels(set(task_votes))
+                reported = "; ".join(
+                    f"{labels[task_id]['name']} ({task_id}): {count} papers"
+                    for task_id, count in task_votes.most_common(5)
+                    if task_id in labels
+                )
+                raise ValueError(
+                    f"Task {chosen} is neither a task the reporting papers mostly "
+                    f"propose nor a descendant of one ({reported}); choose one, or "
+                    "explain the choice in task_choice_reason"
+                )
+        if metric_votes and mutation.metric_choice_reason is None:
+            primary = mutation.metrics[0]
+            if primary.new_metric is not None:
+                names = {primary.new_metric.name, primary.new_metric.full_name}
+            else:
+                metric = self.db.get(Metric, primary.existing_metric_id)
+                # A missing metric fails in _resolve_metric with its own error.
+                names = {metric.name, metric.full_name} if metric else set()
+            if names and not {_name_key(name) for name in names} & _leading(
+                metric_votes
+            ):
+                reported = "; ".join(
+                    f"{spellings[key]['name']}: {count} papers"
+                    for key, count in metric_votes.most_common(5)
+                )
+                raise ValueError(
+                    "The primary metric is not one the reporting papers mostly "
+                    f"report ({reported}); reuse or create that metric, or explain "
+                    "the choice in metric_choice_reason"
+                )
 
     def _resolve_task(self, mutation: AddBenchmarkMutation, created: dict) -> Task:
         if mutation.existing_task_id is not None:
