@@ -149,6 +149,8 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     ));
   };
   const queuedLaunchRef = useRef(readQueuedChatLaunch());
+  // Queued launch controls belong to the chat the launch returns to.
+  const queuedLaunchRouteRef = useRef(routeSessionId ?? null);
   const requestedModelRef = useRef(searchParams.get("model") || queuedLaunchRef.current?.model);
   const [models, setModels] = useState<ChatModelChoice[]>(
     staging ? STAGING_FALLBACK_CHAT_MODELS : PRODUCTION_FALLBACK_CHAT_MODELS,
@@ -414,7 +416,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     });
     setSessionError("");
     setSelectedModel(detail.selected_model);
-    const queued = queuedLaunchRef.current;
+    const queued = selectedId === queuedLaunchRouteRef.current ? queuedLaunchRef.current : null;
     setWebSearchEnabled(queued ? queued.webSearchEnabled : detail.web_search_enabled);
     setReasoningEffort(queued ? queued.reasoningEffort : detail.reasoning_effort ?? "high");
   }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);

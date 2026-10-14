@@ -793,4 +793,31 @@ describe("ChatView web search", () => {
     await waitFor(() => expect(mocks.send).toHaveBeenCalled());
     expect(mocks.chatOptions?.webSearchEnabled).toBe(true);
   });
+
+  it("keeps a pending queued launch's controls off other conversations", async () => {
+    const earlierSession = {
+      ...session,
+      id: "33333333-3333-4333-8333-333333333333",
+      title: "Earlier chat",
+      updated_at: "2026-07-27T20:00:00Z",
+    };
+    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
+    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
+    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "1");
+    mocks.busy = true;
+    mocks.listSessions.mockResolvedValue([session, earlierSession]);
+    mocks.getSession.mockImplementation(async (id: string) => ({
+      ...(id === earlierSession.id ? earlierSession : session),
+      transcript_status: "ready",
+      messages: [],
+    }));
+    const user = userEvent.setup();
+    renderChat();
+    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
+
+    await user.click(await screen.findByText("Earlier chat", { selector: ".chat-session-title" }));
+
+    await waitFor(() => expect(mocks.getSession).toHaveBeenCalledWith(earlierSession.id));
+    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(false));
+  });
 });
