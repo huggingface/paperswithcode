@@ -424,7 +424,7 @@ Use its read-only audit first. Then visually inspect the exact public image, bec
 - stale source content or the wrong arXiv-version title;
 - severe letterboxing, squatting, cropping, or unreadable artwork.
 
-Reuse evidence already collected during enrichment. In particular, inspect hero/overview images from the validated official repository, project page, source page, and HF model card before falling back to a PDF first page. Use `pwc paper thumbnail` only when the correct paper first page is the best source; otherwise use the `create-thumbnail` compositor and content-addressed publisher.
+Reuse evidence already collected during enrichment. In particular, inspect hero/overview images from the validated official repository, project page, source page, and HF model card before falling back to a PDF first page. Use `pwc thumbnail` only when the correct paper first page is the best source; otherwise use the `create-thumbnail` compositor and content-addressed publisher.
 
 Finish with the `create-thumbnail` live checks: confirm the API's final URL, fetch that exact public response, validate its image type and portrait geometry, and visually inspect the downloaded public image. If the existing thumbnail is already authoritative and legible, preserve it and report that no replacement was needed.
 
