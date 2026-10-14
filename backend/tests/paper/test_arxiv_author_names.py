@@ -248,7 +248,8 @@ def test_version_refresh_keeps_hf_claims_from_the_previous_version(tmp_path) -> 
         ]
 
 
-def test_version_refresh_keeps_a_claim_whose_name_arxiv_respelled(tmp_path) -> None:
+def _refresh_links(claimed_order, new_names, tmp_path):
+    """Refresh v2 of a paper whose v1 Tom Aarsen claimed; return v2's links."""
     engine = create_engine(f"sqlite:///{tmp_path / 'refresh.db'}")
     Base.metadata.create_all(
         bind=engine,
@@ -263,19 +264,39 @@ def test_version_refresh_keeps_a_claim_whose_name_arxiv_respelled(tmp_path) -> N
             ]
         )
         db.flush()
-        db.add(PaperAuthor(paper_id=1, author_id=1, author_order=2, claimed=True))
+        db.add(
+            PaperAuthor(
+                paper_id=1, author_id=1, author_order=claimed_order, claimed=True
+            )
+        )
         db.flush()
 
         PaperVersionRefreshService(
             db, paper_factory=lambda _paper_id: None
-        )._replace_paper_authors(2, ["Grace Hopper", "T. Aarsen"], 1)
+        )._replace_paper_authors(2, new_names, 1)
         db.flush()
 
-        links = (
-            db.query(Author.hf_username, PaperAuthor.claimed)
+        return (
+            db.query(Author.name, Author.hf_username, PaperAuthor.claimed)
             .join(PaperAuthor, PaperAuthor.author_id == Author.id)
             .filter(PaperAuthor.paper_id == 2)
             .order_by(PaperAuthor.author_order)
             .all()
         )
-        assert links == [(None, False), ("tomaarsen", True)]
+
+
+def test_version_refresh_keeps_a_claim_whose_name_arxiv_respelled(tmp_path) -> None:
+    # The claim follows the respelled name, not its old position.
+    assert _refresh_links(2, ["T. Aarsen", "Grace Hopper", "Ada Byron"], tmp_path) == [
+        ("Tom Aarsen", "tomaarsen", True),
+        ("Grace Hopper", None, False),
+        ("Ada Byron", None, False),
+    ]
+
+
+def test_version_refresh_drops_a_claim_it_cannot_place(tmp_path) -> None:
+    # Tom left the author list; nobody inherits his claim by position.
+    assert _refresh_links(2, ["Grace Hopper", "Ada Byron"], tmp_path) == [
+        ("Grace Hopper", None, False),
+        ("Ada Byron", None, False),
+    ]

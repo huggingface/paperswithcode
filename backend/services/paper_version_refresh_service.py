@@ -329,15 +329,16 @@ class PaperVersionRefreshService:
         self, paper_id: int, author_names: List[str], claims_from: Optional[int]
     ) -> None:
         # Keep Hugging Face claims (on this version or the previous latest one)
-        # attached to the claiming author instead of re-matching it by name: by
-        # name first, else by position when arXiv now spells the name
-        # differently from the claiming author's stored name.
+        # attached to the claiming author instead of re-matching it by name.
+        # A claim follows its author's name; when arXiv now spells it
+        # differently ("T. Aarsen"), it follows the one new name with the same
+        # surname and first initial. Otherwise the claim is dropped here and
+        # sync_hf_author_profiles restores it from HF.
         names = [normalize_arxiv_author_name(full_name) for full_name in author_names]
-        keys = {name.casefold() for name in names}
-        claimed_by_key: dict[str, DBAuthor] = {}
-        claimed_by_order: dict[int, DBAuthor] = {}
-        for author, order in (
-            self.db.query(DBAuthor, PaperAuthor.author_order)
+        claimed_at: dict[int, DBAuthor] = {}
+        unmatched: list[DBAuthor] = []
+        for author in (
+            self.db.query(DBAuthor)
             .join(PaperAuthor, PaperAuthor.author_id == DBAuthor.id)
             .filter(
                 PaperAuthor.paper_id.in_({paper_id, claims_from or paper_id}),
@@ -345,15 +346,25 @@ class PaperVersionRefreshService:
             )
         ):
             key = normalize_arxiv_author_name(author.name).casefold()
-            if key in keys:
-                claimed_by_key[key] = author
+            matches = [i for i, name in enumerate(names) if name.casefold() == key]
+            if matches:
+                claimed_at.setdefault(matches[0], author)
             else:
-                claimed_by_order[order] = author
+                unmatched.append(author)
+        for author in unmatched:
+            initial = _surname_initial(author.name)
+            matches = [
+                i
+                for i, name in enumerate(names)
+                if i not in claimed_at and _surname_initial(name) == initial
+            ]
+            if initial and len(matches) == 1:
+                claimed_at[matches[0]] = author
         self.db.query(PaperAuthor).filter(PaperAuthor.paper_id == paper_id).delete()
 
         linked_ids: set[int] = set()
         for order, name in enumerate(names, start=1):
-            author = claimed_by_key.get(name.casefold()) or claimed_by_order.get(order)
+            author = claimed_at.get(order - 1)
             claimed = author is not None
             if author is None:
                 author = get_or_create_author_by_name(self.db, name)
@@ -368,3 +379,8 @@ class PaperVersionRefreshService:
                     claimed=claimed,
                 )
             )
+
+
+def _surname_initial(name: str) -> Optional[tuple[str, str]]:
+    parts = normalize_arxiv_author_name(name).casefold().replace(".", " ").split()
+    return (parts[0][0], parts[-1]) if len(parts) > 1 else None
