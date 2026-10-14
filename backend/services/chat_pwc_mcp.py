@@ -21,11 +21,13 @@ ENDPOINTS = {
 }
 CLIENT_IDENTITY_HEADER = "X-PwC-MCP-Client"
 MAX_RESPONSE_BYTES = 1024 * 1024
-# One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13).
+# One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13;
+# get_paper_evaluations since pwc-mcp 0.2.7).
 TOOL_NAMES = frozenset(
     {
         "search_papers",
         "get_paper_info",
+        "get_paper_evaluations",
         "list_papers",
         "read_paper",
         "list_recent_papers",

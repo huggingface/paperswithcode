@@ -1,5 +1,5 @@
 // PWC_MCP_SKILL.md is vendored unchanged from huggingface/pwc-cli
-// mcp_server/SKILL.md at 2aad8107ab64 (main, squash of PR #13).
+// mcp_server/SKILL.md at a2fc9d0c0a21 (main, squash of PR #28, pwc-mcp 0.2.7).
 import { PWC_MCP_TOOLS } from "./pwc_mcp_tools.js";
 
 export interface McpResearchPromptOptions {
@@ -15,7 +15,7 @@ Use the registered PwC MCP tools for all catalog research. They are the only rou
 
 Required procedure for any question about the best, top, leading, recommended, or state-of-the-art models for a task or deployment setting (for example on-device, edge, low-latency, small models): do not open with pwc_search_papers. 1) Resolve the canonical task slug from the task index below (for open LLMs this is language-modeling) and call pwc_get_task. 2) Call pwc_list_benchmarks with that task (add include_descendants when relevant) and pick the most relevant leaderboards. 3) Call pwc_get_benchmark for each chosen leaderboard, passing the constraint the user implied: max_parameters (for example "4B" for on-device) when model size matters, sort_metric or minimum_metrics when a metric matters; matched_count reports how many rows satisfied the filters before limit. 4) Only then use pwc_get_paper_info on the leading entries for artifacts and evaluations, and pwc_search_papers solely to fill gaps the leaderboards left. If pwc_get_task fails, use its closest-match hint or go straight to pwc_list_benchmarks with the slug from the index; never repeat a call with identical arguments after it failed. Do not substitute paper popularity or search rank for benchmark evidence. Compare evaluation setup, hardware and latency where available, and state missing evidence.
 
-Use pwc_get_paper_info for promising results; it returns the abstract, repositories, project pages, and Hugging Face model, dataset, and Space links, and include_evaluations true adds every benchmark result of that paper. Use pwc_list_recent_papers and pwc_list_trending_papers for what is new, pwc_get_related_papers and pwc_get_paper_lineage for context, and pwc_list_tasks, pwc_list_methods, pwc_list_conferences, pwc_list_organizations, and pwc_list_frameworks with their get_ counterparts to orient within the taxonomy.
+Use pwc_get_paper_info for promising results; it returns the abstract, repositories, project pages, and Hugging Face model, dataset, and Space links; use pwc_get_paper_evaluations to page through that paper's benchmark results. Use pwc_list_recent_papers and pwc_list_trending_papers for what is new, pwc_get_related_papers and pwc_get_paper_lineage for context, and pwc_list_tasks, pwc_list_methods, pwc_list_conferences, pwc_list_organizations, and pwc_list_frameworks with their get_ counterparts to orient within the taxonomy.
 
 Use the task and method indexes below to resolve names and acronyms. Verify a method with pwc_get_method. When the user asks what a named technique, architecture, training procedure, model family, or acronym is or how it works, call pwc_get_method before answering, even for concepts you could explain from general knowledge: pass the index slug when one matches, otherwise the name as written, and follow a closest-match hint once. Ground the explanation in the returned description and introducing source, link the method at its first mention, and fall back to general knowledge only when the lookup finds nothing, saying so. A missing exact task lookup is not proof that the entire field is absent: try a suitable parent or nearby canonical task from the index, and search task-scoped benchmarks.
 
@@ -39,6 +39,7 @@ const COMMAND_TO_TOOL: readonly [string, string][] = [
   ["pwc paper read", "pwc_read_paper"],
   ["pwc paper list", "pwc_list_papers"],
   ["pwc paper info", "pwc_get_paper_info"],
+  ["pwc paper evaluations", "pwc_get_paper_evaluations"],
   ["pwc benchmark list", "pwc_list_benchmarks"],
   ["pwc benchmark", "pwc_get_benchmark"],
   ["pwc task list", "pwc_list_tasks"],

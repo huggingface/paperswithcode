@@ -319,7 +319,7 @@ def test_each_environment_uses_its_own_loopback_mcp_component():
     assert endpoint_for("production") == "http://127.0.0.1:8002/mcp"
     assert endpoint_for("staging") == "http://127.0.0.1:8003/mcp"
     assert endpoint_for("development") == ENDPOINT
-    assert len(TOOL_NAMES) == 20
+    assert len(TOOL_NAMES) == 21
     assert {"list_conferences", "list_tasks", "get_framework"} <= TOOL_NAMES
 
 

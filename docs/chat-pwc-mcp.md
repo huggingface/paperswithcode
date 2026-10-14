@@ -1,9 +1,10 @@
 # First-party PwC MCP tools in chat
 
 `PWC_CHAT_PWC_MCP_ENABLED` defaults to false. When enabled in the protected backend
-and external Pi worker configuration, chat discovers the twenty reviewed read-only
+and external Pi worker configuration, chat discovers the twenty-one reviewed read-only
 tools from `https://paperswithcode.co/mcp`, one per read-only `pwc` CLI research
-command with every CLI flag as a parameter (huggingface/pwc-cli PR #13). The
+command with every CLI flag as a parameter (huggingface/pwc-cli PR #13, plus
+`get_paper_evaluations` from pwc-mcp 0.2.7). The
 server owns their input schemas. Pi exposes them with a `pwc_` prefix (for
 example `pwc_search_papers`, `pwc_get_benchmark`, `pwc_list_conferences`) in
 place of its three direct catalog tools.
@@ -30,7 +31,7 @@ execution, the gateway checks the capability and durable turn claim; it commits
 search metering before making an upstream request. Searches and filtered list
 searches share the CLI search allowance. General call and output budgets remain
 in the Pi policy. No private capability, session, or ownership headers are sent
-to the public MCP server. The upstream URL and tool allowlist are fixed; discovery fails closed when any of the twenty tools is missing.
+to the public MCP server. The upstream URL and tool allowlist are fixed; discovery fails closed when any of the twenty-one tools is missing.
 
 The gateway uses the deployed MCP 2026-07-28 stateless JSON-RPC envelope, with empty
 client capabilities. It reuses an HTTP connection pool, requests JSON responses,

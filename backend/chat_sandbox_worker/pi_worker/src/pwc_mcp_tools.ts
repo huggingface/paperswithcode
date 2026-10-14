@@ -2,9 +2,10 @@ import type { ExtensionFactory, SessionEntry } from "@earendil-works/pi-coding-a
 import type { TSchema } from "typebox";
 import { gatewayHeaders, type GatewayContext } from "./provider.js";
 
-// One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13).
+// One tool per read-only pwc CLI research command (huggingface/pwc-cli PR #13;
+// get_paper_evaluations since pwc-mcp 0.2.7).
 export const PWC_MCP_TOOLS = [
-  "search_papers", "get_paper_info", "list_papers", "read_paper",
+  "search_papers", "get_paper_info", "get_paper_evaluations", "list_papers", "read_paper",
   "list_recent_papers", "list_trending_papers",
   "get_related_papers", "get_paper_lineage",
   "get_task", "list_tasks", "get_method", "list_methods",
