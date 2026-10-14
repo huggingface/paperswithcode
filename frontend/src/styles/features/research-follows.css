@@ -52,20 +52,23 @@
 .research-follow-btn.is-following svg {
   color: var(--accent-text);
 }
-.research-follow-btn.is-following:hover {
-  filter: none;
-  border-color: var(--danger, #b42318);
-  color: var(--danger, #b42318);
-}
-.research-follow-btn.is-following:hover svg {
+.research-follow-label-hover {
   display: none;
 }
-.research-follow-label-hover,
-.research-follow-btn.is-following:hover .research-follow-label {
-  display: none;
-}
-.research-follow-btn.is-following:hover .research-follow-label-hover {
-  display: inline;
+/* Touch browsers apply :hover on the first tap; swapping the label then would swallow it. */
+@media (hover: hover) {
+  .research-follow-btn.is-following:hover {
+    filter: none;
+    border-color: var(--danger, #b42318);
+    color: var(--danger, #b42318);
+  }
+  .research-follow-btn.is-following:hover svg,
+  .research-follow-btn.is-following:hover .research-follow-label {
+    display: none;
+  }
+  .research-follow-btn.is-following:hover .research-follow-label-hover {
+    display: inline;
+  }
 }
 .research-follow-hint {
   color: var(--ink-soft);

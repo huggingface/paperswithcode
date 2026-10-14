@@ -44,6 +44,23 @@ describe('research follows', () => {
     expect(await screen.findByRole('button', { name: 'Unfollow Mixture of Experts' })).toBeInTheDocument();
     expect(screen.queryByText(/not following anything/)).not.toBeInTheDocument();
   });
+  it('blocks overlapping unfollows so an interest is listed once', async () => {
+    const a = { kind: 'task' as const, entity_id: 1, name: 'Alpha', url: '/tasks/alpha', created_at: '2026-10-01T10:00:00Z' };
+    const b = { kind: 'task' as const, entity_id: 2, name: 'Beta', url: '/tasks/beta', created_at: '2026-10-01T10:00:00Z' };
+    const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([a, b]);
+    vi.spyOn(researchApi, 'email').mockResolvedValue({ enabled: false, email: null, suppressed: false, delivery_ready: true });
+    let finish = () => {};
+    const change = vi.spyOn(researchApi, 'setFollow').mockReturnValue(new Promise<void>(resolve => { finish = resolve; }));
+    render(<ResearchSettings />, { wrapper });
+    const unfollowAlpha = await screen.findByRole('button', { name: 'Unfollow Alpha' });
+    list.mockReturnValue(new Promise(() => {}));
+    fireEvent.click(unfollowAlpha);
+    fireEvent.click(unfollowAlpha);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Unfollow Beta' })).toBeDisabled());
+    finish();
+    expect(await screen.findAllByRole('button', { name: 'Follow Alpha' })).toHaveLength(1);
+    expect(change).toHaveBeenCalledWith('task', 1, false);
+  });
   it('follows and unfollows with the stable entity id', async () => {
     const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
     const change = vi.spyOn(researchApi, 'setFollow').mockResolvedValue();

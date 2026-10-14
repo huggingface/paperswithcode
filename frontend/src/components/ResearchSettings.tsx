@@ -31,14 +31,16 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
       client.setQueryData<ResearchFollow[]>(queryKey, current => enabled
         ? [...(current ?? []), follow]
         : (current ?? []).filter(f => followKey(f) !== followKey(follow)));
-      setUnfollowed(rows => enabled ? rows.filter(r => followKey(r) !== followKey(follow)) : [...rows, follow]);
+      setUnfollowed(rows => [
+        ...rows.filter(r => followKey(r) !== followKey(follow)),
+        ...(enabled ? [] : [follow]),
+      ]);
       void client.invalidateQueries({ queryKey });
       void client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
     },
   });
   const active = new Set(follows.map(followKey));
   const rows = [...follows, ...unfollowed.filter(f => !active.has(followKey(f)))];
-  const pending = change.isPending ? followKey(change.variables.follow) : null;
   if (!rows.length) return <EmptyFollows />;
   return <>
     {KINDS.map(({ kind, label, icon: Icon }) => {
@@ -54,7 +56,7 @@ function FollowList({ follows }: { follows: ResearchFollow[] }) {
               <span>{following ? `Following since ${since(f.created_at)}` : 'Unfollowed'}</span>
             </div>
             <button type="button" className={following ? 'research-follow-action' : 'research-follow-action is-refollow'}
-              disabled={pending === followKey(f)} aria-label={`${following ? 'Unfollow' : 'Follow'} ${f.name}`}
+              disabled={change.isPending} aria-label={`${following ? 'Unfollow' : 'Follow'} ${f.name}`}
               onClick={() => change.mutate({ follow: f, enabled: !following })}>
               {following ? 'Unfollow' : 'Follow again'}
             </button>
