@@ -10,6 +10,8 @@ interface ChatComposerSurfaceProps {
   composerProps: ComponentProps<typeof Composer>;
   provider: ChatModelChoice["provider"];
   paused: boolean;
+  /** Why the last send was rejected; shown next to the restored draft. */
+  error?: string;
   suggestions?: readonly string[];
 }
 
@@ -18,6 +20,7 @@ export function ChatComposerSurface({
   composerProps,
   provider,
   paused,
+  error,
   suggestions = [],
 }: ChatComposerSurfaceProps) {
   const content = <>
@@ -30,6 +33,7 @@ export function ChatComposerSurface({
       Chat is temporarily disabled. You can keep browsing and editing your
       conversations. New research runs will return when chat is restored.
     </div>}
+    {error && <div className="chat-composer-error" role="alert">{error}</div>}
     <Composer
       {...composerProps}
       {...(variant === "empty"

@@ -14,6 +14,7 @@ from collections import OrderedDict
 from dataclasses import dataclass
 from typing import Any
 
+import httpx
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -31,6 +32,7 @@ from backend.models.database import Paper as DBPaper
 from backend.services.chat_edit_service import INACTIVE_STATUSES
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.paper_markdown_service import read_paper_markdown_bounded
+from backend.services.paper_pdf_text_service import read_paper_pdf_text_bounded
 from backend.services.paper_service import PaperNotFoundError, PaperService
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,9 @@ class PreparedPaper:
     content_truncated: bool
     content_available: bool
     included_bytes: int
+    # "markdown" for canonical OCR Markdown, "pdf_text" for the interim plain
+    # text extracted while that Markdown is still being produced.
+    content_origin: str | None = None
 
     @property
     def cache_marker(self) -> tuple[str, str | None, str | None]:
@@ -326,12 +331,15 @@ class ChatPaperContextService:
             row.updated_at.isoformat() if row.updated_at else None,
         )
 
-    def _load(self, paper: Any, row: DBPaper) -> PreparedPaper:
+    def _load(
+        self, paper: Any, row: DBPaper, *, pdf_fallback: bool = False
+    ) -> PreparedPaper:
         linked_hf = PaperService(self.db).get_linked_hf_artifact_urls(int(paper.id))
         info = _bounded_info(paper, linked_hf)
         markdown = ""
         truncated = False
         available = False
+        origin: str | None = None
         markdown_id = paper.arxiv_id if paper.source == "arxiv" else str(paper.id)
         if markdown_id:
             try:
@@ -344,6 +352,7 @@ class ChatPaperContextService:
                 )
                 markdown = markdown.replace("\x00", " ")
                 available = True
+                origin = "markdown"
             except ValueError as exc:
                 if "was not found" not in str(exc):
                     raise ChatServiceError(
@@ -351,6 +360,9 @@ class ChatPaperContextService:
                         503,
                         "Attached paper context could not be prepared. Please retry.",
                     ) from exc
+                if pdf_fallback:
+                    markdown, truncated, available = self._pdf_text(paper, row)
+                    origin = "pdf_text" if available else None
             except Exception as exc:
                 raise ChatServiceError(
                     "paper_context_unavailable",
@@ -377,17 +389,53 @@ class ChatPaperContextService:
             content_truncated=truncated,
             content_available=available,
             included_bytes=len(markdown.encode()),
+            content_origin=origin,
         )
 
-    def prepare_one(self, route_id: str) -> PreparedPaper:
+    def _pdf_text(self, paper: Any, row: DBPaper) -> tuple[str, bool, bool]:
+        """Extract interim text from the PDF; (text, truncated, available)."""
+        started = time.perf_counter()
+        try:
+            text, truncated = read_paper_pdf_text_bounded(
+                str(paper.id),
+                source=paper.source,
+                arxiv_id=paper.arxiv_id,
+                version=row.version,
+                bucket_id=self.settings.paper_markdown_hf_bucket_id,
+                token=self.settings.hf_token or None,
+                max_bytes=MARKDOWN_LIMIT_BYTES,
+            )
+        except (httpx.HTTPError, ValueError, RuntimeError) as exc:
+            logger.info(
+                "chat paper pdf text outcome=unavailable paper_id=%s error=%s elapsed_ms=%s",
+                paper.id,
+                type(exc).__name__,
+                round((time.perf_counter() - started) * 1000),
+            )
+            return "", False, False
+        logger.info(
+            "chat paper pdf text outcome=ready paper_id=%s bytes=%s elapsed_ms=%s",
+            paper.id,
+            len(text.encode()),
+            round((time.perf_counter() - started) * 1000),
+        )
+        return text, truncated, True
+
+    def prepare_one(
+        self, route_id: str, *, pdf_fallback: bool = False
+    ) -> PreparedPaper:
+        """Prepare one paper; ``pdf_fallback`` reads the PDF when Markdown is missing."""
         paper, row = self._resolve_marker(route_id)
         cached = _CACHE.get(_route_id(paper), self._marker(row))
-        if cached is not None:
+        if cached is not None and (cached.content_available or not pdf_fallback):
             return cached
-        return _CACHE.prepare(_route_id(paper), lambda: self._load(paper, row))
+        return _CACHE.prepare(
+            _route_id(paper),
+            lambda: self._load(paper, row, pdf_fallback=pdf_fallback),
+        )
 
     def prewarm(self, route_id: str) -> None:
-        self.prepare_one(route_id)
+        self.prepare_one(route_id, pdf_fallback=True)
 
     def prepare_turn(
         self,
@@ -466,7 +514,7 @@ class ChatPaperContextService:
                     503,
                     "The paper bound to this chat is no longer available.",
                 )
-            primary = self.prepare_one(_route_id(row))
+            primary = self.prepare_one(_route_id(row), pdf_fallback=True)
             if primary_route_id:
                 claimed = self.prepare_one(primary_route_id)
                 if claimed.paper_id != primary.paper_id:
@@ -476,7 +524,7 @@ class ChatPaperContextService:
                         "This conversation belongs to a different paper.",
                     )
         elif primary_route_id:
-            primary = self.prepare_one(primary_route_id)
+            primary = self.prepare_one(primary_route_id, pdf_fallback=True)
 
         if primary is not None:
             if not primary.content_available:
@@ -519,6 +567,7 @@ class ChatPaperContextService:
                 "content_sha256": primary.content_sha256,
                 "content_truncated": primary.content_truncated,
                 "content_available": primary.content_available,
+                "content_origin": primary.content_origin,
                 "included_bytes": primary.included_bytes,
                 "context_reference": reference,
                 "reader_prompt_version": "reader-v1",
@@ -795,8 +844,16 @@ class ChatPaperContextService:
             f'content_available="{str(paper.content_available).lower()}" '
             f'content_sha256="{paper.content_sha256}"'
         )
+        if paper.content_origin == "pdf_text":
+            attrs += ' content_origin="pdf_text"'
         if paper.content_available:
             body = f"<paper_info>\n{_safe(paper.paper_info)}\n</paper_info>\n<paper_markdown_prefix>\n{paper.markdown}\n</paper_markdown_prefix>"
+            if paper.content_origin == "pdf_text":
+                body += (
+                    "\n<paper_content_notice>The body above is plain text extracted from the PDF "
+                    "while formatted Markdown is still being prepared; tables, equations and "
+                    "figure captions may be garbled.</paper_content_notice>"
+                )
         else:
             body = (
                 f"<paper_info>\n{_safe(paper.paper_info)}\n</paper_info>\n"

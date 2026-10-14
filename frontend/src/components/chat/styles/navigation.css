@@ -183,17 +183,6 @@
   cursor: pointer;
 }
 .chat-session-load-error button:hover { background: var(--bg-subtle); }
-.chat-session-error {
-  width: calc(100% - 56px);
-  max-width: 820px;
-  margin: 12px auto 0;
-  padding: 10px 12px;
-  border: 1px solid color-mix(in oklch, #c33 35%, var(--hairline));
-  border-radius: 8px;
-  color: var(--ink);
-  background: color-mix(in oklch, #c33 8%, var(--bg-elevated));
-  font-size: 13px;
-}
 @media (max-width: 900px) {
   .chat-sidebar {
     position: absolute;

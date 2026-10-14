@@ -716,7 +716,7 @@ def artifact_prepare(
                 "message": "Poster generation currently supports cataloged arXiv papers only.",
             },
         )
-    if not paper.content_available:
+    if paper.content_origin != "markdown":
         raise HTTPException(
             status_code=409,
             detail={

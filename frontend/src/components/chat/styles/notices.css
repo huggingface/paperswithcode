@@ -9,6 +9,16 @@
   font-size: 0.875rem;
   line-height: 1.4;
 }
+.chat-composer-error {
+  margin-bottom: 0.75rem;
+  border: 1px solid color-mix(in oklch, #c33 35%, var(--hairline));
+  border-radius: 0.65rem;
+  background: color-mix(in oklch, #c33 8%, var(--bg-elevated));
+  padding: 0.7rem 0.85rem;
+  color: var(--ink);
+  font-size: 0.875rem;
+  line-height: 1.4;
+}
 .chat-billing-notice {
   display: flex;
   flex-wrap: wrap;

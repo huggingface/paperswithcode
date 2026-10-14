@@ -682,10 +682,10 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             composerProps={composerProps}
             provider={selectedProvider}
             paused={chatPaused}
+            error={chat.sessionError}
             suggestions={mode === "paper" ? READER_PROMPTS : SUGGESTED_CHAT_PROMPTS}
           />
         </div></div> : <>
-          {chat.sessionError && <div className="chat-session-error" role="alert">{chat.sessionError}</div>}
           <ChatConversation
             messages={chat.messages}
             papers={chat.papers}
@@ -705,6 +705,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             composerProps={composerProps}
             provider={selectedProvider}
             paused={chatPaused}
+            error={chat.sessionError}
           />
         </>}
       </section>
