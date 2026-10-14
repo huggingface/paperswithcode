@@ -99,7 +99,7 @@ class _CacheEntry:
 class _PreparedPaperCache:
     def __init__(self) -> None:
         self._entries: OrderedDict[str, _CacheEntry] = OrderedDict()
-        self._inflight: dict[str, threading.Event] = {}
+        self._inflight: dict[tuple[str, bool], threading.Event] = {}
         self._lock = threading.Lock()
         self._bytes = 0
         self._slots = threading.BoundedSemaphore(PREWARM_MAX_CONCURRENCY)
@@ -118,13 +118,19 @@ class _PreparedPaperCache:
             self._entries.move_to_end(route_id)
             return entry.paper
 
-    def prepare(self, route_id: str, loader: Any) -> PreparedPaper:
+    def prepare(
+        self, route_id: str, loader: Any, *, pdf_fallback: bool = False
+    ) -> PreparedPaper:
+        # Reader loads (which may download the PDF) and metadata-only loads
+        # coalesce separately, so neither waits on or inherits the other's
+        # result; a reader follower still reloads if the leader found nothing.
+        flight = (route_id, pdf_fallback)
         while True:
             with self._lock:
-                event = self._inflight.get(route_id)
+                event = self._inflight.get(flight)
                 if event is None:
                     event = threading.Event()
-                    self._inflight[route_id] = event
+                    self._inflight[flight] = event
                     leader = True
                 else:
                     leader = False
@@ -132,7 +138,7 @@ class _PreparedPaperCache:
                 break
             event.wait()
             cached = self.get_unvalidated(route_id)
-            if cached is not None:
+            if cached is not None and (cached.content_available or not pdf_fallback):
                 return cached
         try:
             with self._slots:
@@ -141,7 +147,7 @@ class _PreparedPaperCache:
             return prepared
         finally:
             with self._lock:
-                self._inflight.pop(route_id, None)
+                self._inflight.pop(flight, None)
                 event.set()
 
     def get_unvalidated(self, route_id: str) -> PreparedPaper | None:
@@ -432,6 +438,7 @@ class ChatPaperContextService:
         return _CACHE.prepare(
             _route_id(paper),
             lambda: self._load(paper, row, pdf_fallback=pdf_fallback),
+            pdf_fallback=pdf_fallback,
         )
 
     def prewarm(self, route_id: str) -> None:

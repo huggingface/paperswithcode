@@ -930,3 +930,50 @@ def test_reader_retries_pdf_text_when_only_an_unavailable_entry_is_cached(
         assert loads == [True]
     finally:
         chat_paper_context_service._CACHE._drop("2610.00007")
+
+
+def test_reader_and_mention_loads_coalesce_separately():
+    cache = chat_paper_context_service._PreparedPaperCache()
+    unavailable = replace(_paper("2610.00008"), content_available=False)
+    with_text = replace(unavailable, content_available=True, content_origin="pdf_text")
+    mention_started, release_mention = threading.Event(), threading.Event()
+    reader_started, release_reader = threading.Event(), threading.Event()
+    results = {}
+
+    def slow(started, release, value):
+        def load():
+            started.set()
+            assert release.wait(5)
+            return value
+
+        return load
+
+    mention = threading.Thread(
+        target=lambda: results.setdefault(
+            "mention",
+            cache.prepare(
+                "2610.00008", slow(mention_started, release_mention, unavailable)
+            ),
+        )
+    )
+    mention.start()
+    assert mention_started.wait(5)
+    reader = threading.Thread(
+        target=lambda: results.setdefault(
+            "reader",
+            cache.prepare(
+                "2610.00008",
+                slow(reader_started, release_reader, with_text),
+                pdf_fallback=True,
+            ),
+        )
+    )
+    reader.start()
+    # The reader leads its own load instead of waiting for the mention.
+    assert reader_started.wait(5)
+    release_mention.set()
+    mention.join(5)
+    assert results["mention"] is unavailable
+    release_reader.set()
+    reader.join(5)
+    assert results["reader"] is with_text
