@@ -24,6 +24,7 @@ export const readPaperDateRange = (params: URLSearchParams): PaperDateRangeValue
 export const readHomepagePaperDateRange = (
   params: URLSearchParams,
   currentDate = new Date(),
+  defaultPreset: "week" | "month" = "week",
 ): PaperDateRangeValue => {
   const explicitRange = readPaperDateRange(params);
   if (explicitRange.startDate || explicitRange.endDate || params.get("time") === "all_time") {
@@ -35,7 +36,7 @@ export const readHomepagePaperDateRange = (
     currentDate.getUTCMonth(),
     currentDate.getUTCDate(),
   ));
-  return paperDatePresetRange("week", today);
+  return paperDatePresetRange(defaultPreset, today);
 };
 
 export const withPaperDateRange = (

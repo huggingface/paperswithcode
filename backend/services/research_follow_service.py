@@ -1,11 +1,11 @@
 """Private follows, canonical paper matching, and deterministic diverse ranking."""
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 import re
 import secrets
 
 from fastapi import HTTPException
-from sqlalchemy import or_, select, text
+from sqlalchemy import Integer, column, select, text
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
@@ -218,7 +218,13 @@ def matching_entries(
     window_start: datetime | None = None,
     window_end: datetime | None = None,
     opted_in_at: datetime | None = None,
+    cutoff: date | None = None,
+    until: date | None = None,
+    paper_ids: list[int] | None = None,
 ) -> list[ResearchEntry]:
+    """Match follows to papers published from ``cutoff`` (default 30 days ago) to ``until``."""
+    cutoff = cutoff or (now - timedelta(days=30)).date()
+    until = until or now.date()
     interest_map = {(f.kind, f.entity_id): f for f in follows(db, subject)}
     if not interest_map:
         return []
@@ -235,13 +241,12 @@ def matching_entries(
             {"start": window_start, "end": window_end},
         ).mappings():
             events.setdefault(row["paper_key"], []).append(row)
+    match_sql = (
+        MATCH_SQL if paper_ids is None else MATCH_SQL + "AND p.id = ANY(:paper_ids)"
+    )
     for row in db.execute(
-        text(MATCH_SQL),
-        {
-            "subject": subject,
-            "today": now.date(),
-            "cutoff": (now - timedelta(days=30)).date(),
-        },
+        text(match_sql),
+        {"subject": subject, "today": until, "cutoff": cutoff, "paper_ids": paper_ids},
     ).mappings():
         interest = interest_map.get((row["kind"], row["entity_id"]))
         if interest is None:
@@ -306,11 +311,7 @@ def matching_entries(
                 CASE WHEN p.arxiv_id IS NULL THEN 'paper:' || p.id ELSE 'arxiv:' || p.arxiv_id END paper_key
                 FROM evaluations e JOIN datasets d ON d.id=e.dataset_id JOIN papers p ON p.id=e.paper_id
                 WHERE e.dataset_id=ANY(:ids) AND p.date_published BETWEEN :cutoff AND :today"""),
-                {
-                    "ids": benchmark_ids,
-                    "cutoff": (now - timedelta(days=30)).date(),
-                    "today": now.date(),
-                },
+                {"ids": benchmark_ids, "cutoff": cutoff, "today": until},
             ).mappings():
                 if row["paper_key"] in entries:
                     score = {
@@ -324,26 +325,44 @@ def matching_entries(
 
 
 def feed_entries(
-    db: Session, subject: str, now: datetime, offset: int, limit: int
+    db: Session,
+    subject: str,
+    now: datetime,
+    offset: int,
+    limit: int,
+    *,
+    start_date: date | None = None,
+    end_date: date | None = None,
+    all_time: bool = False,
+    has_code: bool = False,
+    has_hf_artifacts: bool = False,
 ) -> list[ResearchFeedEntry]:
-    """Rank matches with the home feed's trending order and hydrate standard cards."""
+    """Filter and rank matches like the home feed, then explain only the returned page."""
     from backend.services.paper_service import PaperService
 
-    entries = {e.paper_key: e for e in matching_entries(db, subject, now)}
-    if not entries:
-        return []
-    arxiv_ids = [k.removeprefix("arxiv:") for k in entries if k.startswith("arxiv:")]
-    paper_ids = [
-        int(k.removeprefix("paper:")) for k in entries if k.startswith("paper:")
-    ]
-    service = PaperService(db)
-    query = db.query(DBPaper).filter(
-        or_(
-            DBPaper.arxiv_id.in_(arxiv_ids) & DBPaper.is_latest_version,
-            DBPaper.id.in_(paper_ids),
-        )
+    cutoff = date.min if all_time else start_date or (now - timedelta(days=30)).date()
+    until = min(end_date or now.date(), now.date())
+    matches = (
+        text(MATCH_SQL)
+        .bindparams(subject=subject, today=until, cutoff=cutoff)
+        .columns(column("id", Integer))
+        .subquery("matches")
     )
+    service = PaperService(db)
+    query = db.query(DBPaper).filter(DBPaper.id.in_(select(matches.c.id)))
+    if has_code:
+        query = service.apply_has_code_filter(query)
+    if has_hf_artifacts:
+        query = service.apply_has_hf_artifacts_filter(query)
     rows = service.apply_scoped_trending_order(query).offset(offset).limit(limit).all()
+    if not rows:
+        return []
+    entries = {
+        e.paper_key: e
+        for e in matching_entries(
+            db, subject, now, cutoff=cutoff, until=until, paper_ids=[r.id for r in rows]
+        )
+    }
     papers = service.hydrate_cards(rows, include_resources=True)
     return [
         ResearchFeedEntry(

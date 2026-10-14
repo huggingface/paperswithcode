@@ -29,6 +29,7 @@ from backend.models.database import (
     Organization,
     Evaluation,
 )
+from backend.models.database.resources import HfArtifact, PaperRepository, Repository
 from backend.models.database.research import (
     ResearchFollow,
     ResearchSubscription,
@@ -613,3 +614,45 @@ def test_feed_uses_home_feed_trending_order(db, now, monkeypatch):
         str(stale.id),
         str(multi.id),
     ]
+
+
+def test_feed_filters_match_the_home_feed(db, now):
+    task = Task(name="Filter task", slug="filter-task")
+    db.add(task)
+    db.flush()
+    recent = paper(db, now, "filter-recent", days=1)
+    old = paper(db, now, "filter-old", days=60)
+    for row in [recent, old]:
+        tagged(db, row, task)
+    follow(db, "task", task, now)
+    repo = Repository(url="https://github.com/example/filter-old")
+    db.add(repo)
+    db.flush()
+    db.add(PaperRepository(paper_id=old.id, repository_id=repo.id))
+    recent.hf_artifacts.append(
+        HfArtifact(
+            kind="model",
+            repo_id="example/filter-recent",
+            url="https://huggingface.co/example/filter-recent",
+        )
+    )
+    db.flush()
+
+    def ids(**filters):
+        return [
+            e.paper.id for e in follows.feed_entries(db, "alice", now, 0, 10, **filters)
+        ]
+
+    # The default window stays 30 days; explicit and all-time ranges widen it.
+    assert ids() == [str(recent.id)]
+    assert set(ids(all_time=True)) == {str(recent.id), str(old.id)}
+    window = {
+        "start_date": (now - timedelta(days=90)).date(),
+        "end_date": (now - timedelta(days=30)).date(),
+    }
+    assert ids(**window) == [str(old.id)]
+    assert ids(all_time=True, has_code=True) == [str(old.id)]
+    assert ids(all_time=True, has_hf_artifacts=True) == [str(recent.id)]
+    assert ids(has_code=True) == []
+    entry = follows.feed_entries(db, "alice", now, 0, 10, **window)[0]
+    assert entry.reasons == ["Filter task"]

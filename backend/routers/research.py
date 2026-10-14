@@ -1,6 +1,6 @@
 """Authenticated private follows and public signed delivery callbacks."""
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 import binascii
 import json
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -60,11 +60,31 @@ def unfollow(
 def following(
     offset: int = Query(0, ge=0),
     limit: int = Query(40, ge=1, le=100),
+    start_date: date | None = Query(
+        None, description="Earliest publication date; defaults to 30 days ago"
+    ),
+    end_date: date | None = Query(
+        None, description="Latest publication date; defaults to today"
+    ),
+    all_time: bool = Query(False, description="Ignore the default 30-day window"),
+    has_code: bool = Query(False, description="Only papers with linked code"),
+    has_hf_artifacts: bool = Query(
+        False, description="Only papers with Hugging Face artifacts"
+    ),
     user: dict = Depends(require_user),
     db: Session = Depends(get_database_session),
 ):
     return service.feed_entries(
-        db, user["hf_subject"], datetime.now(timezone.utc), offset, limit
+        db,
+        user["hf_subject"],
+        datetime.now(timezone.utc),
+        offset,
+        limit,
+        start_date=start_date,
+        end_date=end_date,
+        all_time=all_time,
+        has_code=has_code,
+        has_hf_artifacts=has_hf_artifacts,
     )
 
 

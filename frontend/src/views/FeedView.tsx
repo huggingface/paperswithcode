@@ -322,7 +322,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const user = auth?.user;
   const [searchParams, setSearchParams] = useSearchParams();
   const orderBy = parseOrderBy(searchParams.get("order_by"));
-  const dateRange = readHomepagePaperDateRange(searchParams);
+  // Following defaults to its 30-day match window; the other tabs default to a week.
+  const dateRange = readHomepagePaperDateRange(searchParams, undefined, following ? "month" : "week");
   const hasCode = searchParams.get("has_code") === "true";
   const hasHfArtifacts = searchParams.get("has_hf_artifacts") === "true";
 
@@ -375,9 +376,10 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     has_hf_artifacts: hasHfArtifacts,
   });
 
+  const followingFilters = { ...dateRange, hasCode, hasHfArtifacts };
   const followedFeed = useInfiniteQuery({
-    queryKey: ["research-feed", user?.hf_subject],
-    queryFn: ({ pageParam }) => researchApi.following(pageParam),
+    queryKey: ["research-feed", user?.hf_subject, followingFilters],
+    queryFn: ({ pageParam }) => researchApi.following(pageParam, followingFilters),
     initialPageParam: 0,
     getNextPageParam: (last, pages) => last.length === 40 ? pages.length * 40 : undefined,
     enabled: following && !!user,
@@ -476,20 +478,25 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                       {l}
                     </button>
                   ))}
-                  <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => navigate("/following")}>following</button>
+                  <button className={`sort-btn ${following ? "active" : ""}`} onClick={() => {
+                    const next = new URLSearchParams(searchParams);
+                    next.delete("order_by");
+                    const query = next.toString();
+                    navigate(query ? `/following?${query}` : "/following");
+                  }}>following</button>
                 </div>
-                {!following && <PaperFeedFilters
+                <PaperFeedFilters
                   hasCode={hasCode}
                   hasHfArtifacts={hasHfArtifacts}
                   onHasCodeChange={setHasCode}
                   onHasHfArtifactsChange={setHasHfArtifacts}
-                />}
+                />
               </div>
-              {!following && <PaperDateFilter
+              <PaperDateFilter
                 startDate={dateRange.startDate}
                 endDate={dateRange.endDate}
                 onChange={(value) => setSearchParams(withHomepagePaperDateRange(searchParams, value))}
-              />}
+              />
             </div>
 
             {error && (
@@ -518,7 +525,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
                 ))}
               </div>
             ) : cards.length === 0 ? (error ? null :
-              <div className="no-results">{following ? <>No recent matches yet. Follow interests from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
+              <div className="no-results">{following ? <>No papers from your follows match these filters. Widen the date range, or follow more from <Link to="/tasks">tasks</Link>, <Link to="/methods">methods</Link>, benchmark, author, or organization pages.</> : "No papers in this window."}</div>
             ) : (
               <>
                 <div className="paper-list">
