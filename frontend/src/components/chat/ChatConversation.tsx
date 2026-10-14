@@ -37,12 +37,15 @@ export function ChatConversation({
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const scrollTopBeforeToggleRef = useRef<number | null>(null);
-  const editScrollAnchorRef = useRef<string | null>(null);
-  const followingBottomRef = useRef(true);
+  // "bottom" follows streamed content, "question" keeps the latest question
+  // pinned near the top while its answer grows below, "free" never moves.
+  const scrollModeRef = useRef<"bottom" | "question" | "free">("bottom");
+  const questionScrollTopRef = useRef(0);
+  const appliedScrollTopRef = useRef(0);
   const [hasContentBelow, setHasContentBelow] = useState(false);
   const touchYRef = useRef<number | null>(null);
-  const followBottom = useCallback((follow: boolean) => {
-    followingBottomRef.current = follow;
+  const setScrollMode = useCallback((mode: "bottom" | "question" | "free") => {
+    scrollModeRef.current = mode;
   }, []);
   const updateContentBelow = useCallback(() => {
     const scroller = scrollRef.current;
@@ -50,16 +53,16 @@ export function ChatConversation({
       setHasContentBelow(scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight > 1);
     }
   }, []);
-  const previousUserCountRef = useRef(0);
-  const previousBusyRef = useRef(false);
   const userMessages = messages.filter((message) => message.role === "user");
   const userCount = userMessages.length;
+  // Opening a conversation, even mid-stream, starts at the latest content.
+  const previousUserCountRef = useRef(userCount);
+  const previousBusyRef = useRef(busy);
   const firstUserId = userMessages[0]?.id;
   const latestUserId = userMessages.at(-1)?.id;
 
   useEffect(() => {
     if (busy) setEditingMessageId(null);
-    else editScrollAnchorRef.current = null;
   }, [busy]);
 
   useLayoutEffect(() => {
@@ -67,7 +70,13 @@ export function ChatConversation({
     if (!scrollElement) return;
     // Canonical reloads replace optimistic IDs without adding a new question.
     if (userCount > previousUserCountRef.current || (busy && !previousBusyRef.current)) {
-      followBottom(true);
+      const question = Array.from(scrollElement.querySelectorAll<HTMLElement>("[data-message-id]")).at(-1);
+      if (question) {
+        const containerTop = scrollElement.getBoundingClientRect().top;
+        questionScrollTopRef.current = scrollElement.scrollTop
+          + question.getBoundingClientRect().top - containerTop - 24;
+        setScrollMode("question");
+      }
     }
     previousUserCountRef.current = userCount;
     previousBusyRef.current = busy;
@@ -76,21 +85,14 @@ export function ChatConversation({
       scrollTopBeforeToggleRef.current = null;
       return;
     }
-    if (editScrollAnchorRef.current) {
-      const target = Array.from(
-        scrollElement.querySelectorAll<HTMLElement>("[data-message-id]"),
-      ).find((element) => element.dataset.messageId === editScrollAnchorRef.current);
-      editScrollAnchorRef.current = null;
-      if (target) {
-        const containerRect = scrollElement.getBoundingClientRect();
-        const targetRect = target.getBoundingClientRect();
-        scrollElement.scrollTop += targetRect.top - containerRect.top - 24;
-        followBottom(false);
-        return;
-      }
+    if (scrollModeRef.current === "bottom") scrollElement.scrollTop = scrollElement.scrollHeight;
+    if (scrollModeRef.current === "question") {
+      // Until the answer is tall enough, the browser clamps this to the end;
+      // once the question reaches the top, the reader's view stops moving.
+      scrollElement.scrollTop = questionScrollTopRef.current;
+      appliedScrollTopRef.current = scrollElement.scrollTop;
     }
-    if (followingBottomRef.current) scrollElement.scrollTop = scrollElement.scrollHeight;
-  }, [messages, userCount, busy, followBottom]);
+  }, [messages, userCount, busy, setScrollMode]);
 
   // Button visibility follows the actual viewport, independently of whether
   // streaming is allowed to move the reader's position.
@@ -119,25 +121,33 @@ export function ChatConversation({
       role="region"
       aria-label="Conversation"
       onWheel={(event) => {
-        if (event.deltaY < 0) followBottom(false);
+        if (event.deltaY < 0 || scrollModeRef.current === "question") setScrollMode("free");
       }}
       onTouchStart={(event) => { touchYRef.current = event.touches[0]?.clientY ?? null; }}
       onTouchMove={(event) => {
         const y = event.touches[0]?.clientY;
-        if (y !== undefined && touchYRef.current !== null && y > touchYRef.current) followBottom(false);
+        if (y !== undefined && touchYRef.current !== null
+          && (y > touchYRef.current || scrollModeRef.current === "question")) setScrollMode("free");
         touchYRef.current = y ?? null;
       }}
       onKeyDown={(event) => {
         if (event.target !== event.currentTarget) return;
         if (["ArrowUp", "PageUp", "Home"].includes(event.key) || (event.key === " " && event.shiftKey)) {
-          followBottom(false);
+          setScrollMode("free");
+        }
+        if (["ArrowDown", "PageDown", "End", " "].includes(event.key) && scrollModeRef.current === "question") {
+          setScrollMode("free");
         }
       }}
       onScroll={(event) => {
         const { scrollHeight, scrollTop, clientHeight } = event.currentTarget;
+        const atEnd = scrollHeight - scrollTop - clientHeight <= 1;
         // Scrolling away also covers scrollbar dragging. Only explicit actions
         // resume following, so delayed scroll events cannot undo upward intent.
-        if (scrollHeight - scrollTop - clientHeight > 1) followBottom(false);
+        if (scrollModeRef.current === "bottom" && !atEnd) setScrollMode("free");
+        // A pinned question only moves up when a shrinking viewport clamps it.
+        const moved = scrollTop - appliedScrollTopRef.current;
+        if (scrollModeRef.current === "question" && (moved > 1 || (moved < -1 && !atEnd))) setScrollMode("free");
         updateContentBelow();
       }}
     >
@@ -168,13 +178,8 @@ export function ChatConversation({
               onEdit={() => setEditingMessageId(message.id)}
               onCancel={() => setEditingMessageId(null)}
               onResendDraft={(nextDraft) => {
-                if (message.id !== firstUserId) editScrollAnchorRef.current = message.id;
                 const accepted = onEditAndResend(message.id, nextDraft);
-                if (accepted) {
-                  if (message.id === firstUserId) followBottom(true);
-                  setEditingMessageId(null);
-                }
-                else editScrollAnchorRef.current = null;
+                if (accepted) setEditingMessageId(null);
                 return accepted;
               }}
             />
@@ -202,7 +207,7 @@ export function ChatConversation({
       type="button"
       className="chat-jump-latest"
       onClick={() => {
-        followBottom(true);
+        setScrollMode("bottom");
         const scroller = scrollRef.current;
         if (scroller) {
           scroller.focus({ preventScroll: true });

@@ -31,7 +31,7 @@ function setup(editAccepted = true) {
     .mockImplementation(function (this: HTMLElement) { return positions.get(this) ?? 0; });
   vi.spyOn(HTMLElement.prototype, "scrollTop", "set")
     .mockImplementation(function (this: HTMLElement, value: number) {
-      positions.set(this, Math.max(0, Math.min(value, height - 400)));
+      positions.set(this, Math.max(0, Math.min(value, height - this.clientHeight)));
     });
   let messages: ChatMessage[] = [
     { id: "question", role: "user", text: "Question" },
@@ -42,10 +42,20 @@ function setup(editAccepted = true) {
     openRouterFallbackEnabled: false, onToggleBlock: vi.fn(),
     onEditAndResend: vi.fn().mockReturnValue(editAccepted), onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
   };
+  // Message content offsets; viewport-relative tops follow the scroll position.
+  const offsets = new Map<string, number>();
+  vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+    const offset = offsets.get(this.dataset.messageId ?? "");
+    const top = offset === undefined ? 0 : offset - scroller.scrollTop;
+    return { top } as DOMRect;
+  });
   const view = render(<ChatConversation {...props} messages={messages} />);
   const scroller = view.container.querySelector<HTMLDivElement>(".chat-conversation")!;
   return {
     ...view, scroller,
+    place(id: string, offset: number) {
+      offsets.set(id, offset);
+    },
     scrollTo(top: number) {
       scroller.scrollTop = top;
       fireEvent.scroll(scroller);
@@ -137,15 +147,58 @@ describe("ChatConversation scrolling", () => {
     chat.update();
     expect(chat.scroller.scrollTop).toBe(600);
   });
-  it("follows a newly submitted question even after scrolling up", () => {
+  it("pins a newly submitted question near the top while its answer streams", () => {
     const chat = setup();
     chat.scrollTo(200);
-    chat.update([
+    chat.place("next-question", 1000);
+    const messages: ChatMessage[] = [
       { id: "question", role: "user" },
       { id: "answer", role: "assistant" },
       { id: "next-question", role: "user", text: "Next question" },
-    ]);
+      { id: "next-answer", role: "assistant", streaming: true },
+    ];
+    // Too little answer yet: the question sits at the end of the conversation.
+    chat.update(messages);
     expect(chat.scroller.scrollTop).toBe(800);
+    chat.update(messages);
+    expect(chat.scroller.scrollTop).toBe(976);
+    // Once the question reaches the top, streaming no longer moves the view.
+    chat.update(messages);
+    expect(chat.scroller.scrollTop).toBe(976);
+    expect(chat.getByRole("button", { name: "Jump to latest" })).toBeTruthy();
+    fireEvent.click(chat.getByRole("button", { name: "Jump to latest" }));
+    chat.update(messages);
+    expect(chat.scroller.scrollTop).toBe(1400);
+  });
+  it.each([
+    ["wheel down", (scroller: HTMLElement) => fireEvent.wheel(scroller, { deltaY: 1 })],
+    ["touch", (scroller: HTMLElement) => {
+      fireEvent.touchStart(scroller, { touches: [{ clientY: 100 }] });
+      fireEvent.touchMove(scroller, { touches: [{ clientY: 95 }] });
+    }],
+    ["PageDown", (scroller: HTMLElement) => fireEvent.keyDown(scroller, { key: "PageDown" })],
+  ])("releases a pinned question on %s intent", (_, intent) => {
+    const chat = setup();
+    chat.update(undefined, false);
+    chat.place("question", 30);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(6);
+    intent(chat.scroller);
+    chat.scrollTo(300);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(300);
+  });
+  it("keeps a pinned question when a shrinking viewport clamps it to the end", () => {
+    const chat = setup();
+    chat.update(undefined, false);
+    chat.place("question", 1000);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(976);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(500);
+    chat.scrollTo(976);
+    expect(chat.scroller.scrollTop).toBe(900);
+    chat.update();
+    expect(chat.scroller.scrollTop).toBe(976);
   });
   it("preserves position when toggling reasoning and on subsequent updates", () => {
     const chat = setup();
@@ -163,6 +216,7 @@ describe("ChatConversation scrolling", () => {
       { id: "follow-up", role: "user" },
     ];
     chat.update(messages, false);
+    chat.place("follow-up", 800);
     fireEvent.click(chat.getByText("Edit follow-up"));
     chat.update(messages);
     expect(chat.scroller.scrollTop).toBe(776);
@@ -181,18 +235,19 @@ describe("ChatConversation scrolling", () => {
     chat.update(undefined, false);
     expect(chat.scroller.scrollTop).toBe(200);
   });
-  it("follows an accepted first-question edit even though its ID stays the same", () => {
+  it("pins an accepted first-question edit even though its ID stays the same", () => {
     const chat = setup();
     chat.update(undefined, false);
     chat.scrollTo(200);
+    chat.place("question", 30);
     fireEvent.click(chat.getByText("Edit question"));
     chat.update([
       { id: "question", role: "user", text: "Edited question", revision: 2 },
       { id: "replacement-answer", role: "assistant", streaming: true },
     ]);
-    expect(chat.scroller.scrollTop).toBe(1000);
+    expect(chat.scroller.scrollTop).toBe(6);
     chat.update();
-    expect(chat.scroller.scrollTop).toBe(1200);
+    expect(chat.scroller.scrollTop).toBe(6);
   });
   it("does not resume following when a first-question edit is rejected", () => {
     const chat = setup(false);
@@ -202,15 +257,16 @@ describe("ChatConversation scrolling", () => {
     chat.update(undefined, false);
     expect(chat.scroller.scrollTop).toBe(200);
   });
-  it("restores following when a composer retry starts with the same user count", () => {
+  it("pins the question when a composer retry starts with the same user count", () => {
     const chat = setup();
     chat.update(undefined, false);
     chat.scrollTo(200);
+    chat.place("question", 30);
     chat.update([
       { id: "question", role: "user", text: "Retry question", revision: 2 },
       { id: "retry-answer", role: "assistant", streaming: true },
     ]);
-    expect(chat.scroller.scrollTop).toBe(1000);
+    expect(chat.scroller.scrollTop).toBe(6);
     chat.scrollTo(200);
     chat.update();
     expect(chat.scroller.scrollTop).toBe(200);
