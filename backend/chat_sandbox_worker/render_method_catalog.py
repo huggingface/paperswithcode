@@ -11,6 +11,7 @@ from typing import Any
 
 FEATURED_METHOD_SLUGS = frozenset(
     {
+        "decision-model",
         "on-policy-distillation",
         "world-action-models",
     }

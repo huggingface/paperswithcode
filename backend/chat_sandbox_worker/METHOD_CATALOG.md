@@ -28,6 +28,7 @@ Methods are named techniques, architectures, training procedures, or model famil
 - `pre-training` — Pre-training
 - `dropout` — Dropout
 - `chain-of-thought-cot` — Chain-of-Thought (CoT)
+- `decision-model` — Decision Model
 - `world-action-models` — World Action Models (WAMs)
 
 ### Language

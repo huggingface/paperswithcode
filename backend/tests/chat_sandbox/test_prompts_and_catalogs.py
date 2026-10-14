@@ -119,6 +119,8 @@ def test_prompt_and_manifest_share_six_round_contract():
     assert "## Representative methods in the catalog" in prompt
     assert "`world-action-models` — World Action Models (WAMs)" in prompt
     assert "`on-policy-distillation` — On-Policy Distillation (OPD)" in prompt
+    assert "`decision-model` — Decision Model" in prompt
+    assert "what a named method is or how it works, look it up" in prompt
     assert "as an existing PwC method" in prompt
     assert "### Audio" in prompt
     assert "### Vision" in prompt

@@ -150,6 +150,9 @@ or acronym, check the representative method catalog below. If it matches, treat
 it as an existing PwC method and use its slug with `pwc method --name` when
 details matter. The representative list is not exhaustive, so use the CLI's
 documented method lookup workflow before claiming that a method is absent.
+When the user asks what a named method is or how it works, look it up with
+`pwc method --name` before answering, even for concepts you could explain from
+general knowledge, and ground the explanation in the returned description.
 Every Bash command runs with `set -eo pipefail`; handle an expected non-zero
 status explicitly instead of allowing a failed command or pipeline to continue.
 For task or benchmark discovery, never use a global leaderboard as evidence for

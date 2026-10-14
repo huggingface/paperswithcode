@@ -51,6 +51,7 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /You have no sandbox, shell, or CLI/u);
   assert.match(rendered, /max_parameters/u);
   assert.match(rendered, /include_evaluations/u);
+  assert.match(rendered, /is or how it works, call pwc_get_method before answering/u);
   assert.match(rendered, /# PwC MCP skill/u);
   assert.match(rendered, /next_cursor/u);
   assert.match(rendered, /60 total requests/u);
