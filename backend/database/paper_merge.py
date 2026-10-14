@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from sqlalchemy import func, text
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
@@ -28,7 +28,11 @@ from backend.models.database import (
     PaperXThread,
     Repository,
 )
-from backend.services.evaluation_service import EvaluationService
+from backend.services.evaluation_service import (
+    EvaluationService,
+    _normalize_url_for_match,
+    _paper_route_keys,
+)
 from backend.services.hf_artifact_service import sync_explicit_hf_artifact_links
 from backend.utils.urls import get_paper_route_identifier
 
@@ -50,6 +54,39 @@ def record_paper_merge_redirect(
         ),
         {"old_paper_id": old_paper_id, "route_identifier": route_identifier},
     )
+
+
+def _repoint_evaluation_sources(
+    db: Session, external_id: int, arxiv_paper: Paper
+) -> int:
+    """Point evaluation sources citing the merged-away paper at its ArXiv row.
+
+    Otherwise a paper's own scores, sourced from its pre-ArXiv external row,
+    no longer match the paper and are badged as externally sourced.
+    """
+    old_keys = _paper_route_keys(external_id, None)
+    new_url = "https://paperswithcode.co/paper/" + get_paper_route_identifier(
+        arxiv_paper.source, arxiv_paper.arxiv_id, arxiv_paper.id
+    )
+    pattern = f"%{external_id}%"
+    repointed = 0
+    for evaluation in db.query(Evaluation).filter(
+        or_(
+            Evaluation.source_url.like(pattern),
+            Evaluation.external_source_url.like(pattern),
+        )
+    ):
+        changed = False
+        if _normalize_url_for_match(evaluation.source_url) in old_keys:
+            evaluation.source_url = new_url
+            changed = True
+        if _normalize_url_for_match(evaluation.external_source_url) in old_keys:
+            evaluation.external_source_url = new_url
+            changed = True
+        if changed:
+            evaluation.external = evaluation.paper_id != arxiv_paper.id
+            repointed += 1
+    return repointed
 
 
 def _merge_method_links(
@@ -255,6 +292,7 @@ def merge_external_paper_into_arxiv(
         "arxiv_id": arxiv_paper.arxiv_id,
         "evaluations_moved": 0,
         "evaluations_dropped": 0,
+        "evaluation_sources_repointed": 0,
         "repos_merged": 0,
         "repos_moved": 0,
         "tasks_merged": 0,
@@ -562,6 +600,9 @@ def merge_external_paper_into_arxiv(
         {"arxiv_id": arxiv_paper_id, "external_id": external_id},
     )
 
+    stats["evaluation_sources_repointed"] = _repoint_evaluation_sources(
+        db, external_id, arxiv_paper
+    )
     record_paper_merge_redirect(db, external_id, arxiv_paper)
 
     db.flush()

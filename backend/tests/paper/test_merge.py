@@ -8,6 +8,7 @@ from sqlalchemy.orm import Session
 from backend.database import paper_merge
 from backend.database.paper_merge import (
     _merge_hf_artifacts,
+    _repoint_evaluation_sources,
     lookup_paper_merge_redirect,
     record_paper_merge_redirect,
 )
@@ -208,3 +209,37 @@ def test_merge_method_links_moves_evidence_before_collapsing_duplicate_parent():
         "method_evidence_merged": 1,
         "method_evidence_moved": 2,
     }
+
+
+def test_repoint_evaluation_sources_keeps_own_scores_first_party():
+    own = SimpleNamespace(
+        paper_id=20,
+        source_url="https://paperswithcode.co/paper/109743",
+        external_source_url="https://paperswithcode.co/paper/109743/",
+        external=True,
+    )
+    citing = SimpleNamespace(
+        paper_id=30,
+        source_url="paper:109743",
+        external_source_url=None,
+        external=False,
+    )
+    unrelated = SimpleNamespace(
+        paper_id=20,
+        source_url="https://paperswithcode.co/paper/1097430",
+        external_source_url=None,
+        external=True,
+    )
+    db = Mock()
+    db.query.return_value.filter.return_value = [own, citing, unrelated]
+    arxiv_paper = SimpleNamespace(source="arxiv", arxiv_id="2608.30320", id=20)
+
+    assert _repoint_evaluation_sources(db, 109743, arxiv_paper) == 2
+
+    new_url = "https://paperswithcode.co/paper/2608.30320"
+    assert own.source_url == own.external_source_url == new_url
+    assert own.external is False
+    assert citing.source_url == new_url
+    assert citing.external is True
+    assert unrelated.source_url == "https://paperswithcode.co/paper/1097430"
+    assert unrelated.external is True
