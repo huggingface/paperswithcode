@@ -26,6 +26,7 @@ import {
   CHAT_DRAFT_KEY,
   CHAT_MODEL_KEY,
   CHAT_REASONING_EFFORT_KEY,
+  CHAT_WEB_SEARCH_KEY,
   clearQueuedChatLaunch,
   readQueuedChatLaunch,
 } from "@/lib/chatLaunch";
@@ -262,6 +263,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     sessionStorage.setItem(CHAT_DRAFT_KEY, JSON.stringify(nextDraft));
     sessionStorage.setItem(CHAT_MODEL_KEY, selectedModel);
     sessionStorage.setItem(CHAT_REASONING_EFFORT_KEY, reasoningEffort);
+    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, webSearchEnabled ? "1" : "0");
     sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
     sessionStorage.setItem(CHAT_AUTH_ATTEMPTED_KEY, "1");
     const returnTo = mode === "paper" && primaryPaper
@@ -270,7 +272,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
         ? `/chat/${routeSessionIdRef.current}`
         : "/chat";
     window.location.href = hfLoginUrl(returnTo, selectedProvider === "huggingface");
-  }, [mode, primaryPaper, reasoningEffort, selectedModel, selectedProvider]);
+  }, [mode, primaryPaper, reasoningEffort, selectedModel, selectedProvider, webSearchEnabled]);
 
   const restoreAuthorizationPrompt = useCallback((nextDraft: ChatDraft, message: string) => {
     sessionStorage.setItem(CHAT_DRAFT_KEY, JSON.stringify(nextDraft));

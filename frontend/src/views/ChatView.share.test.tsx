@@ -346,6 +346,7 @@ describe("ChatView inference authorization", () => {
     await user.click(screen.getByRole("button", { name: "Send message" }));
 
     await waitFor(() => expect(mocks.hfLoginUrl).toHaveBeenCalledWith("/chat", true));
+    expect(sessionStorage.getItem(CHAT_WEB_SEARCH_KEY)).toBe("1");
     expect(fetchMock).toHaveBeenCalledWith(
       expect.stringContaining("/api/v1/me/inference-billing"),
       expect.objectContaining({ credentials: "include" }),
@@ -736,5 +737,38 @@ describe("ChatView web search", () => {
       text: "Find recent multimodal model releases",
       paperMentions: [],
     }));
+  });
+
+  it("enables web search for a queued launch that stored no choice", async () => {
+    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
+    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
+    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
+    mocks.getSession.mockResolvedValueOnce({
+      ...session,
+      transcript_status: "ready",
+      messages: [],
+    });
+
+    renderChat();
+
+    await waitFor(() => expect(mocks.chatOptions?.webSearchEnabled).toBe(true));
+    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
+  });
+
+  it("keeps an explicit web search opt-out for a queued launch", async () => {
+    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
+    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
+    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
+    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "0");
+    mocks.getSession.mockResolvedValueOnce({
+      ...session,
+      transcript_status: "ready",
+      messages: [],
+    });
+
+    renderChat();
+
+    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
+    expect(mocks.chatOptions?.webSearchEnabled).toBe(false);
   });
 });

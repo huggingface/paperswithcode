@@ -193,7 +193,8 @@ export const AskAssistant: React.FC = () => {
     }
     setLaunching(true);
     queueChatLaunch(nextDraft, selectedModel, {
-      webSearchEnabled: webSearchAvailable && webSearchEnabled,
+      // The chat page gates this on availability, which may still be loading here.
+      webSearchEnabled,
       reasoningEffort,
     });
     try {
