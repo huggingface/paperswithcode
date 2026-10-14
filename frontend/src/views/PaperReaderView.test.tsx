@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   getAvailability: vi.fn(),
+  getPaperWebMarkdown: vi.fn(),
   showArtifact: false,
   paper: {} as Record<string, unknown>,
 }));
@@ -33,6 +34,10 @@ const arxivPaper = {
       ],
       hf_artifact_summary: { model_count: 2, dataset_count: 1, space_count: 0, best_kind: "model", best_count: 2, best_url: "https://huggingface.co/models?other=arxiv:1706.03762" },
 };
+vi.mock("@/lib/api/papers", async (importOriginal) => ({
+  ...await importOriginal<typeof import("@/lib/api/papers")>(),
+  getPaperWebMarkdown: mocks.getPaperWebMarkdown,
+}));
 vi.mock("@/lib/api/chat", () => ({
   chatApi: { getAvailability: mocks.getAvailability },
 }));
@@ -184,6 +189,42 @@ describe("PaperReaderView", () => {
       .toHaveAttribute("href", "/paper/109743");
     expect(screen.getByRole("region", { name: "Paper PDF" }))
       .toHaveAttribute("data-url", "/paper-assets/external/109743/paper.pdf");
+  });
+
+  it("reads an HTML-only external paper as Markdown and opens chat once it is ready", async () => {
+    let resolveMarkdown: (markdown: string) => void = () => undefined;
+    mocks.getPaperWebMarkdown.mockReturnValue(new Promise((resolve) => { resolveMarkdown = resolve; }));
+    mocks.paper = {
+      id: "123294",
+      arxiv_id: null,
+      title: "LFM2.5-24B-A2B: Built for Fast On-Device Agents",
+      source: "external",
+      version: "v1",
+      source_url: "https://www.liquid.ai/blog/lfm2-5-24b-a2b",
+      url_pdf: null,
+      repositories: [],
+      project_pages: [],
+    };
+
+    renderReader("/pdf/123294");
+
+    expect(await screen.findByText("Preparing a readable version of this page…")).toBeVisible();
+    expect(screen.queryByRole("region", { name: "Paper PDF" })).not.toBeInTheDocument();
+    expect(screen.getByText("Chat opens once the paper is ready.")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open original" }))
+      .toHaveAttribute("href", "https://www.liquid.ai/blog/lfm2-5-24b-a2b");
+
+    resolveMarkdown(
+      "Title: LFM2.5-24B-A2B\n\nURL Source: https://www.liquid.ai/blog/lfm2-5-24b-a2b\n\n"
+      + "Markdown Content:\n\n# LFM2.5-24B-A2B\n\nIt scores **48.09** on LiveClaw.\n",
+    );
+
+    expect(await screen.findByRole("heading", { name: "LFM2.5-24B-A2B" })).toBeVisible();
+    expect(screen.getByText("48.09")).toBeVisible();
+    expect(screen.queryByText(/URL Source/)).not.toBeInTheDocument();
+    expect(mocks.getPaperWebMarkdown).toHaveBeenCalledWith("123294");
+    fireEvent.click(screen.getByRole("tab", { name: "Chat" }));
+    expect(screen.getByText("Paper chat")).toBeVisible();
   });
 
   it("only accepts an official GitHub repository for the title action", () => {

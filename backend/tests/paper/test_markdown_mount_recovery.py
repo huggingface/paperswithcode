@@ -14,6 +14,7 @@ from backend.tests.paper.markdown_harness import (
 
 def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
     job = object.__new__(MODULE.PaperMarkdownBackfillJob)
+    job._prepare_external_pages = lambda: {}
     job.settings = type(
         "Settings",
         (),

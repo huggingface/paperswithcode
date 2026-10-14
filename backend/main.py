@@ -525,6 +525,7 @@ def create_app() -> FastAPI:
         paper_assets,
         paper_edits,
         paper_pages,
+        paper_reader,
         papers,
         pending_edits,
         preferences,
@@ -556,6 +557,7 @@ def create_app() -> FastAPI:
     app.include_router(pending_edits.router, prefix="/api/v1", tags=["pending_edits"])
     app.include_router(paper_edits.router, prefix="/api/v1", tags=["paper-edits"])
     app.include_router(papers.router, prefix="/api/v1", tags=["papers"])
+    app.include_router(paper_reader.router, prefix="/api/v1", tags=["papers"])
     app.include_router(research_catalog.router, prefix="/api/v1", tags=["research"])
     # External-resource ingestion endpoints share the `/papers` prefix because
     # the resulting rows live in the same `papers` table.

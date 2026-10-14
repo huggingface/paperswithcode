@@ -26,10 +26,18 @@ from backend.scripts.generate_missing_paper_markdown import (
     status_record,
     validate_canonical_markdown,
 )
+from backend.services.external_page_markdown_service import (
+    ExternalPageMarkdownError,
+    external_page_url,
+    prepare_external_page_markdown,
+    retry_due,
+    status_key as external_page_status_key,
+)
 from backend.services.paper_markdown_budget_service import (
     paper_markdown_budget_snapshot,
 )
 from backend.services.paper_markdown_job_profile import paper_markdown_job_profile
+from backend.services.paper_markdown_service import paper_markdown_bucket_key
 from scripts.utils.cron_helpers import CronJobBase
 
 ARXIV_ID = re.compile(r"^(?P<base>\d{4}\.\d{4,5})(?:v\d+)?$")
@@ -52,6 +60,9 @@ MOUNT_RETRY_DELAY = timedelta(minutes=10)
 LIVE_REPAIR_LIMIT = 20
 EXTERNAL_PDF_ARCHIVE_LIMIT = 64
 EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS = 30
+# Firecrawl scrapes per invocation; the live and full lanes each run hourly.
+EXTERNAL_PAGE_SCRAPE_LIMIT = 20
+EXTERNAL_PAGE_SCRAPE_TIMEOUT_SECONDS = 60
 PROBE_SCRIPT = (
     Path(__file__).resolve().parents[4]
     / "backend"
@@ -309,6 +320,89 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     continue
                 papers[entry_paper_key(entry)] = entry
             return list(papers.values())
+
+    def _prepare_external_pages(self) -> dict[str, int]:
+        """Turn HTML-only external papers without Markdown into Markdown."""
+        with db_manager.session_local() as db:
+            query = select(
+                Paper.id,
+                Paper.title,
+                Paper.source,
+                Paper.source_url,
+                Paper.conference_url_pdf,
+            ).where(Paper.is_latest_version, Paper.source == "external")
+            if self.full:
+                query = query.order_by(Paper.id)
+            else:
+                query = query.where(
+                    Paper.created_at >= datetime.now(UTC) - timedelta(days=14)
+                ).order_by(Paper.created_at.desc(), Paper.id.desc())
+            pages = {
+                str(row.id): (row.title, url)
+                for row in db.execute(query)
+                if (
+                    url := external_page_url(
+                        source=row.source,
+                        source_url=row.source_url,
+                        conference_url_pdf=row.conference_url_pdf,
+                    )
+                )
+            }
+        existing = self._existing_paths(
+            self.settings.paper_markdown_hf_bucket_id,
+            [
+                paper_markdown_bucket_key(paper_id, source="external")
+                for paper_id in pages
+            ],
+        )
+        missing = [
+            paper_id
+            for paper_id in pages
+            if paper_markdown_bucket_key(paper_id, source="external") not in existing
+        ]
+        statuses = self._status_records(
+            [external_page_status_key(paper_id) for paper_id in missing]
+        )
+        due = [
+            paper_id
+            for paper_id in missing
+            if retry_due(statuses.get(external_page_status_key(paper_id), {}))
+        ]
+        selected = due[:EXTERNAL_PAGE_SCRAPE_LIMIT]
+        counts = {
+            "external_pages_eligible": len(pages),
+            "external_pages_missing": len(missing),
+            "external_pages_due": len(due),
+            "external_pages_published": 0,
+            "external_pages_failed": 0,
+        }
+        if not self.should_execute or not self.settings.firecrawl_api_key:
+            return counts
+
+        def prepare(paper_id: str) -> bool:
+            title, url = pages[paper_id]
+            try:
+                prepare_external_page_markdown(
+                    paper_id=paper_id,
+                    title=title,
+                    page_url=url,
+                    api_key=self.settings.firecrawl_api_key,
+                    bucket_id=self.settings.paper_markdown_hf_bucket_id,
+                    token=self.settings.hf_token or None,
+                    timeout_seconds=EXTERNAL_PAGE_SCRAPE_TIMEOUT_SECONDS,
+                )
+            except ExternalPageMarkdownError as error:
+                self.logger.info(
+                    "external page Markdown failed for %s: %s", paper_id, error.code
+                )
+                return False
+            return True
+
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            outcomes = list(executor.map(prepare, selected))
+        counts["external_pages_published"] = sum(outcomes)
+        counts["external_pages_failed"] = len(outcomes) - sum(outcomes)
+        return counts
 
     def _semantic_records(
         self,
@@ -1216,6 +1310,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if papers
             else 100.0,
         }
+        external_pages = (
+            {}
+            if self.retry_only or getattr(self, "repair_invalid_limit", 0)
+            else self._prepare_external_pages()
+        )
         if additional_active_job_ids:
             launched = self._launch(
                 candidates, additional_active_job_ids=additional_active_job_ids
@@ -1299,6 +1398,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 item["hf_job_id"] for item in launched if item.get("hf_job_id")
             )
             or "none",
+            **external_pages,
         }
         self.logger.info("PAPER_MARKDOWN_SUMMARY %s", json.dumps(metrics))
         self.logger.info("Papers processed: %s", upstream_available)

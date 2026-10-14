@@ -101,8 +101,9 @@ function closestElement(node: Node | null): Element | null {
 function pageFromNode(node: Node | null, pagesRoot: Element): number | null {
   const element = closestElement(node);
   if (!element || !pagesRoot.contains(element)) return null;
-  if (!element.closest(".textLayer")) return null;
-  const pageElement = element.closest<HTMLElement>(".pdf-page[data-page]");
+  // A PDF page's text layer, or the single page of a web paper's Markdown.
+  if (!element.closest(".textLayer, .reader-web-document")) return null;
+  const pageElement = element.closest<HTMLElement>(".pdf-page[data-page], .reader-web-document[data-page]");
   if (!pageElement || !pagesRoot.contains(pageElement)) return null;
   const page = Number(pageElement.dataset.page);
   if (!Number.isInteger(page) || page < 1 || page > PAPER_SELECTION_MAX_PAGE) return null;

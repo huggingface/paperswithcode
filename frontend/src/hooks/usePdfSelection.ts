@@ -124,7 +124,7 @@ export function usePdfSelection({
       if (!root || pointerSelecting.current) return;
       const inLayer = event.target instanceof Node && Boolean(
         (event.target instanceof Element ? event.target : event.target.parentElement)
-          ?.closest?.(".textLayer")
+          ?.closest?.(".textLayer, .reader-web-document")
         && root.contains(event.target),
       );
       if (!inLayer) return;

@@ -1,5 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
-import type { FormEvent } from "react";
+import type { FormEvent, ReactNode } from "react";
 import { ExternalLink, Github, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { clampZoom } from "./pdfZoom";
@@ -32,27 +32,16 @@ interface PdfToolbarProps {
   onSearch: (direction: 1 | -1) => void;
 }
 
-export function PdfToolbar({
-  paperTitle,
-  paperHref,
-  resources,
-  page,
-  pages,
-  zoomPercent,
-  searchOpen,
-  searchQuery,
-  searchMatch,
-  searchCount,
-  searching,
-  onPage,
-  onZoom,
-  onZoomIn,
-  onZoomOut,
-  onToggleSearch,
-  onCloseSearch,
-  onSearchQuery,
-  onSearch,
-}: PdfToolbarProps) {
+interface ReaderToolbarProps {
+  paperTitle: string;
+  paperHref: string;
+  resources?: PdfToolbarResources;
+  label: string;
+  children?: ReactNode;
+}
+
+/** The reader's top bar: back link, paper title, and its resources, then controls. */
+export function ReaderToolbar({ paperTitle, paperHref, resources, label, children }: ReaderToolbarProps) {
   const toolbarRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const toolbar = toolbarRef.current;
@@ -68,21 +57,7 @@ export function PdfToolbar({
     observer.observe(logo);
     return () => observer.disconnect();
   }, []);
-
-  const submitPage = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const value = Number(new FormData(event.currentTarget).get("page"));
-    if (Number.isInteger(value)) onPage(value);
-  };
-  const submitZoom = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    const input = event.currentTarget.elements.namedItem("zoom") as HTMLInputElement;
-    const value = Number.parseFloat(input.value);
-    const next = Number.isFinite(value) && value > 0 ? clampZoom(value / 100) : zoomPercent / 100;
-    input.value = `${Math.round(next * 100)}%`;
-    onZoom(next);
-  };
-  return <div ref={toolbarRef} className="pdf-toolbar" aria-label="PDF controls">
+  return <div ref={toolbarRef} className="pdf-toolbar" aria-label={label}>
     <div className="pdf-toolbar-paper">
       <Link className="pdf-toolbar-back" to={paperHref} aria-label="Back">
         ← Back
@@ -123,6 +98,45 @@ export function PdfToolbar({
         <span>{resources.huggingFace.count} HF {resources.huggingFace.count === 1 ? "artifact" : "artifacts"}</span>
       </a>}
     </div>
+    {children}
+  </div>;
+}
+
+export function PdfToolbar({
+  paperTitle,
+  paperHref,
+  resources,
+  page,
+  pages,
+  zoomPercent,
+  searchOpen,
+  searchQuery,
+  searchMatch,
+  searchCount,
+  searching,
+  onPage,
+  onZoom,
+  onZoomIn,
+  onZoomOut,
+  onToggleSearch,
+  onCloseSearch,
+  onSearchQuery,
+  onSearch,
+}: PdfToolbarProps) {
+  const submitPage = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const value = Number(new FormData(event.currentTarget).get("page"));
+    if (Number.isInteger(value)) onPage(value);
+  };
+  const submitZoom = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const input = event.currentTarget.elements.namedItem("zoom") as HTMLInputElement;
+    const value = Number.parseFloat(input.value);
+    const next = Number.isFinite(value) && value > 0 ? clampZoom(value / 100) : zoomPercent / 100;
+    input.value = `${Math.round(next * 100)}%`;
+    onZoom(next);
+  };
+  return <ReaderToolbar paperTitle={paperTitle} paperHref={paperHref} resources={resources} label="PDF controls">
     <div className="pdf-toolbar-controls">
       <div className="pdf-toolbar-group">
         <button type="button" onClick={() => onPage(page - 1)} disabled={page <= 1} aria-label="Previous page">←</button>
@@ -167,5 +181,5 @@ export function PdfToolbar({
         <X size={16} aria-hidden="true" />
       </button>
     </div>}
-  </div>;
+  </ReaderToolbar>;
 }

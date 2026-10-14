@@ -220,6 +220,16 @@ old content objects while a one-hour continuation cursor could still reference
 them. The request path performs bounded reads and strict UTF-8 validation rather
 than downloading a whole paper.
 
+External papers whose source is a web page rather than a PDF (lab blog posts,
+GitHub READMEs, Hugging Face model cards) get the same canonical Markdown from
+Firecrawl (`PWC_FIRECRAWL_API_KEY`). The reader prepares a page on first open
+through `GET /api/v1/papers/{paper_id}/web-markdown`, and each hourly
+`paper_markdown_backfill` lane prepares up to 20 more. Venue and publisher
+landing pages, DOI links, and URLs with a fragment are not eligible. A page that
+is too short or does not carry the paper's title near the top is recorded under
+`_jobs/web-status/external/<id>.json` and not scraped again; transient failures
+retry with backoff, at most three times.
+
 For MCP operations, start with `pwc-status --component mcp` and inspect
 `journalctl -u paperswithcode-mcp@staging.service` (or `production`). Operational
 MCP telemetry is limited to tool name, status, latency, response bytes, protocol

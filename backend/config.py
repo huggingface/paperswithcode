@@ -337,6 +337,11 @@ class Settings(BaseSettings, ChatSettings):
         default="", description="Hugging Face API token for higher rate limits"
     )
 
+    firecrawl_api_key: str = Field(
+        default="",
+        description="Firecrawl API key that turns external paper web pages into Markdown",
+    )
+
     native_pdf_reader_enabled: bool = Field(default=False)
     paper_reader_chat_enabled: bool = Field(default=False)
     paper_reader_selection_enabled: bool = Field(default=False)

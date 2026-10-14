@@ -93,6 +93,32 @@ describe("commitPdfSelection", () => {
     document.body.replaceChildren();
   });
 
+  it("captures a range in a web paper's Markdown as its single page", () => {
+    const root = document.createElement("div");
+    const article = document.createElement("article");
+    article.className = "reader-web-document";
+    article.dataset.page = "1";
+    const paragraph = document.createElement("p");
+    paragraph.append(textNode("It scores 48.09 on LiveClaw."));
+    article.append(paragraph);
+    root.append(article);
+    document.body.append(root);
+    const range = document.createRange();
+    range.setStart(paragraph.firstChild as Text, 10);
+    range.setEnd(paragraph.firstChild as Text, 27);
+
+    expect(commitPdfSelection({
+      selection: mockSelection(range),
+      pagesRoot: root,
+      routeId: "123294",
+      paperVersion: "v1",
+      numPages: 1,
+    })).toEqual({
+      ok: true,
+      selection: { routeId: "123294", paperVersion: "v1", page: 1, text: "48.09 on LiveClaw" },
+    });
+  });
+
   it("captures one in-page text-layer range, including search mark text", () => {
     const root = document.createElement("div");
     root.className = "pdf-pages";

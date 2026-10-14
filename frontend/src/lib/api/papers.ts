@@ -13,9 +13,9 @@ import type {
   TrendingPaper,
 } from "./papers.types";
 import type { PaginatedResponse, PaperSearchFeedPage, SearchPage } from "./shared.types";
-import type { ApiRequest } from "../apiTransport";
+import { ApiError, type ApiRequest } from "../apiTransport";
 import { paperCuration } from "./curation";
-import { apiRequest } from "./request";
+import { apiFetch, apiRequest } from "./request";
 
 export interface ListPapersParams {
   page?: number;
@@ -304,3 +304,10 @@ export class PapersApi {
 }
 
 export const papersApi = new PapersApi(apiRequest);
+
+/** An HTML-only external paper's web page as Markdown, prepared on first read. */
+export async function getPaperWebMarkdown(paperId: string): Promise<string> {
+  const response = await apiFetch(`/papers/${encodeURIComponent(paperId)}/web-markdown`);
+  if (!response.ok) throw new ApiError(response, await response.text());
+  return response.text();
+}

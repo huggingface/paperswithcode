@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PdfViewer } from "@/components/pdf/PdfViewer";
+import { WebPaperViewer } from "@/components/pdf/WebPaperViewer";
 import { ArtifactWorkspace } from "@/components/chat/ArtifactWorkspace";
 import { ArtifactPanelProvider, useArtifactPanel } from "@/components/chat/useArtifactPanel";
 import type { PdfToolbarResources } from "@/components/pdf/PdfToolbar";
@@ -12,6 +13,7 @@ import { assetUrl, isPaperReaderChatEnabled } from "@/lib/apiUrl";
 import { chatApi } from "@/lib/api/chat";
 import type { PaperSelectionDraft } from "@/lib/chat";
 import { safeExternalHref } from "@/lib/safeExternalHref";
+import { externalPaperWebPage } from "@/lib/paperReader";
 import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
 
@@ -116,7 +118,8 @@ function PaperReaderExperience() {
     retry: false,
   });
   const paper = query.data;
-  const originalPdfUrl = paper?.source === "external"
+  const webPage = paper ? externalPaperWebPage(paper) : null;
+  const originalPdfUrl = webPage ? null : paper?.source === "external"
     ? assetUrl(`/paper-assets/external/${paper.id}/paper.pdf`)
     : directArxivPdfHref(paper?.url_pdf);
   const pdfUrl = originalPdfUrl && paper?.source !== "external"
@@ -135,6 +138,9 @@ function PaperReaderExperience() {
   );
   const [mobileTab, setMobileTab] = useState<"paper" | "assistant">("paper");
   const [paperSelection, setPaperSelection] = useState<PaperSelectionDraft | undefined>();
+  // Chat waits for a web paper's Markdown so its first turn can read the page.
+  const [webPageReady, setWebPageReady] = useState(false);
+  const markWebPageReady = useCallback(() => setWebPageReady(true), []);
   const [selectionStatus, setSelectionStatus] = useState("");
   const [initialPage, setInitialPage] = useState(() => storedPage(routeId));
   const [workspaceWidth, setWorkspaceWidth] = useState(0);
@@ -178,6 +184,7 @@ function PaperReaderExperience() {
     setActiveSessionId(storedSession || undefined);
     setCollapsed(sessionStorage.getItem(collapsedKey(routeId)) === "1");
     setMobileTab("paper");
+    setWebPageReady(false);
     setPaperSelection(undefined);
     setSelectionStatus("");
     const nextPage = storedPage(routeId);
@@ -317,7 +324,9 @@ function PaperReaderExperience() {
 
   const assistantEnabled = isPaperReaderChatEnabled()
     && availabilityQuery.data?.paper_reader_chat_enabled !== false;
-  const assistant = paper && assistantEnabled ? <ChatExperience
+  const assistant = paper && assistantEnabled && webPage && !webPageReady
+    ? <div className="reader-chat-unavailable" role="status">Chat opens once the paper is ready.</div>
+    : paper && assistantEnabled ? <ChatExperience
     mode="paper"
     routeSessionId={activeSessionId}
     primaryPaper={{ id: paper.id, routeId: canonicalRoute, title: paper.title }}
@@ -332,7 +341,7 @@ function PaperReaderExperience() {
   if (query.isLoading) return <div className="reader-status" role="status">Loading paper…</div>;
   if (query.error || !paper) return <div className="reader-status" role="alert"><p>Paper not found.</p><Link to="/papers">Browse papers</Link></div>;
   if (availabilityQuery.data?.native_pdf_reader_enabled === false) return <div className="reader-status" role="alert"><p>The native reader is currently unavailable.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
-  if (!pdfUrl) return <div className="reader-status" role="alert"><p>Native reading is unavailable for this resource.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
+  if (!pdfUrl && !webPage) return <div className="reader-status" role="alert"><p>Native reading is unavailable for this resource.</p><Link to={`/paper/${canonicalRoute}`}>Back to paper</Link></div>;
 
   return <div className="paper-reader-shell">
     {!desktopSplit && <div className="reader-tabs" role="tablist" aria-label="Reader panels">
@@ -358,28 +367,42 @@ function PaperReaderExperience() {
         aria-label="Paper"
         aria-hidden={!desktopSplit && mobileTab !== "paper"}
       >
-        <PdfViewer
-          url={pdfUrl}
-          downloadUrl={originalPdfUrl ?? pdfUrl}
+        {webPage ? <WebPaperViewer
+          paperId={paper.id}
           paperKey={canonicalRoute}
           paperTitle={paper.title}
           paperHref={`/paper/${canonicalRoute}`}
-          onClose={closeReader}
+          sourceUrl={webPage}
           resources={toolbarResources}
-          initialPage={initialPage}
-          resizeActive={resizeActive || chatTransitionActive}
-          selectionEnabled={selectionEnabled}
           paperVersion={paper.version}
-          loadErrorMessage={paper.source === "external"
-            ? "Paper content is still being prepared. Please try again later."
-            : undefined}
+          selectionEnabled={selectionEnabled}
+          onReady={markWebPageReady}
           onPaperSelection={attachSelection}
           onPaperSelectionError={setSelectionStatus}
-          onPageChange={(page) => {
-            currentPageRef.current = page;
-            sessionStorage.setItem(pageKey(routeId), String(page));
-          }}
-        />
+        /> : pdfUrl && (
+          <PdfViewer
+            url={pdfUrl}
+            downloadUrl={originalPdfUrl ?? pdfUrl}
+            paperKey={canonicalRoute}
+            paperTitle={paper.title}
+            paperHref={`/paper/${canonicalRoute}`}
+            onClose={closeReader}
+            resources={toolbarResources}
+            initialPage={initialPage}
+            resizeActive={resizeActive || chatTransitionActive}
+            selectionEnabled={selectionEnabled}
+            paperVersion={paper.version}
+            loadErrorMessage={paper.source === "external"
+              ? "Paper content is still being prepared. Please try again later."
+              : undefined}
+            onPaperSelection={attachSelection}
+            onPaperSelectionError={setSelectionStatus}
+            onPageChange={(page) => {
+              currentPageRef.current = page;
+              sessionStorage.setItem(pageKey(routeId), String(page));
+            }}
+          />
+        )}
       </section>
       {desktopSplit && !collapsed && <div
         ref={resizeHandleRef}

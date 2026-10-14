@@ -14,12 +14,26 @@ describe("paper detail reader action", () => {
     } as Paper, "109743")).toBe("/pdf/109743");
   });
 
-  it("does not offer the reader for an external HTML-only resource", () => {
+  it("routes an external web page through the catalog paper ID", () => {
     expect(paperReaderRoute({
       id: "109744",
       arxiv_id: null,
       source: "external",
       source_url: "https://example.com/blog",
-    } as Paper, "109744")).toBeNull();
+    } as Paper, "109744")).toBe("/pdf/109744");
+  });
+
+  it.each([
+    "https://doi.org/10.1145/3763359",
+    "https://aclanthology.org/2020.lrec-1.297/",
+    "https://www.sciencedirect.com/science/article/pii/1",
+    "https://ras.papercept.net/program.html#thi1i_171",
+  ])("does not offer the reader for the landing or listing page %s", (sourceUrl) => {
+    expect(paperReaderRoute({
+      id: "109745",
+      arxiv_id: null,
+      source: "external",
+      source_url: sourceUrl,
+    } as Paper, "109745")).toBeNull();
   });
 });
