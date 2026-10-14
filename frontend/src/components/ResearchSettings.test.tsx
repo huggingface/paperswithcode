@@ -66,8 +66,27 @@ describe('research follows', () => {
       render(<ResearchFollowButton kind="method" entityId="3" />, { wrapper });
       expect(screen.getByRole('link', { name: 'Follow' }).getAttribute('href')).toContain('/auth/hf/login');
       expect(screen.getByText('Sign in to get new papers using this method.')).toBeInTheDocument();
+      vi.stubEnv('VITE_DISABLE_AUTH', '1');
+      const { container } = render(<ResearchFollowButton kind="task" entityId="4" />, { wrapper });
+      expect(container).toBeEmptyDOMElement();
     } finally {
+      vi.unstubAllEnvs();
       auth.user = { hf_subject: 'alice', username: 'alice' };
     }
+  });
+  it('confirms a new follow only for the entity that was followed', async () => {
+    const list = vi.spyOn(researchApi, 'follows').mockResolvedValue([]);
+    vi.spyOn(researchApi, 'setFollow').mockResolvedValue();
+    const { rerender } = render(<ResearchFollowButton kind="task" entityId="12" />, { wrapper });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Follow' })).toBeEnabled());
+    list.mockResolvedValue([
+      { kind: 'task', entity_id: 12, name: 'Task', url: '/tasks/task', created_at: '' },
+      { kind: 'task', entity_id: 13, name: 'Other', url: '/tasks/other', created_at: '' },
+    ]);
+    fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
+    expect(await screen.findByText(/Added to/)).toBeInTheDocument();
+    rerender(<ResearchFollowButton kind="task" entityId="13" />);
+    expect(screen.getByRole('button', { name: 'Unfollow' })).toBeInTheDocument();
+    expect(screen.queryByText(/Added to/)).not.toBeInTheDocument();
   });
 });

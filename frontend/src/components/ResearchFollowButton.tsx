@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useLocation } from 'react-router-dom';
 import { Check, Plus } from 'lucide-react';
 import { researchApi, type FollowKind } from '@/lib/api/research';
+import { isAuthDisabled } from '@/lib/apiUrl';
 import { useOptionalAuth } from '@/lib/authContext';
 import { hfLoginUrl } from './HfSignInButton';
 
@@ -19,19 +20,22 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
   const user = auth?.user;
   const location = useLocation();
   const client = useQueryClient();
-  const [justFollowed, setJustFollowed] = useState(false);
+  // Keyed by entity so a reused instance never confirms a follow on another page.
+  const [justFollowed, setJustFollowed] = useState<string | null>(null);
+  const entityKey = `${kind}:${entityId}`;
   const queryKey = ['research-follows', user?.hf_subject];
   const follows = useQuery({ queryKey, queryFn: researchApi.follows, enabled: !!user });
   const followed = follows.data?.some(f => f.kind === kind && String(f.entity_id) === String(entityId)) ?? false;
   const mutation = useMutation({
     mutationFn: () => researchApi.setFollow(kind, entityId, !followed),
     onSuccess: async () => {
-      setJustFollowed(!followed);
+      setJustFollowed(followed ? null : entityKey);
       await client.invalidateQueries({ queryKey });
       await client.invalidateQueries({ queryKey: ['research-feed', user?.hf_subject] });
     },
   });
   if (!auth) return null;
+  if (!user && isAuthDisabled()) return null;
   if (!user) return <div className="research-follow">
     <a className="research-follow-btn" href={hfLoginUrl(location.pathname + location.search)}>
       <Plus aria-hidden="true" />Follow
@@ -50,7 +54,7 @@ export default function ResearchFollowButton({ kind, entityId }: { kind: FollowK
       </> : <><Plus aria-hidden="true" />Follow</>}
     </button>
     {failed ? <span className="research-follow-hint is-error" role="alert">Could not update follows. Please try again.</span>
-      : followed ? justFollowed && <span className="research-follow-hint" role="status">
+      : followed ? justFollowed === entityKey && <span className="research-follow-hint" role="status">
         Added to <Link to="/following">your Following feed</Link>.
       </span>
       : <span className="research-follow-hint">{HINTS[kind]} in <Link to="/following">your Following feed</Link>.</span>}
