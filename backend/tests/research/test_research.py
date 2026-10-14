@@ -693,6 +693,7 @@ def test_preview_and_test_send_never_touch_the_outbox(db, now, monkeypatch):
     preview = delivery.sample_digest(db, "alice", now)
     assert preview["to"] == ["a@example.com"]
     assert "Research preview" in preview["text"]
+    assert f"{now:%b} {now.day}, {now:%Y}." in preview["text"]
 
     calls = []
     monkeypatch.setattr(

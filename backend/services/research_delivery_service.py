@@ -218,9 +218,12 @@ def sample_digest(db: Session, subject: str, now: datetime) -> dict | None:
     sub = db.get(ResearchSubscription, subject)
     if not sub:
         return None
-    start = now - timedelta(days=7)
+    # The last seven days including today; render_digest treats ``end`` as exclusive.
+    start = now - timedelta(days=6)
     entries = matching_entries(db, subject, now, cutoff=start.date())
-    payload = render_digest(diverse(entries, 20), sub.unsubscribe_token, start, now)
+    payload = render_digest(
+        diverse(entries, 20), sub.unsubscribe_token, start, now + timedelta(days=1)
+    )
     payload.update(
         {"to": [sub.email] if sub.email else [], "from": get_settings().resend_from}
     )
