@@ -21,7 +21,7 @@ vi.mock("./ChatMessage", () => ({
 
 afterEach(() => vi.restoreAllMocks());
 
-function setup(editAccepted = true) {
+function setup(editAccepted = true, initialBusy = true) {
   let height = 1000;
   vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(() => height);
   vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
@@ -43,13 +43,15 @@ function setup(editAccepted = true) {
     onEditAndResend: vi.fn().mockReturnValue(editAccepted), onArchiveOld: vi.fn(), onArchiveOldest: vi.fn(),
   };
   // Message content offsets; viewport-relative tops follow the scroll position.
-  const offsets = new Map<string, number>();
+  // The opening question sits past the end so mount-time pinning acts like following.
+  const offsets = new Map<string, number>([["question", 1000]]);
   vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
     const offset = offsets.get(this.dataset.messageId ?? "");
-    const top = offset === undefined ? 0 : offset - scroller.scrollTop;
+    const scrollTop = document.querySelector<HTMLElement>(".chat-conversation")?.scrollTop ?? 0;
+    const top = offset === undefined ? 0 : offset - scrollTop;
     return { top } as DOMRect;
   });
-  const view = render(<ChatConversation {...props} messages={messages} />);
+  const view = render(<ChatConversation {...props} busy={initialBusy} messages={messages} />);
   const scroller = view.container.querySelector<HTMLDivElement>(".chat-conversation")!;
   return {
     ...view, scroller,
@@ -69,6 +71,27 @@ function setup(editAccepted = true) {
 }
 
 describe("ChatConversation scrolling", () => {
+  it("pins the question of a conversation that opens mid-stream", () => {
+    const offsets = new Map([["question", 100]]);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      return { top: offsets.get(this.dataset.messageId ?? "") ?? 0 } as DOMRect;
+    });
+    vi.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockReturnValue(1000);
+    vi.spyOn(HTMLElement.prototype, "clientHeight", "get").mockReturnValue(400);
+    const view = render(<ChatConversation
+      messages={[{ id: "question", role: "user", text: "Question" }, { id: "answer", role: "assistant", streaming: true }]}
+      papers={{}} busy paperMentionsEnabled={false} archivePending={null} openRouterFallbackEnabled={false}
+      onToggleBlock={vi.fn()} onEditAndResend={vi.fn()} onArchiveOld={vi.fn()} onArchiveOldest={vi.fn()}
+    />);
+    expect(view.container.querySelector<HTMLDivElement>(".chat-conversation")!.scrollTop).toBe(76);
+  });
+  it("opens an idle conversation at the bottom", () => {
+    const chat = setup(true, false);
+    chat.place("question", 0);
+    expect(chat.scroller.scrollTop).toBe(600);
+    chat.update(undefined, false);
+    expect(chat.scroller.scrollTop).toBe(800);
+  });
   it("opens at the bottom and follows streamed content", () => {
     const chat = setup();
     expect(chat.scroller.scrollTop).toBe(600);

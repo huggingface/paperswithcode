@@ -55,9 +55,10 @@ export function ChatConversation({
   }, []);
   const userMessages = messages.filter((message) => message.role === "user");
   const userCount = userMessages.length;
-  // Opening a conversation, even mid-stream, starts at the latest content.
+  // An idle conversation opens at the latest content; one that opens
+  // mid-stream (including a first send from the empty composer) pins its question.
   const previousUserCountRef = useRef(userCount);
-  const previousBusyRef = useRef(busy);
+  const previousBusyRef = useRef(false);
   const firstUserId = userMessages[0]?.id;
   const latestUserId = userMessages.at(-1)?.id;
 
