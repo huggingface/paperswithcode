@@ -824,6 +824,35 @@ def test_chat_provider_policy_accepts_one_reviewed_staging_candidate(
     runtime_validation.validate_chat_capacity_and_spend_policy(settings)
 
 
+@pytest.mark.parametrize(
+    ("warning_calls", "hard_calls", "valid"),
+    [
+        (1_000, 1_200, True),
+        (2_500, 3_000, True),
+        (3_000, 3_000, True),
+        (2_500, 3_001, False),
+        (1_300, 1_200, False),
+    ],
+)
+def test_web_search_monthly_budget_is_bounded(
+    settings_factory, warning_calls, hard_calls, valid
+):
+    settings, _release = settings_factory("production")
+    settings.chat_gateway_url = (
+        "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
+    )
+    settings.chat_web_search_enabled = True
+    settings.chat_web_search_exa_api_key = "test-only"
+    settings.chat_web_search_monthly_warning_calls = warning_calls
+    settings.chat_web_search_monthly_hard_calls = hard_calls
+
+    if valid:
+        runtime_validation.validate_chat_provider_policy(settings)
+    else:
+        with pytest.raises(RuntimeError, match="web-search runtime descriptor"):
+            runtime_validation.validate_chat_provider_policy(settings)
+
+
 def test_direct_openai_requires_gateway_key_and_accepts_production(settings_factory):
     staging, _release = settings_factory("staging")
     staging.chat_openai_direct_enabled = True

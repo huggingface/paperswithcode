@@ -472,8 +472,8 @@ class ChatToolSettings(BaseModel):
         default=16 * 1024, ge=4 * 1024, le=16 * 1024
     )
     chat_web_search_query_max_chars: int = Field(default=500, ge=1, le=500)
-    chat_web_search_monthly_warning_calls: int = Field(default=1000, ge=1)
-    chat_web_search_monthly_hard_calls: int = Field(default=1200, ge=1)
+    chat_web_search_monthly_warning_calls: int = Field(default=2500, ge=1)
+    chat_web_search_monthly_hard_calls: int = Field(default=3000, ge=1)
     chat_web_search_transient_cooldown_seconds: int = Field(default=60, ge=5, le=3600)
     chat_web_search_domain_denylist: str = Field(default="")
     chat_hf_catalog_enabled: bool = Field(default=False)

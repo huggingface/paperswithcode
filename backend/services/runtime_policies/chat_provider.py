@@ -194,8 +194,12 @@ def validate_chat_provider_policy(
             or settings.chat_web_search_result_count != 5
             or settings.chat_web_search_max_result_bytes != 16 * 1024
             or settings.chat_web_search_query_max_chars != 500
-            or settings.chat_web_search_monthly_warning_calls != 1_000
-            or settings.chat_web_search_monthly_hard_calls != 1_200
+            or not (
+                1
+                <= settings.chat_web_search_monthly_warning_calls
+                <= settings.chat_web_search_monthly_hard_calls
+                <= 3_000
+            )
         ):
             raise RuntimeError("web-search runtime descriptor is invalid")
     if settings.chat_hf_catalog_enabled:
