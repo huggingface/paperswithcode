@@ -432,6 +432,17 @@ class ChatShareService:
             filename=path.rsplit("/", 1)[-1],
         )
 
+    def get_for_session(self, session_id: uuid.UUID) -> ChatShare:
+        """Resolve a chat URL to its owner-created public snapshot, if any."""
+        share = self.db.execute(
+            select(ChatShare).where(ChatShare.chat_session_id == session_id)
+        ).scalar_one_or_none()
+        if share is None:
+            raise ChatServiceError(
+                "share_not_found", 404, "Shared conversation not found"
+            )
+        return share
+
     def get_public(self, raw_share_id: str) -> ChatShareDetail:
         try:
             share_id = uuid.UUID(raw_share_id)

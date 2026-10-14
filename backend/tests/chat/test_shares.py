@@ -470,6 +470,46 @@ def test_public_http_get_is_anonymous_and_no_store(monkeypatch):
     assert missing.json()["detail"]["message"] == "Shared conversation not found"
 
 
+class _SessionShareDB:
+    def __init__(self, share):
+        self.share = share
+
+    def execute(self, statement):
+        assert "chat_shares.chat_session_id" in str(statement)
+        requested = next(iter(statement.compile().params.values()))
+        if self.share is None or requested != self.share.chat_session_id:
+            return _Result(None)
+        return _Result(self.share)
+
+
+def test_session_public_share_lookup_is_anonymous_and_no_store(monkeypatch):
+    settings = get_settings()
+    monkeypatch.setattr(settings, "chat_enabled", True)
+    monkeypatch.setattr(settings, "hf_token", "test-token")
+    now = datetime.now(UTC)
+    share = SimpleNamespace(
+        id=uuid.uuid4(),
+        chat_session_id=uuid.uuid4(),
+        created_at=now,
+        updated_at=now,
+    )
+    app = create_app()
+    app.dependency_overrides[get_database_session] = lambda: _SessionShareDB(share)
+
+    with TestClient(app) as client:
+        response = client.get(
+            f"/api/v1/chat/sessions/{share.chat_session_id}/public-share"
+        )
+        unshared = client.get(f"/api/v1/chat/sessions/{uuid.uuid4()}/public-share")
+
+    assert response.status_code == 200
+    assert response.headers["Cache-Control"] == "no-store"
+    assert response.json()["public_path"] == f"/share/{share.id}"
+    assert unshared.status_code == 404
+    assert unshared.headers["Cache-Control"] == "no-store"
+    assert unshared.json()["detail"]["message"] == "Shared conversation not found"
+
+
 def test_public_models_forbid_unexpected_private_fields():
     with pytest.raises(ValidationError):
         PublicChatMessage(

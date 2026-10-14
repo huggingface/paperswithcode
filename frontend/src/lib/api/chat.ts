@@ -88,6 +88,12 @@ export class ChatApi {
     return this.request(`/chat/sessions/${id}/share`, { method: "POST" });
   }
 
+  getSessionPublicShare(id: string): Promise<ChatShareSummary> {
+    return this.request(`/chat/sessions/${encodeURIComponent(id)}/public-share`, {
+      credentials: "omit",
+    });
+  }
+
   getSharedChat(id: string): Promise<ChatShareDetail> {
     return this.request(`/chat/shares/${encodeURIComponent(id)}`, {
       credentials: "omit",

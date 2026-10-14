@@ -50,6 +50,8 @@ vi.mock("@/components/chat/ArtifactWorkspace", () => ({ ArtifactWorkspace: ({ ch
 vi.mock("@/components/chat/LatexPaperArtifact", () => ({ LatexPaperArtifact: ({ descriptor }: { descriptor: { title: string } }) => <aside>{descriptor.title}</aside> }));
 vi.mock("@/components/chat/ChatSharing", () => ({ ChatSharing: () => null }));
 import ChatView from "@/views/ChatView";
+import { chatApi } from "@/lib/api/chat";
+import { ApiError } from "@/lib/apiTransport";
 
 const deferred = <T,>() => {
   let resolve!: (value: T) => void;
@@ -285,5 +287,51 @@ describe("selected conversation and active turn ownership", () => {
     expect(screen.queryByText("a saved question")).not.toBeInTheDocument();
     await act(async () => other.resolve(detail("a", "Other account conversation")));
     await screen.findByText("Other account conversation");
+  });
+});
+
+describe("chat URLs opened by someone other than the owner", () => {
+  const shareElement = (path: string) => <QueryClientProvider client={client}>
+    <MemoryRouter initialEntries={[path]}><Routes>
+      <Route path="/chat/:sessionId?" element={<ChatView />} />
+      <Route path="/share/:shareId" element={<Probe />} />
+    </Routes></MemoryRouter>
+  </QueryClientProvider>;
+  const notFound = () => new ApiError(new Response(null, { status: 404 }), "{}");
+
+  it("sends a signed-out visitor to the public share", async () => {
+    mocks.user = null;
+    const lookup = vi.spyOn(chatApi, "getSessionPublicShare").mockResolvedValue({
+      share_id: "s1", public_path: "/share/s1",
+      created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z",
+    });
+    render(shareElement("/chat/a"));
+    await waitFor(() => expect(screen.getByTestId("route")).toHaveTextContent("/share/s1"));
+    expect(lookup).toHaveBeenCalledWith("a");
+    expect(mocks.getSession).not.toHaveBeenCalled();
+  });
+
+  it("sends a signed-in non-owner to the public share", async () => {
+    mocks.getSession.mockRejectedValue(notFound());
+    vi.spyOn(chatApi, "getSessionPublicShare").mockResolvedValue({
+      share_id: "s1", public_path: "/share/s1",
+      created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z",
+    });
+    render(shareElement("/chat/a"));
+    await waitFor(() => expect(screen.getByTestId("route")).toHaveTextContent("/share/s1"));
+  });
+
+  it("keeps the owner on their chat without looking up a share", async () => {
+    const lookup = vi.spyOn(chatApi, "getSessionPublicShare");
+    render(shareElement("/chat/a"));
+    await screen.findByText("a saved question");
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("shows the load error when the chat was never shared", async () => {
+    mocks.getSession.mockRejectedValue(notFound());
+    vi.spyOn(chatApi, "getSessionPublicShare").mockRejectedValue(notFound());
+    render(shareElement("/chat/a"));
+    await screen.findByRole("alert");
   });
 });

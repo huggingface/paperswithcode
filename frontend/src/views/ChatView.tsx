@@ -33,6 +33,7 @@ import {
 import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
 import { emptyChatDraft, parseChatDraft } from "@/lib/paperSelection";
 import { chatApi } from "@/lib/api/chat";
+import { ApiError } from "@/lib/apiTransport";
 import { isStagingEnvironment } from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import {
@@ -375,6 +376,21 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     // the sidebar, so a transcript being edited does not get replaced.
     refetchOnMount: "always",
   });
+  // Only the owner can open /chat/:id. Anyone else who was handed that URL
+  // lands on its public share when the owner created one.
+  const routeNotOwned = !authLoading && (
+    !user || (routeQuery.error instanceof ApiError && routeQuery.error.status === 404)
+  );
+  const publicShareQuery = useQuery({
+    queryKey: ["chatSessionPublicShare", routeSessionId],
+    queryFn: () => chatApi.getSessionPublicShare(routeSessionId ?? ""),
+    enabled: mode === "general" && Boolean(routeSessionId) && routeNotOwned,
+    retry: false,
+  });
+  const publicSharePath = publicShareQuery.data?.public_path;
+  useEffect(() => {
+    if (publicSharePath) navigate(publicSharePath, { replace: true });
+  }, [navigate, publicSharePath]);
   const detail = routeQuery.data;
   // A newly admitted turn already initialized the visible transcript, even when
   // its first canonical fetch is still pending after streaming finishes.
@@ -565,8 +581,9 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   const isEmpty = chat.messages.length === 0;
   const isRouteSessionLoading = Boolean(routeSessionId && (
     authLoading || (user && !routeReady && !routeQuery.isError)
+    || publicShareQuery.isFetching || publicSharePath
   ));
-  const routeSessionError = !routeReady && routeQuery.error?.message;
+  const routeSessionError = !routeReady && !isRouteSessionLoading && routeQuery.error?.message;
   const openRouterFallbackEnabled = Boolean(
     openRouterCredentialQuery.data?.fallback_enabled,
   );

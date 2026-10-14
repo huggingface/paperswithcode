@@ -1512,6 +1512,30 @@ def download_artifact_file(
         _raise_artifact(error)
 
 
+@router.get(
+    "/sessions/{session_id}/public-share",
+    response_model=ChatShareSummary,
+)
+def get_session_public_share(
+    session_id: uuid.UUID,
+    response: Response,
+    db: Session = Depends(get_database_session),
+    settings: Settings = Depends(get_settings),
+):
+    """Let visitors who open a private chat URL land on its public share."""
+    response.headers["Cache-Control"] = "no-store"
+    try:
+        share = ChatShareService(db, settings).get_for_session(session_id)
+    except ChatServiceError as exc:
+        _raise(exc, {"Cache-Control": "no-store"})
+    return ChatShareSummary(
+        share_id=share.id,
+        public_path=f"/share/{share.id}",
+        created_at=share.created_at,
+        updated_at=share.updated_at,
+    )
+
+
 @router.get("/shares/{share_id}", response_model=ChatShareDetail)
 def get_shared_chat(
     share_id: str,
