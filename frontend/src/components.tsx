@@ -659,7 +659,15 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
       staleTime: 10 * 60 * 1000,
     });
   }, [paper.id, queryClient]);
-  const visibleAuthors = paper.authors.slice(0, 3).join(", ");
+  const visibleAuthors = paper.authors.slice(0, 3).map((name, index) => {
+    const authorId = paper.authorIds?.[index];
+    return (
+      <React.Fragment key={index}>
+        {index > 0 && ", "}
+        {authorId ? <Link to={`/authors/${authorId}`}>{name}</Link> : name}
+      </React.Fragment>
+    );
+  });
   const totalAuthors = paper.authors.length;
   const visibleMethods = visibleFeedMethods(paper);
   return (

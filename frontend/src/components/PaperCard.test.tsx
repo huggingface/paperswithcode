@@ -86,3 +86,27 @@ describe("PaperCard organization logos", () => {
    get.mockRestore();
    client.clear();
  });
+
+describe("PaperCard authors", () => {
+  it("links displayed author names that have an author page", () => {
+    render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <PaperCard
+            paper={{
+              ...paper,
+              authors: ["Ada", "Grace", "Alan", "Barbara"],
+              authorIds: ["11", null, "13"],
+            }}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    expect(screen.getByRole("link", { name: "Ada" })).toHaveAttribute("href", "/authors/11");
+    expect(screen.queryByRole("link", { name: "Grace" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Grace/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Alan" })).toHaveAttribute("href", "/authors/13");
+    expect(screen.getByText(/\+1 authors/)).toBeInTheDocument();
+  });
+});

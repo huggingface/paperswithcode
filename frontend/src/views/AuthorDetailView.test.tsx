@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -6,6 +6,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Paper } from "@/lib/api/papers.types";
 import { papersApi } from "@/lib/api/papers";
 import AuthorDetailView from "@/views/AuthorDetailView";
+
+vi.mock("@/hooks/useIntersectionObserver", () => ({
+  useIntersectionObserver: () => ({ targetRef: () => {}, isIntersecting: false }),
+}));
 
 const paper: Paper = {
   id: "42",
@@ -17,6 +21,7 @@ const paper: Paper = {
   title: "Kimi K3",
   abstract: "Technical report.",
   authors: ["Researcher"],
+  author_links: [{ id: "7", name: "Researcher", hf_username: "researcher" }],
   published: "2026-07-27",
   version: "v1",
   is_latest_version: true,
@@ -25,39 +30,53 @@ const paper: Paper = {
 
 afterEach(() => vi.restoreAllMocks());
 
+function renderAuthor(path = "/authors/7") {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={[path]}>
+        <Routes>
+          <Route path="/authors/:authorId" element={<AuthorDetailView />} />
+        </Routes>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
 describe("AuthorDetailView", () => {
-  it("loads the stable author ID route and renders canonical paper links", async () => {
+  it("renders the author's papers as a standard filterable paper feed", async () => {
     vi.spyOn(papersApi, "getAuthor").mockResolvedValue({
       id: "7",
       full_name: "Researcher",
       hf_username: "researcher",
       paper_count: 1,
     });
-    vi.spyOn(papersApi, "authorPapers").mockResolvedValue({
+    vi.spyOn(papersApi, "list").mockResolvedValue({
       count: 1,
       next_page: null,
       previous_page: null,
       results: [paper],
     });
-    const queryClient = new QueryClient({
-      defaultOptions: { queries: { retry: false } },
-    });
 
-    render(
-      <QueryClientProvider client={queryClient}>
-        <MemoryRouter initialEntries={["/authors/7"]}>
-          <Routes>
-            <Route path="/authors/:authorId" element={<AuthorDetailView />} />
-          </Routes>
-        </MemoryRouter>
-      </QueryClientProvider>,
-    );
+    const { container } = renderAuthor();
 
     expect(await screen.findByRole("heading", { name: "Researcher" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Kimi K3" })).toHaveAttribute(
+    expect(await screen.findByRole("link", { name: "Kimi K3" })).toHaveAttribute(
       "href",
       "/paper/2607.24653",
     );
+    expect(container.querySelector(".paper-card")).not.toBeNull();
     expect(papersApi.getAuthor).toHaveBeenCalledWith("7");
+    expect(papersApi.list).toHaveBeenCalledWith(
+      expect.objectContaining({ author: "7", order_by: "trending", include_resources: true }),
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "newest" }));
+    fireEvent.click(screen.getByRole("button", { name: /Has code/ }));
+    await waitFor(() =>
+      expect(papersApi.list).toHaveBeenLastCalledWith(
+        expect.objectContaining({ author: "7", order_by: "date_published", has_code: true }),
+      ),
+    );
   });
 });

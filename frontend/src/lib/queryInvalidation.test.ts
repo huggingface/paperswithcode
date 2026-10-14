@@ -15,7 +15,6 @@ const feeds = [
   ["conference-papers-infinite", "cvpr-2026"],
   ["organization-papers-infinite", "example"],
   ["method-papers-infinite", "transformer"],
-  ["author-papers", "123"],
   ["my-bookmarks"],
   ["related-papers", "99"],
   ["paper-versions", "2401.00001"],

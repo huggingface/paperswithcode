@@ -34,6 +34,8 @@ export interface ListPapersParams {
   has_hf_artifacts?: boolean;
   framework?: string;
   repository?: string;
+  /** Numeric author ID, exact author name, or @HF username. */
+  author?: string;
 }
 
 export interface PaperFeedParams {
@@ -200,13 +202,6 @@ export class PapersApi {
 
   getAuthor(id: string): Promise<Author> {
     return this.request(`/authors/${id}`);
-  }
-
-  authorPapers(
-    id: string,
-    params?: { page?: number; page_size?: number },
-  ): Promise<PaginatedResponse<Paper>> {
-    return this.request(`/authors/${id}/papers${query(params)}`);
   }
 
   primeCurationState(paperId: string, force = false) {

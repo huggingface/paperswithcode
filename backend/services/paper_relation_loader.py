@@ -50,6 +50,9 @@ from backend.models.database import (
 from backend.utils.organization_logos import organization_logo_path
 from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 
+# Paper cards show the first three author names (frontend PaperCard).
+CARD_AUTHOR_LINKS = 3
+
 
 @dataclass(frozen=True, slots=True)
 class PaperConferenceRelation:
@@ -158,17 +161,7 @@ class PaperRelationLoader:
         if not unique_ids:
             return relations
 
-        author_rows = self._load_card_relations(unique_ids, relations)
-        for paper_id, author_id, author_name, hf_username in author_rows:
-            _append_relation(
-                relations.author_links,
-                paper_id,
-                AuthorLink(
-                    id=str(author_id),
-                    name=author_name,
-                    hf_username=hf_username,
-                ),
-            )
+        self._load_card_relations(unique_ids, relations, author_link_limit=None)
         self._load_detail_relations(unique_ids, relations)
         self._load_repository_coverage(unique_ids, relations)
         return relations
@@ -333,7 +326,8 @@ class PaperRelationLoader:
         self,
         paper_ids: list[int],
         relations: PaperRelations,
-    ) -> list[_AuthorRow]:
+        author_link_limit: int | None = CARD_AUTHOR_LINKS,
+    ) -> None:
         author_rows: list[_AuthorRow] = (
             self.db.query(
                 PaperAuthor.paper_id,
@@ -346,8 +340,18 @@ class PaperRelationLoader:
             .order_by(PaperAuthor.paper_id, PaperAuthor.author_order)
             .all()
         )
-        for paper_id, _author_id, author_name, _hf_username in author_rows:
+        for paper_id, author_id, author_name, hf_username in author_rows:
             _append_relation(relations.authors, paper_id, author_name)
+            # Cards link only the names they display, keeping long author lists out of feeds.
+            links = relations.author_links.get(paper_id, ())
+            if author_link_limit is None or len(links) < author_link_limit:
+                _append_relation(
+                    relations.author_links,
+                    paper_id,
+                    AuthorLink(
+                        id=str(author_id), name=author_name, hf_username=hf_username
+                    ),
+                )
 
         task_rows = (
             self.db.query(PaperTask.paper_id, DBTask)
@@ -497,8 +501,6 @@ class PaperRelationLoader:
                     added_by_hf_username=link.added_by_hf_username,
                 ),
             )
-
-        return author_rows
 
     def _load_detail_relations(
         self,

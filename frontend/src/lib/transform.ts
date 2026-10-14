@@ -22,6 +22,8 @@ export interface PaperCardProps {
   title: string;
   abstract: string;
   authors: string[];
+  /** Author page IDs parallel to `authors`; feed cards receive them for displayed names. */
+  authorIds?: (string | null)[];
   /** paper.tasks[*].slug, used by TagChip */
   tags: string[];
   /** paper.methods[*] reduced to the fields MethodChip needs */
@@ -149,6 +151,7 @@ export function transformPaperForCard(paper: Paper): PaperCardProps {
     title: paper.title,
     abstract: paper.abstract || "",
     authors: paper.authors || [],
+    authorIds: (paper.author_links || []).map((link) => link.id ?? null),
     tags,
     methods,
     organizations: (paper.organizations || []).map((organization) => ({

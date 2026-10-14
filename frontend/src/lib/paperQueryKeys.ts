@@ -12,7 +12,6 @@ export const paperQueryKeys = {
     conference: ["conference-papers-infinite"],
     organization: ["organization-papers-infinite"],
     method: ["method-papers-infinite"],
-    author: ["author-papers"],
     saved: ["my-bookmarks"],
     related: ["related-papers"],
     versions: ["paper-versions"],

@@ -103,9 +103,9 @@ class Paper(BaseModel):
     author_links: List["AuthorLink"] = Field(
         default_factory=list,
         description=(
-            "Per-author entries parallel to `authors`, carrying the HF "
-            "username when the author is mapped to a Hugging Face profile. "
-            "Used by the frontend to link names to huggingface.co/{user}."
+            "Per-author entries parallel to `authors`, carrying the author ID "
+            "and the HF username when mapped to a Hugging Face profile. Feed "
+            "card responses include only the first three authors, as displayed."
         ),
     )
 

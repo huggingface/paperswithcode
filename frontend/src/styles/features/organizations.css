@@ -160,3 +160,14 @@
     max-width: calc(100vw - 28px);
   }
 }
+.author-hero {
+  margin: 8px 0 20px;
+}
+.author-hero .feed-subtitle a {
+  color: var(--accent-text);
+  text-decoration: none;
+}
+.author-hero .feed-subtitle a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}

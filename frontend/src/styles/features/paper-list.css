@@ -256,6 +256,15 @@ a.paper-resource.is-link:focus-visible {
   margin-bottom: 10px;
   font-family: var(--serif);
 }
+.paper-authors a {
+  color: inherit;
+  text-decoration: none;
+}
+.paper-authors a:hover {
+  color: var(--accent-text);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .paper-abstract {
   font-size: 13.5px;
   color: var(--ink-soft);

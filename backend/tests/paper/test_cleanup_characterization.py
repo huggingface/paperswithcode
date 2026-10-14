@@ -356,7 +356,7 @@ def test_load_resources_caps_repositories_per_paper(repository_limit, expected):
     assert repositories[0].is_official
 
 
-def test_card_relations_exclude_detail_projection_but_details_include_author_links():
+def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
     card_db = _RelationDatabase()
     detail_db = _RelationDatabase()
 
@@ -364,7 +364,9 @@ def test_card_relations_exclude_detail_projection_but_details_include_author_lin
     detail = PaperRelationLoader(detail_db).load_details([1])
 
     assert card.authors[1] == ["Ada Lovelace"]
-    assert card.author_links.get(1, []) == []
+    assert [link.model_dump() for link in card.author_links[1]] == [
+        {"id": "11", "name": "Ada Lovelace", "hf_username": "ada"}
+    ]
     assert all(entities[0] is not DBDataset for entities in card_db.executed_entities)
     assert all(entities[0] is not DBFramework for entities in card_db.executed_entities)
     assert card.introduced_benchmarks.get(1, []) == []
@@ -381,6 +383,27 @@ def test_card_relations_exclude_detail_projection_but_details_include_author_lin
     assert detail.predecessor_papers[1][0].title == "Predecessor"
     assert detail.successor_papers[1][0].title == "Successor"
     assert detail.conferences[1].slug == "icml-2026"
+
+
+class _ManyAuthorsDatabase(_RelationDatabase):
+    @staticmethod
+    def rows_for(entities):
+        if entities[0] is PaperAuthor.paper_id:
+            return [(1, 10 + i, f"Author {i}", None) for i in range(5)]
+        return _RelationDatabase.rows_for(entities)
+
+
+def test_card_author_links_cover_only_the_displayed_authors():
+    card = PaperRelationLoader(_ManyAuthorsDatabase()).load_cards([1])
+    detail = PaperRelationLoader(_ManyAuthorsDatabase()).load_details([1])
+
+    assert len(card.authors[1]) == 5
+    assert [link.name for link in card.author_links[1]] == [
+        "Author 0",
+        "Author 1",
+        "Author 2",
+    ]
+    assert len(detail.author_links[1]) == 5
 
 
 # Fields declared by the frontend's public `Paper` interface and read by its

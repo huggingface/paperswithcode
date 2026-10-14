@@ -30,6 +30,7 @@ interface UseInfinitePapersParams {
   has_hf_artifacts?: boolean;
   framework?: string;
   repository?: string;
+  author?: string;
   enabled?: boolean;
 }
 
@@ -50,11 +51,12 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
     has_hf_artifacts = false,
     framework,
     repository,
+    author,
     enabled = true,
   } = params;
 
   return useInfiniteQuery<PaginatedResponse<Paper>, Error>({
-    queryKey: [...paperQueryKeys.feeds.infinite, { page_size, search, order_by, order_dir, start_date, end_date, conference, task, method, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository }],
+    queryKey: [...paperQueryKeys.feeds.infinite, { page_size, search, order_by, order_dir, start_date, end_date, conference, task, method, latest_only, include_resources, has_code, has_hf_artifacts, framework, repository, author }],
     queryFn: ({ pageParam = 1 }) =>
       papersApi.list({
         page: pageParam as number,
@@ -73,6 +75,7 @@ export function useInfinitePapers(params: UseInfinitePapersParams = {}) {
         has_hf_artifacts,
         framework,
         repository,
+        author,
       }),
     getNextPageParam: (lastPage) => lastPage.next_page,
     initialPageParam: 1,
