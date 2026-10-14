@@ -280,7 +280,6 @@ const BenchmarkDetailView: React.FC = () => {
 
         <div className="bm-title-row">
           <h1 className="bm-title">{dataset.name}</h1>
-          <ResearchFollowButton kind="benchmark" entityId={dataset.id} />
           {benchmarkTrend && (
             <div className="bm-title-trend" aria-label={`${dataset.name} reporting trend`}>
               <BenchmarkTrendSparkline
@@ -308,6 +307,8 @@ const BenchmarkDetailView: React.FC = () => {
             </div>
           )}
         </div>
+
+        <ResearchFollowButton kind="benchmark" entityId={dataset.id} />
 
         <div className="bm-subtitle">
           {isSummaryLoading ? (

@@ -1,0 +1,87 @@
+/* research-follows feature styles */
+.research-follow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 12px;
+  margin: 14px 0 18px;
+}
+.research-follow-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 112px;
+  min-height: 36px;
+  padding: 7px 16px 7px 13px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  color: var(--bg);
+  background: var(--accent);
+  font-family: var(--sans);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1;
+  text-decoration: none;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.08);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, filter 0.15s;
+}
+.research-follow-btn:hover {
+  filter: brightness(1.1);
+}
+.research-follow-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.research-follow-btn:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+.research-follow-btn svg {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+.research-follow-btn.is-following {
+  border-color: var(--hairline-strong);
+  color: var(--ink);
+  background: var(--bg-elevated);
+  box-shadow: none;
+}
+.research-follow-btn.is-following svg {
+  color: var(--accent-text);
+}
+.research-follow-btn.is-following:hover {
+  filter: none;
+  border-color: var(--danger, #b42318);
+  color: var(--danger, #b42318);
+}
+.research-follow-btn.is-following:hover svg {
+  display: none;
+}
+.research-follow-label-hover,
+.research-follow-btn.is-following:hover .research-follow-label {
+  display: none;
+}
+.research-follow-btn.is-following:hover .research-follow-label-hover {
+  display: inline;
+}
+.research-follow-hint {
+  color: var(--ink-soft);
+  font-family: var(--sans);
+  font-size: 13px;
+  line-height: 1.4;
+}
+.research-follow-hint a {
+  color: var(--accent-text);
+  font-weight: 600;
+  text-decoration: none;
+}
+.research-follow-hint a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.research-follow-hint.is-error {
+  color: var(--danger, #b42318);
+}
