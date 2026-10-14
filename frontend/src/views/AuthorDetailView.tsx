@@ -25,8 +25,7 @@ const SORT_OPTIONS: Array<[OrderBy, string]> = [
 const parseOrderBy = (value: string | null): OrderBy =>
   value === "date_published" || value === "citation_count" ? value : "trending";
 
-const AuthorDetailView: React.FC = () => {
-  const { authorId } = useParams<{ authorId: string }>();
+const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
   const [searchParams, setSearchParams] = useSearchParams();
   const orderBy = parseOrderBy(searchParams.get("order_by"));
   const hasCode = searchParams.get("has_code") === "true";
@@ -34,8 +33,7 @@ const AuthorDetailView: React.FC = () => {
   const dateRange = readPaperDateRange(searchParams);
   const author = useQuery({
     queryKey: ["author", authorId],
-    queryFn: () => papersApi.getAuthor(authorId!),
-    enabled: !!authorId,
+    queryFn: () => papersApi.getAuthor(authorId),
   });
   const papers = useInfinitePapers({
     author: authorId,
@@ -47,20 +45,20 @@ const AuthorDetailView: React.FC = () => {
     has_hf_artifacts: hasHfArtifacts,
     start_date: dateRange.startDate,
     end_date: dateRange.endDate,
-    enabled: !!authorId,
   });
   const { targetRef, isIntersecting } = useIntersectionObserver({ rootMargin: "200px" });
-
-  useEffect(() => {
-    if (isIntersecting && papers.hasNextPage && !papers.isFetchingNextPage) {
-      papers.fetchNextPage();
-    }
-  }, [isIntersecting, papers.hasNextPage, papers.isFetchingNextPage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cards = useMemo(
     () => (papers.data?.pages ?? []).flatMap((page) => page.results.map(transformPaperForCard)),
     [papers.data],
   );
+
+  // Also rerun when results change: a filter change can leave the sentinel visible.
+  useEffect(() => {
+    if (isIntersecting && papers.hasNextPage && !papers.isFetchingNextPage) {
+      papers.fetchNextPage();
+    }
+  }, [isIntersecting, papers.hasNextPage, papers.isFetchingNextPage, cards.length]); // eslint-disable-line react-hooks/exhaustive-deps
   const totalCount = papers.data?.pages[0]?.count ?? 0;
 
   const setParam = (key: string, value: string | null) => {
@@ -173,6 +171,12 @@ const AuthorDetailView: React.FC = () => {
       )}
     </div>
   );
+};
+
+// Remount per author so the shared feed never shows the previous author's papers.
+const AuthorDetailView: React.FC = () => {
+  const { authorId } = useParams<{ authorId: string }>();
+  return authorId ? <AuthorFeed key={authorId} authorId={authorId} /> : <NotFound />;
 };
 
 export default AuthorDetailView;

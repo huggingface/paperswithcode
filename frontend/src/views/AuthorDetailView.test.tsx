@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { Link, MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { Paper } from "@/lib/api/papers.types";
@@ -36,7 +36,10 @@ function renderAuthor(path = "/authors/7") {
     <QueryClientProvider client={queryClient}>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
-          <Route path="/authors/:authorId" element={<AuthorDetailView />} />
+          <Route
+            path="/authors/:authorId"
+            element={<><Link to="/authors/8">Coauthor</Link><AuthorDetailView /></>}
+          />
         </Routes>
       </MemoryRouter>
     </QueryClientProvider>,
@@ -78,5 +81,25 @@ describe("AuthorDetailView", () => {
         expect.objectContaining({ author: "7", order_by: "date_published", has_code: true }),
       ),
     );
+  });
+
+  it("never shows the previous author's papers while another author loads", async () => {
+    vi.spyOn(papersApi, "getAuthor").mockImplementation(async (id) => ({
+      id,
+      full_name: id === "7" ? "Researcher" : "Coauthor Name",
+      hf_username: null,
+      paper_count: 1,
+    }));
+    vi.spyOn(papersApi, "list").mockImplementation((params) =>
+      params?.author === "7"
+        ? Promise.resolve({ count: 1, next_page: null, previous_page: null, results: [paper] })
+        : new Promise(() => {}),
+    );
+
+    renderAuthor();
+    expect(await screen.findByRole("link", { name: "Kimi K3" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("link", { name: "Coauthor" }));
+    expect(await screen.findByRole("heading", { name: "Coauthor Name" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Kimi K3" })).not.toBeInTheDocument();
   });
 });
