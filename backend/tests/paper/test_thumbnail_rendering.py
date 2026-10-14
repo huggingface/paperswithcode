@@ -361,6 +361,96 @@ def test_external_thumbnail_prefers_pdf_url_over_landing_page(
     service._render_external_metadata_thumbnail.assert_not_called()
 
 
+def _external_generation_service(tmp_path: Path):
+    service = _external_pdf_service()
+    service.get_external_filename = lambda _paper_id: "external_42.jpg"
+    service.get_existing_custom_thumbnail_path = MagicMock(return_value=None)
+    service._get_active_cache_path = MagicMock(
+        return_value=tmp_path / "external_42.jpg"
+    )
+    service._upload_to_bucket = MagicMock()
+    service._save_thumbnail = MagicMock()
+    service._convert_pdf_to_thumbnail = MagicMock(return_value="rendered")
+    service._render_external_metadata_thumbnail = MagicMock()
+    return service
+
+
+def test_external_thumbnail_fetches_pdf_url_without_pdf_suffix(
+    tmp_path: Path, monkeypatch
+):
+    service = _external_generation_service(tmp_path)
+    fetched: list[str] = []
+
+    async def fetch(url, **_kwargs):
+        fetched.append(url)
+        return SimpleNamespace(body=b"%PDF-example")
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    asyncio.run(
+        service.generate_external_thumbnail(
+            42,
+            "https://openreview.net/forum?id=abc",
+            title="An OpenReview paper",
+            pdf_url="https://openreview.net/pdf?id=abc",
+        )
+    )
+
+    assert fetched == ["https://openreview.net/pdf?id=abc"]
+    service._render_external_metadata_thumbnail.assert_not_called()
+
+
+def test_transient_pdf_url_error_falls_back_to_source_pdf(tmp_path: Path, monkeypatch):
+    service = _external_generation_service(tmp_path)
+
+    async def fetch(url, **_kwargs):
+        if url.endswith("conference.pdf"):
+            raise SafeOutboundHttpError(502, "bad gateway", origin_status_code=503)
+        return SimpleNamespace(body=b"%PDF-source")
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    asyncio.run(
+        service.generate_external_thumbnail(
+            42,
+            "https://openaccess.thecvf.com/source.pdf",
+            pdf_url="https://openaccess.thecvf.com/conference.pdf",
+        )
+    )
+
+    service._convert_pdf_to_thumbnail.assert_called_once_with(b"%PDF-source")
+
+
+def test_transient_pdf_url_error_does_not_cache_metadata_card(
+    tmp_path: Path, monkeypatch
+):
+    service = _external_generation_service(tmp_path)
+
+    async def fetch(_url, **_kwargs):
+        raise SafeOutboundHttpError(502, "bad gateway", origin_status_code=503)
+
+    monkeypatch.setattr(
+        "backend.services.thumbnail_service.fetch_public_resource", fetch
+    )
+
+    with pytest.raises(ThumbnailGenerationError):
+        asyncio.run(
+            service.generate_external_thumbnail(
+                42,
+                "https://www.isca-archive.org/x/paper.html",
+                title="A Speech Paper",
+                pdf_url="https://www.isca-archive.org/x/paper.pdf",
+            )
+        )
+
+    service._render_external_metadata_thumbnail.assert_not_called()
+    service._upload_to_bucket.assert_not_called()
+
+
 @pytest.mark.parametrize("safe_status_code", [403, 409, 413, 415, 422])
 def test_permanent_safe_fetch_error_uses_metadata_fallback(
     monkeypatch, safe_status_code: int

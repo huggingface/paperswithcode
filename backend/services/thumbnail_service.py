@@ -629,12 +629,18 @@ class ThumbnailService:
     def _looks_like_pdf_url(self, source_url: str) -> bool:
         return urlparse(source_url).path.lower().endswith(".pdf")
 
-    async def _download_external_pdf(self, source_url: str) -> Optional[bytes]:
+    async def _download_external_pdf(
+        self, source_url: str, known_pdf: bool = False
+    ) -> Optional[bytes]:
         """
         Download an external PDF when the source URL is directly PDF-like.
+
+        `known_pdf` skips the `.pdf` suffix check for URLs recorded as PDFs
+        (e.g. OpenReview `/pdf?id=` links); the content type and `%PDF`
+        checks still apply.
         """
         pdf_url = self._normalize_external_pdf_url(source_url)
-        if not self._looks_like_pdf_url(pdf_url):
+        if not known_pdf and not self._looks_like_pdf_url(pdf_url):
             return None
         try:
             result = await fetch_public_resource(
@@ -870,10 +876,18 @@ class ThumbnailService:
                 aws_access_key_id=settings.biorxiv_aws_access_key_id,
                 aws_secret_access_key=settings.biorxiv_aws_secret_access_key,
             )
+        pdf_url_error = None
         if pdf_content is None and pdf_url:
-            pdf_content = await self._download_external_pdf(pdf_url)
+            try:
+                pdf_content = await self._download_external_pdf(pdf_url, known_pdf=True)
+            except ThumbnailGenerationError as exc:
+                pdf_url_error = exc
         if pdf_content is None:
             pdf_content = await self._download_external_pdf(source_url)
+        if pdf_content is None and pdf_url_error is not None:
+            # Retry later instead of caching a metadata card in place of
+            # a PDF that is only temporarily unavailable.
+            raise pdf_url_error
         if pdf_content is not None:
             thumbnail = self._convert_pdf_to_thumbnail(pdf_content)
         elif biorxiv_paper is not None:
