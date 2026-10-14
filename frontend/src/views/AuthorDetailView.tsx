@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
 import { PaperCard } from "@/components";
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import ResearchFollowButton from "@/components/ResearchFollowButton";
@@ -11,7 +12,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useInfinitePapers } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
-import { hfAvatarSrc } from "@/lib/hfAvatar";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
 import { transformPaperForCard } from "@/lib/transform";
 import NotFound from "@/pages/NotFound";
@@ -86,19 +86,17 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
       <header className="author-hero">
         <div className="organizations-eyebrow">AUTHOR</div>
         <div className="author-hero-title">
-          {author.data?.hf_username && author.data.hf_avatar_url && (
+          {author.data?.hf_username && (
             <a
               href={`https://huggingface.co/${author.data.hf_username}`}
               target="_blank"
               rel="noopener noreferrer"
               aria-label={`@${author.data.hf_username} on Hugging Face`}
             >
-              <img
+              <AuthorAvatar
                 className="author-avatar"
-                src={hfAvatarSrc(author.data.hf_avatar_url)}
-                alt=""
-                width={96}
-                height={96}
+                name={author.data.full_name}
+                url={author.data.hf_avatar_url}
               />
             </a>
           )}

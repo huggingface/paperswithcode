@@ -24,6 +24,8 @@ export interface PaperCardProps {
   authors: string[];
   /** Author page IDs parallel to `authors`; feed cards receive them for displayed names. */
   authorIds?: (string | null)[];
+  /** Hugging Face profiles parallel to `authorIds`; null for unlinked authors. */
+  authorHfProfiles?: ({ username: string; avatarUrl: string | null } | null)[];
   /** paper.tasks[*].slug, used by TagChip */
   tags: string[];
   /** paper.methods[*] reduced to the fields MethodChip needs */
@@ -152,6 +154,9 @@ export function transformPaperForCard(paper: Paper): PaperCardProps {
     abstract: paper.abstract || "",
     authors: paper.authors || [],
     authorIds: (paper.author_links || []).map((link) => link.id ?? null),
+    authorHfProfiles: (paper.author_links || []).map((link) =>
+      link.hf_username ? { username: link.hf_username, avatarUrl: link.hf_avatar_url ?? null } : null,
+    ),
     tags,
     methods,
     organizations: (paper.organizations || []).map((organization) => ({

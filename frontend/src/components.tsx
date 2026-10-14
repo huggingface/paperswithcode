@@ -10,6 +10,7 @@ import React from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link, useNavigate } from "react-router-dom";
 
+import { AuthorAvatar } from "@/components/AuthorAvatar";
 import LatexTitle, { LatexText } from "@/components/LatexTitle";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import type { Method } from "@/lib/api/catalog.types";
@@ -661,9 +662,13 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
   }, [paper.id, queryClient]);
   const visibleAuthors = paper.authors.slice(0, 3).map((name, index) => {
     const authorId = paper.authorIds?.[index];
+    const hfProfile = paper.authorHfProfiles?.[index];
     return (
       <React.Fragment key={index}>
         {index > 0 && ", "}
+        {hfProfile && (
+          <AuthorAvatar className="paper-card-author-avatar" name={name} url={hfProfile.avatarUrl} />
+        )}
         {authorId ? <Link to={`/authors/${authorId}`}>{name}</Link> : name}
       </React.Fragment>
     );

@@ -27,12 +27,11 @@
 .detail-authors a { color: var(--ink); border-bottom: 1px dotted var(--hairline-strong); }
 .detail-authors a:hover { border-bottom-color: var(--ink); }
 .detail-author-avatar {
-  display: inline-block;
+  width: 22px;
+  height: 22px;
   margin-right: 5px;
-  vertical-align: -5px;
-  border-radius: 50%;
-  border: 1px solid var(--hairline);
-  object-fit: cover;
+  vertical-align: -6px;
+  font-size: 9px;
 }
 .abstract-text {
   font-family: var(--serif);

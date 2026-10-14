@@ -169,17 +169,18 @@
   gap: 20px;
 }
 .author-avatar {
+  width: 96px;
+  height: 96px;
+  font-size: 36px;
+}
+.author-hero-title img.author-avatar {
   display: block;
-  flex: none;
-  border-radius: 50%;
-  border: 1px solid var(--border);
-  background: var(--surface);
-  object-fit: cover;
 }
 @media (max-width: 640px) {
   .author-avatar {
     width: 64px;
     height: 64px;
+    font-size: 24px;
   }
 }
 .author-hero .feed-subtitle a {

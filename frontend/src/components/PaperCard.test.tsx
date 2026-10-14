@@ -109,4 +109,28 @@ describe("PaperCard authors", () => {
     expect(screen.getByRole("link", { name: "Alan" })).toHaveAttribute("href", "/authors/13");
     expect(screen.getByText(/\+1 authors/)).toBeInTheDocument();
   });
+
+  it("shows a Hugging Face avatar before linked author names", () => {
+    const { container } = render(
+      <QueryClientProvider client={new QueryClient()}>
+        <MemoryRouter>
+          <PaperCard
+            paper={{
+              ...paper,
+              authors: ["Ada Lovelace", "Grace Hopper"],
+              authorIds: ["11", "12"],
+              authorHfProfiles: [
+                { username: "ada", avatarUrl: "https://cdn-avatars.huggingface.co/ada.png" },
+                null,
+              ],
+            }}
+          />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    const avatars = container.querySelectorAll(".paper-card-author-avatar");
+    expect(avatars).toHaveLength(1);
+    expect(avatars[0]).toHaveAttribute("src", "https://cdn-avatars.huggingface.co/ada.png");
+  });
 });

@@ -101,10 +101,9 @@ describe("AuthorDetailView", () => {
     const { container } = renderAuthor();
 
     expect(await screen.findByRole("heading", { name: "Researcher" })).toBeInTheDocument();
-    expect(container.querySelector(".author-avatar")).toHaveAttribute(
-      "src",
-      "https://huggingface.co/avatars/default.svg",
-    );
+    // HF default avatars do not load when embedded, so they render initials.
+    expect(container.querySelector(".author-avatar")).toHaveTextContent("R");
+    expect(container.querySelector("img.author-avatar")).toBeNull();
     expect(screen.getByRole("link", { name: "@researcher on Hugging Face" })).toHaveAttribute(
       "href",
       "https://huggingface.co/researcher",

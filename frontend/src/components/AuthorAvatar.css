@@ -1,0 +1,20 @@
+.author-avatar-base {
+  display: inline-block;
+  flex: none;
+  box-sizing: border-box;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  object-fit: cover;
+}
+.author-avatar-initials {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(135deg, #a855f7, #818cf8);
+  color: #fff;
+  font-family: var(--sans, system-ui, sans-serif);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  user-select: none;
+}
