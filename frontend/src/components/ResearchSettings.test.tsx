@@ -102,6 +102,7 @@ describe('research follows', () => {
     ]);
     fireEvent.click(screen.getByRole('button', { name: 'Follow' }));
     expect(await screen.findByText(/Added to/)).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Manage in Settings' })).toHaveAttribute('href', '/settings');
     rerender(<ResearchFollowButton kind="task" entityId="13" />);
     expect(screen.getByRole('button', { name: 'Unfollow' })).toBeInTheDocument();
     expect(screen.queryByText(/Added to/)).not.toBeInTheDocument();
