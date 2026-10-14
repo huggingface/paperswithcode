@@ -115,6 +115,7 @@ def test_fetches_every_api_page_and_validates_reviewed_models(monkeypatch):
     ]
     assert leaderboard.entries[0].scores == {"intelligence": 42.5, "agentic": 41.0}
     assert leaderboard.entries[1].scores == {"intelligence": 12.3}
+    assert (leaderboard.quota_remaining, leaderboard.quota_limit) == ("99", "100")
 
 
 @pytest.mark.parametrize(

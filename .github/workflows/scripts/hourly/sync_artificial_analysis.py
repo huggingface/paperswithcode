@@ -23,6 +23,11 @@ class SyncArtificialAnalysisJob(CronJobBase):
 
     def run(self):
         leaderboard = fetch_artificial_analysis_leaderboard()
+        self.logger.info(
+            "artificial_analysis_api_quota remaining=%s limit=%s",
+            leaderboard.quota_remaining,
+            leaderboard.quota_limit,
+        )
         session = db_manager.session_local()
         try:
             discovery = run_discovery(
