@@ -23,6 +23,7 @@
   padding: 16px 16px 12px;
   margin: 0;
   box-shadow: 0 1px 0 rgba(0,0,0,0.02);
+  align-self: center;
 }
 .method-figure-svg {
   width: 100%;
