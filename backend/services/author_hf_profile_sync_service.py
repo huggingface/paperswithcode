@@ -87,6 +87,10 @@ def _claims(hf_paper: dict[str, Any]) -> list[tuple[str, dict[str, Any], Any]]:
     ]
 
 
+def _name_key(name: str) -> str:
+    return normalize_arxiv_author_name(name).casefold()
+
+
 class AuthorHfProfileSyncService:
     def __init__(self, db: Session):
         self.db = db
@@ -107,19 +111,22 @@ class AuthorHfProfileSyncService:
         if paper is None:
             return
         self.stats.papers_matched += 1
-        paper_authors = {
-            author.name.casefold(): author
-            for author in self.db.query(Author)
+        paper_authors: dict[str, Author | None] = {}
+        for author in (
+            self.db.query(Author)
             .join(PaperAuthor, PaperAuthor.author_id == Author.id)
             .filter(PaperAuthor.paper_id == paper.id)
-        }
+        ):
+            key = _name_key(author.name)
+            # Two coauthors that normalize to one name are ambiguous: skip both.
+            paper_authors[key] = None if key in paper_authors else author
         for name, user, status in claims:
             self.stats.claims_seen += 1
             self._apply_claim(paper_authors, name, user, status)
 
     def _apply_claim(
         self,
-        paper_authors: dict[str, Author],
+        paper_authors: dict[str, Author | None],
         name: str,
         user: dict[str, Any],
         status: Any,
@@ -147,12 +154,18 @@ class AuthorHfProfileSyncService:
             self.stats.conflicts += 1
             return
         if owners:
+            owner = owners[0]
+            if owner.hf_id and owner.hf_id != profile["hf_id"]:
+                # Only the username matches: HF reassigned a freed username to
+                # another account. Never rebind the row's identity.
+                self.stats.conflicts += 1
+                return
             # The account is already linked: keep its author, refresh the
             # profile (avatar, renamed username, Pro status).
-            self._update(owners[0], profile, linked=False)
+            self._update(owner, profile, linked=False)
             return
 
-        author = paper_authors.get(normalize_arxiv_author_name(name).casefold())
+        author = paper_authors.get(_name_key(name))
         if author is None:
             self.stats.unmatched += 1
             return

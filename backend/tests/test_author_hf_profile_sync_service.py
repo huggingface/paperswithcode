@@ -187,3 +187,46 @@ def test_iter_hf_papers_follows_cursor_until_the_cutoff():
         )
 
     assert [paper["id"] for paper in papers] == ["a", "b"]
+
+
+def test_reused_username_never_rebinds_an_author():
+    session = _session()
+    service = AuthorHfProfileSyncService(session)
+
+    service.sync_paper(_hf_paper(_claim("Weikun Wang", "kunwww", "hf-new-owner")))
+
+    author = session.get(Author, 12)
+    assert (author.hf_username, author.hf_id) == ("kunwww", "hf-kunwww")
+    assert service.stats.conflicts == 1
+
+
+def test_stored_names_are_normalized_and_ambiguous_names_skipped():
+    session = _session()
+    session.add_all(
+        [
+            Author(id=20, name="Ziyue  Hua (MiMo)"),
+            Author(id=21, name="Zihao Yue (Xiaomi)"),
+        ]
+    )
+    session.add_all(
+        [
+            PaperAuthor(paper_id=1, author_id=20, author_order=5),
+            PaperAuthor(paper_id=1, author_id=21, author_order=6),
+        ]
+    )
+    session.delete(session.get(PaperAuthor, (1, 11)))
+    session.commit()
+    service = AuthorHfProfileSyncService(session)
+
+    service.sync_paper(
+        _hf_paper(
+            _claim("Zihao Yue", "yuezih", "hf-yuezih"),
+            _claim("Ziyue Hua", "ziyue", "hf-ziyue"),
+        )
+    )
+
+    assert session.get(Author, 21).hf_username == "yuezih"
+    assert session.get(Author, 10).hf_username is None
+    assert session.get(Author, 20).hf_username is None
+    assert service.stats.linked == 1
+    assert service.stats.unmatched == 1
