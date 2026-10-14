@@ -334,6 +334,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     sessionStorage.removeItem(CHAT_MODEL_KEY);
     sessionStorage.removeItem(CHAT_AUTH_ATTEMPTED_KEY);
     clearQueuedChatLaunch();
+    queuedLaunchRef.current = null;
     setDraft(emptyDraft());
     onPaperSelectionChange?.(undefined);
     if (mode === "paper") onReaderSubmit?.();
@@ -413,7 +414,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     });
     setSessionError("");
     setSelectedModel(detail.selected_model);
-    const queued = queuedLaunchRef.current && detail.messages.length === 0 ? queuedLaunchRef.current : null;
+    const queued = queuedLaunchRef.current;
     setWebSearchEnabled(queued ? queued.webSearchEnabled : detail.web_search_enabled);
     setReasoningEffort(queued ? queued.reasoningEffort : detail.reasoning_effort ?? "high");
   }, [routeSessionId, selectedTurn, detail, loadChat, activeConfiguration, routeQuery.isFetching, initializedRoute]);

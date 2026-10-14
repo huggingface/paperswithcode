@@ -771,4 +771,26 @@ describe("ChatView web search", () => {
     await waitFor(() => expect(mocks.send).toHaveBeenCalled());
     expect(mocks.chatOptions?.webSearchEnabled).toBe(false);
   });
+
+  it("applies the toggle saved before login when returning to an existing chat", async () => {
+    sessionStorage.setItem(CHAT_DRAFT_KEY, "Find recent multimodal model releases");
+    sessionStorage.setItem(CHAT_MODEL_KEY, session.selected_model);
+    sessionStorage.setItem(CHAT_AUTO_SEND_KEY, "1");
+    sessionStorage.setItem(CHAT_WEB_SEARCH_KEY, "1");
+    mocks.getSession.mockResolvedValueOnce({
+      ...session,
+      web_search_enabled: false,
+      transcript_status: "ready",
+      messages: [{
+        id: "earlier-user", turn_id: "earlier-turn", sequence: 1, role: "user",
+        content: "Earlier question", revision: 1, status: "complete",
+        display_blocks: [], citations: [], followups: [], error_code: null,
+      }],
+    });
+
+    renderChat();
+
+    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
+    expect(mocks.chatOptions?.webSearchEnabled).toBe(true);
+  });
 });
