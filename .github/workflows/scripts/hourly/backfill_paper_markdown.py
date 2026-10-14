@@ -1310,17 +1310,18 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if papers
             else 100.0,
         }
-        external_pages = (
-            {}
-            if self.retry_only or getattr(self, "repair_invalid_limit", 0)
-            else self._prepare_external_pages()
-        )
         if additional_active_job_ids:
             launched = self._launch(
                 candidates, additional_active_job_ids=additional_active_job_ids
             )
         else:
             launched = self._launch(candidates)
+        # After OCR dispatch, so a web-page failure cannot hold up PDF papers.
+        external_pages = (
+            {}
+            if self.retry_only or getattr(self, "repair_invalid_limit", 0)
+            else self._prepare_external_pages()
+        )
         retryable_due = sum(
             disposition == "retryable_due" for disposition in dispositions.values()
         )

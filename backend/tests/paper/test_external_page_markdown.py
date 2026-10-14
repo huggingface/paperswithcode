@@ -334,6 +334,67 @@ def test_prepare_backs_off_after_a_storage_failure(monkeypatch):
     assert (status["error_class"], status["retryable"]) == ("storage_unavailable", True)
 
 
+def _failing_publish(*args, **kwargs):
+    raise service.HfHubHTTPError(
+        "bucket unavailable",
+        response=httpx.Response(503, request=httpx.Request("POST", "https://hf.co")),
+    )
+
+
+def test_storage_outages_never_exhaust_a_page(monkeypatch):
+    bucket = FakeBucket().install(monkeypatch)
+    monkeypatch.setattr(
+        service, "scrape_page", lambda *args, **kwargs: ScrapedPage(TITLE, ARTICLE)
+    )
+    monkeypatch.setattr(service, "publish_paper_markdown", _failing_publish)
+    monkeypatch.setattr(service, "retry_due", lambda status: True)
+
+    for _ in range(service.MAX_ATTEMPTS + 2):
+        with pytest.raises(ExternalPageMarkdownError):
+            _prepare()
+
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert (status["attempt_count"], status["retryable"]) == (0, True)
+
+
+def test_scrape_failures_stop_after_the_attempt_limit(monkeypatch):
+    bucket = FakeBucket().install(monkeypatch)
+
+    def scrape(*args, **kwargs):
+        raise ExternalPageMarkdownError("firecrawl_unavailable", retryable=True)
+
+    monkeypatch.setattr(service, "scrape_page", scrape)
+    monkeypatch.setattr(service, "retry_due", lambda status: True)
+
+    for _ in range(service.MAX_ATTEMPTS):
+        with pytest.raises(ExternalPageMarkdownError):
+            _prepare()
+
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert (status["attempt_count"], status["retryable"]) == (3, False)
+
+
+@pytest.mark.parametrize("failing", ["open", "exists", "batch"])
+def test_bucket_errors_surface_as_retryable_storage_unavailable(monkeypatch, failing):
+    FakeBucket().install(monkeypatch)
+    monkeypatch.setattr(
+        service, "scrape_page", lambda *args, **kwargs: ScrapedPage(TITLE, ARTICLE)
+    )
+    if failing == "batch":
+        monkeypatch.setattr(service.HfApi, "batch_bucket_files", _failing_publish)
+    else:
+
+        def fail(*args, **kwargs):
+            raise OSError("bucket unreachable")
+
+        monkeypatch.setattr(service.HfFileSystem, failing, fail)
+
+    with pytest.raises(ExternalPageMarkdownError) as error:
+        _prepare()
+
+    assert (error.value.code, error.value.retryable) == ("storage_unavailable", True)
+
+
 def test_prepare_does_not_record_a_missing_key(monkeypatch):
     bucket = FakeBucket().install(monkeypatch)
 
@@ -343,7 +404,7 @@ def test_prepare_does_not_record_a_missing_key(monkeypatch):
     assert bucket.files == {}
 
 
-def test_retry_due_honours_backoff_and_attempt_limit():
+def test_retry_due_honours_backoff_and_the_retryable_flag():
     now = datetime(2026, 10, 14, tzinfo=UTC)
     later = (now + timedelta(hours=1)).isoformat()
     earlier = (now - timedelta(hours=1)).isoformat()
@@ -366,9 +427,6 @@ def test_retry_due_honours_backoff_and_attempt_limit():
             "next_retry_at": later,
         },
         now=now,
-    )
-    assert not service.retry_due(
-        {"status": "failed", "retryable": True, "attempt_count": 3}, now=now
     )
     assert not service.retry_due(
         {"status": "failed", "retryable": False, "attempt_count": 1}, now=now
