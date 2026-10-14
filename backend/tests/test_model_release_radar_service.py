@@ -17,6 +17,7 @@ from backend.services.model_release_radar_service import (
     WEB_SEARCH_PROVIDER,
     WEB_SEARCH_QUERIES,
     ExtractedRelease,
+    OpenAIReleaseExtractor,
     ReleaseSource,
     SearchHit,
     parse_article,
@@ -473,3 +474,22 @@ def test_web_search_failure_is_reported_and_vendor_feed_wins():
         OPENAI.url,
         "https://openai.com/index/introducing-gpt-6-1-sol",
     )
+
+
+def test_refused_extraction_is_reported_as_a_source_error():
+    class RefusingResponses:
+        def parse(self, **kwargs):
+            return type("Response", (), {"output_parsed": None})()
+
+    extractor = OpenAIReleaseExtractor("test-key")
+    extractor.client = type("Client", (), {"responses": RefusingResponses()})()
+
+    report = scan_model_releases(
+        _session(),
+        sources=(),
+        web_search=lambda query, since: WEB_HITS,
+        extract_releases=extractor,
+        today=TODAY,
+    )
+    assert report.signals == []
+    assert [error["source"] for error in report.errors] == [WEB_SEARCH_PROVIDER]

@@ -580,6 +580,9 @@ class OpenAIReleaseExtractor:
             input=f"<hits>\n{lines}\n</hits>",
             text_format=ExtractedReleases,
         )
+        if response.output_parsed is None:
+            # Refusals and empty outputs leave nothing to parse.
+            raise ValueError("release extraction returned no structured output")
         return response.output_parsed.releases
 
 
