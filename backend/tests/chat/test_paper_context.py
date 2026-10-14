@@ -564,6 +564,42 @@ def test_public_prewarm_enforces_rolling_ip_limit(monkeypatch):
     assert exc_info.value.detail["code"] == "paper_context_rate_limited"
 
 
+def test_public_prewarm_buckets_unix_socket_requests_by_real_ip(monkeypatch):
+    chat_router._prewarm_tasks.clear()
+    chat_router._prewarm_requests.clear()
+    chat_router._prewarm_requests.setdefault("203.0.113.4", deque()).extend(
+        [time.monotonic()] * 30
+    )
+    monkeypatch.setattr(chat_router, "_prewarm_paper", lambda _settings, _id: None)
+    monkeypatch.setattr(
+        chat_router,
+        "get_settings",
+        lambda: Settings(chat_paper_mentions_enabled=True),
+    )
+    body = chat_router.PaperContextPrewarmRequest(route_id="2501.00001")
+
+    def unix_socket_request(real_ip: str) -> Request:
+        return Request(
+            {
+                "type": "http",
+                "method": "POST",
+                "path": "/",
+                "headers": [(b"x-real-ip", real_ip.encode())],
+                "client": None,
+            }
+        )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            chat_router.prewarm_paper_context(body, unix_socket_request("203.0.113.4"))
+        )
+    assert exc_info.value.status_code == 429
+    assert asyncio.run(
+        chat_router.prewarm_paper_context(body, unix_socket_request("203.0.113.5"))
+    ) == {"status": "ready"}
+    assert "unknown" not in chat_router._prewarm_requests
+
+
 def test_public_prewarm_caps_global_preparations_at_four(monkeypatch):
     release = threading.Event()
     condition = threading.Condition()

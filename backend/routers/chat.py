@@ -136,7 +136,7 @@ from backend.services.openrouter_user_budget_service import (
     OpenRouterUserBudgetService,
 )
 from backend.utils.auth import require_admin, require_user
-from backend.utils.client_ip import get_client_ip
+from backend.utils.client_ip import get_proxied_client_ip
 
 from backend.services.chat_application_service import (
     ChatApplicationService,
@@ -1726,7 +1726,7 @@ async def prewarm_paper_context(body: PaperContextPrewarmRequest, request: Reque
     if not settings.chat_paper_mentions_enabled:
         return {"status": "disabled"}
     started = time.perf_counter()
-    client_ip = get_client_ip(request) or "unknown"
+    client_ip = get_proxied_client_ip(request) or "unknown"
     now = time.monotonic()
     async with _prewarm_lock:
         if (
