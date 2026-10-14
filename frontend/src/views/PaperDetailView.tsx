@@ -424,7 +424,7 @@ const PaperDetailView: React.FC = () => {
             {visibleAuthors.map((a, i) => (
               <React.Fragment key={i}>
                 {a.hf_username && (
-                  <AuthorAvatar className="detail-author-avatar" name={a.name} url={a.hf_avatar_url} />
+                  <AuthorAvatar className="detail-author-avatar" url={a.hf_avatar_url} />
                 )}
                 {a.id ? (
                   <Link to={`/authors/${a.id}`}>{a.name}</Link>

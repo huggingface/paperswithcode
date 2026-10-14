@@ -169,18 +169,14 @@
   gap: 20px;
 }
 .author-avatar {
+  display: block;
   width: 96px;
   height: 96px;
-  font-size: 36px;
-}
-.author-hero-title img.author-avatar {
-  display: block;
 }
 @media (max-width: 640px) {
   .author-avatar {
     width: 64px;
     height: 64px;
-    font-size: 24px;
   }
 }
 .author-hero .feed-subtitle a {

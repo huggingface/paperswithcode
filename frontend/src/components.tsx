@@ -667,7 +667,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
       <React.Fragment key={index}>
         {index > 0 && ", "}
         {hfProfile && (
-          <AuthorAvatar className="paper-card-author-avatar" name={name} url={hfProfile.avatarUrl} />
+          <AuthorAvatar className="paper-card-author-avatar" url={hfProfile.avatarUrl} />
         )}
         {authorId ? <Link to={`/authors/${authorId}`}>{name}</Link> : name}
       </React.Fragment>

@@ -87,18 +87,12 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
         <div className="organizations-eyebrow">AUTHOR</div>
         <div className="author-hero-title">
           {author.data?.hf_username && (
-            <a
+            <AuthorAvatar
+              className="author-avatar"
+              url={author.data.hf_avatar_url}
               href={`https://huggingface.co/${author.data.hf_username}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              aria-label={`@${author.data.hf_username} on Hugging Face`}
-            >
-              <AuthorAvatar
-                className="author-avatar"
-                name={author.data.full_name}
-                url={author.data.hf_avatar_url}
-              />
-            </a>
+              label={`@${author.data.hf_username} on Hugging Face`}
+            />
           )}
           <h1 className="feed-title">
             {author.data?.full_name ?? <Skeleton className="h-12 w-64 inline-block" />}

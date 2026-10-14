@@ -88,7 +88,7 @@ describe("AuthorDetailView", () => {
       id: "7",
       full_name: "Researcher",
       hf_username: "researcher",
-      hf_avatar_url: "/avatars/default.svg",
+      hf_avatar_url: "https://cdn-avatars.huggingface.co/researcher.png",
       paper_count: 1,
     });
     vi.spyOn(papersApi, "list").mockResolvedValue({
@@ -101,9 +101,10 @@ describe("AuthorDetailView", () => {
     const { container } = renderAuthor();
 
     expect(await screen.findByRole("heading", { name: "Researcher" })).toBeInTheDocument();
-    // HF default avatars do not load when embedded, so they render initials.
-    expect(container.querySelector(".author-avatar")).toHaveTextContent("R");
-    expect(container.querySelector("img.author-avatar")).toBeNull();
+    expect(container.querySelector(".author-avatar")).toHaveAttribute(
+      "src",
+      "https://cdn-avatars.huggingface.co/researcher.png",
+    );
     expect(screen.getByRole("link", { name: "@researcher on Hugging Face" })).toHaveAttribute(
       "href",
       "https://huggingface.co/researcher",
