@@ -196,6 +196,7 @@ interface AuthorLink {
   id?: string | null;
   name: string;
   hf_username?: string | null;
+  hf_avatar_url?: string | null;
 }
 
 export type PaperOrderBy = 'trending' | 'date_published' | 'citation_count';

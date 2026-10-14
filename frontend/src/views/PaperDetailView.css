@@ -26,6 +26,14 @@
 }
 .detail-authors a { color: var(--ink); border-bottom: 1px dotted var(--hairline-strong); }
 .detail-authors a:hover { border-bottom-color: var(--ink); }
+.detail-author-avatar {
+  display: inline-block;
+  margin-right: 5px;
+  vertical-align: -5px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  object-fit: cover;
+}
 .abstract-text {
   font-family: var(--serif);
   font-size: 16px;

@@ -531,6 +531,10 @@ class AuthorLink(BaseModel):
         None,
         description="Hugging Face username, when the author is mapped to a HF profile",
     )
+    hf_avatar_url: Optional[str] = Field(
+        None,
+        description="Hugging Face avatar URL (absolute, or relative to huggingface.co)",
+    )
 
 
 class Author(BaseModel):

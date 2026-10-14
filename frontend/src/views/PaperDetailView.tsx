@@ -38,6 +38,7 @@ import { SavePaperButton } from "@/components/paper-detail/SavePaperButton";
 import { EditableActionButton } from "@/components/paper-detail/EditableActionButton";
 import { CodexEnrichPaperDialog } from "@/components/paper-detail/CodexEnrichPaperDialog";
 import { isCodexEnrichPaperEnabled } from "@/lib/codexAddEvals";
+import { hfAvatarSrc } from "@/lib/hfAvatar";
 
 const EDIT_SECTION_LABEL: Record<PaperEditSection, string> = {
   tasks: "tasks",
@@ -422,6 +423,16 @@ const PaperDetailView: React.FC = () => {
           <div className="detail-authors">
             {visibleAuthors.map((a, i) => (
               <React.Fragment key={i}>
+                {a.hf_avatar_url && (
+                  <img
+                    className="detail-author-avatar"
+                    src={hfAvatarSrc(a.hf_avatar_url)}
+                    alt=""
+                    width={22}
+                    height={22}
+                    loading="lazy"
+                  />
+                )}
                 {a.id ? (
                   <Link to={`/authors/${a.id}`}>{a.name}</Link>
                 ) : a.hf_username ? (

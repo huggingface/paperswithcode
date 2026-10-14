@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { useInfinitePapers } from "@/hooks/usePapers";
 import { papersApi } from "@/lib/api/papers";
+import { hfAvatarSrc } from "@/lib/hfAvatar";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
 import { transformPaperForCard } from "@/lib/transform";
 import NotFound from "@/pages/NotFound";
@@ -24,9 +25,6 @@ const SORT_OPTIONS: Array<[OrderBy, string]> = [
 
 const parseOrderBy = (value: string | null): OrderBy =>
   value === "date_published" || value === "citation_count" ? value : "trending";
-
-// HF returns default avatars as site-relative paths and uploads as CDN URLs.
-const hfAvatarSrc = (url: string) => (url.startsWith("/") ? `https://huggingface.co${url}` : url);
 
 const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -99,8 +97,8 @@ const AuthorFeed: React.FC<{ authorId: string }> = ({ authorId }) => {
                 className="author-avatar"
                 src={hfAvatarSrc(author.data.hf_avatar_url)}
                 alt=""
-                width={56}
-                height={56}
+                width={96}
+                height={96}
               />
             </a>
           )}

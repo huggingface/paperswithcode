@@ -245,7 +245,7 @@ class _RelationDatabase:
     def rows_for(entities):
         first = entities[0]
         if first is PaperAuthor.paper_id:
-            return [(1, 11, "Ada Lovelace", "ada")]
+            return [(1, 11, "Ada Lovelace", "ada", "/avatars/ada.svg")]
         if first is DBDataset:
             return [
                 SimpleNamespace(
@@ -365,7 +365,12 @@ def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
 
     assert card.authors[1] == ["Ada Lovelace"]
     assert [link.model_dump() for link in card.author_links[1]] == [
-        {"id": "11", "name": "Ada Lovelace", "hf_username": "ada"}
+        {
+            "id": "11",
+            "name": "Ada Lovelace",
+            "hf_username": "ada",
+            "hf_avatar_url": "/avatars/ada.svg",
+        }
     ]
     assert all(entities[0] is not DBDataset for entities in card_db.executed_entities)
     assert all(entities[0] is not DBFramework for entities in card_db.executed_entities)
@@ -376,7 +381,12 @@ def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
     assert card.conferences.get(1) is None
 
     assert [link.model_dump() for link in detail.author_links[1]] == [
-        {"id": "11", "name": "Ada Lovelace", "hf_username": "ada"}
+        {
+            "id": "11",
+            "name": "Ada Lovelace",
+            "hf_username": "ada",
+            "hf_avatar_url": "/avatars/ada.svg",
+        }
     ]
     assert detail.introduced_benchmarks[1][0].name == "Characterized Benchmark"
     assert detail.introduced_frameworks[1][0].name == "Characterized Framework"
@@ -389,7 +399,7 @@ class _ManyAuthorsDatabase(_RelationDatabase):
     @staticmethod
     def rows_for(entities):
         if entities[0] is PaperAuthor.paper_id:
-            return [(1, 10 + i, f"Author {i}", None) for i in range(5)]
+            return [(1, 10 + i, f"Author {i}", None, None) for i in range(5)]
         return _RelationDatabase.rows_for(entities)
 
 

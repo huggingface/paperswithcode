@@ -166,7 +166,7 @@
 .author-hero-title {
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 20px;
 }
 .author-avatar {
   display: block;
@@ -175,6 +175,12 @@
   border: 1px solid var(--border);
   background: var(--surface);
   object-fit: cover;
+}
+@media (max-width: 640px) {
+  .author-avatar {
+    width: 64px;
+    height: 64px;
+  }
 }
 .author-hero .feed-subtitle a {
   color: var(--accent-text);

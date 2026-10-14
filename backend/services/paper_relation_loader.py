@@ -93,7 +93,7 @@ class PaperRelations:
 
 
 _RelationValue = TypeVar("_RelationValue")
-_AuthorRow = tuple[int, int, str, str | None]
+_AuthorRow = tuple[int, int, str, str | None, str | None]
 
 
 def _append_relation(
@@ -334,13 +334,14 @@ class PaperRelationLoader:
                 DBAuthor.id,
                 DBAuthor.name,
                 DBAuthor.hf_username,
+                DBAuthor.hf_avatar_url,
             )
             .join(DBAuthor, PaperAuthor.author_id == DBAuthor.id)
             .filter(PaperAuthor.paper_id.in_(paper_ids))
             .order_by(PaperAuthor.paper_id, PaperAuthor.author_order)
             .all()
         )
-        for paper_id, author_id, author_name, hf_username in author_rows:
+        for paper_id, author_id, author_name, hf_username, hf_avatar_url in author_rows:
             _append_relation(relations.authors, paper_id, author_name)
             # Cards link only the names they display, keeping long author lists out of feeds.
             links = relations.author_links.get(paper_id, ())
@@ -349,7 +350,10 @@ class PaperRelationLoader:
                     relations.author_links,
                     paper_id,
                     AuthorLink(
-                        id=str(author_id), name=author_name, hf_username=hf_username
+                        id=str(author_id),
+                        name=author_name,
+                        hf_username=hf_username,
+                        hf_avatar_url=hf_avatar_url if hf_username else None,
                     ),
                 )
 

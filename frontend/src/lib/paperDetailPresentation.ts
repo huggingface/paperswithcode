@@ -160,6 +160,7 @@ export function buildPaperDetailPresentation(
       name,
       id: paper.author_links?.[index]?.id ?? null,
       hf_username: paper.author_links?.[index]?.hf_username ?? null,
+      hf_avatar_url: paper.author_links?.[index]?.hf_avatar_url ?? null,
     })),
     copyableRanks: copyableLeaderboardRanks(paper.leaderboard_ranks),
     hasIntroducedItems: introducedKinds.length > 0,

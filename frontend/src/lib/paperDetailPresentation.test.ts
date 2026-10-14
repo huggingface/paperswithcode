@@ -48,4 +48,23 @@ describe("paper detail presentation model", () => {
     expect(model.paperSourceLabel).toBe("arXiv:2608.00123v2");
     expect(model.citationCopy).toContain("Ada Lovelace and Grace Hopper");
   });
+
+  it("carries each linked author's Hugging Face avatar", () => {
+    const model = buildPaperDetailPresentation(
+      {
+        ...paper,
+        author_links: [
+          { id: "1", name: "Ada Lovelace", hf_username: "ada", hf_avatar_url: "/avatars/ada.svg" },
+          { id: "2", name: "Grace Hopper", hf_username: null, hf_avatar_url: null },
+        ],
+      },
+      undefined,
+      false,
+    );
+
+    expect(model.authorEntries.map(({ hf_avatar_url }) => hf_avatar_url)).toEqual([
+      "/avatars/ada.svg",
+      null,
+    ]);
+  });
 });
