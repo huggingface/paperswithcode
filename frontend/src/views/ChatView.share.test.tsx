@@ -680,12 +680,10 @@ describe("ChatView web search", () => {
     ));
   });
 
-  it("keeps web search enabled when a new session starts generating", async () => {
-    const user = userEvent.setup();
+  it("keeps default-on web search enabled when a new session starts generating", async () => {
     const rendered = renderChat("/chat");
     const toggle = await screen.findByRole("switch", { name: "Web search" });
 
-    await user.click(toggle);
     expect(toggle).toHaveAttribute("aria-checked", "true");
 
     mocks.busy = true;
@@ -697,24 +695,24 @@ describe("ChatView web search", () => {
     );
   });
 
-  it("resets web search when the user starts a new chat", async () => {
+  it("resets web search to on when the user starts a new chat", async () => {
     mocks.getSession.mockResolvedValueOnce({
       ...session,
-      web_search_enabled: true,
+      web_search_enabled: false,
       transcript_status: "ready",
       messages: [],
     });
     const user = userEvent.setup();
     renderChat();
     const toggle = await screen.findByRole("switch", { name: "Web search" });
-    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "true"));
+    await waitFor(() => expect(toggle).toHaveAttribute("aria-checked", "false"));
 
     await user.click(screen.getByRole("button", { name: "New chat" }));
 
     expect(screen.getByTestId("chat-location")).toHaveTextContent("/chat");
     expect(screen.getByRole("switch", { name: "Web search" })).toHaveAttribute(
       "aria-checked",
-      "false",
+      "true",
     );
   });
 

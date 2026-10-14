@@ -340,7 +340,7 @@ describe("AskAssistant", () => {
     });
   });
 
-  it("offers available web search and carries the choice into the new chat", async () => {
+  it("enables available web search by default and carries it into the new chat", async () => {
     vi.stubEnv("VITE_CHAT_ENABLED", "1");
     vi.spyOn(chatApi, "getAvailability").mockResolvedValue({
       status: "available",
@@ -365,7 +365,7 @@ describe("AskAssistant", () => {
     const toggle = await screen.findByRole("switch", { name: "Web search" });
     expect(screen.getByLabelText("Research model"))
       .toHaveValue("gpt-5.6-luna@openai");
-    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-checked", "true");
     await user.type(
       screen.getByRole("combobox", { name: "Ask the assistant" }),
       "Find the latest vision-language model release",

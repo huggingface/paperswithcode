@@ -172,7 +172,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   );
   const [draft, setDraft] = useState<ChatDraft>(() => emptyDraft());
   const [webSearchEnabled, setWebSearchEnabled] = useState(
-    () => queuedLaunchRef.current?.webSearchEnabled ?? false,
+    () => queuedLaunchRef.current?.webSearchEnabled ?? true,
   );
   const [reasoningEffort, setReasoningEffort] = useState<ReasoningEffort>(
     () => queuedLaunchRef.current?.reasoningEffort ?? "low",
@@ -396,7 +396,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     if (!selectedId) {
       loadChat([], null);
       if (initializedRoute !== undefined) {
-        setWebSearchEnabled(false);
+        setWebSearchEnabled(true);
         setReasoningEffort("low");
       }
       setInitializedRoute(null);
@@ -475,7 +475,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     setInitializedRoute(null);
     setDraft(emptyDraft());
     onPaperSelectionChange?.(undefined);
-    setWebSearchEnabled(false);
+    setWebSearchEnabled(true);
     setReasoningEffort("low");
     if (mode === "paper") onReaderNewChat?.();
     else navigate("/chat");
