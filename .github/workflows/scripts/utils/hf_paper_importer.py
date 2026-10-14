@@ -258,6 +258,7 @@ class HuggingFacePaperImporterMixin:
                 and user_info.get("type", "user") == "user"
                 and author_data.get("status") not in UNCONFIRMED_STATUSES
             )
+            author_id = None
             if claimed:
                 profile = (
                     user_info["user"],
@@ -266,27 +267,42 @@ class HuggingFacePaperImporterMixin:
                     author_data.get("status"),
                     bool(user_info.get("isPro", False)),
                 )
-                author_id = self.find_hf_author(user_info["_id"], user_info["user"])
-                if author_id:
+                found, author_id = self.find_hf_author(
+                    user_info["_id"], user_info["user"]
+                )
+                if not found:
+                    # The username was reassigned to another account: leave
+                    # it to a human, like sync_hf_author_profiles does.
+                    claimed = False
+                elif author_id:
                     self.update_author_hf_info(author_id, *profile)
                 elif link_to_paper:
                     author_id = self.create_author(author_name, *profile)
-            elif link_to_paper:
+            if not claimed:
+                if not link_to_paper:
+                    continue
                 author_id = self.get_or_create_author(author_name)
-            else:
-                continue
 
             if author_id and link_to_paper:
                 self.link_paper_author(paper_id, author_id, order, claimed)
 
-    def find_hf_author(self, hf_id: str, hf_username: str) -> Optional[int]:
-        """Return the author row of this HF account, if it has one."""
+    def find_hf_author(
+        self, hf_id: str, hf_username: str
+    ) -> Tuple[bool, Optional[int]]:
+        """Return (True, author id or None) for this HF account's author row.
+
+        Returns (False, None) when the id and the username point at different
+        rows or the username now belongs to another account.
+        """
         results = self.execute_query(
-            "SELECT id FROM authors WHERE hf_id = %s OR hf_username = %s"
-            " ORDER BY hf_id = %s DESC, id LIMIT 1",
-            (hf_id, hf_username, hf_id),
+            "SELECT id, hf_id FROM authors WHERE hf_id = %s OR hf_username = %s",
+            (hf_id, hf_username),
         )
-        return results[0]["id"] if results else None
+        if not results:
+            return True, None
+        if len(results) > 1 or results[0]["hf_id"] not in (None, hf_id):
+            return False, None
+        return True, results[0]["id"]
 
     def get_or_create_author(self, name: str) -> Optional[int]:
         """Find the name-only author with this name (any case) or create one."""

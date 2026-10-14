@@ -246,3 +246,36 @@ def test_version_refresh_keeps_hf_claims_from_the_previous_version(tmp_path) -> 
             ("Grace Hopper", None, False),
             ("Tom Aarsen", "tomaarsen", True),
         ]
+
+
+def test_version_refresh_keeps_a_claim_whose_name_arxiv_respelled(tmp_path) -> None:
+    engine = create_engine(f"sqlite:///{tmp_path / 'refresh.db'}")
+    Base.metadata.create_all(
+        bind=engine,
+        tables=[Paper.__table__, Author.__table__, PaperAuthor.__table__],
+    )
+    with sessionmaker(bind=engine)() as db:
+        db.add_all(
+            [
+                Paper(id=1, arxiv_id="2605.00004", version="v1", title="Old"),
+                Paper(id=2, arxiv_id="2605.00004", version="v2", title="New"),
+                Author(id=1, name="Tom Aarsen", hf_username="tomaarsen"),
+            ]
+        )
+        db.flush()
+        db.add(PaperAuthor(paper_id=1, author_id=1, author_order=2, claimed=True))
+        db.flush()
+
+        PaperVersionRefreshService(
+            db, paper_factory=lambda _paper_id: None
+        )._replace_paper_authors(2, ["Grace Hopper", "T. Aarsen"], 1)
+        db.flush()
+
+        links = (
+            db.query(Author.hf_username, PaperAuthor.claimed)
+            .join(PaperAuthor, PaperAuthor.author_id == Author.id)
+            .filter(PaperAuthor.paper_id == 2)
+            .order_by(PaperAuthor.author_order)
+            .all()
+        )
+        assert links == [(None, False), ("tomaarsen", True)]

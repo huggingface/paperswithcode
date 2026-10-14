@@ -329,24 +329,31 @@ class PaperVersionRefreshService:
         self, paper_id: int, author_names: List[str], claims_from: Optional[int]
     ) -> None:
         # Keep Hugging Face claims (on this version or the previous latest one)
-        # attached to the claiming author instead of re-matching it by name.
-        claimed_authors = {
-            normalize_arxiv_author_name(author.name).casefold(): author
-            for author in (
-                self.db.query(DBAuthor)
-                .join(PaperAuthor, PaperAuthor.author_id == DBAuthor.id)
-                .filter(
-                    PaperAuthor.paper_id.in_({paper_id, claims_from or paper_id}),
-                    PaperAuthor.claimed,
-                )
+        # attached to the claiming author instead of re-matching it by name: by
+        # name first, else by position when arXiv now spells the name
+        # differently from the claiming author's stored name.
+        names = [normalize_arxiv_author_name(full_name) for full_name in author_names]
+        keys = {name.casefold() for name in names}
+        claimed_by_key: dict[str, DBAuthor] = {}
+        claimed_by_order: dict[int, DBAuthor] = {}
+        for author, order in (
+            self.db.query(DBAuthor, PaperAuthor.author_order)
+            .join(PaperAuthor, PaperAuthor.author_id == DBAuthor.id)
+            .filter(
+                PaperAuthor.paper_id.in_({paper_id, claims_from or paper_id}),
+                PaperAuthor.claimed,
             )
-        }
+        ):
+            key = normalize_arxiv_author_name(author.name).casefold()
+            if key in keys:
+                claimed_by_key[key] = author
+            else:
+                claimed_by_order[order] = author
         self.db.query(PaperAuthor).filter(PaperAuthor.paper_id == paper_id).delete()
 
         linked_ids: set[int] = set()
-        for order, full_name in enumerate(author_names, start=1):
-            name = normalize_arxiv_author_name(full_name)
-            author = claimed_authors.get(name.casefold())
+        for order, name in enumerate(names, start=1):
+            author = claimed_by_key.get(name.casefold()) or claimed_by_order.get(order)
             claimed = author is not None
             if author is None:
                 author = get_or_create_author_by_name(self.db, name)
