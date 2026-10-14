@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from backend.database.connection import get_database_session
 from backend.models.paper_edits import DeviceStart, DeviceExchange, PaperEditDocument
 from backend.services.paper_edit_access import PaperEditAccess, token_hash
-from backend.utils.client_ip import get_client_ip
+from backend.utils.client_ip import get_proxied_client_ip
 from backend.services.paper_edit_authorization import PaperEditAuthorizationService
 from backend.services.paper_edit_service import PaperEditService
 from backend.utils.auth import can_directly_edit_catalog, require_paper_mutator
@@ -32,7 +32,7 @@ def start_authorization(
 ):
     response.headers["Cache-Control"] = "no-store"
     return PaperEditAuthorizationService(db).start(
-        body.paper_id, token_hash(get_client_ip(request) or "unknown")
+        body.paper_id, token_hash(get_proxied_client_ip(request) or "unknown")
     )
 
 

@@ -47,7 +47,7 @@ from backend.services.pending_edit_service import (
     SubmissionSuspendedError,
 )
 from backend.utils.auth import require_hf_admin, require_user
-from backend.utils.client_ip import get_client_ip
+from backend.utils.client_ip import get_proxied_client_ip
 from backend.utils.exceptions import (
     DatabaseError,
     PaperNotFoundError,
@@ -241,7 +241,7 @@ def submit_pending_paper_edit(
             paper_id=body.paper_id,
             hf_username=user["username"],
             hf_subject=user["hf_subject"],
-            source_ip=get_client_ip(request),
+            source_ip=get_proxied_client_ip(request),
             idempotency_key=idempotency_key,
             exempt_from_limits=user["role"] in {"admin", "contributor"},
             edit_type=body.edit_type,

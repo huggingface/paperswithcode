@@ -84,7 +84,7 @@ from backend.services.paper_bucket_service import (
     copy_paper_to_bucket,
 )
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
-from backend.utils.client_ip import get_client_ip
+from backend.utils.client_ip import get_proxied_client_ip
 from backend.utils.public_urls import normalize_public_url
 from backend.utils.urls import (
     get_paper_route_identifier,
@@ -976,7 +976,7 @@ async def submit_paper(
                 actor_username=user["username"],
                 actor_subject=user["hf_subject"],
                 actor_role=user["role"],
-                source_ip=get_client_ip(http_request),
+                source_ip=get_proxied_client_ip(http_request),
                 idempotency_key=idempotency_key,
             )
         )

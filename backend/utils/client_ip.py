@@ -22,3 +22,18 @@ def get_client_ip(request: Request) -> str | None:
         return str(ipaddress.ip_address(candidate))
     except ValueError:
         return None
+
+
+def get_proxied_client_ip(request: Request) -> str | None:
+    """Like ``get_client_ip``, but also resolves requests on the unix socket.
+
+    Production nginx reaches uvicorn over a unix socket, where ``request.client``
+    is empty; only the local nginx can connect there and it sets ``X-Real-IP``.
+    """
+    if request.client and request.client.host:
+        return get_client_ip(request)
+    forwarded = (request.headers.get("X-Real-IP") or "").strip()
+    try:
+        return str(ipaddress.ip_address(forwarded))
+    except ValueError:
+        return None
