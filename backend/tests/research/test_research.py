@@ -30,6 +30,7 @@ from backend.models.database import (
     Evaluation,
 )
 from backend.models.database.resources import HfArtifact, PaperRepository, Repository
+from backend.models.database.identity import UserProfile
 from backend.models.database.research import (
     ResearchFollow,
     ResearchSubscription,
@@ -189,6 +190,20 @@ def test_html_escapes_catalog_content():
     assert "<script>" not in rendered["html"]
     assert "&lt;script&gt;" in rendered["html"]
     assert rendered["headers"]["List-Unsubscribe-Post"] == "List-Unsubscribe=One-Click"
+
+
+def test_digest_template_summarizes_the_week_and_links_settings():
+    e = entry("x", ["a"])
+    e.title, e.url, e.summary, e.reasons = "A paper", "/paper/1", "Short.", ["Agents"]
+    e.scores = [{"benchmark": "SWE-bench", "model": "M", "metrics": {"Accuracy": 71.2}}]
+    start = datetime(2026, 10, 5, 8, tzinfo=UTC)
+    rendered = delivery.render_digest([e], "tok", start, start + timedelta(days=7))
+    assert rendered["subject"] == "Your weekly research digest: 1 new paper"
+    assert "1 new paper from what you follow, Oct 5 – Oct 11, 2026." in rendered["text"]
+    assert "Matched: Agents" in rendered["text"]
+    assert "SWE-bench · M: Accuracy 71.2" in rendered["html"]
+    assert 'href="https://paperswithcode.co/settings"' in rendered["html"]
+    assert "/api/v1/research/unsubscribe/tok" in rendered["html"]
 
 
 def test_descendants_privacy_methods_and_canonical_versions(db, now):
@@ -656,3 +671,48 @@ def test_feed_filters_match_the_home_feed(db, now):
     assert ids(has_code=True) == []
     entry = follows.feed_entries(db, "alice", now, 0, 10, **window)[0]
     assert entry.reasons == ["Filter task"]
+
+
+def test_preview_and_test_send_never_touch_the_outbox(db, now, monkeypatch):
+    task = Task(name="Preview task", slug="preview-task")
+    db.add(task)
+    db.flush()
+    tagged(db, paper(db, now, "preview", days=2), task)
+    follow(db, "task", task, now)
+    db.add(UserProfile(hf_subject="alice", current_username="alice-hf"))
+    db.add(
+        ResearchSubscription(
+            hf_subject="alice",
+            email="a@example.com",
+            enabled=False,
+            unsubscribe_token="t",
+        )
+    )
+    db.flush()
+    assert delivery.subject_for_username(db, "alice-hf") == "alice"
+    preview = delivery.sample_digest(db, "alice", now)
+    assert preview["to"] == ["a@example.com"]
+    assert "Research preview" in preview["text"]
+
+    calls = []
+    monkeypatch.setattr(
+        delivery.httpx,
+        "post",
+        lambda *a, **kw: calls.append(kw)
+        or SimpleNamespace(raise_for_status=lambda: None, json=lambda: {"id": "p1"}),
+    )
+    monkeypatch.setattr(delivery, "delivery_ready", lambda: False)
+    assert delivery.send_test_digest(db, "alice", now) == "disabled"
+    monkeypatch.setattr(delivery, "delivery_ready", lambda: True)
+    monkeypatch.setattr(
+        delivery,
+        "get_settings",
+        lambda: SimpleNamespace(resend_api_key="k", resend_from="PwC <d@example.com>"),
+    )
+    assert delivery.send_test_digest(db, "alice", now) == "not-opted-in"
+    db.get(ResearchSubscription, "alice").enabled = True
+    db.flush()
+    assert delivery.send_test_digest(db, "alice", now) == "sent p1 to a@example.com"
+    assert calls[0]["json"]["to"] == ["a@example.com"]
+    assert calls[0]["json"]["subject"].startswith("[Test] ")
+    assert db.scalar(text("SELECT count(*) FROM research_digests")) == 0

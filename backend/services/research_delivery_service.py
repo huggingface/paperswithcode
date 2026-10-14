@@ -14,6 +14,7 @@ from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
+from backend.models.database.identity import UserProfile
 from backend.models.database.research import (
     ResearchDigest,
     ResearchSubscription,
@@ -51,33 +52,114 @@ def weekly_window(now: datetime) -> tuple[datetime, datetime]:
     return end - timedelta(days=7), end
 
 
-def render_digest(entries, token: str) -> dict:
+INK, SOFT, FAINT, ACCENT, HAIRLINE, PAPER = (
+    "#1a1a1a",
+    "#555555",
+    "#8a8a8a",
+    "#2f4f7a",
+    "#e6e2da",
+    "#faf8f4",
+)
+SERIF = "Georgia,'Times New Roman',serif"
+SANS = "-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+MONO = "ui-monospace,SFMono-Regular,Menlo,Consolas,monospace"
+
+
+def _score_text(score: dict) -> str:
+    metrics = ", ".join(f"{k} {v}" for k, v in score["metrics"].items())
+    return f"{score['benchmark']} · {score['model'] or 'result'}: {metrics}"
+
+
+def _published(value: str) -> str:
+    try:
+        day = datetime.fromisoformat(value)
+    except ValueError:
+        return value
+    return f"{day:%b} {day.day}, {day:%Y}"
+
+
+def _period(start: datetime | None, end: datetime | None) -> str:
+    if not start or not end:
+        return ""
+    last = end - timedelta(days=1)
+    return f"{start:%b} {start.day} – {last:%b} {last.day}, {last:%Y}"
+
+
+def render_digest(
+    entries,
+    token: str,
+    start: datetime | None = None,
+    end: datetime | None = None,
+) -> dict:
+    """Email-safe digest: table layout and inline styles only; all catalog text escaped."""
+    esc = html.escape
     unsubscribe = f"{ORIGIN}/api/v1/research/unsubscribe/{token}"
-    lines = ["Your weekly research updates", ""]
-    blocks = ["<h1>Your weekly research updates</h1>"]
+    count = len(entries)
+    noun = "paper" if count == 1 else "papers"
+    period = _period(start, end)
+    intro = f"{count} new {noun} from what you follow" + (
+        f", {period}." if period else "."
+    )
+    lines = ["Papers with Code · Weekly research digest", intro, ""]
+    rows = []
     for e in entries:
-        reasons = ", ".join(e.reasons)
-        scores = "; ".join(
-            f"{s['benchmark']} ({s['model'] or 'result'}): "
-            + ", ".join(f"{k}: {v}" for k, v in s["metrics"].items())
-            for s in e.scores
-        )
         url = ORIGIN + e.url
-        lines.extend([e.title, e.summary, reasons, scores, url, ""])
-        blocks.append(
-            f'<h2><a href="{html.escape(url, quote=True)}">{html.escape(e.title)}</a></h2>'
-            f"<p>{html.escape(e.summary)}</p><p>{html.escape(reasons)}</p>"
-            f"<p>{html.escape(scores)}</p>"
+        reasons = ", ".join(e.reasons)
+        scores = [_score_text(s) for s in e.scores]
+        lines.extend([e.title, url, e.summary, f"Matched: {reasons}", *scores, ""])
+        score_html = "".join(
+            f'<div style="margin-top:4px;font-family:{MONO};font-size:12px;color:{ACCENT};">'
+            f"{esc(text)}</div>"
+            for text in scores
         )
-    lines.extend([f"More matches: {ORIGIN}/following", f"Unsubscribe: {unsubscribe}"])
-    blocks.append(
-        f'<p><a href="{ORIGIN}/following">More matches in your Following feed</a></p>'
-        f'<p><a href="{unsubscribe}">Unsubscribe</a></p>'
+        rows.append(
+            f'<tr><td style="padding:22px 0;border-top:1px solid {HAIRLINE};">'
+            f'<a href="{esc(url, quote=True)}" style="font-family:{SERIF};font-size:19px;'
+            f'line-height:1.3;color:{INK};text-decoration:none;">{esc(e.title)}</a>'
+            f'<div style="margin-top:6px;font-family:{SANS};font-size:12px;color:{FAINT};">'
+            f"{esc(_published(e.published))} · Matched: {esc(reasons)}</div>"
+            f'<div style="margin-top:8px;font-family:{SANS};font-size:14px;line-height:1.55;'
+            f'color:{SOFT};">{esc(e.summary)}</div>{score_html}</td></tr>'
+        )
+    lines.extend(
+        [
+            f"See more matches: {ORIGIN}/following",
+            f"Manage follows and email: {ORIGIN}/settings",
+            f"Unsubscribe: {unsubscribe}",
+        ]
+    )
+    link = f"color:{ACCENT};text-decoration:none;font-weight:600;"
+    body = (
+        f'<body style="margin:0;padding:0;background:{PAPER};">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="background:{PAPER};"><tr><td align="center" style="padding:32px 16px;">'
+        f'<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        f'style="max-width:600px;background:#ffffff;border:1px solid {HAIRLINE};'
+        f'border-radius:10px;"><tr><td style="padding:28px 32px 8px;">'
+        f'<div style="font-family:{SERIF};font-size:20px;color:{INK};">Papers '
+        f'<span style="font-style:italic;color:{ACCENT};">with Code</span></div>'
+        f'<div style="margin-top:18px;font-family:{SANS};font-size:12px;letter-spacing:.08em;'
+        f'text-transform:uppercase;color:{FAINT};">Weekly research digest</div>'
+        f'<div style="margin-top:6px;font-family:{SANS};font-size:15px;color:{SOFT};">'
+        f"{esc(intro)}</div></td></tr>"
+        f'<tr><td style="padding:0 32px;"><table role="presentation" width="100%" '
+        f'cellpadding="0" cellspacing="0">{"".join(rows)}</table></td></tr>'
+        f'<tr><td style="padding:20px 32px 28px;border-top:1px solid {HAIRLINE};'
+        f'font-family:{SANS};font-size:14px;">'
+        f'<a href="{ORIGIN}/following" style="{link}">See more in your Following feed →</a>'
+        f"</td></tr></table>"
+        f'<div style="max-width:600px;margin-top:16px;font-family:{SANS};font-size:12px;'
+        f'line-height:1.6;color:{FAINT};">You receive this because you turned on the weekly '
+        f"email on Papers with Code. "
+        f'<a href="{ORIGIN}/settings" style="color:{FAINT};">Manage follows and email</a> · '
+        f'<a href="{esc(unsubscribe, quote=True)}" style="color:{FAINT};">Unsubscribe</a>'
+        f"</div></td></tr></table></body>"
     )
     return {
-        "subject": "Your weekly research updates",
+        "subject": f"Your weekly research digest: {count} new {noun}",
         "text": "\n".join(lines),
-        "html": "".join(blocks),
+        "html": f'<!doctype html><html><head><meta charset="utf-8">'
+        f'<meta name="viewport" content="width=device-width,initial-scale=1"></head>{body}</html>',
         "headers": {
             "List-Unsubscribe": f"<{unsubscribe}>",
             "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
@@ -105,7 +187,7 @@ def prepare_digest(db: Session, subject: str, now: datetime) -> ResearchDigest |
         opted_in_at=sub.opted_in_at,
     )
     selected = diverse(entries, 20, rotation=(end.date().toordinal() // 7) * 20)
-    payload = render_digest(selected, sub.unsubscribe_token)
+    payload = render_digest(selected, sub.unsubscribe_token, start, end)
     payload.update({"to": [sub.email], "from": get_settings().resend_from})
     db.execute(
         insert(ResearchDigest)
@@ -119,6 +201,49 @@ def prepare_digest(db: Session, subject: str, now: datetime) -> ResearchDigest |
     )
     db.commit()
     return db.get(ResearchDigest, (subject, end))
+
+
+def subject_for_username(db: Session, username: str) -> str | None:
+    return db.scalar(
+        select(UserProfile.hf_subject).where(UserProfile.current_username == username)
+    )
+
+
+def sample_digest(db: Session, subject: str, now: datetime) -> dict | None:
+    """Render the past week's feed matches as a digest, without outbox or event gating.
+
+    Lets operators review the email before launch; real digests only contain
+    updates discovered after each follow and opt-in.
+    """
+    sub = db.get(ResearchSubscription, subject)
+    if not sub:
+        return None
+    start = now - timedelta(days=7)
+    entries = matching_entries(db, subject, now, cutoff=start.date())
+    payload = render_digest(diverse(entries, 20), sub.unsubscribe_token, start, now)
+    payload.update(
+        {"to": [sub.email] if sub.email else [], "from": get_settings().resend_from}
+    )
+    return payload
+
+
+def send_test_digest(db: Session, subject: str, now: datetime) -> str:
+    """Send one sample digest to the subscriber's own opted-in, unsuppressed address."""
+    if not delivery_ready():
+        return "disabled"
+    sub = db.get(ResearchSubscription, subject)
+    if not sub or not sub.enabled or not sub.email or suppressed(db, sub.email):
+        return "not-opted-in"
+    payload = sample_digest(db, subject, now)
+    payload["subject"] = "[Test] " + payload["subject"]
+    response = httpx.post(
+        "https://api.resend.com/emails",
+        json=payload,
+        headers={"Authorization": f"Bearer {get_settings().resend_api_key}"},
+        timeout=20,
+    )
+    response.raise_for_status()
+    return f"sent {response.json()['id']} to {sub.email}"
 
 
 def expire_pending_digests(db: Session, now: datetime) -> int:

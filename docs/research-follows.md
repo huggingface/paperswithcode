@@ -82,4 +82,17 @@ files, never in source control:
 Register `https://paperswithcode.co/api/v1/research/resend-webhook` for
 `email.bounced`, `email.complained`, and `email.suppressed`. Only after provider
 setup and authorized qualification should the delivery flag be enabled.
+
+Review the email before enabling the timer. Neither command writes the outbox:
+
+```bash
+sudo pwc-cron send_research_digests --preview <hf-username> [--html]
+sudo pwc-cron send_research_digests --test-to <hf-username>
+```
+
+`--preview` renders the past week's Following-feed matches for that account.
+`--test-to` sends one `[Test]` digest, only to that account's own opted-in,
+unsuppressed address, and requires every delivery gate. Real digests still
+contain only updates discovered after each follow and opt-in. Once the test
+looks right, enable `pwc-cron-send-research-digests.timer`.
 No credentials, domain activation, or outbound tests are part of this rollout.
