@@ -188,10 +188,6 @@ def publish_paper_markdown(
     paper_id: str, markdown: str, *, bucket_id: str, token: str | None
 ) -> str:
     """Write the immutable revision, its alias, and the manifest in one batch."""
-    if HfFileSystem(token=token).exists(
-        f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
-    ):
-        raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
     raw = markdown.encode()
     content_sha256 = hashlib.sha256(raw).hexdigest()
     content_key = paper_markdown_content_key(content_sha256)
@@ -270,7 +266,7 @@ def _write_status(
         "retryable": retryable,
         "attempted_at": now.isoformat(),
         "next_retry_at": (
-            (now + timedelta(hours=6 * 2 ** (attempts - 1))).isoformat()
+            (now + timedelta(minutes=30 * 4 ** (attempts - 1))).isoformat()
             if retryable
             else None
         ),
@@ -307,8 +303,10 @@ def prepare_external_page_markdown(
     with lock:
         prior = read_status(paper_id, bucket_id=bucket_id, token=token)
         if not retry_due(prior):
+            # A page in backoff is not yet known to be unreadable.
             raise ExternalPageMarkdownError(
-                str(prior.get("error_class") or "page_unreadable")
+                str(prior.get("error_class") or "page_unreadable"),
+                retryable=bool(prior.get("retryable")),
             )
         # A concurrent request may have published while this one waited.
         alias = paper_markdown_bucket_key(paper_id, source="external")
@@ -316,6 +314,11 @@ def prepare_external_page_markdown(
             f"hf://buckets/{bucket_id}/{alias}"
         ):
             return str(prior["markdown_sha256"])
+        # Check before the paid scrape; a held lock costs no credit.
+        if HfFileSystem(token=token).exists(
+            f"hf://buckets/{bucket_id}/{MARKDOWN_MIGRATION_LOCK_KEY}"
+        ):
+            raise ExternalPageMarkdownError("markdown_migration_locked", retryable=True)
         try:
             page = scrape_page(
                 page_url, api_key=api_key, timeout_seconds=timeout_seconds
@@ -337,9 +340,17 @@ def prepare_external_page_markdown(
                 paper_id, markdown, bucket_id=bucket_id, token=token
             )
         except HfHubHTTPError as error:
-            raise ExternalPageMarkdownError(
-                "storage_unavailable", retryable=True
-            ) from error
+            failure = ExternalPageMarkdownError("storage_unavailable", retryable=True)
+            # Back off so a storage outage does not re-scrape on every read.
+            _write_status(
+                paper_id,
+                {"page_url": page_url},
+                prior=prior,
+                error=failure,
+                bucket_id=bucket_id,
+                token=token,
+            )
+            raise failure from error
         _write_status(
             paper_id,
             {"page_url": page_url, "markdown_sha256": content_sha256},

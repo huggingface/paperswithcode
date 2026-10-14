@@ -249,9 +249,7 @@ def test_prepare_publishes_revision_alias_and_manifest(monkeypatch):
 
 def test_prepare_does_not_publish_during_a_markdown_migration(monkeypatch):
     bucket = FakeBucket({"_content/migration.lock": b"locked"}).install(monkeypatch)
-    monkeypatch.setattr(
-        service, "scrape_page", lambda *args, **kwargs: ScrapedPage(TITLE, ARTICLE)
-    )
+    monkeypatch.setattr(service, "scrape_page", pytest.fail)
 
     with pytest.raises(ExternalPageMarkdownError) as error:
         _prepare()
@@ -281,6 +279,59 @@ def test_prepare_records_failures_and_does_not_rescrape_permanent_ones(monkeypat
     assert len(scrapes) == 1
     status = json.loads(bucket.files[service.status_key("123294")])
     assert (status["status"], status["retryable"]) == ("failed", False)
+
+
+def test_prepare_reports_a_page_in_backoff_as_retryable(monkeypatch):
+    FakeBucket().install(monkeypatch)
+    scrapes = []
+
+    def scrape(*args, **kwargs):
+        scrapes.append(args)
+        raise ExternalPageMarkdownError("firecrawl_unavailable", retryable=True)
+
+    monkeypatch.setattr(service, "scrape_page", scrape)
+
+    for _ in range(2):
+        with pytest.raises(ExternalPageMarkdownError) as error:
+            _prepare()
+        assert (error.value.code, error.value.retryable) == (
+            "firecrawl_unavailable",
+            True,
+        )
+
+    assert len(scrapes) == 1
+
+
+def test_prepare_backs_off_after_a_storage_failure(monkeypatch):
+    bucket = FakeBucket().install(monkeypatch)
+    scrapes = []
+
+    def scrape(*args, **kwargs):
+        scrapes.append(args)
+        return ScrapedPage(TITLE, ARTICLE)
+
+    def publish(*args, **kwargs):
+        raise service.HfHubHTTPError(
+            "bucket unavailable",
+            response=httpx.Response(
+                503, request=httpx.Request("POST", "https://hf.co")
+            ),
+        )
+
+    monkeypatch.setattr(service, "scrape_page", scrape)
+    monkeypatch.setattr(service, "publish_paper_markdown", publish)
+
+    for _ in range(2):
+        with pytest.raises(ExternalPageMarkdownError) as error:
+            _prepare()
+        assert (error.value.code, error.value.retryable) == (
+            "storage_unavailable",
+            True,
+        )
+
+    assert len(scrapes) == 1
+    status = json.loads(bucket.files[service.status_key("123294")])
+    assert (status["error_class"], status["retryable"]) == ("storage_unavailable", True)
 
 
 def test_prepare_does_not_record_a_missing_key(monkeypatch):
