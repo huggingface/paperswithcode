@@ -58,13 +58,26 @@
   .sidebar-section-tools { order: 5; }
 }
 
+.sidebar-tools-mcp {
+  width: 100%;
+  justify-content: space-between;
+  padding: 10px 14px;
+  font-size: 15px;
+  font-weight: 600;
+}
+.sidebar-tools-mcp:hover { border-color: var(--ink-faint); }
 .sidebar-tools-copy {
   font-size: 12px;
   line-height: 1.5;
   color: var(--ink-faint);
-  margin: 0 0 6px;
+  margin: 10px 0 0;
 }
-.sidebar-section-tools code {
+.sidebar-tools-copy a {
+  color: var(--ink-soft);
+  text-decoration: underline;
+  text-decoration-style: dotted;
+}
+.sidebar-tools-copy code {
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: 11px;
 }

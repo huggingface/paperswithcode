@@ -5,6 +5,7 @@ import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "re
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
 import { PaperCard } from "@/components";
+import { AgentLogos } from "@/components/paper-detail/AgentLogos";
 import { PaperFeedFilters } from "@/components/PaperFeedFilters";
 import { PaperDateFilter } from "@/components/PaperDateFilter";
 import { ArrowUpIcon } from "@/components/chat/icons";
@@ -465,22 +466,23 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
           </div>
 
           <div className="sidebar-section sidebar-section-tools">
-            <div className="sidebar-label">Use PwC from your agent</div>
-            <p className="sidebar-tools-copy">
-              Search papers, benchmarks, and leaderboards from the terminal or any MCP
-              client.
-            </p>
-            <a
-              href="https://github.com/huggingface/pwc-cli"
-              target="_blank"
-              rel="noreferrer"
-              className="sidebar-link"
+            <div className="sidebar-label">Use PwC with your agent</div>
+            <Link
+              to="/mcp"
+              className="action-btn sidebar-tools-mcp"
+              title="Connect Claude, Codex, Cursor, or OpenCode to the PwC MCP server"
             >
-              <code>pwc</code> CLI →
-            </a>
-            <Link to="/mcp" className="sidebar-link">
-              MCP server →
+              MCP server
+              <AgentLogos />
             </Link>
+            <p className="sidebar-tools-copy">
+              Search papers, benchmarks, and leaderboards from any MCP client, or from the
+              terminal with the{" "}
+              <a href="https://github.com/huggingface/pwc-cli" target="_blank" rel="noreferrer">
+                <code>pwc</code> CLI
+              </a>
+              .
+            </p>
           </div>
         </aside>
 
