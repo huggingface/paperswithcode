@@ -311,6 +311,25 @@ export interface MethodIndex {
   results: MethodIndexEntry[];
 }
 
+export interface TrendingMethod {
+  id: string;
+  name: string;
+  full_name?: string | null;
+  slug?: string | null;
+  area_id?: string | null;
+  introduced_year?: number | null;
+  recent_paper_count: number;
+  baseline_paper_count: number;
+  share_lift: number;
+  trend_score: number;
+}
+
+export interface TrendingMethodsResponse {
+  results: TrendingMethod[];
+  recent_days: number;
+  baseline_days: number;
+}
+
 export interface MethodTrendPoint {
   start_date: string;
   end_date: string;

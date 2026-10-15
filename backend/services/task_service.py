@@ -10,7 +10,7 @@ import math
 import time
 from typing import Optional, List
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, asc, case, and_, cast, Float
+from sqlalchemy import func, desc, asc, case
 
 from backend.models.database import (
     Task as DBTask,
@@ -40,6 +40,7 @@ from backend.utils.entity_images import load_entity_image
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 from backend.utils.slug_utils import slugify
 from backend.utils.task_slugs import task_slug_candidates
+from backend.services.share_lift import rank_by_share_lift
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,
@@ -358,139 +359,55 @@ class TaskService:
         """
         Rank tasks by how over-indexed they are in recent papers vs baseline.
 
-        For each task with enough support, computes::
-
-            recent_share   = task_recent_papers   / all_recent_papers
-            baseline_share = task_baseline_papers / all_baseline_papers
-            share_lift     = recent_share / baseline_share
-            trend_score    = share_lift * ln(1 + task_recent_papers)
-
-        Results are sorted by descending ``share_lift`` so the order matches
-        the multiplier shown in the UI; ``trend_score`` is used only as a
-        tiebreaker. The recent window is the last ``recent_days``, the
-        baseline window is the ``baseline_days`` immediately preceding it.
-        Tasks below the ``min_recent_papers`` / ``min_baseline_papers`` /
-        ``min_share_lift`` gates are dropped so noisy or shrinking domains
-        never surface.
+        See ``backend.services.share_lift`` for the scoring. Results are
+        sorted by descending ``share_lift`` so the order matches the
+        multiplier shown in the UI; ``trend_score`` only breaks ties.
         """
         try:
-            recent_start = today - timedelta(days=recent_days)
-            baseline_start = recent_start - timedelta(days=baseline_days)
-
-            # Combined window predicate: only consider latest-version papers
-            # published anywhere between baseline_start and today. Pushing this
-            # into the WHERE clause lets Postgres skip the bulk of `papers` and
-            # the matching `paper_tasks` rows entirely before aggregation,
-            # instead of scanning all dated papers and discarding most of them
-            # inside a CASE.
-            in_window = and_(
-                DBPaper.is_latest_version,
-                DBPaper.date_published > baseline_start,
-                DBPaper.date_published <= today,
+            rows = rank_by_share_lift(
+                self.db,
+                DBTask,
+                PaperTask.task_id,
+                PaperTask.paper_id,
+                limit=limit,
+                recent_days=recent_days,
+                baseline_days=baseline_days,
+                min_recent_papers=min_recent_papers,
+                min_baseline_papers=min_baseline_papers,
+                min_share_lift=min_share_lift,
+                today=today,
+                filters=[DBTask.level == level] if level is not None else [],
             )
-            in_recent = and_(
-                DBPaper.date_published > recent_start,
-                DBPaper.date_published <= today,
-            )
-            in_baseline = and_(
-                DBPaper.date_published > baseline_start,
-                DBPaper.date_published <= recent_start,
-            )
-
-            totals_row = (
-                self.db.query(
-                    func.count(case((in_recent, DBPaper.id))).label("all_recent"),
-                    func.count(case((in_baseline, DBPaper.id))).label("all_baseline"),
-                )
-                .filter(in_window)
-                .one()
-            )
-            all_recent = int(totals_row.all_recent or 0)
-            all_baseline = int(totals_row.all_baseline or 0)
-
-            if all_recent == 0 or all_baseline == 0:
-                return TrendingTasks(
-                    results=[],
-                    recent_days=recent_days,
-                    baseline_days=baseline_days,
-                )
-
-            recent_count_expr = func.count(case((in_recent, DBPaper.id)))
-            baseline_count_expr = func.count(case((in_baseline, DBPaper.id)))
-
-            # Express the ranking maths in SQL so Postgres can filter, sort and
-            # LIMIT server-side instead of returning every qualifying task for
-            # Python to score and sort. `all_recent`/`all_baseline` are known
-            # scalars (computed above), so:
-            #   share_lift  = (recent/all_recent) / (baseline/all_baseline)
-            #               = (recent * all_baseline) / (baseline * all_recent)
-            #   trend_score = share_lift * ln(1 + recent)
-            # The min_baseline_papers gate guarantees baseline_count > 0, and
-            # all_recent/all_baseline are non-zero (checked above), so the
-            # divisions are always defined. Casts force float (not integer)
-            # division.
-            share_lift_expr = (cast(recent_count_expr, Float) * float(all_baseline)) / (
-                cast(baseline_count_expr, Float) * float(all_recent)
-            )
-            trend_score_expr = share_lift_expr * func.ln(1.0 + recent_count_expr)
-
-            recent_count_col = recent_count_expr.label("recent_count")
-            baseline_count_col = baseline_count_expr.label("baseline_count")
-            share_lift_col = share_lift_expr.label("share_lift")
-            trend_score_col = trend_score_expr.label("trend_score")
-
-            per_task_query = (
-                self.db.query(
-                    DBTask,
-                    recent_count_col,
-                    baseline_count_col,
-                    share_lift_col,
-                    trend_score_col,
-                )
-                .join(PaperTask, PaperTask.task_id == DBTask.id)
-                .join(DBPaper, DBPaper.id == PaperTask.paper_id)
-                .filter(in_window)
-                .group_by(DBTask.id)
-                .having(recent_count_expr >= min_recent_papers)
-                .having(baseline_count_expr >= min_baseline_papers)
-                .having(share_lift_expr > min_share_lift)
-            )
-
-            if level is not None:
-                per_task_query = per_task_query.filter(DBTask.level == level)
-
-            per_task_query = per_task_query.order_by(
-                desc("share_lift"), desc("trend_score")
-            ).limit(limit)
-
             results = [
                 TrendingTask(
-                    id=str(db_task.id),
-                    name=db_task.name,
-                    description=db_task.description,
-                    research_trends=db_task.research_trends or [],
-                    slug=db_task.slug,
-                    keywords=db_task.keywords,
-                    parent_id=str(db_task.parent_id) if db_task.parent_id else None,
-                    area_id=str(db_task.area_id) if db_task.area_id else None,
-                    level=db_task.level,
-                    paper_count=int(recent_count or 0) + int(baseline_count or 0),
+                    id=str(row.entity.id),
+                    name=row.entity.name,
+                    description=row.entity.description,
+                    research_trends=row.entity.research_trends or [],
+                    slug=row.entity.slug,
+                    keywords=row.entity.keywords,
+                    parent_id=str(row.entity.parent_id)
+                    if row.entity.parent_id
+                    else None,
+                    area_id=str(row.entity.area_id) if row.entity.area_id else None,
+                    level=row.entity.level,
+                    paper_count=row.recent_paper_count + row.baseline_paper_count,
                     image_url=entity_image_url(
                         "tasks",
-                        db_task.slug,
-                        db_task.image_mime_type is not None,
-                        db_task.image_url,
-                        db_task.updated_at,
+                        row.entity.slug,
+                        row.entity.image_mime_type is not None,
+                        row.entity.image_url,
+                        row.entity.updated_at,
                     ),
-                    image_credit=db_task.image_credit,
-                    created_at=db_task.created_at,
-                    updated_at=db_task.updated_at,
-                    recent_paper_count=int(recent_count or 0),
-                    baseline_paper_count=int(baseline_count or 0),
-                    share_lift=float(share_lift),
-                    trend_score=float(trend_score),
+                    image_credit=row.entity.image_credit,
+                    created_at=row.entity.created_at,
+                    updated_at=row.entity.updated_at,
+                    recent_paper_count=row.recent_paper_count,
+                    baseline_paper_count=row.baseline_paper_count,
+                    share_lift=row.share_lift,
+                    trend_score=row.trend_score,
                 )
-                for db_task, recent_count, baseline_count, share_lift, trend_score in per_task_query.all()
+                for row in rows
             ]
 
             return TrendingTasks(

@@ -6,6 +6,7 @@ including pagination, filtering, and paper associations.
 """
 
 from datetime import UTC, date, datetime, timedelta
+import time
 from typing import Optional, List
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import and_, func, desc, asc, or_, case, literal
@@ -16,12 +17,20 @@ from backend.models.database import (
     Paper as DBPaper,
     PaperMethod,
 )
-from backend.models.taxonomy import Method, MethodIndex, MethodIndexEntry, Methods
+from backend.models.taxonomy import (
+    Method,
+    MethodIndex,
+    MethodIndexEntry,
+    Methods,
+    TrendingMethod,
+    TrendingMethods,
+)
 from backend.utils.entity_images import entity_image_url
 from backend.utils.entity_images import load_entity_image
 from backend.utils.exceptions import PaperNotFoundError, DatabaseError
 from backend.utils.urls import get_method_source_url
 from backend.utils.slug_utils import slugify
+from backend.services.share_lift import rank_by_share_lift
 from backend.services.catalog_errors import (
     CatalogConflictError,
     CatalogNotFoundError,
@@ -38,6 +47,12 @@ from backend.services.entity_search import (
     postgres_search_expressions,
     prepare_entity_search,
 )
+
+
+# The methods directory asks for the same ranking on every visit, and papers
+# arrive in daily imports, so a short shared cache keeps it current.
+TRENDING_METHODS_TTL_SECONDS = 600
+_trending_methods_cache: dict[tuple, tuple[float, TrendingMethods]] = {}
 
 
 class MethodService:
@@ -407,6 +422,89 @@ class MethodService:
             ) in rows
         ]
         return MethodIndex(count=len(results), results=results)
+
+    def get_trending_methods(
+        self,
+        *,
+        limit: int = 24,
+        recent_days: int = 30,
+        baseline_days: int = 180,
+        min_recent_papers: int = 10,
+        min_baseline_papers: int = 10,
+        min_share_lift: float = 1.0,
+        today: Optional[date] = None,
+    ) -> TrendingMethods:
+        """Return methods over-indexed in recent papers, briefly cached on PostgreSQL."""
+        args = (
+            limit,
+            recent_days,
+            baseline_days,
+            min_recent_papers,
+            min_baseline_papers,
+            min_share_lift,
+            today or datetime.now(UTC).date(),
+        )
+        bind = self.db.get_bind()
+        if bind.dialect.name != "postgresql":
+            return self._compute_trending_methods(*args)
+        key = (str(bind.url), *args)
+        cached = _trending_methods_cache.get(key)
+        now = time.monotonic()
+        if cached and now - cached[0] < TRENDING_METHODS_TTL_SECONDS:
+            return cached[1]
+        result = self._compute_trending_methods(*args)
+        if len(_trending_methods_cache) >= 256:
+            _trending_methods_cache.clear()
+        _trending_methods_cache[key] = (now, result)
+        return result
+
+    def _compute_trending_methods(
+        self,
+        limit: int,
+        recent_days: int,
+        baseline_days: int,
+        min_recent_papers: int,
+        min_baseline_papers: int,
+        min_share_lift: float,
+        today: date,
+    ) -> TrendingMethods:
+        try:
+            rows = rank_by_share_lift(
+                self.db,
+                DBMethod,
+                PaperMethod.method_id,
+                PaperMethod.paper_id,
+                limit=limit,
+                recent_days=recent_days,
+                baseline_days=baseline_days,
+                min_recent_papers=min_recent_papers,
+                min_baseline_papers=min_baseline_papers,
+                min_share_lift=min_share_lift,
+                today=today,
+            )
+        except SQLAlchemyError as error:
+            raise DatabaseError(
+                f"Failed to compute trending methods: {error}"
+            ) from error
+        return TrendingMethods(
+            results=[
+                TrendingMethod(
+                    id=row.entity.id,
+                    name=row.entity.name,
+                    full_name=row.entity.full_name,
+                    slug=row.entity.slug,
+                    area_id=row.entity.area_id,
+                    introduced_year=row.entity.introduced_year,
+                    recent_paper_count=row.recent_paper_count,
+                    baseline_paper_count=row.baseline_paper_count,
+                    share_lift=row.share_lift,
+                    trend_score=row.trend_score,
+                )
+                for row in rows
+            ],
+            recent_days=recent_days,
+            baseline_days=baseline_days,
+        )
 
     def get_method_by_id(self, method_id: str) -> Method:
         """

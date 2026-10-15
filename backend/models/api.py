@@ -189,6 +189,8 @@ from backend.models.taxonomy import (
     TrendingBenchmarks as TrendingBenchmarks,
     TrendingTask as TrendingTask,
     TrendingTasks as TrendingTasks,
+    TrendingMethod as TrendingMethod,
+    TrendingMethods as TrendingMethods,
 )
 from backend.models.trends import (
     TrendPoint as TrendPoint,

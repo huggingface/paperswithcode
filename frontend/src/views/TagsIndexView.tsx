@@ -9,6 +9,8 @@ import { slugify } from "@/lib/slug";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
+import { TaxonomyViewTabs, TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
+import { useTaxonomyView } from "@/hooks/useTaxonomyView";
 
 const taskKey = (value?: string) => value?.trim().toLowerCase().replace(/[\s_]+/g, "-") ?? "";
 
@@ -20,11 +22,37 @@ const taskKey = (value?: string) => value?.trim().toLowerCase().replace(/[\s_]+/
  * round-trip, so this view can render the returned taxonomy directly.
  */
 const TagsIndexView: React.FC = () => {
+  const [view, setView] = useTaxonomyView();
   const taxonomyQ = useQuery({
     queryKey: ["areas-with-tasks"],
     queryFn: () => catalogApi.areasWithTasks(),
     staleTime: 10 * 60 * 1000,
+    enabled: view === "all",
   });
+  const trendingQ = useQuery({
+    queryKey: ["trending-tasks-directory"],
+    queryFn: () => catalogApi.trendingTasks({ limit: 24, min_recent_papers: 10 }),
+    staleTime: 10 * 60 * 1000,
+    enabled: view === "trending",
+  });
+  const areasQ = useQuery({
+    queryKey: ["areas-all"],
+    queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
+    staleTime: 10 * 60 * 1000,
+    enabled: view === "trending",
+  });
+
+  const trendingItems = useMemo(() => {
+    const areaNames = new Map((areasQ.data?.results ?? []).map((area) => [area.id, area.name]));
+    return trendingQ.data?.results.map((task) => ({
+      id: task.id,
+      name: displayTaskName(task.name, task.slug),
+      href: `/tasks/${task.slug}`,
+      areaName: task.area_id ? areaNames.get(task.area_id) : undefined,
+      recentPaperCount: task.recent_paper_count,
+      shareLift: task.share_lift,
+    }));
+  }, [trendingQ.data, areasQ.data]);
 
   const visibleAreas = useMemo(() => {
     if (!taxonomyQ.data) return [];
@@ -55,7 +83,7 @@ const TagsIndexView: React.FC = () => {
     return visibleAreas.reduce((s, area) => s + area.tasks.length, 0);
   }, [visibleAreas]);
 
-  if (taxonomyQ.error) {
+  if (view === "all" && taxonomyQ.error) {
     return (
       <div className="page">
         <Alert variant="destructive">
@@ -76,7 +104,18 @@ const TagsIndexView: React.FC = () => {
         </div>
       </div>
 
-      {taxonomyQ.isLoading ? (
+      <TaxonomyViewTabs view={view} onChange={setView} allLabel="all domains" />
+
+      {view === "trending" ? (
+        <TrendingTaxonomyGrid
+          noun="task"
+          items={trendingItems}
+          recentDays={trendingQ.data?.recent_days}
+          baselineDays={trendingQ.data?.baseline_days}
+          isLoading={trendingQ.isLoading}
+          error={trendingQ.error}
+        />
+      ) : taxonomyQ.isLoading ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i}>
@@ -169,7 +208,7 @@ const TagsIndexView: React.FC = () => {
         })
       )}
 
-      {totalTasks > 0 && (
+      {view === "all" && totalTasks > 0 && (
         <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--ink-faint)", marginTop: 24 }}>
           {totalTasks} tasks across {visibleAreas.filter((area) => area.tasks.length > 0).length} areas.
         </div>

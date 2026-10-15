@@ -18,6 +18,7 @@ import type {
   Task,
   TaskPage,
   TrendingBenchmarksResponse,
+  TrendingMethodsResponse,
   TrendingTasksResponse,
 } from "./catalog.types";
 import type {
@@ -135,6 +136,17 @@ export class CatalogApi {
 
   methodIndex(): Promise<MethodIndex> {
     return this.request("/methods/index/cards");
+  }
+
+  trendingMethods(params?: {
+    limit?: number;
+    recent_days?: number;
+    baseline_days?: number;
+    min_recent_papers?: number;
+    min_baseline_papers?: number;
+    min_share_lift?: number;
+  }): Promise<TrendingMethodsResponse> {
+    return this.request(endpoint("/methods/trending", params));
   }
 
   getMethod(id: string): Promise<Method> {

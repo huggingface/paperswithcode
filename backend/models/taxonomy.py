@@ -188,6 +188,53 @@ class MethodIndex(BaseModel):
     results: List[MethodIndexEntry]
 
 
+class TrendingMethod(BaseModel):
+    """Compact method projection with publication-rate trending metadata."""
+
+    id: str
+    name: str
+    full_name: Optional[str] = None
+    slug: Optional[str] = None
+    area_id: Optional[str] = None
+    introduced_year: Optional[int] = None
+    recent_paper_count: int = Field(
+        ..., description="Distinct papers using this method within the recent window"
+    )
+    baseline_paper_count: int = Field(
+        ..., description="Distinct papers using this method within the baseline window"
+    )
+    share_lift: float = Field(
+        ...,
+        description=(
+            "Ratio of recent share to baseline share. Values > 1.0 mean the "
+            "method is over-indexed in recent papers compared with its history."
+        ),
+    )
+    trend_score: float = Field(
+        ...,
+        description="Composite score = share_lift * ln(1 + recent_paper_count)",
+    )
+
+    @field_validator("id", "area_id", mode="before")
+    @classmethod
+    def ensure_string_id(cls, value):
+        return str(value) if value is not None else None
+
+
+class TrendingMethods(BaseModel):
+    """Methods gaining momentum across every research area."""
+
+    results: List[TrendingMethod] = Field(
+        ...,
+        description="Methods sorted by descending share lift (trend score breaks ties)",
+    )
+    recent_days: int = Field(..., description="Length of the recent window (days)")
+    baseline_days: int = Field(
+        ...,
+        description="Length of the baseline window preceding the recent window (days)",
+    )
+
+
 class MethodTrendPoint(BaseModel):
     """One calendar-month bucket of papers mentioning a method."""
 

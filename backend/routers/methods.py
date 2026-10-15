@@ -15,6 +15,7 @@ from backend.models.taxonomy import (
     MethodIndex,
     Methods,
     MethodTrend,
+    TrendingMethods,
 )
 from backend.models.papers import Papers
 from backend.services.method_service import MethodService
@@ -126,6 +127,56 @@ def list_methods(
 )
 def method_index(db: Session = Depends(get_database_session)):
     return MethodService(db).get_method_index()
+
+
+@router.get("/trending", response_model=TrendingMethods)
+def get_trending_methods(
+    limit: int = Query(
+        24, ge=1, le=100, description="Maximum number of trending methods to return"
+    ),
+    recent_days: int = Query(
+        30, ge=1, le=365, description="Length of the recent window in days"
+    ),
+    baseline_days: int = Query(
+        180,
+        ge=1,
+        le=730,
+        description="Length of the baseline window immediately preceding the recent window",
+    ),
+    min_recent_papers: int = Query(
+        10,
+        ge=1,
+        description="Minimum recent-window paper count required for a method to qualify",
+    ),
+    min_baseline_papers: int = Query(
+        10,
+        ge=1,
+        description="Minimum baseline-window paper count required for a method to qualify",
+    ),
+    min_share_lift: float = Query(
+        1.0,
+        ge=0.0,
+        description="Minimum share lift (recent share divided by baseline share)",
+    ),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Methods gaining momentum across every research area.
+
+    Ranks methods by descending `share_lift`: each method's share of papers in
+    the recent window divided by its share in the preceding baseline window.
+
+    **Example queries:**
+    - `/api/v1/methods/trending` - default 30d vs preceding 180d, top 24
+    """
+    return MethodService(db).get_trending_methods(
+        limit=limit,
+        recent_days=recent_days,
+        baseline_days=baseline_days,
+        min_recent_papers=min_recent_papers,
+        min_baseline_papers=min_baseline_papers,
+        min_share_lift=min_share_lift,
+    )
 
 
 @router.get("/{method_id}", response_model=Method)

@@ -110,6 +110,27 @@
   display: flex;
   gap: 12px;
 }
+.taxonomy-view-tabs { margin-bottom: 20px; }
+.taxonomy-trending-note {
+  margin: 0 0 16px;
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+.taxonomy-trending-rank {
+  min-width: 1.6em;
+  font-family: var(--mono);
+  font-size: 11px;
+  font-style: normal;
+  color: var(--ink-faint);
+}
+.taxonomy-trending-meta { flex-wrap: wrap; }
+.taxonomy-trending-lift {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
 .tag-hero-meta .stat .value small {
   margin-left: 2px;
   font-family: var(--mono);
