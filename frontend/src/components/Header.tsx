@@ -228,7 +228,8 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
           <div className="site-announcement" role="status">
             <span>New: </span>
             {authDisabled ? (
-              <a href={CANONICAL_FOLLOWING_URL}>following feed</a>
+              // The Space renders in a cross-origin iframe that the canonical site refuses to frame.
+              <a href={CANONICAL_FOLLOWING_URL} target="_blank" rel="noreferrer">following feed</a>
             ) : (
               <Link to="/following">following feed</Link>
             )}

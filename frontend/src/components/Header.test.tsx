@@ -98,6 +98,9 @@ describe("Header navigation", () => {
     expect(
       within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
     ).toHaveAttribute("href", "https://paperswithcode.co/following");
+    expect(
+      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
+    ).toHaveAttribute("target", "_blank");
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
     const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
