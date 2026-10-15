@@ -289,10 +289,10 @@ def _related_paper(paper_id, title):
 @pytest.mark.parametrize(
     ("loader_method", "include_resources", "expected_queries"),
     [
-        ("load_cards", False, 6),
-        ("load_details", False, 11),
-        ("load_cards", True, 8),
-        ("load_details", True, 13),
+        ("load_cards", False, 7),
+        ("load_details", False, 13),
+        ("load_cards", True, 10),
+        ("load_details", True, 16),
     ],
 )
 @pytest.mark.parametrize(
@@ -379,6 +379,7 @@ def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
     assert card.predecessor_papers.get(1, []) == []
     assert card.successor_papers.get(1, []) == []
     assert card.conferences.get(1) is None
+    assert card.suggested_questions == {}
 
     assert [link.model_dump() for link in detail.author_links[1]] == [
         {
@@ -393,6 +394,8 @@ def test_card_relations_link_displayed_authors_and_exclude_detail_projection():
     assert detail.predecessor_papers[1][0].title == "Predecessor"
     assert detail.successor_papers[1][0].title == "Successor"
     assert detail.conferences[1].slug == "icml-2026"
+    # Details always carry a list; [] tells the page to generate on demand.
+    assert detail.suggested_questions == {1: []}
 
 
 class _ManyAuthorsDatabase(_RelationDatabase):

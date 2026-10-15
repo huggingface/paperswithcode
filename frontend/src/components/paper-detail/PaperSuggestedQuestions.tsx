@@ -25,15 +25,18 @@ export function PaperSuggestedQuestions({
   readerChatRoute: string | null;
 }) {
   const enabled = isChatEnabled() && Boolean(paper.id && paper.abstract);
+  const stored = paper.suggested_questions;
+  // The detail response carries stored questions, so they render with the
+  // page; only papers with none stored yet ask for them to be generated.
   const { data } = useQuery({
     queryKey: ["paper-suggested-questions", paper.id],
     queryFn: () => papersApi.suggestedQuestions(String(paper.id)),
-    enabled,
+    enabled: enabled && Array.isArray(stored) && stored.length === 0,
     // Empty means generation was skipped or failed and nothing was stored.
     staleTime: (query) => (query.state.data?.questions.length ? Infinity : 0),
     retry: false,
   });
-  const questions = data?.questions ?? [];
+  const questions = stored?.length ? stored : data?.questions ?? [];
   if (!enabled || questions.length === 0) return null;
 
   return (

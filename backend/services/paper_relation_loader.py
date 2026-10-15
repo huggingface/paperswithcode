@@ -41,6 +41,7 @@ from backend.models.database import (
     PaperProjectPage as DBPaperProjectPage,
     PaperRelation as DBPaperRelation,
     PaperRepository as DBPaperRepository,
+    PaperSuggestedQuestions as DBPaperSuggestedQuestions,
     PaperTask,
     PaperXThread as DBPaperXThread,
     ProjectPage as DBProjectPage,
@@ -90,6 +91,7 @@ class PaperRelations:
     repository_coverage: dict[int, tuple[bool, int]] = field(default_factory=dict)
     project_pages: dict[int, list[ProjectPage]] = field(default_factory=dict)
     x_threads: dict[int, list[XThread]] = field(default_factory=dict)
+    suggested_questions: dict[int, list[str]] = field(default_factory=dict)
 
 
 _RelationValue = TypeVar("_RelationValue")
@@ -163,8 +165,25 @@ class PaperRelationLoader:
 
         self._load_card_relations(unique_ids, relations, author_link_limit=None)
         self._load_detail_relations(unique_ids, relations)
+        self._load_suggested_questions(unique_ids, relations)
         self._load_repository_coverage(unique_ids, relations)
         return relations
+
+    def _load_suggested_questions(
+        self,
+        paper_ids: list[int],
+        relations: PaperRelations,
+    ) -> None:
+        relations.suggested_questions = {paper_id: [] for paper_id in paper_ids}
+        rows = (
+            self.db.query(
+                DBPaperSuggestedQuestions.paper_id, DBPaperSuggestedQuestions.questions
+            )
+            .filter(DBPaperSuggestedQuestions.paper_id.in_(paper_ids))
+            .all()
+        )
+        for paper_id, questions in rows:
+            relations.suggested_questions[paper_id] = questions
 
     @staticmethod
     def _family_join(requested, family):

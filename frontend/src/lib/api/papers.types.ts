@@ -120,6 +120,8 @@ export interface Paper {
   title: string;
   abstract: string;
   tldr?: string | null;
+  /** Detail responses only: stored questions, [] when none are stored yet. */
+  suggested_questions?: string[] | null;
   num_pages?: number | null;
   authors: string[];
   /** Parallel to `authors`. When present, includes hf_username so the frontend

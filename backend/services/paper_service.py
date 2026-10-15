@@ -351,6 +351,7 @@ class PaperService:
             "all_categories": db_paper.all_categories or [],
             "urls_extracted": db_paper.urls_extracted,
             "tldr": db_paper.tldr,
+            "suggested_questions": relations.suggested_questions.get(db_paper.id),
             "num_pages": db_paper.num_pages,
             "hf_models": db_paper.hf_models or [],
             "hf_datasets": db_paper.hf_datasets or [],

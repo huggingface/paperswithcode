@@ -15,14 +15,15 @@ const paper = {
   arxiv_id: "2501.00001v2",
   title: "Pooling Autoencoders",
   abstract: "An abstract.",
+  suggested_questions: [] as string[],
 } as Paper;
 
-function renderQuestions(readerChatRoute: string | null) {
+function renderQuestions(readerChatRoute: string | null, overrides: Partial<Paper> = {}) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
       <MemoryRouter>
-        <PaperSuggestedQuestions paper={paper} readerChatRoute={readerChatRoute} />
+        <PaperSuggestedQuestions paper={{ ...paper, ...overrides }} readerChatRoute={readerChatRoute} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -50,6 +51,24 @@ describe("PaperSuggestedQuestions", () => {
     const link = await screen.findByRole("link", { name: "Why DINO?" });
     const prompt = new URL(link.getAttribute("href")!, "https://x").searchParams.get("q");
     expect(prompt).toBe('About the paper "Pooling Autoencoders" (arXiv:2501.00001): Why DINO?');
+  });
+
+  it("renders stored questions from the paper without another request", () => {
+    renderQuestions("/pdf/2501.00001", { suggested_questions: ["Stored one?", "Stored two?", "Stored three?"] });
+
+    expect(screen.getAllByRole("link").map((link) => link.textContent)).toEqual([
+      "Stored one?",
+      "Stored two?",
+      "Stored three?",
+    ]);
+    expect(mocks.suggestedQuestions).not.toHaveBeenCalled();
+  });
+
+  it("waits for the detail response before generating", () => {
+    renderQuestions(null, { suggested_questions: undefined });
+
+    expect(screen.queryByRole("list")).toBeNull();
+    expect(mocks.suggestedQuestions).not.toHaveBeenCalled();
   });
 
   it("stays hidden without chat", () => {

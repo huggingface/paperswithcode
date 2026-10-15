@@ -186,6 +186,14 @@ class Paper(BaseModel):
     num_pages: Optional[int] = Field(
         None, description="Page count of the source PDF (frontend v2)"
     )
+    suggested_questions: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Stored starter questions for the paper-page assistant. Detail "
+            "responses return a list (empty when none are stored yet); feed "
+            "cards leave it null."
+        ),
+    )
 
     # Hugging Face artifact URLs explicitly linked to this paper. Populated
     # for `source='external'` rows because external rows have no reliable
