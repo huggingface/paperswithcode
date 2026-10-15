@@ -138,3 +138,28 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
         "google/gemini-3.7-flash"
     )
     assert comparison.chat_model_providers["google/gemini-3.7-flash"] == "openrouter"
+
+
+def test_hidden_glm_sessions_report_luna_to_the_frontend(monkeypatch):
+    import uuid
+    from datetime import UTC, datetime
+
+    from backend.models.database import ChatSession
+    from backend.routers import chat
+
+    production_direct = Settings(
+        environment="production", chat_openai_direct_enabled=True
+    )
+    monkeypatch.setattr(chat, "get_settings", lambda: production_direct)
+    now = datetime.now(UTC)
+    session = ChatSession(
+        id=uuid.uuid4(),
+        title="GLM chat",
+        selected_model="zai-org/GLM-5.3-Flash",
+        created_at=now,
+        updated_at=now,
+        message_count=2,
+        web_search_enabled=True,
+    )
+
+    assert chat._summary(session).selected_model == "gpt-5.6-luna@openai"

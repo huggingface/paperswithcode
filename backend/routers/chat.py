@@ -28,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from backend.chat_sandbox_worker.mcp_app_registry import WORKER_MCP_PROVIDERS
+from backend.chat_configuration import registry
 from backend.config import Settings, get_settings
 from backend.database.connection import db_manager, get_database_session
 from backend.models.chat import (
@@ -360,7 +361,10 @@ def _summary(session: ChatSession) -> ChatSessionSummary:
     return ChatSessionSummary(
         id=session.id,
         title=session.title,
-        selected_model=session.selected_model,
+        # Hidden models report the model their next turn will actually use.
+        selected_model=registry.canonical_model_id(
+            get_settings(), session.selected_model
+        ),
         created_at=session.created_at,
         updated_at=session.updated_at,
         message_count=session.message_count,
