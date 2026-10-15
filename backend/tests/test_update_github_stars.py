@@ -353,3 +353,84 @@ def test_empty_or_partially_successful_queue_does_not_fail_job():
             },
         ]
     )
+
+
+def test_fetch_strips_clone_suffix_from_repository_name():
+    http = Mock()
+    http.get.return_value = SimpleNamespace(
+        status_code=200, headers={}, json=lambda: {"stargazers_count": 2}
+    )
+
+    result = fetch_github_stars("wuzimeng", "comp.git", "token", http=http)
+
+    assert result.stars == 2
+    assert http.get.call_args.args[0] == "https://api.github.com/repos/wuzimeng/comp"
+
+
+@pytest.mark.parametrize("status_code", [404, 451])
+def test_fetch_reports_unavailable_repository_without_star_count(status_code):
+    http = Mock()
+    http.get.return_value = SimpleNamespace(status_code=status_code, headers={})
+
+    result = fetch_github_stars("psychofict", "pixcon", "token", http=http)
+
+    assert result.stars is None
+    assert result.status_code == status_code
+    assert result.retries == 0
+
+
+def test_run_queue_keeps_stars_on_404_and_counts_404_and_451_separately(
+    monkeypatch,
+):
+    groups = [
+        {
+            "owner": "owner",
+            "name": f"repo{index}",
+            "repository_ids": [index],
+            "eligible_group_count": 3,
+            "oldest_eligible_paper_date": None,
+        }
+        for index in (1, 2, 3)
+    ]
+    responses = iter(
+        [
+            GitHubFetchResult(None, 404, RateLimit(), failure="unavailable"),
+            GitHubFetchResult(None, 451, RateLimit(), failure="unavailable"),
+            GitHubFetchResult(None, 404, RateLimit(), failure="unavailable"),
+        ]
+    )
+    checked = []
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_service",
+        lambda: (Mock(), Mock()),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_groups",
+        lambda *_args, **_kwargs: groups,
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.fetch_github_stars",
+        lambda *_args, **_kwargs: next(responses),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.mark_repository_group_checked",
+        lambda _session, ids: checked.extend(ids) or len(ids),
+    )
+    star_writes = Mock()
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.update_repository_group_stars",
+        star_writes,
+    )
+
+    result = run_queue("fresh", "token", 3, 60, delay=0)
+
+    star_writes.assert_not_called()
+    assert checked == [1, 2, 3]
+    assert result["not_found"] == 2
+    assert result["legal_blocked"] == 1
+    assert result["terminal_unavailable"] == 3
+    assert result["snapshots_stored"] == 0
+    assert result["failures"] == 0
+    summary = summarize_queues([result])
+    assert summary["fresh_not_found"] == 2
+    assert summary["fresh_legal_blocked"] == 1

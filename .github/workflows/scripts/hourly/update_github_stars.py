@@ -29,6 +29,7 @@ from sqlalchemy import text
 
 from backend.database.connection import db_manager
 from backend.services.repository_service import RepositoryService
+from backend.utils.github_utils import strip_git_suffix
 
 HOT_PAPER_WINDOW_DAYS = 30
 FRESH_PAPER_WINDOW_DAYS = 180
@@ -287,7 +288,7 @@ def fetch_github_stars(
         "Accept": "application/vnd.github.v3+json",
         "User-Agent": "PapersWithCode-Stars/1.0",
     }
-    url = f"https://api.github.com/repos/{owner}/{name}"
+    url = f"https://api.github.com/repos/{owner}/{strip_git_suffix(name)}"
 
     for attempt in range(max_retries + 1):
         try:
@@ -306,8 +307,12 @@ def fetch_github_stars(
                 rate,
                 attempt,
             )
-        if response.status_code == 404:
-            return GitHubFetchResult(0, response.status_code, rate, attempt)
+        if response.status_code in {404, 451}:
+            # Missing or blocked: report no star count so stored stars survive
+            # transient 404s instead of dropping to zero.
+            return GitHubFetchResult(
+                None, response.status_code, rate, attempt, "unavailable"
+            )
 
         transient = response.status_code >= 500
         throttled = response.status_code in {403, 429} and (
@@ -390,7 +395,7 @@ def update_repository_group_stars(
 
 
 def mark_repository_group_checked(session, repository_ids: list) -> int:
-    """Record a terminally unavailable repository without overwriting its stars."""
+    """Record a missing (404) or blocked (451) repository, keeping its stars."""
     result = session.execute(
         text("""
             UPDATE repositories
@@ -439,6 +444,8 @@ def run_queue(
         "failures": 0,
         "credential_failures": 0,
         "terminal_unavailable": 0,
+        "not_found": 0,
+        "legal_blocked": 0,
         "retries": 0,
         "rate_limit_stops": 0,
         "rate_limit_limit": None,
@@ -494,7 +501,7 @@ def run_queue(
                 stats["rate_limit_remaining"] = result.rate_limit.remaining
                 stats["rate_limit_reset"] = result.rate_limit.reset
 
-                if result.status_code == 451:
+                if result.status_code in {404, 451}:
                     write_session, _ = get_repository_service()
                     try:
                         updated = mark_repository_group_checked(
@@ -504,6 +511,10 @@ def run_queue(
                         write_session.close()
                     stats["successes"] += 1
                     stats["terminal_unavailable"] += 1
+                    if result.status_code == 404:
+                        stats["not_found"] += 1
+                    else:
+                        stats["legal_blocked"] += 1
                     stats["updated_repositories"] += updated
                     stats["touched_repository_ids"].extend(group["repository_ids"])
                 elif result.stars is None:
@@ -550,6 +561,8 @@ def summarize_queues(results: list[Dict]) -> Dict:
         "failures",
         "credential_failures",
         "terminal_unavailable",
+        "not_found",
+        "legal_blocked",
         "updated_repositories",
         "snapshots_stored",
         "api_calls",

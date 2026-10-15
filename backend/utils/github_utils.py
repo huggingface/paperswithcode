@@ -9,6 +9,11 @@ from urllib.parse import urlparse
 logger = logging.getLogger(__name__)
 
 
+def strip_git_suffix(name: str) -> str:
+    """Drop a clone-style ``.git`` suffix; GitHub forbids it in repo names."""
+    return name[:-4] if name.lower().endswith(".git") else name
+
+
 def parse_github_url(url: str) -> Tuple[Optional[str], Optional[str]]:
     """
     Parse GitHub URL to extract owner and repository name.
@@ -26,6 +31,9 @@ def parse_github_url(url: str) -> Tuple[Optional[str], Optional[str]]:
         >>> parse_github_url("https://github.com/huggingface/transformers/tree/main/examples")
         ("huggingface", "transformers")
 
+        >>> parse_github_url("https://github.com/wuzimeng/comp.git")
+        ("wuzimeng", "comp")
+
         >>> parse_github_url("https://example.com/not-github")
         (None, None)
     """
@@ -37,8 +45,9 @@ def parse_github_url(url: str) -> Tuple[Optional[str], Optional[str]]:
         path_parts = parsed.path.strip("/").split("/")
         if len(path_parts) >= 2:
             owner = path_parts[0]
-            name = path_parts[1]
-            return owner, name
+            name = strip_git_suffix(path_parts[1])
+            if owner and name:
+                return owner, name
 
         return None, None
 

@@ -142,6 +142,8 @@ class HotGitHubTrendingJob(DatabaseCronJob):
             "successes": fetch["successes"],
             "failures": fetch["failures"],
             "credential_failures": fetch["credential_failures"],
+            "not_found": fetch["not_found"],
+            "legal_blocked": fetch["legal_blocked"],
             "retries": fetch["retries"],
             "snapshots_written": fetch["snapshots_stored"],
             "repository_scores_updated": repository_result["updated"],
