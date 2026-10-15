@@ -447,8 +447,8 @@ class HFDailyCurationService:
     def release_admin_awaiting_markdown(self) -> int:
         """Requeue parked admin paper jobs once their canonical Markdown exists.
 
-        A parked job that a newer admin job for the same paper and stage replaced
-        is canceled instead. Each transition applies only while the row is still
+        A parked job that a newer live, waiting, or completed admin job for the
+        same paper and stage replaced is canceled instead. Each transition applies only while the row is still
         waiting, so a concurrent admin cancel is never overwritten.
         """
         released = 0
@@ -465,6 +465,7 @@ class HFDailyCurationService:
                     PaperCurationJob.kind == row.kind,
                     PaperCurationJob.trigger == "admin",
                     PaperCurationJob.created_at > row.created_at,
+                    PaperCurationJob.status.notin_({"failed", "canceled"}),
                 )
                 .first()
                 is not None

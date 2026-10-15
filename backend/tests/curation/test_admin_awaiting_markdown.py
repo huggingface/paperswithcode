@@ -202,3 +202,32 @@ def test_release_never_overwrites_a_concurrent_cancel(db):
     assert service.release_admin_awaiting_markdown() == 0
     db.refresh(row)
     assert row.status == "canceled"
+
+
+@pytest.mark.parametrize("newer_status", ["failed", "canceled"])
+def test_stopped_newer_job_does_not_supersede_a_waiting_one(db, newer_status):
+    older = _running_job(db, number=1)
+    _complete(db, older)
+    db.add(
+        PaperCurationJob(
+            id=uuid.uuid4(),
+            kind=older.kind,
+            paper_id=older.paper_id,
+            requested_by="nielsr",
+            status=newer_status,
+            trigger="admin",
+            attempt_count=1,
+            created_at=datetime.now(UTC),
+        )
+    )
+    db.commit()
+
+    service = HFDailyCurationService(
+        db,
+        _settings(),
+        job_service=CodexPaperJobService(),
+        markdown_available=lambda _paper, _settings: True,
+    )
+
+    assert service.release_admin_awaiting_markdown() == 1
+    assert older.status == "queued"
