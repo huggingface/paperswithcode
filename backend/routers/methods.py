@@ -16,8 +16,10 @@ from backend.models.taxonomy import (
     Methods,
     MethodTrend,
     TrendingMethods,
+    RelatedMethods,
 )
 from backend.models.papers import Papers
+from backend.services.method_related_service import MethodRelatedService
 from backend.services.method_service import MethodService
 from backend.services.method_trend_service import MethodTrendService
 from backend.database.connection import get_database_session
@@ -219,6 +221,25 @@ def get_method_trend(
         baseline_days=baseline_days,
         history_months=history_months,
     )
+
+
+@router.get("/{method_id}/related", response_model=RelatedMethods)
+def get_related_methods(
+    method_id: str,
+    limit: int = Query(8, ge=1, le=20),
+    db: Session = Depends(get_database_session),
+):
+    """
+    List methods related to a method, by ID, slug, or name.
+
+    Ranks curated siblings first, then methods linked from either method's
+    description, then methods frequently tagged on the same papers.
+    """
+    try:
+        results = MethodRelatedService(db).get_related_methods(method_id, limit)
+    except CatalogNotFoundError as error:
+        raise HTTPException(status_code=404, detail=str(error))
+    return RelatedMethods(results=results)
 
 
 @router.get("/{method_id}/image")

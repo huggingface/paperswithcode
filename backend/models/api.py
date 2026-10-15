@@ -179,6 +179,8 @@ from backend.models.taxonomy import (
     MethodTrendPoint as MethodTrendPoint,
     Methods as Methods,
     RecommendedFramework as RecommendedFramework,
+    RelatedMethod as RelatedMethod,
+    RelatedMethods as RelatedMethods,
     TaskBenchmarkListItem as TaskBenchmarkListItem,
     TaskCreateRequest as TaskCreateRequest,
     TaskPage as TaskPage,

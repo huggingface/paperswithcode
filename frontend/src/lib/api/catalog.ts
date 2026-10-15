@@ -15,6 +15,7 @@ import type {
   OrganizationAreasWithTasks,
   OrganizationContributions,
   Organizations,
+  RelatedMethods,
   Task,
   TaskPage,
   TrendingBenchmarksResponse,
@@ -151,6 +152,10 @@ export class CatalogApi {
 
   getMethod(id: string): Promise<Method> {
     return this.request(`/methods/${encodeURIComponent(id)}`);
+  }
+
+  relatedMethods(id: string): Promise<RelatedMethods> {
+    return this.request(`/methods/${encodeURIComponent(id)}/related`);
   }
 
   methodTrend(id: string, params?: { recent_days?: number; baseline_days?: number; history_months?: number }): Promise<MethodTrend> {
