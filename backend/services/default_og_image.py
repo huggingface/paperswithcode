@@ -3,10 +3,13 @@ Render the static default Open Graph image used when a paper has no
 thumbnail on disk yet.
 
 The image is rendered lazily on first request and cached in memory because:
-  - It only depends on a few hard-coded brand colours; nothing changes per
-    request, so re-rendering on every call would waste CPU.
+  - It only depends on the brand (see backend/services/brand.py and the
+    `pwc-brand` skill); nothing changes per request.
   - Generating it at runtime means we don't have to commit a binary asset.
   - Pillow is already a dependency of the thumbnail pipeline.
+
+It mirrors the site's own og-image.png: the mark, the wordmark, and the
+tagline, centred on paper.
 """
 
 from __future__ import annotations
@@ -14,85 +17,52 @@ from __future__ import annotations
 import io
 from typing import Optional
 
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 
+from backend.services.brand import DOMAIN, LIGHT, draw_mark, draw_tracked, font
+from backend.services.brand import tracked_length
 
 _OG_WIDTH = 1200
 _OG_HEIGHT = 630
-
-_BG_COLOUR = (26, 24, 20)
-_CARD_COLOUR = (250, 248, 244)
-_ACCENT_COLOUR = (220, 86, 47)
-_MUTED_COLOUR = (110, 100, 88)
-
-_TITLE = "Papers with Code"
-_TAGLINE = "Trending AI research, code, and benchmarks"
-_DOMAIN = "paperswithcode.co"
-
+_TAGLINE = "Trending AI research papers with code, datasets, and leaderboards."
 
 _cached_png: Optional[bytes] = None
 
 
-def _load_font(size: int, weight: str = "regular") -> ImageFont.ImageFont:
-    """Try a few well-known font paths, fall back to Pillow's default."""
-    candidates_bold = [
-        "/usr/share/fonts/truetype/dejavu/DejaVu-Sans-Bold.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "/Library/Fonts/Arial Bold.ttf",
-    ]
-    candidates_regular = [
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "/Library/Fonts/Arial.ttf",
-    ]
-    candidates = candidates_bold if weight == "bold" else candidates_regular
-    for path in candidates:
-        try:
-            return ImageFont.truetype(path, size=size)
-        except (OSError, IOError):
-            continue
-    return ImageFont.load_default()
-
-
 def _render() -> bytes:
-    image = Image.new("RGB", (_OG_WIDTH, _OG_HEIGHT), _BG_COLOUR)
+    palette = LIGHT
+    image = Image.new("RGB", (_OG_WIDTH, _OG_HEIGHT), palette.bg)
     draw = ImageDraw.Draw(image)
+    centre = _OG_WIDTH // 2
 
-    margin = 64
-    inner = (margin, margin, _OG_WIDTH - margin, _OG_HEIGHT - margin)
-    draw.rectangle(inner, fill=_CARD_COLOUR)
+    mark = 112
+    draw_mark(draw, (centre - mark // 2, 128), mark, palette)
 
-    accent_w = 14
-    draw.rectangle(
-        (inner[0], inner[1], inner[0] + accent_w, inner[3]),
-        fill=_ACCENT_COLOUR,
+    upright = font("serif", 92, 600)
+    italic = font("serif-italic", 92, 400)
+    word, rest = "Papers ", "with Code"
+    width = draw.textlength(word, font=upright) + draw.textlength(rest, font=italic)
+    x = centre - width / 2
+    draw.text((x, 282), word, font=upright, fill=palette.ink)
+    x += draw.textlength(word, font=upright)
+    draw.text((x, 282), rest, font=italic, fill=palette.ink_soft)
+
+    tagline = font("sans", 30)
+    tagline_width = draw.textlength(_TAGLINE, font=tagline)
+    draw.text(
+        (centre - tagline_width / 2, 418), _TAGLINE, font=tagline, fill=palette.ink_soft
     )
 
-    text_left = inner[0] + accent_w + 56
-    text_right = inner[2] - 56
-
-    title_font = _load_font(size=104, weight="bold")
-    tagline_font = _load_font(size=44)
-    domain_font = _load_font(size=36, weight="bold")
-
-    title_y = inner[1] + 130
-    draw.text((text_left, title_y), _TITLE, fill=_BG_COLOUR, font=title_font)
-
-    tagline_y = title_y + 150
-    draw.text((text_left, tagline_y), _TAGLINE, fill=_MUTED_COLOUR, font=tagline_font)
-
-    domain_y = inner[3] - 90
-    draw.text((text_left, domain_y), _DOMAIN, fill=_ACCENT_COLOUR, font=domain_font)
-    underline_y = domain_y + 60
-    domain_bbox = draw.textbbox((text_left, domain_y), _DOMAIN, font=domain_font)
-    draw.rectangle(
-        (text_left, underline_y, domain_bbox[2], underline_y + 4),
-        fill=_ACCENT_COLOUR,
+    domain = font("mono", 22, 500)
+    domain_width = tracked_length(draw, DOMAIN, font=domain, tracking=0.08)
+    draw_tracked(
+        draw,
+        (centre - domain_width / 2, 530),
+        DOMAIN,
+        font=domain,
+        fill=palette.ink_faint,
+        tracking=0.08,
     )
-
-    # Tiny redundancy so unused arg is referenced.
-    _ = text_right
 
     buf = io.BytesIO()
     image.save(buf, format="PNG", optimize=True)

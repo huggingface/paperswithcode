@@ -161,7 +161,10 @@ def top_papers(db: Session, *, period: str, now: datetime) -> Insight | None:
         text=text,
         link=SITE,
         image=render_list_card(
-            heading, span, [" ".join(paper.title.split()) for paper in papers]
+            heading,
+            span,
+            [" ".join(paper.title.split()) for paper in papers],
+            eyebrow=f"Top papers · {'weekly' if period == 'week' else 'monthly'}",
         ),
         facts={"papers": [paper.title for paper in papers], "period": span},
     )
@@ -267,9 +270,10 @@ def new_sota(db: Session, *, now: datetime) -> Insight | None:
         link = f"{SITE}/benchmark/{dataset.slug}?task={task.slug}&eval={evaluation.id}"
         image = render_bar_card(
             f"New SOTA on {dataset.name}",
-            f"{task.name} · {metric} ({'lower' if lower else 'higher'} is better)",
+            f"{metric} ({'lower' if lower else 'higher'} is better)",
             [Bar(row.model, row.value, fmt(row.value), row is mine) for row in top],
             lower_is_better=lower,
+            eyebrow=f"New state of the art · {task.name}",
         )
         insight = Insight(
             kind="new_sota",
@@ -365,6 +369,7 @@ def trending_benchmark(db: Session, *, now: datetime) -> Insight | None:
             )
             for row in scored
         ],
+        eyebrow="Trending benchmarks · last 90 days",
     )
     return Insight(
         kind="trending_benchmark",
@@ -407,6 +412,7 @@ def _trending_taxonomy(
             Bar(item.name, item.share_lift, fmt_lift(item.share_lift), item is featured)
             for item in results
         ],
+        eyebrow=f"Trending {noun}s · last 30 days",
     )
     return Insight(
         kind=kind,

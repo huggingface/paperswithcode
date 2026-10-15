@@ -204,3 +204,17 @@ def test_post_insight_dry_run_posts_nothing(monkeypatch):
         db, poster=None, kinds=["trending_task"], write=lambda i: i.text, max_chars=280
     )
     assert report.dry_run and report.text == "Agents rise." and db.added == []
+
+
+def test_brand_fonts_load_with_weights_and_mark_is_square():
+    from PIL import Image, ImageDraw
+
+    from backend.services.brand import LIGHT, draw_mark, font
+
+    regular, bold = font("serif", 40, 400), font("serif", 40, 700)
+    assert regular.getlength("Papers") < bold.getlength("Papers")
+    image = Image.new("RGB", (32, 32), (255, 0, 0))
+    draw_mark(ImageDraw.Draw(image), (0, 0), 32, LIGHT)
+    assert image.getpixel((0, 0)) == LIGHT.ink
+    assert image.getpixel((8, 8)) == LIGHT.bg
+    assert image.getpixel((16, 16)) == LIGHT.ink
