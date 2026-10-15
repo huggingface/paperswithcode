@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from types import SimpleNamespace
 
 import fitz
+import httpx
 
 from backend.services import x_insight_post_service as service
 from backend.services.x_insight_cards import Bar, render_bar_card, render_list_card
@@ -109,6 +110,53 @@ def test_plan_kinds_morning_roundups_then_sota_evening_rotation():
         "trending_method",
         "trending_benchmark",
     ]
+
+
+def test_plan_kinds_catches_up_missed_roundups_in_a_late_morning_run():
+    late_tuesday_second = datetime(2026, 6, 2, 13, 5, tzinfo=UTC)
+    assert service.plan_kinds(FakeDb(), late_tuesday_second)[:3] == [
+        "top_papers_month",
+        "top_papers_week",
+        "new_sota",
+    ]
+    thursday_fourth = datetime(2026, 6, 4, 9, 43, tzinfo=UTC)
+    assert service.plan_kinds(FakeDb(), thursday_fourth)[0] == "new_sota"
+
+
+def test_write_with_luna_falls_back_to_the_template_on_errors():
+    insight = Insight("trending_task", "agents", "Agents rise 4.2x.", "l", b"")
+
+    def failing(request):
+        return httpx.Response(429, json={"error": "rate limited"})
+
+    def malformed(request):
+        return httpx.Response(200, json={"unexpected": True})
+
+    for handler in (failing, malformed):
+        client = httpx.Client(transport=httpx.MockTransport(handler))
+        assert (
+            service.write_with_luna(client, insight, api_key="k", max_chars=280)
+            == "Agents rise 4.2x."
+        )
+
+
+def test_write_with_luna_keeps_a_valid_rewrite():
+    insight = Insight("trending_task", "agents", "Agents rise 4.2x.", "l", b"")
+    output = [
+        {
+            "type": "message",
+            "content": [{"type": "output_text", "text": "Agents: up 4.2x."}],
+        }
+    ]
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(200, json={"output": output})
+        )
+    )
+    assert (
+        service.write_with_luna(client, insight, api_key="k", max_chars=280)
+        == "Agents: up 4.2x."
+    )
 
 
 class FakePoster:

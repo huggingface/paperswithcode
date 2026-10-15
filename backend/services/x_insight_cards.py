@@ -91,11 +91,12 @@ def render_bar_card(
     bar_span = WIDTH - MARGIN - value_width - bar_left
     values = [bar.value for bar in bars]
     low, high = min(values + [0.0]), max(values)
+    best_low = min((value for value in values if value > 0), default=1.0)
     row = min(64, (HEIGHT - 80 - top) // max(len(bars), 1))
     for index, bar in enumerate(bars):
         y = top + index * row
         if lower_is_better:
-            share = (low or 1e-9) / (bar.value or 1e-9) if bar.value > 0 else 1.0
+            share = best_low / bar.value if bar.value > 0 else 1.0
         else:
             share = (bar.value - low) / ((high - low) or 1.0)
         length = max(8, int(bar_span * max(0.0, min(1.0, share))))

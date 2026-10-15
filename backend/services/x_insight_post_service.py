@@ -51,6 +51,8 @@ SITE = "https://paperswithcode.co"
 ROTATION = ("trending_benchmark", "trending_method", "trending_task")
 KINDS = ("top_papers_week", "top_papers_month", "new_sota", *ROTATION)
 REPEAT_AFTER = timedelta(days=30)
+MORNING_SLOT_ENDS_HOUR = 15
+ROUNDUP_CATCH_UP_DAYS = 3
 SOTA_WINDOW = timedelta(days=3)
 SOTA_PAPER_AGE_DAYS = 45
 SOTA_MIN_ENTRIES = 5
@@ -309,13 +311,14 @@ def trending_benchmark(db: Session, *, now: datetime) -> Insight | None:
     recent_start = today - timedelta(days=BENCHMARK_RECENT_DAYS)
     baseline_start = recent_start - timedelta(days=BENCHMARK_BASELINE_DAYS)
     published = Paper.date_published
-    recent = func.count(func.distinct(case((published >= recent_start, Paper.id))))
-    baseline = func.count(func.distinct(case((published < recent_start, Paper.id))))
+    # Exclusive starts, as in BenchmarkTrendService: exactly 90 vs. 180 days.
+    recent = func.count(func.distinct(case((published > recent_start, Paper.id))))
+    baseline = func.count(func.distinct(case((published <= recent_start, Paper.id))))
     rows = db.execute(
         select(Dataset, recent.label("recent"), baseline.label("baseline"))
         .join(Evaluation, Evaluation.dataset_id == Dataset.id)
         .join(Paper, and_(Paper.id == Evaluation.paper_id, Paper.is_latest_version))
-        .where(published >= baseline_start, published <= today)
+        .where(published > baseline_start, published <= today)
         .group_by(Dataset.id)
         .having(recent >= BENCHMARK_MIN_RECENT_PAPERS)
     ).all()
@@ -455,9 +458,14 @@ BUILDERS: dict[str, Callable[..., Insight | None]] = {
 def plan_kinds(db: Session, now: datetime) -> list[str]:
     """Kinds to try, in order, for this run.
 
-    Morning runs lead with the monthly (1st) and weekly (Monday) roundups and
-    then a new SOTA; evening runs lead with the least recently posted trending
-    insight. At most one SOTA post goes out per 20 hours.
+    Morning runs lead with the monthly and weekly roundups and then a new
+    SOTA; evening runs lead with the least recently posted trending insight.
+    A roundup that a run missed (throttled past the morning slot, or displaced
+    by the other roundup) is caught up on the next mornings: the monthly one
+    through the 3rd, the weekly one through Wednesday. Their subjects are fixed
+    per month and week, so each is posted once. At most one SOTA post goes out
+    per 20 hours. The morning slot ends at 15:00 UTC because a throttled
+    09:43 run may start up to three hours late.
     """
     last = dict(
         db.execute(
@@ -470,12 +478,12 @@ def plan_kinds(db: Session, now: datetime) -> list[str]:
     rotation = sorted(ROTATION, key=lambda kind: last.get(kind) or oldest)
     sota_due = (last.get("new_sota") or oldest) < now - timedelta(hours=20)
     sota = ["new_sota"] if sota_due else []
-    if now.hour >= 12:
+    if now.hour >= MORNING_SLOT_ENDS_HOUR:
         return rotation + sota
     periodic = []
-    if now.day == 1:
+    if now.day <= ROUNDUP_CATCH_UP_DAYS:
         periodic.append("top_papers_month")
-    if now.weekday() == 0:
+    if now.weekday() < ROUNDUP_CATCH_UP_DAYS:
         periodic.append("top_papers_week")
     return periodic + sota + rotation
 
@@ -507,30 +515,34 @@ def write_with_luna(
     if insight.kind.startswith("top_papers"):
         return insight.text  # a list reads best as is
     facts = json.dumps(insight.facts, ensure_ascii=False)
-    response = client.post(
-        RESPONSES_URL,
-        headers={"Authorization": f"Bearer {api_key}"},
-        json={
-            "model": LUNA_MODEL,
-            "instructions": LUNA_INSTRUCTIONS,
-            "input": (
-                f"Character limit: {max_chars}\n\nDraft:\n{insight.text}\n\n"
-                f"Facts:\n{facts}"
-            ),
-            "store": False,
-            "max_output_tokens": 300,
-            "reasoning": {"effort": "none"},
-            "prompt_cache_key": "pwc-x-insight-v1",
-        },
-    )
-    body = response.raise_for_status().json()
-    rewrite = "".join(
-        part["text"]
-        for item in body["output"]
-        if item.get("type") == "message"
-        for part in item.get("content", [])
-        if part.get("type") == "output_text"
-    ).strip()
+    try:
+        response = client.post(
+            RESPONSES_URL,
+            headers={"Authorization": f"Bearer {api_key}"},
+            json={
+                "model": LUNA_MODEL,
+                "instructions": LUNA_INSTRUCTIONS,
+                "input": (
+                    f"Character limit: {max_chars}\n\nDraft:\n{insight.text}\n\n"
+                    f"Facts:\n{facts}"
+                ),
+                "store": False,
+                "max_output_tokens": 300,
+                "reasoning": {"effort": "none"},
+                "prompt_cache_key": "pwc-x-insight-v1",
+            },
+        )
+        body = response.raise_for_status().json()
+        rewrite = "".join(
+            part["text"]
+            for item in body["output"]
+            if item.get("type") == "message"
+            for part in item.get("content", [])
+            if part.get("type") == "output_text"
+        ).strip()
+    except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
+        logger.warning("x_insight_rewrite_failed kind=%s %s", insight.kind, error)
+        return insight.text
     if accept_rewrite(insight.text, rewrite, facts=facts, max_chars=max_chars):
         return rewrite
     logger.warning("x_insight_rewrite_rejected kind=%s", insight.kind)

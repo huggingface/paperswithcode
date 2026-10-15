@@ -218,8 +218,9 @@ uv run --env-file backend/keys.env python -m backend.scripts.post_trending_paper
 ```
 
 `post_x_insight.py` posts one insight to the same X account twice a day.
-The 09:43 UTC run leads with the top trending papers of the previous month (on
-the 1st) or week (Mondays), then a new SOTA: a paper published in the last 45
+The morning run (09:43 UTC; until 15:00 if throttled) leads with the top
+trending papers of the previous month (posted on the 1st, caught up through the
+3rd) and week (Monday, caught up through Wednesday), then a new SOTA: a paper published in the last 45
 days whose result, added in the last 3 days, took first place on a leaderboard
 with at least 5 entries and beats the previous best from another paper (at
 most one SOTA post per 20 hours). The 17:43 UTC run posts the fastest-growing
