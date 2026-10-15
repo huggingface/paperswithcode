@@ -28,18 +28,6 @@ const SORT_OPTIONS: Array<[SortKey, string]> = [
   ["cited", "most cited"],
 ];
 
-const RELATED_METHODS_BY_SLUG: Record<string, string[]> = {
-  "on-policy-distillation": [
-    "fine-tuning",
-    "post-training",
-    "rlvr",
-    "rlhf",
-    "direct-preference-optimization-dpo",
-  ],
-  mcp: ["agent-skills"],
-  "agent-skills": ["mcp"],
-};
-
 const MethodDetailView: React.FC = () => {
   const { methodSlug } = useParams<{ methodSlug: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -114,35 +102,10 @@ const MethodDetailView: React.FC = () => {
     placeholderData: keepPreviousData,
   });
 
-  // Related methods: use curated siblings where available, otherwise fall back
-  // to the most-popular methods in the same area.
   const relatedQ = useQuery({
-    queryKey: ["related-methods", methodQ.data?.slug, methodQ.data?.area_id, methodQ.data?.id],
-    queryFn: async () => {
-      const method = methodQ.data;
-      if (!method) return [];
-      const curatedSlugs = method.slug
-        ? RELATED_METHODS_BY_SLUG[method.slug]
-        : undefined;
-      if (curatedSlugs) {
-        return Promise.all(curatedSlugs.map((slug) => catalogApi.getMethod(slug)));
-      }
-
-      if (!method.area_id) return [];
-
-      const res = await catalogApi.listMethods({
-        area_id: method.area_id,
-        exclude_id: method.id,
-        ordering: "-paper_count",
-        page_size: 8,
-      });
-      return res.results;
-    },
-    enabled: Boolean(
-      methodQ.data &&
-      ((methodQ.data.slug && RELATED_METHODS_BY_SLUG[methodQ.data.slug]) ||
-        methodQ.data.area_id),
-    ),
+    queryKey: ["related-methods", methodSlug],
+    queryFn: () => catalogApi.relatedMethods(methodSlug!),
+    enabled: !!methodSlug,
     staleTime: 10 * 60 * 1000,
   });
 
@@ -304,10 +267,10 @@ const MethodDetailView: React.FC = () => {
         </figure>
       </div>
 
-      {(relatedQ.data?.length ?? 0) > 0 && (
+      {(relatedQ.data?.results.length ?? 0) > 0 && (
         <div className="filter-row">
           <span className="label">Related methods</span>
-          {relatedQ.data!.map((rm) => (
+          {relatedQ.data!.results.map((rm) => (
             <MethodChip key={rm.id} method={{ slug: rm.slug, name: rm.name }} />
           ))}
         </div>

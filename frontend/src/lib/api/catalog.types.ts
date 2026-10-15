@@ -311,6 +311,16 @@ export interface MethodIndex {
   results: MethodIndexEntry[];
 }
 
+export interface RelatedMethod {
+  id: string;
+  name: string;
+  slug: string;
+}
+
+export interface RelatedMethods {
+  results: RelatedMethod[];
+}
+
 export interface MethodTrendPoint {
   start_date: string;
   end_date: string;

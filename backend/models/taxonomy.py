@@ -188,6 +188,23 @@ class MethodIndex(BaseModel):
     results: List[MethodIndexEntry]
 
 
+class RelatedMethod(BaseModel):
+    """Compact projection of a method listed as related to another method."""
+
+    id: str
+    name: str
+    slug: str
+
+    @field_validator("id", mode="before")
+    @classmethod
+    def ensure_string_id(cls, value):
+        return str(value)
+
+
+class RelatedMethods(BaseModel):
+    results: List[RelatedMethod]
+
+
 class MethodTrendPoint(BaseModel):
     """One calendar-month bucket of papers mentioning a method."""
 
