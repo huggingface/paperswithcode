@@ -27,7 +27,7 @@ import { type GatewayContext } from "./provider.js";
 import { createRemoteToolsExtension, type RemoteToolBridge } from "./external_tools.js";
 import { PWC_MCP_TOOL_NAMES, createPwcMcpToolsExtension, pwcMcpEnabled } from "./pwc_mcp_tools.js";
 import { CATALOG_TOOL_NAMES, createCatalogToolsExtension } from "./catalog_tools.js";
-import { loadPromptAsset, renderPrompt } from "./prompt.js";
+import { loadPromptAsset, renderPrompt, taskCatalogForPrompt } from "./prompt.js";
 import { recoverIncompleteResponse, type RecoverySummary } from "./recovery.js";
 import { createOrBind, restoreFile, TranscriptMirror } from "./transcript.js";
 import { shouldResetSession } from "./session.js";
@@ -341,6 +341,11 @@ export class PiWorker {
     }
     this.emit(run.request_id, { type: "_latency", phase: "session_bind_restore", elapsed_ms: Math.round(performance.now() - phaseStarted) });
     this.failurePhase = "prompt_render";
+    // Never blocks: returns the last live task index (refreshed in the
+    // background at most every five minutes) or undefined, which keeps the
+    // deploy-time snapshot. It is deliberately not part of the session profile,
+    // so a catalog change applies to new sessions without resetting open ones.
+    const taskCatalog = taskCatalogForPrompt();
     const prompt = await renderPrompt({
       model: run.model,
       hfUsername: run.hf_username,
@@ -350,6 +355,7 @@ export class PiWorker {
       paperArtifactsEnabled: run.paper_artifacts_enabled,
       catalogToolsEnabled: Boolean(this.gateway && this.remoteTools),
       ...(run.paper_descriptor === undefined ? {} : { paperDescriptor: run.paper_descriptor }),
+      ...(taskCatalog === undefined ? {} : { taskCatalog }),
       source: this.promptAsset!,
     });
     const coldProviderResult = await coldProviderPromise;

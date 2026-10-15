@@ -198,7 +198,7 @@ async function loadLiveTaskCatalog(apiUrl: string): Promise<string> {
   return [
     "## Complete live task lookup index",
     "",
-    "This index was refreshed from the trusted PwC catalog for the current turn and supersedes the baked fallback snapshot. Treat names and slugs as taxonomy clues, then use `pwc task --name TASK` and `pwc benchmark list --task TASK` to verify task and leaderboard details.",
+    "This index was refreshed from the trusted PwC catalog within the last few minutes and lists every task; it supersedes the deploy-time snapshot. Treat names and slugs as taxonomy clues, then use `pwc task --name TASK` and `pwc benchmark list --task TASK` to verify task and leaderboard details.",
     "",
     ...rows.map(([slug, name]) => `- \`${slug}\` — ${name}`),
     "",

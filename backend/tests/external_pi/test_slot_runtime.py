@@ -117,6 +117,7 @@ def test_child_environments_are_strictly_scrubbed(tmp_path: Path):
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
         "PWC_CHAT_PWC_MCP_ENABLED": "false",
+        "PWC_API_URL": "http://127.0.0.1:8011/api/v1",
         "PWC_EXTERNAL_PI_STATE_ROOT": (
             "/run/paperswithcode/external-pi-green/staging-green-00"
         ),

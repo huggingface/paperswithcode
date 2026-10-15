@@ -165,6 +165,7 @@ def test_worker_launcher_execs_node_with_only_dedicated_worker_values(
         "PWC_EXTERNAL_PI_PROMPT_PATH",
         "PWC_EXTERNAL_PI_TOOL_NAMES",
         "PWC_CHAT_PWC_MCP_ENABLED",
+        "PWC_API_URL",
         "PWC_EXTERNAL_PI_STATE_ROOT",
     }
     assert all("PWC_DB_PASSWORD" not in value for value in executed["environments"])

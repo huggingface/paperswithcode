@@ -18,6 +18,7 @@ from pathlib import Path
 
 try:
     from deploy.external_pi_runtime import external_pi_runtime_manifest
+    from deploy.mcp_release import MCP_API_URLS
     from deploy.external_pi_slot_topology import (
         DEFAULT_FLEET_SESSIONS,
         FLEET_SESSION_TIERS,
@@ -30,6 +31,7 @@ except ModuleNotFoundError:
     from external_pi_runtime import (
         external_pi_runtime_manifest,  # type: ignore[no-redef]
     )
+    from mcp_release import MCP_API_URLS  # type: ignore[no-redef]
     from external_pi_slot_topology import (  # type: ignore[no-redef]
         DEFAULT_FLEET_SESSIONS,
         FLEET_SESSION_TIERS,
@@ -239,6 +241,9 @@ def node_environment(
         "PWC_EXTERNAL_PI_PROMPT_PATH": str(resolved.prompt),
         "PWC_EXTERNAL_PI_TOOL_NAMES": "[]",
         "PWC_CHAT_PWC_MCP_ENABLED": protected.get("PWC_CHAT_PWC_MCP_ENABLED", "false"),
+        # The worker refreshes the prompt's task index from the environment's
+        # loopback catalog bridge in the background, outside any turn budget.
+        "PWC_API_URL": MCP_API_URLS[resolved.worker_id.split("-", 1)[0]],
         "PWC_EXTERNAL_PI_STATE_ROOT": state_root,
     }
 
