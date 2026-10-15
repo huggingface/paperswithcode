@@ -74,11 +74,12 @@ const MethodsIndexView: React.FC = () => {
   }, [methodsQ.data]);
 
   useEffect(() => {
-    if (!areasQ.data || !methodsQ.data || !window.location.hash) return;
+    // Wait for the trending section above the areas so the offset is final.
+    if (!areasQ.data || !methodsQ.data || trendingQ.isLoading || !window.location.hash) return;
     document
       .getElementById(window.location.hash.slice(1))
       ?.scrollIntoView({ block: "start" });
-  }, [areasQ.data, methodsQ.data]);
+  }, [areasQ.data, methodsQ.data, trendingQ.isLoading]);
 
   if (areasQ.error || methodsQ.error) {
     return (

@@ -74,14 +74,15 @@ const TagsIndexView: React.FC = () => {
     });
   }, [taxonomyQ.data]);
 
-  // Area links (`/tasks#area-…`) open the full listing, whose sections only
-  // exist once the taxonomy arrives, so scroll to the anchor after it loads.
+  // Area links (`/tasks#area-…`) target sections that exist only once the
+  // taxonomy arrives and sit below the trending section, so scroll after
+  // both have settled.
   useEffect(() => {
-    if (!taxonomyQ.data || !window.location.hash) return;
+    if (!taxonomyQ.data || trendingQ.isLoading || !window.location.hash) return;
     document
       .getElementById(window.location.hash.slice(1))
       ?.scrollIntoView({ block: "start" });
-  }, [taxonomyQ.data]);
+  }, [taxonomyQ.data, trendingQ.isLoading]);
 
   const totalTasks = useMemo(() => {
     return visibleAreas.reduce((s, area) => s + area.tasks.length, 0);

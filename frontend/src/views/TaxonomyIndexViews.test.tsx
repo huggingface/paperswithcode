@@ -53,12 +53,16 @@ it('shows trending tasks across areas above the full domain listing', async () =
   expect(trending!.compareDocumentPosition(allTask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it('scrolls area links to their section', async () => {
+it('scrolls area links to their section once trending has rendered above it', async () => {
+  let resolveTrending!: (value: Awaited<ReturnType<typeof catalogApi.trendingTasks>>) => void;
+  vi.mocked(catalogApi.trendingTasks).mockReturnValue(new Promise((resolve) => { resolveTrending = resolve; }));
   const scrollIntoView = vi.fn();
   Element.prototype.scrollIntoView = scrollIntoView;
   window.history.replaceState(null, '', '/tasks#area-vision');
   renderAt('/tasks#area-vision');
   expect(await screen.findByRole('link', { name: /Image Classification/ })).toBeInTheDocument();
+  expect(scrollIntoView).not.toHaveBeenCalled();
+  resolveTrending({ recent_days: 30, baseline_days: 180, results: [] });
   await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
   expect(scrollIntoView.mock.contexts[0]).toHaveAttribute('id', 'area-vision');
   window.history.replaceState(null, '', '/');
