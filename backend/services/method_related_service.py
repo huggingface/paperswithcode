@@ -49,13 +49,9 @@ class MethodRelatedService:
         methods = self.db.query(
             DBMethod.id, DBMethod.name, DBMethod.slug, DBMethod.description
         ).all()
+        key = identifier.lower()
         target = next(
-            (
-                m
-                for m in methods
-                if identifier in (str(m.id), m.slug)
-                or m.name.lower() == identifier.lower()
-            ),
+            (m for m in methods if key in (str(m.id), m.slug, m.name.lower())),
             None,
         )
         if target is None:

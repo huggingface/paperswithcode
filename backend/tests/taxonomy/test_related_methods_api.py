@@ -123,5 +123,10 @@ def test_method_without_signals_has_no_related_methods(client):
     assert related(client, "large-language-model-llm") == []
 
 
+def test_mixed_case_slug_resolves(client):
+    assert related(client, "LightGBM") == ["xgboost"]
+    assert related(client, "Random-Forest") == ["xgboost"]
+
+
 def test_unknown_method_returns_404(client):
     assert client.get("/api/v1/methods/nope/related").status_code == 404
