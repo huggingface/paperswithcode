@@ -174,6 +174,9 @@ class CurationOrganizationService:
         handleless = self._handleless_by_name(profile.name)
         if handleless is not None:
             self._apply_profile(handleless, profile)
+            # Sessions run without autoflush; persist the handle so a later
+            # proposal in this call no longer sees the row as handleless.
+            self.db.flush()
             return handleless
 
         if len(result.created) >= MAX_NEW_ORGANIZATIONS:

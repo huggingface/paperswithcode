@@ -278,3 +278,22 @@ def test_same_named_row_with_another_handle_is_not_reused():
     )
     assert result.created[0]["hf_slug"] == "StanfordUniversity"
     assert result.linked == [result.created[0]["id"]]
+
+
+def test_filled_handle_is_not_overwritten_within_one_call():
+    db = _session()
+    db.autoflush = False
+    db.add(Organization(id=765, name="Acme Lab", slug="acme-lab"))
+    db.commit()
+    hf = FakeHF(
+        _profile("acme", "Acme Lab", verified=True),
+        _profile("acme-research", "Acme Lab", followers=500),
+    )
+    CurationOrganizationService(db, hf).link(
+        1,
+        [
+            _org(hf_slug="acme", name="Acme Lab"),
+            _org(hf_slug="acme-research", name="Acme Lab"),
+        ],
+    )
+    assert db.get(Organization, 765).hf_slug == "acme"
