@@ -192,7 +192,7 @@ export function humanizeSlug(slug: string): string {
   return slug.replace(/[-_]+/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-const TASK_ACRONYMS = new Set(["AI", "OCR"]);
+const TASK_ACRONYMS = new Set(["3D", "AI", "OCR"]);
 const TASK_DISPLAY_NAMES = new Map([
   ["3d-tracking", "3D Tracking"],
   ["point-tracking", "2D Point Tracking"],
