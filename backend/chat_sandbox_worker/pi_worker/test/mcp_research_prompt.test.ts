@@ -51,7 +51,12 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /You have no sandbox, shell, or CLI/u);
   assert.match(rendered, /max_parameters/u);
   assert.match(rendered, /include_evaluations/u);
-  assert.match(rendered, /is or how it works, call pwc_get_method before answering/u);
+  assert.match(rendered, /is or how it works, look it up before answering/u);
+  assert.match(rendered, /When the method index lists it, call pwc_get_method with the index slug/u);
+  assert.match(rendered, /for a general concept \(for example weight decay[^)]*\), call pwc_search_papers/u);
+  assert.match(rendered, /After a pwc_get_method miss, use pwc_search_papers rather than retrying/u);
+  assert.match(rendered, /When a conversation opens without a paper in view[^.]*call at least one catalog tool before answering/u);
+  assert.match(rendered, /Read a bare topic or short phrase[^.]*as a request for the key and recent papers/u);
   assert.match(rendered, /# PwC MCP skill/u);
   assert.match(rendered, /next_cursor/u);
   assert.doesNotMatch(rendered, /pass `"next"` before any read/u);
