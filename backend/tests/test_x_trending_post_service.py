@@ -28,20 +28,20 @@ def _pdf(pages: int = 2) -> bytes:
 
 def test_compose_post_keeps_title_newline_tldr_when_it_fits():
     text = compose_post("A  Title", "First point. Second point.", max_chars=280)
-    assert text == "A Title\nFirst point. Second point."
+    assert text == "A Title\n\nFirst point. Second point."
 
 
 def test_compose_post_drops_trailing_sentences_to_fit():
     tldr = "Short first sentence. " + "x" * 300 + "."
     assert compose_post("Title", tldr, max_chars=280) == (
-        "Title\nShort first sentence."
+        "Title\n\nShort first sentence."
     )
 
 
 def test_compose_post_truncates_a_long_first_sentence_at_a_word():
     tldr = " ".join(["word"] * 100) + "."
     text = compose_post("Title", tldr, max_chars=100)
-    assert text.startswith("Title\nword word")
+    assert text.startswith("Title\n\nword word")
     assert text.endswith("word…")
     assert weighted_length(text) <= 100
 
@@ -161,7 +161,7 @@ def test_post_trending_paper_skips_unrenderable_pdf_and_records_post(monkeypatch
     assert report.paper_id == 2
     assert report.errors == [{"paper_id": 1, "error": "down"}]
     assert poster.posts == [
-        ("Great Paper\nIt works.", ["media"], None),
+        ("Great Paper\n\nIt works.", ["media"], None),
         ("https://paperswithcode.co/paper/2610.00002", None, "post1"),
     ]
     (record,) = db.added
@@ -191,5 +191,5 @@ def test_post_trending_paper_dry_run_posts_nothing(monkeypatch):
     report = service.post_trending_paper(
         db, poster=None, fetch_pdf=lambda paper: _pdf(), max_chars=280
     )
-    assert report.dry_run and report.text == "Great Paper\nIt works."
+    assert report.dry_run and report.text == "Great Paper\n\nIt works."
     assert db.added == [] and report.post_id is None

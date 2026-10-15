@@ -202,7 +202,7 @@ uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_g
 Code X account (@paperswithcodee) every four hours. It takes the top
 `trending_score` arXiv paper from the last 14 days that has a TL;DR and was
 never posted, renders the first page of its PDF as an image, and posts the
-title, a new line, and the Luna TL;DR with that image, then replies with the
+title, a blank line, and the Luna TL;DR with that image, then replies with the
 paper page link. `paper_x_posts` records each posted paper so none is posted
 twice. It needs the posting account's OAuth 1.0a keys in `production-cron.env`
 (`X_POST_CONSUMER_KEY`, `X_POST_CONSUMER_SECRET`, `X_POST_ACCESS_TOKEN`,

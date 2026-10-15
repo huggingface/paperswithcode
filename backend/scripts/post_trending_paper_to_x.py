@@ -1,7 +1,7 @@
 """Production entrypoint for posting a trending paper to X.
 
 Posts the top trending recent arXiv paper that has a TL;DR and was never
-posted: the first PDF page as an image, the title, a new line, and the TL;DR,
+posted: the first PDF page as an image, the title, a blank line, and the TL;DR,
 followed by a reply with the paper page link. Needs the posting account's
 OAuth 1.0a keys (X_POST_CONSUMER_KEY, X_POST_CONSUMER_SECRET,
 X_POST_ACCESS_TOKEN, X_POST_ACCESS_TOKEN_SECRET); without them, or with

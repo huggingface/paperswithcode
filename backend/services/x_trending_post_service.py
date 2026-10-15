@@ -2,7 +2,7 @@
 
 Each run picks the highest-trending recent arXiv paper with a TL;DR that has
 not been posted yet, renders the first page of its PDF as an image, and posts
-the title, a new line, and the TL;DR with that image. The paper page link
+the title, a blank line, and the TL;DR with that image. The paper page link
 follows as a reply, so the main post carries no link. `paper_x_posts` records
 every posted paper so it is never posted twice.
 
@@ -157,17 +157,17 @@ def _truncate(text: str, limit: int) -> str:
 
 
 def compose_post(title: str, tldr: str, *, max_chars: int) -> str:
-    """Title, a new line, then the TL;DR; drop trailing sentences to fit."""
+    """Title, a blank line, then the TL;DR; drop trailing sentences to fit."""
     title = " ".join(title.split())
     sentences = _SENTENCE_END.split(" ".join(tldr.split()))
     while sentences:
-        text = f"{title}\n{' '.join(sentences)}"
+        text = f"{title}\n\n{' '.join(sentences)}"
         if weighted_length(text) <= max_chars:
             return text
         if len(sentences) == 1:
             break
         sentences.pop()
-    head = f"{title}\n"
+    head = f"{title}\n\n"
     room = max_chars - weighted_length(head)
     if sentences and room >= 40:
         return head + _truncate(sentences[0], room)
