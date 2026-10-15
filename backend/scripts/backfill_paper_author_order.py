@@ -1,8 +1,8 @@
 """Restore author order on papers whose author links all have order 1.
 
 Report-only unless --apply. Papers are read in batches of --batch-size by id;
-each batch costs one arXiv request (3 s apart), with a Hugging Face papers API
-request only for papers arXiv cannot fully match. Applied papers drop out of
+each batch costs one arXiv request (5 s apart, backing off on 429/5xx), with
+a Hugging Face papers API request only for papers arXiv cannot fully match. Applied papers drop out of
 the selection, so a rerun resumes; pass --after-id to skip past reported ones.
 Unmatched papers are appended to --report as JSON lines and left unchanged.
 """
@@ -71,6 +71,7 @@ def main() -> int:
                                     "paper_id": paper.paper_id,
                                     "arxiv_id": paper.arxiv_id,
                                     "unmatched": [a.name for a in missing],
+                                    "linked": [a.name for a in paper.authors],
                                     "arxiv_authors": [a.name for a in listed or []],
                                 }
                             )

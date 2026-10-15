@@ -116,3 +116,24 @@ def test_folded_names_match_only_after_exact_names() -> None:
 
     assert missing == []
     assert order == {2: 1, 3: 2, 1: 3}
+
+
+def test_client_backs_off_on_rate_limit(monkeypatch) -> None:
+    sleeps: list[float] = []
+    monkeypatch.setattr(paper_author_order_service.time, "sleep", sleeps.append)
+    responses = iter(
+        [
+            httpx.Response(429, headers={"Retry-After": "90"}),
+            httpx.Response(503),
+            httpx.Response(200, content=ATOM_FEED),
+        ]
+    )
+    client = AuthorListClient(
+        httpx.Client(transport=httpx.MockTransport(lambda _: next(responses)))
+    )
+
+    assert list(client.arxiv_authors(["2610.12126"])) == ["2610.12126"]
+    backoffs = [
+        s for s in sleeps if s >= paper_author_order_service.FIRST_BACKOFF_SECONDS
+    ]
+    assert backoffs == [90.0, 60.0]

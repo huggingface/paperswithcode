@@ -27,9 +27,10 @@ ARXIV_API_URL = "https://export.arxiv.org/api/query"
 HF_PAPER_API_URL = "https://huggingface.co/api/papers/{arxiv_id}"
 ATOM = "{http://www.w3.org/2005/Atom}"
 USER_AGENT = "PapersWithCode-AuthorOrderBackfill/1.0 (https://paperswithcode.co)"
-ARXIV_DELAY_SECONDS = 3.0
+ARXIV_DELAY_SECONDS = 5.0
 HF_DELAY_SECONDS = 0.5
-MAX_ATTEMPTS = 4
+MAX_ATTEMPTS = 6
+FIRST_BACKOFF_SECONDS = 30.0
 
 _VERSION_SUFFIX = re.compile(r"v\d+$")
 
@@ -199,7 +200,11 @@ class AuthorListClient:
             if response.status_code not in (429, 500, 502, 503, 504):
                 return response
             if attempt < MAX_ATTEMPTS - 1:
-                time.sleep(delay * 2 ** (attempt + 2))
+                backoff = FIRST_BACKOFF_SECONDS * 2**attempt
+                retry_after = response.headers.get("Retry-After", "")
+                if retry_after.isdigit():
+                    backoff = max(backoff, float(retry_after))
+                time.sleep(backoff)
         response.raise_for_status()
         return response
 
