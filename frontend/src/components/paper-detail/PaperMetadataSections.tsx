@@ -5,6 +5,7 @@ import { LatexText } from "@/components/LatexTitle";
 import type { Paper } from "@/lib/api/papers.types";
 
 import { PaperSectionRule } from "./PaperSectionRule";
+import { PaperSuggestedQuestions } from "./PaperSuggestedQuestions";
 
 const ABSTRACT_PREVIEW_LENGTH = 360;
 
@@ -13,11 +14,13 @@ export function PaperMetadataSections({
   onEditMethods,
   onEditTasks,
   paper,
+  readerChatRoute,
 }: {
   canEdit: boolean;
   onEditMethods: () => void;
   onEditTasks: () => void;
   paper: Paper;
+  readerChatRoute: string | null;
 }) {
   const [abstractExpanded, setAbstractExpanded] = useState(false);
   const abstract = paper.abstract || "";
@@ -34,6 +37,7 @@ export function PaperMetadataSections({
           <div className="tldr-box">{paper.tldr}</div>
         </>
       )}
+      <PaperSuggestedQuestions paper={paper} readerChatRoute={readerChatRoute} />
 
       <PaperSectionRule id="abstract" label="Abstract" />
       <p className="abstract-text" style={{ marginBottom: 8 }}>

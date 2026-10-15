@@ -482,3 +482,18 @@ class PaperRelation(Base):
             f"<PaperRelation(source_paper_id={self.source_paper_id}, "
             f"target_paper_id={self.target_paper_id})>"
         )
+
+
+class PaperSuggestedQuestions(Base):
+    """Three Luna-generated starter questions shown on a paper page."""
+
+    __tablename__ = "paper_suggested_questions"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    questions: Mapped[List[str]] = mapped_column(JSONB, nullable=False)
+    model: Mapped[str] = mapped_column(String(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )

@@ -6,11 +6,16 @@ import { Icon, PaperPreview, SotaBadges } from "@/components";
 import LatexTitle from "@/components/LatexTitle";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { papersApi } from "@/lib/api/papers";
-import { assetUrl, isNativePdfReaderEnabled, isStagingEnvironment } from "@/lib/apiUrl";
+import {
+  assetUrl,
+  isNativePdfReaderEnabled,
+  isPaperReaderChatEnabled,
+  isStagingEnvironment,
+} from "@/lib/apiUrl";
 import { useAuth } from "@/lib/authContext";
 import { paperEditSubmitMode } from "@/lib/contributorCapabilities";
 import { leaderboardBadgeMarkdown } from "@/lib/leaderboardBadges";
-import { paperReaderRoute } from "@/lib/paperReader";
+import { paperReaderRoute, resetReaderSession } from "@/lib/paperReader";
 import { usePaperDetailPageModel } from "@/hooks/usePaperDetailPageModel";
 import {
   parseFreshAuthEditSection,
@@ -326,6 +331,10 @@ const PaperDetailView: React.FC = () => {
   } = presentation;
   const authorLimit = 12;
   const readerRoute = paperReaderRoute(paper, arxivId);
+  const readerChatRoute = readerRoute && isNativePdfReaderEnabled() && isPaperReaderChatEnabled()
+    && (!isStagingEnvironment() || isAdmin)
+    ? readerRoute
+    : null;
   const visibleAuthors = showAllAuthors || authorEntries.length <= authorLimit
     ? authorEntries
     : authorEntries.slice(0, authorLimit);
@@ -468,12 +477,7 @@ const PaperDetailView: React.FC = () => {
               <Link
                 className="action-btn"
                 to={readerRoute}
-                onClick={() => {
-                  const readerId = readerRoute.slice("/pdf/".length);
-                  sessionStorage.removeItem(`pwc:reader:session:${readerId}`);
-                  sessionStorage.removeItem(`pwc:reader:assistant-collapsed:${readerId}`);
-                  sessionStorage.removeItem(`pwc:reader:page:${readerId}`);
-                }}
+                onClick={() => resetReaderSession(readerRoute)}
               >
                 <Icon name="pdf" size={12} /> Read paper
                 <span className="nav-new-badge" aria-hidden="true">New</span>
@@ -706,6 +710,7 @@ const PaperDetailView: React.FC = () => {
             onEditMethods={() => openEdit("methods")}
             onEditTasks={() => openEdit("tasks")}
             paper={paper}
+            readerChatRoute={readerChatRoute}
           />
           <PaperResultsSection
             canCopyBadge={copyableRanks.length > 0}

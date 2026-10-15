@@ -42,6 +42,10 @@ from backend.models.papers import (
     PaperBucketCopyRequest,
     PaperBucketCopyResponse,
     RepositoryTrendingPaper,
+    PaperSuggestedQuestionsResponse,
+)
+from backend.services.paper_suggested_questions_service import (
+    get_suggested_questions,
 )
 from backend.services.paper_service import (
     AmbiguousAuthorError,
@@ -198,6 +202,25 @@ def get_paper_curation_state(
     db: Session = Depends(get_database_session),
 ):
     return PaperCurationService(db).state(paper_id)
+
+
+@router.get(
+    "/papers/{paper_id}/suggested-questions",
+    response_model=PaperSuggestedQuestionsResponse,
+    summary="Get starter questions to ask the assistant about a paper",
+)
+def get_paper_suggested_questions(
+    paper_id: int = Path(..., description="Internal paper database ID"),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Return three short questions about the paper, written by a small LLM from
+    its title and abstract. Generated on first request and stored; returns an
+    empty list when they cannot be generated right now.
+    """
+    return PaperSuggestedQuestionsResponse(
+        questions=get_suggested_questions(db, paper_id)
+    )
 
 
 @router.get(

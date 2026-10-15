@@ -49,6 +49,14 @@ export function paperReaderRoute(paper: Paper, fallbackRoute: string): string | 
   return safeExternalHref(paper.url_pdf) && route ? `/pdf/${route}` : null;
 }
 
+/** Opens the reader on page 1 with a fresh, expanded assistant. */
+export function resetReaderSession(readerRoute: string): void {
+  const readerId = readerRoute.slice("/pdf/".length);
+  sessionStorage.removeItem(`pwc:reader:session:${readerId}`);
+  sessionStorage.removeItem(`pwc:reader:assistant-collapsed:${readerId}`);
+  sessionStorage.removeItem(`pwc:reader:page:${readerId}`);
+}
+
 const CANONICAL_HEADER = /^Title: [^\n]*\n\nURL Source: [^\n]*\n\nMarkdown Content:\n/;
 
 /** A web paper's own Markdown, without the canonical paper-Markdown header. */

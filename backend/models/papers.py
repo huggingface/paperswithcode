@@ -1209,3 +1209,10 @@ class ResolvedPaperReference(BaseModel):
 
 class PaperLookupResponse(BaseModel):
     references: List[ResolvedPaperReference]
+
+
+class PaperSuggestedQuestionsResponse(BaseModel):
+    questions: List[str] = Field(
+        default_factory=list,
+        description="Up to three starter questions to ask the assistant about the paper",
+    )

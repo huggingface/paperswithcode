@@ -136,6 +136,10 @@ export class PapersApi {
     );
   }
 
+  suggestedQuestions(paperId: string): Promise<{ questions: string[] }> {
+    return this.request(`/papers/${encodeURIComponent(paperId)}/suggested-questions`);
+  }
+
   versions(arxivId: string): Promise<Paper[]> {
     return this.request(`/papers/arxiv/${arxivId}/versions`);
   }

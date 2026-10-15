@@ -37,6 +37,7 @@ uv run --env-file backend/keys.env python backend/database/migrations/run_<name>
 | `add_paper_x_threads.sql` | Paper-scoped `paper_x_threads` previews for the paper-page X threads card plus the `x_threads` pending-edit type; apply as `postgres` for `public`, then again with `search_path=staging,public`, before deploying code that reads the table |
 | `add_benchmark_gap_review.sql` | Review state and audit `resolution` on `benchmark_curation_candidates`, plus `paper_curation_jobs.benchmark_candidate_id` and the `review-benchmark-gaps`/`add-benchmark` kinds for the daily `enqueue_benchmark_gap_review` CRON; apply as `postgres` (updates the `staging` copies too) before deploying |
 | `add_benchmark_gap_review_scope.sql` | `paper_curation_jobs.review_scope`: the candidate batch a `review-benchmark-gaps` job was served and must decide; apply as `postgres` (updates `staging` too) before deploying |
+| `add_paper_suggested_questions.sql` | `paper_suggested_questions`: three cached Luna starter questions per paper, generated lazily by `GET /papers/{id}/suggested-questions` (staging gets INSERT too); apply as `postgres` before deploying |
 | `add_user_bookmarks.sql` + `run_add_user_bookmarks.py` | user bookmarks |
 | `add_chat_sessions.sql` | Authenticated chat sessions, UI messages, and opaque Agent SDK transcript storage |
 | `add_chat_primary_paper.sql` | Common chat-session primary-paper binding plus durable reader-context snapshots; apply to each enabled environment before activating code that uses the shared chat ORM |
