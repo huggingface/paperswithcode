@@ -122,7 +122,8 @@ def validate_chat_provider_policy(
             "provider": "openai",
         }
         if settings.environment == "production":
-            expected_discovery = (direct_choice,) + expected_discovery
+            # GLM-5.3-Flash is hidden while direct Luna serves production.
+            expected_discovery = (direct_choice,)
     if settings.environment == "staging":
         expected_kimi_route = "moonshotai/Kimi-K3:baseten"
         if settings.chat_kimi_route != expected_kimi_route:

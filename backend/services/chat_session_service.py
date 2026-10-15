@@ -16,6 +16,7 @@ from sqlalchemy import delete, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
+from backend.chat_configuration import registry
 from backend.chat_execution_policy import bounded_url_seed
 from backend.config import Settings
 from backend.models.chat import DISPLAY_BLOCKS_ADAPTER, CitationSnapshot
@@ -782,7 +783,9 @@ class ChatSessionService:
             message.langfuse_trace_id = trace_id
 
     def _validate_model(self, model: str | None) -> tuple[str, str]:
-        selected = model or self.settings.chat_model_choices[0]["id"]
+        selected = registry.canonical_model_id(
+            self.settings, model or self.settings.chat_model_choices[0]["id"]
+        )
         route = self.settings.chat_model_routes.get(selected)
         if route is None:
             raise ChatServiceError(
@@ -2063,6 +2066,7 @@ class ChatSessionService:
         )
         owner_total_bytes = self._load_owner_storage_bytes(owner)
         model, model_route = self._validate_model(session.selected_model)
+        session.selected_model = model
         replacement = self._load_replacement_plan(
             session,
             replace_message_id=replace_message_id,

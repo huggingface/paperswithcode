@@ -19,6 +19,7 @@ ChatProtocol = Literal["anthropic-messages", "openai-responses"]
 ChatFundingMode = Literal["hf_user_billed", "openrouter_funded", "openai_funded"]
 
 DEEPSEEK_V4_FLASH_ID = "deepseek-ai/DeepSeek-V4-Flash-0731"
+GLM_5_3_FLASH_ID = "zai-org/GLM-5.3-Flash"
 
 # Selected-model IDs persisted by sessions created before the DeepSeek-only
 # registry. They resolve to the canonical route but never appear in discovery.
@@ -113,7 +114,7 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         "hf_user_billed" if deepseek_huggingface else "openrouter_funded",
     )
     glm = _anthropic_route(
-        "zai-org/GLM-5.3-Flash",
+        GLM_5_3_FLASH_ID,
         "GLM-5.3-Flash",
         settings.chat_glm_5_3_flash_route,
         "huggingface",
@@ -123,7 +124,9 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         (glm,) if environment == "production" else (deepseek,)
     )
     if environment == "production" and settings.chat_openai_direct_enabled:
-        records = (_direct_luna(settings, "GPT-5.6 Luna"), glm)
+        # GLM-5.3-Flash is hidden while most of its HF-billed turns fail.
+        # Sessions that selected it continue on Luna via canonical_model_id.
+        records = (_direct_luna(settings, "GPT-5.6 Luna"),)
     if environment == "staging":
         staging_records = (
             _anthropic_route(
@@ -190,6 +193,17 @@ def discoverable_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
     return tuple(record for record in records if record.provider != "openrouter")
 
 
+def canonical_model_id(settings: Settings, model: str) -> str:
+    """Move production sessions that selected hidden GLM to the default model."""
+
+    if model != GLM_5_3_FLASH_ID or settings.environment != "production":
+        return model
+    records = chat_model_records(settings)
+    if any(record.id == GLM_5_3_FLASH_ID for record in records):
+        return model
+    return records[0].id
+
+
 def model_routes(settings: Settings) -> dict[str, str]:
     routes = {record.id: record.route for record in discoverable_records(settings)}
     routes.setdefault(DEEPSEEK_V4_FLASH_ID, deepseek_route(settings))
@@ -228,6 +242,7 @@ def _retired_routes(settings: Settings) -> tuple[str, ...]:
 
     return (
         settings.chat_glm_route,
+        settings.chat_glm_5_3_flash_route,
         settings.chat_gemma_route,
         settings.chat_deepseek_v4_flash_route,
         settings.chat_deepseek_v4_flash_openrouter_route,
@@ -257,6 +272,7 @@ def route_funding_modes(settings: Settings) -> dict[str, str]:
         record.route: record.funding_mode for record in chat_model_records(settings)
     }
     modes.setdefault(settings.chat_glm_route, "openrouter_funded")
+    modes.setdefault(settings.chat_glm_5_3_flash_route, "hf_user_billed")
     modes.setdefault(settings.chat_gemma_route, "openrouter_funded")
     modes.setdefault(settings.chat_deepseek_v4_flash_route, "hf_user_billed")
     modes.setdefault(
@@ -277,6 +293,7 @@ def route_providers(settings: Settings) -> dict[str, str]:
     # Persisted capabilities from the retired comparison registry may still
     # carry these immutable routes even though they are hidden from discovery.
     providers.setdefault(settings.chat_glm_route, "openrouter")
+    providers.setdefault(settings.chat_glm_5_3_flash_route, "huggingface")
     providers.setdefault(settings.chat_gemma_route, "openrouter")
     providers.setdefault(settings.chat_kimi_route, "huggingface")
     providers.setdefault(settings.chat_luna_route, "openrouter")

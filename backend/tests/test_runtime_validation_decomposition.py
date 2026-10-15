@@ -1133,7 +1133,6 @@ def test_production_direct_routes_allow_admission_without_openrouter(
 
     assert [choice["funding_mode"] for choice in settings.chat_model_registry] == [
         "openai_funded",
-        "hf_user_billed",
     ]
     runtime_validation._validate_chat_openrouter_policy(settings)
 

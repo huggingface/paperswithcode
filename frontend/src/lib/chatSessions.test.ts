@@ -9,17 +9,12 @@ import {
 } from "@/lib/chatSessions";
 
 describe("production model fallback", () => {
-  it("keeps Luna default and exposes GLM through Hugging Face", () => {
+  it("offers only Luna while GLM is hidden", () => {
     expect(PRODUCTION_FALLBACK_CHAT_MODELS).toEqual([
       {
         id: "gpt-5.6-luna@openai",
         label: "GPT-5.6 Luna",
         provider: "openai",
-      },
-      {
-        id: "zai-org/GLM-5.3-Flash",
-        label: "GLM-5.3-Flash",
-        provider: "huggingface",
       },
     ]);
   });

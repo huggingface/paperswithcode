@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from backend.chat_configuration import registry
 from backend.config import Settings
 
 
@@ -43,8 +44,20 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
     )
     assert [choice["id"] for choice in production_direct.chat_model_choices] == [
         "gpt-5.6-luna@openai",
-        "zai-org/GLM-5.3-Flash",
     ]
+    # Hidden GLM sessions continue on Luna; issued GLM capabilities resolve.
+    assert (
+        registry.canonical_model_id(production_direct, "zai-org/GLM-5.3-Flash")
+        == "gpt-5.6-luna@openai"
+    )
+    assert (
+        registry.canonical_model_id(production, "zai-org/GLM-5.3-Flash")
+        == "zai-org/GLM-5.3-Flash"
+    )
+    glm_route = production_direct.chat_glm_5_3_flash_route
+    assert production_direct.chat_route_providers[glm_route] == "huggingface"
+    assert production_direct.chat_route_protocols[glm_route] == "anthropic-messages"
+    assert production_direct.chat_route_funding_modes[glm_route] == "hf_user_billed"
     assert production_direct.chat_model_choices[0]["label"] == "GPT-5.6 Luna"
     assert production_direct.chat_model_providers["gpt-5.6-luna@openai"] == "openai"
     assert production_direct.chat_route_protocols["gpt-5.6-luna@openai"] == (
