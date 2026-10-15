@@ -29,7 +29,8 @@ export function PaperSuggestedQuestions({
     queryKey: ["paper-suggested-questions", paper.id],
     queryFn: () => papersApi.suggestedQuestions(String(paper.id)),
     enabled,
-    staleTime: Infinity,
+    // Empty means generation was skipped or failed and nothing was stored.
+    staleTime: (query) => (query.state.data?.questions.length ? Infinity : 0),
     retry: false,
   });
   const questions = data?.questions ?? [];
