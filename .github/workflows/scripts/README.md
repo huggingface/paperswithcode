@@ -25,6 +25,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | local `pwc-cron-post-trending-paper-to-x.timer` | `13 */4 * * *` | `pwc-cron post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
+| local `pwc-cron-warm-paper-suggested-questions.timer` | `33 * * * *` | `pwc-cron warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
 | local `pwc-cron-post-x-insight.timer` | `43 9,17 * * *` | `pwc-cron post_x_insight` | `backend/scripts/post_x_insight.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
@@ -197,6 +198,18 @@ a time. Inspect or dry-run it with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --status
+```
+
+`warm_paper_suggested_questions.py` pre-generates the three paper-page
+suggested questions (gpt-5.6-luna, stored in `paper_suggested_questions`) for
+the papers visitors see first: the first three pages of the home feed's
+default view (trending, past week) and the first page of every task and method
+page (trending, busiest pages first). Papers that already have questions are
+skipped and `--limit` (default 1500) bounds generations per run, so the hourly
+run only fills newcomers once the backlog is done. Count the work with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.warm_paper_suggested_questions --dry-run
 ```
 
 `post_trending_paper_to_x.py` posts one trending paper to the Papers with

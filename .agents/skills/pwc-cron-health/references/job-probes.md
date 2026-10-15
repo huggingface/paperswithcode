@@ -180,6 +180,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
 - **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
 
+## `warm_paper_suggested_questions`
+
+- **Effect:** Prints a JSON summary (`candidates`, `already_stored`, `generated`, `failed`, `remaining`) and inserts `paper_suggested_questions` rows. Candidates are the home feed's first three trending pages (past week) plus the first trending page of every task and method; `remaining` is the eligible backlog beyond `--limit`. Exits 1 only when every generation failed.
+- **Independent proof:** `curl https://paperswithcode.co/api/v1/papers/<id>/suggested-questions` for a top home-feed paper returns three questions within ~0.2 s (stored, not generated).
+- **Correctness:** `remaining` should reach 0 after a few runs and stay near 0; a persistent `failed` count with `suggested_questions_failed` warnings means OpenAI errors (key, quota, or model name).
+
 ## `post_trending_paper_to_x`
 
 - **Effect:** Prints a JSON summary (`paper_id`, `text`, `url`, `post_id`, `reply_id`, `errors`) and inserts one `paper_x_posts` row per post. Posts at most one paper per run: the top `trending_score` arXiv paper from the last 14 days with a TL;DR that was never posted. Exits 0 with an `x_trending_post_skipped` warning (dry run) when the `X_POST_*` OAuth 1.0a keys are unset, and 1 only when candidates existed but none could be fetched and rendered.

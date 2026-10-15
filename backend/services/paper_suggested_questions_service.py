@@ -109,12 +109,19 @@ def get_suggested_questions(db: Session, paper_id: int) -> list[str]:
     finally:
         _generation_slots.release()
 
-    if len(questions) != QUESTION_COUNT:
+    if not store_suggested_questions(db, paper_id, questions):
         return []
+    return questions
+
+
+def store_suggested_questions(db: Session, paper_id: int, questions: list[str]) -> bool:
+    """Store a complete set of questions; an existing row wins."""
+    if len(questions) != QUESTION_COUNT:
+        return False
     db.execute(
         insert(PaperSuggestedQuestions)
         .values(paper_id=paper_id, questions=questions, model=MODEL)
         .on_conflict_do_nothing(index_elements=["paper_id"])
     )
     db.commit()
-    return questions
+    return True

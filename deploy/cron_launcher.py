@@ -460,6 +460,15 @@ COMMANDS: dict[str, Job] = {
             "after the post, so a subject is never posted twice"
         ),
     ),
+    "warm_paper_suggested_questions": job(
+        "-m",
+        "backend.scripts.warm_paper_suggested_questions",
+        timeout="45m",
+        idempotency=(
+            "generate questions only for papers without a paper_suggested_questions "
+            "row; inserts ignore rows written concurrently by paper pages"
+        ),
+    ),
     "sweep_conference_deadlines": job(
         "-m",
         "backend.scripts.sweep_conference_deadlines",

@@ -1678,6 +1678,33 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="warm_paper_suggested_questions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=33),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-warm-paper-suggested-questions.timer",
+        systemd_service="pwc-cron-warm-paper-suggested-questions.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Warm Paper Suggested Questions",
+        category="hourly",
+        schedule="33 * * * * (hourly)",
+        script_path="backend/scripts/warm_paper_suggested_questions.py",
+        log_name="warm_paper_suggested_questions",
+        process_patterns=("backend.scripts.warm_paper_suggested_questions",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "warm_paper_suggested_questions.lock"
+        ),
+        expected_runtime_minutes=15,
+        stale_after_minutes=180,
+        critical=False,
+        healthy_no_work_allowed=True,
+        # No DB freshness: a run with every visible paper covered writes no row.
+        db_freshness_query=None,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="export_enrichment_dashboard",
         output_evaluator="enrichment_snapshot",
         work_metrics_provider="enrichment_snapshot",

@@ -167,6 +167,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         on_calendar=("*-*-* 09,17:43:00",),
         description="Post a SOTA, trend, or roundup insight to X twice daily",
     ),
+    TimerSpec(
+        job="warm_paper_suggested_questions",
+        on_calendar=("*-*-* *:33:00",),
+        description="Pre-generate suggested questions for the papers visitors see first",
+    ),
     # Leaderboard syncs, staggered at their previous workflow minutes.
     TimerSpec(
         job="sync_3d_arena",

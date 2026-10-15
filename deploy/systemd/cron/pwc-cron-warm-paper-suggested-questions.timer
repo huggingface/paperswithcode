@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Pre-generate suggested questions for the papers visitors see first
+
+[Timer]
+OnCalendar=*-*-* *:33:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-warm-paper-suggested-questions.service
+
+[Install]
+WantedBy=timers.target
