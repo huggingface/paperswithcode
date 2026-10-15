@@ -85,6 +85,8 @@ KNOWN_CLIENT_TOP_LEVEL_PREFIXES = frozenset(
     }
 )
 ORGANIZATION_SLUG_ALIASES = {"googledeepmind": "google"}
+# Methods that were removed in favour of a task of the same topic.
+METHOD_SLUGS_MOVED_TO_TASKS = {"continual-learning": "continual-learning"}
 
 
 def _not_found() -> HTMLResponse:
@@ -166,6 +168,9 @@ def legacy_task_page(slug: str) -> RedirectResponse:
 def method_page(
     slug: str, request: Request, db: Session = Depends(get_database_session)
 ) -> Response:
+    task_slug = METHOD_SLUGS_MOVED_TO_TASKS.get(slug)
+    if task_slug is not None:
+        return RedirectResponse(f"/tasks/{task_slug}", status_code=301)
     return _render(DiscoveryPageService(db).method(slug), request)
 
 

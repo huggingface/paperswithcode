@@ -516,6 +516,12 @@ def test_legacy_aliases_redirect_permanently(client):
     assert markdown_alias.status_code == 301
 
 
+def test_method_moved_to_task_redirects_to_the_task_page(client):
+    response = client.get("/methods/continual-learning", follow_redirects=False)
+    assert response.status_code == 301
+    assert response.headers["location"] == "/tasks/continual-learning"
+
+
 def test_merged_organization_slug_redirects_to_canonical_page(client):
     response = client.get("/orgs/googledeepmind?q=vision", follow_redirects=False)
     assert response.status_code == 301
