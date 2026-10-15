@@ -169,11 +169,12 @@ class CurationOrganizationService:
             skip("hf_organization_not_established")
             return None
 
-        same_name = self._by_name(profile.name)
-        if same_name is not None:
-            if same_name.hf_slug is None:
-                self._apply_profile(same_name, profile)
-            return same_name
+        # Only a row without a handle can be this org's catalog entry: one with
+        # another handle is a look-alike or a different, same-named org.
+        handleless = self._handleless_by_name(profile.name)
+        if handleless is not None:
+            self._apply_profile(handleless, profile)
+            return handleless
 
         if len(result.created) >= MAX_NEW_ORGANIZATIONS:
             skip("new_organization_limit")
@@ -261,7 +262,7 @@ class CurationOrganizationService:
             .first()
         )
 
-    def _by_name(self, name: str) -> Organization | None:
+    def _handleless_by_name(self, name: str) -> Organization | None:
         normalized = normalize_organization_name(name)
         match = next(
             (
@@ -269,6 +270,8 @@ class CurationOrganizationService:
                 for organization_id, existing in self.db.query(
                     Organization.id, Organization.name
                 )
+                .filter(Organization.hf_slug.is_(None))
+                .order_by(Organization.id)
                 if normalize_organization_name(existing) == normalized
             ),
             None,

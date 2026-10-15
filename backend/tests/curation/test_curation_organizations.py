@@ -259,3 +259,22 @@ def test_parse_org_website_reads_first_external_link():
     page = '<a rel="nofollow" target="_blank">https://www.stanford.edu/</a>'
     assert parse_org_website(page) == "https://www.stanford.edu/"
     assert parse_org_website("<html></html>") is None
+
+
+def test_same_named_row_with_another_handle_is_not_reused():
+    db = _session()
+    db.add(
+        Organization(
+            id=607,
+            name="Stanford University",
+            slug="stanforduniversityy",
+            hf_slug="StanfordUniversityy",
+        )
+    )
+    db.commit()
+    hf = FakeHF(_profile("StanfordUniversity", "Stanford University", verified=True))
+    result = CurationOrganizationService(db, hf).link(
+        1, [_org(hf_slug="StanfordUniversity", name="Stanford University")]
+    )
+    assert result.created[0]["hf_slug"] == "StanfordUniversity"
+    assert result.linked == [result.created[0]["id"]]
