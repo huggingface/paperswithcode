@@ -308,3 +308,22 @@ def test_hf_org_x_handle_reads_a_single_profile_link(monkeypatch):
     assert service.hf_org_x_handle("Org") is None  # ambiguous
     monkeypatch.setattr(service.httpx, "get", page("", status=404))
     assert service.hf_org_x_handle("Missing") is None
+
+
+def test_sota_posted_escapes_like_wildcards_in_metric_names():
+    from sqlalchemy.dialects import postgresql
+
+    captured = {}
+
+    class CaptureDb:
+        def scalar(self, query):
+            captured["sql"] = str(
+                query.compile(
+                    dialect=postgresql.dialect(),
+                    compile_kwargs={"literal_binds": True},
+                )
+            )
+            return None
+
+    assert not service.sota_posted(CaptureDb(), "191:Pass_1%:7")
+    assert "/_" in captured["sql"] and "/%" in captured["sql"]

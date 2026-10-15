@@ -141,7 +141,7 @@ def sota_posted(db: Session, subject_key: str) -> bool:
         XInsightPost.kind == "new_sota",
         or_(
             XInsightPost.subject_key == subject_key,
-            XInsightPost.subject_key.like(f"%:{subject_key}"),
+            XInsightPost.subject_key.endswith(f":{subject_key}", autoescape=True),
         ),
     )
     return db.scalar(query.limit(1)) is not None
