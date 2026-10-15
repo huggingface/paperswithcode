@@ -63,11 +63,11 @@ describe("Header navigation", () => {
     expect(desktopLinks[2]).toHaveAccessibleName("Browse state-of-the-art");
     expect(within(desktopLinks[1]).getByText("New")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent(
-      "New: Papers with Code MCP now available",
+      "New: following feed, follow your favorite tasks, benchmarks, authors or organizations",
     );
     expect(
-      within(screen.getByRole("status")).getByRole("link", { name: "MCP" }),
-    ).toHaveAttribute("href", "https://github.com/huggingface/pwc-cli#mcp-server");
+      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
+    ).toHaveAttribute("href", "/following");
     expect(within(screen.getByRole("status")).queryByRole("link", { name: "chat" }))
       .not.toBeInTheDocument();
 
@@ -95,6 +95,9 @@ describe("Header navigation", () => {
     expect(desktopChat).toHaveAccessibleName("Chat");
     expect(desktopChat).toHaveAttribute("href", "https://paperswithcode.co/chat");
     expect(desktopChat).toHaveAttribute("target", "_blank");
+    expect(
+      within(screen.getByRole("status")).getByRole("link", { name: "following feed" }),
+    ).toHaveAttribute("href", "https://paperswithcode.co/following");
 
     await user.click(screen.getByRole("button", { name: "Open menu" }));
     const mobilePanel = document.querySelector(".mobile-nav-panel") as HTMLElement;
@@ -162,7 +165,7 @@ describe("Header navigation", () => {
     expect(container.querySelectorAll(".nav-indicator")).toHaveLength(1);
   });
 
-  it("hides the MCP announcement on PDF reader routes", () => {
+  it("hides the announcement on PDF reader routes", () => {
     render(
       <MemoryRouter initialEntries={["/pdf/2606.03748"]}>
         <Header onOpenSearch={vi.fn()} />
@@ -172,7 +175,7 @@ describe("Header navigation", () => {
     expect(screen.queryByRole("status")).not.toBeInTheDocument();
   });
 
-  it("remembers when the MCP announcement is dismissed", async () => {
+  it("remembers when the announcement is dismissed", async () => {
     const user = userEvent.setup();
     const firstRender = render(
       <MemoryRouter>

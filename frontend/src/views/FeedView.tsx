@@ -1,4 +1,4 @@
-import HfSignInButton from "@/components/HfSignInButton";
+import FollowingIntro from "@/components/FollowingIntro";
 import { useOptionalAuth } from "@/lib/authContext";
 import { researchApi } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -384,6 +384,13 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     getNextPageParam: (last, pages) => last.length === 40 ? pages.length * 40 : undefined,
     enabled: following && !!user,
   });
+  const follows = useQuery({
+    queryKey: ["research-follows", user?.hf_subject],
+    queryFn: researchApi.follows,
+    enabled: following && !!user,
+  });
+  const noFollows = following && !!user && follows.data?.length === 0;
+  const popularTasks = topTasks.data?.slice(0, 8);
   const infinite = following ? followedFeed : publicFeed;
   const cards = useMemo(() => {
     const all = following
@@ -508,7 +515,9 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
             )}
 
             {following && !auth?.isLoading && !user ? (
-              <HfSignInButton returnTo="/following" label="Sign in to see your follows" />
+              <FollowingIntro signedIn={false} popularTasks={popularTasks} />
+            ) : noFollows ? (
+              <FollowingIntro signedIn popularTasks={popularTasks} />
             ) : isLoading ? (
               <div className="paper-list">
                 {Array.from({ length: 6 }).map((_, i) => (

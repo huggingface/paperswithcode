@@ -26,6 +26,9 @@ beforeEach(() => {
   vi.spyOn(catalogApi, 'topTasks').mockResolvedValue([]);
   vi.spyOn(catalogApi, 'trendingTasks').mockResolvedValue({ results: [], recent_days: 7, baseline_days: 30 });
   vi.spyOn(papersApi, 'list').mockResolvedValue({ count: 0, results: [], next_page: null, previous_page: null });
+  vi.spyOn(researchApi, 'follows').mockResolvedValue([
+    { kind: 'task', entity_id: 1, name: 'Task', url: '/tasks/task', created_at: '' },
+  ]);
   vi.spyOn(researchApi, 'following').mockResolvedValue([{ paper, paper_key: 'arxiv:2610.12345',
     title: paper.title, url: '/paper/2610.12345', summary: 'Short summary.', published: paper.published,
     reasons: ['Task'], scores: [] }]);
@@ -54,11 +57,34 @@ it('opens Following from the public feed', async () => {
   await screen.findByText('A paper');
   expect(screen.getByRole('button', { name: 'following' })).toHaveClass('active');
 });
-it('asks signed-out visitors to sign in without fetching private papers', async () => {
+it('explains how to start following to signed-out visitors without fetching private papers', async () => {
   auth.user = null;
   renderFeed();
-  expect(await screen.findByRole('button', { name: 'Sign in with Hugging Face' })).toBeInTheDocument();
+  expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
+  expect(screen.getByText(/Sign in with your Hugging Face account/)).toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Sign in with Hugging Face' })).toBeInTheDocument();
+  expect(screen.getByRole('link', { name: /Browse tasks/ })).toHaveAttribute('href', '/tasks');
   expect(researchApi.following).not.toHaveBeenCalled();
+});
+
+it('explains how to follow when a signed-in account follows nothing yet', async () => {
+  vi.mocked(researchApi.follows).mockResolvedValue([]);
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  vi.mocked(catalogApi.topTasks).mockResolvedValue([
+    { id: '1', name: 'Object Detection', slug: 'object-detection', paper_count: 10 } as never,
+  ]);
+  renderFeed();
+  expect(await screen.findByRole('heading', { name: 'Build your personal research feed' })).toBeInTheDocument();
+  expect(screen.queryByText(/Sign in with your Hugging Face account/)).not.toBeInTheDocument();
+  expect(await screen.findByRole('link', { name: 'Object Detection' })).toHaveAttribute('href', '/tasks/object-detection');
+  expect(screen.queryByText(/match these filters/)).not.toBeInTheDocument();
+});
+
+it('keeps the filter hint when follows exist but nothing matches', async () => {
+  vi.mocked(researchApi.following).mockResolvedValue([]);
+  renderFeed();
+  expect(await screen.findByText(/No papers from your follows match these filters/)).toBeInTheDocument();
+  expect(screen.queryByRole('heading', { name: 'Build your personal research feed' })).not.toBeInTheDocument();
 });
 
 it('offers a retry instead of claiming the feed is empty when loading fails', async () => {

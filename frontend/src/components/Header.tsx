@@ -1,6 +1,6 @@
 import React from "react";
 import * as Dialog from "@radix-ui/react-dialog";
-import { NavLink, useLocation } from "react-router-dom";
+import { Link, NavLink, useLocation } from "react-router-dom";
 
 import HfSignInButton from "@/components/HfSignInButton";
 import UserMenu from "@/components/UserMenu";
@@ -35,9 +35,9 @@ interface HeaderProps {
 
 const FEEDBACK_URL =
   "https://github.com/huggingface/paperswithcode-feedback/issues";
-const PWC_MCP_URL = "https://github.com/huggingface/pwc-cli#mcp-server";
-const PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY =
-  "pwc:announcement:pwc-mcp:v1:dismissed";
+const CANONICAL_FOLLOWING_URL = "https://paperswithcode.co/following";
+// A new key per announcement, so readers who closed an earlier one still see it.
+const ANNOUNCEMENT_DISMISSED_KEY = "pwc:announcement:following-feed:v1:dismissed";
 
 type HeaderNavLink = {
   to: string;
@@ -80,8 +80,8 @@ const SearchShortcutHint: React.FC = () => {
 
 const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
   const [mobileOpen, setMobileOpen] = React.useState(false);
-  const [showMcpAnnouncement, setShowMcpAnnouncement] = React.useState(
-    () => localStorage.getItem(PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY) !== "1",
+  const [showAnnouncement, setShowAnnouncement] = React.useState(
+    () => localStorage.getItem(ANNOUNCEMENT_DISMISSED_KEY) !== "1",
   );
   const navRef = React.useRef<HTMLElement>(null);
   const navIndicatorRef = React.useRef<HTMLSpanElement>(null);
@@ -224,20 +224,22 @@ const Header: React.FC<HeaderProps> = ({ onOpenSearch }) => {
             </button>
           </Dialog.Trigger>
         </div>
-        {!isReaderRoute && showMcpAnnouncement && (
+        {!isReaderRoute && showAnnouncement && (
           <div className="site-announcement" role="status">
-            <span>New: Papers with Code </span>
-            <a href={PWC_MCP_URL} target="_blank" rel="noreferrer">
-              MCP
-            </a>
-            <span> now available</span>
+            <span>New: </span>
+            {authDisabled ? (
+              <a href={CANONICAL_FOLLOWING_URL}>following feed</a>
+            ) : (
+              <Link to="/following">following feed</Link>
+            )}
+            <span>, follow your favorite tasks, benchmarks, authors or organizations</span>
             <button
               type="button"
               className="site-announcement-close"
               aria-label="Dismiss announcement"
               onClick={() => {
-                localStorage.setItem(PWC_MCP_ANNOUNCEMENT_DISMISSED_KEY, "1");
-                setShowMcpAnnouncement(false);
+                localStorage.setItem(ANNOUNCEMENT_DISMISSED_KEY, "1");
+                setShowAnnouncement(false);
               }}
             >
               <HeaderIcon name="close" size={11} />
