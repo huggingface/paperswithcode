@@ -488,6 +488,29 @@ def test_production_provider_health_scopes_the_discovered_glm_route():
     assert all("DeepSeek-V4-Flash" not in sql for sql in db.statements)
 
 
+def test_provider_health_is_empty_without_a_huggingface_model():
+    class FakeSession:
+        def scalar(self, _statement):
+            raise AssertionError("no provider route to query")
+
+    now = datetime(2026, 10, 15, 12, tzinfo=UTC)
+    settings = Settings(
+        environment="production",
+        chat_openai_direct_enabled=True,
+        chat_provider_alert_window_seconds=300,
+    )
+    assert all(
+        choice["provider"] != "huggingface" for choice in settings.chat_model_choices
+    )
+
+    assert provider_health(FakeSession(), settings, now) == ProviderHealth(
+        total_turns=0,
+        failed_turns=0,
+        window_start=now - timedelta(minutes=5),
+        window_end=now,
+    )
+
+
 def test_provider_transition_requires_sustained_failure_and_clean_recovery():
     now = datetime(2026, 8, 6, 12, tzinfo=UTC)
     settings = Settings(

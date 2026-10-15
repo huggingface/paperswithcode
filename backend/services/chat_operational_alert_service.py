@@ -232,14 +232,22 @@ class ProviderHealth:
 
 
 def provider_health(db: Session, settings: Settings, now: datetime) -> ProviderHealth:
-    """Count terminal Hugging Face turns without reading transcript content."""
+    """Count terminal Hugging Face turns without reading transcript content.
+
+    Environments that offer no Hugging Face model report an empty window.
+    """
 
     start = now - timedelta(seconds=settings.chat_provider_alert_window_seconds)
     provider_route = next(
-        choice["route"]
-        for choice in settings.chat_model_choices
-        if choice["provider"] == "huggingface"
+        (
+            choice["route"]
+            for choice in settings.chat_model_choices
+            if choice["provider"] == "huggingface"
+        ),
+        None,
     )
+    if provider_route is None:
+        return ProviderHealth(0, 0, start, now)
     terminal = ChatMessageRecord.status.in_(("complete", "error", "interrupted"))
     scope = (
         ChatMessageRecord.role == "user",
