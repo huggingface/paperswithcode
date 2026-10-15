@@ -256,7 +256,8 @@ class PaperCurationJob(Base):
             name="paper_curation_jobs_scope_check",
         ),
         CheckConstraint(
-            "status IN ('queued', 'dispatching', 'running', 'completed', 'failed', 'canceled')",
+            "status IN ('queued', 'dispatching', 'running', 'completed', 'failed', "
+            "'canceled', 'awaiting_markdown')",
             name="paper_curation_jobs_status_check",
         ),
         CheckConstraint(

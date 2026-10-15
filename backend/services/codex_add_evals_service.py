@@ -63,10 +63,19 @@ SCHEDULED_TRIGGERS = frozenset(
 )
 BENCHMARK_GAP_MAX_ACTIVE = 2
 JobStatus = Literal[
-    "queued", "dispatching", "running", "completed", "failed", "canceled"
+    "queued",
+    "dispatching",
+    "running",
+    "completed",
+    "failed",
+    "canceled",
+    "awaiting_markdown",
 ]
 ACTIVE_STATUSES = {"dispatching", "running"}
 TERMINAL_STATUSES = {"completed", "failed", "canceled"}
+# Admin paper jobs that ran before any paper text existed wait here, outside the
+# dispatch queue, until hourly reconciliation finds the paper's Markdown.
+ADMIN_MARKDOWN_KINDS = frozenset({"add-evals", "enrich-paper"})
 # Admin pages poll job status every few seconds; reconcile lists every remote
 # Job in the namespace, so read paths share one call per process per interval.
 READ_RECONCILE_INTERVAL_SECONDS = 30.0
@@ -160,6 +169,7 @@ class CodexPaperJobCounts(BaseModel):
     completed: int = 0
     failed: int = 0
     canceled: int = 0
+    awaiting_markdown: int = 0
 
 
 class CodexPaperJobsResponse(BaseModel):
@@ -1583,6 +1593,10 @@ class CodexPaperJobService:
         row.report = report[:40_000] or None
         row.error = completion_error[:4_000] if completion_error else None
         row.finished_at = _now()
+        if self._awaits_markdown(row):
+            row.status = AWAITING_MARKDOWN
+            # Close the finished attempt's callbacks; release issues a new token.
+            row.callback_token_hash = None
         candidate_id = getattr(row, "candidate_id", None)
         if getattr(row, "kind", None) == "resolve-model-paper" and candidate_id:
             candidate = db.get(TrendingModelCandidate, candidate_id)
@@ -1603,6 +1617,31 @@ class CodexPaperJobService:
         db.commit()
         self.dispatch_next(db, settings)
         return self.serialize(row, settings)
+
+    @staticmethod
+    def _awaits_markdown(row: PaperCurationJob) -> bool:
+        """Park a first admin attempt that found no paper text instead of failing it.
+
+        A released attempt that still finds no text fails normally, so a paper
+        whose Markdown never satisfies the runner cannot loop.
+        """
+        return (
+            row.status == "failed"
+            and parse_failure_code(row.error) == AWAITING_MARKDOWN
+            and getattr(row, "trigger", "admin") == "admin"
+            and getattr(row, "parent_workflow_id", None) is None
+            and row.kind in ADMIN_MARKDOWN_KINDS
+            and row.attempt_count == 1
+        )
+
+    @staticmethod
+    def requeue_awaiting_markdown(row: PaperCurationJob) -> None:
+        """Return a parked admin job to the queue for a fresh remote attempt."""
+        row.status = "queued"
+        row.hf_job_id = None
+        row.error = None
+        row.started_at = None
+        row.finished_at = None
 
     def _evaluate_scheduled_health(self, db: Session, row: PaperCurationJob) -> None:
         if getattr(row, "trigger", "admin") not in {
@@ -1809,7 +1848,11 @@ class CodexPaperJobService:
     ) -> CodexPaperJob:
         if row.status in TERMINAL_STATUSES:
             return self.serialize(row, settings)
-        if row.hf_job_id and settings.codex_jobs_token:
+        if (
+            row.hf_job_id
+            and settings.codex_jobs_token
+            and row.status != AWAITING_MARKDOWN
+        ):
             self._api(settings).cancel_job(
                 job_id=row.hf_job_id, namespace=settings.codex_jobs_namespace
             )

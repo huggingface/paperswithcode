@@ -6,6 +6,7 @@ import {
   CircleSlash2,
   Clock3,
   ExternalLink,
+  FileClock,
   Loader2,
   PlayCircle,
   XCircle,
@@ -24,6 +25,7 @@ import {
   promoteBenchmarkCandidate,
   rollbackBenchmarkCandidate,
   setCodexScheduler,
+  AWAITING_MARKDOWN_MESSAGE,
   type CodexPaperJob,
   type CodexPaperJobStatus,
 } from "@/lib/codexAddEvals";
@@ -35,6 +37,17 @@ const statusStyles: Record<CodexPaperJobStatus, string> = {
   completed: "cron-status--healthy",
   failed: "cron-status--broken",
   canceled: "cron-status--unknown",
+  awaiting_markdown: "cron-status--unknown",
+};
+
+const statusLabels: Record<CodexPaperJobStatus, string> = {
+  queued: "queued",
+  dispatching: "dispatching",
+  running: "running",
+  completed: "completed",
+  failed: "failed",
+  canceled: "canceled",
+  awaiting_markdown: "waiting for Markdown",
 };
 
 const kindLabels: Record<CodexPaperJob["kind"], string> = {
@@ -52,6 +65,7 @@ const statusIcons: Record<CodexPaperJobStatus, typeof Clock3> = {
   completed: CheckCircle2,
   failed: XCircle,
   canceled: CircleSlash2,
+  awaiting_markdown: FileClock,
 };
 
 interface CodexJobQueueProps {
@@ -64,12 +78,13 @@ function JobStatus({ status }: { status: CodexPaperJobStatus }) {
   return (
     <Badge variant="outline" className={statusStyles[status]}>
       <Icon className={`mr-1 h-3.5 w-3.5 ${status === "dispatching" ? "animate-spin" : ""}`} />
-      {status}
+      {statusLabels[status]}
     </Badge>
   );
 }
 
 function resultText(job: CodexPaperJob) {
+  if (job.status === "awaiting_markdown") return AWAITING_MARKDOWN_MESSAGE;
   if (job.error) return job.error;
   if (job.report) return job.report;
   if (job.status === "completed" && job.applied_at) return "Changes applied to the paper.";
@@ -196,11 +211,11 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                 </Button>
               </div>
             </div>
-            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-7">
-              {(["queued", "dispatching", "running", "completed", "failed", "canceled"] as const).map(
+            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-8">
+              {(["queued", "awaiting_markdown", "dispatching", "running", "completed", "failed", "canceled"] as const).map(
                 (status) => (
                   <div className="cron-metric-card" key={status}>
-                    <div className="cron-label capitalize">{status}</div>
+                    <div className="cron-label capitalize">{statusLabels[status]}</div>
                     <div className="mt-1 text-xl font-semibold">{data.summary[status]}</div>
                   </div>
                 ),
@@ -295,7 +310,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                           )}
                           {detail && (
                             <p
-                              className={`mt-2 line-clamp-3 text-xs ${job.error ? "text-red-700" : "cron-muted"}`}
+                              className={`mt-2 line-clamp-3 text-xs ${job.error && job.status !== "awaiting_markdown" ? "text-red-700" : "cron-muted"}`}
                               title={detail}
                             >
                               {detail}
@@ -306,7 +321,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                             {(["failed", "canceled"] as string[]).includes(job.status) && (
                               <Button size="sm" variant="outline" onClick={() => retryJob.mutate(job.id)}>Retry</Button>
                             )}
-                            {(["queued", "dispatching", "running"] as string[]).includes(job.status) && (
+                            {(["queued", "awaiting_markdown", "dispatching", "running"] as string[]).includes(job.status) && (
                               <Button size="sm" variant="outline" onClick={() => cancelJob.mutate(job.id)}>Cancel</Button>
                             )}
                             {job.trace_status === "finalize_failed" && (

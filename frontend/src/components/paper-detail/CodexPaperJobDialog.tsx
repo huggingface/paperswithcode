@@ -12,6 +12,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AWAITING_MARKDOWN_MESSAGE,
   type CodexPaperJob,
   cancelCodexAddEvalsJob,
   cancelCodexEnrichPaperJob,
@@ -128,7 +129,9 @@ export function CodexPaperJobDialog({
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const completedJobId = useRef<string | null>(null);
-  const active = job?.status === "queued" || job?.status === "dispatching" || job?.status === "running";
+  const waiting = job?.status === "awaiting_markdown";
+  const active =
+    waiting || job?.status === "queued" || job?.status === "dispatching" || job?.status === "running";
   const jobId = job?.id;
 
   useEffect(() => {
@@ -146,12 +149,12 @@ export function CodexPaperJobDialog({
           setError(pollError instanceof Error ? pollError.message : "Could not check job status.");
         }
       }
-    }, 2_000);
+    }, waiting ? 60_000 : 2_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [active, copy, jobId]);
+  }, [active, waiting, copy, jobId]);
 
   useEffect(() => {
     if (job?.status !== "completed" || completedJobId.current === job.id) return;
@@ -190,7 +193,7 @@ export function CodexPaperJobDialog({
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <button type="button" className={triggerClassName} onClick={() => setOpen(true)}>
-        {active ? copy.running : job?.status === "completed" ? copy.complete : copy.trigger}
+        {waiting ? "waiting for Markdown…" : active ? copy.running : job?.status === "completed" ? copy.complete : copy.trigger}
       </button>
       <DialogContent className="max-h-[90vh] w-[calc(100vw-2rem)] min-w-0 max-w-2xl overflow-hidden">
         <DialogHeader className="min-w-0">
@@ -205,14 +208,19 @@ export function CodexPaperJobDialog({
         ) : (
           <div className="min-w-0 space-y-3 overflow-hidden">
             <div className="font-mono text-xs uppercase tracking-wide text-muted-foreground">
-              Status: {job.status}
+              Status: {job.status.replace("_", " ")}
             </div>
             {job.hf_job_url && (
               <a className="text-sm underline" href={job.hf_job_url} target="_blank" rel="noreferrer">
                 View Hugging Face Job
               </a>
             )}
-            {active && (
+            {waiting && (
+              <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                {AWAITING_MARKDOWN_MESSAGE} You can close this window and return.
+              </div>
+            )}
+            {active && !waiting && (
               <div className="rounded-md border bg-muted/40 p-3 text-sm">
                 {job.status === "queued"
                   ? "This job is queued and will start after the current Codex job finishes."
@@ -221,7 +229,7 @@ export function CodexPaperJobDialog({
               </div>
             )}
             {job.report && <CodexJobReport report={job.report} />}
-            {job.error && (
+            {job.error && !waiting && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
                 {job.error}
               </div>

@@ -1,6 +1,16 @@
 import { apiUrl } from "@/lib/apiUrl";
 
-export type CodexPaperJobStatus = "queued" | "dispatching" | "running" | "completed" | "failed" | "canceled";
+export type CodexPaperJobStatus =
+  | "queued"
+  | "dispatching"
+  | "running"
+  | "completed"
+  | "failed"
+  | "canceled"
+  | "awaiting_markdown";
+
+export const AWAITING_MARKDOWN_MESSAGE =
+  "No paper text was available yet. This job starts again automatically within an hour of the paper's Markdown being extracted.";
 
 interface CodexThumbnailResult {
   requested: boolean;

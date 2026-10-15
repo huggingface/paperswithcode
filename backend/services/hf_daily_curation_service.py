@@ -41,6 +41,7 @@ from backend.scripts.generate_missing_paper_markdown import (
 )
 from backend.utils.hf_daily_papers import fetch_hf_daily_papers
 from backend.utils.urls import get_paper_route_identifier
+from jobs.curation_failure_codes import AWAITING_MARKDOWN
 
 FetchCohort = Callable[[date], list[str]]
 MarkdownAvailable = Callable[[Paper, Settings], bool]
@@ -443,6 +444,21 @@ class HFDailyCurationService:
         workflow.status = "queued"
         workflow.deferred_reason = None
 
+    def release_admin_awaiting_markdown(self) -> int:
+        """Requeue parked admin paper jobs once their canonical Markdown exists."""
+        released = 0
+        for row in (
+            self.db.query(PaperCurationJob)
+            .filter(PaperCurationJob.status == AWAITING_MARKDOWN)
+            .order_by(PaperCurationJob.created_at)
+            .all()
+        ):
+            paper = self.db.get(Paper, row.paper_id)
+            if paper is not None and self.markdown_available(paper, self.settings):
+                CodexPaperJobService.requeue_awaiting_markdown(row)
+                released += 1
+        return released
+
     def reconcile(
         self,
         *,
@@ -538,6 +554,7 @@ class HFDailyCurationService:
             "missing_imports": [],
             "already_satisfied": 0,
             "released_markdown_ready": 0,
+            "released_admin_markdown_ready": self.release_admin_awaiting_markdown(),
             "retried": 0,
         }
 
