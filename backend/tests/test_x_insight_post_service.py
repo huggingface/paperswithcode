@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import fitz
 import httpx
+import pytest
 
 from backend.services import x_insight_post_service as service
 from backend.services.x_insight_cards import Bar, render_bar_card, render_list_card
@@ -218,3 +219,92 @@ def test_brand_fonts_load_with_weights_and_mark_is_square():
     assert image.getpixel((0, 0)) == LIGHT.ink
     assert image.getpixel((8, 8)) == LIGHT.bg
     assert image.getpixel((16, 16)) == LIGHT.ink
+
+
+SOTA_FACTS = {
+    "benchmark": "IFEval",
+    "model": "LFM2.5-24B-A2B",
+    "value": "96.75",
+    "metric": "Accuracy",
+    "previous_model": "Rufus-Air",
+    "previous_value": "95.4",
+}
+
+
+def test_sota_text_congratulates_handles_then_org_then_nobody():
+    assert service.sota_text(
+        SOTA_FACTS, handles=["liquidai"], organization="Liquid AI"
+    ) == (
+        "Congrats @liquidai on achieving SOTA on IFEval!\n\n"
+        "LFM2.5-24B-A2B scores 96.75 Accuracy.\n\n"
+        "That puts it ahead of Rufus-Air at 95.4."
+    )
+    assert service.sota_text(
+        SOTA_FACTS, handles=["a", "b"], organization=None
+    ).startswith("Congrats @a and @b on achieving SOTA on IFEval!")
+    assert service.sota_text(
+        SOTA_FACTS, handles=[], organization="Liquid AI"
+    ).startswith("Congrats to Liquid AI on achieving SOTA on IFEval!")
+    assert service.sota_text(SOTA_FACTS, handles=[], organization=None).startswith(
+        "New SOTA on IFEval!"
+    )
+
+
+def _paper_with(org=None):
+    organizations = [org] if org else []
+    return SimpleNamespace(id=1, organizations=organizations)
+
+
+def test_sota_credit_prefers_the_org_account_then_hf_then_authors():
+    liquid = SimpleNamespace(name="Liquid AI", slug="liquidai", hf_slug="LiquidAI")
+    threads = [("songdng", "Song"), ("liquidai", "Liquid AI")]
+    never = lambda slug: pytest.fail("HF should not be fetched")  # noqa: E731
+    assert service.sota_credit(FakeDb(threads), _paper_with(liquid), never) == (
+        ["liquidai"],
+        "Liquid AI",
+    )
+    assert service.sota_credit(
+        FakeDb([("songdng", "Song")]), _paper_with(liquid), lambda slug: "liquidai"
+    ) == (["liquidai"], "Liquid AI")
+    assert service.sota_credit(
+        FakeDb([("songdng", "Song"), ("x2", "B"), ("x3", "C")]),
+        _paper_with(liquid),
+        lambda slug: None,
+    ) == (["songdng", "x2"], "Liquid AI")
+    assert service.sota_credit(
+        FakeDb([("bad handle!", "?")]), _paper_with(), never
+    ) == (
+        [],
+        None,
+    )
+
+
+def test_accept_rewrite_keeps_mentions_exactly():
+    draft = "Congrats @liquidai on achieving SOTA on IFEval! It scores 96.75."
+    assert accept_rewrite(
+        draft, "Congrats @liquidai: SOTA on IFEval with 96.75.", max_chars=280
+    )
+    assert not accept_rewrite(
+        draft, "Congrats Liquid AI: SOTA on IFEval, 96.75.", max_chars=280
+    )
+    assert not accept_rewrite(
+        draft, "Congrats @liquidai and @elonmusk! 96.75.", max_chars=280
+    )
+
+
+def test_hf_org_x_handle_reads_a_single_profile_link(monkeypatch):
+    def page(html, status=200):
+        return lambda url, timeout: httpx.Response(status, text=html)
+
+    monkeypatch.setattr(
+        service.httpx, "get", page('<a href="https://twitter.com/liquidai">x</a>')
+    )
+    assert service.hf_org_x_handle("LiquidAI") == "liquidai"
+    monkeypatch.setattr(
+        service.httpx,
+        "get",
+        page('<a href="https://x.com/a"></a><a href="https://x.com/b"></a>'),
+    )
+    assert service.hf_org_x_handle("Org") is None  # ambiguous
+    monkeypatch.setattr(service.httpx, "get", page("", status=404))
+    assert service.hf_org_x_handle("Missing") is None
