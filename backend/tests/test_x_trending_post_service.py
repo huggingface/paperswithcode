@@ -46,6 +46,13 @@ def test_compose_post_truncates_a_long_first_sentence_at_a_word():
     assert weighted_length(text) <= 100
 
 
+def test_compose_post_truncation_counts_the_ellipsis_as_two():
+    for limit in range(20, 60):
+        text = compose_post(" ".join(["word"] * 30), "", max_chars=limit)
+        assert text.endswith("…")
+        assert weighted_length(text) <= limit
+
+
 def test_weighted_length_counts_wide_characters_twice():
     assert weighted_length("ab—é") == 4
     assert weighted_length("模型") == 4
@@ -160,6 +167,20 @@ def test_post_trending_paper_skips_unrenderable_pdf_and_records_post(monkeypatch
     (record,) = db.added
     assert (record.paper_id, record.post_id, record.reply_id) == (2, "post1", "post2")
     assert db.commits == 2
+
+
+def test_post_trending_paper_skips_unreadable_pdfs(monkeypatch):
+    papers = [_paper(1, "2610.00001"), _paper(2, "2610.00002"), _paper(3, "x")]
+    monkeypatch.setattr(service, "candidate_papers", lambda db, **_: papers)
+    pdfs = {1: b"garbage", 2: b"%PDF-1.4\n%%EOF"}
+    report = service.post_trending_paper(
+        FakeDb(),
+        poster=None,
+        fetch_pdf=lambda paper: pdfs.get(paper.id) or _pdf(),
+        max_chars=280,
+    )
+    assert report.paper_id == 3
+    assert [error["paper_id"] for error in report.errors] == [1, 2]
 
 
 def test_post_trending_paper_dry_run_posts_nothing(monkeypatch):

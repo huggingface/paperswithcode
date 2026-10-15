@@ -39,6 +39,15 @@ CANDIDATES_PER_RUN = 5
 RENDER_ZOOM = 2.0
 MAX_IMAGE_BYTES = 5 * 1024 * 1024
 ELLIPSIS = "…"
+# Download failures, unreadable PDFs (PyMuPDF raises FileDataError, a
+# RuntimeError, or low-level FzErrorBase), and PDFs without pages.
+RENDER_ERRORS = (
+    httpx.HTTPError,
+    ValueError,
+    RuntimeError,
+    IndexError,
+    fitz.mupdf.FzErrorBase,
+)
 _SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -140,7 +149,8 @@ def weighted_length(text: str) -> int:
 
 def _truncate(text: str, limit: int) -> str:
     """Cut at a word boundary so the result plus an ellipsis fits `limit`."""
-    while text and weighted_length(text) + 1 > limit:
+    limit -= weighted_length(ELLIPSIS)
+    while text and weighted_length(text) > limit:
         cut = text.rfind(" ")
         text = text[:cut] if cut > 0 else text[:-1]
     return text.rstrip(" ,;:") + ELLIPSIS
@@ -246,7 +256,7 @@ def post_trending_paper(
     for paper in candidate_papers(db, today=today, limit=CANDIDATES_PER_RUN):
         try:
             image = render_first_page(fetch_pdf(paper))
-        except (httpx.HTTPError, ValueError, RuntimeError) as error:
+        except RENDER_ERRORS as error:
             report.errors.append({"paper_id": paper.id, "error": str(error)[:300]})
             continue
         report.paper_id = paper.id

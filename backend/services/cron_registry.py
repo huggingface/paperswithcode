@@ -1649,10 +1649,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=600,
         critical=False,
         healthy_no_work_allowed=True,
-        db_freshness_query="""
-            SELECT max(posted_at) AS last_write, count(*) AS posted_papers
-            FROM paper_x_posts
-        """,
+        # No DB freshness: a run with nothing left to post writes no row.
+        db_freshness_query=None,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
