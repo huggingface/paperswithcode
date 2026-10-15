@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useEffect, useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
@@ -79,6 +79,15 @@ const TagsIndexView: React.FC = () => {
     });
   }, [taxonomyQ.data]);
 
+  // Area links (`/tasks#area-…`) open the full listing, whose sections only
+  // exist once the taxonomy arrives, so scroll to the anchor after it loads.
+  useEffect(() => {
+    if (!taxonomyQ.data || !window.location.hash) return;
+    document
+      .getElementById(window.location.hash.slice(1))
+      ?.scrollIntoView({ block: "start" });
+  }, [taxonomyQ.data]);
+
   const totalTasks = useMemo(() => {
     return visibleAreas.reduce((s, area) => s + area.tasks.length, 0);
   }, [visibleAreas]);
@@ -137,7 +146,7 @@ const TagsIndexView: React.FC = () => {
             <section
               key={area.id}
               id={`area-${slugify(area.name)}`}
-              style={{ marginBottom: 48 }}
+              style={{ marginBottom: 48, scrollMarginTop: 80 }}
             >
               <div
                 style={{

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { catalogApi } from '@/lib/api/catalog';
@@ -54,10 +54,16 @@ it('opens the tasks directory on trending tasks across areas', async () => {
   expect(screen.queryByRole('link', { name: /World Models/ })).not.toBeInTheDocument();
 });
 
-it('opens the full listing for area anchors and ?view=all', async () => {
+it('opens the full listing at the linked area anchor', async () => {
+  const scrollIntoView = vi.fn();
+  Element.prototype.scrollIntoView = scrollIntoView;
+  window.history.replaceState(null, '', '/tasks#area-vision');
   renderAt('/tasks#area-vision');
   expect(await screen.findByRole('link', { name: /Image Classification/ })).toBeInTheDocument();
   expect(catalogApi.trendingTasks).not.toHaveBeenCalled();
+  await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
+  expect(scrollIntoView.mock.contexts[0]).toHaveAttribute('id', 'area-vision');
+  window.history.replaceState(null, '', '/');
 });
 
 it('opens the methods directory on trending methods', async () => {
