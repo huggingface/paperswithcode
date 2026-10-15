@@ -26,20 +26,39 @@ JOIN methods m ON m.id = pm.method_id AND m.slug = 'continual-learning'
 JOIN tasks t ON t.slug = 'continual-learning'
 ON CONFLICT (paper_id, task_id) DO NOTHING;
 
--- research_follows has no foreign key; move method follows to the task.
-INSERT INTO research_follows (hf_subject, kind, entity_id, created_at)
-SELECT f.hf_subject, 'task', t.id, f.created_at
-FROM research_follows f
-JOIN methods m ON m.id = f.entity_id AND m.slug = 'continual-learning'
-JOIN tasks t ON t.slug = 'continual-learning'
-WHERE f.kind = 'method'
-ON CONFLICT (hf_subject, kind, entity_id) DO NOTHING;
-
-DELETE FROM research_follows f
-USING methods m
-WHERE f.kind = 'method'
-  AND f.entity_id = m.id
-  AND m.slug = 'continual-learning';
+-- research_follows has no foreign key; move method follows to the task in
+-- production (public) and staging (staging schema, when present).
+DO $$
+DECLARE
+    schema_name text;
+    follows regclass;
+BEGIN
+    FOREACH schema_name IN ARRAY ARRAY['public', 'staging'] LOOP
+        CONTINUE WHEN NOT EXISTS (
+            SELECT 1 FROM pg_namespace WHERE nspname = schema_name
+        ) OR NOT has_schema_privilege(schema_name, 'USAGE');
+        follows := to_regclass(format('%I.research_follows', schema_name));
+        CONTINUE WHEN follows IS NULL;
+        EXECUTE format(
+            'INSERT INTO %s (hf_subject, kind, entity_id, created_at)
+             SELECT f.hf_subject, ''task'', t.id, f.created_at
+             FROM %s f
+             JOIN public.methods m ON m.id = f.entity_id AND m.slug = ''continual-learning''
+             JOIN public.tasks t ON t.slug = ''continual-learning''
+             WHERE f.kind = ''method''
+             ON CONFLICT (hf_subject, kind, entity_id) DO NOTHING',
+            follows, follows
+        );
+        EXECUTE format(
+            'DELETE FROM %s f
+             USING public.methods m
+             WHERE f.kind = ''method''
+               AND f.entity_id = m.id
+               AND m.slug = ''continual-learning''',
+            follows
+        );
+    END LOOP;
+END $$;
 
 DELETE FROM methods
 WHERE slug = 'continual-learning';
