@@ -180,6 +180,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
 - **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
 
+## `post_trending_paper_to_x`
+
+- **Effect:** Prints a JSON summary (`paper_id`, `text`, `url`, `post_id`, `reply_id`, `errors`) and inserts one `paper_x_posts` row per post. Posts at most one paper per run: the top `trending_score` arXiv paper from the last 14 days with a TL;DR that was never posted. Exits 0 with an `x_trending_post_skipped` warning (dry run) when the `X_POST_*` OAuth 1.0a keys are unset, and 1 only when candidates existed but none could be fetched and rendered.
+- **Independent proof:** Open `https://x.com/i/status/<post_id>` and confirm the first-page image, title, TL;DR, and the paper link reply.
+- **Correctness:** `X HTTP 401` means bad keys, `403` a read-only app or a post over the account's length limit (`PWC_X_POST_MAX_CHARS`), `402` exhausted credits. A null `paper_id` without errors means every recent trending paper was already posted.
+
 ## `scan_model_releases`
 
 - **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.

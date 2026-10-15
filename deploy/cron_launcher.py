@@ -442,6 +442,15 @@ COMMANDS: dict[str, Job] = {
             "section"
         ),
     ),
+    "post_trending_paper_to_x": job(
+        "-m",
+        "backend.scripts.post_trending_paper_to_x",
+        timeout="15m",
+        idempotency=(
+            "post at most one never-posted trending paper per run; paper_x_posts "
+            "is written right after the post, so a paper is never posted twice"
+        ),
+    ),
     "sweep_conference_deadlines": job(
         "-m",
         "backend.scripts.sweep_conference_deadlines",

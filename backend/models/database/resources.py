@@ -415,6 +415,19 @@ class PaperXThreadScan(Base):
     linked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
+class PaperXPost(Base):
+    """A post on the Papers with Code X account featuring one paper."""
+
+    __tablename__ = "paper_x_posts"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    post_id: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_id: Mapped[Optional[str]] = mapped_column(Text)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PaperRepository(Base):
     """Junction table for papers and repositories (many-to-many relationship)."""
 

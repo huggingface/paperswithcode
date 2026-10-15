@@ -1627,6 +1627,35 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="post_trending_paper_to_x",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(240, offset_minutes=13),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-post-trending-paper-to-x.timer",
+        systemd_service="pwc-cron-post-trending-paper-to-x.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Post Trending Paper to X",
+        category="hourly",
+        schedule="13 */4 * * * (every four hours)",
+        script_path="backend/scripts/post_trending_paper_to_x.py",
+        log_name="post_trending_paper_to_x",
+        process_patterns=("backend.scripts.post_trending_paper_to_x",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "post_trending_paper_to_x.lock"
+        ),
+        expected_runtime_minutes=2,
+        stale_after_minutes=600,
+        critical=False,
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(posted_at) AS last_write, count(*) AS posted_papers
+            FROM paper_x_posts
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="export_enrichment_dashboard",
         output_evaluator="enrichment_snapshot",
         work_metrics_provider="enrichment_snapshot",

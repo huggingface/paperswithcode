@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Post a trending paper to the Papers with Code X account every four hours
+
+[Timer]
+OnCalendar=*-*-* 00/4:13:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-post-trending-paper-to-x.service
+
+[Install]
+WantedBy=timers.target

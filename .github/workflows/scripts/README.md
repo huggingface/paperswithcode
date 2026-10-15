@@ -24,6 +24,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | local `pwc-cron-enqueue-benchmark-gap-review.timer` | `35 6 * * *` | `pwc-cron enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
+| local `pwc-cron-post-trending-paper-to-x.timer` | `13 */4 * * *` | `pwc-cron post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
@@ -195,6 +196,24 @@ a time. Inspect or dry-run it with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.enqueue_benchmark_gap_review --status
+```
+
+`post_trending_paper_to_x.py` posts one trending paper to the Papers with
+Code X account (@paperswithcodee) every four hours. It takes the top
+`trending_score` arXiv paper from the last 14 days that has a TL;DR and was
+never posted, renders the first page of its PDF as an image, and posts the
+title, a new line, and the Luna TL;DR with that image, then replies with the
+paper page link. `paper_x_posts` records each posted paper so none is posted
+twice. It needs the posting account's OAuth 1.0a keys in `production-cron.env`
+(`X_POST_CONSUMER_KEY`, `X_POST_CONSUMER_SECRET`, `X_POST_ACCESS_TOKEN`,
+`X_POST_ACCESS_TOKEN_SECRET`; the X app needs Read and Write permission) and
+only previews the post without them. Posts are capped at
+`PWC_X_POST_MAX_CHARS` (default 280; raise it when the account has X Premium
+long posts), dropping trailing TL;DR sentences to fit. Preview the next post
+with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.post_trending_paper_to_x --dry-run --save-image /tmp/page.png
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither
