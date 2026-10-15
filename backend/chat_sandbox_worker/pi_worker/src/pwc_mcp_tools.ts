@@ -55,13 +55,15 @@ const object = (value: unknown): value is ObjectValue => Boolean(value && typeof
 const PAPER_PAGINATION = "pwc-paper-pagination-v1";
 const PAGINATION_HELP = 'To read the next page of the same paper, pass cursor: "next". Omit cursor to start again. The application retains the exact continuation token; never construct one.';
 
-function paperCursor(entries: SessionEntry[], paper: unknown): string {
+// Models often open a paper with cursor "next"; with no saved page on this
+// branch that means the first page, so it reads from the beginning.
+function paperCursor(entries: SessionEntry[], paper: unknown): string | undefined {
   for (const entry of entries.toReversed()) {
     if (entry.type !== "custom" || entry.customType !== PAPER_PAGINATION || !object(entry.data) || entry.data.paper !== paper) continue;
     if (typeof entry.data.cursor === "string") return entry.data.cursor;
     throw new Error("This paper has no next page. Omit cursor to read from the beginning.");
   }
-  throw new Error("No saved page for this paper in this conversation branch. Omit cursor to read from the beginning.");
+  return undefined;
 }
 
 export async function requestPwcMcp(
@@ -154,7 +156,7 @@ export function createPwcMcpToolsExtension(
           // Resolve before yielding: concurrent identical requests read the same page,
           // rather than silently skipping ahead as another request completes.
           const requestArgs = name === "read_paper" && args.cursor === "next"
-            ? { ...args, cursor: paperCursor(ctx.sessionManager.getBranch(), args.paper) } : args;
+            ? { ...args, cursor: paperCursor(ctx.sessionManager.getBranch(), args.paper) ?? null } : args;
           const release = await gate.acquire(signal);
           let result: ObjectValue;
           try { result = await requestPwcMcp(gateway, name, requestArgs, signal, fetcher); }

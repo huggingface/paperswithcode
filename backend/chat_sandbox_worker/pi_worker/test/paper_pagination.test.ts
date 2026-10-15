@@ -51,9 +51,21 @@ test("pagination survives session restore and follows the selected branch, not o
   restored.branch(branch);
   await resumed.read("paper-a", "next");
   assert.equal(resumed.calls[1].cursor, "paper-a:first:signed");
-  await assert.rejects(resumed.read("paper-b", "next"), /No saved page/);
-  const unrelated = await reader(SessionManager.inMemory(), () => { throw new Error("must not fetch"); });
-  await assert.rejects(unrelated.read("paper-a", "next"), /No saved page/);
+  await resumed.read("paper-b", "next");
+  assert.equal(resumed.calls[2].cursor, undefined);
+  const unrelated = await reader(SessionManager.inMemory(), () => ({ structuredContent: { next_cursor: null } }));
+  await unrelated.read("paper-a", "next");
+  assert.deepEqual(unrelated.calls, [{ paper: "paper-a" }]);
+});
+
+test("a first read with cursor next starts at the beginning and then pages on", async () => {
+  // Production chat: 34 read_paper calls a week opened a paper with cursor
+  // "next" and failed with "No saved page for this paper".
+  const manager = SessionManager.inMemory();
+  const r = await reader(manager, args => ({ structuredContent: { text: args.cursor ? "page two" : "page one", next_cursor: args.cursor ? null : "signed-two" } }));
+  assert.deepEqual(JSON.parse((await r.read("2610.17552", "next")).content[0].text), { next_cursor: "next", text: "page one" });
+  assert.equal(JSON.parse((await r.read("2610.17552", "next")).content[0].text).text, "page two");
+  assert.deepEqual(r.calls, [{ paper: "2610.17552" }, { paper: "2610.17552", cursor: "signed-two" }]);
 });
 
 test("failed or expired continuation does not advance state; raw historical cursors still work", async () => {
