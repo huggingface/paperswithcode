@@ -55,4 +55,16 @@
   .sidebar-section-top-domains { order: 2; }
   .sidebar-section-trending-domains { order: 3; }
   .feed-content { order: 4; }
+  .sidebar-section-tools { order: 5; }
+}
+
+.sidebar-tools-copy {
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-faint);
+  margin: 0 0 6px;
+}
+.sidebar-section-tools code {
+  font-family: var(--mono);
+  font-size: 12px;
 }

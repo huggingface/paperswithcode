@@ -463,6 +463,25 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               </Link>
             ))}
           </div>
+
+          <div className="sidebar-section sidebar-section-tools">
+            <div className="sidebar-label">Use PwC from your agent</div>
+            <p className="sidebar-tools-copy">
+              Search papers, benchmarks, and leaderboards from the terminal or any MCP
+              client.
+            </p>
+            <a
+              href="https://github.com/huggingface/pwc-cli"
+              target="_blank"
+              rel="noreferrer"
+              className="sidebar-link"
+            >
+              <code>pwc</code> CLI →
+            </a>
+            <Link to="/mcp" className="sidebar-link">
+              MCP server →
+            </Link>
+          </div>
         </aside>
 
         <div className="feed-main">
