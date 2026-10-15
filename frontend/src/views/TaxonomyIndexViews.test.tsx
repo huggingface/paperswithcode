@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { catalogApi } from '@/lib/api/catalog';
@@ -38,48 +38,45 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); });
 
-it('opens the tasks directory on trending tasks across areas', async () => {
-  renderAt('/tasks');
+it('shows trending tasks across areas above the full domain listing', async () => {
+  const { container } = renderAt('/tasks');
   const link = await screen.findByRole('link', { name: /World Models/ });
   expect(link).toHaveAttribute('href', '/tasks/world-models');
   expect(link).toHaveTextContent('General');
   expect(link).toHaveTextContent('91 papers / 30d');
   expect(link).toHaveTextContent('2.1×');
-  expect(screen.getByRole('tab', { name: 'trending' })).toHaveAttribute('aria-selected', 'true');
-  expect(catalogApi.trendingTasks).toHaveBeenCalledWith({ limit: 24, min_recent_papers: 10 });
-  expect(catalogApi.areasWithTasks).not.toHaveBeenCalled();
-
-  fireEvent.click(screen.getByRole('tab', { name: 'all domains' }));
-  expect(await screen.findByRole('link', { name: /Image Classification/ })).toBeInTheDocument();
-  expect(screen.queryByRole('link', { name: /World Models/ })).not.toBeInTheDocument();
+  expect(catalogApi.trendingTasks).toHaveBeenCalledWith({ limit: 12, min_recent_papers: 10 });
+  const allTask = await screen.findByRole('link', { name: /Image Classification/ });
+  const trending = container.querySelector('#trending');
+  expect(trending).toContainElement(link);
+  expect(trending).not.toContainElement(allTask);
+  expect(trending!.compareDocumentPosition(allTask) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
 });
 
-it('opens the full listing at the linked area anchor', async () => {
+it('scrolls area links to their section', async () => {
   const scrollIntoView = vi.fn();
   Element.prototype.scrollIntoView = scrollIntoView;
   window.history.replaceState(null, '', '/tasks#area-vision');
   renderAt('/tasks#area-vision');
   expect(await screen.findByRole('link', { name: /Image Classification/ })).toBeInTheDocument();
-  expect(catalogApi.trendingTasks).not.toHaveBeenCalled();
   await waitFor(() => expect(scrollIntoView).toHaveBeenCalledWith({ block: 'start' }));
   expect(scrollIntoView.mock.contexts[0]).toHaveAttribute('id', 'area-vision');
   window.history.replaceState(null, '', '/');
 });
 
-it('opens the methods directory on trending methods', async () => {
-  renderAt('/methods');
+it('shows trending methods above the full method listing', async () => {
+  const { container } = renderAt('/methods');
   const link = await screen.findByRole('link', { name: /GRPO/ });
   expect(link).toHaveAttribute('href', '/methods/grpo');
   expect(link).toHaveTextContent('174 papers / 30d');
-  expect(catalogApi.methodIndex).not.toHaveBeenCalled();
-
-  fireEvent.click(screen.getByRole('tab', { name: 'all methods' }));
-  expect(await screen.findByRole('link', { name: /Dropout/ })).toBeInTheDocument();
+  expect(catalogApi.trendingMethods).toHaveBeenCalledWith({ limit: 12 });
+  const allMethod = await screen.findByRole('link', { name: /Dropout/ });
+  expect(container.querySelector('#trending')).not.toContainElement(allMethod);
 });
 
-it('keeps ?view=all on the methods listing', async () => {
-  renderAt('/methods?view=all');
+it('hides the trending section when nothing is gaining momentum', async () => {
+  vi.mocked(catalogApi.trendingMethods).mockResolvedValue({ recent_days: 30, baseline_days: 180, results: [] });
+  const { container } = renderAt('/methods');
   expect(await screen.findByRole('link', { name: /Dropout/ })).toBeInTheDocument();
-  expect(screen.getByRole('tab', { name: 'all methods' })).toHaveAttribute('aria-selected', 'true');
-  expect(catalogApi.trendingMethods).not.toHaveBeenCalled();
+  expect(container.querySelector('#trending')).toBeNull();
 });

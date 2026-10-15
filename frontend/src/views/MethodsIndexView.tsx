@@ -9,15 +9,13 @@ import { slugify } from "@/lib/slug";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
-import { TaxonomyViewTabs, TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
-import { useTaxonomyView } from "@/hooks/useTaxonomyView";
+import { TrendingTaxonomyGrid } from "@/components/TaxonomyTrending";
 
 /**
  * Methods index — methods grouped by `area_id`, sorted by trend score desc
  * within each area. Backend areas are the single source of grouping truth.
  */
 const MethodsIndexView: React.FC = () => {
-  const [view, setView] = useTaxonomyView();
   const areasQ = useQuery({
     queryKey: ["areas-all"],
     queryFn: () => catalogApi.listAreas({ page_size: 50, ordering: "name" }),
@@ -30,13 +28,11 @@ const MethodsIndexView: React.FC = () => {
     queryKey: ["methods-all"],
     queryFn: async () => (await catalogApi.methodIndex()).results,
     staleTime: 10 * 60 * 1000,
-    enabled: view === "all",
   });
   const trendingQ = useQuery({
     queryKey: ["trending-methods-directory"],
-    queryFn: () => catalogApi.trendingMethods({ limit: 24 }),
+    queryFn: () => catalogApi.trendingMethods({ limit: 12 }),
     staleTime: 10 * 60 * 1000,
-    enabled: view === "trending",
   });
 
   const trendingItems = useMemo(() => {
@@ -84,7 +80,7 @@ const MethodsIndexView: React.FC = () => {
       ?.scrollIntoView({ block: "start" });
   }, [areasQ.data, methodsQ.data]);
 
-  if (view === "all" && (areasQ.error || methodsQ.error)) {
+  if (areasQ.error || methodsQ.error) {
     return (
       <div className="page">
         <Alert variant="destructive">
@@ -102,26 +98,24 @@ const MethodsIndexView: React.FC = () => {
             Methods <em>library</em>
           </h1>
           <div className="feed-subtitle">
-            Common techniques used across AI research.
-            {view === "all" &&
-              " Trend scores show papers using each method per 30 days, measured over the latest 90 days; the flame marks the top quartile."}
+            Common techniques used across AI research. Trend scores show papers
+            using each method per 30 days, measured over the latest 90 days;
+            the flame marks the top quartile.
           </div>
         </div>
       </div>
 
-      <TaxonomyViewTabs view={view} onChange={setView} allLabel="all methods" />
+      <TrendingTaxonomyGrid
+        noun="method"
+        items={trendingItems}
+        recentDays={trendingQ.data?.recent_days}
+        baselineDays={trendingQ.data?.baseline_days}
+        isLoading={trendingQ.isLoading}
+        error={trendingQ.error}
+        mono
+      />
 
-      {view === "trending" ? (
-        <TrendingTaxonomyGrid
-          noun="method"
-          items={trendingItems}
-          recentDays={trendingQ.data?.recent_days}
-          baselineDays={trendingQ.data?.baseline_days}
-          isLoading={trendingQ.isLoading}
-          error={trendingQ.error}
-          mono
-        />
-      ) : (areasQ.isLoading || methodsQ.isLoading) ? (
+      {(areasQ.isLoading || methodsQ.isLoading) ? (
         <div style={{ display: "flex", flexDirection: "column", gap: 32 }}>
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i}>
