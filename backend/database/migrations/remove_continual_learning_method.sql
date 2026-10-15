@@ -26,5 +26,20 @@ JOIN methods m ON m.id = pm.method_id AND m.slug = 'continual-learning'
 JOIN tasks t ON t.slug = 'continual-learning'
 ON CONFLICT (paper_id, task_id) DO NOTHING;
 
+-- research_follows has no foreign key; move method follows to the task.
+INSERT INTO research_follows (hf_subject, kind, entity_id, created_at)
+SELECT f.hf_subject, 'task', t.id, f.created_at
+FROM research_follows f
+JOIN methods m ON m.id = f.entity_id AND m.slug = 'continual-learning'
+JOIN tasks t ON t.slug = 'continual-learning'
+WHERE f.kind = 'method'
+ON CONFLICT (hf_subject, kind, entity_id) DO NOTHING;
+
+DELETE FROM research_follows f
+USING methods m
+WHERE f.kind = 'method'
+  AND f.entity_id = m.id
+  AND m.slug = 'continual-learning';
+
 DELETE FROM methods
 WHERE slug = 'continual-learning';
