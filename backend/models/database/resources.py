@@ -428,6 +428,20 @@ class PaperXPost(Base):
     posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class XInsightPost(Base):
+    """An insight post (SOTA, trends, roundups) on the Papers with Code X account."""
+
+    __tablename__ = "x_insight_posts"
+    __table_args__ = (Index("idx_x_insight_posts_kind_subject", "kind", "subject_key"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    subject_key: Mapped[str] = mapped_column(Text, nullable=False)
+    post_id: Mapped[str] = mapped_column(Text, nullable=False)
+    reply_id: Mapped[Optional[str]] = mapped_column(Text)
+    posted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class PaperRepository(Base):
     """Junction table for papers and repositories (many-to-many relationship)."""
 

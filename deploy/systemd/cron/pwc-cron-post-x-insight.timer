@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Post a SOTA, trend, or roundup insight to X twice daily
+
+[Timer]
+OnCalendar=*-*-* 09,17:43:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-post-x-insight.service
+
+[Install]
+WantedBy=timers.target

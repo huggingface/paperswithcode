@@ -25,6 +25,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
 | local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
 | local `pwc-cron-post-trending-paper-to-x.timer` | `13 */4 * * *` | `pwc-cron post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
+| local `pwc-cron-post-x-insight.timer` | `43 9,17 * * *` | `pwc-cron post_x_insight` | `backend/scripts/post_x_insight.py` |
 | `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
 | `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
 | `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
@@ -214,6 +215,24 @@ with:
 
 ```bash
 uv run --env-file backend/keys.env python -m backend.scripts.post_trending_paper_to_x --dry-run --save-image /tmp/page.png
+```
+
+`post_x_insight.py` posts one insight to the same X account twice a day.
+The 09:43 UTC run leads with the top trending papers of the previous month (on
+the 1st) or week (Mondays), then a new SOTA: a paper published in the last 45
+days whose result, added in the last 3 days, took first place on a leaderboard
+with at least 5 entries and beats the previous best from another paper (at
+most one SOTA post per 20 hours). The 17:43 UTC run posts the fastest-growing
+benchmark (site-wide reporting rate, 90 vs. 180 days), method, or task (share
+of new papers, 30 vs. 180 days), whichever kind was posted least recently;
+the same benchmark, method, or task returns after 30 days at the earliest.
+Each post has a chart card and a link reply. Luna (`PWC_OPENAI_API_KEY`)
+rewrites the template text, and the rewrite is kept only if it keeps every
+number and adds none beyond the facts. `x_insight_posts` records each post.
+Preview one kind with:
+
+```bash
+uv run --env-file backend/keys.env python -m backend.scripts.post_x_insight --dry-run --kind new_sota --save-image /tmp/card.png
 ```
 
 `scan_model_releases.py` is a read-only radar for model releases that neither

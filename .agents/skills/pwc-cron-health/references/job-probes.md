@@ -186,6 +186,12 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Open `https://x.com/i/status/<post_id>` and confirm the first-page image, title, TL;DR, and the paper link reply.
 - **Correctness:** `X HTTP 401` means bad keys, `403` a read-only app or a post over the account's length limit (`PWC_X_POST_MAX_CHARS`), `402` exhausted credits. A null `paper_id` without errors means every recent trending paper was already posted.
 
+## `post_x_insight`
+
+- **Effect:** Prints a JSON summary (`kind`, `subject_key`, `text`, `template`, `url`, `post_id`, `reply_id`, `tried`) and inserts one `x_insight_posts` row per post. A null `kind` means no tried kind had anything new (healthy). An `x_insight_rewrite_rejected` warning means Luna changed a number and the template was posted instead.
+- **Independent proof:** Open `https://x.com/i/status/<post_id>`; check the numbers against the linked benchmark, method, or task page.
+- **Correctness:** Same X errors as `post_trending_paper_to_x` (shared `X_POST_*` keys and credits). A SOTA post must name a paper published in the last 45 days that leads a leaderboard with at least 5 entries.
+
 ## `scan_model_releases`
 
 - **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.

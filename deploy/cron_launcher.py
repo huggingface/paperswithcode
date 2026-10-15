@@ -451,6 +451,15 @@ COMMANDS: dict[str, Job] = {
             "is written right after the post, so a paper is never posted twice"
         ),
     ),
+    "post_x_insight": job(
+        "-m",
+        "backend.scripts.post_x_insight",
+        timeout="15m",
+        idempotency=(
+            "post at most one insight per run; x_insight_posts is written right "
+            "after the post, so a subject is never posted twice"
+        ),
+    ),
     "sweep_conference_deadlines": job(
         "-m",
         "backend.scripts.sweep_conference_deadlines",

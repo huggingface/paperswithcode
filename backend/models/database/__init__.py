@@ -165,6 +165,7 @@ from backend.models.database.resources import (
     PaperProjectPage,
     PaperXThread,
     PaperXPost,
+    XInsightPost,
     PaperXThreadScan,
     PaperRepository,
 )
@@ -310,6 +311,7 @@ __all__ = [
     "PaperProjectPage",
     "PaperXThread",
     "PaperXPost",
+    "XInsightPost",
     "PaperXThreadScan",
     "PaperRepository",
     "Area",
