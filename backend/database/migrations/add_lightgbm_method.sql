@@ -83,7 +83,6 @@ SELECT p.id AS paper_id, m.id AS method_id
 FROM papers p
 CROSS JOIN methods m
 WHERE m.slug = 'lightgbm'
-  AND p.is_latest_version
   AND p.id IN (
         2644, -- Application of Machine Learning in Forecasting International Trade Tre
         14412, -- Spam-T5: Benchmarking Large Language Models for Few-Shot Email Spam De
@@ -134,7 +133,6 @@ SELECT p.id AS paper_id, m.id AS method_id
 FROM papers p
 CROSS JOIN methods m
 WHERE m.slug = 'lightgbm'
-  AND p.is_latest_version
   AND p.id IN (
         5856, -- SAINT: Improved Neural Networks for Tabular Data via Row Attention and
         9317, -- Hopular: Modern Hopfield Networks for Tabular Data

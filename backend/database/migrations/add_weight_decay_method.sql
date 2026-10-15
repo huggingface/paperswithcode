@@ -67,7 +67,6 @@ SELECT p.id AS paper_id, m.id AS method_id
 FROM papers p
 CROSS JOIN methods m
 WHERE m.slug = 'weight-decay'
-  AND p.is_latest_version
   AND p.id IN (
         762, -- On Calibration of Modern Neural Networks
         765, -- L2 Regularization versus Batch and Weight Normalization
@@ -177,7 +176,6 @@ SELECT p.id AS paper_id, m.id AS method_id
 FROM papers p
 CROSS JOIN methods m
 WHERE m.slug = 'weight-decay'
-  AND p.is_latest_version
   AND p.id IN (
         1579, -- DropBlock: A regularization method for convolutional networks
         6329, -- Rethinking and Improving Relative Position Encoding for Vision Transfo
