@@ -28,7 +28,14 @@ def _pdf(pages: int = 2) -> bytes:
 
 def test_compose_post_keeps_title_newline_tldr_when_it_fits():
     text = compose_post("A  Title", "First point. Second point.", max_chars=280)
-    assert text == "A Title\n\nFirst point. Second point."
+    assert text == "A Title\n\nFirst point.\n\nSecond point."
+
+
+def test_paragraphs_puts_each_sentence_on_its_own_paragraph():
+    assert service.paragraphs("A is 2.5x faster. B vs. C wins!\nD?  E.") == (
+        "A is 2.5x faster.\n\nB vs. C wins!\n\nD?\n\nE."
+    )
+    assert service.paragraphs("One.\n\n\nTwo.") == "One.\n\nTwo."
 
 
 def test_compose_post_drops_trailing_sentences_to_fit():

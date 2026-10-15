@@ -36,8 +36,8 @@ def test_paper_label_prefers_the_name_before_the_colon():
 def test_compose_list_drops_entries_to_fit_but_keeps_three():
     labels = ["x" * 80] * 5
     text = compose_list("Top papers:", labels)
-    assert text.count("\n") == 4  # head, blank line, three entries
-    assert compose_list("Top:", ["A", "B", "C"]) == "Top:\n\n1. A\n2. B\n3. C"
+    assert text.count("\n\n") == 3  # head and three entries, blank-line separated
+    assert compose_list("Top:", ["A", "B", "C"]) == "Top:\n\n1. A\n\n2. B\n\n3. C"
 
 
 def test_accept_rewrite_guards_numbers_links_and_length():

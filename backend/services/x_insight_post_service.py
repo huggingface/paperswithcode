@@ -43,7 +43,11 @@ from backend.services.method_service import MethodService
 from backend.services.task_service import TaskService
 from backend.services.x_insight_cards import Bar, render_bar_card, render_list_card
 from backend.services.x_thread_discovery_service import short_name
-from backend.services.x_trending_post_service import XPoster, weighted_length
+from backend.services.x_trending_post_service import (
+    XPoster,
+    paragraphs,
+    weighted_length,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -71,9 +75,10 @@ reading. Lead with the most interesting fact. Plain, specific, confident; no \
 hype words ("groundbreaking", "game-changer", "revolutionary"), no emojis, \
 hashtags, links, or questions to the reader.
 
-Hard rules: keep every number exactly as written in the draft, add no new \
-numbers, and state nothing that is not in the draft or the facts. Keep names \
-as written. Stay within the character limit. Output only the post text."""
+Hard rules: keep the draft's opening claim (such as "New SOTA on X") at the \
+start, keep every number exactly as written in the draft, add no new numbers, and state nothing that is not in the draft or the facts. Keep names \
+as written. Put each sentence on its own line with an empty line between \
+sentences. Stay within the character limit. Output only the post text."""
 
 
 @dataclass
@@ -171,10 +176,10 @@ def top_papers(db: Session, *, period: str, now: datetime) -> Insight | None:
 
 
 def compose_list(head: str, labels: list[str], max_chars: int = 280) -> str:
-    """Numbered list, dropping entries from the end until it fits (min 3)."""
+    """Numbered list, an empty line between entries, dropping entries to fit (min 3)."""
     while True:
         lines = [f"{index + 1}. {label}" for index, label in enumerate(labels)]
-        text = head + "\n\n" + "\n".join(lines)
+        text = "\n\n".join([head, *lines])
         if weighted_length(text) <= max_chars or len(labels) <= 3:
             return text
         labels = labels[:-1]
@@ -191,7 +196,13 @@ class Row:
     value: float
 
 
-def _leaderboard(db: Session, task_id: int, dataset_id: int, metric: str) -> list[Row]:
+def _leaderboard(db: Session, dataset_id: int, metric: str) -> list[Row]:
+    """Every result for this benchmark and metric, across all tasks.
+
+    A benchmark can have a leaderboard under several tasks (IFEval under both
+    Instruction Following and Language Modeling); a new SOTA has to beat them
+    all, or the site itself would contradict the post.
+    """
     rows = db.execute(
         select(
             Evaluation.id,
@@ -199,7 +210,6 @@ def _leaderboard(db: Session, task_id: int, dataset_id: int, metric: str) -> lis
             Evaluation.model_name,
             Evaluation.metrics[metric].astext,
         ).where(
-            Evaluation.task_id == task_id,
             Evaluation.dataset_id == dataset_id,
             Evaluation.metrics.has_key(metric),
         )
@@ -245,7 +255,7 @@ def new_sota(db: Session, *, now: datetime) -> Insight | None:
         subject = f"{task.id}:{dataset.id}:{metric}:{paper.id}"
         if recently_posted(db, "new_sota", subject, now, ever=True):
             continue
-        rows = _leaderboard(db, task.id, dataset.id, metric)
+        rows = _leaderboard(db, dataset.id, metric)
         if len(rows) < SOTA_MIN_ENTRIES or (best and len(rows) <= best[0]):
             continue
         direction = db.scalar(select(Metric.direction).where(Metric.name == metric))
@@ -263,9 +273,9 @@ def new_sota(db: Session, *, now: datetime) -> Insight | None:
         if mine not in top:
             top = [mine, *top[:5]]
         text = (
-            f"New SOTA on {dataset.name} ({task.name}): {mine.model} reaches "
-            f"{fmt(mine.value)} {metric}, ahead of {previous.model} at "
-            f"{fmt(previous.value)}."
+            f"New SOTA on {dataset.name}: {mine.model} reaches "
+            f"{fmt(mine.value)} {metric}.\n\n"
+            f"That puts it ahead of {previous.model} at {fmt(previous.value)}."
         )
         link = f"{SITE}/benchmark/{dataset.slug}?task={task.slug}&eval={evaluation.id}"
         image = render_bar_card(
@@ -351,11 +361,11 @@ def trending_benchmark(db: Session, *, now: datetime) -> Insight | None:
     if featured.baseline:
         growth = f"up from {featured.baseline} in the 180 days before."
     else:
-        growth = "none did in the 180 days before."
+        growth = "after none in the 180 days before."
     text = (
-        f"{dataset.name} is the fastest-growing benchmark on Papers with Code: "
-        f"{featured.recent} papers reported results on it in the last 90 days; "
-        f"{growth}"
+        f"{dataset.name} is the fastest-growing benchmark on Papers with Code."
+        f"\n\n{featured.recent} papers reported results on it in the last 90 "
+        f"days, {growth}"
     )
     image = render_bar_card(
         "Fastest-growing benchmarks",
@@ -400,8 +410,8 @@ def _trending_taxonomy(
     if featured is None:
         return None
     text = (
-        f"{featured.name} is the fastest-rising {noun} on Papers with Code: "
-        f"{featured.recent_paper_count} papers in the last 30 days, "
+        f"{featured.name} is the fastest-rising {noun} on Papers with Code."
+        f"\n\n{featured.recent_paper_count} papers in the last 30 days: "
         f"{fmt_lift(featured.share_lift)} its share of new papers in the 180 "
         f"days before."
     )
@@ -549,6 +559,7 @@ def write_with_luna(
     except (httpx.HTTPError, ValueError, KeyError, TypeError) as error:
         logger.warning("x_insight_rewrite_failed kind=%s %s", insight.kind, error)
         return insight.text
+    rewrite = paragraphs(rewrite)
     if accept_rewrite(insight.text, rewrite, facts=facts, max_chars=max_chars):
         return rewrite
     logger.warning("x_insight_rewrite_rejected kind=%s", insight.kind)

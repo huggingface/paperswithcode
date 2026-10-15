@@ -48,7 +48,10 @@ RENDER_ERRORS = (
     IndexError,
     fitz.mupdf.FzErrorBase,
 )
-_SENTENCE_END = re.compile(r"(?<=[.!?])\s+")
+# A sentence ends at . ! ? followed by whitespace, except after "vs." etc.
+_SENTENCE_END = re.compile(
+    r"(?<!\bvs\.)(?<!\be\.g\.)(?<!\bi\.e\.)(?<!\bal\.)(?<=[.!?])\s+"
+)
 
 
 @dataclass(frozen=True)
@@ -156,21 +159,37 @@ def _truncate(text: str, limit: int) -> str:
     return text.rstrip(" ,;:") + ELLIPSIS
 
 
+def sentences(text: str) -> list[str]:
+    return [part for part in _SENTENCE_END.split(" ".join(text.split())) if part]
+
+
+def paragraphs(text: str) -> str:
+    """One sentence per paragraph, separated by an empty line (reads best on X)."""
+    return "\n\n".join(
+        sentence
+        for block in re.split(r"\n\s*\n", text.strip())
+        for sentence in sentences(block)
+    )
+
+
 def compose_post(title: str, tldr: str, *, max_chars: int) -> str:
-    """Title, a blank line, then the TL;DR; drop trailing sentences to fit."""
+    """Title, then each TL;DR sentence, separated by empty lines.
+
+    Trailing sentences are dropped to fit `max_chars`.
+    """
     title = " ".join(title.split())
-    sentences = _SENTENCE_END.split(" ".join(tldr.split()))
-    while sentences:
-        text = f"{title}\n\n{' '.join(sentences)}"
+    parts = sentences(tldr)
+    while parts:
+        text = "\n\n".join([title, *parts])
         if weighted_length(text) <= max_chars:
             return text
-        if len(sentences) == 1:
+        if len(parts) == 1:
             break
-        sentences.pop()
+        parts.pop()
     head = f"{title}\n\n"
     room = max_chars - weighted_length(head)
-    if sentences and room >= 40:
-        return head + _truncate(sentences[0], room)
+    if parts and room >= 40:
+        return head + _truncate(parts[0], room)
     return _truncate(title, max_chars)
 
 
