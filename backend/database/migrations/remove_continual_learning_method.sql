@@ -3,7 +3,8 @@
 -- duplicate method (no description, image or source). Carry the method's
 -- curated and manually reviewed paper links over to the task as manual tags
 -- so a keyword rebuild cannot drop them; its other links are already
--- auto-tagged on the task. paper_methods, evidence and exclusions cascade.
+-- auto-tagged on the task. Method follows move to the task; paper_methods,
+-- evidence and exclusions cascade.
 
 INSERT INTO paper_tasks (paper_id, task_id, source)
 SELECT pm.paper_id, t.id, 'manual'
