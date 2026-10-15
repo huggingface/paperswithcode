@@ -1634,15 +1634,6 @@ class CodexPaperJobService:
             and row.attempt_count == 1
         )
 
-    @staticmethod
-    def requeue_awaiting_markdown(row: PaperCurationJob) -> None:
-        """Return a parked admin job to the queue for a fresh remote attempt."""
-        row.status = "queued"
-        row.hf_job_id = None
-        row.error = None
-        row.started_at = None
-        row.finished_at = None
-
     def _evaluate_scheduled_health(self, db: Session, row: PaperCurationJob) -> None:
         if getattr(row, "trigger", "admin") not in {
             "hf-daily-cron",

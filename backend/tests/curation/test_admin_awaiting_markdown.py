@@ -151,3 +151,54 @@ def test_canceling_a_waiting_job_skips_the_finished_remote_job(db):
 
     assert row.status == "canceled"
     api.cancel_job.assert_not_called()
+
+
+def test_newer_admin_job_supersedes_a_waiting_one(db):
+    older = _running_job(db, number=1)
+    _complete(db, older)
+    newer = PaperCurationJob(
+        id=uuid.uuid4(),
+        kind=older.kind,
+        paper_id=older.paper_id,
+        requested_by="nielsr",
+        status="queued",
+        trigger="admin",
+        attempt_count=0,
+        created_at=datetime.now(UTC),
+    )
+    db.add(newer)
+    db.commit()
+
+    service = HFDailyCurationService(
+        db,
+        _settings(),
+        job_service=CodexPaperJobService(),
+        markdown_available=lambda _paper, _settings: True,
+    )
+
+    assert service.release_admin_awaiting_markdown() == 0
+    assert older.status == "canceled"
+    assert newer.status == "queued"
+
+
+def test_release_never_overwrites_a_concurrent_cancel(db):
+    row = _running_job(db)
+    _complete(db, row)
+
+    def cancel_while_checking(_paper, _settings):
+        # An admin cancel commits between the release scan and its update.
+        db.query(PaperCurationJob).filter(PaperCurationJob.id == row.id).update(
+            {"status": "canceled"}
+        )
+        return True
+
+    service = HFDailyCurationService(
+        db,
+        _settings(),
+        job_service=CodexPaperJobService(),
+        markdown_available=cancel_while_checking,
+    )
+
+    assert service.release_admin_awaiting_markdown() == 0
+    db.refresh(row)
+    assert row.status == "canceled"
