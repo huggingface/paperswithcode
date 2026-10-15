@@ -106,15 +106,29 @@ def parse_org_papers_html(
             )
         )
 
-    website_match = re.search(
-        r'rel="nofollow"[^>]*>\s*(https?://[^<\s]+)\s*</a>', decoded
+    return tuple(papers), parse_org_website(decoded)
+
+
+@dataclass(frozen=True)
+class HFOrganizationProfile:
+    hf_slug: str
+    name: str
+    logo_url: str | None
+    website_url: str | None
+    is_verified: bool
+    followers: int
+
+
+def parse_org_website(text: str) -> str | None:
+    match = re.search(
+        r'rel="nofollow"[^>]*>\s*(https?://[^<\s]+)\s*</a>', html.unescape(text)
     )
-    website_url = website_match.group(1).strip() if website_match else None
-    return tuple(papers), website_url
+    return match.group(1).strip() if match else None
 
 
 class HFOrganizationClient:
-    def __init__(self, client: httpx.Client | None = None):
+    def __init__(self, client: httpx.Client | None = None, attempts: int = 6):
+        self.attempts = attempts
         self._owns_client = client is None
         self.client = client or httpx.Client(
             timeout=httpx.Timeout(30),
@@ -126,13 +140,13 @@ class HFOrganizationClient:
         if self._owns_client:
             self.client.close()
 
-    def _get(self, url: str) -> httpx.Response:
+    def _get(self, url: str, params: dict | None = None) -> httpx.Response:
         response = None
-        for attempt in range(6):
-            response = self.client.get(url)
+        for attempt in range(self.attempts):
+            response = self.client.get(url, params=params)
             if response.status_code not in {429, 500, 502, 503, 504}:
                 return response
-            if attempt < 5:
+            if attempt < self.attempts - 1:
                 retry_after = response.headers.get("retry-after")
                 reset_match = re.search(
                     r"(?:^|;)t=(\d+)", response.headers.get("ratelimit", "")
@@ -179,6 +193,40 @@ class HFOrganizationClient:
             upstream_paper_count=overview["numPapers"],
             papers=papers,
         )
+
+    def fetch_profile(self, hf_slug: str) -> HFOrganizationProfile | None:
+        """Return an organization's public profile, or None when it does not exist."""
+        response = self._get(f"{HF_BASE}/api/organizations/{hf_slug}/overview")
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        overview = response.json()
+        if not isinstance(overview, dict) or not isinstance(overview.get("name"), str):
+            raise HFOrganizationError("Organization overview is missing a name")
+        page = self._get(f"{HF_BASE}/{overview['name']}")
+        page.raise_for_status()
+        logo_url = overview.get("avatarUrl")
+        return HFOrganizationProfile(
+            hf_slug=overview["name"],
+            name=str(overview.get("fullname") or overview["name"]).strip(),
+            logo_url=logo_url if isinstance(logo_url, str) else None,
+            website_url=parse_org_website(page.text),
+            is_verified=overview.get("isVerified") is True,
+            followers=int(overview.get("numFollowers") or 0),
+        )
+
+    def search(self, query: str, limit: int = 10) -> list[str]:
+        """Return HF organization handles matching ``query``."""
+        response = self._get(
+            f"{HF_BASE}/api/quicksearch",
+            params={"q": query, "type": "org", "limit": limit},
+        )
+        response.raise_for_status()
+        return [
+            item["name"]
+            for item in response.json().get("orgs", [])
+            if isinstance(item, dict) and isinstance(item.get("name"), str)
+        ]
 
     def fetch_logo(self, url: str) -> tuple[bytes, str]:
         current = url

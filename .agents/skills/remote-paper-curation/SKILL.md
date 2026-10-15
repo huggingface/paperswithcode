@@ -260,6 +260,48 @@ Example:
 }
 ```
 
+### Organizations
+
+For `enrich-paper`, also tag the organizations behind the paper. Read the
+author affiliations on the first page of the PDF (or the Markdown header),
+including footnote markers. Tag the labs, companies, and universities that the
+authors list as their affiliations, at most 10. Skip departments and
+sub-groups when the parent organization is what the catalog lists (for example,
+FAIR is Meta), funding agencies, compute sponsors, and organizations named only
+in acknowledgements.
+
+The context lists the paper's current `organizations`. Find catalog entries
+with the taxonomy search, whose `organizations` results give the ID, name, slug,
+and HF handle:
+
+```bash
+python jobs/curation_api.py taxonomy "Stanford"
+```
+
+Try the short name, the full name, and the HF handle before you decide an
+organization is missing. Submit an existing organization by ID. Submit a
+missing one by its Hugging Face organization handle, found with
+`https://huggingface.co/api/quicksearch?q=<name>&type=org` and confirmed at
+`https://huggingface.co/api/organizations/<handle>/overview`. Look-alike
+handles are common, so choose the verified one (`isVerified`) or the one with
+by far the most followers. Leave out an organization that has no catalog entry
+and no Hugging Face organization. Each entry needs `name` as the paper writes it
+and `evidence` quoting the affiliation line:
+
+```json
+"organizations": [
+  {"organization_id": 11, "name": "Meta", "evidence": "1 FAIR at Meta"},
+  {"hf_slug": "StanfordUniversity", "name": "Stanford University",
+   "evidence": "2 Stanford University"}
+]
+```
+
+Organization links are only added, never removed, so listing only the new
+affiliations is enough. The VPS creates a missing organization from its Hugging
+Face profile (name, website, and logo) only when the profile is verified or
+established and its name matches. The apply response lists skipped entries
+under `organizations.skipped`; mention them in the audit report.
+
 Finish with a concise audit report. The runner reports it to the VPS.
 
 ## Benchmark-gap jobs

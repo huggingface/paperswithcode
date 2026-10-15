@@ -1094,9 +1094,12 @@ class OrganizationSummary(BaseModel):
     name: str = Field(..., description="Organization name (e.g., 'NVIDIA')")
     slug: str = Field(..., description="URL-friendly slug (e.g., 'nvidia')")
     logo_url: Optional[str] = Field(None, description="Organization logo image URL")
-    source: Literal["manual", "hf_org_papers"] = Field(
+    source: Literal["manual", "hf_org_papers", "curation"] = Field(
         ...,
-        description="Association provenance: 'manual' or 'hf_org_papers'",
+        description=(
+            "Association provenance: 'manual', 'hf_org_papers', or 'curation' "
+            "(read from the paper by the enrichment curator)"
+        ),
     )
     added_by_hf_username: Optional[str] = Field(
         None,

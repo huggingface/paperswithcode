@@ -227,6 +227,7 @@ def test_context_projection_preserves_the_worker_payload():
         "hf_models": [],
         "hf_datasets": [],
         "hf_spaces": [],
+        "organizations": [],
         "method_exclusions": [],
         "evaluations": [vars(_stored_evaluation())],
     }

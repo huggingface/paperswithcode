@@ -26,6 +26,25 @@ class CurationLink(BaseModel):
     )
 
 
+class CurationOrganization(BaseModel):
+    """One paper affiliation: an existing catalog organization or an HF org."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    organization_id: int | None = None
+    hf_slug: str | None = Field(
+        default=None, pattern=r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$"
+    )
+    name: str = Field(min_length=1, max_length=200)
+    evidence: str = Field(min_length=1, max_length=1_000)
+
+    @model_validator(mode="after")
+    def _one_target(self) -> "CurationOrganization":
+        if (self.organization_id is None) == (self.hf_slug is None):
+            raise ValueError("Give exactly one of organization_id or hf_slug")
+        return self
+
+
 class EnrichPaperMutation(BaseModel):
     task_ids: list[int] | None = None
     method_ids: list[int] | None = None
@@ -37,6 +56,9 @@ class EnrichPaperMutation(BaseModel):
     hf_models: list[str] | None = Field(default=None, max_length=50)
     hf_datasets: list[str] | None = Field(default=None, max_length=50)
     hf_spaces: list[str] | None = Field(default=None, max_length=50)
+    organizations: list[CurationOrganization] | None = Field(
+        default=None, max_length=10
+    )
     task_removal_reasons: dict[int, str] = Field(default_factory=dict)
     method_removal_reasons: dict[int, str] = Field(default_factory=dict)
     project_page_removal_reasons: dict[str, str] = Field(default_factory=dict)

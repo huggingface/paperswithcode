@@ -21,6 +21,7 @@ from backend.models.database import (
     Method,
     Metric,
     ModelProviderAlias,
+    Organization,
     ModelRelease,
     Paper,
     PaperCurationJob,
@@ -29,6 +30,7 @@ from backend.models.database import (
     PaperMethod,
     PaperMethodEvidence,
     PaperMethodExclusion,
+    PaperOrganization,
     PaperRepository,
     PaperTask,
     Repository,
@@ -58,6 +60,9 @@ from backend.services.codex_add_evals_service import (
     BENCHMARK_GAP_KINDS,
     CodexPaperJobService,
     codex_paper_job_service,
+)
+from backend.services.curation_organization_service import (
+    CurationOrganizationService,
 )
 from backend.services.curation_thumbnail_queue_service import (
     queue_missing_paper_thumbnail,
@@ -461,6 +466,15 @@ class CodexCurationCallbackService:
                 "hf_models": getattr(paper, "hf_models", None) or [],
                 "hf_datasets": getattr(paper, "hf_datasets", None) or [],
                 "hf_spaces": getattr(paper, "hf_spaces", None) or [],
+                "organizations": [
+                    {
+                        "id": organization.id,
+                        "name": organization.name,
+                        "slug": organization.slug,
+                        "hf_slug": organization.hf_slug,
+                    }
+                    for organization in getattr(paper, "organizations", None) or []
+                ],
                 "method_exclusions": [
                     {"method_id": item.method_id, "reason": item.reason}
                     for item in exclusions
@@ -485,6 +499,23 @@ class CodexCurationCallbackService:
                 {"id": method.id, "name": method.name, "slug": method.slug}
                 for method in self.db.query(Method)
                 .filter(or_(Method.name.ilike(pattern), Method.slug.ilike(pattern)))
+                .limit(30)
+            ],
+            "organizations": [
+                {
+                    "id": organization.id,
+                    "name": organization.name,
+                    "slug": organization.slug,
+                    "hf_slug": organization.hf_slug,
+                }
+                for organization in self.db.query(Organization)
+                .filter(
+                    or_(
+                        Organization.name.ilike(pattern),
+                        Organization.slug.ilike(pattern),
+                        Organization.hf_slug.ilike(pattern),
+                    )
+                )
                 .limit(30)
             ],
         }
@@ -703,11 +734,12 @@ class CodexCurationCallbackService:
             created = 0
             updated = 0
             removed = 0
+            organization_links = None
             if row.kind == "add-evals":
                 created, updated = self._apply_evaluations(body)
                 removed = self._apply_evaluation_removals(row, body)
             else:
-                self._apply_enrichment(row, body)
+                organization_links = self._apply_enrichment(row, body)
 
             if hasattr(self.db, "flush"):
                 self.db.flush()
@@ -782,6 +814,8 @@ class CodexCurationCallbackService:
                 )
             if removed:
                 row.mutation_result["evaluations_removed"] = removed
+            if organization_links:
+                row.mutation_result["organizations"] = organization_links
             if row.kind == "add-evals":
                 skipped = self._skipped_configured_leaderboards(body)
                 if skipped:
@@ -966,6 +1000,12 @@ class CodexCurationCallbackService:
                 "hf_models": sorted(paper.hf_models or []),
                 "hf_datasets": sorted(paper.hf_datasets or []),
                 "hf_spaces": sorted(paper.hf_spaces or []),
+                "organizations": sorted(
+                    int(link.organization_id)
+                    for link in self.db.query(PaperOrganization).filter(
+                        PaperOrganization.paper_id == row.paper_id
+                    )
+                ),
             }
 
         identities = {
@@ -1925,7 +1965,7 @@ class CodexCurationCallbackService:
             removed += 1
         return removed
 
-    def _apply_enrichment(self, row, body: ApplyMutationRequest) -> None:
+    def _apply_enrichment(self, row, body: ApplyMutationRequest) -> dict | None:
         mutation = body.enrich
         if mutation is None:
             raise AssertionError("validated enrichment payload is missing")
@@ -2034,3 +2074,10 @@ class CodexCurationCallbackService:
             )
         if mutation.regenerate_thumbnail:
             queue_thumbnail(row)
+        if not mutation.organizations:
+            return None
+        organizations = CurationOrganizationService(self.db)
+        try:
+            return organizations.link(row.paper_id, mutation.organizations).to_dict()
+        finally:
+            organizations.close()
