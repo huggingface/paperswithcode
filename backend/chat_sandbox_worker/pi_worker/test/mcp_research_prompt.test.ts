@@ -54,6 +54,9 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /is or how it works, call pwc_get_method before answering/u);
   assert.match(rendered, /# PwC MCP skill/u);
   assert.match(rendered, /next_cursor/u);
+  assert.doesNotMatch(rendered, /pass `"next"` before any read/u);
+  assert.match(rendered, /available_at/u);
+  assert.match(rendered, /pwc_get_paper_evaluations/u);
   assert.match(rendered, /60 total requests/u);
   assert.match(rendered, /12 tool calls, 4 searches across `pwc_search_papers` and searched `pwc_list_papers`/u);
   assert.match(rendered, /Each pwc_search_papers call and each pwc_list_papers call with a search argument counts/u);
