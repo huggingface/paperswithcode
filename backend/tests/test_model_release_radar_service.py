@@ -241,11 +241,17 @@ def test_release_model_name_keeps_only_model_announcements():
         "Introducing dots",
         "Introducing Mistral",
         "Mistral Large",
-        "Magistral: reasoning for everyone",
-        "Spaces: A CLI Built for Humans and Agents",
     ):
         source = MISTRAL if "Mistral" in headline else OPENAI
         assert release_model_name(headline, source) is None, headline
+    # A bare known family or a name outside the "-stral" convention is a
+    # product page, not a new family.
+    for headline in (
+        "Magistral: reasoning for everyone",
+        "Spaces: A CLI Built for Humans and Agents",
+        "Timestral update for everyone",
+    ):
+        assert release_model_name(headline, MISTRAL) is None, headline
 
 
 def test_parsers_read_rss_atom_and_article_metadata():
