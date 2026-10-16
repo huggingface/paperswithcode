@@ -1,4 +1,12 @@
 .mcp-page { padding-bottom: 64px; }
+.mcp-repo-banner { display: flex; align-items: center; gap: 14px; margin-bottom: 32px; padding: 14px 18px; border: 1px solid var(--accent); border-radius: 6px; background: var(--bg-elevated); color: var(--ink); }
+.mcp-repo-banner:hover { background: var(--bg-subtle); }
+.mcp-repo-banner:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+.mcp-repo-banner > span:first-of-type { display: grid; flex: 1; min-width: 0; gap: 2px; }
+.mcp-repo-banner strong { font: 600 14px/1.4 var(--mono); }
+.mcp-repo-banner > span:first-of-type > span { color: var(--ink-soft); font-size: 13px; }
+.mcp-repo-banner code { font: 12px var(--mono); }
+.mcp-repo-cta { display: inline-flex; flex-shrink: 0; align-items: center; gap: 4px; color: var(--accent-text); font-size: 12px; font-weight: 600; }
 .mcp-hero { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(320px, .65fr); gap: 48px; align-items: end; padding-bottom: 32px; border-bottom: 1px solid var(--hairline); }
 .mcp-kicker, .mcp-section-heading > p { margin-bottom: 12px; }
 .mcp-hero h1 { max-width: 760px; text-wrap: balance; }
@@ -54,6 +62,7 @@
 }
 
 @media (max-width: 520px) {
+  .mcp-repo-banner { flex-wrap: wrap; }
   .mcp-section { padding: 24px 0; }
   .mcp-capability-grid { grid-template-columns: 1fr; }
   .mcp-tool { grid-template-columns: 1fr; gap: 7px; }

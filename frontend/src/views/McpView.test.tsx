@@ -27,6 +27,14 @@ describe("McpView", () => {
     await waitFor(() => expect(screen.getByText("Status unavailable")).toBeInTheDocument());
   });
 
+  it("links the pwc-cli repository at the top of the page", () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("", { status: 503 }));
+    renderView();
+
+    const banner = screen.getByRole("link", { name: /huggingface\/pwc-cli/ });
+    expect(banner).toHaveAttribute("href", "https://github.com/huggingface/pwc-cli");
+  });
+
   it("reports healthy version and protocol without blocking the page", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(

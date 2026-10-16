@@ -1,6 +1,6 @@
 import React from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Check, Copy, ExternalLink } from "lucide-react";
+import { ArrowUpRight, Check, Copy, ExternalLink, Github } from "lucide-react";
 
 import { DEFAULT_SITE_SUFFIX, formatPageTitle } from "@/lib/latexPlainText";
 import { mcpEndpoint, mcpHealthQueryOptions } from "@/lib/mcp";
@@ -128,6 +128,21 @@ const McpView: React.FC = () => {
 
   return (
     <article className="page mcp-page">
+      <a
+        className="mcp-repo-banner"
+        href="https://github.com/huggingface/pwc-cli"
+        target="_blank"
+        rel="noreferrer"
+      >
+        <Github size={20} aria-hidden />
+        <span>
+          <strong>huggingface/pwc-cli</strong>
+          <span>Open-source MCP server and <code>pwc</code> command-line client</span>
+        </span>
+        <span className="mcp-repo-cta">
+          View on GitHub <ArrowUpRight size={14} aria-hidden />
+        </span>
+      </a>
       <header className="mcp-hero">
         <div>
           <p className="sidebar-label mcp-kicker">Model Context Protocol</p>
