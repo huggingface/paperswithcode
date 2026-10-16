@@ -58,6 +58,7 @@ MISTRAL = ReleaseSource(
     url="https://mistral.ai/sitemap.xml",
     kind="sitemap",
     families=("Mistral", "Magistral"),
+    new_family=r"[A-Z][a-z]*stral",
     path_prefix="/news/",
 )
 DEEPSEEK = ReleaseSource(
@@ -90,6 +91,7 @@ MISTRAL_INDEX = b"""<?xml version="1.0"?>
 MISTRAL_PAGES = b"""<?xml version="1.0"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url><loc>https://mistral.ai/news/</loc><lastmod>2026-10-07T20:14:24Z</lastmod></url>
+<url><loc>https://mistral.ai/news/timestral/</loc><lastmod>2026-10-09T15:00:00Z</lastmod></url>
 <url><loc>https://mistral.ai/news/mistral-large-4/</loc><lastmod>2026-10-07T20:14:24Z</lastmod></url>
 <url><loc>https://mistral.ai/news/mistral-large-2407/</loc><lastmod>2026-10-05T16:53:47Z</lastmod></url>
 <url><loc>https://mistral.ai/news/old-post/</loc><lastmod>2025-01-01T00:00:00Z</lastmod></url>
@@ -117,6 +119,13 @@ PAGES = {
     "https://mistral.ai/sitemap-0.xml": MISTRAL_PAGES,
     "https://mistral.ai/news/mistral-large-4/": _article(
         "Introducing Mistral Large 4", "2026-10-06T12:00:27.000Z"
+    ),
+    # Its JSON-LD keeps the draft's date; the page shows the real one.
+    "https://mistral.ai/news/timestral/": (
+        b'<html><head><meta property="og:title" content="Timestral: Mistral\'s'
+        b' time-series foundation models | Mistral">'
+        b'<script type="application/ld+json">{"datePublished":"2026-07-15"}'
+        b"</script></head><body><p>October 9, 2026</p></body></html>"
     ),
     "https://mistral.ai/news/mistral-large-2407/": _article(
         "Large Enough", "2024-07-24T00:00:00.000Z"
@@ -221,6 +230,9 @@ def test_release_model_name_keeps_only_model_announcements():
     assert release_model_name("Introducing Magistral Medium", MISTRAL) == (
         "Magistral Medium"
     )
+    assert release_model_name(
+        "Timestral: Mistral's time-series foundation models", MISTRAL
+    ) == ("Timestral")
     for headline in (
         "Asana cuts model costs 76x in browser tests with GPT-6.1 Sol",
         "A model guide for the GPT-6 family",
@@ -229,6 +241,8 @@ def test_release_model_name_keeps_only_model_announcements():
         "Introducing dots",
         "Introducing Mistral",
         "Mistral Large",
+        "Magistral: reasoning for everyone",
+        "Spaces: A CLI Built for Humans and Agents",
     ):
         source = MISTRAL if "Mistral" in headline else OPENAI
         assert release_model_name(headline, source) is None, headline
@@ -265,6 +279,7 @@ def test_scan_reports_recent_releases_against_the_catalog():
     by_name = {signal.model_name: signal for signal in report.signals}
     assert set(by_name) == {
         "Mistral Large 4",
+        "Timestral",
         "GPT-6.1 Sol",
         "DeepSeek-V4.2",
         "Grok 5",
@@ -283,7 +298,10 @@ def test_scan_reports_recent_releases_against_the_catalog():
     assert by_name["GPT-6.1 Sol"].status == "unindexed"
     deepseek = by_name["DeepSeek-V4.2"]
     assert (deepseek.published, deepseek.status) == (date(2026, 10, 1), "unindexed")
-    assert len(report.unindexed) == 3
+    timestral = by_name["Timestral"]
+    assert (timestral.published, timestral.status) == (date(2026, 10, 9), "unindexed")
+    assert timestral.title == "Timestral: Mistral's time-series foundation models"
+    assert len(report.unindexed) == 4
     assert report.errors == []
     assert report.sources_checked == 4
     # Old sitemap pages, non-article paths and undated slugs are never fetched.

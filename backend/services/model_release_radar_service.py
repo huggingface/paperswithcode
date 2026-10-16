@@ -91,6 +91,10 @@ class ReleaseSource:
     # Model family names. A post counts as a release only when the model
     # name in its headline starts with one of them.
     families: tuple[str, ...]
+    # Pattern of the lab's naming convention ("Timestral" for Mistral's
+    # "-stral" names). A bare name matching it that is not yet a listed
+    # family announces a new model family.
+    new_family: str | None = None
     # Sitemaps: only follow article URLs under this path.
     path_prefix: str = ""
     # Sitemaps without trustworthy <lastmod>: read the date from the slug.
@@ -101,7 +105,16 @@ class ReleaseSource:
     @property
     def family_pattern(self) -> re.Pattern[str]:
         alternatives = "|".join(re.escape(name) for name in self.families)
+        if self.new_family:
+            alternatives += f"|{self.new_family}"
         return re.compile(rf"^(?:{alternatives})(?![a-z])", re.IGNORECASE)
+
+    def is_new_family(self, name: str) -> bool:
+        return (
+            self.new_family is not None
+            and re.fullmatch(self.new_family, name) is not None
+            and name.casefold() not in {family.casefold() for family in self.families}
+        )
 
 
 # Only sources reachable from the production host with machine-readable
@@ -146,6 +159,7 @@ RELEASE_SOURCES: tuple[ReleaseSource, ...] = (
             "Voxtral",
             "Mixtral",
         ),
+        new_family=r"[A-Z][a-z]*stral",
         path_prefix="/news/",
     ),
     ReleaseSource(
@@ -311,7 +325,7 @@ def parse_sitemap(content: bytes) -> tuple[list[FeedEntry], list[str]]:
 
 
 _META_TITLE = re.compile(
-    r"<meta[^>]+property=[\"']og:title[\"'][^>]+content=[\"']([^\"']+)", re.IGNORECASE
+    r"<meta[^>]+property=[\"']og:title[\"'][^>]+content=([\"'])(.+?)\1", re.IGNORECASE
 )
 _TITLE = re.compile(r"<title[^>]*>(.*?)</title>", re.IGNORECASE | re.DOTALL)
 _PUBLISHED = (
@@ -322,6 +336,12 @@ _PUBLISHED = (
     ),
     re.compile(r"<time[^>]+datetime=[\"']([^\"']+)", re.IGNORECASE),
 )
+# The date readers see ("October 15, 2026"). CMS metadata can keep a draft's
+# date (Mistral's Timestral post: datePublished 2026-07-15, shown October 15).
+_VISIBLE_DATE = re.compile(
+    r">\s*((?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December) \d{1,2}, \d{4})\s*<"
+)
 
 
 def parse_article(page: str) -> tuple[str | None, date | None]:
@@ -329,12 +349,15 @@ def parse_article(page: str) -> tuple[str | None, date | None]:
     match = _META_TITLE.search(page) or _TITLE.search(page)
     title = None
     if match:
-        title = _SITE_SUFFIX.sub("", html.unescape(match.group(1)).strip()) or None
+        title = _SITE_SUFFIX.sub("", html.unescape(match.groups()[-1]).strip()) or None
     published = None
     for pattern in _PUBLISHED:
         found = pattern.search(page)
         if found and (published := _parse_date(found.group(1))):
             break
+    if visible := _VISIBLE_DATE.search(page):
+        shown = datetime.strptime(visible.group(1), "%B %d, %Y").date()
+        published = max(published, shown) if published else shown
     return title, published
 
 
@@ -364,8 +387,13 @@ def release_model_name(title: str, source: ReleaseSource) -> str | None:
         return None
     has_version = any(char.isdigit() for char in name)
     # Headlines that merely start with a family name must carry a version;
-    # a bare family name ("Introducing Claude") is a product page.
-    if not has_version and (not announced or len(words) < 2):
+    # a bare family name ("Introducing Claude") is a product page, but a bare
+    # new name in the lab's convention ("Timestral: ...") is a new family.
+    if (
+        not has_version
+        and not source.is_new_family(name)
+        and (not announced or len(words) < 2)
+    ):
         return None
     return name
 
