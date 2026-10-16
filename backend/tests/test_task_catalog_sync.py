@@ -236,3 +236,12 @@ def test_task_catalog_sync_workflow_refreshes_the_fallback_without_image_churn()
     assert "git push origin HEAD:main" in workflow
     assert "publish_image.py" not in workflow
     assert "pwc-deploy" not in workflow
+
+
+def test_baked_fallback_catalog_includes_the_framework_index():
+    catalog = (
+        REPOSITORY_ROOT / "backend/chat_sandbox_worker/TASK_CATALOG.md"
+    ).read_text()
+
+    assert "## Complete framework lookup index" in catalog
+    assert "`vllm` vLLM" in catalog

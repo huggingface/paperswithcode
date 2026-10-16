@@ -297,3 +297,20 @@ This compact index contains every current task and subtask. Treat names and slug
 - `world-knowledge` — World Knowledge
 - `world-models` — World Models
 - `zero-shot-segmentation` — Zero-shot segmentation
+
+## Complete framework lookup index
+
+Frameworks are software libraries, inference engines, serving systems, and toolkits; this index lists every catalog framework by domain and category. Use the slug with `pwc framework --name FRAMEWORK`.
+
+- Large Language Models / Inference & Serving: `vllm` vLLM, `sglang` SGLang, `llama-cpp` llama.cpp, `mlx-lm` MLX-LM, `mlx-vlm` MLX-VLM, `ollama` Ollama, `text-embeddings-inference` Text Embeddings Inference, `vllm-omni` vLLM-Omni, `tensorrt-llm` TensorRT-LLM
+- Large Language Models / Training & Fine-tuning: `trl` TRL, `unsloth` Unsloth, `prime-rl` prime-rl, `verl` verl
+- Large Language Models / Model Libraries: `transformers` Transformers, `sentence-transformers` Sentence Transformers
+- Large Language Models / Agent Frameworks: `hermes-agent` Hermes Agent, `openclaw` OpenClaw, `cua` Cua, `browser-use` Browser Use
+- Large Language Models / Coding Agents: `codex-cli` Codex CLI, `claude-code` Claude Code, `opencode` OpenCode, `pi-agent` Pi
+- Computer Vision / Model Libraries: `timm` timm, `ultralytics` Ultralytics, `transformers-vision` Transformers, `paddleocr` PaddleOCR, `roboflow-trackers` Trackers
+- Image and video generation / Generation & Inference: `diffusers` Diffusers, `comfyui` ComfyUI, `sglang-diffusion` SGLang Diffusion, `cache-dit` Cache-DiT, `fastvideo` FastVideo, `xdit` xDiT
+- Robotics / Robot Learning: `lerobot` LeRobot
+- Medical Imaging / Medical Imaging Toolkits: `monai` MONAI
+- Graph Machine Learning / Graph Learning Libraries: `pytorch-geometric` PyTorch Geometric
+- Speech and Audio / Speech Toolkits: `nemo-speech` NVIDIA NeMo Speech, `speechbrain` SpeechBrain, `espnet` ESPnet
+- Time Series / Forecasting Libraries: `darts` Darts, `gluonts` GluonTS, `neuralforecast` NeuralForecast
