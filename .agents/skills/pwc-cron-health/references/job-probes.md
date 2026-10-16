@@ -124,7 +124,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `sync_vals_finance_agent`
 
-- **Contract:** `finance-agent-v2` on task `agents`; Accuracy (%) 0–100; the single table on https://www.vals.ai/benchmarks/fabv2; typically 40–400 upstream rows, of which only reviewed labels are published (70 of 78 on 2026-10-16).
+- **Contract:** `finance-agent-v2` on task `agents`; Accuracy (%) 0–100; the single table on https://www.vals.ai/benchmarks/fabv2; typically 40–400 upstream rows, of which only reviewed labels are published (all 78 on 2026-10-16).
 - **Proof:** Diff the Vals table against managed rows (label, accuracy at two decimals); confirm `vals_finance_agent_unreviewed` labels get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Accuracy.
 
 ## `sync_physics_iq_verified`

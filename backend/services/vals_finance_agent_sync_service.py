@@ -386,6 +386,44 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         is_open=True,
         hf_model_url="https://huggingface.co/CohereLabs/command-a-plus-05-2026-bf16",
     ),
+    # Models without a catalog paper before 2026-10-16, indexed from their
+    # official release pages (papers 123607-123614).
+    "Ling 3.0 Flash Fin": ModelIdentity(
+        "Ling-3.0-flash-Fin",
+        source_url="https://huggingface.co/inclusionAI/Ling-3.0-flash-Fin",
+        is_open=True,
+        hf_model_url="https://huggingface.co/inclusionAI/Ling-3.0-flash-Fin",
+    ),
+    "Ember-1": ModelIdentity("Ember-1", source_url="https://fireworks.ai/blog/ember-1"),
+    "Step 5 Preview": ModelIdentity(
+        "Step-5-Preview",
+        source_url="https://huggingface.co/stepfun-ai/Step-5-Preview",
+        is_open=True,
+        hf_model_url="https://huggingface.co/stepfun-ai/Step-5-Preview",
+    ),
+    "Qwen 3.6 Plus": ModelIdentity(
+        "Qwen3.6-Plus", source_url="https://qwen.ai/blog?id=qwen3.6"
+    ),
+    "MiMo V2.5": ModelIdentity(
+        "MiMo-V2.5",
+        source_url="https://mimo.xiaomi.com/mimo-v2-5",
+        is_open=True,
+        hf_model_url="https://huggingface.co/XiaomiMiMo/MiMo-V2.5",
+    ),
+    "Ling 3.0 Flash": ModelIdentity(
+        "Ling-3.0-flash",
+        source_url="https://huggingface.co/inclusionAI/Ling-3.0-flash",
+        is_open=True,
+        hf_model_url="https://huggingface.co/inclusionAI/Ling-3.0-flash",
+    ),
+    "Grok 4.20 (Reasoning)": ModelIdentity(
+        "Grok 4.20 (Reasoning)",
+        source_url="https://docs.x.ai/developers/models/grok-4.20",
+    ),
+    "Mercury 2.5": ModelIdentity(
+        "Mercury 2.5",
+        source_url="https://www.inceptionlabs.ai/blog/introducing-mercury-2-5",
+    ),
 }
 
 

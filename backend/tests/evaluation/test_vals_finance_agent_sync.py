@@ -120,16 +120,6 @@ PRODUCTION_ROWS = {
     "Laguna XS.2": 15.6,
     "Command A+": 9.04,
 }
-UNREVIEWED = [
-    "Ling 3.0 Flash Fin",
-    "Ember-1",
-    "Step 5 Preview",
-    "Qwen 3.6 Plus",
-    "MiMo V2.5",
-    "Ling 3.0 Flash",
-    "Grok 4.20 (Reasoning)",
-    "Mercury 2.5",
-]
 TASK_ID = 14
 DATASET_ID = 2800
 
@@ -272,17 +262,20 @@ def test_first_run_adopts_renames_creates_and_reports():
     stats = ValsFinanceAgentSyncService(session).sync(parse_vals_finance_agent(HTML))
 
     assert stats.fetched == 78
-    assert stats.matched == 70
+    assert stats.matched == 78
     assert stats.adopted == 69
-    assert stats.created == 1
+    assert stats.created == 9  # Muse Spark 1.3 and the eight newly indexed models
     assert stats.renamed == ["Muse Spark 1.3 -> Muse Spark 1.3 Max"]
-    assert stats.unreviewed == UNREVIEWED
+    assert stats.unreviewed == []
     assert stats.missing_papers == [] and stats.missing_upstream == []
     rows = _rows(session)
     assert rows["Muse Spark 1.3 Max"].metrics == {METRIC_NAME: 59.96}
     assert rows["Muse Spark 1.3"].metrics == {METRIC_NAME: 58.9}
     assert rows["Muse Wonder Full (max)"].metrics == {METRIC_NAME: 59.06}
     assert rows["Gemini 4 Argon"].best_rank == 1
+    assert rows["MiMo-V2.5"].is_open and rows["MiMo-V2.5"].metrics == {
+        METRIC_NAME: 36.73
+    }
     adopted = rows["Gemini 4 Argon"].methodology
     assert adopted.startswith(MANAGED_METHODOLOGY_PREFIX)
     assert adopted.endswith("Hand-reviewed notes for Gemini 4 Argon.")
