@@ -1,9 +1,12 @@
 """Public metadata for papers that are not in the Papers With Code catalog.
 
-Readers and agents ask about arXiv IDs and DOIs the catalog never imported.
+Readers and agents ask about arXiv IDs, DOIs, and titles the catalog never
+imported.
 This service answers from the catalog when it can and otherwise from Hugging
 Face Papers, arXiv, or Crossref, marking the result ``in_catalog=false`` and
-listing where the paper can be read. The lookup logic mirrors
+listing where the paper can be read. Titles resolve only on an exact
+normalized-title match (or a unique "Name:" prefix on arXiv), so a near-miss
+title never lands on a different paper. The ID lookup logic mirrors
 ``pwc_mcp.external`` in pwc-cli so the MCP can switch to this endpoint with
 the same field shape.
 
@@ -20,10 +23,11 @@ import logging
 import re
 import threading
 import time
+import unicodedata
 import urllib.parse
 from collections import OrderedDict, deque
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Callable
 from xml.etree import ElementTree
 
 import httpx
@@ -59,6 +63,8 @@ RATE_WINDOW_SECONDS = 60
 CLIENT_LOOKUPS_PER_WINDOW = 20
 WORKER_LOOKUPS_PER_WINDOW = 120
 MAX_CLIENT_BUCKETS = 4096
+TITLE_SEARCH_RESULTS = 10
+MIN_TITLE_LENGTH = 8
 USER_AGENT = "paperswithcode-public-metadata/1.0 (+https://paperswithcode.co)"
 
 
@@ -151,6 +157,22 @@ def doi_reference(reference: str) -> str | None:
         candidate = urllib.parse.unquote(parsed.path.lstrip("/"))
     candidate = candidate.removeprefix("doi:").strip()
     return candidate if DOI.fullmatch(candidate) else None
+
+
+def normalize_title(title: str) -> str:
+    """Casefolded ASCII words of a title, without punctuation or accents."""
+    text = unicodedata.normalize("NFKD", title)
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return " ".join(re.sub(r"[^0-9a-z]+", " ", text.casefold()).split())
+
+
+def title_name(title: str) -> str | None:
+    """The normalized short name of a "Name: subtitle" title, if it has one."""
+    name, separator, subtitle = title.partition(":")
+    name = normalize_title(name)
+    if not separator or not normalize_title(subtitle):
+        return None
+    return name if len(name) >= 4 and len(name.split()) <= 3 else None
 
 
 class _SlidingWindowLimiter:
@@ -327,31 +349,117 @@ class PublicPaperSources:
         work = payload.get("message") if isinstance(payload, dict) else None
         if not isinstance(work, dict) or not work.get("title"):
             return None
-        titles = work.get("title")
-        title = titles[0] if isinstance(titles, list) and titles else str(titles)
-        parts = (work.get("issued") or {}).get("date-parts") or [[]]
-        published = "-".join(f"{int(value):02d}" for value in parts[0] or []) or None
-        abstract = re.sub(r"<[^>]+>", " ", str(work.get("abstract") or ""))
-        abstract = " ".join(abstract.split()).removeprefix("Abstract ").strip()
-        return {
-            "id": doi,
-            "arxiv_id": None,
-            "doi": doi,
-            "title": " ".join(str(title).split()),
-            "authors": [
-                " ".join(filter(None, (author.get("given"), author.get("family"))))
-                for author in work.get("author") or []
-                if isinstance(author, dict)
-            ],
-            "abstract": abstract or None,
-            "published": published,
-            "url": str(work.get("URL") or f"https://doi.org/{doi}"),
-            "pdf_url": None,
-            "hf_url": None,
-            "repositories": [],
-            "project_pages": [],
-            "metadata_source": "crossref",
-        }
+        return _from_crossref(doi, work)
+
+    def by_title(self, title: str) -> dict[str, Any] | None:
+        """Resolve a title by exact normalized match on arXiv, then Crossref.
+
+        As a last resort a "Name: subtitle" title matches the one arXiv paper
+        whose title has the same name before its colon; the record then sets
+        ``matched_name`` so the caller can say the subtitle differed.
+        """
+        wanted = normalize_title(title)
+        matches = [
+            entry
+            for entry in self._arxiv_title_search(wanted)
+            if normalize_title(entry["title"]) == wanted
+        ]
+        if matches:
+            return self._with_hugging_face(min(matches, key=_published_key))
+        record = self._crossref_title_search(title, wanted)
+        if record is not None:
+            return record
+        name = title_name(title)
+        if name is None:
+            return None
+        matches = [
+            entry
+            for entry in self._arxiv_title_search(name)
+            if title_name(entry["title"]) == name
+        ]
+        if len(matches) != 1:
+            return None
+        return {**self._with_hugging_face(matches[0]), "matched_name": name}
+
+    def _arxiv_title_search(self, normalized_title: str) -> list[dict[str, Any]]:
+        query = urllib.parse.urlencode(
+            {
+                "search_query": f'ti:"{normalized_title}"',
+                "max_results": TITLE_SEARCH_RESULTS,
+            }
+        )
+        body = self._get(f"https://export.arxiv.org/api/query?{query}")
+        return _arxiv_entries(body) if body else []
+
+    def _crossref_title_search(self, title: str, wanted: str) -> dict[str, Any] | None:
+        query = urllib.parse.urlencode(
+            {
+                "query.bibliographic": title,
+                "rows": TITLE_SEARCH_RESULTS,
+                "select": "DOI,title,author,issued,URL,abstract",
+            }
+        )
+        payload = self._json(f"https://api.crossref.org/works?{query}")
+        message = payload.get("message") if isinstance(payload, dict) else None
+        items = message.get("items") if isinstance(message, dict) else None
+        records = [
+            _from_crossref(str(work["DOI"]), work)
+            for work in items or []
+            if isinstance(work, dict) and work.get("DOI") and work.get("title")
+        ]
+        # Reprints and proceedings copies share a title; the earliest is the
+        # original publication.
+        matches = [
+            record for record in records if normalize_title(record["title"]) == wanted
+        ]
+        return min(matches, key=_published_key) if matches else None
+
+    def _with_hugging_face(self, entry: dict[str, Any]) -> dict[str, Any]:
+        """Prefer the Hugging Face record of an arXiv search hit when it exists."""
+        quoted = urllib.parse.quote(entry["arxiv_id"], safe="./")
+        paper = self._json(f"https://huggingface.co/api/papers/{quoted}")
+        if not isinstance(paper, dict) or not paper.get("title"):
+            return entry
+        record = _from_hf(paper)
+        record["doi"] = entry["doi"]
+        record["repositories"] = record["repositories"] or entry["repositories"]
+        return record
+
+
+def _published_key(record: dict[str, Any]) -> str:
+    return record.get("published") or "9999"
+
+
+def _from_crossref(doi: str, work: dict[str, Any]) -> dict[str, Any]:
+    titles = work.get("title")
+    title = titles[0] if isinstance(titles, list) and titles else str(titles)
+    parts = (work.get("issued") or {}).get("date-parts") or [[]]
+    # Crossref sends [[null]] for works without an issue date.
+    published = (
+        "-".join(f"{int(value):02d}" for value in parts[0] or [] if value is not None)
+        or None
+    )
+    abstract = re.sub(r"<[^>]+>", " ", str(work.get("abstract") or ""))
+    abstract = " ".join(abstract.split()).removeprefix("Abstract ").strip()
+    return {
+        "id": doi,
+        "arxiv_id": None,
+        "doi": doi,
+        "title": " ".join(str(title).split()),
+        "authors": [
+            " ".join(filter(None, (author.get("given"), author.get("family"))))
+            for author in work.get("author") or []
+            if isinstance(author, dict)
+        ],
+        "abstract": abstract or None,
+        "published": published,
+        "url": str(work.get("URL") or f"https://doi.org/{doi}"),
+        "pdf_url": None,
+        "hf_url": None,
+        "repositories": [],
+        "project_pages": [],
+        "metadata_source": "crossref",
+    }
 
 
 def _from_hf(paper: dict[str, Any]) -> dict[str, Any]:
@@ -500,7 +608,8 @@ class PublicPaperMetadataService:
         if reference is None:
             raise InvalidPaperIdentifierError(
                 "Use an arXiv ID (optionally versioned), an arXiv or Hugging Face "
-                "paper URL, a DOI, or a Papers With Code paper ID."
+                "paper URL, a DOI, or a Papers With Code paper ID. Look up "
+                "titles with GET /api/v1/papers/public-metadata/search?title=..."
             )
         catalog_paper = self._catalog_paper(reference)
         if catalog_paper is not None:
@@ -521,10 +630,63 @@ class PublicPaperMetadataService:
         except PaperNotFoundError:
             return None
 
+    def search_title(self, title: str, client_ip: str | None) -> PublicPaperMetadata:
+        """Resolve an exact paper title the catalog search did not find."""
+        wanted = normalize_title(title)
+        if len(wanted) < MIN_TITLE_LENGTH or len(wanted.split()) < 2:
+            raise InvalidPaperIdentifierError(
+                "Give the paper's full title (at least two words)."
+            )
+        record = self._lookup(
+            f"title:{wanted}",
+            lambda sources: sources.by_title(title),
+            client_ip or "unknown",
+            not_found=(
+                f'No arXiv or Crossref paper is titled exactly "{title}". Check '
+                "the title, or look it up by arXiv ID, DOI, or URL."
+            ),
+        )
+        if record.get("arxiv_id"):
+            catalog_paper = self._catalog_paper(
+                PaperReference("arxiv", record["arxiv_id"])
+            )
+            if catalog_paper is not None:
+                return _catalog_metadata(catalog_paper)
+        prefix = (
+            f'Matched by its name "{record["title"].partition(":")[0]}"; the '
+            "full title differs from the one requested. "
+            if record.get("matched_name")
+            else ""
+        )
+        return _public_result(record, prefix)
+
     def _public_metadata(
         self, reference: PaperReference, client_ip: str
     ) -> PublicPaperMetadata:
-        key = f"{reference.kind}:{reference.value.casefold()}"
+        fetch = (
+            PublicPaperSources.by_arxiv_id
+            if reference.kind == "arxiv"
+            else PublicPaperSources.by_doi
+        )
+        record = self._lookup(
+            f"{reference.kind}:{reference.value.casefold()}",
+            lambda sources: fetch(sources, reference.value),
+            client_ip,
+            not_found=(
+                f"{reference.value} is not in the Papers With Code catalog, and "
+                "Hugging Face Papers, arXiv, and Crossref do not know it either."
+            ),
+        )
+        return _public_result(record)
+
+    @staticmethod
+    def _lookup(
+        key: str,
+        fetch: Callable[[PublicPaperSources], dict[str, Any] | None],
+        client_ip: str,
+        not_found: str,
+    ) -> dict[str, Any]:
+        """Cached, rate-limited upstream lookup; raises for misses and outages."""
         hit, record = _cache.get(key)
         if not hit:
             retry_after = _limiter.acquire(client_ip)
@@ -533,7 +695,11 @@ class PublicPaperMetadataService:
                     "Too many uncached public metadata lookups. Try again shortly.",
                     retry_after=retry_after,
                 )
-            record = self._fetch(reference)
+            with _new_client() as client:
+                sources = PublicPaperSources(client)
+                record = fetch(sources)
+            if record is None and sources.failed:
+                record = _UNAVAILABLE
             ttl = (
                 FAILURE_CACHE_TTL_SECONDS
                 if record is _UNAVAILABLE
@@ -547,36 +713,22 @@ class PublicPaperMetadataService:
                 retry_after=FAILURE_CACHE_TTL_SECONDS,
             )
         if record is None:
-            raise PublicPaperNotFoundError(
-                f"{reference.value} is not in the Papers With Code catalog, and "
-                "Hugging Face Papers, arXiv, and Crossref do not know it either."
-            )
-        source = SOURCE_LABELS[record["metadata_source"]]
-        return PublicPaperMetadata(
-            in_catalog=False,
-            note=(
-                "Not indexed by Papers With Code; metadata comes from "
-                f"{source}. Read it at the links in available_at."
-            ),
-            available_at=available_at(record),
-            **record,
-        )
-
-    @staticmethod
-    def _fetch(reference: PaperReference) -> Any:
-        with _new_client() as client:
-            return PublicPaperMetadataService._fetch_with(client, reference)
-
-    @staticmethod
-    def _fetch_with(client: httpx.Client, reference: PaperReference) -> Any:
-        sources = PublicPaperSources(client)
-        if reference.kind == "arxiv":
-            record = sources.by_arxiv_id(reference.value)
-        else:
-            record = sources.by_doi(reference.value)
-        if record is None and sources.failed:
-            return _UNAVAILABLE
+            raise PublicPaperNotFoundError(not_found)
         return record
+
+
+def _public_result(record: dict[str, Any], prefix: str = "") -> PublicPaperMetadata:
+    fields = {key: value for key, value in record.items() if key != "matched_name"}
+    source = SOURCE_LABELS[record["metadata_source"]]
+    return PublicPaperMetadata(
+        in_catalog=False,
+        note=(
+            f"{prefix}Not indexed by Papers With Code; metadata comes from "
+            f"{source}. Read it at the links in available_at."
+        ),
+        available_at=available_at(record),
+        **fields,
+    )
 
 
 def _catalog_metadata(paper: Paper) -> PublicPaperMetadata:

@@ -335,3 +335,253 @@ def _request(client, real_ip):
 )
 def test_proxied_client_ip(client, real_ip, expected):
     assert get_proxied_client_ip(_request(client, real_ip)) == expected
+
+
+def _feed(*entries):
+    """An arXiv Atom feed of (arxiv_id, title, published) entries."""
+    body = "".join(
+        f"<entry><id>http://arxiv.org/abs/{arxiv_id}v1</id><title>{title}</title>"
+        f"<summary>Text.</summary><published>{published}T00:00:00Z</published>"
+        "<author><name>Jane Doe</name></author></entry>"
+        for arxiv_id, title, published in entries
+    )
+    return f'<feed xmlns="http://www.w3.org/2005/Atom">{body}</feed>'.encode()
+
+
+def _search(client, title):
+    return client.get("/api/v1/papers/public-metadata/search", params={"title": title})
+
+
+def test_title_search_matches_arxiv_title_ignoring_case_and_punctuation(
+    monkeypatch, catalog
+):
+    feed = _feed(
+        (
+            "1602.04938",
+            "&quot;Why Should I Trust You?&quot;: Explaining the "
+            "Predictions of Any Classifier",
+            "2016-02-16",
+        ),
+        ("2101.00001", "Why Should I Trust You? A Survey", "2021-01-01"),
+    )
+    hf = {**HF_PAPER, "id": "1602.04938", "githubRepo": None, "projectPage": None}
+    upstream = Upstream(
+        {
+            "https://export.arxiv.org/api/query": httpx.Response(200, content=feed),
+            "https://huggingface.co/api/papers/": httpx.Response(200, json=hf),
+        }
+    )
+    client = _client(monkeypatch, upstream)
+
+    response = _search(
+        client, "Why Should I Trust You? Explaining the Predictions of Any Classifier"
+    )
+
+    assert response.status_code == 200
+    assert response.headers["cache-control"] == "public, max-age=3600"
+    body = response.json()
+    assert body["in_catalog"] is False
+    assert body["arxiv_id"] == "1602.04938"
+    assert body["metadata_source"] == "huggingface"
+    assert [(link["kind"], link["url"]) for link in body["available_at"]] == [
+        ("abstract", "https://arxiv.org/abs/1602.04938"),
+        ("pdf", "https://arxiv.org/pdf/1602.04938"),
+        ("huggingface", "https://huggingface.co/papers/1602.04938"),
+    ]
+    assert "matched_name" not in body
+    assert body["note"].startswith("Not indexed by Papers With Code")
+    assert "ti%3A%22why+should+i+trust+you+explaining" in upstream.calls[0]
+    assert len(upstream.calls) == 2  # arXiv search + Hugging Face; no Crossref
+
+
+def test_title_search_returns_catalog_paper_when_arxiv_match_is_indexed(
+    monkeypatch, catalog
+):
+    catalog["2504.12516"] = SimpleNamespace(
+        id="777",
+        arxiv_id="2504.12516",
+        source="arxiv",
+        title="Catalog Paper Title",
+        authors=[],
+        abstract=None,
+        published=None,
+        url_abs="https://arxiv.org/abs/2504.12516",
+        url_pdf=None,
+    )
+    feed = _feed(("2504.12516", "Catalog Paper Title", "2025-04-16"))
+    upstream = Upstream(
+        {"https://export.arxiv.org/api/query": httpx.Response(200, content=feed)}
+    )
+    client = _client(monkeypatch, upstream)
+
+    body = _search(client, "catalog paper title").json()
+
+    assert body["in_catalog"] is True
+    assert body["catalog_id"] == "777"
+
+
+def test_title_search_falls_back_to_earliest_exact_crossref_work(monkeypatch, catalog):
+    works = {
+        "message": {
+            "items": [
+                {
+                    "DOI": "10.1/fast",
+                    "title": ["Fast Active Contours Without Edges"],
+                    "issued": {"date-parts": [[None]]},
+                },
+                {
+                    "DOI": "10.1/reprint",
+                    "title": ["Active contours without edges"],
+                    "issued": {"date-parts": [[2010]]},
+                },
+                {
+                    "DOI": "10.1109/83.902291",
+                    "title": ["Active contours without edges"],
+                    "issued": {"date-parts": [[2001, 2]]},
+                    "URL": "https://doi.org/10.1109/83.902291",
+                },
+            ]
+        }
+    }
+    upstream = Upstream(
+        {
+            "https://export.arxiv.org/api/query": httpx.Response(
+                200,
+                content=_feed(
+                    (
+                        "1610.01023",
+                        "Segmentation of Coronal Holes Using Active "
+                        "Contours Without Edges",
+                        "2016-10-04",
+                    )
+                ),
+            ),
+            "https://api.crossref.org/works?": httpx.Response(200, json=works),
+        }
+    )
+    client = _client(monkeypatch, upstream)
+
+    body = _search(client, "Active Contours Without Edges").json()
+
+    assert body["in_catalog"] is False
+    assert body["metadata_source"] == "crossref"
+    assert body["doi"] == "10.1109/83.902291"
+    assert body["published"] == "2001-02"
+    assert [(link["kind"], link["url"]) for link in body["available_at"]] == [
+        ("abstract", "https://doi.org/10.1109/83.902291"),
+    ]
+
+
+def test_title_search_matches_unique_name_when_subtitle_differs(monkeypatch, catalog):
+    exact_miss = _feed()
+    by_name = _feed(
+        (
+            "1912.08531",
+            "GlobalTrack: A Simple and Strong Baseline for Long-term Tracking",
+            "2019-12-18",
+        ),
+        ("2301.00001", "Beyond GlobalTrack for Drones", "2023-01-01"),
+    )
+
+    def arxiv(request):
+        query = request.url.params["search_query"]
+        return httpx.Response(
+            200, content=by_name if query == 'ti:"globaltrack"' else exact_miss
+        )
+
+    upstream = Upstream(
+        {
+            "https://export.arxiv.org/api/query": arxiv,
+            "https://api.crossref.org/works?": httpx.Response(
+                200, json={"message": {"items": []}}
+            ),
+        }
+    )
+    client = _client(monkeypatch, upstream)
+
+    body = _search(
+        client, "GlobalTrack: A Simple and Universal Tracker with Global Features"
+    ).json()
+
+    assert body["arxiv_id"] == "1912.08531"
+    assert body["title"].startswith("GlobalTrack: A Simple and Strong Baseline")
+    assert body["note"].startswith('Matched by its name "GlobalTrack"')
+    assert body["available_at"][0]["url"] == "https://arxiv.org/abs/1912.08531"
+
+
+@pytest.mark.parametrize(
+    "candidates",
+    [
+        [],
+        [("2001.00001", "Different Title Entirely", "2020-01-01")],
+        # A shared name is ambiguous, so neither paper is chosen.
+        [
+            ("1912.08531", "GlobalTrack: A Simple and Strong Baseline", "2019-12-18"),
+            ("2301.00002", "GlobalTrack: Tracking Satellites", "2023-01-02"),
+        ],
+    ],
+)
+def test_near_miss_title_is_a_404_not_a_wrong_paper(monkeypatch, catalog, candidates):
+    upstream = Upstream(
+        {
+            "https://export.arxiv.org/api/query": httpx.Response(
+                200, content=_feed(*candidates)
+            ),
+            "https://api.crossref.org/works?": httpx.Response(
+                200,
+                json={"message": {"items": [{"DOI": "10.1/x", "title": ["Other"]}]}},
+            ),
+        }
+    )
+    client = _client(monkeypatch, upstream)
+
+    response = _search(client, "GlobalTrack: A Simple and Universal Tracker")
+
+    assert response.status_code == 404
+    assert response.json()["detail"]["code"] == "paper_not_found"
+    assert "titled exactly" in response.json()["detail"]["message"]
+
+
+def test_title_search_outage_is_503(monkeypatch, catalog):
+    upstream = Upstream(
+        {
+            "https://export.arxiv.org/": httpx.Response(503),
+            "https://api.crossref.org/": httpx.Response(500),
+        }
+    )
+    client = _client(monkeypatch, upstream)
+
+    response = _search(client, "Some Paper That Exists")
+
+    assert response.status_code == 503
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_short_title_is_400(monkeypatch, catalog):
+    upstream = Upstream({})
+    client = _client(monkeypatch, upstream)
+
+    response = _search(client, "BERT")
+
+    assert response.status_code == 400
+    assert response.json()["detail"]["code"] == "invalid_paper_identifier"
+    assert upstream.calls == []
+
+
+@pytest.mark.parametrize(
+    ("title", "expected"),
+    [
+        ("GlobalTrack: A Simple Tracker", "globaltrack"),
+        ("Mask R-CNN: Instance Segmentation", "mask r cnn"),
+        ("Deep Residual Learning for Image Recognition", None),
+        ("Attention Is All You Need: A Very Long Prefix Name", None),
+        ("ViT:", None),
+        ("ab: short name", None),
+    ],
+)
+def test_title_name(title, expected):
+    assert service.title_name(title) == expected
+
+
+def test_normalize_title_strips_accents_and_punctuation():
+    assert service.normalize_title("Über-Fast “Café” Nets!") == "uber fast cafe nets"

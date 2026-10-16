@@ -636,6 +636,71 @@ def get_trending_papers(
     )
 
 
+def _public_metadata_error_response(error: PublicMetadataError) -> JSONResponse:
+    headers = {}
+    if error.retry_after:
+        headers["Retry-After"] = str(error.retry_after)
+    if error.status_code in {400, 404}:
+        headers["Cache-Control"] = "public, max-age=3600"
+    else:
+        headers["Cache-Control"] = "no-store"
+    return JSONResponse(
+        status_code=error.status_code,
+        content={"detail": {"code": error.code, "message": error.message}},
+        headers=headers,
+    )
+
+
+def _public_metadata_cache_control(result: PublicPaperMetadata) -> str:
+    return (
+        "public, max-age=60, stale-while-revalidate=300"
+        if result.in_catalog
+        else "public, max-age=3600"
+    )
+
+
+@router.get(
+    "/papers/public-metadata/search",
+    response_model=PublicPaperMetadata,
+    summary="Find public metadata for a paper by its exact title",
+    responses={
+        400: {"description": "Title too short"},
+        404: {"description": "No arXiv or Crossref paper has this exact title"},
+        429: {"description": "Too many uncached lookups"},
+        503: {"description": "Public metadata sources are unavailable"},
+    },
+)
+def search_public_paper_metadata(
+    request: Request,
+    response: Response,
+    title: str = Query(
+        ...,
+        min_length=1,
+        max_length=300,
+        description="The paper's full title; matching ignores case and punctuation.",
+    ),
+    db: Session = Depends(get_database_session),
+):
+    """
+    Resolve a paper title on arXiv and Crossref, even outside the catalog.
+
+    Only an exact normalized-title match counts, so a near-miss title never
+    resolves to a different paper. As a last resort a "Name: subtitle" title
+    matches the single arXiv paper with the same name before its colon, and
+    the `note` says so. A match already in the catalog returns
+    `in_catalog: true`; otherwise the response has the same shape as
+    `/papers/{identifier}/public-metadata`.
+    """
+    try:
+        result = PublicPaperMetadataService(db).search_title(
+            title, get_proxied_client_ip(request)
+        )
+    except PublicMetadataError as error:
+        return _public_metadata_error_response(error)
+    response.headers["Cache-Control"] = _public_metadata_cache_control(result)
+    return result
+
+
 @router.get(
     "/papers/{identifier:path}/public-metadata",
     response_model=PublicPaperMetadata,
@@ -674,23 +739,8 @@ def get_public_paper_metadata(
             identifier, get_proxied_client_ip(request)
         )
     except PublicMetadataError as error:
-        headers = {}
-        if error.retry_after:
-            headers["Retry-After"] = str(error.retry_after)
-        if error.status_code in {400, 404}:
-            headers["Cache-Control"] = "public, max-age=3600"
-        else:
-            headers["Cache-Control"] = "no-store"
-        return JSONResponse(
-            status_code=error.status_code,
-            content={"detail": {"code": error.code, "message": error.message}},
-            headers=headers,
-        )
-    response.headers["Cache-Control"] = (
-        "public, max-age=60, stale-while-revalidate=300"
-        if result.in_catalog
-        else "public, max-age=3600"
-    )
+        return _public_metadata_error_response(error)
+    response.headers["Cache-Control"] = _public_metadata_cache_control(result)
     return result
 
 
