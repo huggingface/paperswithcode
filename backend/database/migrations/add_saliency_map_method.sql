@@ -22,7 +22,7 @@ VALUES (
     'Saliency Maps',
     'Gradient Saliency Maps (Simonyan et al.)',
     'Gradient saliency maps, also called vanilla gradients, explain an image classifier''s decision by computing the gradient of the class score with respect to the input pixels in a single backward pass. The magnitude of the gradient, taking the maximum over colour channels, shows which pixels would change the score most if perturbed, giving an image-specific class saliency map without extra training or model changes. Simonyan, Vedaldi and Zisserman introduced the method together with class model visualisation, which optimizes an input image to maximize a class score. They used the saliency maps for weakly supervised object localization with GraphCut and showed that the computation is closely related to deconvolutional network reconstruction. This is distinct from visual saliency prediction, which models where humans look. Later attribution methods such as SmoothGrad, Guided Backpropagation, [Integrated Gradients](/methods/integrated-gradients) and [Grad-CAM](/methods/grad-cam) refine these noisy gradient maps.',
-    'gradient saliency map, gradient saliency maps, gradient-based saliency map, gradient-based saliency maps, image-specific class saliency, class saliency map, class saliency maps, vanilla gradient, vanilla gradients',
+    'gradient saliency map, gradient saliency maps, gradient-based saliency map, gradient-based saliency maps, image-specific class saliency, class saliency map, class saliency maps, vanilla gradient saliency, vanilla gradient saliency map, vanilla gradient saliency maps',
     (
         SELECT id
         FROM areas
