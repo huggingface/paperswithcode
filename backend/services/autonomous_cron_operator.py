@@ -109,6 +109,7 @@ _OWNED_SERVICE_PATHS: Mapping[str, tuple[str, ...]] = {
     "sync_physics_iq_verified": (
         "backend/services/physics_iq_verified_sync_service.py",
     ),
+    "sync_vals_finance_agent": ("backend/services/vals_finance_agent_sync_service.py",),
     "sync_frontiercode": ("backend/services/frontiercode_sync_service.py",),
     "sync_coarena": ("backend/services/coarena_sync_service.py",),
     "sync_arc_prize": ("backend/services/arc_prize_sync_service.py",),
@@ -204,6 +205,9 @@ _FOCUSED_TESTS: Mapping[str, tuple[str, ...]] = {
     "sync_extractbench": ("backend/tests/evaluation/test_extractbench_sync.py",),
     "sync_physics_iq_verified": (
         "backend/tests/evaluation/test_physics_iq_verified_sync.py",
+    ),
+    "sync_vals_finance_agent": (
+        "backend/tests/evaluation/test_vals_finance_agent_sync.py",
     ),
     "sync_frontiercode": ("backend/tests/evaluation/test_frontiercode_sync.py",),
     "sync_coarena": ("backend/tests/evaluation/test_coarena_sync.py",),

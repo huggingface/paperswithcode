@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Sync Vals AI Finance Agent v2 leaderboard hourly
+
+[Timer]
+OnCalendar=*-*-* *:47:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-sync-vals-finance-agent.service
+
+[Install]
+WantedBy=timers.target

@@ -43,6 +43,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
 | `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `cron-sync-physics-iq-verified.yml` | `28 * * * *` | `pwc-cron sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
+| `cron-sync-vals-finance-agent.yml` | `47 * * * *` | `pwc-cron sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -313,6 +314,19 @@ warning instead of failing.
 word- and page-level grounding F1 on the Document Understanding task, and omits
 the grounding metrics for systems that return no evidence (upstream reports
 0.00 for both).
+
+`sync_vals_finance_agent.py` parses the Finance Agent v2 table on
+https://www.vals.ai/benchmarks/fabv2 (Rank, Model, Accuracy, …) into the
+`finance-agent-v2` benchmark on task `agents` and fails on any layout change
+or a row count outside 40–400. Exact Vals model labels map to reviewed
+`(paper, model_name)` identities in the service (model names follow the
+catalog, e.g. Vals "Wonder Full" is "Muse Wonder Full (max)"); the job never
+creates papers, so unreviewed labels and unresolved papers are logged as
+warnings. It creates missing mapped rows, revises a row's accuracy when Vals
+changes it (values that round to the published precision are unchanged),
+adopts matching hand-imported rows, and renames a mislabelled hand-imported
+row once (`renamed_from`, only when its score matches). Managed rows that drop
+off the leaderboard are reported, never deleted.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

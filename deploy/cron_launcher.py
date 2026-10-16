@@ -365,6 +365,15 @@ COMMANDS: dict[str, Job] = {
             "replace managed ExtractBench evaluation rows from the validated leaderboard.csv"
         ),
     ),
+    "sync_vals_finance_agent": job(
+        "-m",
+        "scripts.hourly.sync_vals_finance_agent",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Finance Agent v2 evaluation rows from the "
+            "validated Vals AI leaderboard table; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",
@@ -445,7 +454,7 @@ COMMANDS: dict[str, Job] = {
     "post_trending_paper_to_x": job(
         "-m",
         "backend.scripts.post_trending_paper_to_x",
-        timeout="15m",
+        timeout="30m",
         idempotency=(
             "post at most one never-posted trending paper per run; paper_x_posts "
             "is written right after the post, so a paper is never posted twice"
@@ -454,7 +463,7 @@ COMMANDS: dict[str, Job] = {
     "post_x_insight": job(
         "-m",
         "backend.scripts.post_x_insight",
-        timeout="15m",
+        timeout="30m",
         idempotency=(
             "post at most one insight per run; x_insight_posts is written right "
             "after the post, so a subject is never posted twice"
