@@ -519,6 +519,12 @@ def test_title_search_matches_unique_name_when_subtitle_differs(monkeypatch, cat
             ("1912.08531", "GlobalTrack: A Simple and Strong Baseline", "2019-12-18"),
             ("2301.00002", "GlobalTrack: Tracking Satellites", "2023-01-02"),
         ],
+        # A full page may hide another paper with the name on a later page.
+        [("1912.08531", "GlobalTrack: A Simple and Strong Baseline", "2019-12-18")]
+        + [
+            (f"2302.{n:05d}", f"Tracking Study {n} with GlobalTrack", "2023-02-01")
+            for n in range(service.NAME_SEARCH_RESULTS - 1)
+        ],
     ],
 )
 def test_near_miss_title_is_a_404_not_a_wrong_paper(monkeypatch, catalog, candidates):

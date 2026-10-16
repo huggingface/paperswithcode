@@ -64,6 +64,8 @@ CLIENT_LOOKUPS_PER_WINDOW = 20
 WORKER_LOOKUPS_PER_WINDOW = 120
 MAX_CLIENT_BUCKETS = 4096
 TITLE_SEARCH_RESULTS = 10
+# A name shared by more papers than one page holds is never unique.
+NAME_SEARCH_RESULTS = 50
 MIN_TITLE_LENGTH = 8
 USER_AGENT = "paperswithcode-public-metadata/1.0 (+https://paperswithcode.co)"
 
@@ -372,21 +374,20 @@ class PublicPaperSources:
         name = title_name(title)
         if name is None:
             return None
-        matches = [
-            entry
-            for entry in self._arxiv_title_search(name)
-            if title_name(entry["title"]) == name
-        ]
+        entries = self._arxiv_title_search(name, NAME_SEARCH_RESULTS)
+        if len(entries) >= NAME_SEARCH_RESULTS:
+            # Later pages may hold another paper with the same name.
+            return None
+        matches = [entry for entry in entries if title_name(entry["title"]) == name]
         if len(matches) != 1:
             return None
         return {**self._with_hugging_face(matches[0]), "matched_name": name}
 
-    def _arxiv_title_search(self, normalized_title: str) -> list[dict[str, Any]]:
+    def _arxiv_title_search(
+        self, normalized_title: str, limit: int = TITLE_SEARCH_RESULTS
+    ) -> list[dict[str, Any]]:
         query = urllib.parse.urlencode(
-            {
-                "search_query": f'ti:"{normalized_title}"',
-                "max_results": TITLE_SEARCH_RESULTS,
-            }
+            {"search_query": f'ti:"{normalized_title}"', "max_results": limit}
         )
         body = self._get(f"https://export.arxiv.org/api/query?{query}")
         return _arxiv_entries(body) if body else []
