@@ -89,7 +89,42 @@ def render(payload: dict[str, Any], *, maximum_tasks_per_area: int = 12) -> str:
             lines.append(
                 f"- `{str(task['slug']).strip()}` — {str(task['name']).strip()}"
             )
+    if "framework_domains" in payload:
+        lines.extend(("", *render_framework_index(payload["framework_domains"])))
     return "\n".join(lines) + "\n"
+
+
+def render_framework_index(domains: list[dict[str, Any]]) -> list[str]:
+    """Render every catalog framework as one compact line per category."""
+    if not isinstance(domains, list):
+        raise TypeError("framework catalog must contain a domains list")
+    entries = []
+    for domain in domains:
+        for category in domain.get("categories") or []:
+            frameworks = [
+                f"`{str(framework['slug']).strip()}` {str(framework['name']).strip()}"
+                for framework in category.get("frameworks") or []
+                if str(framework.get("slug") or "").strip()
+                and str(framework.get("name") or "").strip()
+            ]
+            if frameworks:
+                entries.append(
+                    f"- {str(domain.get('name') or '').strip()} / "
+                    f"{str(category.get('name') or '').strip()}: {', '.join(frameworks)}"
+                )
+    if not entries:
+        raise ValueError("framework catalog is empty")
+    return [
+        "## Complete framework lookup index",
+        "",
+        (
+            "Frameworks are software libraries, inference engines, serving systems, "
+            "and toolkits; this index lists every catalog framework by domain and "
+            "category. Use the slug with `pwc framework --name FRAMEWORK`."
+        ),
+        "",
+        *entries,
+    ]
 
 
 def main() -> int:

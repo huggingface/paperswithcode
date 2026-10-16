@@ -20,6 +20,25 @@ from backend.chat_sandbox_worker.update_worker_contract import (
 )
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+FRAMEWORKS = {
+    "domains": [
+        {
+            "name": "Large Language Models",
+            "categories": [
+                {
+                    "name": "Inference & Serving",
+                    "frameworks": [
+                        {"slug": "vllm", "name": "vLLM"},
+                        {"slug": "llama-cpp", "name": "llama.cpp"},
+                    ],
+                }
+            ],
+        }
+    ]
+}
+FRAMEWORK_LINE = (
+    "- Large Language Models / Inference & Serving: `vllm` vLLM, `llama-cpp` llama.cpp"
+)
 
 
 def test_sync_command_updates_catalog_and_detects_stale_output(tmp_path: Path):
@@ -53,6 +72,8 @@ def test_sync_command_updates_catalog_and_detects_stale_output(tmp_path: Path):
         def do_GET(self):
             if self.path == "/api/v1/areas/with-tasks/":
                 payload = areas
+            elif self.path == "/api/v1/frameworks/":
+                payload = FRAMEWORKS
             elif self.path.startswith("/api/v1/tasks/"):
                 payload = {
                     "count": len(tasks),
@@ -90,6 +111,7 @@ def test_sync_command_updates_catalog_and_detects_stale_output(tmp_path: Path):
         updated = subprocess.run(command, check=False, capture_output=True, text=True)
         assert updated.returncode == 0, updated.stderr
         assert "`text-reranking` — Text Reranking" in output.read_text()
+        assert FRAMEWORK_LINE in output.read_text()
 
         output.write_text("stale\n")
         stale = subprocess.run(
@@ -145,8 +167,11 @@ def test_live_task_catalog_replaces_the_baked_snapshot(tmp_path: Path):
 
     class Handler(BaseHTTPRequestHandler):
         def do_GET(self):
-            page = 2 if "page=2" in self.path else 1
-            body = json.dumps(pages[page]).encode()
+            if self.path == "/api/v1/frameworks/":
+                payload = FRAMEWORKS
+            else:
+                payload = pages[2 if "page=2" in self.path else 1]
+            body = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.send_header("Content-Length", str(len(body)))
@@ -173,6 +198,7 @@ def test_live_task_catalog_replaces_the_baked_snapshot(tmp_path: Path):
 
     assert "baked catalog without the new task" not in prompt
     assert "`text-reranking` — Text Reranking" in prompt
+    assert FRAMEWORK_LINE in prompt
     assert prompt.count("PWC_TASK_CATALOG_START") == 1
     assert prompt.count("PWC_TASK_CATALOG_END") == 1
 

@@ -202,5 +202,38 @@ async function loadLiveTaskCatalog(apiUrl: string): Promise<string> {
     "",
     ...rows.map(([slug, name]) => `- \`${slug}\` — ${name}`),
     "",
+    await loadFrameworkIndex(apiUrl, signal),
+  ].join("\n");
+}
+
+/** Render every catalog framework as one compact `slug` name line per category. */
+async function loadFrameworkIndex(apiUrl: string, signal: AbortSignal): Promise<string> {
+  const response = await fetch(new URL(`${apiUrl}/frameworks/`), { signal });
+  if (!response.ok) throw new Error(`Framework catalog request failed: ${response.status}`);
+  const payload = await response.json() as { domains?: unknown };
+  if (!Array.isArray(payload.domains)) throw new Error("Framework catalog response is invalid");
+  const lines: string[] = [];
+  for (const domain of payload.domains as { name?: unknown; categories?: unknown }[]) {
+    if (!Array.isArray(domain?.categories)) continue;
+    for (const category of domain.categories as { name?: unknown; frameworks?: unknown }[]) {
+      if (!Array.isArray(category?.frameworks)) continue;
+      const entries = (category.frameworks as { name?: unknown; slug?: unknown }[])
+        .map((framework) => [
+          typeof framework?.slug === "string" ? framework.slug.trim() : "",
+          typeof framework?.name === "string" ? framework.name.trim() : "",
+        ])
+        .filter(([slug, name]) => slug && name && slug.length <= 200 && name.length <= 200)
+        .map(([slug, name]) => `\`${slug}\` ${name}`);
+      if (entries.length > 0) lines.push(`- ${String(domain.name ?? "").trim()} / ${String(category.name ?? "").trim()}: ${entries.join(", ")}`);
+    }
+  }
+  if (lines.length === 0) throw new Error("Live framework catalog is empty");
+  return [
+    "## Complete framework lookup index",
+    "",
+    "Frameworks are software libraries, inference engines, serving systems, and toolkits; this index lists every catalog framework by domain and category. Use the slug with `pwc framework --name FRAMEWORK`.",
+    "",
+    ...lines,
+    "",
   ].join("\n");
 }

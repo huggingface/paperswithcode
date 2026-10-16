@@ -56,11 +56,7 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /for a general concept \(for example weight decay[^)]*\), call pwc_search_papers/u);
   assert.match(rendered, /After a pwc_get_method miss, use pwc_search_papers rather than retrying/u);
   assert.match(rendered, /inference engines, serving systems[^:]*are frameworks, not methods: never call pwc_get_method for them/u);
-  assert.match(rendered, /Call pwc_get_framework with the framework index slug, or pwc_list_frameworks/u);
-  for (const entry of ["vllm=vLLM", "sglang=SGLang", "llama-cpp=llama.cpp", "transformers=Transformers", "neuralforecast=NeuralForecast"]) {
-    assert.ok(rendered.includes(entry), entry);
-  }
-  assert.doesNotMatch(rendered, /\$\{FRAMEWORK_INDEX\}/u);
+  assert.match(rendered, /Call pwc_get_framework with the slug from the framework lookup index, or pwc_list_frameworks/u);
   assert.match(rendered, /When a paper is in view[^.]*do not call pwc_get_method with the paper's title, model name, or acronym/u);
   assert.match(rendered, /When the method index does not list it, call pwc_get_method/u);
   assert.match(rendered, /When a conversation opens without a paper in view[^.]*call at least one catalog tool before answering/u);

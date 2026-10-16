@@ -9,24 +9,32 @@ from typing import Any
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
+from backend.chat_sandbox_worker.render_task_catalog import render_framework_index
+
 MAXIMUM_PAGES = 10
 MAXIMUM_RESPONSE_BYTES = 1_000_000
 
 
-def _page(api_url: str, page: int, *, timeout: float) -> dict[str, Any]:
-    query = urlencode({"page": page, "page_size": 100, "ordering": "name"})
-    url = f"{api_url.rstrip('/')}/tasks/?{query}"
+def _get(url: str, *, timeout: float) -> Any:
     with urlopen(url, timeout=timeout) as response:
         body = response.read(MAXIMUM_RESPONSE_BYTES + 1)
     if len(body) > MAXIMUM_RESPONSE_BYTES:
         raise ValueError("task catalog response is too large")
-    payload = json.loads(body)
+    return json.loads(body)
+
+
+def _page(api_url: str, page: int, *, timeout: float) -> dict[str, Any]:
+    query = urlencode({"page": page, "page_size": 100, "ordering": "name"})
+    payload = _get(f"{api_url.rstrip('/')}/tasks/?{query}", timeout=timeout)
     if not isinstance(payload, dict) or not isinstance(payload.get("results"), list):
         raise TypeError("task catalog response is invalid")
     return payload
 
 
-def render_live_task_catalog(tasks: list[dict[str, Any]]) -> str:
+def render_live_task_catalog(
+    tasks: list[dict[str, Any]],
+    framework_domains: list[dict[str, Any]] | None = None,
+) -> str:
     """Render a compact, complete lookup index from validated public task rows."""
     rows: set[tuple[str, str]] = set()
     for task in tasks:
@@ -49,6 +57,8 @@ def render_live_task_catalog(tasks: list[dict[str, Any]]) -> str:
         "",
     ]
     lines.extend(f"- `{slug}` — {name}" for name, slug in ordered)
+    if framework_domains is not None:
+        lines.extend(("", *render_framework_index(framework_domains)))
     return "\n".join(lines) + "\n"
 
 
@@ -70,7 +80,15 @@ def fetch_live_task_catalog(
         tasks.extend(task for task in payload["results"] if isinstance(task, dict))
         next_page = payload.get("next_page")
         if next_page is None:
-            return render_live_task_catalog(tasks)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError("task catalog refresh timed out")
+            frameworks = _get(f"{base_url.rstrip('/')}/frameworks/", timeout=remaining)
+            if not isinstance(frameworks, dict) or not isinstance(
+                frameworks.get("domains"), list
+            ):
+                raise TypeError("framework catalog response is invalid")
+            return render_live_task_catalog(tasks, frameworks["domains"])
         if not isinstance(next_page, int) or next_page != page + 1:
             raise ValueError("task catalog pagination is invalid")
         page = next_page

@@ -392,8 +392,8 @@ cannot alter an already-published worker image.
 `sync-chat-task-catalog.yml` refreshes the checked-in fallback
 `TASK_CATALOG.md` from the production taxonomy API every 15 minutes and on
 manual dispatch. At runtime, both worker harnesses fetch every page of the task
-taxonomy through the trusted capability-backed catalog gateway and replace the
-baked prompt section before each turn. Persistent sessions are recreated when
+taxonomy and the complete framework list through the trusted capability-backed
+catalog gateway and replace the baked prompt section before each turn. Persistent sessions are recreated when
 that live catalog changes. The fallback therefore stays useful during a
 catalog-gateway failure without making prompt freshness depend on a Modal image
 publication or application deployment. The prompt also requires task-scoped

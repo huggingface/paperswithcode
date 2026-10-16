@@ -50,15 +50,23 @@ test("failed background catalog refresh keeps using the baked catalog without re
   assert.equal(loads, 1);
 });
 
+const FRAMEWORKS = {
+  domains: [{
+    name: "Large Language Models",
+    categories: [{ name: "Inference & Serving", frameworks: [{ slug: "vllm", name: "vLLM" }, { slug: "llama-cpp", name: "llama.cpp" }] }],
+  }],
+};
+
 test("coalesces concurrent live task catalog loads and reuses the successful result", async () => {
   const originalFetch = globalThis.fetch;
   let requests = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (input: string | URL | Request) => {
     requests += 1;
+    const frameworks = String(input).endsWith("/frameworks/");
     return {
       ok: true,
       async json() {
-        return {
+        return frameworks ? FRAMEWORKS : {
           results: [{ name: "Text Reranking", slug: "text-reranking" }],
           next_page: null,
         };
@@ -73,10 +81,12 @@ test("coalesces concurrent live task catalog loads and reuses the successful res
     ]);
     const third = await fetchLiveTaskCatalog(url);
 
-    assert.equal(requests, 1);
+    assert.equal(requests, 2);
     assert.equal(first, second);
     assert.equal(second, third);
     assert.match(third, /`text-reranking` — Text Reranking/u);
+    assert.match(third, /## Complete framework lookup index/u);
+    assert.match(third, /- Large Language Models \/ Inference & Serving: `vllm` vLLM, `llama-cpp` llama\.cpp/u);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -85,13 +95,14 @@ test("coalesces concurrent live task catalog loads and reuses the successful res
 test("does not cache a failed live task catalog load", async () => {
   const originalFetch = globalThis.fetch;
   let requests = 0;
-  globalThis.fetch = async () => {
+  globalThis.fetch = async (input: string | URL | Request) => {
     requests += 1;
+    const frameworks = String(input).endsWith("/frameworks/");
     return {
       ok: requests > 1,
       status: requests > 1 ? 200 : 503,
       async json() {
-        return {
+        return frameworks ? FRAMEWORKS : {
           results: [{ name: "Image Classification", slug: "image-classification" }],
           next_page: null,
         };
@@ -103,8 +114,9 @@ test("does not cache a failed live task catalog load", async () => {
     await assert.rejects(fetchLiveTaskCatalog(url), /request failed: 503/u);
     const catalog = await fetchLiveTaskCatalog(url);
 
-    assert.equal(requests, 2);
+    assert.equal(requests, 3);
     assert.match(catalog, /`image-classification` — Image Classification/u);
+    assert.match(catalog, /`vllm` vLLM/u);
   } finally {
     globalThis.fetch = originalFetch;
   }

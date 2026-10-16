@@ -121,7 +121,14 @@ def build_catalog(api_url: str = DEFAULT_API_URL) -> str:
         for name in area_names
     ):
         raise ValueError("area taxonomy contains an invalid name")
-    return render({**areas, "all_tasks": tasks})
+    frameworks = _fetch_json(f"{base}/frameworks/")
+    return render(
+        {
+            **areas,
+            "all_tasks": tasks,
+            "framework_domains": frameworks.get("domains"),
+        }
+    )
 
 
 def _write_atomic(path: Path, content: str) -> None:
