@@ -103,6 +103,18 @@
   height: 8px;
   border-radius: 50%;
 }
+.tag-cell .name .task-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 9px;
+  background: color-mix(in oklch, currentColor 14%, transparent);
+  transition: transform 0.2s ease;
+}
+.tag-cell:hover .name .task-icon { transform: rotate(-8deg) scale(1.1); }
 .tag-cell .meta {
   font-family: var(--mono);
   font-size: 11px;

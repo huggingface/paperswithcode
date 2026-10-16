@@ -1,6 +1,6 @@
 import React from "react";
 import { Link } from "react-router-dom";
-import { TrendingUp } from "lucide-react";
+import { TrendingUp, type LucideIcon } from "lucide-react";
 
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -8,6 +8,8 @@ export interface TrendingTaxonomyItem {
   id: string;
   name: string;
   href: string;
+  icon?: LucideIcon;
+  iconColor?: string;
   areaName?: string;
   recentPaperCount: number;
   shareLift: number;
@@ -55,6 +57,11 @@ export const TrendingTaxonomyGrid: React.FC<{
             <Link key={item.id} to={item.href} className="tag-cell">
               <div className="name" style={mono ? { fontFamily: "var(--mono)", fontSize: 15 } : undefined}>
                 <span className="taxonomy-trending-rank">{index + 1}</span>
+                {item.icon && (
+                  <span className="task-icon" style={{ color: item.iconColor }}>
+                    <item.icon size={16} strokeWidth={2} aria-hidden="true" />
+                  </span>
+                )}
                 {item.name}
               </div>
               <div className="meta taxonomy-trending-meta">

@@ -6,6 +6,7 @@ import { catalogApi } from "@/lib/api/catalog";
 import { chipColors, hueFromSlug } from "@/lib/colors";
 import { displayTaskName } from "@/lib/transform";
 import { slugify } from "@/lib/slug";
+import { taskIcon } from "@/lib/taskIcons";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { TaxonomySuggestionTile } from "@/components/TaxonomySuggestionTile";
@@ -39,15 +40,20 @@ const TagsIndexView: React.FC = () => {
 
   const trendingItems = useMemo(() => {
     const areaNames = new Map((areasQ.data?.results ?? []).map((area) => [area.id, area.name]));
+    const taskSlugs = new Map(
+      (taxonomyQ.data?.results ?? []).flatMap((area) => area.tasks.map((task) => [task.id, task.slug])),
+    );
     return trendingQ.data?.results.map((task) => ({
       id: task.id,
       name: displayTaskName(task.name, task.slug),
       href: `/tasks/${task.slug}`,
+      icon: taskIcon(task.slug, task.parent_id ? taskSlugs.get(task.parent_id) : undefined),
+      iconColor: chipColors(hueFromSlug(task.slug)).dot,
       areaName: task.area_id ? areaNames.get(task.area_id) : undefined,
       recentPaperCount: task.recent_paper_count,
       shareLift: task.share_lift,
     }));
-  }, [trendingQ.data, areasQ.data]);
+  }, [trendingQ.data, areasQ.data, taxonomyQ.data]);
 
   const visibleAreas = useMemo(() => {
     if (!taxonomyQ.data) return [];
@@ -192,10 +198,13 @@ const TagsIndexView: React.FC = () => {
                 {tasks.map((t) => {
                   const slug = t.slug || "";
                   const c = chipColors(hueFromSlug(slug));
+                  const Icon = taskIcon(slug);
                   return (
                     <Link key={t.id} to={`/tasks/${slug}`} className="tag-cell">
                       <div className="name">
-                        <span className="dot" style={{ background: c.dot }}></span>
+                        <span className="task-icon" style={{ color: c.dot }}>
+                          <Icon size={16} strokeWidth={2} aria-hidden="true" />
+                        </span>
                         {displayTaskName(t.name, slug)}
                       </div>
                       <div className="meta">
