@@ -350,9 +350,9 @@ existing HF attribution.
 
 `sync_hf_author_profiles.py` walks `https://huggingface.co/api/papers` (newest
 first, 100 papers per request) back 30 days and applies each paper's HF
-authorship claims. Each HF account has its own author row, which lists only
-the papers it claimed: a claim moves the paper's link from the author matched
-by that name to the account's row (created on first sight), marks the link
+authorship claims. Each HF account has its own author row: a claim moves the
+paper's link from the author matched by that name to the account's row
+(created on first sight), marks the link
 `claimed`, and refreshes the avatar, username, and Pro status. It never moves an
 account between rows, ignores HF's unconfirmed `extracted_pending` guesses, and
 logs claims of an already claimed slot and unmatched names as `conflicts` and

@@ -14,6 +14,12 @@
 -- Run after add_paper_author_claims.sql and after backfilling claims with
 -- `sync_hf_author_profiles --days 10000`; otherwise claimed papers move too.
 --
+-- Not applied in production. Most of an HF author's genuine papers are
+-- unclaimed (HF has no claim for papers it never indexed, nor for many it
+-- did), so this also moves real papers off the author, splitting one person
+-- across two pages (Yann LeCun would lose about 40 of 102). Author pages list
+-- every linked paper, so fix namesake links per author instead of running it.
+--
 -- Run as the schema owner (postgres). Idempotent — safe to re-run.
 
 BEGIN;

@@ -188,9 +188,7 @@ WITH RECURSIVE interests AS (
  JOIN paper_methods pm ON pm.method_id=i.entity_id WHERE i.kind='method'
  UNION ALL
  SELECT 'author',i.entity_id,pa.paper_id,2 FROM interests i
- JOIN paper_authors pa ON pa.author_id=i.entity_id
- JOIN authors a ON a.id=pa.author_id
- WHERE i.kind='author' AND (pa.claimed OR (a.hf_id IS NULL AND a.hf_username IS NULL))
+ JOIN paper_authors pa ON pa.author_id=i.entity_id WHERE i.kind='author'
  UNION ALL
  SELECT 'organization',i.entity_id,po.paper_id,2 FROM interests i
  JOIN paper_organizations po ON po.organization_id=i.entity_id WHERE i.kind='organization'

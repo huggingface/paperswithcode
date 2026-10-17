@@ -9,7 +9,7 @@ import re
 from typing import Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, asc, or_, and_
+from sqlalchemy import func, desc, asc, or_
 
 from backend.models.database import (
     Author as DBAuthor,
@@ -38,15 +38,6 @@ def normalize_arxiv_author_name(full_name: str) -> str:
 def has_hf_account():
     """SQL condition: the author row is linked to a Hugging Face account."""
     return or_(DBAuthor.hf_id.isnot(None), DBAuthor.hf_username.isnot(None))
-
-
-def listed_paper_link():
-    """SQL condition on a joined PaperAuthor/Author: the author lists this paper.
-
-    An author linked to a Hugging Face account lists only the papers it claimed
-    there; a name-only author lists every paper matched to its name.
-    """
-    return or_(PaperAuthor.claimed, ~has_hf_account())
 
 
 def get_or_create_author_by_name(db: Session, name: str) -> DBAuthor:
@@ -118,10 +109,7 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(
-                    PaperAuthor,
-                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
-                )
+                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
                 .group_by(DBAuthor.id)
             )
 
@@ -203,10 +191,7 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(
-                    PaperAuthor,
-                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
-                )
+                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
                 .filter(DBAuthor.id == self._resolve_author_id(author_id))
                 .group_by(DBAuthor.id)
                 .first()
@@ -277,8 +262,7 @@ class AuthorService:
             query = (
                 self.db.query(DBPaper)
                 .join(PaperAuthor, DBPaper.id == PaperAuthor.paper_id)
-                .join(DBAuthor, DBAuthor.id == PaperAuthor.author_id)
-                .filter(PaperAuthor.author_id == resolved_id, listed_paper_link())
+                .filter(PaperAuthor.author_id == resolved_id)
             )
 
             # Apply latest version filter
@@ -359,10 +343,7 @@ class AuthorService:
                 self.db.query(
                     DBAuthor, func.count(PaperAuthor.paper_id).label("paper_count")
                 )
-                .outerjoin(
-                    PaperAuthor,
-                    and_(DBAuthor.id == PaperAuthor.author_id, listed_paper_link()),
-                )
+                .outerjoin(PaperAuthor, DBAuthor.id == PaperAuthor.author_id)
                 .filter(
                     or_(
                         DBAuthor.name.ilike(f"%{query}%"),

@@ -1,9 +1,7 @@
 -- Record which paper-author links were claimed on Hugging Face.
 --
--- Authors linked to an HF account list only the papers they claimed; papers
--- matched by name alone belong to a separate, name-only author row. Run
--- split_unclaimed_hf_author_papers.sql after backfilling claims with
--- `sync_hf_author_profiles --days 10000`.
+-- Name matching never attaches new papers to an author linked to an HF
+-- account; only claims do. Author pages list every linked paper, claimed or not.
 --
 -- Run as the schema owner (postgres). Idempotent — safe to re-run.
 

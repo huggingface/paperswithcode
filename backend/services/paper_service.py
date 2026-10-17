@@ -733,14 +733,12 @@ class PaperService:
                 )
 
             for author in resolved_authors:
-                # An author with a Hugging Face account has only its claimed papers.
-                author_links = [
-                    DBPaperAuthor.paper_id == DBPaper.id,
-                    DBPaperAuthor.author_id == author.id,
-                ]
-                if author.hf_id or author.hf_username:
-                    author_links.append(DBPaperAuthor.claimed)
-                query = query.filter(exists().where(*author_links))
+                query = query.filter(
+                    exists().where(
+                        DBPaperAuthor.paper_id == DBPaper.id,
+                        DBPaperAuthor.author_id == author.id,
+                    )
+                )
 
             # Apply conference filter
             if conference:

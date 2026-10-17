@@ -116,7 +116,7 @@ def sample_authors():
     paper_author1 = PaperAuthor(paper_id=1, author_id=1, claimed=True)
     paper_author2 = PaperAuthor(paper_id=2, author_id=1, claimed=True)
     paper_author3 = PaperAuthor(paper_id=1, author_id=2)
-    # Matched to Alice Johnson by name only; she never claimed it on HF.
+    # Linked to Alice Johnson without an HF claim, as for most legacy papers.
     paper_author4 = PaperAuthor(paper_id=2, author_id=3)
 
     db.add_all([paper_author1, paper_author2, paper_author3, paper_author4])
@@ -182,15 +182,15 @@ def test_get_author_by_id(client, sample_authors):
     assert data["paper_count"] == 2
 
 
-def test_hf_author_lists_only_claimed_papers(client, sample_authors):
-    """An author with an HF account does not get namesake papers by name."""
+def test_hf_author_lists_unclaimed_papers(client, sample_authors):
+    """Every paper whose page links to an HF-linked author is on that author's page."""
     author = client.get("/api/v1/authors/3").json()
     papers = client.get("/api/v1/authors/3/papers").json()
     listed = client.get("/api/v1/authors/?search=Alice").json()["results"]
 
-    assert author["paper_count"] == 0
-    assert papers["count"] == 0
-    assert [entry["paper_count"] for entry in listed] == [0]
+    assert author["paper_count"] == 1
+    assert [paper["id"] for paper in papers["results"]] == ["2"]
+    assert [entry["paper_count"] for entry in listed] == [1]
 
 
 def test_name_only_author_lists_every_matched_paper(client, sample_authors):

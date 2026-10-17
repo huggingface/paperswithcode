@@ -6,7 +6,7 @@ from dataclasses import dataclass, replace
 from datetime import date
 from typing import Optional
 
-from sqlalchemy import and_, func
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from backend.models.database import (
@@ -853,10 +853,7 @@ class DiscoveryPageService:
         entity = self.db.query(Author).filter(Author.id == author_id).one_or_none()
         if entity is None:
             return None
-        # An author with a Hugging Face account lists only the papers it claimed.
         author_links = PaperAuthor.author_id == entity.id
-        if entity.hf_id or entity.hf_username:
-            author_links = and_(author_links, PaperAuthor.claimed)
         papers = self._papers_for_relation(
             PaperAuthor, author_links, f"Authored by {entity.name}"
         )
