@@ -1617,8 +1617,8 @@ def production_codex_values(
 def production_codex_image_values() -> dict[str, str]:
     return {
         "PWC_CODEX_JOBS_IMAGE": (
-            "cr.hf.co/nielsr/pwc-codex-curator:runner-87ebc81c234c"
-            "@sha256:12d5300aaf69c2ba77ac80994ee8526370e6d4a63193f9d19fcd433b569becb1"
+            "cr.hf.co/nielsr/pwc-codex-curator:runner-8fc62f3ce865"
+            "@sha256:93d70eb1c02345d37a099182e322463b47f4480a472720376c1b98068fe075a9"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",
     }
