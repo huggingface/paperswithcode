@@ -225,7 +225,9 @@ sudo pwc-cleanup --component mcp --confirm CLEAN_RELEASES
 
 Site and MCP mutations share the site deployment lock. Candidate qualification
 runs as `pwc-mcp` on a temporary loopback port and must pass health, initialize,
-tool discovery, and a one-result read-only catalog call before activation. The
+tool discovery, and a one-result read-only catalog call before activation.
+Activation and rollback enable `paperswithcode-mcp@<environment>.service` before
+restarting it, so the active release starts again after a host reboot. The
 permanent service is one process on loopback (`8002` production, `8003` staging),
 with `MemoryMax=768M`, `CPUQuota=75%`, `TasksMax=64`, protected system paths,
 and no database or bucket credentials. The installer requires at least 512 MiB

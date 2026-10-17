@@ -289,6 +289,77 @@ def test_failed_activation_restores_previous_pointer(tmp_path, monkeypatch):
     assert mcp_release._pointer("staging", "previous") == previous
 
 
+def test_activation_enables_unit_so_it_survives_reboot(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
+    release = _release(tmp_path)
+    commands = []
+    monkeypatch.setattr(
+        mcp_release, "_run", lambda command, **kwargs: commands.append(command)
+    )
+    monkeypatch.setattr(
+        mcp_release, "_ensure_permanent_port_available", lambda *args: None
+    )
+    monkeypatch.setattr(mcp_release, "_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mcp_release, "_smoke", lambda *args, **kwargs: None)
+
+    mcp_release.activate_release(release, "production")
+
+    assert commands == [
+        ["systemctl", "enable", "paperswithcode-mcp@production.service"],
+        ["systemctl", "restart", "paperswithcode-mcp@production.service"],
+    ]
+
+
+def test_failed_initial_activation_disables_unit(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
+    release = _release(tmp_path)
+    monkeypatch.setattr(mcp_release, "_run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        mcp_release, "_ensure_permanent_port_available", lambda *args: None
+    )
+    monkeypatch.setattr(mcp_release, "_health", lambda *args, **kwargs: None)
+
+    def smoke(*args):
+        raise mcp_release.McpReleaseError("candidate failed")
+
+    monkeypatch.setattr(mcp_release, "_smoke", smoke)
+    stopped = []
+    monkeypatch.setattr(
+        mcp_release.subprocess,
+        "run",
+        lambda command, **kwargs: stopped.append(command),
+    )
+
+    with pytest.raises(mcp_release.McpReleaseError, match="candidate failed"):
+        mcp_release.activate_release(release, "staging")
+
+    assert mcp_release._pointer("staging", "current") is None
+    assert stopped == [
+        ["systemctl", "disable", "--now", "paperswithcode-mcp@staging.service"]
+    ]
+
+
+def test_rollback_enables_unit_before_restart(tmp_path, monkeypatch):
+    monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
+    monkeypatch.setattr(mcp_release, "MCP_PORTS", {"staging": 8003})
+    root = mcp_release.MCP_ENVIRONMENTS / "staging"
+    mcp_release._atomic_pointer(_release(tmp_path, "b" * 16), root / "current")
+    mcp_release._atomic_pointer(_release(tmp_path, "a" * 16), root / "previous")
+    commands = []
+    monkeypatch.setattr(
+        mcp_release, "_run", lambda command, **kwargs: commands.append(command)
+    )
+    monkeypatch.setattr(mcp_release, "_health", lambda *args, **kwargs: None)
+    monkeypatch.setattr(mcp_release, "_smoke", lambda *args, **kwargs: None)
+
+    mcp_release.rollback("staging")
+
+    assert commands == [
+        ["systemctl", "enable", "paperswithcode-mcp@staging.service"],
+        ["systemctl", "restart", "paperswithcode-mcp@staging.service"],
+    ]
+
+
 def test_rollback_swaps_current_and_previous(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_release, "MCP_ENVIRONMENTS", tmp_path / "environments")
     monkeypatch.setattr(mcp_release, "MCP_PORTS", {"staging": 8003})

@@ -429,6 +429,8 @@ def activate_release(release: Path, environment: str) -> None:
         _atomic_pointer(current, root / "previous")
     unit = f"paperswithcode-mcp@{environment}.service"
     try:
+        # Enabling makes the active release survive a host reboot.
+        _run(["systemctl", "enable", unit])
         _run(["systemctl", "restart", unit])
         _health(MCP_PORTS[environment], str(manifest["package_version"]))
         _smoke(MCP_PORTS[environment], manifest)
@@ -449,7 +451,7 @@ def activate_release(release: Path, environment: str) -> None:
                 _atomic_pointer(previous, root / "previous")
             else:
                 (root / "previous").unlink(missing_ok=True)
-            subprocess.run(["systemctl", "stop", unit], check=False)
+            subprocess.run(["systemctl", "disable", "--now", unit], check=False)
         raise
 
 
@@ -478,6 +480,7 @@ def rollback(environment: str) -> dict[str, object]:
     _atomic_pointer(previous, MCP_ENVIRONMENTS / environment / "current")
     _atomic_pointer(current, MCP_ENVIRONMENTS / environment / "previous")
     try:
+        _run(["systemctl", "enable", f"paperswithcode-mcp@{environment}.service"])
         _run(["systemctl", "restart", f"paperswithcode-mcp@{environment}.service"])
         manifest = validate_release(previous)
         _health(MCP_PORTS[environment], str(manifest["package_version"]))
