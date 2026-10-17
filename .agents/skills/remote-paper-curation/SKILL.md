@@ -131,6 +131,16 @@ results, submit empty `evaluations` even when the older paper has configured
 benchmarks. Apply the same restriction to `benchmark_gaps` and explain older or
 sibling results as `not_paper_native` in source coverage.
 
+The pinned official model card in `source_candidate.model_card_url` is
+first-party evidence for the triggering release. When it reports scores for
+that exact release (for example a dated point release such as `…-1017`), those
+scores are eligible results for it even when the paper only reports an earlier
+release of the family; never mark them `not_paper_native`. Submit them with
+the release's canonical name (or a supplied alias) as `model_name`, the pinned
+card URL as each `score_evidence.source_url`, and the card table as
+`table_reference`. The exact split, version, tool-setting, metric, and scale
+rules apply unchanged, and the card's comparator columns stay excluded.
+
 For every `source_documents` URL in `/tmp/url_candidates.json`, include a separate
 `source_coverage` entry with benchmark outcomes. This includes the official GitHub
 README even when it contains no eligible scores. Use `status: "unavailable"` and

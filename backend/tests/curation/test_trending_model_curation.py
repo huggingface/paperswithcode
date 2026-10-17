@@ -1801,6 +1801,98 @@ def test_trending_eval_ownership_rejects_sibling_model_name(trigger):
     )
 
 
+def test_trending_eval_ownership_accepts_point_release_card_scores():
+    engine = create_engine("sqlite:///:memory:")
+    Base.metadata.create_all(
+        engine,
+        tables=[
+            Paper.__table__,
+            ModelRelease.__table__,
+            ModelProviderAlias.__table__,
+            TrendingModelCandidate.__table__,
+            PaperCurationWorkflow.__table__,
+        ],
+    )
+    db = Session(engine)
+    paper = Paper(
+        title="DeepSeek-V4.1",
+        source="arxiv",
+        arxiv_id="2609.00001",
+        version="v1",
+        is_latest_version=True,
+    )
+    db.add(paper)
+    db.flush()
+    release = ModelRelease(
+        paper_id=paper.id,
+        canonical_name="DeepSeek-V4.1-Flash-1017",
+        publisher="deepseek-ai",
+        aliases=[],
+    )
+    db.add(release)
+    db.flush()
+    candidate = TrendingModelCandidate(
+        repo_id="deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        author="deepseek-ai",
+        status="resolved",
+        model_release_id=release.id,
+    )
+    db.add(candidate)
+    db.flush()
+    workflow = PaperCurationWorkflow(
+        id=uuid.uuid4(),
+        paper_id=paper.id,
+        source_candidate_id=candidate.id,
+        cohort_date=datetime.now(UTC).date(),
+        cohort_order=0,
+        policy_version="hf-trending-v1",
+        status="running",
+    )
+    db.add(workflow)
+    db.commit()
+    row = SimpleNamespace(
+        paper_id=paper.id, parent_workflow_id=workflow.id, trigger="hf-trending-cron"
+    )
+    service = CodexCurationCallbackService(db)
+
+    def proposal(model_name):
+        return ApplyMutationRequest(
+            evaluations=[
+                {
+                    "paper_id": paper.id,
+                    "task_id": 1,
+                    "dataset_id": 1,
+                    "model_name": model_name,
+                    "metrics": {"Accuracy": 41.2},
+                    "best_metric": "Accuracy",
+                    "source_url": "https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                }
+            ]
+        )
+
+    # Card-only scores for the triggering point release belong to it.
+    service._validate_trending_model_ownership(
+        row, proposal("DeepSeek-V4.1-Flash-1017")
+    )
+    # The paper's earlier release cannot be relabeled onto this release's lane.
+    with pytest.raises(
+        ValueError, match="does not belong to the resolved model release"
+    ):
+        service._validate_trending_model_ownership(row, proposal("DeepSeek-V4.1-Flash"))
+
+
+def test_triggered_add_evals_treats_pinned_card_as_first_party_release_evidence():
+    runner = Path("jobs/run_paper_curation.py").read_text(encoding="utf-8")
+    skill = Path(".agents/skills/remote-paper-curation/SKILL.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert "prioritize its paper-native model lanes" not in runner
+    assert "first-party results for it even when the paper does not report" in runner
+    assert "first-party evidence for the triggering release" in skill
+    assert "never mark them `not_paper_native`" in skill
+
+
 def test_trending_eval_requires_coverage_for_every_authoritative_source():
     row = SimpleNamespace(
         trigger="hf-trending-cron",

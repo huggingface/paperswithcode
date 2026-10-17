@@ -236,7 +236,12 @@ def _prompt(context: dict) -> str:
                 "This workflow was triggered by a new or changed official model "
                 f"repository: {context['source_candidate']['repo_id']} at pinned "
                 f"revision {context['source_candidate']['readme_revision']}. "
-                "Inspect that model card and prioritize its paper-native model lanes."
+                "Inspect that model card and prioritize that release's own model lanes. "
+                "Scores the pinned official card reports for this exact release are "
+                "first-party results for it even when the paper does not report that "
+                "release: submit them under the release name with the pinned card as "
+                "score_evidence source_url, under the same exact split, metric, and "
+                "scale rules. Comparator columns and older or sibling releases stay excluded."
             )
     return "\n\n".join(rules)
 
