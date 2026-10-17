@@ -112,7 +112,7 @@ export interface OrganizationSummary {
   name: string;
   slug: string;
   logo_url?: string | null;
-  source: 'manual' | 'hf_org_papers';
+  source: 'manual' | 'hf_org_papers' | 'curation';
   added_by_hf_username?: string | null;
 }
 
