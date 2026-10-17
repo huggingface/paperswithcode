@@ -25,6 +25,7 @@ from backend.services.arc_prize_sync_service import (
     ArcPrizeEntry,
     ArcPrizeSnapshot,
     ArcPrizeSyncService,
+    VERSION_CONFIGS,
     VersionConfig,
     parse_arc_prize_leaderboard,
 )
@@ -199,6 +200,29 @@ def test_parser_rejects_truncation_wrong_dataset_and_invalid_scores():
     row["score"] = 1.1
     with pytest.raises(ValueError, match="outside 0-1"):
         parse_arc_prize_leaderboard(payload, config)
+
+
+def test_v3_parser_accepts_leaderboard_growth_past_one_hundred_rows():
+    config = VERSION_CONFIGS["v3"]
+    payload = {
+        "version": "v3",
+        "generatedAt": "2026-10-15T16:00:00Z",
+        "evaluations": [
+            {
+                "modelId": f"model-{index}",
+                "modelGroup": "example",
+                "modelDisplayName": f"Model {index}",
+                "datasetId": config.upstream_dataset_id,
+                "datasetDisplayName": config.dataset_name,
+                "score": 0.01,
+                "resultsUrl": "",
+                "display": True,
+            }
+            for index in range(102)
+        ],
+    }
+
+    assert len(parse_arc_prize_leaderboard(payload, config).entries) == 102
 
 
 def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed():

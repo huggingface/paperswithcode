@@ -67,7 +67,7 @@ VERSION_CONFIGS: dict[str, VersionConfig] = {
         dataset_slug="arc-agi-3",
         metric_name="RHAE",
         min_entries=5,
-        max_entries=100,
+        max_entries=400,
     ),
 }
 
