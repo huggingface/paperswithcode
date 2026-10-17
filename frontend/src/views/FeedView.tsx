@@ -406,6 +406,8 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
       : [],
     [following, follows.data],
   );
+  // Keep the follows section up while auth or follows load so the domain lists never flash in.
+  const showFollowsSidebar = following && (!!auth?.isLoading || (!!user && !noFollows));
   const popularTasks = topTasks.data?.slice(0, 8);
   const infinite = following ? followedFeed : publicFeed;
   const cards = useMemo(() => {
@@ -438,9 +440,19 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
 
       <div className="layout-with-sidebar">
         <aside className="sidebar">
-          {followedEntities.length > 0 ? (
+          {showFollowsSidebar ? (
             <div className="sidebar-section sidebar-section-follows">
               <div className="sidebar-label">You follow</div>
+              {(auth?.isLoading || follows.isLoading) && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {Array.from({ length: 4 }).map((_, i) => (
+                    <Skeleton key={i} className="h-5 w-full" />
+                  ))}
+                </div>
+              )}
+              {follows.isError && (
+                <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>Couldn't load your follows.</div>
+              )}
               {followedEntities.map((follow) => (
                 <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
                   <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>

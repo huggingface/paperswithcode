@@ -134,3 +134,10 @@ it('lists followed entities with kind badges in the sidebar', async () => {
   expect(links[1]).toHaveAttribute('href', '/organizations/liquid-ai');
   expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
 });
+
+it('keeps domain lists out of the Following sidebar while follows load', () => {
+  vi.mocked(researchApi.follows).mockReturnValue(new Promise(() => {}));
+  const { container } = renderFeed();
+  expect(screen.getByText('You follow')).toBeInTheDocument();
+  expect(container.querySelector('.sidebar-section-top-domains')).toBeNull();
+});
