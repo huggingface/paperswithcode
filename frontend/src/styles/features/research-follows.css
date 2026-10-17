@@ -223,3 +223,44 @@
     padding: 22px 18px;
   }
 }
+.sidebar-follow-link {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0;
+}
+.sidebar-follow-kind {
+  flex: 0 0 76px;
+  padding: 3px 0;
+  border-radius: 6px;
+  color: var(--accent-text);
+  background: var(--accent-soft);
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-align: center;
+  text-transform: uppercase;
+}
+.sidebar-follow-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sidebar-follow-link:hover .sidebar-follow-name {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+@media (max-width: 880px) {
+  .sidebar-section-follows {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 18px;
+  }
+  .sidebar-section-follows .sidebar-label {
+    flex-basis: 100%;
+    margin-bottom: 4px;
+  }
+}

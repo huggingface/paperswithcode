@@ -1,6 +1,6 @@
 import FollowingIntro from "@/components/FollowingIntro";
 import { useOptionalAuth } from "@/lib/authContext";
-import { researchApi } from "@/lib/api/research";
+import { researchApi, type FollowKind } from "@/lib/api/research";
 import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 
@@ -317,6 +317,15 @@ export const AskAssistant: React.FC = () => {
   );
 };
 
+const FOLLOW_KIND_LABELS: Record<FollowKind, string> = {
+  task: "Task",
+  method: "Method",
+  benchmark: "Benchmark",
+  author: "Author",
+  organization: "Org",
+};
+const FOLLOW_KIND_ORDER = Object.keys(FOLLOW_KIND_LABELS) as FollowKind[];
+
 const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const navigate = useNavigate();
   const auth = useOptionalAuth();
@@ -391,6 +400,12 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
     enabled: following && !!user,
   });
   const noFollows = following && !!user && follows.data?.length === 0;
+  const followedEntities = useMemo(
+    () => following && follows.data
+      ? [...follows.data].sort((a, b) => FOLLOW_KIND_ORDER.indexOf(a.kind) - FOLLOW_KIND_ORDER.indexOf(b.kind))
+      : [],
+    [following, follows.data],
+  );
   const popularTasks = topTasks.data?.slice(0, 8);
   const infinite = following ? followedFeed : publicFeed;
   const cards = useMemo(() => {
@@ -423,47 +438,61 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
 
       <div className="layout-with-sidebar">
         <aside className="sidebar">
-          <div className="sidebar-section sidebar-section-top-domains">
-            <div className="sidebar-label">Top Domains</div>
-            {topTasks.isLoading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-5 w-full" />
+          {followedEntities.length > 0 ? (
+            <div className="sidebar-section sidebar-section-follows">
+              <div className="sidebar-label">You follow</div>
+              {followedEntities.map((follow) => (
+                <Link key={`${follow.kind}-${follow.entity_id}`} to={follow.url} className="sidebar-link sidebar-follow-link">
+                  <span className="sidebar-follow-kind">{FOLLOW_KIND_LABELS[follow.kind]}</span>
+                  <span className="sidebar-follow-name">{follow.name}</span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="sidebar-section sidebar-section-top-domains">
+                <div className="sidebar-label">Top Domains</div>
+                {topTasks.isLoading && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <Skeleton key={i} className="h-5 w-full" />
+                    ))}
+                  </div>
+                )}
+                {topTasks.data?.map((task) => (
+                  <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+                    {displayTaskName(task.name, task.slug)}
+                    {task.paper_count != null && <span className="count">{task.paper_count}</span>}
+                  </Link>
                 ))}
+                <Link to="/tasks" className="sidebar-link" style={{ marginTop: 8, fontStyle: "italic" }}>
+                  all domains →
+                </Link>
               </div>
-            )}
-            {topTasks.data?.map((task) => (
-              <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                {displayTaskName(task.name, task.slug)}
-                {task.paper_count != null && <span className="count">{task.paper_count}</span>}
-              </Link>
-            ))}
-            <Link to="/tasks" className="sidebar-link" style={{ marginTop: 8, fontStyle: "italic" }}>
-              all domains →
-            </Link>
-          </div>
 
-          <div className="sidebar-section sidebar-section-trending-domains">
-            <div className="sidebar-label">Trending Domains</div>
-            {trendingTasks.isLoading && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {Array.from({ length: 6 }).map((_, i) => (
-                  <Skeleton key={i} className="h-5 w-full" />
+              <div className="sidebar-section sidebar-section-trending-domains">
+                <div className="sidebar-label">Trending Domains</div>
+                {trendingTasks.isLoading && (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {Array.from({ length: 6 }).map((_, i) => (
+                      <Skeleton key={i} className="h-5 w-full" />
+                    ))}
+                  </div>
+                )}
+                {trendingTasks.data?.results?.length === 0 && !trendingTasks.isLoading && (
+                  <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>
+                    No domains gaining momentum right now.
+                  </div>
+                )}
+                {trendingTasks.data?.results?.map((task) => (
+                  <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
+                    {displayTaskName(task.name, task.slug)}
+                    <span className="count">{task.share_lift.toFixed(1)}x</span>
+                  </Link>
                 ))}
               </div>
-            )}
-            {trendingTasks.data?.results?.length === 0 && !trendingTasks.isLoading && (
-              <div style={{ fontSize: 12, color: "var(--ink-faint)" }}>
-                No domains gaining momentum right now.
-              </div>
-            )}
-            {trendingTasks.data?.results?.map((task) => (
-              <Link key={task.id} to={`/tasks/${task.slug}`} className="sidebar-link">
-                {displayTaskName(task.name, task.slug)}
-                <span className="count">{task.share_lift.toFixed(1)}x</span>
-              </Link>
-            ))}
-          </div>
+            </>
+          )}
 
           <div className="sidebar-section sidebar-section-tools">
             <div className="sidebar-label">Use PwC with your agent</div>

@@ -54,6 +54,7 @@
   .feed-chat { order: 1; }
   .sidebar-section-top-domains { order: 2; }
   .sidebar-section-trending-domains { order: 3; }
+  .sidebar-section-follows { order: 2; }
   .feed-content { order: 4; }
   .sidebar-section-tools { order: 5; }
 }
