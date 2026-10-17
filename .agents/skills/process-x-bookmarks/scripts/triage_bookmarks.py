@@ -19,7 +19,7 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from backend.services.x_thread_discovery_service import (
     author_matches,
@@ -93,10 +93,14 @@ def fetch_bookmarks(limit):
 def self_replies(post, user):
     """Return the author's own posts in the thread (they often hold the links)."""
     created = datetime.fromisoformat(post["created_at"].replace("Z", "+00:00"))
+    # X rejects an end_time later than a few seconds ago.
+    end = min(created + timedelta(days=2), datetime.now(UTC) - timedelta(minutes=1))
+    if end <= created:
+        return []
     window = urllib.parse.urlencode(
         {
             "start_time": created.strftime("%Y-%m-%dT%H:%M:%SZ"),
-            "end_time": (created + timedelta(days=2)).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "end_time": end.strftime("%Y-%m-%dT%H:%M:%SZ"),
             "max_results": 100,
         }
     )
