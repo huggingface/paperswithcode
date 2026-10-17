@@ -84,6 +84,15 @@ credentials. If checkout dependencies cannot load live code, use an isolated
 temporary environment; never install into or edit the release. Treat any local
 configuration mismatch as missing audit evidence, not a production failure.
 
+`backend/keys.env` is not the production configuration, so this baseline
+misreads production enablement flags. A job gated by `enablement_settings`
+(for example `send_research_digests`, whose `PWC_RESEARCH_EMAIL_ENABLED` is
+set only in `/etc/paperswithcode/production.env`) shows a false "timer is
+active while disabled by configuration" finding. Before reporting such a
+finding, check the flag with `sudo grep -c '^FLAG_NAME=true'
+/etc/paperswithcode/production.env` (never print secret values) or compare
+with the admin dashboard `/status`, which the production backend builds.
+
 The public catalog `pwc` executable may not expose the repository-only `cron` command. When `pwc cron health` and the source parser disagree, use `python -m backend.cli` from code matching the active release and report the mismatch.
 
 Save launcher status separately and run the bundled inventory check:
@@ -112,6 +121,7 @@ Inspect every job object, not only the summary, `critical_issues`, health score,
 
 - Treat `degraded`, `unknown`, `broken`, and `stuck` as findings even when the score is at least 80% or the endpoint says healthy.
 - Separate `execution_health` from `output_health`; either can fail independently.
+- `execution_health.recent_runs` summarizes the last 24 hours of launcher `exit` and `lock_skipped` records in `cron-logs/launcher.jsonl` (`runs`, `failures`, `consecutive_failures`, `lock_skips`). Two or more consecutive failures mark a job broken even while a run is active, and a failure rate of 10% (at least three failures) degrades it even when the latest exit succeeded. Without the key (no launcher history yet), check `journalctl -u SERVICE --since '24 hours ago' | grep -c 'Failed with result'` yourself: systemd keeps only the latest exit.
 - Inspect `db_metrics`, `work_metrics`, workflow/systemd evidence, lock state, process state, and diagnostics.
 - The admin `/status` response is cached stale-while-revalidate for about a minute. Prefer the fresh CLI build; use `force_refresh=true` only as corroboration.
 - Treat the paused/manual URL extraction entry as `not_applicable` for schedule cadence. Audit its last manual run only when one is claimed.

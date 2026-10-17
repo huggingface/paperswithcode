@@ -616,6 +616,29 @@ def cron_python(current: Path = CURRENT, runtimes: Path = RUNTIMES) -> Path:
     return runtime / "bin" / "python"
 
 
+def append_launcher_record(log_dir: Path, record: dict) -> None:
+    with (log_dir / "launcher.jsonl").open("a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, sort_keys=True) + "\n")
+
+
+def terminal_record(start: dict, event: str, *, returncode: int) -> dict:
+    """A compact record pairing a launch with how it ended.
+
+    The CRON dashboard reads these to count recent failures and lock skips,
+    which the latest systemd exit alone cannot show.
+    """
+
+    return {
+        "at": datetime.now(timezone.utc).isoformat(),
+        "event": event,
+        "job": start["job"],
+        "health_job": start["health_job"],
+        "git_sha": start["git_sha"],
+        "started_at": start["at"],
+        "returncode": returncode,
+    }
+
+
 def main() -> int:
     manifest = json.loads((CURRENT / "release.json").read_text())
     if len(sys.argv) == 2 and sys.argv[1] == "status":
@@ -667,8 +690,7 @@ def main() -> int:
         "idempotency": spec.idempotency,
         "health_job": spec.health_job,
     }
-    with (log_dir / "launcher.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, sort_keys=True) + "\n")
+    append_launcher_record(log_dir, record)
     command = spec.command
     if job in RESTRICTED_TRENDING_JOBS:
         if pwd.getpwuid(os.getuid()).pw_name != "pwc-cron-trending":
@@ -704,13 +726,20 @@ def main() -> int:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             print(f"{job} is already running")
+            append_launcher_record(
+                log_dir, terminal_record(record, "lock_skipped", returncode=0)
+            )
             return 0
-        return subprocess.run(
+        returncode = subprocess.run(
             ["timeout", "-k", "60s", spec.timeout, *argv],
             cwd=CURRENT,
             env=env,
             check=False,
         ).returncode
+        append_launcher_record(
+            log_dir, terminal_record(record, "exit", returncode=returncode)
+        )
+        return returncode
 
 
 if __name__ == "__main__":

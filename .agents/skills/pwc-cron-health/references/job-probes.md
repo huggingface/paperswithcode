@@ -17,7 +17,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `update_hot_github_trending`
 
 - **Effect:** Refreshes 0–30-day official repositories, star history, repository EMA trending, and linked recent paper trending components/scores.
-- **Independent proof:** Reconstruct eligible hot repo groups; measure queue coverage, oldest wait, one-snapshot starvation, and linked stale paper scores. Compare sampled GitHub `stargazers_count` to repository values and latest star-history rows.
+- **Independent proof:** Reconstruct eligible hot repo groups; measure queue coverage, oldest wait, one-snapshot starvation, and linked stale paper scores. The dashboard's oldest wait uses the later of the latest snapshot and `num_stars_updated_at`, because terminal 404/451 repositories get no snapshot but are re-checked like any other. Compare sampled GitHub `stargazers_count` to repository values and latest star-history rows.
 - **Correctness:** Recompute repository EMA and paper composite scores from durable inputs; compare exact or tolerance-bounded results and public trending ordering.
 
 ## `update_github_stars`
@@ -30,13 +30,14 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 - **Effect:** Updates paper citation count, Semantic Scholar ID, and `citation_updated_at` across cadence buckets.
 - **Independent proof:** Reconstruct eligible/backlog buckets and their age distribution. Compare a bounded stratified sample directly with Semantic Scholar using stable paper identity; verify the stored ID and count.
-- **Correctness:** Flag suspicious mass zeroing/decreases and timestamps advanced after not-found/error outcomes. A fresh maximum timestamp is weak evidence.
+- **Correctness:** Flag suspicious mass zeroing/decreases and timestamps advanced after not-found/error outcomes. A fresh maximum timestamp is weak evidence. The dashboard degrades on Semantic Scholar throttling only when `rate_limit_hits` reach 5% of `api_calls`; a handful of retried 429s is routine.
 
 ## `extract_urls`
 
 - **Effect:** Manual/paused pipeline marks `urls_extracted` and writes official repositories/project pages plus junctions.
 - **Independent proof:** Report schedule as `not_applicable`. If auditing a claimed dispatch, measure unresolved backlog and false-complete papers with no official resource; sample linked URLs for HTTP reachability, canonical GitHub identity, and officialness.
 - **Safety:** Do not invoke select/discover/persist to test health.
+- **Dashboard freshness:** the newest `repositories` / `project_pages` row with `source = 'ai_extraction'`, stale after seven days; `papers.updated_at` moves for every catalog edit and proves nothing about this pipeline.
 
 ## `calculate_trending_scores`
 
@@ -163,12 +164,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Reconciles the rolling HF cohort into versioned workflows and two-stage jobs; downstream jobs mutate enrichments/evaluations and may request thumbnails.
 - **Independent proof:** Compare unique rolling cohort to workflows under active policy; inspect missing/duplicate/deferred reasons, queue age, scheduler state, canary, attempts, and terminal outcomes.
 - **Correctness:** For completed/satisfied workflows, verify expected paper mutations and proposal/mutation result—not merely workflow creation. Treat failed/partial/deferred counts as findings even if the generic dashboard evaluator ignores them.
+- **Dashboard window:** `failed_workflows` / `partial_workflows` count only workflows whose `cohort_date` is in the last seven days, the cohort the enqueuer revisits. Older partials (most are settled validator rejections from the 2026-09-14 backfill week) need a one-off review, not a standing alarm.
 
 ## `enqueue_hf_trending_model_curation`
 
 - **Effect:** Discovers trending HF model candidates, advances their resolver states, and may enqueue bounded paper-curation workflows.
 - **Independent proof:** Compare a bounded current Hub trending cohort with candidate identities and `last_seen_at`; inspect missing/duplicate candidates, active/resolved/failed states, oldest wait, attempts, and downstream workflow linkage.
-- **Correctness:** Sample resolved candidates and verify canonical paper identity plus resulting enrichment. Fresh candidate timestamps alone do not prove resolution or application.
+- **Correctness:** Sample resolved candidates and verify canonical paper identity plus resulting enrichment. Fresh candidate timestamps alone do not prove resolution or application. The dashboard counts failed candidates seen in the last seven days and failed/partial workflows from the last seven cohort days.
 
 ## `discover_x_threads`
 
@@ -195,30 +197,35 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Prints a JSON summary (`candidates`, `already_stored`, `generated`, `failed`, `remaining`) and inserts `paper_suggested_questions` rows. Candidates are the home feed's first three trending pages (past week) plus the first trending page of every task and method; `remaining` is the eligible backlog beyond `--limit`. Exits 1 only when every generation failed.
 - **Independent proof:** `curl https://paperswithcode.co/api/v1/papers/<id>/suggested-questions` for a top home-feed paper returns three questions within ~0.2 s (stored, not generated).
 - **Correctness:** `remaining` should reach 0 after a few runs and stay near 0; a persistent `failed` count with `suggested_questions_failed` warnings means OpenAI errors (key, quota, or model name).
+- **Dashboard evidence:** `visible_missing` of `visible_papers` = the top 90 trending latest papers of the past week (an approximation of the home feed's three pages) without a `paper_suggested_questions` row. Zero is healthy even with no recent writes; more than 5 degrades. The task/method part of the cohort needs the probe above.
 
 ## `post_trending_paper_to_x`
 
 - **Effect:** Prints a JSON summary (`paper_id`, `text`, `url`, `post_id`, `reply_id`, `errors`) and inserts one `paper_x_posts` row per post. Posts at most one paper per run: the top `trending_score` arXiv paper from the last 14 days with a TL;DR that was never posted. Exits 0 with an `x_trending_post_skipped` warning (dry run) when the `X_POST_*` OAuth 1.0a keys are unset, and 1 only when candidates existed but none could be fetched and rendered.
 - **Independent proof:** Open `https://x.com/i/status/<post_id>` and confirm the first-page image, title, TL;DR, and the paper link reply.
 - **Correctness:** `X HTTP 401` means bad keys, `403` a read-only app or a post over the account's length limit (`PWC_X_POST_MAX_CHARS`), `402` exhausted credits. A null `paper_id` without errors means every recent trending paper was already posted.
+- **Dashboard evidence:** latest `paper_x_posts.posted_at` and posts in 24 h. Six runs a day normally post several papers, so a day without a post degrades the job; confirm with `SELECT posted_at, paper_id FROM paper_x_posts ORDER BY posted_at DESC LIMIT 10` before blaming X.
 
 ## `post_x_insight`
 
 - **Effect:** Prints a JSON summary (`kind`, `subject_key`, `text`, `template`, `url`, `post_id`, `reply_id`, `tried`) and inserts one `x_insight_posts` row per post. A null `kind` means no tried kind had anything new (healthy). An `x_insight_rewrite_rejected` warning means Luna changed a number and the template was posted instead.
 - **Independent proof:** Open `https://x.com/i/status/<post_id>`; check the numbers against the linked benchmark, method, or task page.
 - **Correctness:** Same X errors as `post_trending_paper_to_x` (shared `X_POST_*` keys and credits). A SOTA post must name a paper published in the last 45 days that leads a leaderboard with at least 5 entries.
+- **Dashboard evidence:** latest `x_insight_posts.posted_at` and posts in 72 h; a quiet run is healthy, so only three days without any insight degrade. Check `SELECT kind, max(posted_at), count(*) FROM x_insight_posts GROUP BY kind` for a kind that stopped posting.
 
 ## `scan_model_releases`
 
 - **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.
 - **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`.
 - **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed; a long-lived unindexed release means nobody indexed it, which is a curation gap rather than a job failure.
+- **Dashboard evidence:** report-only, so a successful systemd exit (the job exits 1 only when every source failed) is the output proof. Read the radar JSON from `journalctl -u pwc-cron-scan-model-releases.service --since '6 hours ago' -o cat | grep '^{'` for `sources_checked` versus `errors`.
 
 ## `export_enrichment_dashboard`
 
 - **Effect:** Exports the private enrichment-dashboard artifact consumed by operators; it does not write catalog rows.
 - **Independent proof:** Inspect the configured output object's mtime, size, schema/version, row count, and bounded hash. Recompute sampled aggregates from the database and compare them with the exported fields.
 - **Limitation:** A successful launcher log without a fresh, parseable, internally consistent artifact is not durable-output proof. Do not expose private dashboard contents.
+- **Dashboard evidence:** `/var/lib/paperswithcode/shared/enrichment-dashboard/snapshot.json` is stream-parsed (no size cap; it passed 18 MB on 2026-10-17) for `schema_version`, `generated_at`, and the `daily`/`papers`/`evaluations` list lengths.
 
 ## `sync_hf_organizations`
 
@@ -248,6 +255,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** Generates/caches valid paper images and uploads thumbnail objects for several candidate lanes.
 - **Independent proof:** Reconstruct each deployed candidate lane separately (visible, task/method, recent, external), derive expected filenames, and measure object coverage. Decode sampled images; verify dimensions/aspect, nonblank content, and current cohort identity.
 - **Functional proof:** Sample `/api/thumbnails/{filename}` for status, MIME, decodability, and content. A global newest mtime does not prove lane coverage.
+- **Trap:** All five lanes share the launcher's `preload_thumbnails` lock, so a lane whose slot arrives while another lane runs exits 0 with "preload_thumbnails is already running" and does no work. The launcher records each as a `lock_skipped` event, and the dashboard degrades the job for any skip in 24 h; name the skipped lane from `journalctl -u 'pwc-cron-preload-thumbnails-*' --since '24 hours ago' | grep 'already running'`.
 
 ## `mirror_thumbnails_to_disk`
 
@@ -290,12 +298,14 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Effect:** A minutely systemd job reads content-free operational signals, writes private state and health JSON, and delivers primary/fallback alerts.
 - **Independent proof:** Check timer/service cadence, health-record mtime/schema/status, journal cursor advancement, pending delivery states/attempts, and bounded history. Recompute provider/content-free journal health from source aggregates.
 - **Limitation:** Alert delivery cannot be fully proven without authorized Slack/channel evidence. Do not inspect chat content.
+- **Trap:** The health record reflects only the latest poll; on 2026-10-17 the unit had failed 557 times in a day while showing healthy. Read `execution_health.recent_runs` (launcher exits) or count `Failed with result` in the unit journal.
 
 ## `process_curation_thumbnails`
 
 - **Effect:** A minutely systemd worker claims thumbnail requests, generates/uploads output, and records status/timestamps/dimensions/warnings/errors.
 - **Independent proof:** Inspect queued, processing, stale-claim, failed, oldest-wait, attempts, and recent-completion distributions. For sampled succeeded rows, independently fetch/decode the URL or public endpoint and verify dimensions, nonblank content, and bucket/local presence.
 - **Trap:** A succeeded database flag is insufficient when the object is absent or corrupt.
+- **Dashboard evidence:** the queue is event-driven, so with nothing queued or processing a successful poll is healthy however old the last write; `failed` counts only failures finished in the last 24 hours.
 
 
 ## `create_eval_verification_issues`

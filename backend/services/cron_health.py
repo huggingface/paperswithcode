@@ -30,6 +30,9 @@ GITHUB_REPOSITORY = "huggingface/paperswithcode"
 WORKFLOW_STATUS_CACHE_SECONDS = 60
 WORKFLOW_RUN_BATCH_PAGES = 3
 MAX_LAUNCHER_EVIDENCE_BYTES = 1024 * 1024
+# About a day of launcher records at today's every-minute job cadence.
+MAX_LAUNCHER_HISTORY_BYTES = 4 * 1024 * 1024
+LAUNCHER_HISTORY_HOURS = 24
 MAX_SCHEDULE_STATE_BYTES = 4096
 _WORKFLOW_STATUS_CACHE: Dict[tuple[str, str], tuple[float, Dict[str, Any]]] = {}
 logger = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ class ExecutionHealthResult(HealthResult, total=False):
     last_started_at: str | None
     last_completed_at: str | None
     evidence_source: str | None
+    recent_runs: Dict[str, Any]
 
 
 class OutputHealthResult(HealthResult):
@@ -434,17 +438,9 @@ def fetch_persistent_execution(
     ):
         return None
 
-    try:
-        with launcher_path.open("rb") as handle:
-            handle.seek(0, os.SEEK_END)
-            size = handle.tell()
-            offset = max(0, size - MAX_LAUNCHER_EVIDENCE_BYTES)
-            handle.seek(offset)
-            raw = handle.read(MAX_LAUNCHER_EVIDENCE_BYTES)
-    except OSError:
+    raw = _read_launcher_tail(launcher_path, MAX_LAUNCHER_EVIDENCE_BYTES)
+    if raw is None:
         return None
-    if offset:
-        raw = raw.partition(b"\n")[2]
 
     terminal_status = str(log_status.get("status") or "unknown")
     if terminal_status not in {"success", "success_no_work", "failed"}:
@@ -458,7 +454,8 @@ def fetch_persistent_execution(
             record = json.loads(raw_line)
         except (UnicodeDecodeError, json.JSONDecodeError):
             continue
-        if not isinstance(record, dict):
+        # Terminal records ("exit", "lock_skipped") follow their launch record.
+        if not isinstance(record, dict) or record.get("event"):
             continue
         if record.get("job") != job.id and record.get("health_job") != job.id:
             continue
@@ -475,6 +472,126 @@ def fetch_persistent_execution(
             "source": "launcher_and_file_log",
         }
     return None
+
+
+def _read_launcher_tail(path: Path, max_bytes: int) -> bytes | None:
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            offset = max(0, handle.tell() - max_bytes)
+            handle.seek(offset)
+            raw = handle.read(max_bytes)
+    except OSError:
+        return None
+    return raw.partition(b"\n")[2] if offset else raw
+
+
+def fetch_launcher_history(
+    *,
+    launcher_path: Path | None = None,
+    now: datetime | None = None,
+) -> Dict[str, Dict[str, Any]]:
+    """Count recent launcher exits, failures, and lock skips per health job.
+
+    systemd keeps only the latest exit, so a job that fails every run but is
+    running now, or a monitor that failed hundreds of times before its latest
+    success, looks fine without this history.
+    """
+
+    if launcher_path is None:
+        paths = _persistent_execution_paths(get_settings())
+        if paths is None:
+            return {}
+        launcher_path = paths[0]
+    raw = _read_launcher_tail(launcher_path, MAX_LAUNCHER_HISTORY_BYTES)
+    if raw is None:
+        return {}
+    cutoff = (now or _utcnow()) - timedelta(hours=LAUNCHER_HISTORY_HOURS)
+    history: Dict[str, Dict[str, Any]] = {}
+    streak_closed: set[str] = set()
+    for raw_line in reversed(raw.splitlines()):
+        try:
+            record = json.loads(raw_line)
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            continue
+        if not isinstance(record, dict) or record.get("event") not in {
+            "exit",
+            "lock_skipped",
+        }:
+            continue
+        finished = _parse_log_timestamp(record.get("at"))
+        if finished is None or finished < cutoff:
+            continue
+        job_id = str(record.get("health_job") or record.get("job") or "")
+        summary = history.setdefault(
+            job_id,
+            {
+                "window_hours": LAUNCHER_HISTORY_HOURS,
+                "runs": 0,
+                "failures": 0,
+                "lock_skips": 0,
+                "consecutive_failures": 0,
+                "last_failure_at": None,
+            },
+        )
+        if record["event"] == "lock_skipped":
+            summary["lock_skips"] += 1
+            continue
+        summary["runs"] += 1
+        if record.get("returncode") == 0:
+            streak_closed.add(job_id)
+            continue
+        summary["failures"] += 1
+        summary["last_failure_at"] = summary["last_failure_at"] or to_iso8601(finished)
+        if job_id not in streak_closed:
+            summary["consecutive_failures"] += 1
+    return history
+
+
+def _launcher_history_health(
+    job: CronJobDefinition,
+    execution: ExecutionHealthResult,
+    history: Dict[str, Any] | None,
+) -> ExecutionHealthResult:
+    """Escalate execution health from recent failures the latest exit hides."""
+
+    if not history or execution.get("applicable") is False:
+        return execution
+    runs = int(history.get("runs") or 0)
+    failures = int(history.get("failures") or 0)
+    streak = int(history.get("consecutive_failures") or 0)
+    lock_skips = int(history.get("lock_skips") or 0)
+    window = history.get("window_hours", LAUNCHER_HISTORY_HOURS)
+    findings: list[tuple[str, str]] = []
+    if streak >= 2:
+        findings.append(("broken", f"the last {streak} launcher exits failed"))
+    elif failures >= 3 and runs and failures / runs >= 0.1:
+        findings.append(
+            (
+                "broken" if failures / runs >= 0.5 else "degraded",
+                f"{failures} of {runs} runs failed in the last {window}h",
+            )
+        )
+    if lock_skips and job.lock_skip_misses_work:
+        findings.append(
+            (
+                "degraded",
+                f"{lock_skips} run(s) skipped in the last {window}h because "
+                "another run held the shared lock",
+            )
+        )
+    if not findings:
+        return {**execution, "recent_runs": history}
+    status = execution["status"]
+    for candidate, _reason in findings:
+        status = _worse_output(status, candidate)
+    reasons = [execution["reason"], *(reason for _status, reason in findings)]
+    return {
+        **execution,
+        "status": status,
+        "reason": "; ".join(reasons),
+        "recent_runs": history,
+    }
 
 
 def fetch_autonomous_cron_output() -> Dict[str, Any]:
@@ -1025,7 +1142,7 @@ def _execution_health(
                 "reason": "systemd timer is disabled or inactive",
             }
         if evidence.get("service_active") or running:
-            age = _minutes_since(evidence.get("last_started_at"))
+            age = _minutes_since(evidence.get("last_started_at"), now=now)
             if age is not None and age > job.expected_runtime_minutes:
                 return {
                     **base,
@@ -1608,13 +1725,15 @@ def _provider_counter_contract(
     work = context.work
     status, reasons = _counter_contract(status, reasons, context)
     throttled = int(work.get("rate_limit_hits", 0) or 0)
+    api_calls = int(work.get("api_calls", 0) or 0)
     failures = int(
         work.get("api_errors", 0)
         or work.get("papers_failed", 0)
         or work.get("artifacts_failed", 0)
         or 0
     )
-    if throttled:
+    # Retried throttling is routine; only a material share of calls matters.
+    if throttled and (not api_calls or throttled / api_calls >= 0.05):
         status = _worse_output(status, "degraded")
         reasons.append(f"upstream provider rate-limited {throttled} request(s)")
     if failures:
@@ -1754,6 +1873,7 @@ def _daily_curation_contract(
         status = _worse_output(status, "broken")
         reasons.append(f"scheduled dispatch is paused: {pause_condition}")
 
+    # The registry SQL counts only the rolling cohort the enqueuer revisits.
     for metric, label in (
         ("failed_workflows", "failed workflow"),
         ("partial_workflows", "partial workflow"),
@@ -1761,7 +1881,7 @@ def _daily_curation_contract(
         count = int(db.get(metric, 0) or 0)
         if count:
             status = _worse_output(status, "broken")
-            reasons.append(f"{count} {label}(s) require attention")
+            reasons.append(f"{count} recent {label}(s) require attention")
 
     for metric, label in (
         ("oldest_queued_age_minutes", "queued curation job"),
@@ -1800,13 +1920,13 @@ def _curation_thumbnail_contract(
 ) -> tuple[str, List[str]]:
     db = context.db
     queue_is_empty = not any(
-        int(db.get(key, 0) or 0)
-        for key in ("queued", "processing", "stale_processing", "failed")
+        int(db.get(key, 0) or 0) for key in ("queued", "processing", "stale_processing")
     )
+    # The queue is event-driven: an idle queue writes nothing, so write
+    # staleness only matters while work is waiting.
     if context.systemd.get("service_result") == "success" and queue_is_empty:
-        return "healthy", [
-            "latest queue poll completed and no thumbnail work is pending"
-        ]
+        status = "healthy"
+        reasons = ["latest queue poll completed and no thumbnail work is pending"]
     stale = int(db.get("stale_processing", 0) or 0)
     failed = int(db.get("failed", 0) or 0)
     if stale:
@@ -1814,7 +1934,7 @@ def _curation_thumbnail_contract(
         reasons.append(f"{stale} curation thumbnail request(s) are stuck processing")
     if failed:
         status = _worse_output(status, "degraded")
-        reasons.append(f"{failed} curation thumbnail request(s) failed")
+        reasons.append(f"{failed} curation thumbnail request(s) failed in 24h")
     return status, reasons
 
 
@@ -1894,6 +2014,30 @@ def _autonomous_cron_contract(
     return "broken", reasons + [
         f"autonomous CRON pass reported {work.get('operator_reason_code') or 'failure'}"
     ]
+
+
+def _suggested_questions_contract(
+    status: str,
+    reasons: List[str],
+    context: OutputEvaluationContext,
+) -> tuple[str, List[str]]:
+    db = context.db
+    if "visible_missing" not in db:
+        return status, reasons
+    missing = int(db.get("visible_missing") or 0)
+    if not missing:
+        # A fully covered home feed writes nothing, so staleness is no-work.
+        reasons = [reason for reason in reasons if reason != context.db_reason]
+        if status in {"degraded", "broken", "unknown"} and not reasons:
+            status = "healthy"
+        reasons.append("every home-feed paper has stored suggested questions")
+    elif missing > 5:
+        status = _worse_output(status, "degraded")
+        reasons.append(
+            f"{missing} of {db.get('visible_papers')} home-feed papers lack "
+            "suggested questions"
+        )
+    return status, reasons
 
 
 OutputEvaluator = Callable[
@@ -1994,6 +2138,11 @@ OUTPUT_POLICIES = {
     ),
     "curation_thumbnails": OutputPolicy(_curation_thumbnail_contract),
     "chat_alert_monitor": OutputPolicy(_chat_alert_contract),
+    "suggested_questions": OutputPolicy(_suggested_questions_contract),
+    "report_only": OutputPolicy(
+        lambda status, reasons, _context: (status, reasons),
+        accept_systemd_completion=True,
+    ),
     "submission_review": OutputPolicy(_submission_review_contract),
     "autonomous_cron_operator": OutputPolicy(_autonomous_cron_contract),
 }
@@ -2343,6 +2492,7 @@ def evaluate_job_health(
     now: Optional[datetime] = None,
     process_running: bool | None = None,
     schedule_enabled: bool | None = None,
+    launcher_history: Dict[str, Any] | None = None,
 ) -> Dict[str, Any]:
     """Combine log, process, lock, and DB signals into a dashboard status."""
 
@@ -2514,6 +2664,10 @@ def evaluate_job_health(
         schedule_enabled=schedule_enabled,
         now=now,
     )
+    if job.scheduler != "manual":
+        execution_health = _launcher_history_health(
+            job, execution_health, launcher_history
+        )
     if (
         execution_health.get("applicable") is False
         and execution_health["status"] == "healthy"
@@ -2690,7 +2844,7 @@ def build_cron_dashboard(
                 if job.db_freshness_query
             }
 
-    with ThreadPoolExecutor(max_workers=3) as executor:
+    with ThreadPoolExecutor(max_workers=4) as executor:
         database_future = executor.submit(timed_collect, collect_database)
         workflow_future = executor.submit(
             timed_collect,
@@ -2701,9 +2855,11 @@ def build_cron_dashboard(
         thumbnail_future = executor.submit(
             timed_collect, fetch_thumbnail_cache_freshness
         )
+        launcher_future = executor.submit(fetch_launcher_history, now=collection_now)
         database_by_id, database_ms = database_future.result()
         workflow_by_id, workflow_ms = workflow_future.result()
         thumbnail_metrics, thumbnail_ms = thumbnail_future.result()
+        launcher_history = launcher_future.result()
     supplemental_db_metrics = {"thumbnail_cache": thumbnail_metrics}
 
     def get_recent_log_status(job: CronJobDefinition) -> Dict[str, Any]:
@@ -2754,6 +2910,7 @@ def build_cron_dashboard(
             schedule_enabled=schedule_enabled(job),
             now=collection_now,
             process_running=running_by_id[job.id],
+            launcher_history=launcher_history.get(job.id),
         )
         health_findings = build_job_findings(job, evaluated, collection_now)
         evaluated["health_findings"] = [

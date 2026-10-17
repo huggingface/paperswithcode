@@ -121,6 +121,9 @@ class CronJobDefinition:
     db_metrics_provider: Optional[Literal["thumbnail_cache"]] = None
     dependency_job_id: Optional[str] = None
     enablement_settings: Tuple[str, ...] = ()
+    # True when runs differ in their work (lanes sharing one launcher lock), so
+    # a lock-skipped run is missed work rather than a harmless overlap.
+    lock_skip_misses_work: bool = False
 
     @property
     def systemd_unit_pairs(self) -> Tuple[Tuple[str, str], ...]:
@@ -300,7 +303,10 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         healthy_no_work_allowed=True,
         db_freshness_query="""
             WITH hot_repositories AS (
-                SELECT DISTINCT r.id, r.created_at AS repository_created_at
+                SELECT DISTINCT
+                    r.id,
+                    r.created_at AS repository_created_at,
+                    r.num_stars_updated_at
                 FROM repositories r
                 JOIN paper_repositories pr
                   ON pr.repository_id = r.id
@@ -318,11 +324,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                     hr.repository_created_at,
                     count(rsh.id) AS snapshot_count,
                     min(rsh.snapshot_at) AS first_snapshot_at,
-                    max(rsh.snapshot_at) AS last_snapshot_at
+                    max(rsh.snapshot_at) AS last_snapshot_at,
+                    -- 404/451 repositories get no snapshot, but the job still
+                    -- stamps num_stars_updated_at, which also drives selection.
+                    COALESCE(
+                        GREATEST(max(rsh.snapshot_at), hr.num_stars_updated_at),
+                        hr.repository_created_at
+                    ) AS last_checked_at
                 FROM hot_repositories hr
                 LEFT JOIN repository_star_history rsh
                   ON rsh.repository_id = hr.id
-                GROUP BY hr.id, hr.repository_created_at
+                GROUP BY hr.id, hr.repository_created_at, hr.num_stars_updated_at
             ),
             stale_papers AS (
                 SELECT count(DISTINCT p.id) AS count
@@ -353,12 +365,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 (SELECT count FROM stale_papers) AS stale_paper_scores,
                 COALESCE(
                   EXTRACT(EPOCH FROM (
-                    now() - min(
-                      COALESCE(last_snapshot_at, repository_created_at)
-                    )
+                    now() - min(last_checked_at)
                       FILTER (
-                        WHERE COALESCE(last_snapshot_at, repository_created_at)
-                              < now() - interval '15 minutes'
+                        WHERE last_checked_at < now() - interval '15 minutes'
                       )
                   )) / 60,
                   0
@@ -446,16 +455,23 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         process_patterns=("url_extraction_agent.database",),
         lock_file=None,
         expected_runtime_minutes=110,
-        stale_after_minutes=120,
+        # Manual dispatch only: expect a run about weekly, not hourly.
+        stale_after_minutes=7 * 24 * 60,
         critical=False,
         healthy_no_work_allowed=True,
+        # Only rows the extraction agent created prove it ran; papers.updated_at
+        # moves for every catalog edit.
         db_freshness_query="""
-            SELECT max(updated_at) AS last_write,
+            WITH extracted AS (
+                SELECT created_at FROM repositories WHERE source = 'ai_extraction'
+                UNION ALL
+                SELECT created_at FROM project_pages WHERE source = 'ai_extraction'
+            )
+            SELECT max(created_at) AS last_write,
                    count(*) FILTER (
-                     WHERE urls_extracted = true
-                       AND updated_at > now() - interval '24 hours'
+                     WHERE created_at > now() - interval '7 days'
                    ) AS recent_writes
-            FROM papers
+            FROM extracted
         """,
         workflow_file="cron-extract-urls.yml",
         workflow_jobs=("select", "discover", "persist"),
@@ -1479,7 +1495,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         healthy_no_work_allowed=True,
         db_freshness_query="""
             WITH daily_workflows AS (
-                SELECT workflow.*
+                SELECT workflow.*,
+                       workflow.cohort_date >= CURRENT_DATE - 7 AS in_cohort
                 FROM paper_curation_workflows AS workflow
                 WHERE EXISTS (
                     SELECT 1
@@ -1492,8 +1509,14 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                        count(*) FILTER (WHERE status = 'queued') AS queued_workflows,
                        count(*) FILTER (WHERE status = 'running') AS running_workflows,
                        count(*) FILTER (WHERE status = 'deferred') AS deferred_workflows,
-                       count(*) FILTER (WHERE status = 'failed') AS failed_workflows,
-                       count(*) FILTER (WHERE status = 'partial') AS partial_workflows
+                       -- Only the rolling seven-day cohort the enqueuer revisits;
+                       -- older partials are settled validator rejections.
+                       count(*) FILTER (
+                           WHERE status = 'failed' AND in_cohort
+                       ) AS failed_workflows,
+                       count(*) FILTER (
+                           WHERE status = 'partial' AND in_cohort
+                       ) AS partial_workflows
                 FROM daily_workflows
             ), job_metrics AS (
                 SELECT count(*) FILTER (WHERE status = 'queued') AS queued_jobs,
@@ -1547,13 +1570,18 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                 SELECT max(last_seen_at) AS last_write,
                    count(*) FILTER (WHERE status IN ('discovered','queued','resolving')) AS active,
                    count(*) FILTER (WHERE status = 'resolved') AS resolved,
-                   count(*) FILTER (WHERE status = 'failed') AS failed
+                   count(*) FILTER (
+                       WHERE status = 'failed'
+                         AND last_seen_at > now() - interval '7 days'
+                   ) AS failed
                 FROM trending_model_candidates
             ), workflow_metrics AS (
                 SELECT count(*) FILTER (WHERE status = 'failed') AS failed_workflows,
                        count(*) FILTER (WHERE status = 'partial') AS partial_workflows
                 FROM paper_curation_workflows AS workflow
-                WHERE workflow.status IN ('failed', 'partial') AND EXISTS (
+                WHERE workflow.status IN ('failed', 'partial')
+                  AND workflow.cohort_date >= CURRENT_DATE - 7
+                  AND EXISTS (
                     SELECT 1 FROM paper_curation_jobs AS job
                     WHERE job.parent_workflow_id = workflow.id
                       AND job.trigger = 'hf-trending-cron'
@@ -1605,7 +1633,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-scan-model-releases.timer",
         systemd_service="pwc-cron-scan-model-releases.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        # Report-only: the radar JSON goes to the journal, and the job exits 1
+        # only when every source failed, so a clean exit proves the scan.
+        output_evaluator="report_only",
         display_name="Model Release Radar",
         category="hourly",
         schedule="48 1/3 * * * (every three hours)",
@@ -1722,11 +1752,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             "post_trending_paper_to_x.lock"
         ),
         expected_runtime_minutes=2,
-        stale_after_minutes=600,
+        # A run with nothing left to post writes no row, so allow a quiet day.
+        stale_after_minutes=1440,
         critical=False,
         healthy_no_work_allowed=True,
-        # No DB freshness: a run with nothing left to post writes no row.
-        db_freshness_query=None,
+        db_freshness_query="""
+            SELECT max(posted_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE posted_at > now() - interval '24 hours'
+                   ) AS recent_writes
+            FROM paper_x_posts
+        """,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
@@ -1746,11 +1782,17 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         process_patterns=("backend.scripts.post_x_insight",),
         lock_file=("/var/lib/paperswithcode/production/cron-locks/post_x_insight.lock"),
         expected_runtime_minutes=3,
-        stale_after_minutes=1500,
+        # A run with nothing new to say writes no row, so allow quiet days.
+        stale_after_minutes=4320,
         critical=False,
         healthy_no_work_allowed=True,
-        # No DB freshness: a run with nothing new to say writes no row.
-        db_freshness_query=None,
+        db_freshness_query="""
+            SELECT max(posted_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE posted_at > now() - interval '72 hours'
+                   ) AS recent_writes
+            FROM x_insight_posts
+        """,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
@@ -1761,7 +1803,7 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-warm-paper-suggested-questions.timer",
         systemd_service="pwc-cron-warm-paper-suggested-questions.service",
         systemd_extra_units=(),
-        output_evaluator="generic",
+        output_evaluator="suggested_questions",
         display_name="Warm Paper Suggested Questions",
         category="hourly",
         schedule="33 * * * * (hourly)",
@@ -1776,8 +1818,31 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         stale_after_minutes=180,
         critical=False,
         healthy_no_work_allowed=True,
-        # No DB freshness: a run with every visible paper covered writes no row.
-        db_freshness_query=None,
+        # A run with every visible paper covered writes no row, so the
+        # evaluator judges the home-feed cohort's coverage instead of writes.
+        db_freshness_query="""
+            WITH home_feed AS (
+                SELECT id
+                FROM papers
+                WHERE is_latest_version = TRUE
+                  AND date_published >= CURRENT_DATE - 6
+                ORDER BY trending_score DESC NULLS LAST, id
+                LIMIT 90
+            )
+            SELECT (SELECT max(created_at) FROM paper_suggested_questions)
+                       AS last_write,
+                   (SELECT count(*) FROM paper_suggested_questions
+                    WHERE created_at > now() - interval '3 hours')
+                       AS recent_writes,
+                   count(*) AS visible_papers,
+                   count(*) FILTER (
+                     WHERE NOT EXISTS (
+                       SELECT 1 FROM paper_suggested_questions AS questions
+                       WHERE questions.paper_id = home_feed.id
+                     )
+                   ) AS visible_missing
+            FROM home_feed
+        """,
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
@@ -2013,6 +2078,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             ),
         ),
         output_evaluator="thumbnail_preload",
+        # The five lanes share the launcher's preload_thumbnails lock.
+        lock_skip_misses_work=True,
         display_name="Preload Thumbnails",
         category="daily",
         schedule="0 */3 * * *; daily 04:00–04:45 UTC",
@@ -2379,7 +2446,10 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
                      WHERE thumbnail_status = 'processing'
                        AND thumbnail_claimed_at < now() - interval '30 minutes'
                    ) AS stale_processing,
-                   count(*) FILTER (WHERE thumbnail_status = 'failed') AS failed,
+                   count(*) FILTER (
+                     WHERE thumbnail_status = 'failed'
+                       AND thumbnail_finished_at > now() - interval '24 hours'
+                   ) AS failed,
                    COALESCE(EXTRACT(EPOCH FROM (
                      now() - min(thumbnail_requested_at)
                        FILTER (WHERE thumbnail_status = 'queued')

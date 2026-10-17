@@ -111,3 +111,40 @@ def test_snapshot_needs_matching_export_completion():
     assert cron_health._enrichment_snapshot_contract("unknown", [], c)[0] == "unknown"
     c.work["snapshot_generated_at"] = c.now - timedelta(hours=40)
     assert cron_health._enrichment_snapshot_contract("unknown", [], c)[0] == "degraded"
+
+
+def test_snapshot_larger_than_old_read_cap_streams(tmp_path):
+    path = tmp_path / "snapshot.json"
+    papers = [{"title": "x" * 1000} for _ in range(18_000)]
+    path.write_text(
+        json.dumps(
+            dict(
+                schema_version=1,
+                generated_at="2026-10-17T03:10:00Z",
+                daily=[{"day": "2026-10-16"}],
+                papers=papers,
+                evaluations=[[1, 2]],
+            )
+        )
+    )
+    assert path.stat().st_size > 16 * 1024 * 1024
+
+    result = enrichment_snapshot_metrics(path)
+
+    assert result["snapshot_valid"] is True
+    assert result["snapshot_papers"] == 18_000
+    assert result["snapshot_evaluations"] == 1
+    path.write_text(path.read_text()[:-10])
+    assert enrichment_snapshot_metrics(path) == {"snapshot_valid": False}
+    path.write_text(
+        json.dumps(
+            dict(
+                schema_version=1,
+                generated_at="2026-10-17T03:10:00Z",
+                daily=[{}],
+                papers={},
+                evaluations=[],
+            )
+        )
+    )
+    assert enrichment_snapshot_metrics(path) == {"snapshot_valid": False}
