@@ -355,5 +355,6 @@ def test_cron_status_reports_exact_production_release(
     assert status["jobs"]["sync_extractbench"]["timeout"] == "30m"
     assert status["jobs"]["sync_physics_iq_verified"]["timeout"] == "30m"
     assert status["jobs"]["sync_vals_finance_agent"]["timeout"] == "30m"
+    assert status["jobs"]["sync_surge_chartography"]["timeout"] == "30m"
     assert status["jobs"]["sync_coarena"]["timeout"] == "30m"
     assert status["jobs"]["sync_arc_prize"]["timeout"] == "30m"

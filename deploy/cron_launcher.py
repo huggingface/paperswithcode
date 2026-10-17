@@ -374,6 +374,15 @@ COMMANDS: dict[str, Job] = {
             "validated Vals AI leaderboard table; never creates papers"
         ),
     ),
+    "sync_surge_chartography": job(
+        "-m",
+        "scripts.hourly.sync_surge_chartography",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed Chartography (no tools) evaluation rows "
+            "from the validated Surge AI leaderboard; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",

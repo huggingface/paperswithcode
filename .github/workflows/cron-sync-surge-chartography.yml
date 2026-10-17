@@ -1,0 +1,42 @@
+name: Cron - Sync Surge AI Chartography
+
+on:
+  workflow_dispatch: {}
+
+concurrency:
+  group: cron-sync-surge-chartography
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  run:
+    permissions: {}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Load SSH key into agent
+        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+      - name: Add VPS to known_hosts
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -z "$VPS_HOST" ] || [[ "$VPS_HOST" == *"://"* || "$VPS_HOST" == *"@"* || "$VPS_HOST" == *"/"* || "$VPS_HOST" =~ [[:space:]] ]]; then
+            echo "VPS_HOST must be a bare hostname or IP address."
+            exit 1
+          fi
+          timeout 10 bash -c "cat < /dev/null > /dev/tcp/$VPS_HOST/22"
+          ssh-keyscan -T 10 -H "$VPS_HOST" >> ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+      - name: Refresh Chartography evaluations on VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          ssh -o StrictHostKeyChecking=yes \
+            "${VPS_USER}@${VPS_HOST}" \
+            'if sudo /usr/local/sbin/pwc-cron status | grep -q '\''"sync_surge_chartography"'\''; then sudo /usr/local/sbin/pwc-cron sync_surge_chartography; else echo "sync_surge_chartography is not activated in the production CRON allowlist"; fi'

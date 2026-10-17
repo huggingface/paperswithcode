@@ -1,0 +1,13 @@
+[Unit]
+Description=Sync Surge AI Chartography leaderboard hourly
+After=network-online.target postgresql@16-main.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pwc-cron-throttled sync_surge_chartography
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+ReadWritePaths=/run/paperswithcode/cron-slots

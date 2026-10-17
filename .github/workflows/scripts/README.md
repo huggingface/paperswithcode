@@ -44,6 +44,7 @@ cadence, which preserves the former GitHub Actions minute offsets.
 | `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `cron-sync-physics-iq-verified.yml` | `28 * * * *` | `pwc-cron sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `cron-sync-vals-finance-agent.yml` | `47 * * * *` | `pwc-cron sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
+| `cron-sync-surge-chartography.yml` | `38 * * * *` | `pwc-cron sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
 | `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
 | `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
 | `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
@@ -327,6 +328,23 @@ changes it (values that round to the published precision are unchanged),
 adopts matching hand-imported rows, and renames a mislabelled hand-imported
 row once (`renamed_from`, only when its score matches). Managed rows that drop
 off the leaderboard are reported, never deleted.
+
+`sync_surge_chartography.py` parses the server-rendered "Chartography
+Leaderboard" block on https://surgehq.ai/benchmarks/chartography (provider,
+model with its reasoning configuration, Pass@1 percent) into the
+`chartography-no-tools` benchmark on task `image-understanding`, normalizing
+percentages to 0–1, and fails on any layout change or a row count outside
+25–400. Surge shows one best configuration per model; exact provider + model
+labels map to reviewed `(paper, model_name)` identities in the service, and
+row names carry the catalog's " (no tools)" suffix. The job never creates
+papers, so unreviewed labels and unresolved papers are logged as warnings;
+`EXCLUDED_LABELS` holds labels deliberately left out (DeepSeek V4 Flash
+Vision (experimental)). It creates missing mapped rows, revises a row's score
+when Surge changes it (values that round to the published precision are
+unchanged), and adopts matching hand-imported rows, keeping their notes,
+`is_open`, `hf_model_url`, and `num_parameters`. Managed rows that drop off the
+leaderboard are reported, never deleted. The with-tools `chartography`
+benchmark is curated by hand and never touched.
 
 `sync_physics_iq_verified.py` parses the Physics-IQ Verified table in the
 official `google-deepmind/physics-IQ-benchmark` README (the

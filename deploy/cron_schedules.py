@@ -229,6 +229,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Sync Vals AI Finance Agent v2 leaderboard hourly",
     ),
     TimerSpec(
+        job="sync_surge_chartography",
+        on_calendar=("*-*-* *:38:00",),
+        description="Sync Surge AI Chartography leaderboard hourly",
+    ),
+    TimerSpec(
         job="sync_physics_iq_verified",
         on_calendar=("*-*-* *:28:00",),
         description="Sync Physics-IQ Verified leaderboard hourly",

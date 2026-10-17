@@ -127,6 +127,11 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Contract:** `finance-agent-v2` on task `agents`; Accuracy (%) 0–100; the single table on https://www.vals.ai/benchmarks/fabv2; typically 40–400 upstream rows, of which only reviewed labels are published (all 78 on 2026-10-16).
 - **Proof:** Diff the Vals table against managed rows (label, accuracy at two decimals); confirm `vals_finance_agent_unreviewed` labels get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); verify ranks on Accuracy.
 
+## `sync_surge_chartography`
+
+- **Contract:** `chartography-no-tools` on task `image-understanding`; Pass@1 0–1 (Surge percent / 100); the "Chartography Leaderboard" block on https://surgehq.ai/benchmarks/chartography (fetch with a browser User-Agent); typically 25–400 upstream rows, of which only reviewed labels are published (41 of 42 on 2026-10-17; DeepSeek V4 Flash Vision (experimental) is excluded on purpose).
+- **Proof:** Diff the Surge block against managed rows (label, percent at one decimal); confirm `surge_chartography_unreviewed` labels get an identity (index the model's paper first), `missing_papers` is empty, and `missing_upstream` rows were investigated (never deleted automatically); confirm the with-tools `chartography` benchmark was not touched.
+
 ## `sync_physics_iq_verified`
 
 - **Contract:** `physics-iq-verified` on task `video-generation`; Physics-IQ Verified Score (I2V) and (V2V), 0–100; Verified table of the official `google-deepmind/physics-IQ-benchmark` README; typically 30–300 upstream rows, of which only reviewed labels are published (33 on 2026-10-13), one per model and track.
