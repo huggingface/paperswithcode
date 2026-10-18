@@ -18,6 +18,7 @@ import { usePdfPaperLinks } from "./usePdfPaperLinks";
 import { PdfOutline } from "./PdfOutline";
 import { clampZoom, stepZoom } from "./pdfZoom";
 import { activeSectionIndex, loadPdfOutline, pdfSectionFromHash, type PdfOutlineEntry } from "./pdfOutline";
+import type { PdfHighlight } from "./pdfCitations";
 
 interface PdfViewerProps {
   url: string;
@@ -36,12 +37,16 @@ interface PdfViewerProps {
   onClose?: () => void;
   loadErrorMessage?: string;
   chrome?: "reader" | "canvas";
+  /** Passage a chat citation points at: scrolled into view and briefly highlighted. */
+  highlight?: PdfHighlight;
 }
 
 // Section jumps leave this much of the previous section visible above the
 // heading; the reading anchor sits just below so the jumped-to section is active.
 const SECTION_SCROLL_MARGIN = 8;
 const SECTION_ANCHOR_OFFSET = 24;
+// Citation jumps keep this much context visible above the highlighted passage.
+const CITATION_SCROLL_MARGIN = 72;
 // Placeholder height for pages that have not rendered yet, until the document's
 // own page proportions are known. Accurate placeholders keep page and section
 // jumps from overshooting when the pages above the target are still unrendered.
@@ -125,6 +130,8 @@ function LazyPdfPage({
   activeSearchPage,
   resolveCitation,
   warmPreviews,
+  highlightBoxes,
+  highlightNonce,
 }: {
   page: number;
   width: number;
@@ -133,6 +140,8 @@ function LazyPdfPage({
   activeSearchPage?: number;
   resolveCitation?: PdfCitationResolver;
   warmPreviews?: (routeIds: string[]) => void;
+  highlightBoxes?: number[][];
+  highlightNonce?: number;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const [visible, setVisible] = useState(page <= 2);
@@ -179,6 +188,12 @@ function LazyPdfPage({
       </div>;
     })}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
+    {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
+      key={`${highlightNonce}-${index}`}
+      className="pdf-citation-highlight"
+      aria-hidden="true"
+      style={{ left: `${x0 / 10}%`, top: `${y0 / 10}%`, width: `${(x1 - x0) / 10}%`, height: `${(y1 - y0) / 10}%` }}
+    />)}
   </div>;
 }
 
@@ -237,6 +252,7 @@ export function PdfViewer({
   onClose,
   loadErrorMessage,
   chrome = "reader",
+  highlight,
 }: PdfViewerProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -543,6 +559,22 @@ export function PdfViewer({
     scrollRef.current?.querySelector<HTMLElement>(`[data-page="${bounded}"]`)?.scrollIntoView({ block: "start", behavior });
     if (behavior === "instant") setCurrentPage(bounded);
   };
+  // Scroll so the cited passage sits near the top once the document is laid
+  // out; placeholder pages have accurate heights, so the offset holds.
+  useEffect(() => {
+    const first = highlight?.boxes[0];
+    const scroller = scrollRef.current;
+    const target = first && scroller?.querySelector<HTMLElement>(`[data-page="${first.page}"]`);
+    if (!first || !scroller || !target) return;
+    const behavior = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth";
+    const rect = target.getBoundingClientRect();
+    const top = rect.top - scroller.getBoundingClientRect().top + scroller.scrollTop + rect.height * first.bbox[1] / 1000;
+    setNavigationPage(behavior === "smooth" ? first.page : undefined);
+    scroller.scrollTo({ top: Math.max(0, top - CITATION_SCROLL_MARGIN), behavior });
+    if (behavior === "instant") setCurrentPage(first.page);
+    // Re-run per request and once pages exist, not on every scroll-state change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [highlight?.nonce, pages]);
   const jumpToSection = (entry: PdfOutlineEntry, behavior?: ScrollBehavior) => {
     const scroller = scrollRef.current;
     const target = scroller?.querySelector<HTMLElement>(`[data-page="${entry.page}"]`);
@@ -673,6 +705,8 @@ export function PdfViewer({
             activeSearchPage={matches[activeMatch]}
             resolveCitation={resolveCitation}
             warmPreviews={previewCache.warm}
+            highlightBoxes={highlight?.boxes.filter((box) => box.page === pageNumber).map((box) => box.bbox)}
+            highlightNonce={highlight?.nonce}
           />)}
         </div>
       </Document>}

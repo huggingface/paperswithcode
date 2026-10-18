@@ -13,9 +13,9 @@ import type {
   TrendingPaper,
 } from "./papers.types";
 import type { PaginatedResponse, PaperSearchFeedPage, SearchPage } from "./shared.types";
-import type { ApiRequest } from "../apiTransport";
+import { ApiError, type ApiRequest } from "../apiTransport";
 import { paperCuration } from "./curation";
-import { apiRequest } from "./request";
+import { apiFetch, apiRequest } from "./request";
 
 export interface ListPapersParams {
   page?: number;
@@ -309,3 +309,27 @@ export class PapersApi {
 }
 
 export const papersApi = new PapersApi(apiRequest);
+
+export interface PaperLayoutBlock {
+  page: number;
+  label: string;
+  /** [x0, y0, x1, y1] on a 0-1000 grid of the page. */
+  bbox: number[];
+  /** Anchor of the enclosing section header, if any. */
+  section: string | null;
+  text: string;
+}
+
+export interface PaperLayout {
+  page_count: number;
+  processed_pages: number;
+  blocks: Record<string, PaperLayoutBlock>;
+}
+
+/** PDF layout blocks that reader chat citations point at; null when the paper has none. */
+export async function getPaperLayout(routeId: string): Promise<PaperLayout | null> {
+  const response = await apiFetch(`/papers/${encodeURIComponent(routeId)}/layout`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new ApiError(response, await response.text());
+  return response.json();
+}

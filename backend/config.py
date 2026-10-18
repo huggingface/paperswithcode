@@ -337,6 +337,12 @@ class Settings(BaseSettings, ChatSettings):
     native_pdf_reader_enabled: bool = Field(default=False)
     paper_reader_chat_enabled: bool = Field(default=False)
     paper_reader_selection_enabled: bool = Field(default=False)
+    # Reader chat cites PDF layout blocks when the paper has page-aware layout.
+    paper_reader_citations_enabled: bool = Field(default=False)
+    paper_layout_hf_bucket_id: str = Field(
+        default="huggingface/pwc-papers-pages",
+        description="Private bucket with page-aware Chandra Markdown and block sidecars",
+    )
 
     catalog_mutations_enabled: bool = Field(default=True)
     thumbnail_mutations_enabled: bool = Field(default=True)
