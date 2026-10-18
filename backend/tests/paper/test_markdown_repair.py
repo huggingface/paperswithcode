@@ -245,18 +245,22 @@ def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
     tmp_path, monkeypatch
 ):
     monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
-    papers = _candidates(25)
-    recent, large, small = papers[:1], papers[1:2], papers[2:]
+    papers = _candidates(26)
+    fresh, recent, large, small = papers[:1], papers[1:2], papers[2:3], papers[3:]
     job = _scheduler(execute=False, confirm=False, full=True)
     job._papers = Mock(
-        side_effect=lambda *, recent_only=False: recent if recent_only else papers
+        side_effect=lambda *, recent_only=False: (
+            fresh + recent if recent_only else papers
+        )
     )
     sizes = {item["output_key"]: 300 for item in recent + small}
     sizes[large[0]["output_key"]] = MODULE.STUB_SCAN_BYTES
     job._existing_paths = Mock(
         return_value={key: SimpleNamespace(size=size) for key, size in sizes.items()}
     )
-    job._copy_upstream = Mock(return_value=([], 0))
+    # A paper still missing inside the live window belongs to the live lane and
+    # must not hold back full-lane repairs.
+    job._copy_upstream = Mock(return_value=(fresh, 0))
     job._status_records = Mock(return_value={})
     job._semantic_records = Mock(
         side_effect=lambda inspected, _canonical: {
@@ -270,7 +274,7 @@ def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
 
     inspected = job._semantic_records.call_args.args[0]
     assert [item["arxiv_id"] for item in inspected] == [
-        item["arxiv_id"] for item in recent + small
+        item["arxiv_id"] for item in fresh + recent + small
     ]
     candidates = job._launch.call_args.args[0]
     # Bounded, and the live lane alone repairs the recent window.

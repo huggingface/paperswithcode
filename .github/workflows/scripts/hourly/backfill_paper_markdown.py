@@ -1256,13 +1256,20 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 candidates.append({**item, "retry": disposition == "retryable_due"})
         missing_candidate_count = len(candidates)
         repair_limit = getattr(self, "repair_invalid_limit", 0)
-        if automatic_repairs and not candidates and not repair_limit:
+        # New papers keep arriving inside the live window, which the live lane
+        # owns, so only older missing work holds back full-lane repairs.
+        blocking_missing = [
+            item
+            for item in candidates
+            if not self.full or str(item["output_key"]) not in recent_keys
+        ]
+        if automatic_repairs and not blocking_missing and not repair_limit:
             repair_limit = LIVE_REPAIR_LIMIT
         if repair_limit:
             # Runs repair a bounded cohort after eligible missing work drains: the
             # live lane its recent window, the full lane older small objects.
             # Explicit repair runs always handle only their requested cohort.
-            candidates = []
+            repairs = []
             for item in stub_papers if self.full else recent_papers:
                 key = str(item["output_key"])
                 if semantic_records.get(key) != "invalid":
@@ -1282,7 +1289,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                         str(item["title"]), original.decode("utf-8")
                     )
                 except ValueError:
-                    candidates.append(
+                    repairs.append(
                         {
                             **item,
                             "retry": disposition == "retryable_due",
@@ -1291,8 +1298,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
                             ).hexdigest(),
                         }
                     )
-                if len(candidates) >= repair_limit:
+                if len(repairs) >= repair_limit:
                     break
+            # A full run with nothing to repair keeps its live-window missing work.
+            if repairs or not self.full:
+                candidates = repairs
         if self.retry_only:
             candidates = [item for item in candidates if item["retry"]]
         failed_or_completed = max(0, len(remaining) - missing_candidate_count)
