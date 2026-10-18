@@ -18,7 +18,7 @@ pdf.js text layer the reader uses; both read the same PDF text objects.
 Also reports a quote-only baseline (does a sentence from the block occur in the
 page text after normalization?) and writes overlay PNGs plus an HTML report.
 
-    uv run --no-project backend/scripts/evaluate_paper_layout.py --run-id <run> --out <dir>
+    uv run --no-project backend/scripts/evaluate_paper_layout.py --run-id <run>... --out <dir>
 """
 
 from __future__ import annotations
@@ -31,6 +31,7 @@ import random
 import re
 import tempfile
 import unicodedata
+from collections import Counter
 from pathlib import Path
 
 import fitz
@@ -62,14 +63,16 @@ def words(text: str) -> list[str]:
     return WORD.findall(normalize(text))
 
 
-def fetch_pdf(api: HfApi, paper_key: str, directory: Path) -> Path:
+def fetch_pdf(api: HfApi, entry: dict[str, str], directory: Path) -> Path:
+    """Fetch the same PDF revision the OCR job read."""
     path = directory / "paper.pdf"
-    if paper_key.startswith("external/"):
-        api.download_bucket_files(SOURCE_BUCKET_ID, [(f"{paper_key}/paper.pdf", path)])
+    if entry["source"] == "external":
+        api.download_bucket_files(
+            SOURCE_BUCKET_ID, [(f"{entry['paper_key']}/paper.pdf", path)]
+        )
     else:
-        arxiv_id = paper_key.split("/", 1)[1]
         response = httpx.get(
-            f"https://arxiv.org/pdf/{arxiv_id}",
+            f"https://arxiv.org/pdf/{entry['arxiv_id']}{entry.get('version') or ''}",
             headers={"User-Agent": "paperswithcode-layout-eval/1.0"},
             follow_redirects=True,
             timeout=60,
@@ -151,31 +154,39 @@ def main() -> None:
     api = HfApi(token=os.environ.get("HF_TOKEN"))
     args.out.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as directory:
-        results = []
+        entries = []
         for run_id in args.run_id:
-            path = Path(directory) / f"{run_id}.jsonl"
+            path = Path(directory) / f"{run_id}.json"
             api.download_bucket_files(
-                LAYOUT_BUCKET_ID, [(f"_jobs/results/{run_id}.jsonl", path)]
+                LAYOUT_BUCKET_ID, [(f"_jobs/manifests/{run_id}.json", path)]
             )
-            results += [json.loads(line) for line in path.read_text().splitlines()]
+            entries += json.loads(path.read_text())["entries"]
+    stored = {
+        str(item.path)
+        for item in api.get_bucket_paths_info(
+            LAYOUT_BUCKET_ID, [f"{entry['paper_key']}.md" for entry in entries]
+        )
+    }
 
     papers = []
     overlay_budget = args.overlays
     rng = random.Random(0)
-    for result in results:
-        if not result.get("ok"):
-            papers.append(
-                {"paper_key": result["paper_key"], "error": result.get("error")}
-            )
+    for entry in entries:
+        key = entry["paper_key"]
+        if f"{key}.md" not in stored:
+            papers.append({"paper_key": key, "error": "not_stored"})
             continue
-        key = result["paper_key"]
         with tempfile.TemporaryDirectory() as directory:
             work = Path(directory)
             api.download_bucket_files(
                 LAYOUT_BUCKET_ID, [(f"{key}.blocks.json", work / "blocks.json")]
             )
-            blocks = json.loads((work / "blocks.json").read_text())["blocks"]
-            with fitz.open(fetch_pdf(api, key, work)) as document:
+            meta = json.loads((work / "blocks.json").read_text())
+            blocks = meta.pop("blocks")
+            with fitz.open(fetch_pdf(api, entry, work)) as document:
+                if len(document) != meta["page_count"]:
+                    papers.append({"paper_key": key, "error": "pdf_page_mismatch"})
+                    continue
                 rows = score_paper(document, blocks, args.threshold)
                 overlay = None
                 if overlay_budget > 0 and blocks:
@@ -197,10 +208,10 @@ def main() -> None:
                 "aligned": sum(row["status"] == "aligned" for row in scored),
                 "quote_found": sum(row["quote_found"] for row in scored),
                 "no_text_layer": len(rows) - len(scored),
-                "page_count": result["page_count"],
-                "processed_pages": result["processed_pages"],
-                "page_errors": result["page_errors"],
-                "seconds": result["seconds"],
+                "page_count": meta["page_count"],
+                "processed_pages": meta["processed_pages"],
+                "page_errors": meta.get("page_errors"),
+                "seconds": meta.get("seconds"),
                 "overlay": overlay,
                 "worst": sorted(scored, key=lambda row: row["recall"])[:3],
             }
@@ -224,9 +235,7 @@ def main() -> None:
         "papers_without_text_layer": sum(
             p["scored"] == 0 and p["no_text_layer"] > 0 for p in ok
         ),
-        "median_seconds": sorted(p["seconds"] for p in ok)[len(ok) // 2]
-        if ok
-        else None,
+        "failures": dict(Counter(p["error"] for p in papers if "error" in p)),
     }
     (args.out / "summary.json").write_text(
         json.dumps({"summary": summary, "papers": papers}, indent=1)

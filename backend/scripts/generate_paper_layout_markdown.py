@@ -17,6 +17,7 @@ gets three objects in the layout bucket:
 - ``<key>.blocks.json``: anchor -> page, label, bbox (0-1000 grid), section.
 
 Papers already present in the layout bucket are skipped, so a run resumes.
+A paper without a ``.md`` after its run failed; the job log has the error.
 """
 
 from __future__ import annotations
@@ -273,13 +274,19 @@ def process(
         work = Path(directory)
         page_count, pages = ocr_pages(read_pdf(entry, source_bucket, work))
         markdown, blocks = build_paged_markdown(pages)
+        # Each paper records its own outcome, so a resumed or killed run never
+        # loses results that were already stored.
         meta = {
             "schema_version": LAYOUT_SCHEMA_VERSION,
             "paper_key": key,
+            "source": entry["source"],
+            "arxiv_version": entry.get("version") or None,
             "model_id": MODEL_ID,
             "model_revision": MODEL_REVISION,
             "page_count": page_count,
             "processed_pages": len(pages),
+            "page_errors": sum(1 for page in pages if page["error"]),
+            "seconds": round(time.monotonic() - started, 1),
             "bbox_scale": 1000,
             "run_id": run_id,
             "created_at": datetime.now(UTC).isoformat(),
@@ -300,15 +307,7 @@ def process(
         bucket_bridge(
             {"operation": "upload", "bucket_id": layout_bucket, "files": files}
         )
-    return {
-        "paper_key": key,
-        "ok": True,
-        "page_count": page_count,
-        "processed_pages": len(pages),
-        "blocks": len(blocks),
-        "page_errors": sum(1 for page in pages if page["error"]),
-        "seconds": round(time.monotonic() - started, 1),
-    }
+    return {"paper_key": key, "ok": True, "blocks": len(blocks), **meta}
 
 
 def main() -> None:
@@ -348,7 +347,6 @@ def main() -> None:
         VLLM_API_KEY="EMPTY",
     )
     vllm = start_vllm()
-    results = []
     try:
         for number, entry in enumerate(pending, 1):
             try:
@@ -364,23 +362,9 @@ def main() -> None:
                     "ok": False,
                     "error": repr(error)[:500],
                 }
-            results.append(result)
             print(f"[{number}/{len(pending)}] {json.dumps(result)}", flush=True)
     finally:
         vllm.terminate()
-        vllm.wait(timeout=60)
-        with tempfile.TemporaryDirectory(prefix="pwc-layout-results-") as directory:
-            path = Path(directory) / "results.jsonl"
-            path.write_text(
-                "".join(json.dumps(r) + "\n" for r in results), encoding="utf-8"
-            )
-            bucket_bridge(
-                {
-                    "operation": "upload",
-                    "bucket_id": args.layout_bucket,
-                    "files": [(str(path), f"_jobs/results/{run_id}.jsonl")],
-                }
-            )
 
 
 if __name__ == "__main__":
