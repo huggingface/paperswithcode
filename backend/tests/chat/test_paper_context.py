@@ -1061,9 +1061,16 @@ def test_reader_paper_prefers_layout_markdown_with_citable_tags(monkeypatch):
     assert "[short label](pdf:p5b3)" in block
 
 
-def test_reader_paper_without_layout_uses_canonical_markdown(monkeypatch):
-    def missing_layout(identifier, **_kwargs):
-        raise chat_paper_context_service.PaperLayoutNotFoundError(identifier)
+@pytest.mark.parametrize(
+    "error",
+    [
+        chat_paper_context_service.PaperLayoutNotFoundError("2610.04862"),
+        httpx.ConnectTimeout("bucket timed out"),
+    ],
+)
+def test_reader_paper_without_layout_uses_canonical_markdown(monkeypatch, error):
+    def missing_layout(_identifier, **_kwargs):
+        raise error
 
     service, paper, row = _layout_service(monkeypatch, missing_layout)
 
@@ -1095,11 +1102,14 @@ def test_layout_reader_loads_cache_apart_from_mentions(monkeypatch):
 
     monkeypatch.setattr(service, "_load", load)
     try:
-        reader = service.prepare_one("2610.00009", pdf_fallback=True)
+        reader = service.prepare_one("2610.00009", pdf_fallback=True, reader=True)
         mention = service.prepare_one("2610.00009")
+        service.prewarm("2610.00009")
         assert reader.content_origin == "layout_markdown"
         assert mention.content_origin == "markdown"
-        assert service.prepare_one("2610.00009", pdf_fallback=True) is reader
+        assert (
+            service.prepare_one("2610.00009", pdf_fallback=True, reader=True) is reader
+        )
         assert loads == [True, False]
     finally:
         chat_paper_context_service._CACHE._drop("2610.00009")

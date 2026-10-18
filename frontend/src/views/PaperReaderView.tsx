@@ -141,6 +141,7 @@ function PaperReaderExperience() {
   );
   const [mobileTab, setMobileTab] = useState<"paper" | "assistant">("paper");
   const [paperSelection, setPaperSelection] = useState<PaperSelectionDraft | undefined>();
+  const [pdfHighlight, setPdfHighlight] = useState<PdfHighlight>();
   // Chat waits for a web paper's Markdown so its first turn can read the page.
   const [webPageReady, setWebPageReady] = useState(false);
   const markWebPageReady = useCallback(() => setWebPageReady(true), []);
@@ -189,6 +190,7 @@ function PaperReaderExperience() {
     setMobileTab("paper");
     setWebPageReady(false);
     setPaperSelection(undefined);
+    setPdfHighlight(undefined);
     setSelectionStatus("");
     const nextPage = storedPage(routeId);
     currentPageRef.current = nextPage;
@@ -332,7 +334,6 @@ function PaperReaderExperience() {
     enabled: citationsEnabled && Boolean(canonicalRoute),
     staleTime: 5 * 60_000,
   });
-  const [pdfHighlight, setPdfHighlight] = useState<PdfHighlight>();
   const layout = layoutQuery.data;
   const citationTarget = useMemo<PdfCitationTarget | null>(() => citationsEnabled ? {
     layout,

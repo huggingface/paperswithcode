@@ -386,6 +386,14 @@ class ChatPaperContextService:
                 origin = "layout_markdown"
             except PaperLayoutNotFoundError:
                 pass
+            except Exception as exc:
+                # Layout only adds citations; any storage failure falls back
+                # to canonical Markdown rather than failing the reader turn.
+                logger.warning(
+                    "chat paper layout outcome=unavailable paper_id=%s error=%s",
+                    paper.id,
+                    type(exc).__name__,
+                )
         if markdown_id and not available:
             try:
                 markdown, truncated = read_paper_markdown_bounded(
@@ -467,16 +475,16 @@ class ChatPaperContextService:
         return text, truncated, True
 
     def prepare_one(
-        self, route_id: str, *, pdf_fallback: bool = False
+        self, route_id: str, *, pdf_fallback: bool = False, reader: bool = False
     ) -> PreparedPaper:
         """Prepare one paper; ``pdf_fallback`` reads the PDF when Markdown is missing.
 
-        Reader loads also prefer page-aware layout Markdown when citations are
-        enabled. They cache under their own key so mentions elsewhere keep the
-        canonical Markdown without citation tags.
+        A ``reader`` load (the reader's primary paper) also prefers page-aware
+        layout Markdown when citations are enabled. It caches under its own key
+        so mentions elsewhere keep the canonical Markdown without citation tags.
         """
         paper, row = self._resolve_marker(route_id)
-        layout = pdf_fallback and self.settings.paper_reader_citations_enabled
+        layout = reader and self.settings.paper_reader_citations_enabled
         cache_key = _route_id(paper) + ("#layout" if layout else "")
         cached = _CACHE.get(cache_key, self._marker(row))
         if cached is not None and (cached.content_available or not pdf_fallback):
@@ -567,7 +575,7 @@ class ChatPaperContextService:
                     503,
                     "The paper bound to this chat is no longer available.",
                 )
-            primary = self.prepare_one(_route_id(row), pdf_fallback=True)
+            primary = self.prepare_one(_route_id(row), pdf_fallback=True, reader=True)
             if primary_route_id:
                 claimed = self.prepare_one(primary_route_id)
                 if claimed.paper_id != primary.paper_id:
@@ -577,7 +585,7 @@ class ChatPaperContextService:
                         "This conversation belongs to a different paper.",
                     )
         elif primary_route_id:
-            primary = self.prepare_one(primary_route_id, pdf_fallback=True)
+            primary = self.prepare_one(primary_route_id, pdf_fallback=True, reader=True)
 
         if primary is not None:
             if not primary.content_available:
