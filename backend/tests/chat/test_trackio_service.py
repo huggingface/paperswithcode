@@ -4,6 +4,7 @@ import json
 import queue
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from datetime import date
 from types import SimpleNamespace
 
 import httpx
@@ -243,6 +244,45 @@ def test_settings_restrict_credentials_to_space_origin():
     assert (
         trackio.configured_trackio_client(Settings(chat_trackio_enabled=False)) is None
     )
+
+
+@pytest.mark.parametrize(
+    ("day", "expected"),
+    [
+        (date(2026, 10, 18), "pwc-chat-2026-W42"),  # Sunday ends the ISO week
+        (date(2026, 10, 19), "pwc-chat-2026-W43"),  # Monday starts the next
+        (date(2026, 3, 2), "pwc-chat-2026-W10"),
+        # ISO week-numbering years differ from calendar years at the edges.
+        (date(2026, 12, 31), "pwc-chat-2026-W53"),
+        (date(2027, 1, 3), "pwc-chat-2026-W53"),
+        (date(2027, 1, 4), "pwc-chat-2027-W01"),
+        (date(2024, 12, 30), "pwc-chat-2025-W01"),
+    ],
+)
+def test_weekly_project_uses_iso_year_and_zero_padded_week(day, expected):
+    assert trackio.weekly_project("pwc-chat", day) == expected
+
+
+def test_entries_rotate_project_weekly_and_keep_daily_runs(client):
+    first = client._entry("chat", date(2026, 10, 18), log_id="a", metrics={})
+    second = client._entry("chat", date(2026, 10, 19), log_id="b", metrics={})
+    assert (first["project"], first["run"]) == (
+        "pwc-chat-2026-W42",
+        "staging-chat-2026-10-18",
+    )
+    assert (second["project"], second["run"]) == (
+        "pwc-chat-2026-W43",
+        "staging-chat-2026-10-19",
+    )
+    assert first["run_id"] != second["run_id"]
+
+
+def test_trace_entry_project_follows_span_start_date(client):
+    with turn() as trace:
+        trace.finish("answer", "success")
+    entry = payload(client)
+    day = date.fromisoformat(entry["run"].removeprefix("staging-chat-"))
+    assert entry["project"] == trackio.weekly_project("pwc-chat", day)
 
 
 def test_durable_lifecycle_exports_without_chat_content(client):
