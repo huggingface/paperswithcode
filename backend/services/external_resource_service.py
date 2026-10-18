@@ -36,6 +36,9 @@ from sqlalchemy.orm import Session
 from backend.database.paper_merge import find_arxiv_paper_for_title
 from backend.models.papers import Paper
 from backend.services.author_service import get_or_create_author_by_name
+from backend.services.external_paper_curation_service import (
+    enqueue_external_paper_curation,
+)
 from backend.models.database import (
     Paper as DBPaper,
     PaperAuthor as DBPaperAuthor,
@@ -102,7 +105,11 @@ class ExternalResourceService:
     # ------------------------------------------------------------------
 
     def add_external_resource(
-        self, payload: ExternalResourceInput, *, commit: bool = True
+        self,
+        payload: ExternalResourceInput,
+        *,
+        commit: bool = True,
+        queue_curation: bool = True,
     ) -> ExternalResourceIngestionResult:
         """
         Insert (or update) an external resource and link its associated
@@ -111,6 +118,10 @@ class ExternalResourceService:
         Required fields: `source_url`, `title`, `date_published`. Missing
         `date_published` raises `ExternalResourceError`; the plan deliberately
         rejects rows without a credible publication date.
+
+        A newly created row also gets a queued enrich-paper -> add-evals
+        curation workflow unless `queue_curation` is False (callers that start
+        their own workflow, such as trending model resolution).
         """
         try:
             source_url = normalize_public_url(payload.source_url)
@@ -206,6 +217,8 @@ class ExternalResourceService:
                 paper_id, payload.github_repository_urls
             )
             hf_counts = self._set_hf_artifacts(paper_id, payload.hf_artifact_urls)
+            if existing is None and queue_curation:
+                enqueue_external_paper_curation(self.db, db_paper)
 
             if commit:
                 self.db.commit()

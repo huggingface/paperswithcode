@@ -572,7 +572,8 @@ sudo pwc-cron enqueue_hf_daily_paper_curation --status
 ```
 
 Trending-model discovery is a separate hourly lane. It reads the global Hub
-top 50 through the installed `hf` CLI, deterministically skips obvious model
+top 50, plus featured-publisher models ranked up to 100, through the installed
+`hf` CLI, deterministically skips obvious model
 conversions, and queues at most ten new or changed substantive releases per
 cycle. Each accepted release runs the normal enrich-paper then add-evals
 workflow; benchmark matching remains restricted to the existing catalog.
@@ -588,6 +589,21 @@ changes. The scheduled command runs at minute 42, shares the daily curation
 health/token guardrails, and prioritizes trending work behind only overdue
 daily workflows. Model-card revisions are pinned; a changed README is curated
 again, while rejected repackaging stays durable until the card changes.
+
+Every newly created external paper (`ExternalResourceService.add_external_resource`:
+the add-external-paper skill, the external-resource API, pending-edit approvals,
+and leaderboard syncs) gets one admin-lane enrich-paper then add-evals workflow
+with policy version `external-paper-v1` (priority 50, behind interactive admin
+jobs). Trending resolution opts out because it starts its own model-card-pinned
+workflow. Filter the admin curation queue by that policy version to see them.
+Queued admin-lane work dispatches on every job completion and on the hourly
+reconcile. Backfill recent external papers that never had a curation job, in
+bounded batches (Hugging Face model papers first):
+
+```bash
+sudo pwc-cron enqueue_hf_daily_paper_curation --backfill-external-days 30 --limit 20 --dry-run
+sudo pwc-cron enqueue_hf_daily_paper_curation --backfill-external-days 30 --limit 20
+```
 
 It scans the exact rolling seven-day Hugging Face daily cohorts, records missing
 imports, creates one durable parent workflow per paper, and uses the shared

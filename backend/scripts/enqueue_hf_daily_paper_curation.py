@@ -13,6 +13,9 @@ from backend.database.connection import get_database_session
 from backend.services.codex_add_evals_service import CanaryDispatchFailed
 from backend.models.database import PaperCurationJob
 from backend.services.curation_trace_service import CurationTraceService
+from backend.services.external_paper_curation_service import (
+    backfill_external_paper_curation,
+)
 from backend.services.hf_daily_curation_service import (
     CurationRetryConflict,
     HFDailyCurationService,
@@ -34,6 +37,14 @@ def main() -> int:
     action.add_argument("--reconcile-jobs", action="store_true")
     action.add_argument("--validate-job", type=uuid.UUID)
     action.add_argument("--status", action="store_true")
+    action.add_argument(
+        "--backfill-external-days",
+        type=int,
+        choices=range(1, 91),
+        metavar="DAYS",
+        help="queue curation for external papers created in the last DAYS "
+        "days that never had a curation job (bounded by --limit, default 20)",
+    )
     parser.add_argument("--reason")
     args = parser.parse_args()
     session = get_database_session()
@@ -42,6 +53,16 @@ def main() -> int:
         service = HFDailyCurationService(db, get_settings())
         if args.status:
             result = service.status()
+        elif args.backfill_external_days:
+            result = backfill_external_paper_curation(
+                db,
+                days=args.backfill_external_days,
+                limit=args.limit or 20,
+                dry_run=args.dry_run,
+                settings=service.settings,
+            )
+            if not args.dry_run:
+                service.job_service.dispatch_next(db, service.settings)
         elif args.retry_trace:
             row = db.get(PaperCurationJob, args.retry_trace)
             if row is None or row.trace_status != "finalize_failed":

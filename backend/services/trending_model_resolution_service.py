@@ -264,6 +264,8 @@ class TrendingModelResolutionService:
                 hf_artifact_urls=[f"https://huggingface.co/{candidate.repo_id}"],
             ),
             commit=False,
+            # The resolved candidate starts its own model-card-pinned workflow.
+            queue_curation=False,
         )
         paper = self.db.get(Paper, int(result.paper.id))
         if paper is None:
