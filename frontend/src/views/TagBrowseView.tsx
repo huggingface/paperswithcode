@@ -440,7 +440,13 @@ const TagBrowseView: React.FC = () => {
     <div className="page">
       <TaskBreadcrumb task={task} area={pageQ.data.area} parents={parents} />
 
-      <div className={task.image_url ? "task-hero-grid" : undefined}>
+      <div
+        className={
+          task.image_url
+            ? `task-hero-grid${task.slug === "auto-research" ? " task-hero-grid--wide" : ""}`
+            : undefined
+        }
+      >
         <div>
           <div style={{ fontFamily: "var(--mono)", fontSize: 11, color: "var(--accent-text)", letterSpacing: "0.1em", marginBottom: 8 }}>
             TASK

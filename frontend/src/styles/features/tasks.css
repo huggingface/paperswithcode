@@ -5,6 +5,9 @@
   gap: 48px;
   align-items: start;
 }
+.task-hero-grid--wide {
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 720px);
+}
 .task-figure-card {
   background: var(--bg-elevated);
   border: 1px solid var(--hairline);
