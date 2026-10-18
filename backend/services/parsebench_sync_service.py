@@ -207,6 +207,13 @@ _GPT_6_ASTRA = external(
     "2026-09-03",
 )
 
+_LIGHTONOCR_3 = external(
+    "https://huggingface.co/blog/lightonai/lightonocr-3",
+    "LightOnOCR-3: High-Performance OCR and Layout Extraction in One Model",
+    "2026-10-08",
+    is_open=True,
+)
+
 _GPT_6_SOL_LUNA = external(
     "https://openai.com/index/introducing-gpt-6-sol-and-luna/",
     "Introducing GPT-6 Sol and Luna",
@@ -426,6 +433,20 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
     "Docling-models": arxiv("2408.09869"),
     "Nemotron-3-Nano-Omni-30B-A3B (Thinking)": arxiv("2604.24954"),
     "LightOnOCR-2-1B": arxiv("2601.14251"),
+    "LightOnOCR-3-4B": _LIGHTONOCR_3,
+    "LightOnOCR-3-1B": _LIGHTONOCR_3,
+    "LightOnOCR-3-0.8B": _LIGHTONOCR_3,
+    "aeddix-alpine-ocr (KDL pipeline)": external(
+        "https://huggingface.co/aeddix-labs/aeddix-alpine-ocr",
+        "Aeddix Alpine OCR",
+        "2026-10-06",
+        abstract=(
+            "Aeddix Alpine OCR is an open-weight 1.2B document parsing model "
+            "fine-tuned from MinerU2.5-Pro-2605-1.2B that converts page images "
+            "to Markdown."
+        ),
+        is_open=True,
+    ),
     "Qianfan-OCR": arxiv("2603.13398"),
     "Unlimited-OCR": arxiv("2606.23050"),
     "Jina-OCR-v1": arxiv("2609.03181"),
@@ -455,6 +476,8 @@ EXCLUDED_PROVIDERS: frozenset[str] = frozenset(
         "Reducto (Agentic)",
         "Reducto",
         "Reducto (r-1)",
+        "DocAI",
+        "Nutrient DWS (Agentic)",
         "Datalab Accurate",
         "Datalab Balanced",
         "Datalab Fast",

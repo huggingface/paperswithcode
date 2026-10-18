@@ -73,7 +73,7 @@ _MUSE_SPARK_1_3 = "https://research.meta.ai/blog/introducing-muse-spark-1-3"
 
 # Exact Vals model labels are the trust boundary between a leaderboard row and
 # its introducing paper. Model names follow the catalog (reviewed on
-# 2026-10-14 and 2026-10-16), not Vals' spelling. Unreviewed labels are
+# 2026-10-14, 2026-10-16 and 2026-10-18), not Vals' spelling. Unreviewed labels are
 # reported, never imported.
 MODEL_IDENTITIES: dict[str, ModelIdentity] = {
     "Gemini 4 Argon": ModelIdentity(
@@ -87,6 +87,12 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         source_url=(
             "https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/"
         ),
+    ),
+    "Muse Spark Open": ModelIdentity(
+        "Muse Spark Open",
+        source_url="https://research.meta.ai/blog/muse-spark-open",
+        is_open=True,
+        hf_model_url="https://huggingface.co/meta-models/Muse-Spark-Open-816B-A42B",
     ),
     "Muse Spark 1.2": ModelIdentity(
         "Muse Spark 1.2",
