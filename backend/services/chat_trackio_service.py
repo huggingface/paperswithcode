@@ -22,7 +22,7 @@ import queue
 import threading
 import time
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from functools import lru_cache
 from typing import Any
 
@@ -38,6 +38,17 @@ MAX_QUEUE_BYTES = 64 * 1024 * 1024
 BATCH_LINGER_SECONDS = 0.25
 DROP_LOG_INTERVAL_SECONDS = 60.0
 LIFECYCLE_SPAN_NAME = "durable-chat-lifecycle"
+
+
+def weekly_project(project: str, day: date) -> str:
+    """Name the ISO week's Trackio project, e.g. ``pwc-chat-2026-W43``.
+
+    Trackio keeps one SQLite file per project; rotating weekly bounds each DB
+    so a corruption or restart rewrite loses at most one week. Daily runs
+    never straddle two projects because a UTC day sits in one ISO week.
+    """
+    year, week, _ = day.isocalendar()
+    return f"{project}-{year}-W{week:02d}"
 
 
 class TrackioClient:
@@ -92,33 +103,39 @@ class TrackioClient:
             "provider-request": "provider-requests",
             LIFECYCLE_SPAN_NAME: "lifecycle",
         }.get(root.span["name"], "chat")
-        run = f"{self.environment}-{kind}-{root.span['start_time'][:10]}"
-        entry = {
-            "project": self.project,
-            "run": run,
-            "run_id": hashlib.sha256(f"{self.project}:{run}".encode()).hexdigest()[:32],
-            "log_id": root.span["id"],
-            "metrics": (
+        entry = self._entry(
+            kind,
+            date.fromisoformat(root.span["start_time"][:10]),
+            log_id=root.span["id"],
+            metrics=(
                 _lifecycle_metrics(root)
                 if root.span["name"] == LIFECYCLE_SPAN_NAME
                 else {"trace": self._trace_metric(root)}
             ),
-        }
+        )
         self._enqueue(entry, root.trace_id)
 
     def log_metrics(self, kind: str, metrics: dict[str, float], *, log_id: str) -> None:
         """Queue plain numeric metrics into today's ``<environment>-<kind>`` run."""
         if not kind or not metrics or not log_id:
             raise ValueError("Trackio metrics need a run kind, values, and a log id")
-        run = f"{self.environment}-{kind}-{datetime.now(UTC).date().isoformat()}"
-        entry = {
-            "project": self.project,
-            "run": run,
-            "run_id": hashlib.sha256(f"{self.project}:{run}".encode()).hexdigest()[:32],
-            "log_id": log_id,
-            "metrics": dict(metrics),
-        }
+        entry = self._entry(
+            kind, datetime.now(UTC).date(), log_id=log_id, metrics=dict(metrics)
+        )
         self._enqueue(entry, log_id)
+
+    def _entry(
+        self, kind: str, day: date, *, log_id: str, metrics: dict[str, Any]
+    ) -> dict[str, Any]:
+        project = weekly_project(self.project, day)
+        run = f"{self.environment}-{kind}-{day.isoformat()}"
+        return {
+            "project": project,
+            "run": run,
+            "run_id": hashlib.sha256(f"{project}:{run}".encode()).hexdigest()[:32],
+            "log_id": log_id,
+            "metrics": metrics,
+        }
 
     def _enqueue(self, entry: dict[str, Any], trace_id: str) -> None:
         encoded = json.dumps(entry, default=str).encode()
