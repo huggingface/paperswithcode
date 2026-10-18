@@ -330,9 +330,6 @@ def test_worker_failure_classification_and_forced_cleanup():
         "immutable_asset_conflict",
         False,
     )
-    assert WORKER.classify_failure(
-        subprocess.TimeoutExpired("chandra", WORKER.CHANDRA_TIMEOUT_SECONDS), 1
-    ) == ("chandra_timeout", True)
 
     for message in (
         "markdown_version_verification_failed",

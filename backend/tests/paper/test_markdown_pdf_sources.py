@@ -242,10 +242,11 @@ def test_worker_archives_external_pdf_and_publishes_source_aware_markdown(
     monkeypatch.setattr(
         WORKER,
         "run_chandra",
-        lambda path, _output, pages: (
+        lambda path, pages: (
             (
                 "External report Markdown body " * 80,
                 {},
+                [],
             )
             if path.read_bytes() == pdf and pages == 2
             else (_ for _ in ()).throw(AssertionError("unexpected OCR input"))

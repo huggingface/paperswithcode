@@ -22,6 +22,7 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
             "paper_markdown_incremental_batch_size": 100,
             "paper_markdown_backfill_batch_size": 100,
             "paper_markdown_hf_bucket_id": "test/paper-markdown",
+            "paper_layout_hf_bucket_id": "test/paper-pages",
             "paper_markdown_hf_namespace": "test-owner",
             "paper_markdown_runtime_image": "test-image",
             "paper_markdown_hardware": "l40sx1",

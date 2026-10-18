@@ -13,28 +13,6 @@ from backend.tests.paper.markdown_harness import (
 )
 
 
-def test_worker_collects_nested_chandra_images(tmp_path, monkeypatch):
-    output = tmp_path / "ocr"
-    observed_timeout = None
-
-    def fake_run(*_args, **kwargs):
-        nonlocal observed_timeout
-        observed_timeout = kwargs.get("timeout")
-        document = output / "paper"
-        images = document / "images"
-        images.mkdir(parents=True)
-        (document / "paper.md").write_text("![figure](images/figure.webp)")
-        (images / "figure.webp").write_bytes(b"nested-image")
-
-    monkeypatch.setattr(WORKER.subprocess, "run", fake_run)
-
-    body, assets = WORKER.run_chandra(tmp_path / "paper.pdf", output, 1)
-
-    assert body == "![figure](images/figure.webp)"
-    assert assets == {"figure.webp": b"nested-image"}
-    assert observed_timeout == WORKER.CHANDRA_TIMEOUT_SECONDS
-
-
 @pytest.mark.parametrize(
     ("title", "body"),
     [
@@ -164,6 +142,7 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
             "paper_markdown_incremental_batch_size": 100,
             "paper_markdown_backfill_batch_size": 100,
             "paper_markdown_hf_bucket_id": "test/paper-markdown",
+            "paper_layout_hf_bucket_id": "test/paper-pages",
             "paper_markdown_hf_namespace": "test-owner",
             "paper_markdown_runtime_image": "test-image",
             "paper_markdown_hardware": "l40sx1",

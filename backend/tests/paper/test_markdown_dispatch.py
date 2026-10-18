@@ -26,6 +26,7 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
             "paper_markdown_incremental_batch_size": 100,
             "paper_markdown_backfill_batch_size": 100,
             "paper_markdown_hf_bucket_id": "test/paper-markdown",
+            "paper_layout_hf_bucket_id": "test/paper-pages",
             "paper_markdown_hf_namespace": "test-owner",
             "paper_markdown_runtime_image": "test-image",
             "paper_markdown_hardware": "l40sx1",
@@ -449,6 +450,7 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
             "copied_from_upstream_count": 0,
             "planned_upstream_copy_count": 0,
             "missing_count": 1,
+            "layout_missing_count": 0,
             "coverage_percentage": 50.0,
             "retryable_due": 0,
             "retryable_deferred": 0,
@@ -461,6 +463,7 @@ def test_dry_reconciliation_appends_coverage_history(tmp_path, monkeypatch):
         }
         for row in rows
     )
+    # The full lane leaves the recent window's missing layout to the live lane.
     job._launch.assert_called_with([{**papers[1], "retry": False}])
 
 

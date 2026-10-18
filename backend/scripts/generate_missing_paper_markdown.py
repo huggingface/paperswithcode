@@ -13,6 +13,16 @@
 The worker mirrors bounded state through the authenticated Bucket API. A
 manifest is immutable, each paper is checkpointed independently, and canonical
 Markdown is uploaded with its verified assets and status record.
+
+With ``--layout-bucket-id`` the same OCR pass also stores page-aware layout for
+reader citations in that bucket, keyed like the canonical object:
+
+- ``<key>.layout.json``: Chandra's raw per-page output, the source of truth;
+- ``<key>.md``: Markdown with a ``<!-- pwc:p{page}b{block} -->`` anchor per block;
+- ``<key>.blocks.json``: anchor -> page, label, bbox (0-1000 grid), section.
+
+Manifest entries marked ``layout_only`` already have canonical Markdown, which
+is left untouched; they only gain the layout objects.
 """
 
 from __future__ import annotations
@@ -97,9 +107,11 @@ MARKDOWN_MANIFEST_SCHEMA_VERSION = 1
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
 MARKDOWN_MIGRATION_LOCK_KEY = "_content/migration.lock"
 MAX_ATTEMPTS = int(os.environ.get("PWC_MARKDOWN_MAX_ATTEMPTS", "3"))
-CHANDRA_TIMEOUT_SECONDS = int(
-    os.environ.get("PWC_MARKDOWN_CHANDRA_TIMEOUT_SECONDS", "1800")
-)
+CHANDRA_PAGE_BATCH_SIZE = 28
+CHANDRA_MAX_OUTPUT_TOKENS = 12384
+LAYOUT_SCHEMA_VERSION = 1
+LAYOUT_SKIPPED_LABELS = {"Blank-Page", "Page-Header", "Page-Footer"}
+LAYOUT_NON_TEXT_LABELS = {"Image", "Figure"}
 VLLM_SHUTDOWN_TIMEOUT_SECONDS = int(
     os.environ.get("PWC_MARKDOWN_VLLM_SHUTDOWN_TIMEOUT_SECONDS", "60")
 )
@@ -224,9 +236,7 @@ class BucketContentStore:
         shard_id = Path(manifest_key).stem
         result_key = f"_jobs/results/{run_id}/{shard_id}.jsonl"
         progress_key = f"_jobs/progress/{run_id}/{shard_id}.json"
-        status_keys = [
-            f"_jobs/status/{entry_paper_key(entry)}.json" for entry in entries
-        ]
+        status_keys = [entry_status_key(entry) for entry in entries]
         output_keys = [str(entry["output_key"]) for entry in entries]
         manifest_keys = [
             markdown_manifest_key(entry_paper_key(entry)) for entry in entries
@@ -605,46 +615,143 @@ def download_pdf_for_entry(entry: dict[str, object]) -> tuple[bytes, str]:
     return download_pdf(str(entry["arxiv_id"]), version)
 
 
-def run_chandra(pdf: Path, output: Path, pages: int) -> tuple[str, dict[str, bytes]]:
-    output.mkdir(parents=True, exist_ok=True)
-    env = {
-        **os.environ,
-        "VLLM_API_BASE": "http://127.0.0.1:8000/v1",
-        "VLLM_MODEL_NAME": "chandra",
-        "VLLM_API_KEY": "EMPTY",
-    }
-    subprocess.run(
-        [
-            "chandra",
-            str(pdf),
-            str(output),
-            "--method",
-            "vllm",
-            "--page-range",
-            f"0-{pages - 1}",
-            "--max-output-tokens",
-            "12384",
-            "--include-images",
-            "--no-html",
-        ],
-        env=env,
-        check=True,
-        timeout=CHANDRA_TIMEOUT_SECONDS,
+def run_chandra(
+    pdf: Path, pages: int
+) -> tuple[str, dict[str, bytes], list[dict[str, object]]]:
+    """OCR the leading pages once for canonical Markdown, images, and layout."""
+    os.environ.update(
+        VLLM_API_BASE="http://127.0.0.1:8000/v1",
+        VLLM_MODEL_NAME="chandra",
+        VLLM_API_KEY="EMPTY",
     )
-    markdown_files = list(output.rglob("*.md"))
-    if len(markdown_files) != 1:
-        raise ValueError("invalid_chandra_output")
-    markdown_path = markdown_files[0]
+    from chandra.input import load_pdf_images
+    from chandra.model import InferenceManager
+    from chandra.model.schema import BatchInputItem
+
+    images = load_pdf_images(str(pdf), list(range(pages)))
+    model = InferenceManager(method="vllm")
+    markdown: list[str] = []
     assets: dict[str, bytes] = {}
-    for path in output.rglob("*"):
-        if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
-            continue
-        data = path.read_bytes()
-        existing = assets.get(path.name)
-        if existing is not None and existing != data:
-            raise ValueError(f"ambiguous_chandra_asset:{path.name}")
-        assets[path.name] = data
-    return markdown_path.read_text(encoding="utf-8"), assets
+    layout_pages: list[dict[str, object]] = []
+    for start in range(0, len(images), CHANDRA_PAGE_BATCH_SIZE):
+        batch = [
+            BatchInputItem(image=image, prompt_type="ocr_layout")
+            for image in images[start : start + CHANDRA_PAGE_BATCH_SIZE]
+        ]
+        results = model.generate(
+            batch,
+            max_output_tokens=CHANDRA_MAX_OUTPUT_TOKENS,
+            include_images=True,
+            include_headers_footers=False,
+        )
+        for offset, (item, result) in enumerate(zip(batch, results, strict=True)):
+            markdown.append(result.markdown)
+            for name, image in result.images.items():
+                buffer = BytesIO()
+                image.save(
+                    buffer, format=Image.registered_extensions()[Path(name).suffix]
+                )
+                data = buffer.getvalue()
+                if assets.get(name, data) != data:
+                    raise ValueError(f"ambiguous_chandra_asset:{name}")
+                assets[name] = data
+            layout_pages.append(
+                {
+                    "page": start + offset + 1,
+                    "image_size": [item.image.width, item.image.height],
+                    "raw": result.raw,
+                    "token_count": result.token_count,
+                    "error": bool(result.error),
+                }
+            )
+    return "".join(markdown), assets, layout_pages
+
+
+def build_paged_markdown(
+    pages: list[dict[str, object]],
+) -> tuple[str, dict[str, dict[str, object]]]:
+    """Turn raw Chandra pages into anchored Markdown plus a block sidecar.
+
+    Anchors are ``p{page}b{block}`` where ``block`` is the 1-based position of
+    the layout block on its page, so they stay stable against the raw layout.
+    Bboxes stay on Chandra's 0-1000 grid, which maps onto any rendered page size.
+    """
+    from bs4 import BeautifulSoup
+    from chandra.output import parse_markdown
+
+    parts: list[str] = []
+    blocks: dict[str, dict[str, object]] = {}
+    section: str | None = None
+    for page in pages:
+        page_number = int(page["page"])
+        parts.append(f"<!-- pwc:page {page_number} -->")
+        soup = BeautifulSoup(str(page["raw"]), "html.parser")
+        for index, div in enumerate(soup.find_all("div", recursive=False), 1):
+            label = div.get("data-label") or "block"
+            if label in LAYOUT_SKIPPED_LABELS:
+                continue
+            try:
+                bbox = [int(value) for value in str(div.get("data-bbox")).split()]
+            except ValueError:
+                continue
+            if len(bbox) != 4:
+                continue
+            anchor = f"p{page_number}b{index}"
+            if label == "Section-Header":
+                section = anchor
+            text = BeautifulSoup(div.decode_contents(), "html.parser").get_text(" ")
+            blocks[anchor] = {
+                "page": page_number,
+                "label": label,
+                "bbox": bbox,
+                "section": section,
+                "text": " ".join(text.split())[:2000],
+            }
+            if label in LAYOUT_NON_TEXT_LABELS:
+                continue
+            body = parse_markdown(str(div), include_images=False)
+            if body:
+                parts.append(f"<!-- pwc:{anchor} -->\n{body}")
+    return "\n\n".join(parts) + "\n", blocks
+
+
+def write_layout(
+    entry: dict[str, object],
+    layout_root: Path,
+    *,
+    page_count: int,
+    pages: list[dict[str, object]],
+    resolved_version: str,
+) -> list[str]:
+    """Write a paper's layout objects; the anchored Markdown is listed last."""
+    stem = str(entry["output_key"]).removesuffix(".md")
+    markdown, blocks = build_paged_markdown(pages)
+    meta = {
+        "schema_version": LAYOUT_SCHEMA_VERSION,
+        "paper_key": stem,
+        "source": entry.get("source", "arxiv"),
+        "arxiv_version": resolved_version
+        if entry.get("source") != "external"
+        else None,
+        "model_id": MODEL_ID,
+        "model_revision": MODEL_REVISION,
+        "page_count": page_count,
+        "processed_pages": len(pages),
+        "page_errors": sum(1 for page in pages if page["error"]),
+        "bbox_scale": 1000,
+        "created_at": datetime.now(UTC).isoformat(),
+    }
+    objects = {
+        f"{stem}.layout.json": json.dumps({**meta, "pages": pages}, ensure_ascii=False),
+        f"{stem}.blocks.json": json.dumps(
+            {**meta, "blocks": blocks}, ensure_ascii=False
+        ),
+        # Its presence marks the paper's layout as complete, so it goes last.
+        f"{stem}.md": markdown,
+    }
+    for key, text in objects.items():
+        atomic_write(layout_root / key, text.encode("utf-8"))
+    return list(objects)
 
 
 def canonicalize_assets(
@@ -867,23 +974,28 @@ def process(
     run_root: Path,
     *,
     allow_missing_images: bool = False,
+    layout_root: Path | None = None,
 ) -> dict:
     started = time.monotonic()
     paper_key = entry_paper_key(entry)
     version = str(entry["version"])
+    layout_only = bool(entry.get("layout_only"))
+    if layout_only and layout_root is None:
+        raise ValueError("layout_bucket_required")
     output = content_root / str(entry["output_key"])
-    if output.exists() and entry.get("replace_invalid_sha256"):
-        validate_repair_original(entry, output.read_bytes())
-    elif output.exists():
-        if not (content_root / markdown_manifest_key(paper_key)).exists():
+    if output.exists() and not layout_only:
+        if entry.get("replace_invalid_sha256"):
+            validate_repair_original(entry, output.read_bytes())
+        elif not (content_root / markdown_manifest_key(paper_key)).exists():
             return publish_existing_markdown(entry, content_root)
-        return {
-            "paper_key": paper_key,
-            "paper_id": entry.get("paper_id"),
-            "source": entry.get("source", "arxiv"),
-            "arxiv_id": entry.get("arxiv_id"),
-            "status": "already_exists",
-        }
+        else:
+            return {
+                "paper_key": paper_key,
+                "paper_id": entry.get("paper_id"),
+                "source": entry.get("source", "arxiv"),
+                "arxiv_id": entry.get("arxiv_id"),
+                "status": "already_exists",
+            }
 
     from pypdf import PdfReader
 
@@ -904,18 +1016,42 @@ def process(
     processed_pages = min(page_count, MAX_PAGES)
     pdf_path = paper_dir / "paper.pdf"
     atomic_write(pdf_path, pdf_data)
-    body, assets = run_chandra(pdf_path, paper_dir / "ocr", processed_pages)
-    result = publish(
-        {**entry, "version": resolved_version},
-        body,
-        assets,
-        content_root,
-        page_count=page_count,
-        processed_pages=processed_pages,
-        allow_missing_images=allow_missing_images,
-    )
+    body, assets, layout_pages = run_chandra(pdf_path, processed_pages)
+    if layout_only:
+        # The canonical object stays as it is; the title check still guards
+        # against storing the layout of the wrong PDF.
+        validate_markdown_semantics(str(entry["title"]), body)
+        result = {
+            "paper_key": paper_key,
+            "paper_id": entry.get("paper_id"),
+            "source": entry.get("source", "arxiv"),
+            "arxiv_id": entry.get("arxiv_id"),
+            "pdf_key": entry.get("pdf_key"),
+            "status": "succeeded",
+            "page_count": page_count,
+            "processed_page_count": processed_pages,
+        }
+    else:
+        result = publish(
+            {**entry, "version": resolved_version},
+            body,
+            assets,
+            content_root,
+            page_count=page_count,
+            processed_pages=processed_pages,
+            allow_missing_images=allow_missing_images,
+        )
+    if layout_root is not None:
+        result["layout_keys"] = write_layout(
+            entry,
+            layout_root,
+            page_count=page_count,
+            pages=layout_pages,
+            resolved_version=resolved_version,
+        )
     return {
         **result,
+        "layout_only": layout_only,
         "requested_version": version,
         "resolved_version": resolved_version,
         "version_fallback_attempted": True,
@@ -926,8 +1062,14 @@ def process(
     }
 
 
-def _prior_status(content_root: Path, paper_key: str) -> dict:
-    path = content_root / "_jobs" / "status" / f"{paper_key}.json"
+def entry_status_key(entry: dict[str, object]) -> str:
+    """Layout-only work keeps its own retry record beside the canonical one."""
+    folder = "layout-status" if entry.get("layout_only") else "status"
+    return f"_jobs/{folder}/{entry_paper_key(entry)}.json"
+
+
+def _prior_status(content_root: Path, status_key: str) -> dict:
+    path = content_root / status_key
     if not path.exists():
         return {}
     try:
@@ -957,10 +1099,6 @@ def classify_failure(error: Exception, attempt_count: int) -> tuple[str, bool]:
         status = error.response.status_code
         error_class = f"arxiv_http_{status}"
         retryable = status == 429 or status >= 500
-    elif isinstance(error, subprocess.TimeoutExpired):
-        error_class, retryable = "chandra_timeout", True
-    elif isinstance(error, subprocess.CalledProcessError):
-        error_class, retryable = "chandra_subprocess_failure", True
     elif message.startswith("missing_extracted_image:"):
         error_class, retryable = "missing_extracted_image", True
     elif message.startswith(
@@ -979,9 +1117,8 @@ def classify_failure(error: Exception, attempt_count: int) -> tuple[str, bool]:
     elif message == "semantic_markdown_mismatch":
         error_class = "semantic_markdown_mismatch"
         retryable = attempt_count < MAX_ATTEMPTS
-    elif message in {"invalid_pdf", "invalid_chandra_output"}:
+    elif message == "invalid_pdf":
         error_class = message
-        retryable = message == "invalid_chandra_output" and attempt_count < 2
     elif message in {
         "invalid_extracted_image",
         "unsupported_extracted_image",
@@ -1113,6 +1250,9 @@ def main() -> None:
     parser.add_argument("--manifest", type=Path)
     parser.add_argument("--bucket-id")
     parser.add_argument("--manifest-key")
+    parser.add_argument(
+        "--layout-bucket-id", help="Also store page-aware layout in this bucket"
+    )
     parser.add_argument("--content-root", type=Path, default=Path("/content"))
     parser.add_argument("--stub-root", type=Path)
     parser.add_argument("--stub-delay-seconds", type=float, default=0)
@@ -1129,9 +1269,12 @@ def main() -> None:
         parser.error("--bucket-id and --manifest-key must be provided together")
     if bucket_mode == bool(args.manifest):
         parser.error("provide either --manifest or Bucket API arguments")
+    if args.layout_bucket_id and not bucket_mode:
+        parser.error("--layout-bucket-id requires Bucket API arguments")
 
     temporary: tempfile.TemporaryDirectory[str] | None = None
     store: BucketContentStore | None = None
+    layout_root: Path | None = None
     if bucket_mode:
         token = os.environ.get("HF_TOKEN")
         if not token:
@@ -1141,6 +1284,8 @@ def main() -> None:
         manifest = content_root / str(args.manifest_key)
         store = BucketContentStore(str(args.bucket_id), token, content_root)
         store.download(str(args.manifest_key))
+        if args.layout_bucket_id:
+            layout_root = Path(temporary.name) / "layout"
     else:
         content_root = args.content_root
         manifest = args.manifest
@@ -1222,7 +1367,8 @@ def main() -> None:
                 continue
             if _TERMINATION_REQUESTED or time.monotonic() >= deadline:
                 break
-            prior = _prior_status(content_root, paper_key)
+            status_key = entry_status_key(entry)
+            prior = _prior_status(content_root, status_key)
             attempt_count = max(0, int(prior.get("attempt_count") or 0)) + 1
             allow_missing_images = should_omit_missing_images(prior, attempt_count)
             attempted_at = datetime.now(UTC)
@@ -1260,6 +1406,7 @@ def main() -> None:
                         content_root,
                         result_path.parent,
                         allow_missing_images=allow_missing_images,
+                        layout_root=layout_root,
                     )
             except Exception as error:  # noqa: BLE001 - isolate failures per paper
                 failure = error
@@ -1283,7 +1430,6 @@ def main() -> None:
                 attempted_at=attempted_at,
             )
             results.append(result)
-            status_key = f"_jobs/status/{paper_key}.json"
             atomic_write(
                 content_root / status_key,
                 json.dumps(result, sort_keys=True, indent=2).encode(),
@@ -1314,7 +1460,7 @@ def main() -> None:
             pdf_key = entry.get("pdf_key")
             if pdf_key and (content_root / str(pdf_key)).is_file():
                 published_keys.append(str(pdf_key))
-            if result.get("status") == "succeeded":
+            if result.get("status") == "succeeded" and not result.get("layout_only"):
                 content_keys = [str(key) for key in result.get("asset_keys") or []]
                 content_keys.extend(
                     [
@@ -1324,6 +1470,18 @@ def main() -> None:
                 )
                 upload_checkpoint(content_keys)
                 published_keys.append(str(result["markdown_manifest_key"]))
+            if result.get("layout_keys"):
+                run_bucket_bridge(
+                    token,
+                    {
+                        "operation": "upload",
+                        "bucket_id": args.layout_bucket_id,
+                        "files": [
+                            (str(layout_root / key), key)
+                            for key in result["layout_keys"]
+                        ],
+                    },
+                )
             upload_checkpoint(published_keys)
     except Exception as error:
         fatal_error = str(error)[:1000]

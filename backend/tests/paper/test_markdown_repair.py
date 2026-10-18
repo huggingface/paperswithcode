@@ -29,6 +29,7 @@ def _scheduler(*, execute: bool, confirm: bool, full: bool = True):
             "paper_markdown_incremental_batch_size": 100,
             "paper_markdown_backfill_batch_size": 100,
             "paper_markdown_hf_bucket_id": "test/paper-markdown",
+            "paper_layout_hf_bucket_id": "test/paper-pages",
             "paper_markdown_hf_namespace": "test-owner",
             "paper_markdown_runtime_image": "test-image",
             "paper_markdown_hardware": "l40sx1",
@@ -134,7 +135,9 @@ def test_failed_repair_keeps_existing_canonical_object(tmp_path, monkeypatch):
         SimpleNamespace(PdfReader=lambda *a, **k: SimpleNamespace(pages=[1])),
     )
     monkeypatch.setattr(WORKER, "download_pdf_for_entry", lambda entry: (b"pdf", "v1"))
-    monkeypatch.setattr(WORKER, "run_chandra", lambda *a: ("irrelevant caption", {}))
+    monkeypatch.setattr(
+        WORKER, "run_chandra", lambda *a: ("irrelevant caption", {}, [])
+    )
     with pytest.raises(ValueError, match="semantic_markdown_mismatch"):
         WORKER.process(entry, tmp_path, tmp_path / "run")
     assert output.read_bytes() == original
@@ -276,7 +279,9 @@ def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
     assert [item["arxiv_id"] for item in inspected] == [
         item["arxiv_id"] for item in fresh + recent + small
     ]
-    candidates = job._launch.call_args.args[0]
+    candidates = [
+        item for item in job._launch.call_args.args[0] if not item.get("layout_only")
+    ]
     # Bounded, and the live lane alone repairs the recent window.
     assert len(candidates) == MODULE.LIVE_REPAIR_LIMIT
     assert {item["arxiv_id"] for item in candidates} <= {

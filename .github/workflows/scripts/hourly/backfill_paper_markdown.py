@@ -16,13 +16,14 @@ from urllib.parse import urlsplit
 import pymupdf
 from huggingface_hub import HfApi, HfFileSystem, Volume
 from huggingface_hub.errors import HfHubHTTPError
-from sqlalchemy import select
+from sqlalchemy import exists, or_, select
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
-from backend.models.database import Paper
+from backend.models.database import Paper, PaperConference
 from backend.scripts.generate_missing_paper_markdown import (
     download_external_pdf,
+    entry_status_key,
     status_record,
     validate_canonical_markdown,
 )
@@ -143,6 +144,11 @@ def paper_manifest_entry(paper: Paper) -> dict[str, object] | None:
 
 def entry_paper_key(entry: dict[str, object]) -> str:
     return str(entry.get("paper_key") or entry["arxiv_id"])
+
+
+def layout_blocks_key(entry: dict[str, object]) -> str:
+    """The layout sidecar that reader citations need, keyed like the canonical."""
+    return str(entry["output_key"]).removesuffix(".md") + ".blocks.json"
 
 
 def chunks[T](values: list[T], size: int) -> list[list[T]]:
@@ -315,7 +321,16 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 )
                 query = query.order_by(Paper.created_at.desc(), Paper.id.desc())
             else:
-                query = query.order_by(Paper.id)
+                in_conference = or_(
+                    Paper.conference.isnot(None),
+                    exists().where(PaperConference.paper_id == Paper.id),
+                )
+                query = query.order_by(
+                    Paper.hf_daily_featured_on.is_(None),
+                    in_conference,
+                    Paper.date_published.desc().nullslast(),
+                    Paper.id.desc(),
+                )
             rows = db.execute(query).scalars()
             papers: dict[str, dict[str, object]] = {}
             for paper in rows:
@@ -468,6 +483,55 @@ class PaperMarkdownBackfillJob(CronJobBase):
 
         with ThreadPoolExecutor(max_workers=8) as executor:
             return dict(executor.map(read, existing))
+
+    def _layout_candidates(
+        self, papers: list[dict[str, object]], *, limit: int
+    ) -> tuple[list[dict[str, object]], int]:
+        """Return due layout-only work in ``papers`` order and the missing count.
+
+        ``papers`` already have canonical Markdown, often an arXiv HTML copy
+        without pages, so the worker only adds the page-aware layout.
+        """
+        layout = self._existing_paths(
+            self.settings.paper_layout_hf_bucket_id,
+            [layout_blocks_key(item) for item in papers],
+        )
+        missing = [item for item in papers if layout_blocks_key(item) not in layout]
+        selected: list[dict[str, object]] = []
+        for window in chunks(missing, 1000):
+            if len(selected) >= limit:
+                break
+            entries = [{**item, "layout_only": True} for item in window]
+            statuses = self._status_records([entry_status_key(e) for e in entries])
+            for entry in entries:
+                status = statuses.get(entry_status_key(entry))
+                disposition = status_disposition(status) if status else None
+                if disposition in {None, "retryable_due"}:
+                    selected.append({**entry, "retry": disposition is not None})
+        return selected[:limit], len(missing)
+
+    def _busy_paper_keys(self, jobs: list[object]) -> set[str]:
+        """Papers already in an active job's manifest, so no shard repeats them."""
+        keys: set[str] = set()
+        for job in jobs:
+            labels = job_labels(job)
+            if job_stage(job) not in ACTIVE_STAGES:
+                continue
+            if labels.get("job_type", "ocr") != "ocr":
+                continue
+            if not labels.get("run_id") or not labels.get("shard_id"):
+                continue
+            path = (
+                f"hf://buckets/{self.settings.paper_markdown_hf_bucket_id}/_jobs/"
+                f"manifests/{labels['run_id']}/{labels['shard_id']}.jsonl"
+            )
+            try:
+                with self.filesystem.open(path, "rb", block_size=0) as handle:
+                    lines = handle.read().decode("utf-8").splitlines()
+            except (OSError, UnicodeDecodeError, HfHubHTTPError):
+                continue
+            keys.update(entry_paper_key(json.loads(line)) for line in lines if line)
+        return keys
 
     def _copy_upstream(
         self, missing: list[dict[str, object]]
@@ -662,6 +726,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 self.settings.paper_markdown_hf_bucket_id,
                 "--manifest-key",
                 manifest_key,
+                "--layout-bucket-id",
+                self.settings.paper_layout_hf_bucket_id,
                 "--soft-deadline-seconds",
                 str(self.profile.soft_deadline_seconds),
             ],
@@ -947,6 +1013,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
     ) -> list[dict[str, str]]:
         remote_jobs = self._reap_stalled_scheduling(self._remote_jobs())
         active = self._active_jobs(remote_jobs)
+        busy = self._busy_paper_keys(remote_jobs)
+        candidates = [item for item in candidates if entry_paper_key(item) not in busy]
         if active and any(item.get("replace_invalid_sha256") for item in candidates):
             self.logger.warning(
                 "Markdown repair waits for all active workers to finish"
@@ -1303,11 +1371,37 @@ class PaperMarkdownBackfillJob(CronJobBase):
             # A full run with nothing to repair keeps its live-window missing work.
             if repairs or not self.full:
                 candidates = repairs
+        layout_missing = 0
+        if not getattr(self, "repair_invalid_limit", 0):
+            # Canonical OCR above writes layout too; the rest only lacks layout.
+            # The full lane leaves the recent window to the live lane.
+            has_canonical = set(canonical)
+            if self.should_execute:
+                has_canonical |= {
+                    str(item["output_key"]) for item in missing
+                } - remaining_paths
+            queued = {entry_paper_key(item) for item in candidates}
+            layout_scope = [
+                item
+                for item in papers
+                if str(item["output_key"]) in has_canonical
+                and entry_paper_key(item) not in queued
+                and semantic_records.get(str(item["output_key"])) != "invalid"
+                and not (self.full and str(item["output_key"]) in recent_keys)
+            ]
+            layout_capacity = self.profile.concurrency * self.profile.max_papers
+            layout_candidates, layout_missing = self._layout_candidates(
+                layout_scope, limit=max(0, layout_capacity - len(candidates))
+            )
+            candidates.extend(layout_candidates)
         if self.retry_only:
             candidates = [item for item in candidates if item["retry"]]
         failed_or_completed = max(0, len(remaining) - missing_candidate_count)
         repair_candidates = sum(
             bool(item.get("replace_invalid_sha256")) for item in candidates
+        )
+        layout_only_candidates = sum(
+            bool(item.get("layout_only")) for item in candidates
         )
         copied_from_upstream = upstream_available if self.should_execute else 0
         canonical_after_upstream = len(canonical) + copied_from_upstream
@@ -1331,6 +1425,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 0 if self.should_execute else upstream_available
             ),
             "missing_count": len(remaining),
+            "layout_missing_count": layout_missing,
             "coverage_percentage": round(usable_markdown / len(papers) * 100, 2)
             if papers
             else 100.0,
@@ -1404,6 +1499,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
             ),
             "retried_papers": sum(int(item.get("retried") or 0) for item in launched),
             "ocr_candidates": len(candidates),
+            "layout_missing": layout_missing,
+            "layout_only_candidates": layout_only_candidates,
             "retry_only": self.retry_only,
             "jobs_planned_or_launched": len(launched),
             "stalled_scheduling_jobs": self.stalled_scheduling_jobs,
