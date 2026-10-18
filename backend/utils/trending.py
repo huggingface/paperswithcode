@@ -27,6 +27,12 @@ Consequences:
 - Extra HF artifacts help with diminishing returns and can never push a paper
   past the single-signal ceiling on their own.
 
+Aggregator artifacts (paper feeds, awesome lists, leaderboards) cite hundreds of
+papers, and the Hub links each of them back. They say nothing about one paper
+trending, so artifacts linked to more than ``HF_MAX_ARTIFACT_PAPERS`` papers or
+listed in ``HF_AGGREGATOR_DENYLIST`` count for nothing. The links stay on paper
+pages; only scoring ignores them.
+
 This module is dependency-free (stdlib ``bisect``) so it is unit-testable without
 a database or numpy.
 """
@@ -47,6 +53,20 @@ KIND_WEIGHTS: Dict[str, float] = {
     "dataset": 0.8,
     "space": 0.7,
 }
+
+# A paper's own artifact is linked to a handful of papers; live trending models
+# never exceed 5, while aggregator Spaces and datasets reach thousands.
+HF_MAX_ARTIFACT_PAPERS = 5
+
+# Known aggregators, excluded whatever their current fan-out.
+HF_AGGREGATOR_DENYLIST = frozenset(
+    {
+        ("space", "tardellirs/paper-pulse"),
+        ("space", "tardellirs/model-pulse"),
+        ("space", "eduagarcia/multilingual-tokenizer-leaderboard"),
+        ("dataset", "molmohsen/awesome-ai-agent-papers"),
+    }
+)
 
 # Final score multiplier (single-signal top ~= 50, both-signal top ~= 100).
 SCORE_SCALE = 100.0
@@ -109,6 +129,14 @@ def apply_decaying_pin(
     floor = decaying_pin_floor(hours_elapsed, decay_hours, peak=peak)
     base = float(computed) if computed is not None else 0.0
     return max(base, floor)
+
+
+def is_hf_aggregator(kind: str, repo_id: str, linked_papers: int) -> bool:
+    """Whether an HF artifact is an aggregator that must not drive trending."""
+    return (
+        linked_papers > HF_MAX_ARTIFACT_PAPERS
+        or (kind, repo_id) in HF_AGGREGATOR_DENYLIST
+    )
 
 
 def sorted_positive(values: Iterable[float]) -> List[float]:

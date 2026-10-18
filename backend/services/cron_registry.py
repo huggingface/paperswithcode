@@ -2078,7 +2078,8 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
             ),
         ),
         output_evaluator="thumbnail_preload",
-        # The five lanes share the launcher's preload_thumbnails lock.
+        # Each lane has its own launcher lock; a skip means a lane overran its
+        # own next slot, which is still missed work.
         lock_skip_misses_work=True,
         display_name="Preload Thumbnails",
         category="daily",

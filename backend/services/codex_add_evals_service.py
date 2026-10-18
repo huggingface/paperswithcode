@@ -67,6 +67,10 @@ BENCHMARK_GAP_MAX_ACTIVE = 2
 SCHEDULED_HEALTH_PAUSES = frozenset(
     {"apply_or_verification_failures", "terminal_failure_rate"}
 )
+# New external papers run in the admin lane, capped so a backfill cannot take
+# every worker from interactive admin and scheduled daily work.
+EXTERNAL_PAPER_POLICY_VERSION = "external-paper-v1"
+EXTERNAL_PAPER_MAX_ACTIVE = 2
 JobStatus = Literal[
     "queued",
     "dispatching",
@@ -674,19 +678,23 @@ class CodexPaperJobService:
                 and usage_allowed
                 and scheduled_active < settings.codex_jobs_max_scheduled_active
             )
-            row = (
-                db.query(PaperCurationJob)
-                .filter(
-                    PaperCurationJob.status == "queued",
-                    PaperCurationJob.trigger.in_({"admin", "benchmark-promotion"}),
-                )
-                .order_by(
-                    PaperCurationJob.priority,
-                    PaperCurationJob.created_at,
-                    PaperCurationJob.id,
-                )
-                .first()
+            admin_rows = db.query(PaperCurationJob).filter(
+                PaperCurationJob.status == "queued",
+                PaperCurationJob.trigger.in_({"admin", "benchmark-promotion"}),
             )
+            external_active = sum(
+                getattr(item, "policy_version", None) == EXTERNAL_PAPER_POLICY_VERSION
+                for item in active
+            )
+            if external_active >= EXTERNAL_PAPER_MAX_ACTIVE:
+                admin_rows = admin_rows.filter(
+                    PaperCurationJob.policy_version != EXTERNAL_PAPER_POLICY_VERSION
+                )
+            row = admin_rows.order_by(
+                PaperCurationJob.priority,
+                PaperCurationJob.created_at,
+                PaperCurationJob.id,
+            ).first()
             if row is None and self._benchmark_review_allowed(
                 settings, scheduler_state, usage_allowed
             ):
@@ -1758,7 +1766,9 @@ class CodexPaperJobService:
         elif row.status == "completed" and row.kind == "add-evals":
             workflow.status = "completed"
             workflow.finished_at = _now()
-            self._release_canary_backlog(db, workflow.policy_version, settings)
+            # External-paper workflows are not part of any scheduled canary.
+            if workflow.policy_version != EXTERNAL_PAPER_POLICY_VERSION:
+                self._release_canary_backlog(db, workflow.policy_version, settings)
         elif row.status == "failed":
             if parse_failure_code(row.error) == AWAITING_MARKDOWN:
                 workflow.status = "deferred"

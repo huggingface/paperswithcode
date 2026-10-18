@@ -28,6 +28,48 @@ def _load_module():
     return module
 
 
+def test_population_ignores_hf_aggregator_links():
+    cron = _load_module()
+    github_rows = [
+        SimpleNamespace(paper_id=1, existing=False, github_raw=None),
+        SimpleNamespace(paper_id=2, existing=True, github_raw=None),
+    ]
+    hf_rows = [
+        SimpleNamespace(
+            paper_id=1, kind="model", repo_id="org/m", trending_score=5, linked_papers=1
+        ),
+        SimpleNamespace(
+            paper_id=1,
+            kind="space",
+            repo_id="tardellirs/paper-pulse",
+            trending_score=9,
+            linked_papers=1,
+        ),
+        SimpleNamespace(
+            paper_id=2,
+            kind="space",
+            repo_id="org/feed",
+            trending_score=9,
+            linked_papers=40,
+        ),
+    ]
+    session = Mock()
+    session.execute.side_effect = [
+        Mock(fetchall=Mock(return_value=github_rows)),
+        Mock(fetchall=Mock(return_value=hf_rows)),
+    ]
+
+    population = cron.load_population(session, cutoff=None)
+
+    assert population[1]["artifacts"] == [("model", 5.0)]
+    assert population[2]["artifacts"] == []
+    # Paper 2 only had an aggregator, so its stored score is cleared.
+    github_corpus, hf_corpora = cron.derive_corpora(population)
+    updates, clears = cron.build_score_changes(population, github_corpus, hf_corpora)
+    assert [update["id"] for update in updates] == [1]
+    assert clears == [2]
+
+
 def test_targeted_compute_only_changes_selected_papers(monkeypatch):
     cron = _load_module()
     population = {

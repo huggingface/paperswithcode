@@ -82,6 +82,38 @@ or a mismatch, including fractions that happen to fit inside 0–100 bounds.
 If metadata conflicts with source or existing leaderboard evidence, skip the
 result and report the conflict instead of choosing a scale arbitrarily.
 
+### Benchmark chart images (add-evals only)
+
+Many model cards, READMEs, and release pages publish their scores only as an
+embedded benchmark chart. When a source document has no text table or prose
+score for a benchmark but embeds a results image (`<img>`, Markdown
+`![...](...)`), you may read that image:
+
+1. Resolve the image URL from the source document (absolute, first-party: the
+   model repo, the release page's own domain, or its GitHub repo). Download it
+   to `/tmp/charts/` with Python (`urllib.request`, browser User-Agent), then
+   open the local file with the `view_image` tool.
+2. Import only values printed on the chart as numbers (a data label on or
+   above the bar, or a value in a chart table). Never estimate a value from bar
+   height, axis gridlines, or pixel position; skip unlabeled bars.
+3. The bar must unambiguously belong to the introduced model: its label or
+   legend entry names the release, and the legend color-to-model mapping is
+   clear. Comparator bars stay excluded, as in text tables.
+4. Apply every text-table rule: exact benchmark version, split, setting
+   (thinking/tools/pass@k), metric definition, and scale. A chart panel title
+   such as `SWE-bench Verified` names the benchmark; a footnote may define the
+   protocol. If the chart omits protocol details that the leaderboard needs,
+   skip and report.
+5. Cite the chart. In `score_evidence`, `source_url` is the image URL and
+   `table_reference` is `Chart image on <source document URL>: panel
+   "<exact panel/benchmark title>", bar "<exact bar label>", printed value
+   "<exact text>"`. Use the same citation in any `validation_evidence` entry
+   that relies on the chart, and list the source document in `source_coverage`
+   with the chart named in the outcome detail.
+
+Prefer a text table whenever both exist; the chart only fills gaps. Report
+which values came from charts in the audit.
+
 Query every benchmark the paper reports under its exact name and common
 variants (for example `ImageNet`, `ImageNet-1K`, `ILSVRC-2012`); the first match
 may be a different task, such as an inpainting board named `ImageNet`.

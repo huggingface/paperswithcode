@@ -150,3 +150,24 @@ def test_project_assets_are_not_project_pages(asset):
         )
         is None
     )
+
+
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    [("external", True), ("arxiv", False)],
+)
+def test_external_paper_reads_its_first_model_card(source, expected):
+    result = url_preflight.extract_candidates(
+        {
+            "paper": {
+                "id": 42,
+                "source": source,
+                "source_url": "https://example.org/blog/release",
+                "hf_models": ["org/Model-X", "https://huggingface.co/org/Model-X-FP8"],
+            }
+        },
+        fetch=lambda url, limit: (b"<html></html>", url),
+    )
+    documents = [entry["url"] for entry in result["source_documents"]]
+    assert ("https://huggingface.co/org/Model-X" in documents) is expected
+    assert "https://huggingface.co/org/Model-X-FP8" not in documents

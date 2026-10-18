@@ -5,7 +5,7 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=/usr/local/sbin/pwc-cron-throttled preload_thumbnails --priority visible --citation-top 1000 --trending-top 500 --newest-top 300 --per-task 20 --per-method 20 --limit 10000 --missing-only --trust-local-cache
+ExecStart=/usr/local/sbin/pwc-cron-throttled preload_thumbnails --priority visible --citation-top 1000 --trending-top 500 --newest-top 300 --per-task 20 --per-method 20 --limit 10000 --missing-only --trust-local-cache --max-runtime-seconds 6000
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

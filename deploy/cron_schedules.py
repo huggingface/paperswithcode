@@ -345,8 +345,11 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Link papers by task keywords weekly",
         after=("pwc-cron-link-methods-by-references",),
     ),
-    # Thumbnail preload lanes (five schedules with distinct arguments; all
-    # share the preload_thumbnails job lock).
+    # Thumbnail preload lanes (five schedules with distinct arguments).  Each
+    # --priority lane has its own launcher lock, so a long lane no longer
+    # silently skips the others.  --max-runtime-seconds keeps every lane well
+    # inside the 2h launcher timeout; missing-only lanes resume a backlog on
+    # the next run instead of being killed mid-sweep (method-top, 2026-10-17).
     TimerSpec(
         job="preload_thumbnails",
         unit_name="pwc-cron-preload-thumbnails-visible",
@@ -369,6 +372,8 @@ TIMERS: tuple[TimerSpec, ...] = (
             "10000",
             "--missing-only",
             "--trust-local-cache",
+            "--max-runtime-seconds",
+            "6000",
         ),
     ),
     TimerSpec(
@@ -383,6 +388,8 @@ TIMERS: tuple[TimerSpec, ...] = (
             "50",
             "--missing-only",
             "--trust-local-cache",
+            "--max-runtime-seconds",
+            "6000",
         ),
     ),
     TimerSpec(
@@ -397,6 +404,8 @@ TIMERS: tuple[TimerSpec, ...] = (
             "50",
             "--missing-only",
             "--trust-local-cache",
+            "--max-runtime-seconds",
+            "6000",
         ),
     ),
     TimerSpec(
@@ -404,7 +413,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         unit_name="pwc-cron-preload-thumbnails-recent",
         on_calendar=("*-*-* 04:30:00",),
         description="Preload thumbnails for recent papers daily",
-        args=("--priority", "recent", "--recent-days", "30", "--limit", "500"),
+        args=(
+            "--priority",
+            "recent",
+            "--recent-days",
+            "30",
+            "--limit",
+            "500",
+            "--max-runtime-seconds",
+            "6000",
+        ),
         after=("pwc-cron-import-hf-daily-papers",),
     ),
     TimerSpec(
@@ -423,6 +441,8 @@ TIMERS: tuple[TimerSpec, ...] = (
             "2",
             "--max-failures",
             "-1",
+            "--max-runtime-seconds",
+            "6000",
         ),
     ),
 )

@@ -79,7 +79,7 @@ def _compile_postgres_types_sqlite(_element, _compiler, **_kw):
     return "JSON"
 
 
-def test_discovery_uses_hf_cli_global_top_fifty():
+def test_discovery_uses_hf_cli_global_top_fifty_plus_featured_top_hundred():
     calls = []
 
     def run(command):
@@ -107,7 +107,7 @@ def test_discovery_uses_hf_cli_global_top_fifty():
             "--sort",
             "trending_score",
             "--limit",
-            "50",
+            "100",
             "--expand",
             "author,tags,createdAt,lastModified,trendingScore",
             "--format",
@@ -116,6 +116,22 @@ def test_discovery_uses_hf_cli_global_top_fifty():
     ]
     assert models[0].repo_id == "Qwen/Qwen3.8-Flash-Next"
     assert models[0].featured_publisher is True
+
+
+def test_discovery_keeps_only_featured_publishers_beyond_top_fifty():
+    payload = [
+        {"id": f"{author}/model-{rank}", "author": author, "trending_score": 100 - rank}
+        for rank, author in enumerate(["community"] * 2 + ["Qwen", "community"])
+    ]
+    models = HFTrendingDiscoveryClient(
+        run=lambda _command: json.dumps(payload), hf_cli="hf"
+    ).list_top_models(limit=2, featured_limit=4)
+
+    assert [model.repo_id for model in models] == [
+        "community/model-0",
+        "community/model-1",
+        "Qwen/model-2",
+    ]
 
 
 def test_source_url_identity_preserves_distinct_legacy_and_namespaced_sources():

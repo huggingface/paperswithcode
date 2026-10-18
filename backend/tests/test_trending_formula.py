@@ -10,6 +10,7 @@ import pytest
 
 from backend.utils.trending import (
     GITHUB_WEIGHT,
+    HF_MAX_ARTIFACT_PAPERS,
     HF_WEIGHT,
     SCORE_SCALE,
     apply_decaying_pin,
@@ -18,6 +19,7 @@ from backend.utils.trending import (
     decaying_pin_floor,
     github_component,
     hf_component,
+    is_hf_aggregator,
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
     quantile_rank,
@@ -157,3 +159,12 @@ def test_decaying_pin_fades_to_computed_score():
     assert apply_decaying_pin(51.7, 36, 72) == 51.7
     assert apply_decaying_pin(80.0, 36, 72) == 80.0
     assert apply_decaying_pin(51.7, 80, 72) == 51.7
+
+
+def test_hf_aggregators_are_excluded_by_fan_out_and_denylist():
+    assert not is_hf_aggregator("model", "org/model", 1)
+    assert not is_hf_aggregator("model", "org/model", HF_MAX_ARTIFACT_PAPERS)
+    assert is_hf_aggregator("model", "org/model", HF_MAX_ARTIFACT_PAPERS + 1)
+    assert is_hf_aggregator("space", "tardellirs/paper-pulse", 1)
+    # The denylist is per kind: a same-named repo of another kind still counts.
+    assert not is_hf_aggregator("model", "tardellirs/paper-pulse", 1)

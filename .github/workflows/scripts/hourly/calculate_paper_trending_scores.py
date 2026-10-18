@@ -36,6 +36,7 @@ from backend.utils.trending import (
     apply_decaying_pin,
     compute_paper_score,
     decaying_pin_floor,
+    is_hf_aggregator,
     parse_trending_paper_id_pin_specs,
     parse_trending_pin_specs,
     sorted_positive,
@@ -68,7 +69,8 @@ def load_population(session, cutoff):
 
     - ``github_raw``: best fresh official-repo stars/hour (0.0 if none).
     - ``existing``: whether the paper currently has a non-null trending_score.
-    - ``artifacts``: list of ``(kind, trending_score)`` for linked HF artifacts.
+    - ``artifacts``: list of ``(kind, trending_score)`` for linked HF artifacts,
+      excluding aggregators (see ``is_hf_aggregator``).
     """
     log("Loading paper population (GitHub component)...")
     github_rows = session.execute(
@@ -106,25 +108,40 @@ def load_population(session, cutoff):
     log("Loading HF artifact component...")
     hf_rows = session.execute(
         text("""
-            SELECT pha.paper_id, a.kind, a.trending_score
+            WITH fan_out AS (
+                SELECT x.hf_artifact_id, COUNT(*) AS linked_papers
+                FROM paper_hf_artifacts x
+                JOIN hf_artifacts a ON a.id = x.hf_artifact_id
+                JOIN papers p ON p.id = x.paper_id
+                WHERE p.is_latest_version = TRUE
+                  AND a.trending_score IS NOT NULL
+                GROUP BY x.hf_artifact_id
+            )
+            SELECT pha.paper_id, a.kind, a.repo_id, a.trending_score,
+                   f.linked_papers
             FROM paper_hf_artifacts pha
             JOIN hf_artifacts a ON a.id = pha.hf_artifact_id
+            JOIN fan_out f ON f.hf_artifact_id = a.id
             JOIN papers p ON p.id = pha.paper_id
             WHERE p.is_latest_version = TRUE
               AND p.date_published >= :cutoff
-              AND a.trending_score IS NOT NULL
         """),
         {"cutoff": cutoff},
     ).fetchall()
 
     hf_links = 0
+    aggregator_links = 0
     for row in hf_rows:
         entry = population.get(row.paper_id)
         if entry is None:
             continue
+        if is_hf_aggregator(row.kind, row.repo_id, row.linked_papers):
+            aggregator_links += 1
+            continue
         entry["artifacts"].append((row.kind, float(row.trending_score)))
         hf_links += 1
     log(f"HF artifact score links: {hf_links}")
+    log(f"HF aggregator links ignored: {aggregator_links}")
 
     return population
 

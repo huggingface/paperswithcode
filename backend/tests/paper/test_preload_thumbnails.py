@@ -48,6 +48,8 @@ def _make_job(
     job.dry_run = True
     job.refresh_existing = False
     job.request_delay_seconds = 0.0
+    job.max_runtime_seconds = None
+    job.stopped_at_runtime_budget = False
     job.candidates_seen = 0
     job.already_cached = 0
     job.generated = 0
@@ -306,6 +308,43 @@ def test_run_async_tracks_confirmed_unavailable_separately(monkeypatch):
 
     assert job.unavailable == 1
     assert job.failures == 0
+
+
+def test_run_async_stops_at_runtime_budget_and_leaves_rest_for_next_run(
+    monkeypatch,
+):
+    import asyncio
+
+    from scripts.daily.preload_thumbnails import Candidate, ThumbnailPreloadJob
+
+    job = _make_job()
+    job.dry_run = False
+    job.max_runtime_seconds = 10
+    job._collect_candidates = lambda session: [
+        Candidate(paper_id, f"2402.{paper_id:05d}", "v1") for paper_id in range(5)
+    ]
+    clock = iter([0, 0, 4, 8, 12, 16])
+    monkeypatch.setattr(
+        "scripts.daily.preload_thumbnails.time.time", lambda: next(clock)
+    )
+    processed = []
+
+    async def generate(_service, candidate):
+        processed.append(candidate.paper_id)
+        return "generated"
+
+    job._process_paper = generate
+    monkeypatch.setattr(
+        "scripts.daily.preload_thumbnails.db_manager",
+        MagicMock(session_local=lambda: MagicMock()),
+    )
+
+    asyncio.run(ThumbnailPreloadJob._run_async(job))
+
+    assert processed == [0, 1, 2]
+    assert job.generated == 3
+    assert job.candidates_seen == 3
+    assert job.stopped_at_runtime_budget is True
 
 
 def test_process_paper_passes_title_and_pdf_url_for_external_papers(tmp_path: Path):

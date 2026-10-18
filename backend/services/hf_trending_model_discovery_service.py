@@ -85,7 +85,10 @@ class HFTrendingDiscoveryClient:
         self.run = run
         self.hf_cli = hf_cli or _hf_cli()
 
-    def list_top_models(self, *, limit: int = 50) -> list[HFTrendingModel]:
+    def list_top_models(
+        self, *, limit: int = 50, featured_limit: int = 100
+    ) -> list[HFTrendingModel]:
+        """Return the global top `limit`, plus featured publishers up to `featured_limit`."""
         if limit <= 0:
             raise ValueError("limit must be positive")
         output = self.run(
@@ -96,7 +99,7 @@ class HFTrendingDiscoveryClient:
                 "--sort",
                 "trending_score",
                 "--limit",
-                str(limit),
+                str(max(limit, featured_limit)),
                 "--expand",
                 "author,tags,createdAt,lastModified,trendingScore",
                 "--format",
@@ -106,7 +109,10 @@ class HFTrendingDiscoveryClient:
         payload = json.loads(output)
         if not isinstance(payload, list):
             raise ValueError("hf models list did not return a JSON array")
-        return [HFTrendingModel.from_payload(item) for item in payload]
+        models = [HFTrendingModel.from_payload(item) for item in payload]
+        return models[:limit] + [
+            model for model in models[limit:] if model.featured_publisher
+        ]
 
 
 @dataclass(frozen=True)

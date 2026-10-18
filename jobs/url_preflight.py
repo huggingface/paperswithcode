@@ -435,6 +435,17 @@ def extract_candidates(
     document("paper_source", paper.get("source_url"))
     source_candidate = context.get("source_candidate") or {}
     document("model_card", source_candidate.get("model_card_url"))
+    if paper.get("source") == "external" and not source_candidate:
+        # Release-page papers often keep their scores on the model card.
+        hf_models = paper.get("hf_models") or []
+        if hf_models:
+            model = str(hf_models[0]).strip().strip("/")
+            document(
+                "model_card",
+                model
+                if model.startswith("http")
+                else f"https://huggingface.co/{model}",
+            )
     for repository in paper.get("repositories") or []:
         if repository.get("is_official"):
             document("github_readme", repository.get("url"))
