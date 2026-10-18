@@ -719,7 +719,10 @@ the same queue under trigger `benchmark-gap-cron`: one `review-benchmark-gaps`
 overseer per day and up to 20 `add-benchmark` jobs per UTC day. They obey the
 scheduled dispatch pause and the curation operator switch, take at most two of
 the scheduled slots, and do not count toward the daily token guardrail or the
-failure-rate breaker. They use the curation operator's
+failure-rate breaker. The overseer alone may take any free slot, outside that
+two-job lane, and it still runs while the daily-paper health breakers
+(`terminal_failure_rate`, `apply_or_verification_failures`) hold scheduled
+work; an operator, token-guardrail, or policy pause still stops it. They use the curation operator's
 `create_benchmark_from_gap` capability, the only autonomous path that creates
 datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
 

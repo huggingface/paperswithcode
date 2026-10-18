@@ -62,6 +62,11 @@ SCHEDULED_TRIGGERS = frozenset(
     {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER}
 )
 BENCHMARK_GAP_MAX_ACTIVE = 2
+# Health breakers that count only daily/trending paper stages. The daily
+# benchmark-gap overseer is unrelated to them, so they must not hold it back.
+SCHEDULED_HEALTH_PAUSES = frozenset(
+    {"apply_or_verification_failures", "terminal_failure_rate"}
+)
 JobStatus = Literal[
     "queued",
     "dispatching",
@@ -682,6 +687,12 @@ class CodexPaperJobService:
                 )
                 .first()
             )
+            if row is None and self._benchmark_review_allowed(
+                settings, scheduler_state, usage_allowed
+            ):
+                # The one daily overseer takes any free slot, ahead of the
+                # benchmark-gap lane cap and the daily-paper health breakers.
+                row = self._next_benchmark_gap_row(db, kind="review-benchmark-gaps")
             if (
                 row is None
                 and scheduled_allowed
@@ -764,20 +775,37 @@ class CodexPaperJobService:
         )
 
     @staticmethod
-    def _next_benchmark_gap_row(db: Session) -> PaperCurationJob | None:
-        return (
-            db.query(PaperCurationJob)
-            .filter(
-                PaperCurationJob.trigger == BENCHMARK_GAP_TRIGGER,
-                PaperCurationJob.status == "queued",
+    def _benchmark_review_allowed(
+        settings: Settings,
+        state: PaperCurationSchedulerState | None,
+        usage_allowed: bool,
+    ) -> bool:
+        return bool(
+            settings.codex_curation_scheduler_enabled
+            and state
+            and state.dispatch_enabled
+            and (
+                state.paused_at is None
+                or state.pause_condition in SCHEDULED_HEALTH_PAUSES
             )
-            .order_by(
-                PaperCurationJob.priority,
-                PaperCurationJob.created_at,
-                PaperCurationJob.id,
-            )
-            .first()
+            and usage_allowed
         )
+
+    @staticmethod
+    def _next_benchmark_gap_row(
+        db: Session, kind: str | None = None
+    ) -> PaperCurationJob | None:
+        query = db.query(PaperCurationJob).filter(
+            PaperCurationJob.trigger == BENCHMARK_GAP_TRIGGER,
+            PaperCurationJob.status == "queued",
+        )
+        if kind is not None:
+            query = query.filter(PaperCurationJob.kind == kind)
+        return query.order_by(
+            PaperCurationJob.priority,
+            PaperCurationJob.created_at,
+            PaperCurationJob.id,
+        ).first()
 
     @staticmethod
     def _next_scheduled_row(db: Session) -> PaperCurationJob | None:

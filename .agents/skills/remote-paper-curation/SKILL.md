@@ -382,9 +382,22 @@ template such as "`{name}` is a standard benchmark reported by `{n}` papers").
 Write each reason from that candidate's evidence: what it measures, the task
 and metric its papers share or disagree on, and why that leads to the
 decision. Merge reasons may repeat. Decide only candidates from the context.
+
+Do not generate reasons from a fill-in sentence. A script that pastes each
+candidate's tasks, metrics, splits, lead paper, or URL into one fixed sentence
+is a template, and it fails as soon as two candidates come from the same
+papers: sibling datasets reported together (several splits of one gait
+benchmark, the multi-label sets of one paper) share every slot except the
+name, which the check removes. Write a sibling's reason about what tells it
+apart: its domain, size, modality, or protocol, or which sibling it is
+evaluated next to and why the two need separate leaderboards. Phrase reasons
+differently from one another, as a reviewer would.
+
 Build the proposal with a short Python script that walks `/tmp/context.json`
 and holds your hand-written decision and reason for every candidate id, so
-none is dropped.
+none is dropped. `python jobs/curation_api.py apply` runs the server's
+template check first and, without using up an apply, lists every group of
+candidate ids whose reasons clash; rewrite all of them and apply again.
 
 ```json
 {

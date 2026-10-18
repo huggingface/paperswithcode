@@ -8,6 +8,7 @@ import copy
 import gzip
 import json
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -206,6 +207,39 @@ def wait_for_thumbnail(timeout_seconds: int, poll_seconds: int = 5) -> dict:
         time.sleep(min(poll_seconds, max(0, deadline - time.monotonic())))
 
 
+def check_review_reasons(proposal: dict, context: dict) -> None:
+    """Mirror the server's reused-template check on overseer reasons.
+
+    The server refuses a review whose approve, reject, or defer reasons match
+    after removing each candidate's own names, digits, and punctuation.
+    """
+    review = proposal.get("review_benchmark_gaps")
+    if not review:
+        return
+    names = {
+        item["id"]: [item["name"], *(item.get("aliases") or [])]
+        for item in (context.get("review") or {}).get("candidates", [])
+    }
+    templates: dict[str, list[str]] = {}
+    for decision in review.get("decisions") or []:
+        candidate_id = str(decision.get("candidate_id"))
+        if decision.get("decision") == "merge" or candidate_id not in names:
+            continue
+        text = str(decision.get("reason") or "").lower()
+        for name in sorted(names[candidate_id], key=len, reverse=True):
+            text = text.replace(name.lower(), " ")
+        template = " ".join(re.findall(r"[a-z]+", text))
+        templates.setdefault(template, []).append(candidate_id)
+    repeated = [ids for ids in templates.values() if len(ids) > 1]
+    if repeated:
+        raise ValueError(
+            "Proposal preflight failed (no apply attempted): reasons of these "
+            "candidate groups match once their names and digits are removed; "
+            "rewrite each from its own evidence, saying what sets it apart:\n"
+            + "\n".join(", ".join(ids) for ids in repeated)
+        )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     sub = parser.add_subparsers(dest="command", required=True)
@@ -235,7 +269,9 @@ def main() -> None:
     else:
         with open(args.json_file, encoding="utf-8") as handle:
             proposal = json.load(handle)
-        proposal = make_scheduled_enrichment_additive(proposal, request_json("context"))
+        context = request_json("context")
+        check_review_reasons(proposal, context)
+        proposal = make_scheduled_enrichment_additive(proposal, context)
         trace = _trace_payload(proposal)
         check_benchmark_gap_fields(proposal, trace["url_candidates"])
         store_trace_with_retry("trace/preapply", trace)

@@ -52,6 +52,7 @@ from backend.services.codex_add_evals_service import CodexPaperJobService
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
 )
+from jobs import curation_api
 
 
 @compiles(BigInteger, "sqlite")
@@ -706,6 +707,73 @@ def test_dispatch_keeps_a_two_job_lane_for_benchmark_gap_work(db, monkeypatch):
     assert daily.status == "running"
 
 
+@pytest.mark.parametrize(
+    ("pause_condition", "dispatched"),
+    [
+        (None, True),
+        ("terminal_failure_rate", True),
+        ("apply_or_verification_failures", True),
+        ("operator", False),
+        ("daily_token_guardrail", False),
+    ],
+)
+def test_dispatch_starts_the_overseer_past_the_lane_and_health_pauses(
+    db, monkeypatch, pause_condition, dispatched
+):
+    settings = get_settings().model_copy(
+        update={
+            "codex_jobs_enabled": True,
+            "codex_curation_scheduler_enabled": True,
+            "codex_jobs_max_active": 4,
+            "codex_jobs_max_scheduled_active": 3,
+        }
+    )
+    db.add(
+        PaperCurationSchedulerState(
+            id=1,
+            dispatch_enabled=pause_condition != "operator",
+            paused_at=datetime.now(UTC) if pause_condition else None,
+            pause_condition=pause_condition,
+        )
+    )
+    jobs = CodexPaperJobService()
+    for index in range(3):
+        row = jobs.enqueue_benchmark_job(
+            db,
+            kind="add-benchmark",
+            benchmark_candidate_id=add_candidate(db, f"Bench{index}").id,
+            requested_by="test",
+            settings=settings,
+            priority=20,
+        )
+        # Two creation jobs fill the benchmark-gap lane.
+        row.status = "running" if index < 2 else "queued"
+    review = jobs.enqueue_benchmark_job(
+        db,
+        kind="review-benchmark-gaps",
+        benchmark_candidate_id=None,
+        requested_by="test",
+        settings=settings,
+        priority=10,
+    )
+    db.commit()
+    monkeypatch.setattr(
+        CodexPaperJobService,
+        "_dispatch_row",
+        lambda _self, _db, _settings, row: setattr(row, "status", "running"),
+    )
+
+    jobs.dispatch_next(db, settings)
+
+    assert review.status == ("running" if dispatched else "queued")
+    assert (
+        db.query(PaperCurationJob)
+        .filter_by(kind="add-benchmark", status="queued")
+        .count()
+        == 1
+    )
+
+
 def test_failure_backoff_counts_only_the_current_approval(db):
     candidate, job, _source, _parent = creation_setup(db)
     review = service(db)
@@ -916,13 +984,22 @@ def test_review_refuses_one_templated_reason_across_candidates(db):
             ],
         )
 
-    with pytest.raises(ValueError, match="2 decisions reuse 1 templates"):
-        service(db).apply_review(
-            decisions(
-                "Tiny-ImageNet is a standard public benchmark reported by 16 papers.",
-                "Oxford-IIIT Pet is a standard public benchmark reported by 8 papers.",
-            )
+    templated = decisions(
+        "Tiny-ImageNet is a standard public benchmark reported by 16 papers.",
+        "Oxford-IIIT Pet is a standard public benchmark reported by 8 papers.",
+    )
+    with pytest.raises(ValueError, match="2 decisions reuse 1 templates") as error:
+        service(db).apply_review(templated)
+    # The error names every clashing candidate so one retry can fix them all.
+    assert f"{tiny.id}, {pets.id}" in str(error.value)
+
+    # The runner's apply helper refuses the same proposal before the server.
+    context = {"review": {"candidates": service(db)._summaries([tiny, pets])}}
+    with pytest.raises(ValueError, match="no apply attempted") as error:
+        curation_api.check_review_reasons(
+            {"review_benchmark_gaps": templated.model_dump(mode="json")}, context
         )
+    assert f"{tiny.id}, {pets.id}" in str(error.value)
 
     result = service(db).apply_review(
         decisions(

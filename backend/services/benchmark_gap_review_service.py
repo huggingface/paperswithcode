@@ -797,7 +797,7 @@ class BenchmarkGapReviewService:
         Two reasons count as the same template when they match after removing
         each candidate's own names, digits, and punctuation.
         """
-        templates: dict[str, list[str]] = {}
+        templates: dict[str, list] = {}
         for decision in mutation.decisions:
             if decision.decision == "merge" or decision.candidate_id not in eligible:
                 continue
@@ -810,13 +810,20 @@ class BenchmarkGapReviewService:
             ):
                 text = text.replace(name.lower(), " ")
             template = " ".join(re.findall(r"[a-z]+", text))
-            templates.setdefault(template, []).append(decision.reason)
-        repeated = [reasons for reasons in templates.values() if len(reasons) > 1]
+            templates.setdefault(template, []).append(decision)
+        repeated = [group for group in templates.values() if len(group) > 1]
         if repeated:
+            # Name every clashing group so one correction can fix them all.
+            groups = "; ".join(
+                ", ".join(str(item.candidate_id) for item in group)
+                for group in repeated
+            )
             raise ValueError(
                 "Give each candidate a reason grounded in its own evidence; "
-                f"{sum(len(reasons) for reasons in repeated)} decisions reuse "
-                f"{len(repeated)} templates, for example {repeated[0][0]!r}"
+                f"{sum(len(group) for group in repeated)} decisions reuse "
+                f"{len(repeated)} templates. Rewrite the reasons of these "
+                f"candidate groups, saying what sets each apart: {groups}. "
+                f"For example {repeated[0][0].reason[:300]!r}"
             )
 
     def _merge(
