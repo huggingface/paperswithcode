@@ -135,6 +135,7 @@ class ThumbnailPreloadJob(CronJobBase):
         dry_run: bool,
         refresh_existing: bool,
         request_delay_seconds: Optional[float],
+        max_runtime_seconds: Optional[float] = None,
     ):
         if priority not in VALID_PRIORITIES:
             raise ValueError(
@@ -161,6 +162,7 @@ class ThumbnailPreloadJob(CronJobBase):
         self.max_failures = max_failures
         self.dry_run = dry_run
         self.refresh_existing = refresh_existing
+        self.max_runtime_seconds = max_runtime_seconds
 
         # missing-all defaults to trusting the local cache because probing the
         # bucket for tens of thousands of candidates is pure overhead when the
@@ -181,6 +183,7 @@ class ThumbnailPreloadJob(CronJobBase):
         self.would_generate = 0
         self.failures = 0
         self.unavailable = 0
+        self.stopped_at_runtime_budget = False
 
     def _validate_settings(self) -> None:
         backend = (self.settings.thumbnail_storage_backend or "").lower()
@@ -674,6 +677,22 @@ class ThumbnailPreloadJob(CronJobBase):
 
         start = time.time()
         for candidate in candidates:
+            if (
+                self.max_runtime_seconds is not None
+                and time.time() - start >= self.max_runtime_seconds
+            ):
+                # Missing-only runs resume from what is still missing, so the
+                # next run picks up the rest instead of the launcher timeout
+                # killing this one mid-backlog.
+                self.stopped_at_runtime_budget = True
+                self.logger.warning(
+                    "Stopping at --max-runtime-seconds=%.0f with %d/%d candidates "
+                    "left; the next run resumes them",
+                    self.max_runtime_seconds,
+                    total - self.candidates_seen,
+                    total,
+                )
+                break
             self.candidates_seen += 1
 
             try:
@@ -789,6 +808,7 @@ class ThumbnailPreloadJob(CronJobBase):
                     "would_generate": self.would_generate,
                     "unavailable_documents": self.unavailable,
                     "failed_downloads": self.failures,
+                    "stopped_at_runtime_budget": self.stopped_at_runtime_budget,
                 }
             ),
         )
@@ -987,6 +1007,16 @@ def parse_args(argv: Optional[List[str]] = None) -> argparse.Namespace:
             "and 0 otherwise."
         ),
     )
+    parser.add_argument(
+        "--max-runtime-seconds",
+        type=float,
+        default=None,
+        help=(
+            "Stop starting new candidates after this many seconds of processing "
+            "so a large backlog finishes across several runs within the "
+            "launcher timeout. With --missing-only the next run resumes."
+        ),
+    )
     return parser.parse_args(argv)
 
 
@@ -1012,6 +1042,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         dry_run=args.dry_run,
         refresh_existing=args.refresh_existing,
         request_delay_seconds=args.request_delay_seconds,
+        max_runtime_seconds=args.max_runtime_seconds,
     )
     success = job.execute()
     return 0 if success else 1

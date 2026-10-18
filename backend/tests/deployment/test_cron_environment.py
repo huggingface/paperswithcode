@@ -404,3 +404,70 @@ def test_launcher_records_each_exit_and_lock_skip(tmp_path: Path, monkeypatch):
     assert records[1]["returncode"] == 3
     assert records[1]["started_at"] == records[0]["at"]
     assert records[3]["health_job"] == "sync_tabarena"
+
+
+def test_preload_thumbnail_lanes_hold_separate_launcher_locks(
+    tmp_path: Path, monkeypatch
+):
+    import fcntl
+    from types import SimpleNamespace
+
+    current = tmp_path / "current"
+    current.mkdir()
+    (current / "release.json").write_text(
+        json.dumps(
+            {
+                "release_id": "a" * 12 + "-production",
+                "git_sha": "a" * 40,
+                "backend_features": {},
+            }
+        )
+    )
+    logs, locks = tmp_path / "logs", tmp_path / "locks"
+    monkeypatch.setattr(cron_launcher, "CURRENT", current)
+    monkeypatch.setattr(cron_launcher, "LOG_DIR", logs)
+    monkeypatch.setattr(cron_launcher, "cron_python", lambda: Path("/bin/true"))
+    monkeypatch.setattr(
+        cron_launcher.subprocess,
+        "run",
+        lambda *args, **kwargs: SimpleNamespace(returncode=0),
+    )
+    monkeypatch.setenv("PWC_CRON_LOCK_DIR", str(locks))
+    locks.mkdir()
+
+    def launch(*args: str) -> int:
+        monkeypatch.setattr(
+            cron_launcher.sys, "argv", ["pwc-cron", "preload_thumbnails", *args]
+        )
+        return cron_launcher.main()
+
+    with (locks / "preload_thumbnails.task-top.lock").open("w") as held:
+        fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        assert launch("--priority", "method-top") == 0
+        assert launch("--priority=recent") == 0
+        assert launch("--priority", "task-top") == 0
+
+    records = [
+        json.loads(line) for line in (logs / "launcher.jsonl").read_text().splitlines()
+    ]
+    assert [record.get("event") for record in records[1::2]] == [
+        "exit",
+        "exit",
+        "lock_skipped",
+    ]
+    assert records[-1]["lock"] == "preload_thumbnails.task-top"
+
+
+def test_lock_name_ignores_lanes_for_jobs_without_lane_arg():
+    spec = cron_launcher.COMMANDS["preload_thumbnails"]
+    assert cron_launcher.lock_name("preload_thumbnails", spec, []) == (
+        "preload_thumbnails"
+    )
+    assert (
+        cron_launcher.lock_name("preload_thumbnails", spec, ["--priority", "../x"])
+        == "preload_thumbnails"
+    )
+    other = cron_launcher.COMMANDS["sync_tabarena"]
+    assert cron_launcher.lock_name("sync_tabarena", other, ["--priority", "a"]) == (
+        "sync_tabarena"
+    )

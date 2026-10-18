@@ -95,6 +95,9 @@ class Job:
     mutates_shared_data: bool
     idempotency: str
     health_job: str
+    # Argument whose value names an independent lane with its own job lock, so
+    # lanes of one job (different candidate sets) never skip each other.
+    lane_arg: str | None = None
 
 
 def job(
@@ -103,6 +106,7 @@ def job(
     idempotency: str,
     health_job: str | None = None,
     mutates_shared_data: bool = True,
+    lane_arg: str | None = None,
 ) -> Job:
     return Job(
         command=command,
@@ -110,7 +114,25 @@ def job(
         mutates_shared_data=mutates_shared_data,
         idempotency=idempotency,
         health_job=health_job or command[-1].rsplit(".", 1)[-1],
+        lane_arg=lane_arg,
     )
+
+
+def lock_name(job: str, spec: Job, extra: list[str]) -> str:
+    """The launcher lock for one invocation: per lane when the job has lanes."""
+
+    if spec.lane_arg is None:
+        return job
+    for index, arg in enumerate(extra):
+        if arg == spec.lane_arg and index + 1 < len(extra):
+            lane = extra[index + 1]
+        elif arg.startswith(spec.lane_arg + "="):
+            lane = arg.partition("=")[2]
+        else:
+            continue
+        if lane.replace("-", "").replace("_", "").isalnum():
+            return f"{job}.{lane}"
+    return job
 
 
 COMMANDS: dict[str, Job] = {
@@ -541,6 +563,9 @@ COMMANDS: dict[str, Job] = {
         "scripts.daily.preload_thumbnails",
         timeout="2h",
         idempotency="skip valid existing thumbnail objects",
+        # Five daily/3-hourly lanes with different candidate sets; one shared
+        # lock let a long lane silently skip the others (2026-10-16/17).
+        lane_arg="--priority",
     ),
     "mirror_thumbnails_to_disk": job(
         "-m",
@@ -721,13 +746,18 @@ def main() -> int:
         env.get("PWC_CRON_LOCK_DIR", "/var/lib/paperswithcode/production/cron-locks")
     )
     lock_dir.mkdir(parents=True, exist_ok=True)
-    with (lock_dir / f"{job}.lock").open("w") as lock:
+    lock_id = lock_name(job, spec, extra)
+    with (lock_dir / f"{lock_id}.lock").open("w") as lock:
         try:
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
-            print(f"{job} is already running")
+            print(f"{lock_id} is already running; skipped this run", file=sys.stderr)
             append_launcher_record(
-                log_dir, terminal_record(record, "lock_skipped", returncode=0)
+                log_dir,
+                {
+                    **terminal_record(record, "lock_skipped", returncode=0),
+                    "lock": lock_id,
+                },
             )
             return 0
         returncode = subprocess.run(
