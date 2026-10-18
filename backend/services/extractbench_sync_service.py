@@ -27,6 +27,7 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 # The README leaderboard and grounding tables are both rendered from this CSV.
@@ -51,7 +52,7 @@ REQUIRED_COLUMNS = frozenset(
         *(column for _, column in GROUNDING_METRICS),
     }
 )
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code ExtractBench live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ExtractBench")
 MIN_EXPECTED_ENTRIES = 30
 MAX_EXPECTED_ENTRIES = 400
 # Refuse to replace the managed leaderboard when the reviewed subset collapses.

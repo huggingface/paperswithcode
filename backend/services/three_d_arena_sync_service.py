@@ -20,13 +20,14 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 ARENA_ENDPOINT = "https://3d-arena-3d-arena.hf.space/api/leaderboard?vote_type=render"
 ARENA_SOURCE_URL = "https://huggingface.co/spaces/3d-arena/3d-arena"
 DATASET_SLUG = "3d-arena-iso3d-living"
 TASK_SLUG = "3d-generation"
 METRIC_NAME = "Elo (live, external)"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code 3D Arena live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("3D Arena")
 MIN_EXPECTED_ENTRIES = 15
 MAX_EXPECTED_ENTRIES = 100
 RETRYABLE_STATUS_CODES = {429, 502, 503, 504}

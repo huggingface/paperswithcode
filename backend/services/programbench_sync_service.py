@@ -24,6 +24,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 PROGRAMBENCH_URL = "https://programbench.com/"
 TASK_SLUG = "coding-agents"
@@ -37,7 +38,7 @@ METRIC_NAMES = (
     AVERAGE_PASS_RATE_METRIC_NAME,
 )
 HARNESS_NAME = "mini-SWE-agent"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code ProgramBench live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ProgramBench")
 MIN_EXPECTED_ENTRIES = 15
 MAX_EXPECTED_ENTRIES = 60
 _RESULTS_PATTERN = re.compile(r"\bvar\s+results\s*=\s*(\[.*?\]);", re.DOTALL)

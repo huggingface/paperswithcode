@@ -28,15 +28,14 @@ from backend.services.artificial_analysis_sync_service import (
     PaperIdentity,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 TTS_MODELS_URL = "https://artificialanalysis.ai/text-to-speech/models"
 SOURCE_URL_PREFIX = f"{TTS_MODELS_URL}/"
 TASK_SLUG = "text-to-speech"
 DATASET_SLUG = "artificial-analysis-provider-voice-tts-arena"
 METRIC_NAME = "Quality Elo"
-MANAGED_METHODOLOGY_PREFIX = (
-    "Managed by the Papers with Code Artificial Analysis TTS live sync."
-)
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Artificial Analysis TTS")
 MIN_EXPECTED_MODELS = 80
 MAX_EXPECTED_MODELS = 200
 

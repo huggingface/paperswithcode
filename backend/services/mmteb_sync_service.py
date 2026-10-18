@@ -24,6 +24,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 BENCHMARK_NAME = "MTEB(Multilingual, v2)"
 MMTEB_API_URL = (
@@ -43,7 +44,7 @@ MIN_RESOLVED_ENTRIES = {
     "retrieval": 20,
     "reranking": 20,
 }
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code MMTEB v2 live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("MMTEB v2")
 LEGACY_METHODOLOGY_PREFIX = (
     "Official MTEB leaderboard external evaluation for MTEB(Multilingual, v2):"
 )

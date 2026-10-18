@@ -18,6 +18,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 DEEPSWE_ENDPOINT = "https://deepswe.datacurve.ai/artifacts/v1.1/leaderboard-live.json"
 DEEPSWE_SOURCE_URL = "https://deepswe.datacurve.ai/"
@@ -25,7 +26,7 @@ DATASET_SLUG = "deepswe"
 TASK_SLUG = "coding-agents"
 METRIC_NAME = "Pass@1"
 HARNESS_NAME = "MiniSWE-Agent"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code DeepSWE live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("DeepSWE")
 MIN_EXPECTED_CONFIGS = 40
 MAX_EXPECTED_CONFIGS = 100
 MIN_EXPECTED_MODELS = 15

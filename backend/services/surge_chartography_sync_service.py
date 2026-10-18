@@ -22,6 +22,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 SURGE_CHARTOGRAPHY_URL = "https://surgehq.ai/benchmarks/chartography"
 TASK_SLUG = "image-understanding"
@@ -30,9 +31,7 @@ TASK_SLUG = "image-understanding"
 DATASET_SLUG = "chartography-no-tools"
 METRIC_NAME = "Pass@1"
 MODEL_NAME_SUFFIX = " (no tools)"
-MANAGED_METHODOLOGY_PREFIX = (
-    "Managed by the Papers with Code Surge AI Chartography live sync."
-)
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Surge AI Chartography")
 LEADERBOARD_TITLE = "Chartography Leaderboard"
 # The page is a Webflow site that rejects non-browser user agents.
 USER_AGENT = (

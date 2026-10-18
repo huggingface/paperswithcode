@@ -19,10 +19,11 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 ARC_PRIZE_SOURCE_URL = "https://arcprize.org/leaderboard"
 TASK_SLUG = "reasoning"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code ARC Prize live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("ARC Prize")
 LEGACY_METHODOLOGY_PREFIX = "Strongest verified configuration for this paper/release"
 
 

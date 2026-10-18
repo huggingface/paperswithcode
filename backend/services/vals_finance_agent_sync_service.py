@@ -23,14 +23,13 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 VALS_FINANCE_AGENT_URL = "https://www.vals.ai/benchmarks/fabv2"
 TASK_SLUG = "agents"
 DATASET_SLUG = "finance-agent-v2"
 METRIC_NAME = "Accuracy"
-MANAGED_METHODOLOGY_PREFIX = (
-    "Managed by the Papers with Code Vals AI Finance Agent v2 live sync."
-)
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Vals AI Finance Agent v2")
 TABLE_HEADER = (
     "Rank",
     "Model",

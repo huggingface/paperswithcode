@@ -29,6 +29,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 TABARENA_SOURCE_URL = "https://huggingface.co/spaces/TabArena/leaderboard"
 TABARENA_CSV_URL = (
@@ -38,7 +39,7 @@ TABARENA_CSV_URL = (
 DATASET_SLUG = "tabarena-v0-1"
 TASK_SLUG = "tabular-learning"
 METRIC_NAME = "Elo"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code TabArena live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("TabArena")
 MIN_EXPECTED_ENTRIES = 50
 MAX_EXPECTED_ENTRIES = 200
 

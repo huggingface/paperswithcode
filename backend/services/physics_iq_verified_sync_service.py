@@ -22,6 +22,7 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 # physics-iq-verified.anates.ai renders the same table from data compiled into
 # its Next.js bundle and exposes no JSON endpoint, so the README is canonical.
@@ -36,9 +37,7 @@ METRIC_BY_TRACK = {
     "v2v": "Physics-IQ Verified Score (V2V)",
 }
 TRACK_BY_INPUT_TYPE = {"i2v": "i2v", "multiframe (v2v)": "v2v"}
-MANAGED_METHODOLOGY_PREFIX = (
-    "Managed by the Papers with Code Physics-IQ Verified live sync."
-)
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Physics-IQ Verified")
 LEADERBOARD_HEADING = "### Physics-IQ Verified Leaderboard"
 TABLE_HEADER = (
     "#",

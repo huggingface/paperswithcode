@@ -19,13 +19,14 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 COARENA_ENDPOINT = "https://coarena.ai/api/leaderboard"
 COARENA_SOURCE_URL = "https://coarena.ai/leaderboard"
 DATASET_SLUG = "coarena"
 TASK_SLUG = "computer-use-agents"
 METRIC_NAME = "Elo (live, external)"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code CoArena live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("CoArena")
 MIN_EXPECTED_ENTRIES = 5
 MAX_EXPECTED_ENTRIES = 100
 # Published CoArena statuses. `stable` is used for long-standing top models

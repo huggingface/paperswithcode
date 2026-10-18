@@ -26,6 +26,7 @@ from backend.models.database import (
 )
 from backend.services.arxiv_service import ArxivService
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import (
     PaperIngestionError,
     PaperIngestionService,
@@ -40,7 +41,7 @@ DATASET_SLUG = "open-asr-leaderboard"
 TASK_SLUG = "automatic-speech-recognition"
 WER_METRIC = "WER"
 RTFX_METRIC = "RTFx"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code Open ASR live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Open ASR")
 MIN_EXPECTED_ENTRIES = 40
 MAX_EXPECTED_ENTRIES = 150
 

@@ -191,6 +191,15 @@ onto the new best result. Explain the best-result replacement; do not call an
 accurately reported older score factually wrong. Never insert a second variant
 and expect the server to silently remove the first.
 
+Never update or remove an existing row whose `methodology` starts with
+`Managed by the Papers with Code <source> live sync.`. A live leaderboard sync
+owns it and rewrites it from the official leaderboard every run, and the server
+rejects any proposal that changes, consolidates, or removes it. Do not submit a
+differently named row for the same model on that leaderboard instead. Drop the
+item and report the benchmark as a `not_applicable` outcome with `task_id`,
+`dataset_id`, `metric`, and a `detail` saying the row is managed by that live
+sync. Other models and other leaderboards follow the normal rules.
+
 For `add-evals`, when a paper-native result is blocked by missing catalog configuration, include
 one structured `benchmark_gaps` entry conforming to
 `jobs/schemas/curation_proposal.schema.json`. Group all introduced-model results

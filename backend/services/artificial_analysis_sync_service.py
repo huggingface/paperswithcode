@@ -28,6 +28,7 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.model_release_identity_service import ModelReleaseIdentityService
 from backend.services.paper_ingestion_service import PaperIngestionService
 
@@ -37,9 +38,7 @@ API_ENDPOINT = "https://artificialanalysis.ai/api/v2/language/models/free"
 # release radar share that budget.
 SOURCE_URL_PREFIX = "https://artificialanalysis.ai/models/"
 METRIC_NAME = "Score"
-MANAGED_METHODOLOGY_PREFIX = (
-    "Managed by the Papers with Code Artificial Analysis live sync."
-)
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Artificial Analysis")
 
 
 # Reviewed upstream renames. Only previously managed rows may carry their

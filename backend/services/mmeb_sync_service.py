@@ -28,13 +28,14 @@ from backend.models.database import (
     TaskDatasetMetric,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 MMEB_SPACE_URL = "https://huggingface.co/spaces/TIGER-Lab/MMEB-Leaderboard"
 MMEB_CONFIG_URL = "https://tiger-lab-mmeb-leaderboard.hf.space/config"
 MIN_EXPECTED_ENTRIES = 50
 MAX_EXPECTED_ENTRIES = 500
 MIN_RESOLVED_ENTRIES = {"v2": 5, "v3": 5}
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code MMEB live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("MMEB")
 
 LANES = {
     "v2": ("mmeb-v2", "MMEB-v2 Score", "Overall-V2"),

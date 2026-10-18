@@ -25,6 +25,7 @@ from backend.services.external_resource_service import (
     ExternalResourceInput,
     ExternalResourceService,
 )
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 from backend.services.paper_ingestion_service import PaperIngestionService
 
 FRONTIERCODE_ENDPOINT = "https://cognition.com/data/frontiercode-leaderboard/data.json"
@@ -32,7 +33,7 @@ FRONTIERCODE_SOURCE_URL = "https://cognition.com/frontiercode"
 TASK_SLUG = "coding-agents"
 DATASET_SLUGS = {"main": "frontiercode-main", "extended": "frontiercode-extended"}
 METRIC_NAMES = ("Score", "Pass Rate")
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code FrontierCode live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("FrontierCode")
 MIN_EXPECTED_MODELS = 20
 MAX_EXPECTED_MODELS = 60
 EXPECTED_SUBSET_SIZES = {"main": 100, "extended": 150}

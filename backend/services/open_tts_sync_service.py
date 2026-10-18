@@ -28,6 +28,7 @@ from backend.services.artificial_analysis_sync_service import (
     PaperIdentity,
 )
 from backend.services.evaluation_service import EvaluationService
+from backend.services.leaderboard_sync_ownership import managed_methodology_prefix
 
 SPACE_APP_URL = "https://hf-audio-open-tts-leaderboard.hf.space"
 SPACE_SOURCE_URL = "https://huggingface.co/spaces/hf-audio/open_tts_leaderboard"
@@ -52,7 +53,7 @@ ALL_LANGUAGE_DATASET_SLUG = "open-tts-leaderboard-all-languages"
 TASK_SLUG = "text-to-speech"
 WER_METRIC = "WER"
 RTFX_METRIC = "RTFx"
-MANAGED_METHODOLOGY_PREFIX = "Managed by the Papers with Code Open TTS live sync."
+MANAGED_METHODOLOGY_PREFIX = managed_methodology_prefix("Open TTS")
 METHODOLOGY_BY_DATASET = {
     DATASET_SLUG: "English macro-average across Seed-TTS and CV3-Eval",
     ALL_LANGUAGE_DATASET_SLUG: (

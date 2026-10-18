@@ -72,6 +72,7 @@ from backend.services.curation_thumbnail_queue_service import (
 from backend.services.curation_autonomy import curation_primary_authorization
 from backend.services.evaluation_service import EvaluationService
 from backend.services.leaderboard_ranking_service import parse_metric_value
+from backend.services.leaderboard_sync_ownership import is_sync_managed
 from backend.services.paper_association_service import PaperAssociationService
 from backend.services.paper_method_link_service import upsert_evidence_links
 from backend.services.paper_service import PaperService
@@ -1905,6 +1906,24 @@ class CodexCurationCallbackService:
             if before[field] != proposed[field]
         }
 
+    @staticmethod
+    def _reject_sync_managed(existing: Evaluation, action: str) -> None:
+        """Keep curators off rows owned by a live leaderboard sync.
+
+        The sync rewrites its rows on every run, so a curator edit would be
+        reverted at best and would corrupt the sync's methodology at worst.
+        """
+        if not is_sync_managed(existing.methodology):
+            return
+        raise ValueError(
+            f"Evaluation {existing.id} ({existing.model_name!r} on task "
+            f"{existing.task_id} / dataset {existing.dataset_id}) is managed by a "
+            f"live leaderboard sync and cannot be {action} by curation. Leave that "
+            "row unchanged: drop this item and report the benchmark as a "
+            "not_applicable outcome with task_id, dataset_id, metric, and a detail "
+            "saying the leaderboard row is managed by a live sync."
+        )
+
     def _apply_evaluations(self, body: ApplyMutationRequest) -> tuple[int, int]:
         created = 0
         updated = 0
@@ -1933,6 +1952,8 @@ class CodexCurationCallbackService:
                 changes = self._evaluation_changes(existing, item)
                 if not changes and len(matches) == 1:
                     continue
+                for match in matches:
+                    self._reject_sync_managed(match, "updated")
                 values.pop("paper_id")
                 self.evaluation_service.update_evaluation(
                     existing.id,
@@ -1961,6 +1982,7 @@ class CodexCurationCallbackService:
                 .with_for_update()
                 .one()
             )
+            self._reject_sync_managed(existing, "removed")
             self.db.delete(existing)
             removed += 1
         return removed
