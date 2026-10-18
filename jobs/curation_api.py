@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import base64
 import copy
+import fcntl
 import gzip
 import json
 import os
@@ -15,7 +16,7 @@ import urllib.parse
 import urllib.request
 
 USER_AGENT = "PapersWithCode-Curation/1.0 (+https://paperswithcode.co)"
-SEEN_LEADERBOARDS = "/tmp/pwc-curation-leaderboards.json"
+SEEN_LEADERBOARDS = "/tmp/pwc-curation-leaderboards.jsonl"
 
 
 def request_json(
@@ -57,23 +58,32 @@ def request_json(
     return result
 
 
-def _seen_leaderboards() -> dict[str, list[str]]:
+def _seen_leaderboards() -> dict[str, set[str]]:
+    seen: dict[str, set[str]] = {}
     if not os.path.exists(SEEN_LEADERBOARDS):
-        return {}
+        return seen
     with open(SEEN_LEADERBOARDS, encoding="utf-8") as handle:
-        return json.load(handle)
+        fcntl.flock(handle, fcntl.LOCK_SH)
+        for line in handle:
+            for key, metrics in json.loads(line).items():
+                seen.setdefault(key, set()).update(metrics)
+    return seen
 
 
 def remember_leaderboards(boards: list[dict]) -> None:
-    """Record configured boards so apply can check evaluations against them."""
-    seen = _seen_leaderboards()
-    for board in boards:
-        key = f"{board['task']['id']}:{board['dataset']['id']}"
-        seen[key] = sorted(
-            set(seen.get(key, [])) | {metric["name"] for metric in board["metrics"]}
-        )
-    with open(SEEN_LEADERBOARDS, "w", encoding="utf-8") as handle:
-        json.dump(seen, handle)
+    """Record configured boards so apply can check evaluations against them.
+
+    Each lookup appends one locked line, so parallel lookups cannot drop boards.
+    """
+    found = {
+        f"{board['task']['id']}:{board['dataset']['id']}": [
+            metric["name"] for metric in board["metrics"]
+        ]
+        for board in boards
+    }
+    with open(SEEN_LEADERBOARDS, "a", encoding="utf-8") as handle:
+        fcntl.flock(handle, fcntl.LOCK_EX)
+        handle.write(json.dumps(found) + "\n")
 
 
 def request(
@@ -225,7 +235,7 @@ def check_evaluation_leaderboards(proposal: dict) -> None:
             errors.append(
                 f"evaluations[{index}] ({item.get('model_name')}): best_metric "
                 f"{item.get('best_metric')!r} is not configured for this board; "
-                f"configured metrics: {seen[key]}"
+                f"configured metrics: {sorted(seen[key])}"
             )
     if errors:
         raise ValueError(

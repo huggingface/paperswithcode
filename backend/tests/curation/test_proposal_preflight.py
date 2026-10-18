@@ -102,7 +102,7 @@ def evaluation(task_id, dataset_id, best_metric="Accuracy"):
 
 def test_evaluations_must_target_looked_up_leaderboards(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        curation_api, "SEEN_LEADERBOARDS", str(tmp_path / "boards.json")
+        curation_api, "SEEN_LEADERBOARDS", str(tmp_path / "boards.jsonl")
     )
     curation_api.remember_leaderboards([board(10, 179, "Accuracy")])
     curation_api.remember_leaderboards([board(448, 2013, "Weighted F1")])
@@ -128,7 +128,7 @@ def test_evaluations_must_target_looked_up_leaderboards(tmp_path, monkeypatch):
 
 def test_leaderboard_lookups_are_remembered(tmp_path, monkeypatch):
     monkeypatch.setattr(
-        curation_api, "SEEN_LEADERBOARDS", str(tmp_path / "boards.json")
+        curation_api, "SEEN_LEADERBOARDS", str(tmp_path / "boards.jsonl")
     )
     monkeypatch.setenv("PWC_CURATION_API_URL", "https://paperswithcode.co/api/v1")
     monkeypatch.setenv("PWC_CURATION_JOB_ID", "job")
