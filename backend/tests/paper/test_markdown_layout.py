@@ -214,7 +214,7 @@ def test_ocr_job_stores_layout_in_the_layout_bucket():
 def test_layout_candidates_skip_existing_layout_and_permanent_failures():
     job = _scheduler(execute=False, confirm=False)
     papers = _candidates(4)
-    job._existing_paths = Mock(return_value={"2607/2607.00000.blocks.json": object()})
+    job._existing_paths = Mock(return_value={"2607/2607.00000.md": object()})
     job._status_records = Mock(
         return_value={
             "_jobs/layout-status/2607.00001.json": {
@@ -268,9 +268,9 @@ def test_launch_skips_papers_already_in_an_active_shard():
     assert [item["papers"] for item in launched] == ["2"]
 
 
-def test_entry_layout_key_matches_the_reader_sidecar():
-    assert MODULE.layout_blocks_key({"output_key": "external/12.md"}) == (
-        "external/12.blocks.json"
+def test_layout_is_complete_once_its_anchored_markdown_exists():
+    assert MODULE.layout_marker_key({"output_key": "external/12.md"}) == (
+        "external/12.md"
     )
 
 
@@ -283,7 +283,7 @@ def test_live_lane_queues_layout_after_missing_canonical_work(tmp_path, monkeypa
     canonical = {item["output_key"]: object() for item in papers[:2]}
     job._existing_paths = Mock(
         side_effect=lambda bucket, _paths: (
-            {"2607/2607.00000.blocks.json": object()}
+            {"2607/2607.00000.md": object()}
             if bucket == "test/paper-pages"
             else canonical
         )

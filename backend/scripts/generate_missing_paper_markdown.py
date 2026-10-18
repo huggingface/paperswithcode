@@ -1460,16 +1460,8 @@ def main() -> None:
             pdf_key = entry.get("pdf_key")
             if pdf_key and (content_root / str(pdf_key)).is_file():
                 published_keys.append(str(pdf_key))
-            if result.get("status") == "succeeded" and not result.get("layout_only"):
-                content_keys = [str(key) for key in result.get("asset_keys") or []]
-                content_keys.extend(
-                    [
-                        str(entry["output_key"]),
-                        str(result["markdown_content_key"]),
-                    ]
-                )
-                upload_checkpoint(content_keys)
-                published_keys.append(str(result["markdown_manifest_key"]))
+            # Layout goes before the canonical checkpoint: once canonical
+            # Markdown exists, a retried shard skips the paper's OCR.
             if result.get("layout_keys"):
                 run_bucket_bridge(
                     token,
@@ -1482,6 +1474,16 @@ def main() -> None:
                         ],
                     },
                 )
+            if result.get("status") == "succeeded" and not result.get("layout_only"):
+                content_keys = [str(key) for key in result.get("asset_keys") or []]
+                content_keys.extend(
+                    [
+                        str(entry["output_key"]),
+                        str(result["markdown_content_key"]),
+                    ]
+                )
+                upload_checkpoint(content_keys)
+                published_keys.append(str(result["markdown_manifest_key"]))
             upload_checkpoint(published_keys)
     except Exception as error:
         fatal_error = str(error)[:1000]

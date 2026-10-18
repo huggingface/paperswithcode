@@ -146,9 +146,9 @@ def entry_paper_key(entry: dict[str, object]) -> str:
     return str(entry.get("paper_key") or entry["arxiv_id"])
 
 
-def layout_blocks_key(entry: dict[str, object]) -> str:
-    """The layout sidecar that reader citations need, keyed like the canonical."""
-    return str(entry["output_key"]).removesuffix(".md") + ".blocks.json"
+def layout_marker_key(entry: dict[str, object]) -> str:
+    """The anchored layout Markdown, which the worker writes last."""
+    return str(entry["output_key"])
 
 
 def chunks[T](values: list[T], size: int) -> list[list[T]]:
@@ -494,9 +494,9 @@ class PaperMarkdownBackfillJob(CronJobBase):
         """
         layout = self._existing_paths(
             self.settings.paper_layout_hf_bucket_id,
-            [layout_blocks_key(item) for item in papers],
+            [layout_marker_key(item) for item in papers],
         )
-        missing = [item for item in papers if layout_blocks_key(item) not in layout]
+        missing = [item for item in papers if layout_marker_key(item) not in layout]
         selected: list[dict[str, object]] = []
         for window in chunks(missing, 1000):
             if len(selected) >= limit:
