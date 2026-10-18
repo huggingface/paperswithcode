@@ -434,6 +434,7 @@
   text-align: left;
   white-space: normal;
 }
+.chat-pdf-citation-preview.is-below { top: calc(100% + 6px); bottom: auto; }
 .chat-pdf-citation-preview strong { display: block; margin-bottom: 2px; color: var(--ink-faint); font-weight: 600; }
 .chat-pdf-citation:hover .chat-pdf-citation-preview,
 .chat-pdf-citation:focus-visible .chat-pdf-citation-preview { display: block; }
