@@ -83,7 +83,7 @@ def test_repair_upload_backs_up_original_before_validated_replacement(
     original = b"figure caption only"
     replacement = (
         "Title: Paper zero\n\nMarkdown Content:\n\n"
-        + "Paper zero explains the proposed method. " * 5
+        + "Paper zero explains the proposed method. " * 60
     ).encode()
     if failure == "valid_original":
         original = replacement
@@ -239,3 +239,43 @@ def test_repair_dispatch_waits_for_existing_remote_worker():
     job._budget_decision = Mock()
     assert job._launch([entry]) == []
     job._budget_decision.assert_not_called()
+
+
+def test_full_lane_repairs_small_invalid_objects_outside_the_live_window(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(25)
+    recent, large, small = papers[:1], papers[1:2], papers[2:]
+    job = _scheduler(execute=False, confirm=False, full=True)
+    job._papers = Mock(
+        side_effect=lambda *, recent_only=False: recent if recent_only else papers
+    )
+    sizes = {item["output_key"]: 300 for item in recent + small}
+    sizes[large[0]["output_key"]] = MODULE.STUB_SCAN_BYTES
+    job._existing_paths = Mock(
+        return_value={key: SimpleNamespace(size=size) for key, size in sizes.items()}
+    )
+    job._copy_upstream = Mock(return_value=([], 0))
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(
+        side_effect=lambda inspected, _canonical: {
+            item["output_key"]: "invalid" for item in inspected
+        }
+    )
+    job.filesystem = Mock()
+    job.filesystem.open.side_effect = lambda *a, **k: BytesIO(b"Title: f7.svg")
+    job._launch = Mock(return_value=[])
+    job.run()
+
+    inspected = job._semantic_records.call_args.args[0]
+    assert [item["arxiv_id"] for item in inspected] == [
+        item["arxiv_id"] for item in recent + small
+    ]
+    candidates = job._launch.call_args.args[0]
+    # Bounded, and the live lane alone repairs the recent window.
+    assert len(candidates) == MODULE.LIVE_REPAIR_LIMIT
+    assert {item["arxiv_id"] for item in candidates} <= {
+        item["arxiv_id"] for item in small
+    }
+    assert all(item["replace_invalid_sha256"] for item in candidates)

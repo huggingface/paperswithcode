@@ -244,7 +244,7 @@ def test_worker_archives_external_pdf_and_publishes_source_aware_markdown(
         "run_chandra",
         lambda path, _output, pages: (
             (
-                "External report Markdown body " * 12,
+                "External report Markdown body " * 80,
                 {},
             )
             if path.read_bytes() == pdf and pages == 2

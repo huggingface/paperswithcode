@@ -132,7 +132,7 @@ def test_bucket_worker_downloads_manifest_and_uploads_outputs_without_mount(
     upload_batches = []
     stub = tmp_path / "stub"
     stub.mkdir()
-    (stub / "2608.00001.md").write_text("Bucket transport paper text. " * 12)
+    (stub / "2608.00001.md").write_text("Bucket transport paper text. " * 80)
 
     def bucket_bridge(token, request):
         assert token == "secret"

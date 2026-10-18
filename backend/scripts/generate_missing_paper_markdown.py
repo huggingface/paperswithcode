@@ -81,6 +81,17 @@ IMAGE_FILENAME_ONLY = re.compile(
     r"\s*(?:!\[[^\]]*\]\()?[^\s()<>]+\.(?:png|jpe?g|webp)(?:\))?\s*",
     re.IGNORECASE,
 )
+# arXiv HTML pages that failed to convert are scraped with a figure file as their
+# <title> and only a caption as their body.
+SCRAPED_IMAGE_TITLE = re.compile(
+    r"\.(?:svg|png|jpe?g|gif|webp|bmp|tiff?|eps|pdf)\s*$", re.IGNORECASE
+)
+# arXiv HTML footer that a failed conversion returns in place of the paper.
+ARXIV_HTML_FEEDBACK = re.compile(
+    r"^Instructions for reporting errors\r?\n-{3,}\r?\n.*",
+    re.MULTILINE | re.DOTALL,
+)
+MIN_MARKDOWN_BODY_CHARS = 2000
 STATUS_SCHEMA_VERSION = 2
 MARKDOWN_MANIFEST_SCHEMA_VERSION = 1
 SHA256_HEX = re.compile(r"^[0-9a-f]{64}$")
@@ -563,8 +574,17 @@ def validate_canonical_markdown(title: str, markdown: str) -> None:
     marker = re.search(r"^Markdown Content:\r?\n", markdown, flags=re.MULTILINE)
     if marker is None:
         raise ValueError("semantic_markdown_mismatch")
+    header_title = re.search(
+        r"^Title:(.*)$", markdown[: marker.start()], flags=re.MULTILINE
+    )
+    if header_title and SCRAPED_IMAGE_TITLE.search(header_title.group(1).strip()):
+        raise ValueError("scraped_figure_markdown")
     body = markdown[marker.end() :].lstrip("\r\n")
     validate_markdown_semantics(title, body)
+    text = ARXIV_HTML_FEEDBACK.sub("", body)
+    text = HTML_IMAGE.sub("", MARKDOWN_IMAGE.sub("", text))
+    if len(" ".join(text.split())) < MIN_MARKDOWN_BODY_CHARS:
+        raise ValueError("markdown_body_too_short")
 
 
 def validate_repair_original(entry: dict[str, object], original: bytes) -> None:
@@ -740,6 +760,7 @@ def publish(
     ).encode()
     if len(markdown) < 120 or len(markdown) > 64 * 1024 * 1024:
         raise ValueError("invalid_markdown_size")
+    validate_canonical_markdown(str(entry["title"]), markdown.decode("utf-8"))
     content_sha256 = hashlib.sha256(markdown).hexdigest()
     content_key = markdown_content_key(content_sha256)
     manifest_key = markdown_manifest_key(paper_key)
@@ -967,6 +988,8 @@ def classify_failure(error: Exception, attempt_count: int) -> tuple[str, bool]:
         "image_too_large",
         "image_too_many_pixels",
         "invalid_markdown_size",
+        "markdown_body_too_short",
+        "scraped_figure_markdown",
     }:
         error_class = message
     elif isinstance(error, OSError):

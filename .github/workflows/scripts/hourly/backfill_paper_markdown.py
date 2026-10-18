@@ -58,6 +58,10 @@ DISPATCH_SCHEMA_VERSION = 1
 MOUNT_PROBE_MAX_AGE = timedelta(hours=2)
 MOUNT_RETRY_DELAY = timedelta(minutes=10)
 LIVE_REPAIR_LIMIT = 20
+# The full lane also validates canonical objects below this size from any month.
+# Failed arXiv HTML scrapes are a few hundred bytes, while a converted paper is
+# tens of kilobytes; objects rejected for a short body fall well below it.
+STUB_SCAN_BYTES = 8 * 1024
 EXTERNAL_PDF_ARCHIVE_LIMIT = 64
 EXTERNAL_PDF_ARCHIVE_TIMEOUT_SECONDS = 30
 # Firecrawl scrapes per invocation; the live and full lanes each run hourly.
@@ -1192,8 +1196,18 @@ class PaperMarkdownBackfillJob(CronJobBase):
         remaining_paths = {str(item["output_key"]) for item in remaining}
         recent_papers = papers if not self.full else self._papers(recent_only=True)
         recent_keys = {str(item["output_key"]) for item in recent_papers}
+        stub_papers = [
+            item
+            for item in papers
+            if self.full
+            and str(item["output_key"]) not in recent_keys
+            and getattr(canonical.get(str(item["output_key"])), "size", STUB_SCAN_BYTES)
+            < STUB_SCAN_BYTES
+        ]
+        inspected_papers = recent_papers + stub_papers
+        inspected_keys = recent_keys | {str(item["output_key"]) for item in stub_papers}
         canonical_after = {
-            key: value for key, value in canonical.items() if key in recent_keys
+            key: value for key, value in canonical.items() if key in inspected_keys
         }
         if self.should_execute:
             canonical_after.update(
@@ -1204,7 +1218,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     and str(item["output_key"]) not in remaining_paths
                 }
             )
-        semantic_records = self._semantic_records(recent_papers, canonical_after)
+        semantic_records = self._semantic_records(inspected_papers, canonical_after)
         semantic_invalid_existing = sum(
             result == "invalid" for result in semantic_records.values()
         )
@@ -1214,11 +1228,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
         status_paths = [
             f"_jobs/status/{entry_paper_key(item)}.json" for item in remaining
         ]
-        automatic_repairs = not self.full and not self.retry_only
+        automatic_repairs = not self.retry_only
         if getattr(self, "repair_invalid_limit", 0) or automatic_repairs:
             status_paths.extend(
                 f"_jobs/status/{entry_paper_key(item)}.json"
-                for item in recent_papers
+                for item in inspected_papers
                 if semantic_records.get(str(item["output_key"])) == "invalid"
             )
         status_records = self._status_records(status_paths)
@@ -1245,10 +1259,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
         if automatic_repairs and not candidates and not repair_limit:
             repair_limit = LIVE_REPAIR_LIMIT
         if repair_limit:
-            # Live runs repair a bounded cohort after eligible missing work drains.
+            # Runs repair a bounded cohort after eligible missing work drains: the
+            # live lane its recent window, the full lane older small objects.
             # Explicit repair runs always handle only their requested cohort.
             candidates = []
-            for item in recent_papers:
+            for item in stub_papers if self.full else recent_papers:
                 key = str(item["output_key"])
                 if semantic_records.get(key) != "invalid":
                     continue

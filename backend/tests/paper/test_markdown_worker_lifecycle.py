@@ -43,7 +43,7 @@ def test_chandra_worker_stub_writes_canonical_markdown_and_checkpoint(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Kimi K3 paper text.\n\n![figure](figure.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](figure.webp)\n\nAfter image. " * 80
     )
     asset_dir = stub / "2607.24653"
     asset_dir.mkdir()
@@ -111,7 +111,7 @@ def test_chandra_worker_failure_records_duration(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 80
     )
 
     subprocess.run(
@@ -156,7 +156,7 @@ def test_chandra_worker_final_attempt_omits_missing_image(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 80
     )
     status_path.write_text(json.dumps({"status": "failed", "attempt_count": 2}))
 
@@ -205,7 +205,7 @@ def test_chandra_worker_omits_missing_image_after_one_retry(tmp_path):
     }
     manifest.write_text(json.dumps(entry) + "\n")
     (stub / "2607.24653.md").write_text(
-        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 20
+        "Kimi K3 paper text.\n\n![figure](missing.webp)\n\nAfter image. " * 80
     )
     status_path.write_text(
         json.dumps(
@@ -253,7 +253,7 @@ def _write_stub_manifest(tmp_path: Path, count: int = 2):
     manifest.write_text("".join(json.dumps(item) + "\n" for item in entries))
     for entry in entries:
         (stub / f"{entry['arxiv_id']}.md").write_text(
-            f"{entry['title']} valid Markdown body. " * 20
+            f"{entry['title']} valid Markdown body. " * 80
         )
     return content, stub, manifest, entries
 

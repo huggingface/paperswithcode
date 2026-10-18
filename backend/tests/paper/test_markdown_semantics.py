@@ -132,7 +132,9 @@ def test_worker_omits_missing_extracted_image_on_final_attempt(tmp_path):
         },
         (
             "Missing figure analysis.\n\n![figure](missing_figure.webp)\n\n"
-            '<img src="missing_plot.webp" alt="plot">'
+            '<img src="missing_plot.webp" alt="plot">\n\n'
+            + "Missing figure analysis continues. "
+            * 60
         ),
         {},
         tmp_path,
@@ -208,7 +210,7 @@ def _candidates(count: int):
 
 @pytest.mark.parametrize("newline", ["\n", "\n\n", "\r\n"])
 def test_canonical_markdown_accepts_upstream_header_spacing(newline):
-    body = "Adaptive Expert Routing for Robust Object Detection. " * 8
+    body = "Adaptive Expert Routing for Robust Object Detection. " * 40
     WORKER.validate_canonical_markdown(
         "Adaptive Expert Routing for Robust Object Detection",
         "Title: Detector\n\nMarkdown Content:" + newline + body,
@@ -248,3 +250,82 @@ def test_upstream_copy_rejects_caption_and_unavailable_objects():
     assert job.api.batch_bucket_files.call_args.kwargs["copy"] == [
         ("bucket", "upstream/papers", "hash-0", paths[0])
     ]
+
+
+_PAPER_TITLE = "Principia: Principled Benchmarking of Vision Language Models"
+_PAPER_BODY = "Principia benchmarks vision language models on principled tasks. " * 40
+
+
+def _canonical(title_line: str, body: str) -> str:
+    return (
+        f"Title: {title_line}\n\nURL Source: https://arxiv.org/html/2609.04200\n\n"
+        f"Markdown Content:\n{body}"
+    )
+
+
+@pytest.mark.parametrize(
+    ("title_line", "body", "error"),
+    [
+        # Production stub: arXiv HTML conversion failed, leaving a figure caption.
+        (
+            "principia_summary_arxiv_final.svg",
+            "We present a textual comparison of principia predictions for "
+            "benchmarking vision language models.",
+            "scraped_figure_markdown",
+        ),
+        ("f7.PNG ", _PAPER_BODY, "scraped_figure_markdown"),
+        (
+            _PAPER_TITLE,
+            "Principia benchmarks vision language models. " * 10,
+            "markdown_body_too_short",
+        ),
+        (
+            _PAPER_TITLE,
+            "Principia vision language models.\n\n"
+            + "![Image 1: Refer to caption](https://arxiv.org/html/x1.png)\n" * 80,
+            "markdown_body_too_short",
+        ),
+        (
+            "1",
+            "Principia vision language models.\n\n"
+            "Instructions for reporting errors\n---------------------------------\n\n"
+            + "We are continuing to improve HTML versions of papers. "
+            * 40,
+            "markdown_body_too_short",
+        ),
+    ],
+)
+def test_canonical_markdown_rejects_html_scrape_failures(title_line, body, error):
+    with pytest.raises(ValueError, match=f"^{error}$"):
+        WORKER.validate_canonical_markdown(_PAPER_TITLE, _canonical(title_line, body))
+
+
+def test_canonical_markdown_accepts_full_paper_with_arxiv_feedback_footer():
+    WORKER.validate_canonical_markdown(
+        _PAPER_TITLE,
+        _canonical(
+            _PAPER_TITLE,
+            _PAPER_BODY
+            + "\nInstructions for reporting errors\n---------------------------------\n"
+            + "We are continuing to improve HTML versions of papers.\n",
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "message", ["markdown_body_too_short", "scraped_figure_markdown"]
+)
+def test_short_or_scraped_markdown_is_a_permanent_failure(message):
+    assert WORKER.classify_failure(ValueError(message), 1) == (message, False)
+
+
+def test_worker_refuses_to_publish_short_ocr_output(tmp_path):
+    entry = {
+        "arxiv_id": "2607.00001",
+        "version": "v1",
+        "title": "Short paper",
+        "output_key": "2607/2607.00001.md",
+    }
+    with pytest.raises(ValueError, match="^markdown_body_too_short$"):
+        WORKER.publish(entry, "Short paper abstract only. " * 20, {}, tmp_path)
+    assert not (tmp_path / entry["output_key"]).exists()

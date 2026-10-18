@@ -24,7 +24,7 @@ def test_worker_publishes_content_addressed_markdown_and_manifest(tmp_path):
 
     result = WORKER.publish(
         entry,
-        "Versioned paper explains immutable Markdown storage. " * 4,
+        "Versioned paper explains immutable Markdown storage. " * 40,
         {},
         tmp_path,
     )
@@ -86,7 +86,7 @@ def test_worker_refuses_to_publish_during_version_migration(tmp_path):
                 "title": "Versioned paper",
                 "output_key": "2607/2607.00001.md",
             },
-            "Versioned paper explains immutable Markdown storage. " * 4,
+            "Versioned paper explains immutable Markdown storage. " * 40,
             {},
             tmp_path,
         )
