@@ -27,6 +27,9 @@ from backend.services.chat_operational_alert_service import (
     provider_runtime_revision,
     provider_transition,
     reliability_alert_classifications,
+    RUNTIME_ALERT_NAMES,
+    TELEMETRY_ALERT_NAMES,
+    runtime_alert_decisions,
     runtime_failure_counts,
     settle_executor_transport_alert,
 )
@@ -66,6 +69,7 @@ def empty_state() -> dict[str, Any]:
         "observed_provider_digest": None,
         "observed_provider_runtime_revision": None,
         "operational_counts": {},
+        "runtime_active": {},
         "events": [],
     }
 
@@ -88,6 +92,7 @@ def load_state(path: Path) -> dict[str, Any]:
     state.setdefault("observed_provider_digest", None)
     state.setdefault("observed_provider_runtime_revision", None)
     state.setdefault("operational_counts", {})
+    state.setdefault("runtime_active", {})
     if (
         not isinstance(state["lifecycle_active"], list)
         or len(state["lifecycle_active"]) > len(LIFECYCLE_ALERT_NAMES)
@@ -122,6 +127,18 @@ def load_state(path: Path) -> dict[str, Any]:
         for key, value in state["operational_counts"].items()
     ):
         raise TypeError("chat operational alert state has invalid aggregate counts")
+    if not isinstance(state["runtime_active"], dict) or any(
+        name not in RUNTIME_ALERT_NAMES
+        or not isinstance(entry, dict)
+        or set(entry) != {"last_seen", "last_alerted", "suppressed", "repeated"}
+        or _timestamp(entry["last_seen"]) is None
+        or _timestamp(entry["last_alerted"]) is None
+        or not isinstance(entry["suppressed"], int)
+        or entry["suppressed"] < 0
+        or not isinstance(entry["repeated"], bool)
+        for name, entry in state["runtime_active"].items()
+    ):
+        raise TypeError("chat operational alert state has invalid runtime state")
     provider_digest = state["observed_provider_digest"]
     if provider_digest is not None and (
         not isinstance(provider_digest, str)
@@ -391,11 +408,13 @@ def new_event(
     count: int = 1,
     classifications: dict[str, int] | None = None,
     window_start: datetime | None = None,
+    severity: str | None = None,
 ) -> dict[str, Any]:
     return {
         "id": str(uuid.uuid4()),
         "signal": signal,
-        "severity": "recovery" if signal.endswith("_recovered") else "critical",
+        "severity": severity
+        or ("recovery" if signal.endswith("_recovered") else "critical"),
         "count": count,
         "classifications": classifications or {},
         "window_start": (window_start or now).isoformat(),
@@ -535,15 +554,42 @@ def collect_events(
         if cursor_reset:
             events.append(new_event("journal_cursor_reset", now=now))
         failures = runtime_failure_counts(messages)
-        if failures:
-            events.append(
-                new_event(
-                    "chat_runtime_critical",
-                    now=now,
-                    count=sum(failures.values()),
-                    classifications=failures,
+        alerts, recovered_runtime = runtime_alert_decisions(
+            state["runtime_active"], failures, now
+        )
+        for signal, severity in (
+            ("chat_runtime_critical", "critical"),
+            ("chat_telemetry_degraded", "warning"),
+        ):
+            if alerts[severity]:
+                events.append(
+                    new_event(
+                        signal,
+                        now=now,
+                        count=sum(alerts[severity].values()),
+                        classifications=alerts[severity],
+                        severity=severity,
+                    )
                 )
-            )
+        for signal, names in (
+            (
+                "chat_runtime_recovered",
+                [n for n in recovered_runtime if n not in TELEMETRY_ALERT_NAMES],
+            ),
+            (
+                "chat_telemetry_recovered",
+                [n for n in recovered_runtime if n in TELEMETRY_ALERT_NAMES],
+            ),
+        ):
+            if names:
+                events.append(
+                    new_event(
+                        signal,
+                        now=now,
+                        count=len(names),
+                        classifications={name: 1 for name in names},
+                    )
+                )
         lifecycle_alerts = lifecycle_window_alerts(lifecycle_messages, settings)
         state["operational_counts"] = {**failures, **lifecycle_alerts}
         active = set(state["lifecycle_active"])
