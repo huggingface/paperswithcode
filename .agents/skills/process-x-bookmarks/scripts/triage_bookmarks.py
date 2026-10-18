@@ -9,6 +9,9 @@ Usage (from the repository root):
   uv run --env-file backend/keys.env python \
       .agents/skills/process-x-bookmarks/scripts/triage_bookmarks.py \
       --max 200 --out <scratchpad>/x_bookmarks.json
+
+The fetched bookmarks are saved to <out>.raw.json before any other X call, so
+a rerun can reuse them with --from-raw instead of paying for them again.
 """
 
 import argparse
@@ -50,6 +53,10 @@ def get(url, headers):
         return json.load(response)
 
 
+class CreditsDepleted(Exception):
+    pass
+
+
 def x_get(path):
     token = os.environ["X_USER_ACCESS_TOKEN"]
     try:
@@ -60,6 +67,8 @@ def x_get(path):
                 "X token expired: run scripts/x_user_token.py --refresh "
                 "(or without --refresh to re-authorize)."
             )
+        if error.code == 402:
+            raise CreditsDepleted(error.read().decode()[:200]) from error
         raise
 
 
@@ -166,13 +175,29 @@ def main():
     parser.add_argument("--max", type=int, default=200, help="newest N bookmarks")
     parser.add_argument("--out", required=True)
     parser.add_argument(
+        "--from-raw",
+        help="reuse the bookmarks saved by an earlier run (<out>.raw.json)",
+    )
+    parser.add_argument(
         "--no-replies",
         action="store_true",
         help="skip the self-reply lookup for posts without an arXiv link",
     )
     args = parser.parse_args()
 
-    handle, bookmarks, users, tweets = fetch_bookmarks(args.max)
+    if args.from_raw:
+        with open(args.from_raw) as raw:
+            handle, bookmarks, users, tweets = json.load(raw)
+    else:
+        try:
+            handle, bookmarks, users, tweets = fetch_bookmarks(args.max)
+        except CreditsDepleted:
+            sys.exit(
+                "X API credits are depleted: top them up in the X developer console."
+            )
+        with open(f"{args.out}.raw.json", "w") as raw:
+            json.dump([handle, bookmarks, users, tweets], raw)
+    replies_enabled = not args.no_replies
     report = []
     for post in bookmarks:
         # A quote or retweet of an announcement: the quoted post is the thread.
@@ -183,12 +208,17 @@ def main():
         ]
         arxiv_ids, other = links(thread)
         replies_checked = False
-        if not arxiv_ids and not args.no_replies:
-            root = thread[-1]
-            replies = self_replies(root, users[root["author_id"]])
-            replies_checked = True
-            arxiv_ids, more = links(thread + replies)
-            other = list(dict.fromkeys(other + more))
+        root = thread[-1]
+        if not arxiv_ids and replies_enabled and root.get("author_id") in users:
+            try:
+                replies = self_replies(root, users[root["author_id"]])
+            except CreditsDepleted:
+                print("X credits depleted: skipping the remaining self-reply lookups")
+                replies_enabled = False
+            else:
+                replies_checked = True
+                arxiv_ids, more = links(thread + replies)
+                other = list(dict.fromkeys(other + more))
         thread_users = {
             users[t["author_id"]]["username"]: users[t["author_id"]]
             for t in thread

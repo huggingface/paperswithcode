@@ -2,15 +2,17 @@
 
 One-time setup in the X developer portal (your app → User authentication settings):
   - enable OAuth 2.0, type "Web App" (confidential) or "Native App" (public)
-  - callback URL: http://127.0.0.1:8765/callback
+  - callback URL: http://localhost:8080/callback
   - put X_OAUTH_CLIENT_ID (and X_OAUTH_CLIENT_SECRET for a Web App) in backend/keys.env
 
-Usage:
-  uv run --env-file backend/keys.env python .agents/skills/process-x-bookmarks/scripts/x_user_token.py
-      Prints an authorize link; open it, approve, then paste the URL your browser
-      was redirected to (the page itself will not load, which is fine).
-  uv run --env-file backend/keys.env python .agents/skills/process-x-bookmarks/scripts/x_user_token.py --refresh
+Usage (from the repository root, prefix each with `uv run --env-file backend/keys.env python`):
+  .agents/skills/process-x-bookmarks/scripts/x_user_token.py --refresh
       Swaps X_USER_REFRESH_TOKEN for a fresh access token (they expire after 2 hours).
+  .agents/skills/process-x-bookmarks/scripts/x_user_token.py --link
+      Prints an authorize link. The user opens it and approves; the browser then
+      fails to load http://localhost:8080/callback?state=…&code=…, which is fine.
+  .agents/skills/process-x-bookmarks/scripts/x_user_token.py --finish '<redirected URL>'
+      Exchanges the code from that URL (valid for a few minutes) for tokens.
 
 Writes X_USER_ACCESS_TOKEN and X_USER_REFRESH_TOKEN into backend/keys.env and
 prints only the authenticated @handle, never the token values.
@@ -28,7 +30,9 @@ import urllib.request
 from pathlib import Path
 
 KEYS_FILE = Path("backend/keys.env").resolve()  # run from the repository root
-REDIRECT_URI = "http://127.0.0.1:8765/callback"
+# The PKCE verifier must survive between --link and --finish.
+PENDING_FILE = Path.home() / ".cache" / "pwc-x-oauth-pending.json"
+REDIRECT_URI = "http://localhost:8080/callback"
 SCOPES = "tweet.read users.read bookmark.read offline.access"
 CLIENT_ID = os.environ["X_OAUTH_CLIENT_ID"]
 CLIENT_SECRET = os.environ.get("X_OAUTH_CLIENT_SECRET")
@@ -73,27 +77,23 @@ def save_tokens(tokens):
 def whoami(access_token):
     request = urllib.request.Request(
         "https://api.x.com/2/users/me",
-        headers={"Authorization": f"Bearer {access_token}", "User-Agent": "curl/8.5.0"},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "User-Agent": "curl/8.5.0",
+        },
     )
     with urllib.request.urlopen(request, timeout=60) as response:
         return json.load(response)["data"]["username"]
 
 
-if "--refresh" in sys.argv:
-    tokens = token_request(
-        {
-            "grant_type": "refresh_token",
-            "refresh_token": os.environ["X_USER_REFRESH_TOKEN"],
-        }
-    )
-else:
+def print_link():
     verifier = secrets.token_urlsafe(64)
-    challenge = (
-        base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest())
-        .rstrip(b"=")
-        .decode()
-    )
+    digest = hashlib.sha256(verifier.encode()).digest()
+    challenge = base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
     state = secrets.token_urlsafe(16)
+    PENDING_FILE.parent.mkdir(parents=True, exist_ok=True)
+    PENDING_FILE.write_text(json.dumps({"verifier": verifier, "state": state}))
+    PENDING_FILE.chmod(0o600)
     query = urllib.parse.urlencode(
         {
             "response_type": "code",
@@ -105,23 +105,43 @@ else:
             "code_challenge_method": "S256",
         }
     )
-    print("Open this link, approve access, then paste the full redirected URL:\n")
-    print(f"https://x.com/i/oauth2/authorize?{query}\n")
-    params = urllib.parse.parse_qs(
-        urllib.parse.urlparse(input("Redirected URL: ").strip()).query
-    )
-    if params.get("state", [None])[0] != state:
-        sys.exit("State mismatch: paste the URL from this run's authorize link.")
+    print(f"https://x.com/i/oauth2/authorize?{query}")
+
+
+def exchange_code(redirected_url):
+    pending = json.loads(PENDING_FILE.read_text())
+    params = urllib.parse.parse_qs(urllib.parse.urlparse(redirected_url.strip()).query)
+    if params.get("state", [None])[0] != pending["state"]:
+        sys.exit("State mismatch: paste the URL from the latest --link run.")
     tokens = token_request(
         {
             "grant_type": "authorization_code",
             "code": params["code"][0],
             "redirect_uri": REDIRECT_URI,
-            "code_verifier": verifier,
+            "code_verifier": pending["verifier"],
         }
     )
+    PENDING_FILE.unlink()
+    return tokens
+
+
+if "--link" in sys.argv:
+    print_link()
+    sys.exit()
+if "--refresh" in sys.argv:
+    tokens = token_request(
+        {
+            "grant_type": "refresh_token",
+            "refresh_token": os.environ["X_USER_REFRESH_TOKEN"],
+        }
+    )
+elif "--finish" in sys.argv:
+    tokens = exchange_code(sys.argv[sys.argv.index("--finish") + 1])
+else:
+    sys.exit(__doc__)
 
 save_tokens(tokens)
 print(
-    f"Saved X user tokens to {KEYS_FILE} for @{whoami(tokens['access_token'])} (scopes: {tokens.get('scope')})."
+    f"Saved X user tokens to {KEYS_FILE} for "
+    f"@{whoami(tokens['access_token'])} (scopes: {tokens.get('scope')})."
 )

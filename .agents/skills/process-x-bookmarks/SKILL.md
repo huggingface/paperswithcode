@@ -29,12 +29,25 @@ Bookmarks need an OAuth 2.0 user-context token; the app-only
 uv run --env-file backend/keys.env python .agents/skills/process-x-bookmarks/scripts/x_user_token.py --refresh
 ```
 
-If the refresh token is missing or rejected, the user must re-authorize once.
-The script is interactive (it prints a link and reads the redirected URL), so
-start it in a terminal tab the user can type into, without `--refresh`, and
-ask them to approve and paste the URL. Ask them to close `backend/keys.env` in
-their editor first: an open editor buffer has overwritten the saved tokens
-before.
+If the refresh token is missing or rejected, the user must re-authorize once,
+in two steps that need no terminal:
+
+1. Run the script with `--link` and put the printed link in your message
+   (not only in a tool result the user may not see).
+2. The user approves; their browser then fails to load
+   `http://localhost:8080/callback?state=…&code=…`. They paste that URL back,
+   and you run the script with `--finish '<URL>'` right away (the code expires
+   within minutes; a new `--link` invalidates older links).
+
+That callback must be registered on the X app (client ID in
+`X_OAUTH_CLIENT_ID`); X answers an unregistered one with a bare "Something went
+wrong — You weren't able to give access to the App". Ask the user to close
+`backend/keys.env` in their editor first: an open editor buffer has
+overwritten the saved tokens before.
+
+X API reads are prepaid. HTTP 402 `credits-depleted` on any endpoint means the
+account is out of credits (shared with the `discover_x_threads` CRON); the user
+must top up in the X developer console. Stop and tell them.
 
 ## 2. Triage the bookmarks
 
@@ -46,7 +59,12 @@ uv run --env-file backend/keys.env python .agents/skills/process-x-bookmarks/scr
 The API returns bookmarks newest first and at most the newest 800. Bookmarks
 carry no bookmarked-at time, so "recent" means the first `--max` entries; every
 later step is idempotent, so re-processing already-handled bookmarks is safe.
-X reads are pay-per-use: keep `--max` to what the user asked for.
+X reads are pay-per-use: keep `--max` to what the user asked for. The fetched
+bookmarks are saved to `<out>.raw.json` first; rerun with
+`--from-raw <out>.raw.json` instead of fetching them again. Each bookmark
+without an arXiv link costs one extra timeline read for the self-reply lookup;
+pass `--no-replies` when credits are tight, and the script stops the lookups
+by itself if credits run out mid-run.
 
 For each bookmark the script follows quotes and retweets to the original post,
 and when no arXiv link is visible it reads the poster's own posts in the same
