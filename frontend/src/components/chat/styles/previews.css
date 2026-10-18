@@ -394,3 +394,65 @@
   font-variant-numeric: tabular-nums;
 }
 .catalog-preview-stats { margin-top: 4px; }
+
+/* Reader citations into the open PDF */
+.chat-pdf-citation {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 0 1px;
+  padding: 1px 8px;
+  border: 1px solid color-mix(in oklch, var(--accent-text) 30%, transparent);
+  border-radius: 999px;
+  background: color-mix(in oklch, var(--accent-text) 7%, transparent);
+  color: var(--accent-text);
+  font: inherit;
+  font-size: 0.86em;
+  line-height: 1.5;
+  vertical-align: baseline;
+  cursor: pointer;
+}
+.chat-pdf-citation:hover,
+.chat-pdf-citation:focus-visible { border-color: var(--accent-text); }
+.chat-pdf-citation > svg { width: 0.95em; height: 0.95em; flex: none; }
+.chat-pdf-citation-preview {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  left: 0;
+  z-index: 20;
+  display: none;
+  width: min(320px, 70vw);
+  padding: 8px 10px;
+  border: 1px solid var(--chat-border);
+  border-radius: 8px;
+  background: var(--chat-surface);
+  color: var(--chat-text);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+  font-size: 0.92em;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+}
+.chat-pdf-citation-preview strong { display: block; margin-bottom: 2px; color: var(--chat-muted); font-weight: 600; }
+.chat-pdf-citation:hover .chat-pdf-citation-preview,
+.chat-pdf-citation:focus-visible .chat-pdf-citation-preview { display: block; }
+
+.chat-pdf-sources { margin-top: 10px; color: var(--chat-muted); font-size: 0.88em; }
+.chat-pdf-sources summary { cursor: pointer; width: fit-content; }
+.chat-pdf-sources ol { margin: 6px 0 0; padding-left: 1.4em; }
+.chat-pdf-sources li { margin: 3px 0; }
+.chat-pdf-sources button {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--chat-text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.chat-pdf-sources button:hover > span:last-child { text-decoration: underline; }
+.chat-pdf-sources-page { flex: none; color: var(--accent-text); font-variant-numeric: tabular-nums; }

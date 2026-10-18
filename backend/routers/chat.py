@@ -474,6 +474,7 @@ def chat_availability():
             "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
+            "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -493,6 +494,7 @@ def chat_availability():
             "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
+            "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -512,6 +514,7 @@ def chat_availability():
             "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
             "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
             "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
+            "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
             "paper_artifacts_enabled": (
                 settings.chat_artifacts_enabled
                 and settings.chat_latex_paper_enabled
@@ -527,6 +530,7 @@ def chat_availability():
         "native_pdf_reader_enabled": settings.native_pdf_reader_enabled,
         "paper_reader_chat_enabled": settings.paper_reader_chat_enabled,
         "paper_reader_selection_enabled": settings.paper_reader_selection_enabled,
+        "paper_reader_citations_enabled": settings.paper_reader_citations_enabled,
         "paper_artifacts_enabled": (
             settings.chat_artifacts_enabled
             and settings.chat_latex_paper_enabled

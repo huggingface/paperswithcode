@@ -254,6 +254,7 @@ def test_chat_availability_maps_spend_rejection_to_content_free_paused_state(
         "native_pdf_reader_enabled": False,
         "paper_reader_chat_enabled": False,
         "paper_reader_selection_enabled": False,
+        "paper_reader_citations_enabled": False,
         "paper_artifacts_enabled": False,
     }
 
