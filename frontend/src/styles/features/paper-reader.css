@@ -73,6 +73,10 @@
 .pdf-page .textLayer ::selection { background: rgb(45 125 255 / .3); color: transparent; }
 .pdf-search-highlight { border-radius: 1px; background: rgb(45 125 255 / .34); color: inherit; box-shadow: 0 0 0 1px rgb(45 125 255 / .18); }
 .pdf-search-highlight.is-active { background: rgb(28 104 239 / .52); box-shadow: 0 0 0 1px rgb(28 104 239 / .34); }
+/* A chat citation's passage: flashes, then fades out. */
+.pdf-citation-highlight { position: absolute; z-index: 3; border-radius: 3px; pointer-events: none; background: rgb(255 196 0 / .28); box-shadow: 0 0 0 2px rgb(255 170 0 / .7); animation: pdf-citation-flash 4s ease-out forwards; }
+@keyframes pdf-citation-flash { 0%, 10% { opacity: 0; } 18%, 70% { opacity: 1; } 100% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .pdf-citation-highlight { animation: pdf-citation-flash 4s step-end forwards; } }
 /* Hover table of contents: one tick per section along the right edge; the full outline appears while the rail is hovered, focused, or tapped open. */
 .pdf-outline { position: absolute; z-index: 9; top: 0; right: 14px; bottom: 0; display: flex; align-items: center; pointer-events: none; }
 .pdf-outline-rail { display: flex; flex-direction: column; align-items: flex-end; justify-content: center; gap: 5px; max-height: 100%; overflow: hidden; border: 0; padding: 12px 6px 12px 10px; background: transparent; cursor: pointer; pointer-events: auto; }

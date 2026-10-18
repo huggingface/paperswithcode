@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 
@@ -16,6 +16,9 @@ import { safeExternalHref } from "@/lib/safeExternalHref";
 import { externalPaperWebPage } from "@/lib/paperReader";
 import { normalizePaperRouteId } from "@/lib/utils";
 import { ChatExperience } from "@/views/ChatView";
+import { PdfCitationContext, type PdfCitationTarget } from "@/components/chat/PdfCitationContext";
+import { citationBoxes, type PdfHighlight } from "@/components/pdf/pdfCitations";
+import { getPaperLayout } from "@/lib/api/papers";
 
 const DEFAULT_RATIO = 66;
 const CHAT_TRANSITION_MS = 240;
@@ -322,6 +325,25 @@ function PaperReaderExperience() {
     if (!selection) setSelectionStatus("");
   }, []);
 
+  const citationsEnabled = availabilityQuery.data?.paper_reader_citations_enabled === true && Boolean(pdfUrl);
+  const layoutQuery = useQuery({
+    queryKey: ["paper-layout", canonicalRoute],
+    queryFn: () => getPaperLayout(canonicalRoute),
+    enabled: citationsEnabled && Boolean(canonicalRoute),
+    staleTime: 5 * 60_000,
+  });
+  const [pdfHighlight, setPdfHighlight] = useState<PdfHighlight>();
+  const layout = layoutQuery.data;
+  const citationTarget = useMemo<PdfCitationTarget | null>(() => citationsEnabled ? {
+    layout,
+    open: (anchor) => {
+      const boxes = layout ? citationBoxes(layout, anchor) : [];
+      if (!boxes.length) return;
+      setPdfHighlight((previous) => ({ boxes, nonce: (previous?.nonce ?? 0) + 1 }));
+      setMobileTab("paper");
+    },
+  } : null, [citationsEnabled, layout]);
+
   const assistantEnabled = isPaperReaderChatEnabled()
     && availabilityQuery.data?.paper_reader_chat_enabled !== false;
   const assistant = paper && assistantEnabled && webPage && !webPageReady
@@ -397,6 +419,7 @@ function PaperReaderExperience() {
               : undefined}
             onPaperSelection={attachSelection}
             onPaperSelectionError={setSelectionStatus}
+            highlight={pdfHighlight}
             onPageChange={(page) => {
               currentPageRef.current = page;
               sessionStorage.setItem(pageKey(routeId), String(page));
@@ -437,7 +460,7 @@ function PaperReaderExperience() {
         role="tabpanel"
         aria-label="Chat"
         aria-hidden={(!desktopSplit && mobileTab !== "assistant") || collapsed}
-      >{assistant}</aside>
+      ><PdfCitationContext.Provider value={citationTarget}>{assistant}</PdfCitationContext.Provider></aside>
       <div className="sr-only" aria-live="polite">{selectionStatus}</div>
       {desktopSplit && <button
         type="button"

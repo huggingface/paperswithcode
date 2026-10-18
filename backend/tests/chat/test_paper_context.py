@@ -948,7 +948,7 @@ def test_reader_retries_pdf_text_when_only_an_unavailable_entry_is_cached(
     )
     loads = []
 
-    def load(_paper, _row, *, pdf_fallback=False):
+    def load(_paper, _row, *, pdf_fallback=False, layout=False):
         loads.append(pdf_fallback)
         return replace(
             unavailable,
@@ -1013,3 +1013,94 @@ def test_reader_and_mention_loads_coalesce_separately():
     release_reader.set()
     reader.join(5)
     assert results["reader"] is with_text
+
+
+def _layout_service(monkeypatch, paged_reader, *, enabled=True):
+    service, paper, row = _missing_markdown_service(
+        monkeypatch, lambda *_args, **_kwargs: ("pdf text", False)
+    )
+    service.settings = Settings(
+        paper_markdown_hf_bucket_id="owner/content",
+        paper_layout_hf_bucket_id="owner/pages",
+        paper_reader_citations_enabled=enabled,
+        hf_token="",
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_paper_context_service.read_paged_markdown_bounded",
+        paged_reader,
+    )
+    return service, paper, row
+
+
+def test_reader_paper_prefers_layout_markdown_with_citable_tags(monkeypatch):
+    seen = {}
+
+    def paged_reader(identifier, **kwargs):
+        seen.update(identifier=identifier, **kwargs)
+        return (
+            "<!-- pwc:page 6 -->\n\n<!-- pwc:p6b2 -->\n## 5.1 Prediction Model\n\n"
+            "<!-- pwc:p6b3 -->\nMAR <b>uses</b> a diffusion MLP.\n",
+            False,
+        )
+
+    service, paper, row = _layout_service(monkeypatch, paged_reader)
+
+    prepared = service._load(paper, row, pdf_fallback=True, layout=True)
+
+    assert seen["identifier"] == "2610.04862"
+    assert seen["bucket_id"] == "owner/pages"
+    assert prepared.content_origin == "layout_markdown"
+    assert "[page 6]" in prepared.markdown
+    assert "{p6b2} ## 5.1 Prediction Model" in prepared.markdown
+    assert "{p6b3} MAR &lt;b&gt;uses&lt;/b&gt;" in prepared.markdown
+    assert "pwc:" not in prepared.markdown
+    block = ChatPaperContextService._paper_block(
+        "primary-paper", prepared, kind="primary"
+    )
+    assert 'content_origin="layout_markdown"' in block
+    assert "[short label](pdf:p5b3)" in block
+
+
+def test_reader_paper_without_layout_uses_canonical_markdown(monkeypatch):
+    def missing_layout(identifier, **_kwargs):
+        raise chat_paper_context_service.PaperLayoutNotFoundError(identifier)
+
+    service, paper, row = _layout_service(monkeypatch, missing_layout)
+
+    prepared = service._load(paper, row, pdf_fallback=True, layout=True)
+
+    assert prepared.content_origin == "pdf_text"
+    assert "pdf_citation_notice" not in ChatPaperContextService._paper_block(
+        "primary-paper", prepared
+    )
+
+
+def test_layout_reader_loads_cache_apart_from_mentions(monkeypatch):
+    service = ChatPaperContextService(
+        SimpleNamespace(), Settings(paper_reader_citations_enabled=True)
+    )
+    row = SimpleNamespace(
+        id=9, version="v1", updated_at=SimpleNamespace(isoformat=lambda: "u")
+    )
+    paper = SimpleNamespace(id="9", arxiv_id="2610.00009", source="arxiv")
+    monkeypatch.setattr(service, "_resolve_marker", lambda _route: (paper, row))
+    base = replace(
+        _paper("2610.00009"), paper_id="9", paper_version="v1", metadata_updated_at="u"
+    )
+    loads = []
+
+    def load(_paper, _row, *, pdf_fallback=False, layout=False):
+        loads.append(layout)
+        return replace(base, content_origin="layout_markdown" if layout else "markdown")
+
+    monkeypatch.setattr(service, "_load", load)
+    try:
+        reader = service.prepare_one("2610.00009", pdf_fallback=True)
+        mention = service.prepare_one("2610.00009")
+        assert reader.content_origin == "layout_markdown"
+        assert mention.content_origin == "markdown"
+        assert service.prepare_one("2610.00009", pdf_fallback=True) is reader
+        assert loads == [True, False]
+    finally:
+        chat_paper_context_service._CACHE._drop("2610.00009")
+        chat_paper_context_service._CACHE._drop("2610.00009#layout")

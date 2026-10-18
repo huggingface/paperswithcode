@@ -31,6 +31,11 @@ from backend.models.database import ChatMessageRecord, ChatSession
 from backend.models.database import Paper as DBPaper
 from backend.services.chat_edit_service import INACTIVE_STATUSES
 from backend.services.chat_session_service import ChatServiceError
+from backend.services.paper_layout_service import (
+    PaperLayoutNotFoundError,
+    citable_markdown,
+    read_paged_markdown_bounded,
+)
 from backend.services.paper_markdown_service import read_paper_markdown_bounded
 from backend.services.paper_pdf_text_service import read_paper_pdf_text_bounded
 from backend.services.paper_service import PaperNotFoundError, PaperService
@@ -43,6 +48,19 @@ CACHE_MAX_ENTRIES = 64
 CACHE_MAX_BYTES = 6 * 1024 * 1024
 CACHE_TTL_SECONDS = 5 * 60
 PREWARM_MAX_CONCURRENCY = 4
+PDF_CITATION_NOTICE = (
+    "<pdf_citation_notice>The body above was read from the PDF's layout. "
+    "`[page N]` marks where PDF page N begins, and a tag such as `{p5b3}` labels the "
+    "paragraph, heading, equation, table or caption that follows it. When a statement "
+    "relies on a specific passage of this paper, cite it inline right after the "
+    "statement as [short label](pdf:p5b3) with the tag of the supporting block. The "
+    "label names the content in 1-4 words (a concept or section name), never "
+    '"source" or a number. Cite a heading\'s tag to point at its whole section. '
+    "Use only tags that appear above, never invented ones; cite one or two blocks "
+    "per claim; do not cite general knowledge. If the paper does not support a "
+    "claim, say so rather than citing loosely related text. Do not otherwise mention "
+    "tags or page numbers.</pdf_citation_notice>"
+)
 
 
 @dataclass(frozen=True)
@@ -62,8 +80,9 @@ class PreparedPaper:
     content_truncated: bool
     content_available: bool
     included_bytes: int
-    # "markdown" for canonical OCR Markdown, "pdf_text" for the interim plain
-    # text extracted while that Markdown is still being produced.
+    # "markdown" for canonical OCR Markdown, "layout_markdown" for page-aware
+    # Markdown whose block tags reader answers cite, "pdf_text" for the interim
+    # plain text extracted while canonical Markdown is still being produced.
     content_origin: str | None = None
 
     @property
@@ -143,7 +162,7 @@ class _PreparedPaperCache:
         try:
             with self._slots:
                 prepared = loader()
-            self.put(prepared)
+            self.put(prepared, route_id)
             return prepared
         finally:
             with self._lock:
@@ -161,10 +180,11 @@ class _PreparedPaperCache:
             self._entries.move_to_end(route_id)
             return entry.paper
 
-    def put(self, paper: PreparedPaper) -> None:
+    def put(self, paper: PreparedPaper, key: str | None = None) -> None:
+        key = key or paper.route_id
         with self._lock:
-            self._drop(paper.route_id)
-            self._entries[paper.route_id] = _CacheEntry(
+            self._drop(key)
+            self._entries[key] = _CacheEntry(
                 paper=paper, expires_at=time.monotonic() + CACHE_TTL_SECONDS
             )
             self._bytes += paper.byte_size
@@ -338,7 +358,12 @@ class ChatPaperContextService:
         )
 
     def _load(
-        self, paper: Any, row: DBPaper, *, pdf_fallback: bool = False
+        self,
+        paper: Any,
+        row: DBPaper,
+        *,
+        pdf_fallback: bool = False,
+        layout: bool = False,
     ) -> PreparedPaper:
         linked_hf = PaperService(self.db).get_linked_hf_artifact_urls(int(paper.id))
         info = _bounded_info(paper, linked_hf)
@@ -347,7 +372,21 @@ class ChatPaperContextService:
         available = False
         origin: str | None = None
         markdown_id = paper.arxiv_id if paper.source == "arxiv" else str(paper.id)
-        if markdown_id:
+        if markdown_id and layout:
+            try:
+                markdown, truncated = read_paged_markdown_bounded(
+                    markdown_id,
+                    source=paper.source,
+                    bucket_id=self.settings.paper_layout_hf_bucket_id,
+                    token=self.settings.hf_token or None,
+                    max_bytes=MARKDOWN_LIMIT_BYTES,
+                )
+                markdown = citable_markdown(markdown.replace("\x00", " "))
+                available = True
+                origin = "layout_markdown"
+            except PaperLayoutNotFoundError:
+                pass
+        if markdown_id and not available:
             try:
                 markdown, truncated = read_paper_markdown_bounded(
                     markdown_id,
@@ -430,14 +469,21 @@ class ChatPaperContextService:
     def prepare_one(
         self, route_id: str, *, pdf_fallback: bool = False
     ) -> PreparedPaper:
-        """Prepare one paper; ``pdf_fallback`` reads the PDF when Markdown is missing."""
+        """Prepare one paper; ``pdf_fallback`` reads the PDF when Markdown is missing.
+
+        Reader loads also prefer page-aware layout Markdown when citations are
+        enabled. They cache under their own key so mentions elsewhere keep the
+        canonical Markdown without citation tags.
+        """
         paper, row = self._resolve_marker(route_id)
-        cached = _CACHE.get(_route_id(paper), self._marker(row))
+        layout = pdf_fallback and self.settings.paper_reader_citations_enabled
+        cache_key = _route_id(paper) + ("#layout" if layout else "")
+        cached = _CACHE.get(cache_key, self._marker(row))
         if cached is not None and (cached.content_available or not pdf_fallback):
             return cached
         return _CACHE.prepare(
-            _route_id(paper),
-            lambda: self._load(paper, row, pdf_fallback=pdf_fallback),
+            cache_key,
+            lambda: self._load(paper, row, pdf_fallback=pdf_fallback, layout=layout),
             pdf_fallback=pdf_fallback,
         )
 
@@ -577,7 +623,11 @@ class ChatPaperContextService:
                 "content_origin": primary.content_origin,
                 "included_bytes": primary.included_bytes,
                 "context_reference": reference,
-                "reader_prompt_version": "reader-v1",
+                "reader_prompt_version": (
+                    "reader-v2"
+                    if primary.content_origin == "layout_markdown"
+                    else "reader-v1"
+                ),
             }
             prepared_by_requested_id[primary.route_id] = primary
 
@@ -851,8 +901,8 @@ class ChatPaperContextService:
             f'content_available="{str(paper.content_available).lower()}" '
             f'content_sha256="{paper.content_sha256}"'
         )
-        if paper.content_origin == "pdf_text":
-            attrs += ' content_origin="pdf_text"'
+        if paper.content_origin in ("pdf_text", "layout_markdown"):
+            attrs += f' content_origin="{paper.content_origin}"'
         if paper.content_available:
             body = f"<paper_info>\n{_safe(paper.paper_info)}\n</paper_info>\n<paper_markdown_prefix>\n{paper.markdown}\n</paper_markdown_prefix>"
             if paper.content_origin == "pdf_text":
@@ -861,6 +911,8 @@ class ChatPaperContextService:
                     "while formatted Markdown is still being prepared; tables, equations and "
                     "figure captions may be garbled.</paper_content_notice>"
                 )
+            elif paper.content_origin == "layout_markdown":
+                body += "\n" + PDF_CITATION_NOTICE
         else:
             body = (
                 f"<paper_info>\n{_safe(paper.paper_info)}\n</paper_info>\n"

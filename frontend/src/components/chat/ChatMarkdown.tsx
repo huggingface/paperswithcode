@@ -26,6 +26,8 @@ import {
   parseHuggingFaceRepoUrl,
 } from "@/components/chat/HuggingFacePreviewLink";
 import { GitHubPreviewLink } from "@/components/chat/GitHubPreviewLink";
+import { PdfCitationChip, PdfCitationSources } from "@/components/chat/PdfCitation";
+import { PDF_CITATION_ANCHOR } from "@/components/pdf/pdfCitations";
 import { WebPreviewLink } from "@/components/chat/WebPreviewLink";
 import { ExternalPaperPreviewLink } from "@/components/chat/ExternalPaperPreviewLink";
 import {
@@ -106,7 +108,7 @@ function withholdPartialCitation(text: string): string {
 }
 
 const chatUrlTransform = (url: string): string =>
-  url.startsWith("paper:") || isCatalogEntityHref(url)
+  url.startsWith("paper:") || url.startsWith("pdf:") || isCatalogEntityHref(url)
     ? url
     : defaultUrlTransform(url);
 
@@ -134,6 +136,7 @@ export const ChatMarkdown: React.FC<{
   );
 
   return (
+    <>
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[rehypeKatex]}
@@ -154,6 +157,12 @@ export const ChatMarkdown: React.FC<{
                 {children}
               </PaperCitation>
             );
+          }
+          if (href?.startsWith("pdf:")) {
+            const anchor = href.slice("pdf:".length);
+            return PDF_CITATION_ANCHOR.test(anchor)
+              ? <PdfCitationChip anchor={anchor}>{children}</PdfCitationChip>
+              : <span className="chat-invalid-citation">{children}</span>;
           }
           if (href && isCatalogEntityHref(href)) {
             const entity = parseCatalogEntityHref(href);
@@ -229,5 +238,7 @@ export const ChatMarkdown: React.FC<{
     >
       {source}
     </ReactMarkdown>
+    {!streaming && <PdfCitationSources text={source} />}
+    </>
   );
 };
