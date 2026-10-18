@@ -86,9 +86,16 @@ def fetch_bookmarks(limit):
     posts, users, tweets, token = [], {}, {}, None
     while len(posts) < limit:
         page = f"&pagination_token={token}" if token else ""
-        data = x_get(
-            f"/users/{me['id']}/bookmarks?max_results=100&{TWEET_FIELDS}{page}"
-        )
+        try:
+            data = x_get(
+                f"/users/{me['id']}/bookmarks?max_results=100&{TWEET_FIELDS}{page}"
+            )
+        except CreditsDepleted:
+            if not posts:
+                raise
+            # Keep the pages already paid for.
+            print(f"X credits depleted: continuing with {len(posts)} bookmarks")
+            break
         posts += data.get("data", [])
         includes = data.get("includes", {})
         users.update({u["id"]: u for u in includes.get("users", [])})
