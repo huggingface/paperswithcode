@@ -572,9 +572,10 @@ export function PdfViewer({
     setNavigationPage(behavior === "smooth" ? first.page : undefined);
     scroller.scrollTo({ top: Math.max(0, top - CITATION_SCROLL_MARGIN), behavior });
     if (behavior === "instant") setCurrentPage(first.page);
-    // Re-run per request and once pages exist, not on every scroll-state change.
+    // Re-run per request, once pages exist and once the real page aspect is
+    // measured (placeholder heights change then), not on scroll-state changes.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [highlight?.nonce, pages]);
+  }, [highlight?.nonce, pages, pageAspect]);
   const jumpToSection = (entry: PdfOutlineEntry, behavior?: ScrollBehavior) => {
     const scroller = scrollRef.current;
     const target = scroller?.querySelector<HTMLElement>(`[data-page="${entry.page}"]`);
