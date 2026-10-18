@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
 import { PdfCitationContext } from "@/components/chat/PdfCitationContext";
-import { citationBoxes, citedAnchors } from "@/components/pdf/pdfCitations";
+import { citationBoxes, citedAnchors, previewPlacement } from "@/components/pdf/pdfCitations";
 import type { PaperLayout } from "@/lib/api/papers";
 
 const layout: PaperLayout = {
@@ -59,5 +59,22 @@ describe("ChatMarkdown pdf citations", () => {
     );
     expect(container.querySelectorAll(".chat-pdf-citation")).toHaveLength(2);
     expect(container.querySelector(".chat-pdf-sources")).toBeNull();
+  });
+});
+
+describe("pdf citation preview placement", () => {
+  it("opens rightward when there is room and stays inside the viewport near the right edge", () => {
+    const viewport = 1200;
+    expect(previewPlacement({ left: 100, top: 400 }, viewport)).toEqual({ left: 0, below: false });
+    const nearRight = previewPlacement({ left: 1100, top: 400 }, viewport);
+    expect(1100 + nearRight.left + 320).toBeLessThanOrEqual(viewport - 12);
+  });
+
+  it("stays inside a narrow viewport and opens below chips near the top", () => {
+    const placement = previewPlacement({ left: 300, top: 40 }, 390);
+    const width = 390 * 0.7;
+    expect(300 + placement.left).toBeGreaterThanOrEqual(12);
+    expect(300 + placement.left + width).toBeLessThanOrEqual(390 - 12);
+    expect(placement.below).toBe(true);
   });
 });
