@@ -61,6 +61,16 @@ and a 2 MiB per-trace payload limit. Transient network/HTTP failures retry three
 times with the same log ID, so accepted retries deduplicate in Trackio. Permanent
 HTTP/API errors, oversize traces and queue overflow emit content-free warnings
 recognized by chat operational alerts. Network I/O never waits on the chat stream.
+The final retry warning names the last status code or exception class
+(`last_error=HTTP 500`, `last_error=ReadTimeout`), never the response body.
+
+Trace export classifications are `warning` alerts (`chat_telemetry_degraded`),
+not critical pages, because they lose observability rather than chat turns. Like
+critical runtime classifications, each alerts once on entry, then at most once
+per cooldown while it keeps recurring (six hours for warnings, one hour for
+critical), with the suppressed count; after 30 quiet minutes a repeating
+classification sends one `chat_telemetry_recovered` or `chat_runtime_recovered`
+notice.
 A normal interpreter shutdown drains for up to five seconds; prolonged Space
 outages, forced termination or remaining queued work can lose traces. There is
 no durable client-side spool.

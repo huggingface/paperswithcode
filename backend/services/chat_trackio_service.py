@@ -191,6 +191,7 @@ class TrackioClient:
 
     def _send(self, payload: bytes) -> bool:
         # No redirect following: credentials must stay on the configured Space.
+        last_error = "unknown"
         with httpx.Client(timeout=15, follow_redirects=False) as client:
             for attempt in range(3):
                 try:
@@ -219,12 +220,15 @@ class TrackioClient:
                             "chat Trackio export failed HTTP %s", response.status_code
                         )
                         return False
-                except (httpx.HTTPError, ValueError):
+                    last_error = f"HTTP {response.status_code}"
+                except (httpx.HTTPError, ValueError) as exc:
                     # Never log payloads, response bodies or tokens.
-                    pass
+                    last_error = type(exc).__name__
                 if attempt < 2:
                     time.sleep(2**attempt)
-        logger.warning("chat Trackio export failed after 3 attempts")
+        logger.warning(
+            "chat Trackio export failed after 3 attempts last_error=%s", last_error
+        )
         return False
 
     def _next_batch(self) -> list[bytes]:

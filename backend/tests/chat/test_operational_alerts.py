@@ -26,6 +26,7 @@ from backend.services.chat_operational_alert_service import (
     operational_alert_payload,
     provider_health,
     provider_transition,
+    runtime_alert_decisions,
     runtime_failure_counts,
     settle_executor_transport_alert,
 )
@@ -711,6 +712,111 @@ def test_pending_runtime_events_are_bounded_by_coalescing():
         "turn_cleanup_failure": 2,
         "latency_phase_failure": 1,
     }
+
+
+def test_runtime_alerts_cool_down_while_ongoing_and_recover_once():
+    now = datetime(2026, 10, 17, 13, tzinfo=UTC)
+    active: dict = {}
+
+    alerts, recovered = runtime_alert_decisions(
+        active, {"trackio_export_failure": 5, "turn_cleanup_failure": 1}, now
+    )
+    assert alerts == {
+        "critical": {"turn_cleanup_failure": 1},
+        "warning": {"trackio_export_failure": 5},
+    }
+    assert recovered == []
+
+    for minute in range(1, 60):
+        alerts, recovered = runtime_alert_decisions(
+            active,
+            {"trackio_export_failure": 10},
+            now + timedelta(minutes=minute),
+        )
+        assert alerts == {"critical": {}, "warning": {}}
+        # The one-off critical line expires silently after the quiet period.
+        assert recovered == []
+    assert set(active) == {"trackio_export_failure"}
+
+    reminder_at = now + timedelta(hours=6)
+    alerts, _ = runtime_alert_decisions(
+        active, {"trackio_export_failure": 10}, reminder_at - timedelta(minutes=1)
+    )
+    assert alerts["warning"] == {}
+    alerts, _ = runtime_alert_decisions(
+        active, {"trackio_export_failure": 10}, reminder_at
+    )
+    assert alerts["warning"]["trackio_export_failure"] > 10
+
+    alerts, recovered = runtime_alert_decisions(
+        active, {}, reminder_at + timedelta(minutes=29)
+    )
+    assert recovered == []
+    alerts, recovered = runtime_alert_decisions(
+        active, {}, reminder_at + timedelta(minutes=30)
+    )
+    assert alerts == {"critical": {}, "warning": {}}
+    assert recovered == ["trackio_export_failure"]
+    assert active == {}
+
+
+def test_monitor_sends_one_telemetry_warning_per_ongoing_failure(monkeypatch):
+    now = datetime(2026, 10, 17, 13, tzinfo=UTC)
+    journal = ["chat Trackio export failed after 3 attempts last_error=HTTP 500"] * 5
+    monkeypatch.setattr(
+        monitor, "read_journal", lambda _cursor, _now: (journal, "cursor", False)
+    )
+    monkeypatch.setattr(monitor, "read_lifecycle_window", lambda _now, _seconds: [])
+    monkeypatch.setattr(
+        monitor,
+        "db_manager",
+        SimpleNamespace(session_local=lambda: nullcontext(None)),
+    )
+    monkeypatch.setattr(
+        monitor,
+        "provider_health",
+        lambda _db, _settings, observed_now: ProviderHealth(
+            0, 0, observed_now - timedelta(minutes=5), observed_now
+        ),
+    )
+    state = monitor.empty_state()
+    settings = Settings()
+
+    events, _ = monitor.collect_events(state, settings, now)
+    assert [(event["signal"], event["severity"]) for event in events] == [
+        ("chat_telemetry_degraded", "warning")
+    ]
+    assert events[0]["classifications"] == {"trackio_export_failure": 5}
+    for minute in range(1, 30):
+        events, _ = monitor.collect_events(
+            state, settings, now + timedelta(minutes=minute)
+        )
+        assert events == []
+        assert state["operational_counts"] == {"trackio_export_failure": 5}
+
+    journal = []
+    events, _ = monitor.collect_events(state, settings, now + timedelta(minutes=59))
+    assert [(event["signal"], event["severity"]) for event in events] == [
+        ("chat_telemetry_recovered", "recovery")
+    ]
+
+
+def test_state_rejects_unknown_runtime_classifications(tmp_path):
+    path = tmp_path / "state.json"
+    state = monitor.empty_state()
+    stamp = datetime(2026, 10, 17, tzinfo=UTC).isoformat()
+    state["runtime_active"] = {
+        "user-controlled-label": {
+            "last_seen": stamp,
+            "last_alerted": stamp,
+            "suppressed": 0,
+            "repeated": False,
+        }
+    }
+    path.write_text(json.dumps(state), encoding="utf-8")
+
+    with pytest.raises(TypeError, match="invalid runtime state"):
+        monitor.load_state(path)
 
 
 def test_state_round_trip_is_private_and_atomic(tmp_path):

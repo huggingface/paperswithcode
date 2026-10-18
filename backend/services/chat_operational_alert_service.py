@@ -76,6 +76,30 @@ RUNTIME_FAILURE_PATTERNS = {
     "paper_curation_dispatch_pause": "paper curation dispatch paused",
     "paper_curation_dispatch_recovery": "paper curation dispatch resumed",
 }
+RUNTIME_ALERT_NAMES = frozenset({*RUNTIME_FAILURE_PATTERNS, "session_store_forbidden"})
+# Trace export failures lose observability, not chat turns, so they warn
+# instead of paging and never force the paid synthetic probe.
+TELEMETRY_ALERT_NAMES = frozenset(
+    {
+        "langfuse_initialization_failure",
+        "langfuse_finalization_failure",
+        "langfuse_client_failure",
+        "trackio_initialization_failure",
+        "trackio_finalization_failure",
+        "trackio_client_failure",
+        "trackio_export_failure",
+        "trackio_trace_dropped",
+        "trackio_export_rejected",
+        "durable_lifecycle_telemetry_failure",
+    }
+)
+# A recurring classification alerts on entry, then at most once per cooldown,
+# and recovers after a quiet period without matching journal lines.
+RUNTIME_ALERT_COOLDOWN = {
+    "critical": timedelta(hours=1),
+    "warning": timedelta(hours=6),
+}
+RUNTIME_RECOVERY_QUIET = timedelta(minutes=30)
 LIFECYCLE_PATTERN = re.compile(
     r"chat durable lifecycle event=(?P<event>[a-z_]+) "
     r"code=(?P<code>[a-z_]+|none) value=(?P<value>\d+)(?:\s|$)"
@@ -300,6 +324,56 @@ def runtime_failure_counts(messages: list[str]) -> dict[str, int]:
         for message in messages
     )
     return {name: count for name, count in counts.items() if count}
+
+
+def runtime_alert_severity(name: str) -> str:
+    return "warning" if name in TELEMETRY_ALERT_NAMES else "critical"
+
+
+def runtime_alert_decisions(
+    active: dict[str, dict[str, Any]], failures: dict[str, int], now: datetime
+) -> tuple[dict[str, dict[str, int]], list[str]]:
+    """Throttle recurring runtime classifications, updating ``active`` in place.
+
+    ``active`` maps a classification to ISO ``last_seen``/``last_alerted``
+    timestamps, the ``suppressed`` count since its last alert, and whether it
+    ``repeated`` after entry. Returns the counts to alert on, by severity, and
+    the classifications that recovered. A one-off line alerts once and expires
+    silently; only a repeating classification earns a recovery notice.
+    """
+
+    alerts: dict[str, dict[str, int]] = {"critical": {}, "warning": {}}
+    for name, count in sorted(failures.items()):
+        severity = runtime_alert_severity(name)
+        entry = active.get(name)
+        if entry is None:
+            alerts[severity][name] = count
+            active[name] = {
+                "last_seen": now.isoformat(),
+                "last_alerted": now.isoformat(),
+                "suppressed": 0,
+                "repeated": False,
+            }
+            continue
+        entry["last_seen"] = now.isoformat()
+        entry["repeated"] = True
+        last_alerted = datetime.fromisoformat(entry["last_alerted"])
+        if now - last_alerted >= RUNTIME_ALERT_COOLDOWN[severity]:
+            alerts[severity][name] = entry["suppressed"] + count
+            entry["last_alerted"] = now.isoformat()
+            entry["suppressed"] = 0
+        else:
+            entry["suppressed"] += count
+    expired = [
+        name
+        for name, entry in active.items()
+        if name not in failures
+        and now - datetime.fromisoformat(entry["last_seen"]) >= RUNTIME_RECOVERY_QUIET
+    ]
+    recovered = sorted(name for name in expired if active[name]["repeated"])
+    for name in expired:
+        del active[name]
+    return alerts, recovered
 
 
 def lifecycle_window_alerts(messages: list[str], settings: Settings) -> dict[str, int]:
