@@ -345,3 +345,20 @@ def test_external_paper_jobs_hold_at_most_two_workers(db, monkeypatch):
         EXTERNAL_PAPER_POLICY_VERSION,
         EXTERNAL_PAPER_POLICY_VERSION,
     ]
+
+
+def test_completed_external_workflow_never_releases_the_daily_canary(db):
+    paper = _paper(db)
+    service = CodexPaperJobService()
+    enqueue_external_paper_curation(db, paper, settings=SETTINGS, jobs=service)
+    db.add(PaperCurationSchedulerState(id=1, canary_released=False))
+    db.commit()
+    job = db.query(PaperCurationJob).one()
+    job.kind = "add-evals"
+    job.status = "completed"
+
+    service._advance_workflow(db, job, SETTINGS)
+    db.commit()
+
+    assert db.query(PaperCurationWorkflow).one().status == "completed"
+    assert not db.get(PaperCurationSchedulerState, 1).canary_released

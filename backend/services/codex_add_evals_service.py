@@ -1738,7 +1738,9 @@ class CodexPaperJobService:
         elif row.status == "completed" and row.kind == "add-evals":
             workflow.status = "completed"
             workflow.finished_at = _now()
-            self._release_canary_backlog(db, workflow.policy_version, settings)
+            # External-paper workflows are not part of any scheduled canary.
+            if workflow.policy_version != EXTERNAL_PAPER_POLICY_VERSION:
+                self._release_canary_backlog(db, workflow.policy_version, settings)
         elif row.status == "failed":
             if parse_failure_code(row.error) == AWAITING_MARKDOWN:
                 workflow.status = "deferred"
