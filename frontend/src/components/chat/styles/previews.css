@@ -424,21 +424,21 @@
   display: none;
   width: min(320px, 70vw);
   padding: 8px 10px;
-  border: 1px solid var(--chat-border);
+  border: 1px solid var(--hairline);
   border-radius: 8px;
-  background: var(--chat-surface);
-  color: var(--chat-text);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 0.12);
+  background: var(--bg-elevated);
+  color: var(--ink);
+  box-shadow: 0 14px 44px -12px rgba(30, 28, 20, 0.4);
   font-size: 0.92em;
   line-height: 1.45;
   text-align: left;
   white-space: normal;
 }
-.chat-pdf-citation-preview strong { display: block; margin-bottom: 2px; color: var(--chat-muted); font-weight: 600; }
+.chat-pdf-citation-preview strong { display: block; margin-bottom: 2px; color: var(--ink-faint); font-weight: 600; }
 .chat-pdf-citation:hover .chat-pdf-citation-preview,
 .chat-pdf-citation:focus-visible .chat-pdf-citation-preview { display: block; }
 
-.chat-pdf-sources { margin-top: 10px; color: var(--chat-muted); font-size: 0.88em; }
+.chat-pdf-sources { margin-top: 10px; color: var(--ink-faint); font-size: 0.88em; }
 .chat-pdf-sources summary { cursor: pointer; width: fit-content; }
 .chat-pdf-sources ol { margin: 6px 0 0; padding-left: 1.4em; }
 .chat-pdf-sources li { margin: 3px 0; }
@@ -449,7 +449,7 @@
   padding: 0;
   border: 0;
   background: none;
-  color: var(--chat-text);
+  color: var(--ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
