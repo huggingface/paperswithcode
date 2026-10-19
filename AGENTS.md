@@ -105,6 +105,13 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   First confirm the worktree is clean and that `main` contains the branch's
   changes (for a squash merge, compare the branch diff against the merge
   commit's diff). Clean up only the task's own worktree and branch.
+- Keep the agent session until all of its work is live in production. Do not
+  archive, delete, or offer to archive a session whose merged changes are
+  undeployed or deployed only to staging, such as a chat change awaiting
+  production authorization. Before ending a turn in that state, record what
+  is unshipped and the exact SHA to deploy in the PR description or a comment,
+  so the work survives if the session is lost. Documentation-only and
+  local-only tasks are complete once merged or done.
 - Never force-push. If local and remote `main` have diverged, stop and resolve the
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
