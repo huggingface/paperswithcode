@@ -1,4 +1,4 @@
-"""Stateless, serialized compiler API for the private Hugging Face Space."""
+"""Stateless, serialized compiler API for one per-job compiler sandbox."""
 
 from __future__ import annotations
 
@@ -687,7 +687,7 @@ def _compiler_environment(root: Path) -> dict[str, str]:
     return {
         "HOME": str(home),
         "LANG": "C.UTF-8",
-        "PATH": "/usr/local/bin:/usr/bin:/bin",
+        "PATH": "/opt/texlive/bin:/usr/local/bin:/usr/bin:/bin",
         "TEXMFOUTPUT": str(root),
         "openin_any": "p",
         "openout_any": "p",
