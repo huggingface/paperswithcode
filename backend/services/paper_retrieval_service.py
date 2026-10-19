@@ -53,6 +53,8 @@ _RELATED_CACHE_TTL_SECONDS = 300
 # Punctuation inside a word ("V4.1", "Qwen2.5-VL"), split like the title copy
 # in papers_search_vector_update().
 _INNER_PUNCTUATION = re.compile(r"(?<=[^\W_])[^\w\s]+(?=[^\W_])|_")
+# A split variant ORed in would bring back what a "-term" excludes.
+_NEGATED_TERM = re.compile(r"(?:^|\s)-\S")
 
 
 def _related_cache_get(key: tuple) -> list[RelatedPaperRecommendation] | None:
@@ -904,7 +906,7 @@ class PaperRetrievalService:
         normalized_arxiv_id = self._normalize_arxiv_search_query(query)
         ts_query = func.websearch_to_tsquery("english", query)
         split_query = _INNER_PUNCTUATION.sub(" ", query)
-        if split_query != query:
+        if split_query != query and not _NEGATED_TERM.search(query):
             ts_query = ts_query.op("||")(
                 func.websearch_to_tsquery("english", split_query)
             )

@@ -1723,6 +1723,14 @@ def test_keyword_search_matches_version_numbers_inside_names(session_factory):
             ("Qwen2.5-VL", qwen),
         ]:
             assert [item.id for item in search(session, query)] == [str(paper.id)]
+        # "-V4.1" must still exclude an abstract that holds v4.1 as one token.
+        add_paper(
+            session,
+            title="DeepSeek Serving Notes",
+            abstract="Version 1 of our V4.1 deployment.",
+        )
+        session.commit()
+        assert search(session, "Serving -V4.1") == []
 
 
 def test_backfill_expression_matches_the_trigger(search_engine):
