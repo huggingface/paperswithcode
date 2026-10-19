@@ -173,8 +173,12 @@ export class PolicyController {
   authorize(id: string, name: string, input: Record<string, unknown>): string | undefined {
     if (!this.active.size) this.rounds += 1;
     this.active.add(id);
-    const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : this.paperActivated ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
-    const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : this.paperActivated ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
+    // Research before `pwc-paper create` must not starve the command that
+    // activates the paper budget, so paper commands always use that budget.
+    const paperBudget = this.paperActivated
+      || (name === "bash" && typeof input.command === "string" && Boolean(parsePwcPaperCommand(input.command)));
+    const maximumRounds = this.posterMode ? (this.options.posterlyMaximumRounds ?? 20) : paperBudget ? (this.options.paperMaximumRounds ?? 12) : this.options.maximumRounds;
+    const maximumCalls = this.posterMode ? (this.options.posterlyMaximumCalls ?? 40) : paperBudget ? (this.options.paperMaximumCalls ?? 30) : this.options.maximumCalls;
     if (this.toolingClosed || this.rounds > maximumRounds || this.calls >= maximumCalls) {
       this.toolingClosed = true;
       return this.deny(id, ANSWER_NOW);
