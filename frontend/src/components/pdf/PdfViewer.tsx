@@ -152,21 +152,55 @@ function LazyPdfPage({
   const [shownWidth, setShownWidth] = useState(width);
   if (!visible && shownWidth !== width) setShownWidth(width);
   const layerWidths = shownWidth === width ? [width] : [shownWidth, width];
+  // A remounted canvas is blank until pdf.js repaints it, so the page's last
+  // render stays on top as an image until the fresh canvas has painted.
+  const [snapshot, setSnapshot] = useState<string>();
+  const [painted, setPainted] = useState(false);
+  if (!visible && painted) setPainted(false);
+  const capture = useCallback((layerWidth: number) => {
+    setPainted(true);
+    const canvas = ref.current?.querySelector<HTMLCanvasElement>(`[data-layer-width="${layerWidth}"] canvas`);
+    canvas?.toBlob((blob) => {
+      if (blob) setSnapshot(URL.createObjectURL(blob));
+    }, "image/webp", 0.9);
+  }, []);
+  useEffect(() => () => {
+    if (snapshot) URL.revokeObjectURL(snapshot);
+  }, [snapshot]);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
-    const observer = new IntersectionObserver(([entry]) => setVisible(entry.isIntersecting), {
-      rootMargin: "120% 0px",
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
+    // Render well ahead of the viewport so fast scrolling meets painted pages,
+    // and release canvases only once they are much farther away, so pages near
+    // the reading position are not re-rendered on every change of direction.
+    // The margins must extend the scroll container: it clips its pages, so
+    // margins around the browser viewport would never see them early.
+    const root = element.closest(".pdf-scroll");
+    const mount = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) setVisible(true);
+    }, { root, rootMargin: "250% 0px" });
+    const release = new IntersectionObserver(([entry]) => {
+      if (!entry.isIntersecting) setVisible(false);
+    }, { root, rootMargin: "600% 0px" });
+    mount.observe(element);
+    release.observe(element);
+    return () => {
+      mount.disconnect();
+      release.disconnect();
+    };
   }, []);
   return <div ref={ref} className="pdf-page" data-page={page} style={{ minHeight: Math.round(width * aspect) }}>
     {visible && layerWidths.map((layerWidth) => {
       const shown = layerWidth === shownWidth;
-      const promote = shown ? undefined : () => setShownWidth(layerWidth);
+      const rendered = shown
+        ? () => capture(layerWidth)
+        : () => {
+          setShownWidth(layerWidth);
+          capture(layerWidth);
+        };
       return <div
         key={layerWidth}
+        data-layer-width={layerWidth}
         className={shown ? "pdf-page-layer" : "pdf-page-layer is-pending"}
         style={shown && layerWidth !== width ? { "--pdf-layer-scale": width / layerWidth } as CSSProperties : undefined}
         aria-hidden={shown ? undefined : true}
@@ -178,8 +212,8 @@ function LazyPdfPage({
           renderTextLayer={shown}
           renderAnnotationLayer={shown}
           onGetAnnotationsSuccess={onAnnotations}
-          onRenderSuccess={promote}
-          onRenderError={promote}
+          onRenderSuccess={rendered}
+          onRenderError={shown ? undefined : () => setShownWidth(layerWidth)}
           loading={null}
           customTextRenderer={searchQuery
             ? ({ str }) => highlightPdfText(str, searchQuery, page === activeSearchPage)
@@ -187,6 +221,7 @@ function LazyPdfPage({
         />
       </div>;
     })}
+    {snapshot && !painted && <img className="pdf-page-snapshot" src={snapshot} alt="" aria-hidden="true" />}
     {visible && paperLinks.map(link => <PdfPaperLink key={link.anchor.parentElement?.dataset.annotationId} {...link} />)}
     {highlightBoxes?.map(([x0, y0, x1, y1], index) => <div
       key={`${highlightNonce}-${index}`}

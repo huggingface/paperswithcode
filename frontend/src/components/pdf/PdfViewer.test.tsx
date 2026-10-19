@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 let observedWidth = 800;
 let resizeCallback: ResizeObserverCallback | undefined;
 let intersecting = true;
+const intersectionObservers: Array<{ element: Element; rootMargin: string; callback: IntersectionObserverCallback }> = [];
 const reactPdf = vi.hoisted(() => ({
   documentOptions: [] as unknown[],
   renders: [] as Array<() => void>,
@@ -102,6 +103,7 @@ describe("PdfViewer resize rendering", () => {
   beforeEach(() => {
     observedWidth = 800;
     intersecting = true;
+    intersectionObservers.length = 0;
     resizeCallback = undefined;
     reactPdf.documentOptions.length = 0;
     reactPdf.renders.length = 0;
@@ -113,8 +115,9 @@ describe("PdfViewer resize rendering", () => {
     Object.defineProperty(window, "IntersectionObserver", {
       configurable: true,
       value: class {
-        constructor(private readonly callback: IntersectionObserverCallback) {}
+        constructor(private readonly callback: IntersectionObserverCallback, private readonly options?: IntersectionObserverInit) {}
         observe(element: Element) {
+          intersectionObservers.push({ element, rootMargin: this.options?.rootMargin ?? "", callback: this.callback });
           this.callback([{ isIntersecting: intersecting, target: element } as IntersectionObserverEntry], this as unknown as IntersectionObserver);
         }
         disconnect() {}
@@ -174,6 +177,29 @@ describe("PdfViewer resize rendering", () => {
     expect(updatedPageChange).not.toHaveBeenCalled();
     await waitFor(() => expect(updatedPageChange).toHaveBeenCalledWith(13));
     expect(onPageChange).not.toHaveBeenCalled();
+  });
+
+  it("renders pages ahead of the viewport and keeps them until they are far away", () => {
+    intersecting = false;
+    const view = render(<PdfViewer url="https://arxiv.org/pdf/2511.09554" paperKey="2511.09554" paperTitle="RF-DETR" paperHref="/paper/2511.09554" />);
+    fireEvent.click(screen.getByRole("button", { name: "Load long PDF" }));
+    const pageElement = view.container.querySelector('[data-page="8"]')!;
+    const fire = (rootMargin: string, isIntersecting: boolean) => act(() => {
+      for (const observer of intersectionObservers) {
+        if (observer.element !== pageElement || observer.rootMargin !== rootMargin) continue;
+        observer.callback([{ isIntersecting, target: pageElement } as IntersectionObserverEntry], {} as IntersectionObserver);
+      }
+    });
+    const rendered = () => pageElement.querySelector('[data-testid="pdf-page"]');
+    expect(rendered()).toBeNull();
+
+    fire("250% 0px", true);
+    fire("600% 0px", true);
+    expect(rendered()).toBeInTheDocument();
+    fire("250% 0px", false);
+    expect(rendered()).toBeInTheDocument();
+    fire("600% 0px", false);
+    expect(rendered()).toBeNull();
   });
 
   it("advances repeated Next clicks while a smooth scroll is still running", () => {
