@@ -256,63 +256,6 @@
   padding: 1px 5px;
   border-radius: 3px;
 }
-.task-research-trends {
-  max-width: 760px;
-  margin: -8px 0 28px;
-  border-left: 2px solid var(--accent);
-  background: var(--bg-elevated);
-}
-.task-research-trends-item {
-  border-bottom: 0;
-}
-.task-research-trends-trigger {
-  padding: 18px 20px;
-  color: var(--accent-text);
-}
-.task-research-trends-trigger:hover {
-  text-decoration: none;
-}
-.task-research-trends-trigger svg {
-  width: 16px;
-  height: 16px;
-}
-.task-research-trends-title {
-  font-family: var(--mono);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--accent-text);
-}
-.task-research-trends-content {
-  padding: 0 20px 16px;
-}
-.task-research-trends ul {
-  margin: 0;
-  padding-left: 19px;
-}
-.task-research-trends li {
-  padding-left: 4px;
-  font-family: var(--serif);
-  font-size: 15px;
-  line-height: 1.5;
-  color: var(--ink);
-}
-.task-research-trends li + li {
-  margin-top: 8px;
-}
-.task-research-trends li::marker {
-  color: var(--accent-text);
-}
-.task-research-trends p {
-  margin: 0;
-}
-.task-research-trends a {
-  color: var(--accent-text);
-  text-decoration: underline;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 2px;
-}
 .task-quickstats {
   display: flex;
   gap: 28px;

@@ -28,12 +28,6 @@ import { useIntersectionObserver } from "@/hooks/useIntersectionObserver";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { readPaperDateRange, withPaperDateRange } from "@/lib/paperDateRange";
-import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
 
 type OrderBy = "trending" | "date_published" | "citation_count";
 const SORT_OPTIONS: Array<[OrderBy, string]> = [
@@ -455,24 +449,6 @@ const TagBrowseView: React.FC = () => {
           <ResearchFollowButton kind="task" entityId={task.id} />
           {task.description && (
             <MarkdownText className="task-explainer" text={task.description} />
-          )}
-          {task.research_trends && task.research_trends.length > 0 && (
-            <Accordion className="task-research-trends" type="single" collapsible>
-              <AccordionItem className="task-research-trends-item" value="key-trends">
-                <AccordionTrigger className="task-research-trends-trigger">
-                  <span className="task-research-trends-title">Key trends</span>
-                </AccordionTrigger>
-                <AccordionContent className="task-research-trends-content">
-                  <ul>
-                    {task.research_trends.map((trend, index) => (
-                      <li key={index}>
-                        <MarkdownText text={trend} />
-                      </li>
-                    ))}
-                  </ul>
-                </AccordionContent>
-              </AccordionItem>
-            </Accordion>
           )}
           <div className="task-quickstats">
             <span>
