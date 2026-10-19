@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 
 import { PanelIcon, PlusIcon, TrashIcon } from "./icons";
 import { canNavigateAwayFromArtifact } from "./useArtifactPanel";
+import { McpShowcase } from "@/components/McpShowcase";
 import { type ChatSession, groupSessions } from "@/lib/chatSessions";
 
 const SIDEBAR_WIDTH_KEY = "pwc:chat:sidebar-width";
 const DEFAULT_SIDEBAR_WIDTH = 280;
 const MIN_SIDEBAR_WIDTH = 200;
 const MAX_SIDEBAR_WIDTH = 480;
+const COLLAPSED_SESSION_COUNT = 12;
 
 const clampSidebarWidth = (width: number) => (
   Math.max(MIN_SIDEBAR_WIDTH, Math.min(MAX_SIDEBAR_WIDTH, width))
@@ -52,6 +54,15 @@ export function ChatSessionNavigation({
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingTitle, setEditingTitle] = useState("");
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  const [showAllSessions, setShowAllSessions] = useState(false);
+  const recentSessions = [...sessions].sort(
+    (a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at),
+  );
+  const collapsedSessions = recentSessions.filter(
+    (session, index) => index < COLLAPSED_SESSION_COUNT || session.id === activeSessionId,
+  );
+  const visibleSessions = showAllSessions ? recentSessions : collapsedSessions;
+  const hiddenSessionCount = sessions.length - collapsedSessions.length;
 
   useEffect(() => {
     if (!menu) return;
@@ -111,7 +122,7 @@ export function ChatSessionNavigation({
         {!loading && !error && sessions.length === 0 && (
           <div className="chat-sessions-empty">Conversations you start will show up here.</div>
         )}
-        {groupSessions(sessions).map((group) => <div className="chat-session-group" key={group.label}>
+        {groupSessions(visibleSessions).map((group) => <div className="chat-session-group" key={group.label}>
           <div className="chat-session-group-label">{group.label}</div>
           {group.items.map((session) => <div
             key={session.id}
@@ -170,7 +181,16 @@ export function ChatSessionNavigation({
             ><TrashIcon /></button>
           </div>)}
         </div>)}
+        {hiddenSessionCount > 0 && <button
+          type="button"
+          className="chat-sessions-toggle"
+          aria-expanded={showAllSessions}
+          onClick={() => setShowAllSessions((value) => !value)}
+        >
+          {showAllSessions ? "Show less" : `Show ${hiddenSessionCount} older ${hiddenSessionCount === 1 ? "chat" : "chats"}`}
+        </button>}
       </nav>
+      <McpShowcase className="chat-sidebar-tools" />
       <div
         className="chat-sidebar-resize-handle"
         role="separator"
