@@ -250,3 +250,12 @@ def test_static_sitemap_lists_curated_landing_pages(client):
     root = ElementTree.fromstring(response.content)
     locations = [node.text for node in root.iter() if node.tag.endswith("loc")]
     assert "https://paperswithcode.co/astra-for-robotics" in locations
+
+
+def test_static_sitemap_lists_browse_index_pages(client):
+    response = client.get("/sitemaps/static.xml")
+
+    root = ElementTree.fromstring(response.content)
+    locations = [node.text for node in root.iter() if node.tag.endswith("loc")]
+    for path in ("/ai-deadlines", "/trends", "/tasks", "/methods", "/conferences"):
+        assert f"https://paperswithcode.co{path}" in locations

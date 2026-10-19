@@ -16,6 +16,7 @@ from backend.services.content_negotiation_service import (
     prefers_markdown,
     public_page_headers,
 )
+from backend.services.discovery_page_service import STATIC_INDEX_PAGES
 from backend.services.public_page_markdown_service import render_archive_markdown
 from backend.services.sitemap_service import (
     PRODUCTION_ORIGIN,
@@ -85,7 +86,13 @@ def sitemap_index(db: Session = Depends(get_database_session)) -> Response:
     "/sitemaps/static.xml", methods=["GET", "HEAD"], include_in_schema=False
 )
 def static_sitemap() -> Response:
-    paths = ("/", "/papers/recent", "/papers/archive", "/astra-for-robotics")
+    paths = (
+        "/",
+        "/papers/recent",
+        "/papers/archive",
+        "/astra-for-robotics",
+        *STATIC_INDEX_PAGES,
+    )
     urls = "".join(f"<url><loc>{PRODUCTION_ORIGIN}{path}</loc></url>" for path in paths)
     return _xml_response(
         '<?xml version="1.0" encoding="UTF-8"?>'

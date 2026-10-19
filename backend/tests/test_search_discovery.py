@@ -18,6 +18,7 @@ from backend.services.discovery_page_service import (
     DiscoveryPage,
     DiscoveryPageService,
     DiscoveryPaperLink,
+    STATIC_INDEX_PAGES,
 )
 
 
@@ -462,10 +463,6 @@ def test_missing_entity_and_unknown_top_level_are_real_404s(client, monkeypatch)
     "path",
     [
         "/papers",
-        "/tasks",
-        "/methods",
-        "/conferences",
-        "/organizations",
         "/chat/abc",
         "/pdf/2606.23050",
         "/privacy",
@@ -648,3 +645,23 @@ def test_astra_collection_route_renders_server_side_document(client, monkeypatch
     )
     assert 'href="/paper/122059"' in response.text
     assert "Page not found" not in response.text
+
+
+@pytest.mark.parametrize("path", sorted(STATIC_INDEX_PAGES))
+def test_static_index_pages_have_own_title_description_and_canonical(client, path):
+    response = client.get(path)
+
+    assert response.status_code == 200
+    body = response.text
+    assert "<title>Generic</title>" not in body
+    assert f'<link rel="canonical" href="https://paperswithcode.co{path}">' in body
+    assert '<meta name="robots" content="index,follow">' in body
+    assert STATIC_INDEX_PAGES[path][0] in body.replace("&amp;", "&")
+    assert response.headers["link"] == (
+        f'<https://paperswithcode.co{path}>; rel="canonical"'
+    )
+
+
+def test_static_index_page_with_query_is_noindex(client):
+    response = client.get("/tasks?q=vision")
+    assert '<meta name="robots" content="noindex,follow">' in response.text

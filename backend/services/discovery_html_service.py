@@ -144,7 +144,7 @@ def render_discovery_document(page: DiscoveryPage) -> str:
         )
         + (
             ""
-            if page.leaderboard is not None
+            if page.leaderboard is not None or page.kind == "Index"
             else '<section aria-labelledby="papers-heading">'
             '<h2 id="papers-heading">Relevant papers</h2>'
             + (f"<ol>{paper_links}</ol>" if paper_links else empty)

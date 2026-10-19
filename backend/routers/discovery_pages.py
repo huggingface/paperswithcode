@@ -15,7 +15,11 @@ from backend.services.content_negotiation_service import (
     public_page_headers,
 )
 from backend.services.discovery_html_service import render_discovery_shell
-from backend.services.discovery_page_service import DiscoveryPage, DiscoveryPageService
+from backend.services.discovery_page_service import (
+    STATIC_INDEX_PAGES,
+    DiscoveryPage,
+    DiscoveryPageService,
+)
 from backend.services.public_page_markdown_service import render_discovery_markdown
 from backend.services.spa_shell_service import load_index_html
 
@@ -272,6 +276,16 @@ def astra_for_robotics_page(
     request: Request, db: Session = Depends(get_database_session)
 ) -> Response:
     return _render(DiscoveryPageService(db).astra_for_robotics(), request)
+
+
+def _static_index_route(path: str) -> None:
+    @router.api_route(path, methods=["GET", "HEAD"], include_in_schema=False)
+    def static_index_page(request: Request) -> Response:
+        return _render(DiscoveryPageService.static_index(path), request)
+
+
+for _path in STATIC_INDEX_PAGES:
+    _static_index_route(_path)
 
 
 @router.api_route("/{slug}", methods=["GET", "HEAD"], include_in_schema=False)

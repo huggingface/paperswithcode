@@ -79,6 +79,56 @@ class DiscoveryLink:
     label: str
 
 
+# Top-level browse pages with fixed copy. Without an entry here the SPA shell
+# is served with the generic site title and no canonical tag.
+# path -> (title, heading, description)
+STATIC_INDEX_PAGES = {
+    "/ai-deadlines": (
+        "AI Conference Deadlines 2026 | Papers with Code",
+        "AI Conference Deadlines",
+        "Upcoming submission deadlines for machine-learning and AI conferences "
+        "such as NeurIPS, ICML, ICLR, CVPR and ACL, with each venue's accepted "
+        "papers and code.",
+    ),
+    "/trends": (
+        "Machine Learning Research Trends | Papers with Code",
+        "Research Trends",
+        "Which machine-learning tasks, methods and open-source frameworks are "
+        "gaining papers and implementations, updated from newly published research.",
+    ),
+    "/tasks": (
+        "Machine Learning Tasks and Benchmarks | Papers with Code",
+        "Research Tasks",
+        "Browse machine-learning tasks, from image classification to robotics, "
+        "with state-of-the-art leaderboards, benchmarks and papers with code.",
+    ),
+    "/methods": (
+        "Machine Learning Methods | Papers with Code",
+        "Methods",
+        "Browse machine-learning methods, models and architectures, with the "
+        "papers and open-source implementations that use them.",
+    ),
+    "/conferences": (
+        "AI Conferences and Accepted Papers | Papers with Code",
+        "Conferences",
+        "Machine-learning conferences with their accepted papers, code "
+        "implementations and results by task.",
+    ),
+    "/organizations": (
+        "AI Research Organizations | Papers with Code",
+        "Organizations",
+        "AI labs, universities and companies publishing machine-learning "
+        "research, with their papers, code and benchmark results.",
+    ),
+    "/frameworks": (
+        "Machine Learning Frameworks | Papers with Code",
+        "Frameworks",
+        "Deep-learning frameworks such as PyTorch, TensorFlow and JAX, and how "
+        "many research papers ship implementations in each.",
+    ),
+}
+
+
 @dataclass(frozen=True)
 class DiscoveryPaperLink:
     route_identifier: str
@@ -229,6 +279,27 @@ class DiscoveryPageService:
             paper_links=tuple(
                 self._paper_link(paper, "Trending research") for paper in papers
             ),
+        )
+
+    @staticmethod
+    def static_index(path: str) -> Optional[DiscoveryPage]:
+        copy = STATIC_INDEX_PAGES.get(path)
+        if copy is None:
+            return None
+        title, heading, description = copy
+        return DiscoveryPage(
+            kind="Index",
+            canonical_path=path,
+            title=title,
+            description=description,
+            heading=heading,
+            breadcrumbs=(DiscoveryLink("/", "Home"),),
+            entity_links=tuple(
+                DiscoveryLink(other, STATIC_INDEX_PAGES[other][1])
+                for other in STATIC_INDEX_PAGES
+                if other != path
+            ),
+            paper_links=(),
         )
 
     def _task_by_slug(self, slug: str) -> Optional[Task]:
