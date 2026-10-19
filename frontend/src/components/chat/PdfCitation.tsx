@@ -1,7 +1,12 @@
-import { useState, type ReactNode } from "react";
+import { Children, useState, type ReactNode } from "react";
 import { FileText } from "lucide-react";
 
-import { citedAnchors, previewPlacement, type PreviewPlacement } from "@/components/pdf/pdfCitations";
+import {
+  capitalizeCitationLabel,
+  citedAnchors,
+  previewPlacement,
+  type PreviewPlacement,
+} from "@/components/pdf/pdfCitations";
 import { usePdfCitationTarget } from "./PdfCitationContext";
 
 function preview(text: string): string {
@@ -30,7 +35,8 @@ export function PdfCitationChip({ anchor, children }: { anchor: string; children
     aria-label={`${isSection ? "Jump to section" : "Jump to passage"} on page ${block.page}`}
   >
     <FileText aria-hidden="true" />
-    <span>{children}</span>
+    <span>{Children.map(children, (child, index) =>
+      index === 0 && typeof child === "string" ? capitalizeCitationLabel(child) : child)}</span>
     <span
       className={`chat-pdf-citation-preview${placement.below ? " is-below" : ""}`}
       role="tooltip"
