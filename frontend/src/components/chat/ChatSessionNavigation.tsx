@@ -190,7 +190,7 @@ export function ChatSessionNavigation({
           {showAllSessions ? "Show less" : `Show ${hiddenSessionCount} older ${hiddenSessionCount === 1 ? "chat" : "chats"}`}
         </button>}
       </nav>
-      <McpShowcase className="chat-sidebar-tools" />
+      <McpShowcase className="chat-sidebar-tools" canNavigate={canNavigateAwayFromArtifact} />
       <div
         className="chat-sidebar-resize-handle"
         role="separator"

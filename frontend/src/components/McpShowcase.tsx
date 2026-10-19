@@ -2,7 +2,12 @@ import { Link } from "react-router-dom";
 
 import { AgentLogos } from "@/components/paper-detail/AgentLogos";
 
-export function McpShowcase({ className = "" }: { className?: string }) {
+interface McpShowcaseProps {
+  className?: string;
+  canNavigate?: () => boolean;
+}
+
+export function McpShowcase({ className = "", canNavigate }: McpShowcaseProps) {
   return (
     <div className={`sidebar-section sidebar-section-tools ${className}`.trim()}>
       <div className="sidebar-label">Use PwC with your agent</div>
@@ -10,6 +15,9 @@ export function McpShowcase({ className = "" }: { className?: string }) {
         to="/mcp"
         className="action-btn sidebar-tools-mcp"
         title="Connect Claude, Codex, Cursor, or OpenCode to the PwC MCP server"
+        onClick={(event) => {
+          if (canNavigate && !canNavigate()) event.preventDefault();
+        }}
       >
         MCP server
         <AgentLogos />
