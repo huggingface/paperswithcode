@@ -157,16 +157,25 @@ function LazyPdfPage({
   const [snapshot, setSnapshot] = useState<string>();
   const [painted, setPainted] = useState(false);
   if (!visible && painted) setPainted(false);
+  const snapshotUrl = useRef<string>();
+  // Encoding is asynchronous: only the latest capture of a mounted page may
+  // publish its image, and each replaced or unmounted image is revoked.
+  const latestCapture = useRef(0);
   const capture = useCallback((layerWidth: number) => {
     setPainted(true);
+    const id = ++latestCapture.current;
     const canvas = ref.current?.querySelector<HTMLCanvasElement>(`[data-layer-width="${layerWidth}"] canvas`);
     canvas?.toBlob((blob) => {
-      if (blob) setSnapshot(URL.createObjectURL(blob));
+      if (!blob || id !== latestCapture.current) return;
+      if (snapshotUrl.current) URL.revokeObjectURL(snapshotUrl.current);
+      snapshotUrl.current = URL.createObjectURL(blob);
+      setSnapshot(snapshotUrl.current);
     }, "image/webp", 0.9);
   }, []);
   useEffect(() => () => {
-    if (snapshot) URL.revokeObjectURL(snapshot);
-  }, [snapshot]);
+    latestCapture.current += 1;
+    if (snapshotUrl.current) URL.revokeObjectURL(snapshotUrl.current);
+  }, []);
   useEffect(() => {
     const element = ref.current;
     if (!element) return;
