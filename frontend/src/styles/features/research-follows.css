@@ -90,7 +90,7 @@
 }
 .following-intro {
   max-width: 720px;
-  margin: 8px 0 32px;
+  margin: 8px auto 32px;
   padding: 28px 30px;
   border: 1px solid var(--hairline);
   border-radius: 12px;
