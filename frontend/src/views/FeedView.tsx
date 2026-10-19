@@ -410,12 +410,10 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
   const showFollowsSidebar = following && (!!auth?.isLoading || (!!user && !noFollows));
   const popularTasks = topTasks.data?.slice(0, 8);
   const infinite = following ? followedFeed : publicFeed;
-  const cards = useMemo(() => {
-    const all = following
-      ? followedFeed.data?.pages.flatMap(page => page.map(entry => entry.paper)) ?? []
-      : publicFeed.data?.pages.flatMap(page => page.results) ?? [];
-    return all.map(transformPaperForCard);
-  }, [following, followedFeed.data, publicFeed.data]);
+  const cards = useMemo(() => following
+    ? followedFeed.data?.pages.flatMap(page => page.map(entry => ({ ...transformPaperForCard(entry.paper), followReasons: entry.reasons }))) ?? []
+    : publicFeed.data?.pages.flatMap(page => page.results.map(paper => ({ ...transformPaperForCard(paper), followReasons: undefined }))) ?? [],
+  [following, followedFeed.data, publicFeed.data]);
 
   const { targetRef: sentinelRef, isIntersecting } = useIntersectionObserver({ rootMargin: "400px" });
   useEffect(() => {
@@ -601,7 +599,7 @@ const FeedView: React.FC<{ following?: boolean }> = ({ following = false }) => {
               <>
                 <div className="paper-list">
                   {cards.map((p, i) => (
-                    <PaperCard key={p.id} paper={p} rank={i + 1} />
+                    <PaperCard key={p.id} paper={p} rank={i + 1} followReasons={p.followReasons} />
                   ))}
                 </div>
                 <div ref={sentinelRef} style={{ height: 1 }} />

@@ -213,6 +213,11 @@ a.paper-resource.is-link:focus-visible {
   margin-bottom: 6px;
 }
 .paper-meta-line .sep { color: var(--hairline-strong); }
+.paper-follow-reason {
+  font-size: 12px;
+  color: var(--ink-faint);
+  margin-bottom: 4px;
+}
 .paper-title {
   font-family: var(--serif);
   font-size: 22px;

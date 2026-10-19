@@ -592,6 +592,15 @@ interface PaperCardComponentProps {
   showInstitution?: boolean;
   onClickTag?: (slug: string) => void;
   highlightQuery?: string;
+  /** Names of the followed entities that put this paper on the Following feed. */
+  followReasons?: string[];
+}
+
+// "Agents", "Agents and Reasoning", "Agents, Reasoning and 2 more"
+function formatFollowReasons(reasons: string[]): string {
+  const names = [...new Set(reasons.map((r) => r.replace(/ \(subtask\)$/, "")))];
+  const shown = names.length > 3 ? [...names.slice(0, 2), `${names.length - 2} more`] : names;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} and ${shown[shown.length - 1]}` : shown[0];
 }
 
 const LANGUAGE_MODELING_TASK_SLUG = "language-modeling";
@@ -650,6 +659,7 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
   showInstitution = true,
   onClickTag,
   highlightQuery,
+  followReasons,
 }) => {
   const queryClient = useQueryClient();
   const paperHref = `/paper/${paper.id}`;
@@ -689,6 +699,11 @@ export const PaperCard: React.FC<PaperCardComponentProps> = ({
       )}
       <div className="paper-body">
         <div className="paper-body-main">
+          {followReasons && followReasons.length > 0 && (
+            <div className="paper-follow-reason">
+              Because you follow {formatFollowReasons(followReasons)}
+            </div>
+          )}
           <h3 className="paper-title">
             <Link to={paperHref} onFocus={prefetchPaper} onMouseEnter={prefetchPaper}>
               <LatexTitle title={paper.title} highlight={highlightQuery} />

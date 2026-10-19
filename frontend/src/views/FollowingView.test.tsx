@@ -39,6 +39,7 @@ it('renders following in the existing tab row with standard paper cards and thum
   await screen.findByText('A paper');
   expect(container.querySelector('.paper-card .paper-thumb-wrap img')).toHaveAttribute('src', expect.stringContaining('/api/thumbnails/example.png'));
   expect(container.querySelector('.paper-authors')).toHaveTextContent('An Author');
+  expect(container.querySelector('.paper-follow-reason')).toHaveTextContent('Because you follow Task');
   expect(screen.getByText('Full abstract.')).toBeInTheDocument();
   const tab = screen.getByRole('button', { name: 'following' });
   expect(tab).toHaveClass('active');
@@ -56,6 +57,14 @@ it('opens Following from the public feed', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'following' }));
   await screen.findByText('A paper');
   expect(screen.getByRole('button', { name: 'following' })).toHaveClass('active');
+});
+it('names every distinct follow that matched, collapsing subtasks and long lists', async () => {
+  vi.mocked(researchApi.following).mockResolvedValue([{ paper, paper_key: 'arxiv:2610.12345',
+    title: paper.title, url: '/paper/2610.12345', summary: '', published: paper.published,
+    reasons: ['Agents (subtask)', 'Agents', 'Reasoning', 'Jane Doe', 'Hugging Face'], scores: [] }]);
+  const { container } = renderFeed();
+  await screen.findByText('A paper');
+  expect(container.querySelector('.paper-follow-reason')).toHaveTextContent('Because you follow Agents, Reasoning and 2 more');
 });
 it('explains how to start following to signed-out visitors without fetching private papers', async () => {
   auth.user = null;
