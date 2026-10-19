@@ -130,4 +130,15 @@ describe("ChatSessionNavigation history and MCP showcase", () => {
 
     expect(screen.getByRole("link", { name: /MCP server/ })).toHaveAttribute("href", "/mcp");
   });
+
+  it("keeps the chat open when an unsaved artifact blocks leaving", () => {
+    const block = (event: Event) => event.preventDefault();
+    window.addEventListener("pwc:artifact-navigation", block);
+    render(<ChatSessionNavigation {...props} />);
+
+    const allowed = fireEvent.click(screen.getByRole("link", { name: /MCP server/ }));
+    window.removeEventListener("pwc:artifact-navigation", block);
+
+    expect(allowed).toBe(false);
+  });
 });
