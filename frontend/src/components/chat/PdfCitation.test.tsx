@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { ChatMarkdown } from "@/components/chat/ChatMarkdown";
 import { PdfCitationContext } from "@/components/chat/PdfCitationContext";
-import { citationBoxes, citedAnchors, previewPlacement } from "@/components/pdf/pdfCitations";
+import { capitalizeCitationLabel, citationBoxes, citedAnchors, previewPlacement } from "@/components/pdf/pdfCitations";
 import type { PaperLayout } from "@/lib/api/papers";
 
 const layout: PaperLayout = {
@@ -76,5 +76,24 @@ describe("pdf citation preview placement", () => {
     expect(300 + placement.left).toBeGreaterThanOrEqual(12);
     expect(300 + placement.left + width).toBeLessThanOrEqual(390 - 12);
     expect(placement.below).toBe(true);
+  });
+});
+
+describe("citation labels", () => {
+  it("sentence-cases labels but keeps deliberate lowercase terms", () => {
+    expect(capitalizeCitationLabel("working memory")).toBe("Working memory");
+    expect(capitalizeCitationLabel("Hybrid generation")).toBe("Hybrid generation");
+    expect(capitalizeCitationLabel("pLDDT scores")).toBe("pLDDT scores");
+    expect(capitalizeCitationLabel("§5.1")).toBe("§5.1");
+    expect(capitalizeCitationLabel("")).toBe("");
+  });
+
+  it("capitalizes the rendered chip label", () => {
+    render(
+      <PdfCitationContext.Provider value={{ layout, open: vi.fn() }}>
+        <ChatMarkdown text="See [working memory](pdf:p5b2)." papers={{}} />
+      </PdfCitationContext.Provider>,
+    );
+    expect(screen.getByRole("button", { name: "Jump to passage on page 5" }).textContent).toContain("Working memory");
   });
 });

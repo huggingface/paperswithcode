@@ -57,3 +57,14 @@ export function previewPlacement(
     below: chip.top < PREVIEW_ROOM_ABOVE,
   };
 }
+
+/**
+ * Sentence-case a citation label: uppercase its first letter, unless the label
+ * starts with a deliberately lowercase term such as "pLDDT" or "iPhone".
+ */
+export function capitalizeCitationLabel(label: string): string {
+  const [first, second] = label;
+  if (!first || first === first.toUpperCase()) return label;
+  if (second && second !== second.toLowerCase()) return label;
+  return first.toUpperCase() + label.slice(1);
+}
