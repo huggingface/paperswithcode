@@ -1,7 +1,12 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render as renderElement, screen } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ChatSessionNavigation } from "./ChatSessionNavigation";
+import type { ChatSession } from "@/lib/chatSessions";
+
+const render = (element: ReactElement) => renderElement(<MemoryRouter>{element}</MemoryRouter>);
 
 const props = {
   sessions: [],
@@ -74,5 +79,66 @@ describe("ChatSessionNavigation resizing", () => {
       "--chat-sidebar-width": "280px",
     });
     expect(localStorage.getItem("pwc:chat:sidebar-width")).toBe("280");
+  });
+});
+
+const session = (index: number): ChatSession => ({
+  id: `chat-${index}`,
+  title: `Chat ${index}`,
+  selected_model: "luna",
+  created_at: new Date(Date.now() - index * 60_000).toISOString(),
+  updated_at: new Date(Date.now() - index * 60_000).toISOString(),
+  message_count: 2,
+  is_busy: false,
+  web_search_enabled: false,
+});
+
+describe("ChatSessionNavigation history and MCP showcase", () => {
+  const sessions = Array.from({ length: 15 }, (_, index) => session(index));
+
+  it("shows the most recent chats and expands to older ones", () => {
+    render(<ChatSessionNavigation {...props} sessions={sessions} />);
+
+    expect(screen.getByText("Chat 11")).toBeInTheDocument();
+    expect(screen.queryByText("Chat 12")).not.toBeInTheDocument();
+
+    const toggle = screen.getByRole("button", { name: "Show 3 older chats" });
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(toggle);
+
+    expect(screen.getByText("Chat 14")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Show less" }));
+    expect(screen.queryByText("Chat 14")).not.toBeInTheDocument();
+  });
+
+  it("keeps an older active chat visible while collapsed", () => {
+    render(<ChatSessionNavigation {...props} sessions={sessions} activeSessionId="chat-14" />);
+
+    expect(screen.getByText("Chat 14")).toBeInTheDocument();
+    expect(screen.queryByText("Chat 13")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show 2 older chats" })).toBeInTheDocument();
+  });
+
+  it("hides the toggle when every chat fits", () => {
+    render(<ChatSessionNavigation {...props} sessions={sessions.slice(0, 12)} />);
+
+    expect(screen.queryByRole("button", { name: /older chat|Show less/ })).not.toBeInTheDocument();
+  });
+
+  it("links to the MCP server page", () => {
+    render(<ChatSessionNavigation {...props} />);
+
+    expect(screen.getByRole("link", { name: /MCP server/ })).toHaveAttribute("href", "/mcp");
+  });
+
+  it("keeps the chat open when an unsaved artifact blocks leaving", () => {
+    const block = (event: Event) => event.preventDefault();
+    window.addEventListener("pwc:artifact-navigation", block);
+    render(<ChatSessionNavigation {...props} />);
+
+    const allowed = fireEvent.click(screen.getByRole("link", { name: /MCP server/ }));
+    window.removeEventListener("pwc:artifact-navigation", block);
+
+    expect(allowed).toBe(false);
   });
 });

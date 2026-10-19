@@ -72,6 +72,21 @@
   color: var(--ink-faint);
 }
 .chat-session-group { margin-top: 14px; }
+.chat-sessions-toggle {
+  margin-top: 6px;
+  padding: 7px 10px;
+  border-radius: 7px;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-faint);
+}
+.chat-sessions-toggle:hover { background: var(--hairline); color: var(--ink); }
+.chat-sidebar-tools {
+  flex: none;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--hairline);
+}
 .chat-session-group-label {
   font-family: var(--mono);
   font-size: 10px;
