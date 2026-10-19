@@ -57,6 +57,10 @@
   .sidebar-section-follows { order: 2; }
   .feed-content { order: 4; }
   .sidebar-section-tools { order: 5; }
+  /* /following without follows: lead with the feed intro, above the chat. */
+  .feed-content:has(> .following-intro) { display: contents; }
+  .feed-content:has(> .following-intro) > * { order: 4; }
+  .feed-content:has(> .following-intro) > .following-intro { order: 0; margin: 0; }
 }
 
 .sidebar-tools-mcp {
