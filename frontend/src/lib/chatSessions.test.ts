@@ -13,7 +13,7 @@ describe("production model fallback", () => {
     expect(PRODUCTION_FALLBACK_CHAT_MODELS).toEqual([
       {
         id: "gpt-5.6-luna@openai",
-        label: "GPT-5.6 Luna",
+        label: "GPT-6 Luna",
         provider: "openai",
       },
     ]);
@@ -29,7 +29,7 @@ describe("legacy model compatibility", () => {
 
   it("recognizes production OpenAI Luna without discovery", () => {
     expect(providerForChatModel([], "gpt-5.6-luna@openai")).toBe("openai");
-    expect(labelForChatModel([], "gpt-5.6-luna@openai")).toBe("GPT-5.6 Luna");
+    expect(labelForChatModel([], "gpt-5.6-luna@openai")).toBe("GPT-6 Luna");
   });
 });
 

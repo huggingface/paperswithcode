@@ -617,7 +617,7 @@ export const AssistantMessage: React.FC<{
           </a>
         )}
         {msg.errorCode === "hf_inference_billing_exhausted" && <>
-          {onRetryWithLuna && <button type="button" onClick={onRetryWithLuna}>Retry with GPT-5.6 Luna</button>}
+          {onRetryWithLuna && <button type="button" onClick={onRetryWithLuna}>Retry with GPT-6 Luna</button>}
           {hfBilling?.account_type === "Free" && !hfBilling.bill_to
             ? <a href={HF_PRO_URL} target="_blank" rel="noreferrer">
                 Upgrade to Hugging Face PRO — $9/month for 20× more included credits

@@ -89,7 +89,7 @@ def test_trusted_responses_payload_overwrites_every_security_boundary_field():
     capability = _capability()
     payload, maximum = _trusted_openai_payload(
         {
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "input": [{"role": "user", "content": "hello"}],
             "max_output_tokens": 1000,
             "stream": False,
@@ -105,7 +105,7 @@ def test_trusted_responses_payload_overwrites_every_security_boundary_field():
     )
 
     assert maximum == 1000
-    assert payload["model"] == "gpt-5.6-luna"
+    assert payload["model"] == "gpt-6-luna"
     assert payload["stream"] is True
     assert payload["store"] is False
     assert payload["service_tier"] == "default"
@@ -122,14 +122,14 @@ def test_trusted_responses_payload_overwrites_every_security_boundary_field():
     "payload",
     [
         {"model": "gpt-5.6-terra", "max_output_tokens": 100},
-        {"model": "gpt-5.6-luna", "max_output_tokens": 100, "metadata": {}},
+        {"model": "gpt-6-luna", "max_output_tokens": 100, "metadata": {}},
         {
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "max_output_tokens": 100,
             "include": ["file_search_call.results"],
         },
         {
-            "model": "gpt-5.6-luna",
+            "model": "gpt-6-luna",
             "max_output_tokens": 100,
             "tools": [{"type": "web_search"}],
         },

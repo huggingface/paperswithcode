@@ -19,7 +19,7 @@ export const GATEWAY_PAYLOAD_LIMIT_BYTES = 7 * 1024 * 1024;
 // capacity does not require sending larger requests by default.
 export function modelContextWindow(modelId: string, api: ProviderProtocol): number {
   const model = modelId.split(":")[0]!.split("@")[0]!;
-  if (["gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 272_000;
+  if (["gpt-6-luna", "gpt-5.6-luna", "openai/gpt-5.6-luna", "zai-org/GLM-5.3-Flash"].includes(model)) return 272_000;
   return api === "openai-responses" ? 48_000 : 200_000;
 }
 export function gatewayPayloadLimit(contextWindow: number): number {

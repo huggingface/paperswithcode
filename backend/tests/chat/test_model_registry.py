@@ -58,7 +58,7 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
     assert production_direct.chat_route_providers[glm_route] == "huggingface"
     assert production_direct.chat_route_protocols[glm_route] == "anthropic-messages"
     assert production_direct.chat_route_funding_modes[glm_route] == "hf_user_billed"
-    assert production_direct.chat_model_choices[0]["label"] == "GPT-5.6 Luna"
+    assert production_direct.chat_model_choices[0]["label"] == "GPT-6 Luna"
     assert production_direct.chat_model_providers["gpt-5.6-luna@openai"] == "openai"
     assert production_direct.chat_route_protocols["gpt-5.6-luna@openai"] == (
         "openai-responses"
@@ -94,12 +94,12 @@ def test_model_registry_exposes_stable_ids_not_provider_routes():
         "moonshotai/Kimi-K3",
         "gpt-5.6-luna@openrouter",
     ]
-    assert direct.chat_model_choices[0]["label"] == "GPT-5.6 Luna (Direct)"
+    assert direct.chat_model_choices[0]["label"] == "GPT-6 Luna (Direct)"
     assert direct.chat_model_routes["gpt-5.6-luna@openai"] == ("gpt-5.6-luna@openai")
     assert direct.chat_model_providers["gpt-5.6-luna@openai"] == "openai"
     assert direct.chat_route_providers["gpt-5.6-luna@openai"] == "openai"
     assert direct.chat_route_protocols["gpt-5.6-luna@openai"] == "openai-responses"
-    assert direct.chat_route_provider_models["gpt-5.6-luna@openai"] == ("gpt-5.6-luna")
+    assert direct.chat_route_provider_models["gpt-5.6-luna@openai"] == ("gpt-6-luna")
     assert direct.chat_route_funding_modes["gpt-5.6-luna@openai"] == "openai_funded"
     assert direct.chat_effective_pi_prewarm_model == "gpt-5.6-luna@openai"
 

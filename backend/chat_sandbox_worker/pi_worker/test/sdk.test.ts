@@ -92,6 +92,8 @@ test("advertises a 272K working window for Luna and GLM", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
 
   assert.equal(direct.model.contextWindow, 272_000);
+  const gpt6 = await createProvider("gpt-6-luna", "openai-responses");
+  assert.equal(gpt6.model.contextWindow, 272_000);
   const glm = await createProvider("zai-org/GLM-5.3-Flash:baseten");
   assert.equal(glm.model.contextWindow, 272_000);
   assert.equal(direct.model.maxTokens, 8_000);

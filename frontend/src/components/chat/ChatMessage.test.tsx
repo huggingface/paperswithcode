@@ -469,11 +469,11 @@ describe("AssistantMessage", () => {
       <AssistantMessage msg={msg} papers={{}} onToggleBlock={() => undefined} onRetryWithLuna={onRetryWithLuna} />,
     );
 
-    fireEvent.click(screen.getByRole("button", { name: "Retry with GPT-5.6 Luna" }));
+    fireEvent.click(screen.getByRole("button", { name: "Retry with GPT-6 Luna" }));
     expect(onRetryWithLuna).toHaveBeenCalledTimes(1);
 
     rerender(<AssistantMessage msg={msg} papers={{}} onToggleBlock={() => undefined} />);
-    expect(screen.queryByRole("button", { name: "Retry with GPT-5.6 Luna" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Retry with GPT-6 Luna" })).not.toBeInTheDocument();
   });
 
   it("links a missing HF token directly to Settings", () => {

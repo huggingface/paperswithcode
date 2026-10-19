@@ -52,14 +52,14 @@ def test_direct_openai_pricing_uses_per_million_rates_and_fails_stale():
         output_tokens=1_000_000,
     )
     # Long context: 2x input (including cache categories), 1.5x output.
-    assert actual_usage_microusd(settings, usage) == 2_174_000
+    assert actual_usage_microusd(settings, usage) == 937_000
     assert (
         safe_maximum_microusd(
             settings,
             OpenAIRequestBounds(request_bytes=1000, maximum_output_tokens=1000),
             now=datetime(2026, 8, 20, tzinfo=UTC),
         )
-        == 1450
+        == 625
     )
     with pytest.raises(OpenAIPricingUnavailable):
         safe_maximum_microusd(
@@ -106,11 +106,11 @@ def test_long_context_accounting_and_reservations(input_tokens, multiplier):
     )
     actual = actual_usage_microusd(settings, usage)
     expected_input = int(
-        (Decimal(input_tokens) * Decimal("0.2") * multiplier).to_integral_value(
+        (Decimal(input_tokens) * Decimal("0.1") * multiplier).to_integral_value(
             rounding=ROUND_CEILING
         )
     )
-    assert actual == expected_input + (1800 if multiplier == 2 else 1200)
+    assert actual == expected_input + (750 if multiplier == 2 else 500)
     assert (
         safe_maximum_microusd(
             settings,
@@ -171,7 +171,7 @@ def test_stale_unknown_reconciliation_is_bounded_truthful_and_idempotent():
                 environment="staging",
                 month_start=now.date().replace(day=1),
                 public_model_id="gpt-5.6-luna@openai",
-                provider_model="gpt-5.6-luna",
+                provider_model="gpt-6-luna",
                 reasoning_effort="low",
                 service_tier="default",
                 request_bytes=100,
@@ -240,7 +240,7 @@ def test_stale_dispatch_is_marked_unknown_once_before_ceiling_settlement(
                 environment="staging",
                 month_start=now.date().replace(day=1),
                 public_model_id="gpt-5.6-luna@openai",
-                provider_model="gpt-5.6-luna",
+                provider_model="gpt-6-luna",
                 reasoning_effort="low",
                 service_tier="default",
                 request_bytes=100,

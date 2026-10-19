@@ -126,7 +126,7 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
     if environment == "production" and settings.chat_openai_direct_enabled:
         # GLM-5.3-Flash is hidden while most of its HF-billed turns fail.
         # Sessions that selected it continue on Luna via canonical_model_id.
-        records = (_direct_luna(settings, "GPT-5.6 Luna"),)
+        records = (_direct_luna(settings, "GPT-6 Luna"),)
     if environment == "staging":
         staging_records = (
             _anthropic_route(
@@ -149,7 +149,7 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
             # route as the default.  The remaining choices stay available
             # for comparative ordinary-chat testing and existing sessions.
             records = (
-                _direct_luna(settings, "GPT-5.6 Luna (Direct)"),
+                _direct_luna(settings, "GPT-6 Luna (Direct)"),
                 *records,
                 *staging_records,
             )

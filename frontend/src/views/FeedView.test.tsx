@@ -115,7 +115,7 @@ describe("AskAssistant", () => {
       },
       {
         id: "gpt-5.6-luna@openai",
-        label: "GPT-5.6 Luna (Direct)",
+        label: "GPT-6 Luna (Direct)",
         provider: "openai",
       },
     ]);

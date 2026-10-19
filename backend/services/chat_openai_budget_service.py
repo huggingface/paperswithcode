@@ -27,7 +27,7 @@ from backend.services.durable_external_qualification_contract import (
 from backend.services.chat_openai_usage_extractor import ExtractedOpenAIUsage
 from backend.services.openrouter_user_budget_service import usd_to_microusd, utc_month
 
-# GPT-5.6 Luna: https://developers.openai.com/api/docs/models/gpt-5.6-luna
+# GPT-6 Luna: https://developers.openai.com/api/docs/models/gpt-6-luna
 MAX_REQUEST_BYTES = MAX_PROVIDER_REQUEST_BYTES
 MAX_BILLABLE_INPUT_TOKENS = 1_050_000
 LONG_CONTEXT_INPUT_THRESHOLD = 272_000

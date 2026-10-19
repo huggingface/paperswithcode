@@ -108,15 +108,15 @@ def validate_chat_provider_policy(
             raise RuntimeError("direct OpenAI chat requires an OpenAI API key")
         if (
             settings.chat_openai_luna_route != "gpt-5.6-luna@openai"
-            or settings.chat_openai_model != "gpt-5.6-luna"
+            or settings.chat_openai_model != "gpt-6-luna"
         ):
             raise RuntimeError("direct OpenAI chat must use the reviewed Luna route")
         direct_choice = {
             "id": "gpt-5.6-luna@openai",
             "label": (
-                "GPT-5.6 Luna"
+                "GPT-6 Luna"
                 if settings.environment == "production"
-                else "GPT-5.6 Luna (Direct)"
+                else "GPT-6 Luna (Direct)"
             ),
             "route": settings.chat_openai_luna_route,
             "provider": "openai",

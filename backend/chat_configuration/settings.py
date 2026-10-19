@@ -88,7 +88,9 @@ class ChatModelSettings(BaseModel):
     chat_luna_route: str = Field(default="openai/gpt-5.6-luna")
     chat_openai_direct_enabled: bool = Field(default=False)
     chat_openai_luna_route: str = Field(default="gpt-5.6-luna@openai")
-    chat_openai_model: str = Field(default="gpt-5.6-luna", pattern=r"^gpt-5\.6-luna$")
+    # The route ID is persisted by sessions and capabilities; only the model
+    # it serves changes.
+    chat_openai_model: str = Field(default="gpt-6-luna", pattern=r"^gpt-6-luna$")
     chat_openai_service_tier: Literal["default"] = Field(default="default")
     # Read-only compatibility input for rolling back releases whose staging
     # registry still exposed the Terra route.
@@ -98,16 +100,16 @@ class ChatModelSettings(BaseModel):
 class ChatOpenAIBudgetSettings(BaseModel):
     """Direct-OpenAI pricing, allowances, and rate limits."""
 
-    chat_openai_pricing_verified_at: str = Field(default="2026-09-20")
+    chat_openai_pricing_verified_at: str = Field(default="2026-10-19")
     chat_openai_pricing_max_age_days: int = Field(default=30, ge=1, le=90)
-    chat_openai_input_microusd_per_million_tokens: int = Field(default=200_000, ge=1)
+    chat_openai_input_microusd_per_million_tokens: int = Field(default=100_000, ge=1)
     chat_openai_cached_input_microusd_per_million_tokens: int = Field(
-        default=20_000, ge=1
+        default=10_000, ge=1
     )
     chat_openai_cache_write_microusd_per_million_tokens: int = Field(
-        default=250_000, ge=1
+        default=125_000, ge=1
     )
-    chat_openai_output_microusd_per_million_tokens: int = Field(default=1_200_000, ge=1)
+    chat_openai_output_microusd_per_million_tokens: int = Field(default=500_000, ge=1)
     chat_openai_monthly_user_budget_usd: Decimal = Field(
         default=Decimal("1.00"), gt=0, le=1000
     )

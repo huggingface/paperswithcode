@@ -146,6 +146,7 @@ export interface ChatModelChoice {
   reasoning_efforts?: ReasoningEffort[];
 }
 
+// Persisted route ID; it now serves GPT-6 Luna.
 export const DEFAULT_CHAT_MODEL = "gpt-5.6-luna@openai";
 const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
 const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
@@ -170,13 +171,13 @@ export function labelForChatModel(
     ?? (selectedModel === LEGACY_OPENROUTER_LUNA_MODEL
       ? "GPT-5.6 Luna (Legacy OpenRouter)"
       : selectedModel === DEFAULT_CHAT_MODEL
-        ? "GPT-5.6 Luna"
+        ? "GPT-6 Luna"
       : `${selectedModel} (unavailable)`);
 }
 export const PRODUCTION_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
   {
     id: DEFAULT_CHAT_MODEL,
-    label: "GPT-5.6 Luna",
+    label: "GPT-6 Luna",
     provider: "openai",
   },
 ];
@@ -198,7 +199,7 @@ export const STAGING_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
   },
   {
     id: "gpt-5.6-luna@openai",
-    label: "GPT-5.6 Luna (Direct)",
+    label: "GPT-6 Luna (Direct)",
     provider: "openai",
   },
 ];

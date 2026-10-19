@@ -195,7 +195,7 @@ def harness(monkeypatch):
 
 def _responses_body(**overrides) -> bytes:
     payload = {
-        "model": "gpt-5.6-luna",
+        "model": "gpt-6-luna",
         "input": [{"role": "user", "content": "hello"}],
         "max_output_tokens": 100,
         "tools": [{"type": "function", "name": "search"}],
