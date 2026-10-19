@@ -496,6 +496,29 @@ def test_legacy_bridge_flag_is_explicit_on_deploy_parser(environment: str):
     assert args.qualify_only is False
 
 
+@pytest.fixture(autouse=True)
+def _keep_tests_off_live_host(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
+    """Keep unstubbed slot control and unit changes away from the live host."""
+    real_run = subprocess.run
+
+    def refuse_host_mutation(command, *args, **kwargs):
+        if (
+            isinstance(command, (list, tuple))
+            and len(command) > 1
+            and command[0] == "systemctl"
+            and command[1] not in {"show", "is-active", "is-enabled"}
+        ):
+            raise AssertionError(f"test reached host systemd: {command}")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", refuse_host_mutation)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_slot_socket",
+        lambda environment, slot: tmp_path / f"{environment}-{slot}.sock",
+    )
+
+
 def _contract(emits: int, accepts: int, database: int = 1) -> dict:
     return {
         "chat_runtime": {
@@ -1111,6 +1134,189 @@ def test_reap_finishes_external_cleanup_when_backend_is_already_stopped(
 
     assert deploy_cli.reap(SimpleNamespace(environment="staging")) == 0
     assert events == [("external", "staging", "green:previous", True)]
+
+
+def _deferred_drain_fixture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    phase: str = "live-with-old-external-pi-draining",
+    lifecycle_enabled: bool = True,
+    backend_status: dict | None = None,
+) -> tuple[list[tuple], list[tuple[str, dict]]]:
+    current = tmp_path / "current"
+    previous = tmp_path / "previous"
+    current.mkdir()
+    previous.mkdir()
+    events: list[tuple] = []
+    journals: list[tuple[str, dict]] = []
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": phase,
+            "active_slot": "green",
+            "draining_slot": "blue",
+            "active_release": current.name,
+            "draining_release": previous.name,
+        },
+    )
+    monkeypatch.setattr(deploy_cli, "_active_slot", lambda _environment: "green")
+    monkeypatch.setattr(
+        deploy_cli,
+        "external_pi_lifecycle_enabled",
+        lambda _environment: lifecycle_enabled,
+    )
+    monkeypatch.setattr(
+        deploy_cli, "_unix_json", lambda *_args, **_kwargs: backend_status
+    )
+
+    def stop_backend(environment: str, slot: str) -> bool:
+        busy = backend_status and backend_status.get("active_chat_streams")
+        if not busy:
+            events.append(("backend", environment, slot))
+        return not busy
+
+    monkeypatch.setattr(deploy_cli, "_stop_drained_slot", stop_backend)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_slot_release",
+        lambda _environment, slot: previous if slot == "blue" else current,
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "validate_manifest",
+        lambda release, *_args: {"release_id": release.name},
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "stop_slot_if_enabled",
+        lambda environment, slot, release_id, **kwargs: events.append(
+            ("external", environment, slot, release_id, kwargs)
+        ),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "read_pointers",
+        lambda _root: SimpleNamespace(current=current, previous=previous),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "_write_journal",
+        lambda _environment, phase, **values: journals.append((phase, values)),
+    )
+    monkeypatch.setattr(
+        deploy_cli,
+        "_start_recovery_slot",
+        lambda *_args: pytest.fail("a settled cutover is not rolled back"),
+    )
+    return events, journals
+
+
+@pytest.mark.parametrize(
+    "phase", ["live-with-old-external-pi-draining", "live-with-old-slot-draining"]
+)
+@pytest.mark.parametrize("backend_running", [True, False])
+def test_next_deploy_reaps_the_displaced_slot_before_reusing_it(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+    backend_running: bool,
+):
+    """After cutover the displaced slot keeps its external Pi supervisor and
+    worker until pwc-reap. The next deploy must stop both with that slot's own
+    release before start_slot or candidate cleanup touches the slot."""
+    idle = {
+        "accepting_chat_turns": False,
+        "active_http_requests": 0,
+        "active_chat_streams": 0,
+        "active_gateway_streams": 0,
+    }
+    events, journals = _deferred_drain_fixture(
+        tmp_path,
+        monkeypatch,
+        phase=phase,
+        backend_status=idle if backend_running else None,
+    )
+
+    deploy_cli._recover_interrupted_activation("staging")
+
+    expected_external = (
+        "external",
+        "staging",
+        "blue",
+        "previous",
+        {"allow_orphaned_turn_reap": True},
+    )
+    assert events == (
+        [("backend", "staging", "blue"), expected_external]
+        if backend_running
+        else [expected_external]
+    )
+    assert journals == [
+        (
+            "settled",
+            {
+                "active_slot": "green",
+                "active_release": "current",
+                "previous_release": "previous",
+            },
+        )
+    ]
+
+
+def test_next_deploy_refuses_while_the_displaced_slot_still_streams(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    events, journals = _deferred_drain_fixture(
+        tmp_path,
+        monkeypatch,
+        backend_status={
+            "accepting_chat_turns": False,
+            "active_http_requests": 0,
+            "active_chat_streams": 1,
+            "active_gateway_streams": 0,
+        },
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="still draining"):
+        deploy_cli._recover_interrupted_activation("staging")
+
+    assert events == []
+    assert journals == []
+
+
+def test_deferred_drain_without_external_pi_keeps_the_rollback_target(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    events, journals = _deferred_drain_fixture(
+        tmp_path,
+        monkeypatch,
+        phase="live-with-old-slot-draining",
+        lifecycle_enabled=False,
+    )
+
+    deploy_cli._recover_interrupted_activation("staging")
+
+    assert events == []
+    assert journals == []
+
+
+def test_deferred_drain_journal_must_name_the_displaced_slot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    _deferred_drain_fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        deploy_cli,
+        "_journal",
+        lambda _environment: {
+            "phase": "live-with-old-external-pi-draining",
+            "draining_slot": "green",
+        },
+    )
+
+    with pytest.raises(deploy_cli.DeployError, match="draining slot"):
+        deploy_cli._recover_interrupted_activation("staging")
 
 
 def test_initial_slot_bridge_qualifies_shadow_before_activation(

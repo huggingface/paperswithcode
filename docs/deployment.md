@@ -128,6 +128,8 @@ switching `previous`, `current`, and `active`. A failed live smoke restores all
 three pointers. A successful activation drains the displaced slot without
 blocking transcript callbacks; if streams remain at the reporting deadline the
 result is `success-with-draining` and `pwc-reap` finishes cleanup later.
+With the external Pi lifecycle enabled, the next deploy or rollback runs that
+reap itself before it touches the displaced slot again.
 
 Production chat remains disabled when source is merely landed or deployed with
 `PWC_CHAT_ENABLED=false`. A separately authorized protected configuration

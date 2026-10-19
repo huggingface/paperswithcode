@@ -385,6 +385,87 @@ def test_stop_without_exact_status_proof_leaves_active_worker_running(
     ]
 
 
+def test_candidate_stop_accepts_validated_release_drain_after_cutover(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    """A displaced slot's supervisor drained its old release, then the next
+    candidate's cleanup stopped only that supervisor and left the worker
+    running. The validated previous release's offline proof stops it."""
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    (tmp_path / "staging-blue.json").write_text(
+        json.dumps(
+            {
+                "release_id": "previous-release",
+                "worker_id": "staging-blue",
+                "state": "offline",
+                "registered": True,
+                "generation": 247,
+                "drained": True,
+            }
+        )
+    )
+    commands: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        if command[1] == "show":
+            return SimpleNamespace(returncode=0, stdout="active\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    lifecycle.stop_slot(
+        "staging",
+        "blue",
+        "new-candidate",
+        validated_orphan_release_ids=frozenset({"previous-release"}),
+    )
+
+    assert commands == [
+        ["systemctl", "stop", "paperswithcode-staging-external-pi@blue.service"],
+        ["systemctl", "stop", "paperswithcode-staging-external-pi-worker@blue.service"],
+    ]
+
+
+def test_candidate_stop_rejects_drain_proof_from_an_unvalidated_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(lifecycle, "STATUS_ROOT", tmp_path)
+    (tmp_path / "staging-blue.json").write_text(
+        json.dumps(
+            {
+                "release_id": "unknown-release",
+                "worker_id": "staging-blue",
+                "state": "offline",
+                "drained": True,
+            }
+        )
+    )
+    commands: list[list[str]] = []
+
+    def run(command, **_kwargs):
+        commands.append(command)
+        if command[1] == "show":
+            return SimpleNamespace(returncode=0, stdout="active\n")
+        return SimpleNamespace(returncode=0)
+
+    monkeypatch.setattr(lifecycle.subprocess, "run", run)
+
+    with pytest.raises(lifecycle.ExternalPiSlotError, match="prove graceful drain"):
+        lifecycle.stop_slot(
+            "staging",
+            "blue",
+            "new-candidate",
+            validated_orphan_release_ids=frozenset({"previous-release"}),
+        )
+
+    assert [
+        "systemctl",
+        "stop",
+        "paperswithcode-staging-external-pi-worker@blue.service",
+    ] not in commands
+
+
 def test_stop_without_status_proof_accepts_exact_inactive_worker_state(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ):

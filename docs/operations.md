@@ -244,7 +244,10 @@ Blue/green deployments record every pointer mutation in
 `live-with-old-slot-draining`, do not restart or kill the old service; run
 `sudo pwc-reap <environment>` later. It stops a slot only after both chat and
 gateway stream counts are zero and then removes only unreferenced releases and
-runtimes. A journal phase ending in `smoke-pending` or
+runtimes. When the external Pi lifecycle is enabled, the next `pwc-deploy` or
+`pwc-rollback` performs that reap first, stopping the displaced slot's
+supervisor and worker with the slot's own release, and refuses to start while
+the displaced backend still has streams. A journal phase ending in `smoke-pending` or
 `automatic-rollback-in-progress` is an incident requiring pointer and public
 smoke inspection before another deployment.
 

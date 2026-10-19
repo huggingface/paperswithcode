@@ -1311,9 +1311,10 @@ def _worker_stop_is_safe(
     *,
     release_id: str,
     worker_id: str,
+    drained_release_ids: frozenset[str] = frozenset(),
 ) -> bool:
     if (
-        current.get("release_id") == release_id
+        current.get("release_id") in drained_release_ids | {release_id}
         and current.get("worker_id") == worker_id
         and current.get("state") == "offline"
         and current.get("drained") is True
@@ -1404,6 +1405,7 @@ def stop_slot(
             current,
             release_id=release_id,
             worker_id=worker_id,
+            drained_release_ids=validated_orphan_release_ids,
         )
         for prior, current, worker_id in zip(previous, value, worker_ids, strict=True)
     ):

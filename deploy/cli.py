@@ -970,6 +970,24 @@ def _recover_interrupted_activation(environment: str) -> None:
     journal = _journal(environment)
     if not journal:
         return
+    if journal.get("phase") in {
+        "live-with-old-slot-draining",
+        "live-with-old-external-pi-draining",
+    } and external_pi_lifecycle_enabled(environment):
+        # The displaced slot's external Pi keeps running until pwc-reap. Finish
+        # that reap now, with the slot's own release, so the next activation
+        # never starts or cleans up this slot while its old supervisor runs.
+        active_slot = _active_slot(environment)
+        draining_slot = journal.get("draining_slot")
+        if draining_slot not in {"blue", "green"} or draining_slot == active_slot:
+            raise DeployError("activation journal cannot identify its draining slot")
+        if _reap_draining_slot(environment, draining_slot) is not None:
+            raise DeployError(
+                f"{environment}/{draining_slot} is still draining from the previous "
+                "activation; run pwc-reap once its streams finish"
+            )
+        _write_settled_journal(environment, active_slot)
+        return
     if journal.get("phase") in {"candidate-preparing", "candidate-prepared"}:
         candidate_slot = journal.get("candidate_slot")
         candidate_release_name = journal.get("candidate_release")
@@ -1962,6 +1980,43 @@ def rollback(args: argparse.Namespace) -> int:
     return 0
 
 
+def _reap_draining_slot(environment: str, draining: str) -> dict | None:
+    """Stop a displaced slot's drained backend, then its external Pi.
+
+    Returns the backend status while streams remain, otherwise None.
+    """
+
+    status_value = _unix_json(
+        environment,
+        draining,
+        "/internal/deployment-status",
+        check=False,
+    )
+    if status_value is not None and not _stop_drained_slot(environment, draining):
+        return status_value
+    draining_release = _slot_release(environment, draining)
+    if draining_release is None:
+        raise DeployError("draining slot has no release")
+    stop_slot_if_enabled(
+        environment,
+        draining,
+        validate_manifest(draining_release, environment)["release_id"],
+        allow_orphaned_turn_reap=True,
+    )
+    return None
+
+
+def _write_settled_journal(environment: str, active: str) -> None:
+    pointers = read_pointers(ENVIRONMENTS_ROOT / environment)
+    _write_journal(
+        environment,
+        "settled",
+        active_slot=active,
+        active_release=pointers.current.name if pointers.current else None,
+        previous_release=pointers.previous.name if pointers.previous else None,
+    )
+
+
 def reap(args: argparse.Namespace) -> int:
     require_root()
     with deployment_lock():
@@ -1969,15 +2024,8 @@ def reap(args: argparse.Namespace) -> int:
         if active is None:
             raise DeployError("slot topology is not active")
         draining = "green" if active == "blue" else "blue"
-        status_value = _unix_json(
-            args.environment,
-            draining,
-            "/internal/deployment-status",
-            check=False,
-        )
-        if status_value is not None and not _stop_drained_slot(
-            args.environment, draining
-        ):
+        status_value = _reap_draining_slot(args.environment, draining)
+        if status_value is not None:
             print(
                 json.dumps(
                     {
@@ -1995,23 +2043,7 @@ def reap(args: argparse.Namespace) -> int:
                 )
             )
             return 0
-        draining_release = _slot_release(args.environment, draining)
-        if draining_release is None:
-            raise DeployError("draining slot has no release")
-        stop_slot_if_enabled(
-            args.environment,
-            draining,
-            validate_manifest(draining_release, args.environment)["release_id"],
-            allow_orphaned_turn_reap=True,
-        )
-        pointers = read_pointers(ENVIRONMENTS_ROOT / args.environment)
-        _write_journal(
-            args.environment,
-            "settled",
-            active_slot=active,
-            active_release=pointers.current.name if pointers.current else None,
-            previous_release=pointers.previous.name if pointers.previous else None,
-        )
+        _write_settled_journal(args.environment, active)
         cleanup_releases()
         cleanup_runtimes(RUNTIMES, _protected_python_runtime_ids())
         cleanup_external_pi_runtimes(
