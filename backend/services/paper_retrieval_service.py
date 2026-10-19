@@ -50,6 +50,9 @@ _related_cache: OrderedDict[tuple, tuple[float, list[RelatedPaperRecommendation]
 )
 _related_cache_lock = threading.Lock()
 _RELATED_CACHE_TTL_SECONDS = 300
+# Punctuation inside a word ("V4.1", "Qwen2.5-VL"), split like the title copy
+# in papers_search_vector_update().
+_INNER_PUNCTUATION = re.compile(r"(?<=[^\W_])[^\w\s]+(?=[^\W_])|_")
 
 
 def _related_cache_get(key: tuple) -> list[RelatedPaperRecommendation] | None:
@@ -900,6 +903,11 @@ class PaperRetrievalService:
         normalized_title = " ".join(query.lower().split())
         normalized_arxiv_id = self._normalize_arxiv_search_query(query)
         ts_query = func.websearch_to_tsquery("english", query)
+        split_query = _INNER_PUNCTUATION.sub(" ", query)
+        if split_query != query:
+            ts_query = ts_query.op("||")(
+                func.websearch_to_tsquery("english", split_query)
+            )
         author_ts_query = func.websearch_to_tsquery("simple", query)
         arxiv_match = (
             DBPaper.arxiv_id == normalized_arxiv_id if normalized_arxiv_id else False

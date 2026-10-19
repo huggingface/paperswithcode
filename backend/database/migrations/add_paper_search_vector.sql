@@ -13,8 +13,14 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 BEGIN
+    -- The second title copy splits on punctuation, because the parser keeps
+    -- "DeepSeek-V4.1-Flash" as v4 + 1 and "Llama-3.1-8B" as -3.1 + -8 + b,
+    -- so a query for "V4.1" or "Llama 3.1" could never match the title.
     NEW.search_vector :=
         setweight(to_tsvector('english', coalesce(NEW.title, '')), 'A') ||
+        setweight(to_tsvector('english', regexp_replace(
+            coalesce(NEW.title, ''), '[^[:alnum:]]+', ' ', 'g'
+        )), 'A') ||
         setweight(to_tsvector('english', coalesce(NEW.abstract, '')), 'B');
     RETURN NEW;
 END;

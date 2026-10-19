@@ -14,7 +14,10 @@ from sqlalchemy.orm import sessionmaker
 
 from backend.config import get_settings
 from backend.database.connection import get_database_session
-from backend.database.migrations.backfill_paper_search_vector import backfill
+from backend.database.migrations.backfill_paper_search_vector import (
+    SEARCH_VECTOR,
+    backfill,
+)
 from backend.main import create_app
 from backend.models.database import (
     Author as DBAuthor,
@@ -1577,8 +1580,9 @@ def test_trigger_insert_update_coverage_and_partial_index(search_engine):
             text("SELECT search_vector::text FROM papers WHERE id = :id"),
             {"id": paper_id},
         ).scalar_one()
-        assert "'chang':4B" in abstract_updated
-        assert "'abstract':5B" in abstract_updated
+        # The abstract follows the title and its punctuation-split copy.
+        assert "'chang':7B" in abstract_updated
+        assert "'abstract':8B" in abstract_updated
 
         coverage = connection.execute(
             text("""
@@ -1700,6 +1704,43 @@ def test_backfill_is_bounded_and_resumable(search_engine, search_database_url):
     assert (updated, remaining) == (2, 1)
     updated, remaining = backfill(search_database_url, batch_size=2, max_batches=1)
     assert (updated, remaining) == (1, 0)
+
+
+def test_keyword_search_matches_version_numbers_inside_names(session_factory):
+    with session_factory() as session:
+        deepseek = add_paper(
+            session, title="DeepSeek-V4.1-Flash: Pushing the Limits of KV Cache"
+        )
+        llama = add_paper(session, title="Fine-Tuning Llama-3.1-8B for Agents")
+        qwen = add_paper(session, title="Qwen2.5-VL Technical Report")
+        session.commit()
+        for query, paper in [
+            ("DeepSeek V4.1", deepseek),
+            ("deepseek v4.1 flash", deepseek),
+            ("DeepSeek-V4.1-Flash", deepseek),
+            ("Llama 3.1 8B", llama),
+            ("Qwen2.5 VL", qwen),
+            ("Qwen2.5-VL", qwen),
+        ]:
+            assert [item.id for item in search(session, query)] == [str(paper.id)]
+
+
+def test_backfill_expression_matches_the_trigger(search_engine):
+    with search_engine.begin() as connection:
+        connection.execute(
+            text("""
+                INSERT INTO papers (
+                    title, abstract, source, arxiv_id, version,
+                    is_latest_version, citation_count, urls_extracted
+                ) VALUES (
+                    'DeepSeek-V4.1-Flash: Llama-3.1', 'An abstract.', 'arxiv',
+                    '2607.00200', 'v1', true, 0, false
+                )
+            """)
+        )
+        assert connection.execute(
+            text(f"SELECT p.search_vector = ({SEARCH_VECTOR}) FROM papers p")
+        ).scalar_one()
 
 
 def test_reference_lookup_matches_arxiv_ids_and_title_fingerprints(session_factory):
