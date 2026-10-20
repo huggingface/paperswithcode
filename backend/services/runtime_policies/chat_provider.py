@@ -223,7 +223,7 @@ def validate_chat_provider_policy(
                 1
                 <= settings.chat_web_search_monthly_warning_calls
                 <= settings.chat_web_search_monthly_hard_calls
-                <= 3_000
+                <= 6_000
             )
         ):
             raise RuntimeError("web-search runtime descriptor is invalid")

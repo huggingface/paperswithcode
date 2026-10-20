@@ -829,8 +829,9 @@ def test_chat_provider_policy_accepts_one_reviewed_staging_candidate(
     [
         (1_000, 1_200, True),
         (2_500, 3_000, True),
-        (3_000, 3_000, True),
-        (2_500, 3_001, False),
+        (5_000, 6_000, True),
+        (6_000, 6_000, True),
+        (5_000, 6_001, False),
         (1_300, 1_200, False),
     ],
 )

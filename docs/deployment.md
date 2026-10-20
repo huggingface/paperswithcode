@@ -351,8 +351,8 @@ sudo python deploy/configure_host_env.py \
 
 The application records content-free attempt, success/failure, latency, result
 count, provider-reported cost, and opaque-owner concentration telemetry. The
-admin dashboard warns at 2,500 provider attempts and the application circuit
-opens at 3,000 per UTC month (runtime validation caps it at 3,000); configure
+admin dashboard warns at 5,000 provider attempts and the application circuit
+opens at 6,000 per UTC month (runtime validation caps it at 6,000); configure
 Exa account-level paid-tier spend alerts
 as the outer backstop. For emergency abuse response, set
 `PWC_CHAT_WEB_SEARCH_DOMAIN_DENYLIST` to a comma-separated hostname list and

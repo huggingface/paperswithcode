@@ -513,8 +513,8 @@ def test_staging_web_search_configuration_is_scoped_and_bounded():
     assert values["PWC_CHAT_WEB_SEARCH_MAX_CALLS"] == "3"
     assert values["PWC_CHAT_WEB_SEARCH_RESULT_COUNT"] == "5"
     assert values["PWC_CHAT_WEB_SEARCH_MAX_RESULT_BYTES"] == "16384"
-    assert values["PWC_CHAT_WEB_SEARCH_MONTHLY_WARNING_CALLS"] == "2500"
-    assert values["PWC_CHAT_WEB_SEARCH_MONTHLY_HARD_CALLS"] == "3000"
+    assert values["PWC_CHAT_WEB_SEARCH_MONTHLY_WARNING_CALLS"] == "5000"
+    assert values["PWC_CHAT_WEB_SEARCH_MONTHLY_HARD_CALLS"] == "6000"
     assert set(values) <= configure_host_env.STAGING_RUNTIME_PASSTHROUGH_KEYS
     with pytest.raises(ValueError, match="EXA_API_KEY"):
         configure_host_env.staging_web_search_values({})
