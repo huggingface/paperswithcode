@@ -9,11 +9,11 @@ cookies), then pushes the resulting `dist/` folder to the target Space repo.
 Usage:
 
     uv run --env-file backend/keys.env python .github/workflows/scripts/deploy_hf_space.py \\
-        --space nielsr/paperswithcode-mirror
+        --space your-namespace/paperswithcode-mirror
 
     # First time only: creates the Space repo with sdk=static.
     uv run --env-file backend/keys.env python .github/workflows/scripts/deploy_hf_space.py \\
-        --space nielsr/paperswithcode-mirror --create
+        --space your-namespace/paperswithcode-mirror --create
 
 The Space then serves a static SPA that calls the live API at
 `https://paperswithcode.co`. The backend must allow the Space origin in its
@@ -204,7 +204,7 @@ def main() -> None:
     parser.add_argument(
         "--space",
         required=True,
-        help="Target Space repo id, e.g. nielsr/paperswithcode-mirror",
+        help="Target Space repo id, e.g. your-namespace/paperswithcode-mirror",
     )
     parser.add_argument(
         "--api-url",

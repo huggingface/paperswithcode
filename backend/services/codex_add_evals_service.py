@@ -1080,6 +1080,8 @@ class CodexPaperJobService:
     def _verified_job_image(
         self, db: Session, settings: Settings, row: PaperCurationJob
     ) -> str:
+        if not settings.codex_jobs_image:
+            raise RuntimeError("Curator image is not configured (PWC_CODEX_JOBS_IMAGE)")
         image = settings.codex_jobs_image.replace(
             "{sha}", row.repository_sha or _git_revision()
         )

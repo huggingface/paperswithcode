@@ -53,7 +53,7 @@ def _settings():
     return SimpleNamespace(
         codex_jobs_enabled=False,
         codex_jobs_token="hf-token",
-        codex_jobs_namespace="nielsr",
+        codex_jobs_namespace="example-org",
     )
 
 
@@ -69,7 +69,7 @@ def _running_job(db, *, number=1, trigger="admin", attempt_count=1, kind="add-ev
         id=uuid.uuid4(),
         kind=kind,
         paper_id=paper.id,
-        requested_by="nielsr",
+        requested_by="example-admin",
         status="running",
         trigger=trigger,
         hf_job_id=f"hf-job-{number}",
@@ -160,7 +160,7 @@ def test_newer_admin_job_supersedes_a_waiting_one(db):
         id=uuid.uuid4(),
         kind=older.kind,
         paper_id=older.paper_id,
-        requested_by="nielsr",
+        requested_by="example-admin",
         status="queued",
         trigger="admin",
         attempt_count=0,
@@ -213,7 +213,7 @@ def test_stopped_newer_job_does_not_supersede_a_waiting_one(db, newer_status):
             id=uuid.uuid4(),
             kind=older.kind,
             paper_id=older.paper_id,
-            requested_by="nielsr",
+            requested_by="example-admin",
             status=newer_status,
             trigger="admin",
             attempt_count=1,

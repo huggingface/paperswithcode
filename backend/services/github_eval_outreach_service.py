@@ -10,9 +10,9 @@ from backend.services.github_eval_outreach_state import OutreachState
 from backend.services.github_issue_body_service import ISSUE_TITLE
 from backend.services.github_issue_publish_service import (
     GithubApiError,
-    NIELSROGGE_LOGIN,
     SITE_ISSUE_QUERY,
     _is_excluded_repository,
+    outreach_login,
 )
 
 DAY = 86400
@@ -104,8 +104,10 @@ class OutreachRunner:
         max_create=30,
         sleep=time.sleep,
         now=time.time,
+        login=None,
     ):
         self.state, self.api, self.catalog, self.draft = state, api, catalog, draft
+        self.login = login or outreach_login()
         self.dry_run, self.limit, self.max_create = dry_run, limit, max_create
         self.sleep, self.now = sleep, now
         self.counts = Counter()
@@ -124,7 +126,7 @@ class OutreachRunner:
             found = next(
                 (
                     issue
-                    for issue in issues(self.api, repository, creator="NielsRogge")
+                    for issue in issues(self.api, repository, creator=self.login)
                     if issue.get("title") == ISSUE_TITLE
                     and issue.get("body") == pending["body"]
                 ),
@@ -134,7 +136,7 @@ class OutreachRunner:
             not found
             or found.get("title") != ISSUE_TITLE
             or found.get("body") != pending["body"]
-            or found.get("user", {}).get("login", "").lower() != NIELSROGGE_LOGIN
+            or found.get("user", {}).get("login", "").lower() != self.login.lower()
         ):
             self.record(
                 "needs_review",
@@ -228,7 +230,7 @@ class OutreachRunner:
         ):
             self.record("ineligible", repository)
             return
-        if next(issues(self.api, repository, state="open", creator="NielsRogge"), None):
+        if next(issues(self.api, repository, state="open", creator=self.login), None):
             self.record("open_issue", repository)
             return
         covered = set(record.get("covered", []))
@@ -267,7 +269,7 @@ class OutreachRunner:
             )
             return
         # Recheck the author gate immediately before the write, after potentially slow drafts.
-        if next(issues(self.api, repository, state="open", creator="NielsRogge"), None):
+        if next(issues(self.api, repository, state="open", creator=self.login), None):
             self.record("open_issue", repository)
             return
         pending = {
@@ -320,9 +322,9 @@ class OutreachRunner:
                 "counts": {"rate_limited": 1},
                 "events": [],
             }
-        if self.api(["user"])["login"].lower() != NIELSROGGE_LOGIN:
+        if self.api(["user"])["login"].lower() != self.login.lower():
             raise ValueError(
-                "Evaluation outreach requires the NielsRogge GitHub account"
+                f"Evaluation outreach requires the {self.login} GitHub account"
             )
         for key, record in self.state.pending()[: self.limit]:
             try:

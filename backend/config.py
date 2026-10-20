@@ -53,7 +53,7 @@ class Settings(BaseSettings, ChatSettings):
     db_host: str = Field(default="localhost", description="Database host")
     db_port: int = Field(default=5432, description="Database port")
     db_name: str = Field(default="paperswithcode_hf", description="Database name")
-    db_user: str = Field(default="nielsrogge", description="Database user")
+    db_user: str = Field(default="postgres", description="Database user")
     db_password: str = Field(default="", description="Database password")
     db_search_path: str = Field(default="public")
 
@@ -73,7 +73,7 @@ class Settings(BaseSettings, ChatSettings):
         description=(
             "Comma-separated list of additional CORS origins. "
             "Used to allow the Hugging Face Space mirror (e.g. "
-            "https://nielsr-paperswithcode.hf.space) to call the production "
+            "https://<namespace>-paperswithcode.hf.space) to call the production "
             "API."
         ),
     )
@@ -207,9 +207,7 @@ class Settings(BaseSettings, ChatSettings):
     codex_add_evals_enabled: bool = Field(default=False)
     codex_enrich_paper_enabled: bool = Field(default=False)
     codex_add_evals_timeout_seconds: int = Field(default=3600, ge=60, le=7200)
-    codex_add_evals_work_dir: str = Field(
-        default="/root/python_projects/paperswithcode"
-    )
+    codex_add_evals_work_dir: str = Field(default="./runtime/codex-work")
     codex_add_evals_spool_dir: str = Field(default="/tmp/pwc-codex-add-evals")
     # Remote paper-curation workers run on Hugging Face Jobs. Keep these
     # credentials separate from the general Hub token and database credentials.
@@ -220,12 +218,8 @@ class Settings(BaseSettings, ChatSettings):
     codex_jobs_token: str = Field(default="")
     codex_jobs_openai_api_key: str = Field(default="")
     # Digest-pinned image built by .github/workflows/build-codex-curator-image.yml.
-    codex_jobs_image: str = Field(
-        default=(
-            "cr.hf.co/nielsr/pwc-codex-curator:runner-8fc62f3ce865"
-            "@sha256:93d70eb1c02345d37a099182e322463b47f4480a472720376c1b98068fe075a9"
-        )
-    )
+    # Deliberately has no default; each deployment pins its own curator image.
+    codex_jobs_image: str = Field(default="")
     # Hub revision of a legacy Docker Space image; unused for registry digests.
     codex_jobs_image_revision: str = Field(default="")
     codex_jobs_api_url: str = Field(default="https://paperswithcode.co/api/v1")
@@ -360,6 +354,11 @@ class Settings(BaseSettings, ChatSettings):
     github_token: str = Field(
         default="", description="GitHub API token for higher rate limits"
     )
+    # Evaluation outreach identity. An open issue by this GitHub login marks a
+    # repository as already contacted, and the outreach token must belong to it.
+    github_outreach_login: str = Field(default="")
+    # First name used to introduce and sign evaluation outreach issues.
+    github_outreach_signer: str = Field(default="")
 
     # Thumbnail configuration
     thumbnail_cache_dir: str = Field(

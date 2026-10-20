@@ -47,7 +47,7 @@ separately reviewed commit.
 **Queue System**:
 - **HOT**: 0–30 days, exclusively owned by the 15-minute job
 - **FRESH** (`PWC_GITHUB_TOKEN`): 31 days–6 months, oldest update first
-- **WEEKLY** (`GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE`): older and
+- **WEEKLY** (`PWC_GITHUB_TOKEN_WEEKLY`): older and
   never-updated repositories, oldest update first, refreshed every 7 days
 
 The 30-day boundary is intentionally fixed so hot selection, fresh exclusion,
@@ -65,8 +65,10 @@ PYTHONPATH=.github/workflows uv run --env-file backend/keys.env python -m script
 
 **Required environment variables**:
 - `PWC_GITHUB_TOKEN`: GitHub API token for authentication
-- `GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE`: token from a separate GitHub
-  account, used only for the weekly/backfill queue
+- `PWC_GITHUB_TOKEN_WEEKLY`: token from a separate GitHub account, used only
+  for the weekly/backfill queue (the legacy name
+  `GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE` is still read when the new
+  one is unset)
 
 ---
 

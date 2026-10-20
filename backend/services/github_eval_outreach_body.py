@@ -2,6 +2,7 @@
 
 from backend.services.github_issue_body_service import (
     GithubIssueDraft,
+    outreach_signer,
     render_badge_markdown,
     render_ranking_paragraphs,
     validate_issue_body,
@@ -13,9 +14,10 @@ def render_repository_body(papers: list[GithubIssueDraft]) -> str:
         raise ValueError("No papers to include")
     if len(papers) == 1:
         return papers[0].body
+    signer = outreach_signer()
     parts = [
         "Hi,",
-        "Niels here from the open-source team at Hugging Face.",
+        f"{signer} here from the open-source team at Hugging Face.",
         "I've made the following papers and their evaluation results available on Papers with Code:",
     ]
     bullets = []
@@ -66,7 +68,7 @@ def render_repository_body(papers: list[GithubIssueDraft]) -> str:
                 "\n".join(badges),
             ]
         )
-    parts.extend(["Kind regards,", "Niels"])
+    parts.extend(["Kind regards,", signer])
     body = "\n\n".join(parts)
     if len(body.encode()) > 60000:
         raise ValueError("Grouped issue exceeds the publication size limit")

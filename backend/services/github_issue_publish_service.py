@@ -10,6 +10,7 @@ import time
 from dataclasses import asdict, dataclass
 from typing import Any, Callable
 
+from backend.config import get_settings
 from backend.services.github_issue_body_service import (
     GithubIssueDraft,
     normalize_repository_url,
@@ -31,7 +32,6 @@ class GithubIssuePublishResult:
 
 
 GithubApi = Callable[[list[str], dict[str, str]], Any]
-NIELSROGGE_LOGIN = "nielsrogge"
 # GitHub issue search does not match URL paths or arXiv ids in bodies, so
 # outreach issues are found by the site name they all carry.
 SITE_ISSUE_QUERY = 'is:issue "Papers with Code"'
@@ -42,6 +42,17 @@ EXCLUDED_REPOSITORY_NAMES = frozenset(
     {"vllm", "sglang", "llama.cpp", "tensorflow", "pytorch"}
 )
 EXCLUDED_REPOSITORIES = frozenset({"google-research/google-research", "pwc-1/paper-9"})
+
+
+def outreach_login() -> str:
+    """GitHub login that authors outreach issues (``PWC_GITHUB_OUTREACH_LOGIN``)."""
+    login = get_settings().github_outreach_login.strip()
+    if not login:
+        raise RuntimeError(
+            "Evaluation outreach requires PWC_GITHUB_OUTREACH_LOGIN, the GitHub "
+            "login that authors outreach issues"
+        )
+    return login
 
 
 def _is_excluded_repository(repository: str) -> bool:
@@ -224,8 +235,9 @@ def _matching_issue(
     )
 
 
-def _has_open_nielsrogge_issue(
+def _has_open_outreach_issue(
     repository: str,
+    login: str,
     env: dict[str, str],
     api: GithubApi,
 ) -> bool:
@@ -235,7 +247,7 @@ def _has_open_nielsrogge_issue(
             "-f",
             "state=open",
             "-f",
-            "creator=NielsRogge",
+            f"creator={login}",
             "-f",
             "per_page=100",
             "-f",
@@ -249,7 +261,7 @@ def _has_open_nielsrogge_issue(
     )
     return any(
         "pull_request" not in issue
-        and (issue.get("user", {}).get("login") or "").lower() == NIELSROGGE_LOGIN
+        and (issue.get("user", {}).get("login") or "").lower() == login.lower()
         for issue in open_issues
     )
 
@@ -275,10 +287,10 @@ def publish_github_issue(
     if _is_excluded_repository(repository):
         raise ValueError(f"Repository {repository} is excluded from outreach")
 
-    if _has_open_nielsrogge_issue(repository, env, api):
+    login = outreach_login()
+    if _has_open_outreach_issue(repository, login, env, api):
         raise ValueError(
-            f"Repository {repository} already has an open issue authored by "
-            f"{NIELSROGGE_LOGIN}"
+            f"Repository {repository} already has an open issue authored by {login}"
         )
 
     existing = _matching_issue(draft, repository, env, api)

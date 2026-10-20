@@ -32,6 +32,7 @@ from backend.services.codex_add_evals_service import (
     _release_git_revision,
 )
 from backend.utils.auth import require_hf_admin
+from deploy.configure_host_env import production_codex_image_values
 from jobs import curation_api
 from jobs.curation_api import USER_AGENT as HELPER_USER_AGENT
 
@@ -87,10 +88,10 @@ def test_release_manifest_pins_remote_worker_revision(tmp_path):
 
 def test_remote_job_uses_immutable_curator_image():
     settings = get_settings()
-    assert settings.codex_jobs_image == (
-        "cr.hf.co/nielsr/pwc-codex-curator:runner-8fc62f3ce865"
-        "@sha256:93d70eb1c02345d37a099182e322463b47f4480a472720376c1b98068fe075a9"
-    )
+    # Each deployment pins its own curator image; production's pin lives in
+    # the host-environment tooling, not in the application defaults.
+    assert settings.codex_jobs_image == ""
+    assert "@sha256:" in production_codex_image_values()["PWC_CODEX_JOBS_IMAGE"]
     assert settings.codex_jobs_image_revision == ""
     assert settings.codex_jobs_namespace == ""
     assert CURATOR_COMMAND == "exec python3 /runner/run_paper_curation.py"
@@ -101,9 +102,9 @@ def test_curator_image_and_dockerfile_pin_current_runner():
     runner_digest = hashlib.sha256(
         Path("jobs/run_paper_curation.py").read_bytes()
     ).hexdigest()
-    settings = get_settings()
+    image = production_codex_image_values()["PWC_CODEX_JOBS_IMAGE"]
 
-    assert f":runner-{runner_digest[:12]}@sha256:" in settings.codex_jobs_image
+    assert f":runner-{runner_digest[:12]}@sha256:" in image
     assert f'"{runner_digest}"' in Path("jobs/Dockerfile.codex-curator").read_text(
         encoding="utf-8"
     )

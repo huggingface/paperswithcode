@@ -8,7 +8,8 @@ For `Verify evals on Papers with Code` outreach, do not create an issue when:
 
 - the target repository is owned by `huggingface`;
 - the repository name is `vllm`, `sglang`, or `llama.cpp`;
-- the repository already has an open issue authored by `nielsrogge`.
+- the repository already has an open issue authored by the outreach login
+  (`PWC_GITHUB_OUTREACH_LOGIN`).
 
 The publisher checks these exclusions before creating an issue. It also reuses
 an existing issue containing the paper URL, including closed issues, to avoid
@@ -81,11 +82,12 @@ Unsettled papers do not consume the repository-check allowance.
 Selection covers all latest papers with native evaluations and official GitHub
 links, rather than a time window that could lose work during downtime.
 
-Any open issue by `NielsRogge` blocks outreach. Complete, paginated issue history
+Any open issue by the outreach login (`PWC_GITHUB_OUTREACH_LOGIN`) blocks outreach. Complete, paginated issue history
 also suppresses already-contacted papers, including closed threads and numeric,
 arXiv, and versioned paper URLs. Previously contacted papers are omitted from a
 new grouped message. Counts, ranks, badges, and official links are refreshed
-before posting. Creation requires authenticating as `NielsRogge`, and the job
+before posting. Creation requires authenticating as that login, issues are introduced and
+signed by `PWC_GITHUB_OUTREACH_SIGNER`, and the job
 reads back the issue to verify its exact author, title, and body.
 
 The durable SQLite ledger is

@@ -36,10 +36,17 @@ FRESH_PAPER_WINDOW_DAYS = 180
 DEFAULT_RATE_LIMIT_RESERVE = 500
 MAX_RETRIES = 3
 MAX_RETRY_DELAY_SECONDS = 60.0
-QUEUE_CREDENTIALS = {
-    "fresh": "PWC_GITHUB_TOKEN",
-    "weekly": "GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE",
-}
+WEEKLY_CREDENTIAL = "PWC_GITHUB_TOKEN_WEEKLY"
+# Older deployments still name the weekly-queue token after its account.
+LEGACY_WEEKLY_CREDENTIAL = "GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE"
+
+
+def queue_credentials() -> dict[str, str]:
+    """Environment variable names holding each queue's GitHub token."""
+    weekly = WEEKLY_CREDENTIAL
+    if not os.getenv(WEEKLY_CREDENTIAL) and os.getenv(LEGACY_WEEKLY_CREDENTIAL):
+        weekly = LEGACY_WEEKLY_CREDENTIAL
+    return {"fresh": "PWC_GITHUB_TOKEN", "weekly": weekly}
 
 
 def log(message: str):
@@ -553,6 +560,7 @@ def run_queue(
 def summarize_queues(results: list[Dict]) -> Dict:
     """Flatten per-queue results for log parsing and the admin dashboard."""
     summary: Dict = {}
+    credentials = queue_credentials()
     fields = (
         "eligible_groups",
         "selected_groups",
@@ -571,7 +579,7 @@ def summarize_queues(results: list[Dict]) -> Dict:
     )
     for result in results:
         queue = result["queue"]
-        summary[f"{queue}_credential"] = QUEUE_CREDENTIALS[queue]
+        summary[f"{queue}_credential"] = credentials[queue]
         for field in fields:
             summary[f"{queue}_{field}"] = result.get(field, 0)
     return summary
@@ -580,11 +588,12 @@ def summarize_queues(results: list[Dict]) -> Dict:
 def require_successful_queues(results: list[Dict]) -> None:
     """Fail when a selected queue produced no usable GitHub response."""
     outages = []
+    credentials = queue_credentials()
     for result in results:
         if result["selected_groups"] == 0 or result["successes"] > 0:
             continue
         queue = result["queue"]
-        credential = QUEUE_CREDENTIALS[queue]
+        credential = credentials[queue]
         if result["credential_failures"]:
             outages.append(
                 f"{queue} credential {credential} was rejected "
@@ -602,8 +611,7 @@ def require_successful_queues(results: list[Dict]) -> None:
 def main():
     log("Starting GitHub Stars Update")
     token_config = {
-        "fresh": os.getenv("PWC_GITHUB_TOKEN"),
-        "weekly": os.getenv("GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE"),
+        queue: os.getenv(name) for queue, name in queue_credentials().items()
     }
     missing = [queue for queue, token in token_config.items() if not token]
     if missing:

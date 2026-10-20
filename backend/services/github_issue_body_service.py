@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
+from backend.config import get_settings
 from backend.models.database import (
     Dataset,
     Evaluation,
@@ -277,6 +278,17 @@ def render_badge_markdown(
     return badges
 
 
+def outreach_signer() -> str:
+    """Name that introduces and signs outreach issues (``PWC_GITHUB_OUTREACH_SIGNER``)."""
+    signer = get_settings().github_outreach_signer.strip()
+    if not signer:
+        raise RuntimeError(
+            "Evaluation outreach requires PWC_GITHUB_OUTREACH_SIGNER, the name "
+            "that signs outreach issues"
+        )
+    return signer
+
+
 def render_issue_body(
     paper_id: str,
     native_evaluation_count: int,
@@ -289,6 +301,7 @@ def render_issue_body(
     if not tasks:
         raise ValueError("At least one task is required")
 
+    signer = outreach_signer()
     paper_url = f"{SITE_ORIGIN}/paper/{paper_id}"
     evaluation_noun = "evaluation" if native_evaluation_count == 1 else "evaluations"
     provenance = "verified paper-native" if verified else "paper-native"
@@ -305,7 +318,7 @@ def render_issue_body(
         ]
     paragraphs = [
         "Hi,",
-        "Niels here from the open-source team at Hugging Face. Congratulations on your work!",
+        f"{signer} here from the open-source team at Hugging Face. Congratulations on your work!",
         (
             f"I've made the [paper]({paper_url}) and "
             f"[{native_evaluation_count} {provenance} {evaluation_noun}]"
@@ -324,7 +337,7 @@ def render_issue_body(
         ),
         *badge_paragraphs,
         "Kind regards,",
-        "Niels",
+        signer,
     ]
     body = "\n\n".join(paragraphs)
     validate_issue_body(body, paper_id)

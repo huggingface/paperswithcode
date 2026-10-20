@@ -1,5 +1,6 @@
 import pytest
 
+from backend.config import get_settings
 from backend.cli import build_parser
 from backend.services.github_issue_body_service import (
     PaperEvaluation,
@@ -11,6 +12,15 @@ from backend.services.github_issue_body_service import (
     render_ranking_paragraphs,
 )
 from backend.utils.paper_reference import normalize_paper_reference
+
+
+@pytest.fixture(autouse=True)
+def outreach_identity(monkeypatch):
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_LOGIN", "Example-Bot")
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_SIGNER", "Alex")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def evaluation(
@@ -162,6 +172,17 @@ def test_render_issue_body_is_compact_and_verification_is_explicit():
     assert "rank #" not in verified
     assert verified.count("https://paperswithcode.co/benchmark/") == 1
     assert "/leaderboard-badge-link?eval=9926" in verified
+    assert verified.startswith("Hi,\n\nAlex here from the open-source team")
+    assert verified.endswith("Kind regards,\n\nAlex")
+
+
+def test_render_issue_body_requires_configured_signer(monkeypatch):
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_SIGNER", "")
+    get_settings.cache_clear()
+    tasks = (TaskLink(name="Robotics", slug="robotics", evaluation_count=1),)
+
+    with pytest.raises(RuntimeError, match="PWC_GITHUB_OUTREACH_SIGNER"):
+        render_issue_body("2601.21998", 1, tasks, (), False)
 
 
 def test_normalize_paper_reference_accepts_url_arxiv_and_external_id():

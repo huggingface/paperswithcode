@@ -492,5 +492,7 @@ async def get_user_organizations(username: str) -> list[str]:
 
 
 if __name__ == "__main__":
-    orgs = asyncio.run(get_user_organizations("nielsr"))
+    import sys
+
+    orgs = asyncio.run(get_user_organizations(sys.argv[1]))
     print(orgs)

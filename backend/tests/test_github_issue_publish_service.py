@@ -1,10 +1,20 @@
 import pytest
 
+from backend.config import get_settings
 from backend.services.github_issue_body_service import GithubIssueDraft
 from backend.services.github_issue_publish_service import (
     publish_github_issue,
     select_official_repository,
 )
+
+
+@pytest.fixture(autouse=True)
+def outreach_identity(monkeypatch):
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_LOGIN", "Example-Bot")
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_SIGNER", "Alex")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
 
 
 def draft() -> GithubIssueDraft:
@@ -142,7 +152,7 @@ def test_publish_creates_and_reads_back_new_issue(monkeypatch):
     assert sum("POST" in call for call in calls) == 1
 
 
-def test_publish_skips_repository_with_open_nielsrogge_issue(monkeypatch):
+def test_publish_skips_repository_with_open_outreach_issue(monkeypatch):
     monkeypatch.setenv("TEST_GITHUB_TOKEN", "test-token")
 
     def api(arguments, _env):
@@ -157,15 +167,38 @@ def test_publish_skips_repository_with_open_nielsrogge_issue(monkeypatch):
             return [
                 {
                     "number": 12,
-                    "user": {"login": "NielsRogge"},
+                    "user": {"login": "Example-Bot"},
                     "state": "open",
                 }
             ]
         raise AssertionError(arguments)
 
-    with pytest.raises(ValueError, match="open issue authored by nielsrogge"):
+    with pytest.raises(ValueError, match="open issue authored by Example-Bot"):
         publish_github_issue(
             draft(),
             token_environment_variable="TEST_GITHUB_TOKEN",
+            api=api,
+        )
+
+
+def test_publish_requires_configured_outreach_login(monkeypatch):
+    monkeypatch.setenv("TEST_GITHUB_TOKEN", "test-token")
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_LOGIN", "")
+    get_settings.cache_clear()
+
+    def api(arguments, _env):
+        if arguments[0] == "repos/owner/repository":
+            return {
+                "archived": False,
+                "has_issues": True,
+                "full_name": "owner/repository",
+            }
+        raise AssertionError(arguments)
+
+    with pytest.raises(RuntimeError, match="PWC_GITHUB_OUTREACH_LOGIN"):
+        publish_github_issue(
+            draft(),
+            token_environment_variable="TEST_GITHUB_TOKEN",
+            requested_repository="owner/repository",
             api=api,
         )

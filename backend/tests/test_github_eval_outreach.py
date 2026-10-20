@@ -2,6 +2,7 @@ import subprocess
 
 import pytest
 
+from backend.config import get_settings
 from backend.services.github_eval_outreach_catalog import OutreachPaper
 from backend.services.github_eval_outreach_service import (
     OutreachRunner,
@@ -20,6 +21,15 @@ from backend.services.github_issue_publish_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def outreach_identity(monkeypatch):
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_LOGIN", "Example-Bot")
+    monkeypatch.setenv("PWC_GITHUB_OUTREACH_SIGNER", "Alex")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
 class Github:
     def __init__(self):
         self.calls = []
@@ -32,7 +42,7 @@ class Github:
             "has_issues": True,
             "archived": False,
         }
-        self.login = "NielsRogge"
+        self.login = "Example-Bot"
 
     def __call__(self, args):
         self.calls.append(args)
@@ -52,7 +62,7 @@ class Github:
                 **fields,
                 "number": len(self.rows) + 1,
                 "state": "open",
-                "user": {"login": "NielsRogge"},
+                "user": {"login": "Example-Bot"},
                 "html_url": f"https://github.com/lab/code/issues/{len(self.rows) + 1}",
             }
             self.rows.append(issue)
@@ -75,11 +85,11 @@ class Github:
                 "total_count": len(items),
                 "items": items[(page - 1) * 100 : page * 100],
             }
-        if "creator=NielsRogge" in args:
+        if "creator=Example-Bot" in args:
             rows = [
                 row
                 for row in rows
-                if row.get("user", {}).get("login", "").lower() == "nielsrogge"
+                if row.get("user", {}).get("login", "").lower() == "example-bot"
             ]
         if "state=open" in args:
             rows = [row for row in rows if row.get("state") == "open"]
@@ -101,7 +111,7 @@ def draft(paper_id):
         (),
         (),
         ("lab/code",),
-        f"Hi,\n\n[Paper]({url}) [1 paper-native evaluation]({url}#results)\n\nNiels",
+        f"Hi,\n\n[Paper]({url}) [1 paper-native evaluation]({url}#results)\n\nAlex",
     )
 
 
@@ -145,7 +155,7 @@ def test_open_author_issue_beyond_first_page_blocks(state):
     github = Github()
     github.rows = [{"state": "open", "user": {"login": "someone"}, "body": ""}] * 150
     github.rows.append(
-        {"state": "open", "user": {"login": "NielsRogge"}, "body": "unrelated"}
+        {"state": "open", "user": {"login": "Example-Bot"}, "body": "unrelated"}
     )
     assert runner(state, github).run()["counts"]["open_issue"] == 1
     assert not github.posts
@@ -166,7 +176,7 @@ def test_closed_arxiv_url_among_many_unrelated_issues_blocks_via_search(state):
     # rejects page-based pagination on large repositories (HTTP 422).
     assert any(call[0] == "search/issues" for call in github.calls)
     assert not any(
-        call[0] == "repos/lab/code/issues" and "creator=NielsRogge" not in call
+        call[0] == "repos/lab/code/issues" and "creator=Example-Bot" not in call
         for call in github.calls
     )
 
@@ -228,7 +238,7 @@ def test_pulls_do_not_block_outreach(state):
     github.rows = [
         {
             "state": "open",
-            "user": {"login": "NielsRogge"},
+            "user": {"login": "Example-Bot"},
             "pull_request": {},
             "body": "https://paperswithcode.co/paper/1",
         }
@@ -312,7 +322,7 @@ def test_refresh_drops_removed_official_link(state):
 def test_wrong_identity_fails_before_any_repository_request(state):
     github = Github()
     github.login = "other"
-    with pytest.raises(ValueError, match="NielsRogge"):
+    with pytest.raises(ValueError, match="Example-Bot"):
         runner(state, github).run()
     assert github.calls == [["user"]]
 
@@ -544,7 +554,7 @@ def multi_repository_github(count):
 
     def api(args):
         if args == ["user"]:
-            return {"login": "NielsRogge"}
+            return {"login": "Example-Bot"}
         if args[0] == "search/issues":
             name = next(a for a in args if a.startswith("q=repo:")).split()[0][7:]
         else:
@@ -561,7 +571,7 @@ def test_default_run_passes_fifty_blocked_repos_and_posts_thirty(state):
         for n, name in enumerate(repositories, 1)
     }
     for github in list(repositories.values())[:51]:
-        github.rows = [{"state": "open", "user": {"login": "NielsRogge"}}]
+        github.rows = [{"state": "open", "user": {"login": "Example-Bot"}}]
     result = runner(state, api, cohort).run()
     assert result["counts"]["open_issue"] == 51
     assert result["counts"]["attempted"] == 30

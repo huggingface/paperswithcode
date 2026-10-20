@@ -18,6 +18,7 @@ from scripts.hourly.update_github_stars import (  # noqa: E402
     fetch_github_stars,
     get_next_repository_group,
     mark_repository_group_checked,
+    queue_credentials,
     rate_limit_reserve_reached,
     require_successful_queues,
     run_queue,
@@ -434,3 +435,20 @@ def test_run_queue_keeps_stars_on_404_and_counts_404_and_451_separately(
     summary = summarize_queues([result])
     assert summary["fresh_not_found"] == 2
     assert summary["fresh_legal_blocked"] == 1
+
+
+def test_weekly_credential_prefers_neutral_name_and_keeps_legacy_fallback(
+    monkeypatch,
+):
+    monkeypatch.delenv("PWC_GITHUB_TOKEN_WEEKLY", raising=False)
+    monkeypatch.setenv("GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE", "legacy")
+    assert (
+        queue_credentials()["weekly"] == "GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE"
+    )
+
+    monkeypatch.setenv("PWC_GITHUB_TOKEN_WEEKLY", "neutral")
+    assert queue_credentials()["weekly"] == "PWC_GITHUB_TOKEN_WEEKLY"
+
+    monkeypatch.delenv("PWC_GITHUB_TOKEN_WEEKLY")
+    monkeypatch.delenv("GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE")
+    assert queue_credentials()["weekly"] == "PWC_GITHUB_TOKEN_WEEKLY"
