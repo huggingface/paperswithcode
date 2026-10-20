@@ -86,3 +86,24 @@ def test_pi_transcript_storage_envelope_round_trips_postgres_forbidden_nul():
 
     assert "\x00" not in str(stored)
     assert _native_entry(stored) == native
+
+
+def test_append_refuses_an_agent_session_bound_to_another_chat(monkeypatch):
+    class DB:
+        def execute(self, _query):
+            raise AssertionError("append must not touch another chat's session")
+
+    own_chat = uuid.uuid4()
+    own_session = SimpleNamespace(agent_session_id=uuid.uuid4())
+    victim_agent_session = uuid.uuid4()
+    service = ChatPiTranscriptService(DB(), get_settings())
+    monkeypatch.setattr(service, "_pi_chat", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(service, "create_or_bind_session", lambda *_args: own_session)
+
+    with pytest.raises(PiTranscriptError, match="ownership mismatch"):
+        service.append_entries(
+            own_chat,
+            victim_agent_session,
+            [{"ordinal": 0, "entry": {"type": "message", "id": "x"}}],
+            current_leaf_id="x",
+        )

@@ -177,9 +177,17 @@ class ChatPiTranscriptService:
             raise PiTranscriptError("Pi transcript append batch is outside the limit")
         chat = self._pi_chat(chat_session_id, lock=True)
         row = self.create_or_bind_session(chat_session_id, agent_session_id)
+        # The capability binds the chat; the agent session id comes from the
+        # caller. Only append to the session this chat is actually bound to,
+        # never to another chat's session that happens to share the id.
+        if row.agent_session_id != agent_session_id:
+            raise PiTranscriptError("Pi transcript ownership mismatch")
         row = self.db.execute(
             select(ChatPiSession)
-            .where(ChatPiSession.agent_session_id == agent_session_id)
+            .where(
+                ChatPiSession.agent_session_id == agent_session_id,
+                ChatPiSession.chat_session_id == chat_session_id,
+            )
             .with_for_update()
         ).scalar_one()
         parsed: list[tuple[int, dict[str, Any], int, str | None, str | None, str]] = []
