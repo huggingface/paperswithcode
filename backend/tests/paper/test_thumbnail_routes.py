@@ -147,11 +147,13 @@ class _FakeDb:
 
 
 def test_generate_persists_discovered_external_thumbnail(monkeypatch):
+    url = "/api/thumbnails/custom/external_42.jpg"
+    # Hydration already resolves the on-disk URL even though the column is null.
     api_paper = SimpleNamespace(
-        id=42,
+        id="42",
         source="external",
         source_url="https://example.com/report",
-        thumbnail_url=None,
+        thumbnail_url=url,
     )
     monkeypatch.setattr(
         thumbnails_router.PaperService,
@@ -160,7 +162,6 @@ def test_generate_persists_discovered_external_thumbnail(monkeypatch):
     )
     db_row = SimpleNamespace(id=42, thumbnail_url=None)
     db = _FakeDb(db_row)
-    url = "/api/thumbnails/custom/external_42.jpg"
     service = SimpleNamespace(get_external_thumbnail_url=lambda _paper_id: url)
     client = _thumbnail_client(service, db=db, admin=True)
 

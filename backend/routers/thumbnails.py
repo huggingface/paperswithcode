@@ -137,12 +137,12 @@ async def generate_thumbnail(
                 or thumbnail_service.get_external_thumbnail_url(paper.id)
             )
             if existing_url:
-                if not paper.thumbnail_url:
-                    # `paper` is the hydrated API model; persist on the ORM row.
-                    db_paper = db.get(DBPaper, paper.id)
-                    if db_paper is not None:
-                        db_paper.thumbnail_url = existing_url
-                        db.commit()
+                # Hydration fills `paper.thumbnail_url` from disk, so check the
+                # stored column on the ORM row rather than the API model.
+                db_paper = db.get(DBPaper, int(paper.id))
+                if db_paper is not None and not db_paper.thumbnail_url:
+                    db_paper.thumbnail_url = existing_url
+                    db.commit()
                 return {
                     "thumbnail_url": existing_url,
                     "status": "cached",
