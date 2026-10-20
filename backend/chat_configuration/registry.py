@@ -16,10 +16,13 @@ if TYPE_CHECKING:
 
 ChatProvider = Literal["huggingface", "openrouter", "openai"]
 ChatProtocol = Literal["anthropic-messages", "openai-responses"]
-ChatFundingMode = Literal["hf_user_billed", "openrouter_funded", "openai_funded"]
+ChatFundingMode = Literal[
+    "hf_user_billed", "hf_org_funded", "openrouter_funded", "openai_funded"
+]
 
 DEEPSEEK_V4_FLASH_ID = "deepseek-ai/DeepSeek-V4-Flash-0731"
 GLM_5_3_FLASH_ID = "zai-org/GLM-5.3-Flash"
+SPONSORED_DEEPSEEK_ID = "deepseek-ai/DeepSeek-V4.1-Flash-1017"
 
 # Selected-model IDs persisted by sessions created before the DeepSeek-only
 # registry. They resolve to the canonical route but never appear in discovery.
@@ -95,6 +98,16 @@ def _direct_luna(settings: Settings, label: str) -> ChatModelRecord:
     )
 
 
+def _sponsored_deepseek(settings: Settings) -> ChatModelRecord:
+    return _anthropic_route(
+        SPONSORED_DEEPSEEK_ID,
+        "DeepSeek V4.1 Flash (Free)",
+        settings.chat_sponsored_deepseek_route,
+        "huggingface",
+        "hf_org_funded",
+    )
+
+
 def deepseek_route(settings: Settings) -> str:
     if settings.chat_deepseek_v4_flash_provider == "huggingface":
         return settings.chat_deepseek_v4_flash_route
@@ -127,6 +140,8 @@ def chat_model_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
         # GLM-5.3-Flash is hidden while most of its HF-billed turns fail.
         # Sessions that selected it continue on Luna via canonical_model_id.
         records = (_direct_luna(settings, "GPT-6 Luna"),)
+    if environment == "production" and settings.chat_sponsored_deepseek_enabled:
+        records = records + (_sponsored_deepseek(settings),)
     if environment == "staging":
         staging_records = (
             _anthropic_route(
@@ -194,12 +209,15 @@ def discoverable_records(settings: Settings) -> tuple[ChatModelRecord, ...]:
 
 
 def canonical_model_id(settings: Settings, model: str) -> str:
-    """Move production sessions that selected hidden GLM to the default model."""
+    """Move sessions that selected a hidden GLM or sponsored model to the default."""
 
-    if model != GLM_5_3_FLASH_ID or settings.environment != "production":
+    hidden_in_environment = model == SPONSORED_DEEPSEEK_ID or (
+        model == GLM_5_3_FLASH_ID and settings.environment == "production"
+    )
+    if not hidden_in_environment:
         return model
     records = chat_model_records(settings)
-    if any(record.id == GLM_5_3_FLASH_ID for record in records):
+    if any(record.id == model for record in records):
         return model
     return records[0].id
 
@@ -246,6 +264,7 @@ def _retired_routes(settings: Settings) -> tuple[str, ...]:
         settings.chat_gemma_route,
         settings.chat_deepseek_v4_flash_route,
         settings.chat_deepseek_v4_flash_openrouter_route,
+        settings.chat_sponsored_deepseek_route,
     )
 
 
@@ -278,6 +297,9 @@ def route_funding_modes(settings: Settings) -> dict[str, str]:
     modes.setdefault(
         settings.chat_deepseek_v4_flash_openrouter_route, "openrouter_funded"
     )
+    # Capabilities issued before the sponsored model was switched off keep
+    # billing the organization, never the user.
+    modes.setdefault(settings.chat_sponsored_deepseek_route, "hf_org_funded")
     return modes
 
 
@@ -297,6 +319,7 @@ def route_providers(settings: Settings) -> dict[str, str]:
     providers.setdefault(settings.chat_gemma_route, "openrouter")
     providers.setdefault(settings.chat_kimi_route, "huggingface")
     providers.setdefault(settings.chat_luna_route, "openrouter")
+    providers.setdefault(settings.chat_sponsored_deepseek_route, "huggingface")
     return providers
 
 

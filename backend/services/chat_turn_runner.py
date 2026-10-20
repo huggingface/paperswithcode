@@ -230,6 +230,13 @@ def create_chat_turn_runner(
     with db_manager.session_local() as db:
         provider = settings.chat_route_providers[admission.model_route]
         provider_mode = _provider_mode_for_route(settings, owner, admission.model_route)
+        # Sponsored routes bill the organization at the gateway, so the user's
+        # Hugging Face credential never enters the capability.
+        user_billed_huggingface = (
+            provider == "huggingface"
+            and settings.chat_route_funding_modes.get(admission.model_route)
+            != "hf_org_funded"
+        )
         if provider == "openrouter" and provider_mode not in {
             "openrouter_funded",
             "openrouter_byok",
@@ -272,7 +279,7 @@ def create_chat_turn_runner(
             owner_id=owner.hf_user_id,
             provider_token=(
                 owner.hf_inference_token
-                if provider == "huggingface"
+                if user_billed_huggingface
                 else (
                     owner.openrouter_token
                     if provider_mode == "openrouter_byok"
@@ -280,7 +287,7 @@ def create_chat_turn_runner(
                 )
             ),
             provider_bill_to=(
-                owner.hf_inference_bill_to if provider == "huggingface" else None
+                owner.hf_inference_bill_to if user_billed_huggingface else None
             ),
             settings=settings,
             provider_mode=provider_mode,

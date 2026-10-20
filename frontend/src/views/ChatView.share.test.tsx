@@ -359,6 +359,32 @@ describe("ChatView inference authorization", () => {
     expect(mocks.send).not.toHaveBeenCalled();
   });
 
+  it("sends the sponsored model without asking for inference permission", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+    mocks.getChatModels.mockResolvedValue({
+      items: [{
+        id: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        label: "DeepSeek V4.1 Flash (Free)",
+        provider: "huggingface",
+        sponsored: true,
+      }],
+      default_model: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    });
+    const user = userEvent.setup();
+    renderChat("/chat");
+
+    const composer = await screen.findByRole("combobox");
+    await user.type(composer, "What is new in vision-language models?");
+    await user.click(screen.getByRole("button", { name: "Send message" }));
+
+    await waitFor(() => expect(mocks.send).toHaveBeenCalled());
+    expect(mocks.hfLoginUrl).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalledWith(
+      expect.stringContaining("/api/v1/me/inference-billing"),
+      expect.anything(),
+    );
+  });
+
   it("sends directly when inference permission is already connected", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       new Response(JSON.stringify({

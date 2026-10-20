@@ -409,6 +409,7 @@ def list_models(
                 "id": choice["id"],
                 "label": choice["label"],
                 "provider": choice["provider"],
+                "sponsored": choice["funding_mode"] == "hf_org_funded",
                 "reasoning_efforts": ["low", "high", "max"],
             }
             for choice in settings.chat_model_choices

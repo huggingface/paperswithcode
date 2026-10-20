@@ -629,6 +629,9 @@ export const AssistantMessage: React.FC<{
             Inference Providers pricing and billing details
           </a>
         </>}
+        {msg.errorCode === "hf_sponsored_unavailable" && onRetryWithLuna && (
+          <button type="button" onClick={onRetryWithLuna}>Retry with GPT-6 Luna</button>
+        )}
         {msg.errorCode === "openrouter_monthly_budget_exhausted" && <>
           {openRouterFallbackEnabled
             ? <span>This response started on the shared allowance. Your connected OpenRouter key will be used when you explicitly retry.</span>

@@ -9,6 +9,8 @@ interface ChatComposerSurfaceProps {
   variant: "empty" | "followup";
   composerProps: ComponentProps<typeof Composer>;
   provider: ChatModelChoice["provider"];
+  /** Billed to Papers With Code, so the user billing notice does not apply. */
+  sponsored?: boolean;
   paused: boolean;
   /** Why the last send was rejected; shown next to the restored draft. */
   error?: string;
@@ -19,12 +21,13 @@ export function ChatComposerSurface({
   variant,
   composerProps,
   provider,
+  sponsored = false,
   paused,
   error,
   suggestions = [],
 }: ChatComposerSurfaceProps) {
   const content = <>
-    <BillingNotice provider={provider} />
+    {!sponsored && <BillingNotice provider={provider} />}
     {paused && <div
       id="chat-paused-description"
       className="chat-paused-banner"

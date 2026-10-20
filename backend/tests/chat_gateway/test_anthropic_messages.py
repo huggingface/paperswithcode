@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +10,7 @@ from fastapi import HTTPException
 from starlette.requests import Request
 
 from backend.services.chat_provider_gateway.anthropic_messages import (
+    AnthropicMessagesProtocol,
     apply_openrouter_reasoning_policy as _apply_openrouter_reasoning_policy,
     byok_provider_error_code as _byok_provider_error_code,
     huggingface_provider_error_code as _huggingface_provider_error_code,
@@ -336,3 +338,57 @@ def test_gateway_keeps_byok_billing_and_rate_limit_errors_distinct(
 )
 def test_gateway_classifies_hugging_face_billing_errors(status_code, error_code):
     assert _huggingface_provider_error_code(status_code) == error_code
+
+
+def _sponsored_settings() -> Settings:
+    return Settings(
+        _env_file=None,
+        jwt_secret="x" * 32,
+        environment="production",
+        chat_openai_direct_enabled=True,
+        chat_sponsored_deepseek_enabled=True,
+        chat_title_hf_token="org-title-token",
+        chat_title_bill_to="huggingface",
+    )
+
+
+def test_gateway_bills_sponsored_model_to_the_organization():
+    settings = _sponsored_settings()
+    # A connected user credential is never used for the sponsored route.
+    row = SimpleNamespace(
+        model=settings.chat_sponsored_deepseek_route,
+        owner_hash="a" * 64,
+        provider_token_encrypted=None,
+    )
+
+    assert _provider_target(row, settings) == (
+        "https://router.huggingface.co/v1/messages",
+        "org-title-token",
+        "huggingface",
+    )
+
+
+def test_gateway_refuses_sponsored_model_without_organization_credential():
+    settings = _sponsored_settings().model_copy(update={"chat_title_hf_token": ""})
+    row = SimpleNamespace(model=settings.chat_sponsored_deepseek_route)
+
+    with pytest.raises(HTTPException) as error:
+        _provider_target(row, settings)
+    assert error.value.status_code == 503
+
+
+def test_gateway_reports_exhausted_sponsorship_not_user_billing():
+    protocol = AnthropicMessagesProtocol(_sponsored_settings())
+
+    def mapped(mode: str, status_code: int):
+        result = asyncio.run(
+            protocol.map_provider_status(
+                SimpleNamespace(status_code=status_code),
+                SimpleNamespace(provider_mode=mode),
+            )
+        )
+        return None if result is None else result.code
+
+    assert mapped("hf_org_funded", 402) == "hf_sponsored_unavailable"
+    assert mapped("hf_org_funded", 429) is None
+    assert mapped("huggingface", 402) == "hf_inference_billing_exhausted"

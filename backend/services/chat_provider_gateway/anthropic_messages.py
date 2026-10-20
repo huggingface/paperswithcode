@@ -132,6 +132,16 @@ def provider_target(
             settings.chat_openrouter_api_key,
             None,
         )
+    if provider == "huggingface" and sponsored_route(row, settings):
+        if not settings.chat_title_hf_token or not settings.chat_title_bill_to:
+            raise HTTPException(
+                status_code=503, detail="Sponsored model is not configured"
+            )
+        return (
+            "https://router.huggingface.co/v1/messages",
+            settings.chat_title_hf_token,
+            settings.chat_title_bill_to,
+        )
     if provider == "huggingface":
         credential = user_provider_credential(row, settings)
         return (
@@ -248,6 +258,10 @@ def byok_provider_error_code(status_code: int) -> str | None:
     }.get(status_code)
 
 
+def sponsored_route(row, settings: Settings) -> bool:
+    return settings.chat_route_funding_modes.get(row.model) == "hf_org_funded"
+
+
 def huggingface_provider_error_code(status_code: int) -> str | None:
     if status_code == 402:
         return "hf_inference_billing_exhausted"
@@ -333,6 +347,9 @@ class AnthropicMessagesProtocol:
         provider_mode = row.provider_mode or (
             "openrouter_funded" if provider == "openrouter" else "huggingface"
         )
+        if provider == "huggingface" and sponsored_route(row, settings):
+            # Call-level mode only; the capability row keeps "huggingface".
+            provider_mode = "hf_org_funded"
         owner_id = owner()
         effort = getattr(row, "reasoning_effort", None) or "high"
         if provider == "openrouter":
@@ -434,6 +451,9 @@ class AnthropicMessagesProtocol:
             code = "openrouter_unavailable"
         elif mode == "huggingface":
             code = huggingface_provider_error_code(status)
+        elif mode == "hf_org_funded" and status == 402:
+            # The organization's spending limit, not the user's credits, ran out.
+            code = "hf_sponsored_unavailable"
         else:
             code = None
         return None if code is None else ProviderError(code=code, error=None)

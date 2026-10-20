@@ -41,7 +41,9 @@ def maximum_provider_turn_microusd(
 ) -> int:
     """Price the full server-funded provider envelope before turn admission."""
     funding_mode = settings.chat_route_funding_modes.get(model_route)
-    if funding_mode in {None, "hf_user_billed"}:
+    # The organization's Inference Providers spending limit bounds sponsored
+    # routes, so they reserve nothing from the application cap.
+    if funding_mode in {None, "hf_user_billed", "hf_org_funded"}:
         return 0
     if funding_mode == "openai_funded":
         safe_openai_maximum_microusd(

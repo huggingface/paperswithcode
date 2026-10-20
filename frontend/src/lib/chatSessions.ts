@@ -143,6 +143,8 @@ export interface ChatModelChoice {
   id: string;
   label: string;
   provider: ChatModelProvider;
+  // Billed to the Papers With Code organization, so no user authorization.
+  sponsored?: boolean;
   reasoning_efforts?: ReasoningEffort[];
 }
 
@@ -161,6 +163,13 @@ export function providerForChatModel(
       : selectedModel === DEFAULT_CHAT_MODEL
         ? "openai"
         : "huggingface");
+}
+
+export function isSponsoredChatModel(
+  models: ChatModelChoice[],
+  selectedModel: string,
+): boolean {
+  return models.find((model) => model.id === selectedModel)?.sponsored === true;
 }
 
 export function labelForChatModel(

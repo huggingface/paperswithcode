@@ -2592,6 +2592,11 @@ class ChatStreamOrchestrator:
                         "credits may be exhausted; enable or review pay-as-you-go "
                         "billing in Settings."
                     )
+                elif provider_code == "hf_sponsored_unavailable":
+                    payload["message"] = (
+                        "The free DeepSeek V4.1 Flash allowance is used up for "
+                        "now. Retry with GPT-6 Luna or try again later."
+                    )
                 elif provider_code == "openai_budget_exhausted":
                     payload["message"] = (
                         "The Papers With Code direct OpenAI allowance is exhausted. "

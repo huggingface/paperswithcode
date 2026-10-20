@@ -71,6 +71,19 @@ def test_provider_turn_reserve_prices_the_full_selected_model_envelope():
         == 4_000_000
     )
 
+    # The organization's spending limit bounds the sponsored route.
+    sponsored = Settings(
+        _env_file=None,
+        environment="production",
+        chat_sponsored_deepseek_enabled=True,
+    )
+    assert (
+        maximum_provider_turn_microusd(
+            sponsored, model_route=sponsored.chat_sponsored_deepseek_route, now=NOW
+        )
+        == 0
+    )
+
 
 def test_live_turn_admission_persists_the_route_health_decision():
     engine = create_engine("sqlite+pysqlite:///:memory:")

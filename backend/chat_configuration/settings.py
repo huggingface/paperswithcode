@@ -77,6 +77,14 @@ class ChatModelSettings(BaseModel):
             "routes remain registered for rolling switches"
         ),
     )
+    # Free DeepSeek V4.1 Flash for every signed-in user, billed to the Hugging
+    # Face organization behind the title credential. The organization's
+    # Inference Providers spending limit is the only budget. Only Novita serves
+    # this snapshot; pin it like the other reviewed routes.
+    chat_sponsored_deepseek_enabled: bool = Field(default=False)
+    chat_sponsored_deepseek_route: str = Field(
+        default="deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
+    )
     # A default-off server-funded route enabled only by reviewed environment config.
     # Production discovery and the default model remain unchanged.
     chat_alternative_model_enabled: bool = Field(default=False)

@@ -124,6 +124,30 @@ def validate_chat_provider_policy(
         if settings.environment == "production":
             # GLM-5.3-Flash is hidden while direct Luna serves production.
             expected_discovery = (direct_choice,)
+    if settings.chat_sponsored_deepseek_enabled:
+        if settings.environment != "production":
+            raise RuntimeError("the sponsored DeepSeek model is production-only")
+        expected_sponsored_route = "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita"
+        if settings.chat_sponsored_deepseek_route != expected_sponsored_route:
+            raise RuntimeError(
+                "sponsored DeepSeek V4.1 Flash must use the reviewed Novita route"
+            )
+        # The organization pays through the dedicated title credential.
+        if (
+            not settings.chat_title_hf_token
+            or settings.chat_title_bill_to != "huggingface"
+        ):
+            raise RuntimeError(
+                "sponsored DeepSeek requires the huggingface-billed title credential"
+            )
+        expected_discovery += (
+            {
+                "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+                "label": "DeepSeek V4.1 Flash (Free)",
+                "route": expected_sponsored_route,
+                "provider": "huggingface",
+            },
+        )
     if settings.environment == "staging":
         expected_kimi_route = "moonshotai/Kimi-K3:baseten"
         if settings.chat_kimi_route != expected_kimi_route:

@@ -86,6 +86,8 @@ def admit_prepared_turn(
             if (
                 not getattr(admission, "attach_only", False)
                 and transport == "huggingface"
+                and settings.chat_route_funding_modes.get(admission.model_route)
+                != "hf_org_funded"
                 and not inference_credential_present
             ):
                 raise ChatServiceError(

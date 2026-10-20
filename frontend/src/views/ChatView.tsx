@@ -57,6 +57,7 @@ import {
   type LatexPaperArtifactDescriptor,
   getChatModels,
   getSession,
+  isSponsoredChatModel,
   providerForChatModel,
   removeSession,
   toUiMessages,
@@ -160,6 +161,8 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     requestedModelRef.current || DEFAULT_CHAT_MODEL,
   );
   const selectedProvider = providerForChatModel(models, selectedModel);
+  const selectedSponsored = isSponsoredChatModel(models, selectedModel);
+  const userBilledInference = selectedProvider === "huggingface" && !selectedSponsored;
   const openRouterCredentialQuery = useOpenRouterCredential(
     Boolean(user && selectedProvider === "openrouter"),
   );
@@ -274,8 +277,8 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       : routeSessionIdRef.current
         ? `/chat/${routeSessionIdRef.current}`
         : "/chat";
-    window.location.href = hfLoginUrl(returnTo, selectedProvider === "huggingface");
-  }, [mode, primaryPaper, reasoningEffort, selectedModel, selectedProvider, webSearchEnabled]);
+    window.location.href = hfLoginUrl(returnTo, userBilledInference);
+  }, [mode, primaryPaper, reasoningEffort, selectedModel, userBilledInference, webSearchEnabled]);
 
   const restoreAuthorizationPrompt = useCallback((nextDraft: ChatDraft, message: string) => {
     sessionStorage.setItem(CHAT_DRAFT_KEY, JSON.stringify(nextDraft));
@@ -296,7 +299,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       authorizeInference(payload);
       return;
     }
-    if (selectedProvider === "huggingface" && !inferenceConnectedRef.current) {
+    if (userBilledInference && !inferenceConnectedRef.current) {
       if (inferenceCheckPendingRef.current) return;
       inferenceCheckPendingRef.current = true;
       try {
@@ -341,7 +344,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
     setDraft(emptyDraft());
     onPaperSelectionChange?.(undefined);
     if (mode === "paper") onReaderSubmit?.();
-  }, [authorizeInference, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, restoreAuthorizationPrompt, selectedProvider, sendChat, user]);
+  }, [authorizeInference, mode, onPaperSelectionChange, onReaderSubmit, paperSelection, restoreAuthorizationPrompt, sendChat, user, userBilledInference]);
 
   useEffect(() => {
     if (authLoading || !user) return;
@@ -712,6 +715,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             variant="empty"
             composerProps={composerProps}
             provider={selectedProvider}
+            sponsored={selectedSponsored}
             paused={chatPaused}
             error={chat.sessionError}
             suggestions={mode === "paper" ? READER_PROMPTS : SUGGESTED_CHAT_PROMPTS}
@@ -736,6 +740,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             variant="followup"
             composerProps={composerProps}
             provider={selectedProvider}
+            sponsored={selectedSponsored}
             paused={chatPaused}
             error={chat.sessionError}
           />

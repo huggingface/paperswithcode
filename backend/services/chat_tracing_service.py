@@ -56,6 +56,7 @@ AUTH_OUTCOMES = frozenset(
 BILLING_OUTCOMES = frozenset(
     {
         "hf_inference_billing_exhausted",
+        "hf_sponsored_unavailable",
         "openrouter_byok_billing_error",
         "openrouter_monthly_budget_exhausted",
         "provider_billing",

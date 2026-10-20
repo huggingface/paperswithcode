@@ -872,6 +872,38 @@ def test_direct_openai_requires_gateway_key_and_accepts_production(settings_fact
     runtime_validation.validate_chat_provider_policy(production)
 
 
+def test_sponsored_deepseek_requires_production_and_organization_billing(
+    settings_factory,
+):
+    production, _release = settings_factory("production")
+    production.chat_openai_direct_enabled = True
+    production.openai_api_key = "test-only"
+    production.chat_gateway_url = (
+        "https://chat-gateway.paperswithcode.co/api/internal/chat-gateway"
+    )
+    production.chat_sponsored_deepseek_enabled = True
+    production.chat_title_hf_token = "org-title-token"
+    production.chat_title_bill_to = "huggingface"
+
+    runtime_validation.validate_chat_provider_policy(production)
+
+    production.chat_title_bill_to = "someone-else"
+    with pytest.raises(RuntimeError, match="huggingface-billed title credential"):
+        runtime_validation.validate_chat_provider_policy(production)
+
+    production.chat_title_bill_to = "huggingface"
+    production.chat_sponsored_deepseek_route = (
+        "deepseek-ai/DeepSeek-V4.1-Flash-1017:fastest"
+    )
+    with pytest.raises(RuntimeError, match="reviewed Novita route"):
+        runtime_validation.validate_chat_provider_policy(production)
+
+    staging, _release = settings_factory("staging")
+    staging.chat_sponsored_deepseek_enabled = True
+    with pytest.raises(RuntimeError, match="production-only"):
+        runtime_validation.validate_chat_provider_policy(staging)
+
+
 def test_direct_openai_requires_exact_low_reasoning_warm_profile(settings_factory):
     settings, _release = settings_factory("staging")
     settings.chat_openai_direct_enabled = True

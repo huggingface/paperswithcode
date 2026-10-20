@@ -163,3 +163,59 @@ def test_hidden_glm_sessions_report_luna_to_the_frontend(monkeypatch):
     )
 
     assert chat._summary(session).selected_model == "gpt-5.6-luna@openai"
+
+
+def test_sponsored_deepseek_is_offered_next_to_luna_in_production_only():
+    sponsored = Settings(
+        environment="production",
+        chat_openai_direct_enabled=True,
+        chat_sponsored_deepseek_enabled=True,
+    )
+    assert sponsored.chat_model_choices == (
+        {
+            "id": "gpt-5.6-luna@openai",
+            "label": "GPT-6 Luna",
+            "route": "gpt-5.6-luna@openai",
+            "provider": "openai",
+            "provider_model": "gpt-6-luna",
+            "protocol": "openai-responses",
+            "funding_mode": "openai_funded",
+        },
+        {
+            "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+            "label": "DeepSeek V4.1 Flash (Free)",
+            "route": "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",
+            "provider": "huggingface",
+            "provider_model": "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",
+            "protocol": "anthropic-messages",
+            "funding_mode": "hf_org_funded",
+        },
+    )
+    # Luna stays the default and the prewarmed model.
+    assert sponsored.chat_effective_pi_prewarm_model == "gpt-5.6-luna@openai"
+    assert (
+        registry.canonical_model_id(sponsored, registry.SPONSORED_DEEPSEEK_ID)
+        == registry.SPONSORED_DEEPSEEK_ID
+    )
+
+    staging = Settings(
+        environment="staging",
+        chat_openai_direct_enabled=True,
+        chat_sponsored_deepseek_enabled=True,
+    )
+    assert registry.SPONSORED_DEEPSEEK_ID not in {
+        choice["id"] for choice in staging.chat_model_choices
+    }
+
+
+def test_switched_off_sponsored_sessions_continue_on_luna():
+    switched_off = Settings(environment="production", chat_openai_direct_enabled=True)
+    assert (
+        registry.canonical_model_id(switched_off, registry.SPONSORED_DEEPSEEK_ID)
+        == "gpt-5.6-luna@openai"
+    )
+    # Already-issued capabilities still bill the organization, never the user.
+    route = switched_off.chat_sponsored_deepseek_route
+    assert switched_off.chat_route_providers[route] == "huggingface"
+    assert switched_off.chat_route_protocols[route] == "anthropic-messages"
+    assert switched_off.chat_route_funding_modes[route] == "hf_org_funded"
