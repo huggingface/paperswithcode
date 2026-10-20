@@ -109,6 +109,7 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatc
         url_candidates=None,
         trace_attempt_count=0,
         trace_uri=None,
+        mutation_result=None,
     )
     hub = Hub()
     monkeypatch.setattr(
@@ -143,3 +144,66 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatc
         manifest["objects"]
     )
     assert not (tmp_path / "curation-traces" / f"{row.id}.json").exists()
+    assert row.mutation_result == {"status": "no_changes"}
+
+
+def test_finalize_cannot_replace_the_server_recorded_mutation_result(
+    tmp_path, monkeypatch
+):
+    class Database:
+        def commit(self):
+            pass
+
+        def get(self, *_args):
+            return None
+
+    uploaded = {}
+    monkeypatch.setattr(
+        "backend.services.curation_trace_service.upload_trace_objects",
+        lambda _bucket, prefix, objects, *, token: uploaded.update(objects),
+    )
+    settings = get_settings().model_copy(
+        update={
+            "codex_curation_trace_upload_enabled": True,
+            "codex_curation_trace_hf_bucket_id": "example/curate-papers-traces",
+            "codex_add_evals_spool_dir": str(tmp_path),
+        }
+    )
+    # A resolve-model-paper job: no paper_id on the row, so the thumbnail
+    # queue targets the paper the server recorded when it applied the result.
+    applied = {"status": "resolved", "paper_id": 7}
+    row = SimpleNamespace(
+        id=uuid.uuid4(),
+        paper_id=None,
+        cohort_date=date(2026, 10, 20),
+        parent_workflow_id=None,
+        repository_sha="a" * 40,
+        skill_sha256="b" * 64,
+        prompt_sha256=None,
+        model="gpt-5.6-sol",
+        reasoning_effort="medium",
+        codex_cli_version="0.75.0",
+        policy_version="trending-model-v1",
+        proposal=None,
+        url_candidates=None,
+        trace_uri=None,
+        mutation_result=dict(applied),
+    )
+    events = base64.b64encode(gzip.compress(b'{"type":"done"}\n')).decode()
+
+    CurationTraceService(Database(), settings, hf_api=object()).finalize(
+        row,
+        {
+            "events_gzip_b64": events,
+            "result": {"status": "resolved", "paper_id": 999},
+            "benchmark_gaps": [],
+            "report": "",
+        },
+    )
+
+    assert row.mutation_result == applied
+    # The worker's claim is still preserved as trace evidence.
+    assert json.loads(uploaded["result.json"]) == {
+        "status": "resolved",
+        "paper_id": 999,
+    }
