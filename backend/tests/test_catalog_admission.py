@@ -37,6 +37,12 @@ def test_control_paths_and_writes_bypass(path):
     assert not is_catalog_read({"type": "websocket"})
 
 
+def test_bulk_paper_lookup_post_is_admitted_as_catalog_read():
+    assert is_catalog_read(scope("/api/v1/papers/lookup", "POST"))
+    assert is_catalog_read(scope("/api/v1/papers/lookup/", "POST"))
+    assert not is_catalog_read(scope("/api/v1/papers/lookup", "DELETE"))
+
+
 @pytest.mark.anyio
 async def test_saturation_preserves_chat_and_holds_slot_through_body():
     entered = asyncio.Event()

@@ -174,6 +174,9 @@ location = /_staging_access_check {{ return 204; }}
                     assert client.get("/api/v1/papers/search?q=test").status_code == 200
                     details = [client.get("/api/v1/papers/123") for _ in range(90)]
                     assert any(r.status_code == 429 for r in details)
+                    # Bulk lookup is an anonymous catalog read sent as POST, so
+                    # it draws on the same per-client catalog budget.
+                    assert client.post("/api/v1/papers/lookup").status_code == 429
                     assert client.get("/api/v1/auth/me").status_code == 200
             finally:
                 process.terminate()
