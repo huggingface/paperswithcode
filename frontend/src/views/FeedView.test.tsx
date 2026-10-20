@@ -18,11 +18,21 @@ import { DEFAULT_CHAT_MODEL, STAGING_FALLBACK_CHAT_MODELS } from "@/lib/chatSess
 import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
 import { AskAssistant } from "@/views/FeedView";
 
+const auth = vi.hoisted(() => ({
+  value: { user: { username: "owner" } as { username: string } | null, isLoading: false },
+}));
+
 vi.mock("@/lib/authContext", () => ({
-  useAuth: () => ({ user: { username: "owner" }, isLoading: false }),
+  useAuth: () => auth.value,
+  useOptionalAuth: () => auth.value,
 }));
 
 beforeEach(() => {
+  auth.value = { user: { username: "owner" }, isLoading: false };
+  vi.spyOn(chatApi, "getModels").mockResolvedValue({
+    items: STAGING_FALLBACK_CHAT_MODELS,
+    default_model: DEFAULT_CHAT_MODEL,
+  });
   sessionStorage.clear();
   vi.stubEnv("MODE", "staging");
 });
@@ -140,21 +150,32 @@ describe("AskAssistant", () => {
     expect(screen.queryByText(/^Via\b/)).not.toBeInTheDocument();
   });
 
-  it("offers OpenAI Luna first and DeepSeek second in production", () => {
+  it("offers Luna and the free DeepSeek to signed-out production visitors", () => {
     vi.stubEnv("MODE", "production");
+    auth.value = { user: null, isLoading: false };
     renderAskAssistant();
 
     const picker = screen.getByRole("combobox", { name: "Research model" });
     expect(picker).toHaveValue("gpt-5.6-luna@openai");
-    expect([...picker.querySelectorAll("optgroup")].map((group) => group.label)).toEqual([
-      "Hugging Face Inference Providers",
-      "OpenAI",
-    ]);
     expect([...picker.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
-      "DeepSeek V4 Flash",
-      "GPT-5.6 Luna",
+      "DeepSeek V4.1 Flash (Free)",
+      "GPT-6 Luna",
     ]);
-    expect(screen.queryByText(/^Via\b/)).not.toBeInTheDocument();
+    expect(chatApi.getModels).not.toHaveBeenCalled();
+  });
+
+  it("offers the discovered production models to signed-in users", async () => {
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("VITE_CHAT_ENABLED", "1");
+    vi.mocked(chatApi.getModels).mockResolvedValue({
+      items: [{ id: "gpt-5.6-luna@openai", label: "GPT-6 Luna", provider: "openai" }],
+      default_model: "gpt-5.6-luna@openai",
+    });
+    renderAskAssistant();
+
+    await waitFor(() => expect(screen.queryByRole("combobox", { name: "Research model" }))
+      .not.toBeInTheDocument());
+    expect(screen.getByLabelText("Research model")).toHaveTextContent("GPT-6 Luna");
   });
 
   it("types, holds, erases, and rotates the suggested placeholder", () => {

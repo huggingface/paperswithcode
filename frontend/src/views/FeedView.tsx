@@ -29,6 +29,7 @@ import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
 import {
   createSession,
   DEFAULT_CHAT_MODEL,
+  getChatModels,
   PRODUCTION_FALLBACK_CHAT_MODELS,
   STAGING_FALLBACK_CHAT_MODELS,
 } from "@/lib/chatSessions";
@@ -120,9 +121,19 @@ const parseOrderBy = (value: string | null): OrderBy => {
 export const AskAssistant: React.FC = () => {
   const navigate = useNavigate();
   const mirror = isChatMirror();
-  const models = isStagingEnvironment()
-    ? STAGING_FALLBACK_CHAT_MODELS
-    : PRODUCTION_FALLBACK_CHAT_MODELS;
+  const signedIn = Boolean(useOptionalAuth()?.user);
+  // Discovery needs a signed-in user; everyone else sees the fallback list.
+  const modelsQuery = useQuery({
+    queryKey: ["chatModels"],
+    queryFn: getChatModels,
+    retry: false,
+    enabled: isChatEnabled() && signedIn && !mirror,
+  });
+  const models = modelsQuery.data?.items ?? (
+    isStagingEnvironment()
+      ? STAGING_FALLBACK_CHAT_MODELS
+      : PRODUCTION_FALLBACK_CHAT_MODELS
+  );
   const [draft, setDraft] = useState<ChatDraft>({ text: "", paperMentions: [] });
   const question = draft.text;
   const [scrollTop, setScrollTop] = useState(0);

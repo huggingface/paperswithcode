@@ -10,12 +10,18 @@ import {
 } from "@/lib/chatSessions";
 
 describe("production model fallback", () => {
-  it("offers only Luna while GLM is hidden", () => {
+  it("offers Luna and the sponsored DeepSeek while GLM is hidden", () => {
     expect(PRODUCTION_FALLBACK_CHAT_MODELS).toEqual([
       {
         id: "gpt-5.6-luna@openai",
         label: "GPT-6 Luna",
         provider: "openai",
+      },
+      {
+        id: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
+        label: "DeepSeek V4.1 Flash (Free)",
+        provider: "huggingface",
+        sponsored: true,
       },
     ]);
   });

@@ -188,11 +188,18 @@ export function labelForChatModel(
         ? "GPT-6 Luna"
       : `${selectedModel} (unavailable)`);
 }
+// Signed-out visitors cannot read discovery, so this list is what they see.
 export const PRODUCTION_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
   {
     id: DEFAULT_CHAT_MODEL,
     label: "GPT-6 Luna",
     provider: "openai",
+  },
+  {
+    id: SPONSORED_CHAT_MODEL,
+    label: "DeepSeek V4.1 Flash (Free)",
+    provider: "huggingface",
+    sponsored: true,
   },
 ];
 export const STAGING_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
