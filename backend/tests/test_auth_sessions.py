@@ -430,6 +430,20 @@ def test_absolute_return_destinations_are_allowlisted(monkeypatch):
     assert auth._safe_return_to("https://evil.example/chat") == "/"
 
 
+def test_local_return_destinations_reject_other_origins():
+    for value in (
+        "//evil.example",
+        "///evil.example",
+        "/\\evil.example",
+        "/\t/evil.example",
+        "/\n/evil.example",
+    ):
+        assert auth._safe_return_to(value) == "/", value
+    assert auth._safe_return_to("/paper/2601.00001?tab=code") == (
+        "/paper/2601.00001?tab=code"
+    )
+
+
 class _LoginClient:
     async def __aenter__(self):
         return self

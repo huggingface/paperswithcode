@@ -122,7 +122,14 @@ def _safe_return_to(value: Optional[str]) -> str:
         ):
             return value
         return "/"
-    if not value.startswith("/"):
+    # Browsers read "//host", "/\\host" and paths with stripped control
+    # characters (e.g. "/\t/host") as another origin, so only plain
+    # single-slash paths count as local.
+    if (
+        not value.startswith("/")
+        or value[1:2] in ("/", "\\")
+        or any(ord(char) < 0x20 or char == "\x7f" for char in value)
+    ):
         return "/"
     return value
 
