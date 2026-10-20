@@ -2,11 +2,16 @@
 
 Guidelines for adding structured benchmark data through the API and service layer.  Always prefer API-first operations—the service stack handles validation, task/dataset linking, and rank recalculation.
 
+Catalog writes require a catalog mutator: the admin token (`PWC_ADMIN_API_TOKEN`)
+in the `X-Admin-Token` header, or a contributor/admin browser session (see
+`backend/utils/auth.py`).
+
 ## Creating Datasets
 
 ```bash
 curl -X POST "http://localhost:8000/api/v1/datasets/" \
   -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $PWC_ADMIN_API_TOKEN" \
   -d '{
         "name": "Video-MMLU",
         "full_name": "Video-MMLU: Massive Multi-Discipline Lecture Understanding",
@@ -18,7 +23,7 @@ curl -X POST "http://localhost:8000/api/v1/datasets/" \
       }'
 ```
 
-**Required fields:** `name`, `description`, `url`, `task_ids`.  Optional metadata (modalities, languages, license, introduced_date) is stored if provided.
+**Required fields:** `name`, `description`, `task_ids`.  Optional metadata (`url`, `hf_url`, `paper_url`, modalities, languages, license, introduced_date, …) is stored if provided; see `DatasetCreateRequest` in `backend/models/evaluations.py`.
 
 Service behavior (`DatasetService.create_dataset`):
 - Validates task IDs
@@ -40,6 +45,7 @@ For one-off imports, use the `add-benchmark` and `add-evals` skills under `.agen
 ```bash
 curl -X POST "http://localhost:8000/api/v1/evaluations/" \
   -H "Content-Type: application/json" \
+  -H "X-Admin-Token: $PWC_ADMIN_API_TOKEN" \
   -d '{
         "paper_id": 123,
         "task_id": 12,
@@ -51,12 +57,16 @@ curl -X POST "http://localhost:8000/api/v1/evaluations/" \
       }'
 ```
 
-The evaluation service:
-- Ensures the `(task, dataset, metric)` triple is valid via `LeaderboardMetricService`
-- Links datasets to tasks when missing (`task_datasets`)
-- Validates/normalizes metric names (case-insensitive lookup in `metrics` table)
-- Prevents duplicates by checking `(paper_id, task_id, dataset_id, model_name, best_metric)`
+The evaluation service (`EvaluationService.create_evaluation`):
+- Rejects a `(task, dataset)` pair that has no `task_dataset_metrics` rows, i.e.
+  is not a defined leaderboard
+- Requires every `metrics` key and `best_metric` to be allowed for that
+  leaderboard via `LeaderboardMetricService.validate_metrics_for_leaderboard`
+- Accepts `harness` only when the leaderboard's `supports_harness` flag is set
 - Recalculates leaderboard ranks (`best_rank`) after inserts/updates/deletes
+
+List a leaderboard's allowed metrics with
+`GET /api/v1/datasets/{dataset_id}/tasks/{task_id}/metrics`.
 
 ### Triple Reminder
 
@@ -67,7 +77,7 @@ Leaderboards are keyed on `(task_id, dataset_id, metric_id)`.  Examples:
   `world-knowledge` *subtask* (a child of `language-modeling`), not the
   parent task. Always pick the most-specific task in the hierarchy.
 
-If you are unsure which metrics are allowed for a task/dataset pair, use the `LeaderboardMetricService.get_metrics_for_leaderboard` helper or query `task_dataset_metrics`.
+If you are unsure which metrics are allowed for a task/dataset pair, use the metrics endpoint above, `LeaderboardMetricService.get_allowed_metrics_for_leaderboard`, or query `task_dataset_metrics`.
 
 ### Subtasks (Task Hierarchy)
 
@@ -93,7 +103,7 @@ When reading data for a parent task page:
 
 ### Bulk Imports
 
-- `backend/database/evaluations_setup/paper_eval_import.py` wraps the same service calls used by the API for scripted imports.
+- `backend/database/evaluations_setup/paper_eval_import.py` provides import helpers around `EvaluationService`, the same service used by the API.
 - Always run the validation script afterwards (see below).
 
 ## Metric Naming & Direction
@@ -110,31 +120,35 @@ ON CONFLICT (name) DO NOTHING;
 
 ## Validation Script
 
-Run after any batch insert to standardize metric aliases and fill gaps:
+Run after any batch insert to audit metric labels and fill gaps. It is a dry
+run by default and exits non-zero when it has findings; add `--fix` to apply
+the safe automated changes:
 
 ```bash
-uv run --env-file backend/keys.env python backend/database/validate_evaluation_metrics.py --fix
+uv run --env-file backend/keys.env python backend/database/validate_evaluation_metrics.py
 ```
 
 Checks performed:
-- Normalizes metric keys (`box mAP` → `box AP`, `AP@50` → `AP50`, …)
-- Ensures `best_metric` matches a key present in `metrics`
-- Recomputes ranks when necessary
+- Audits metric labels against each leaderboard's allowed metrics
+- Normalizes safe metric aliases (`box mAP` → `box AP`, `AP@50` → `AP50`, …)
+- Sets missing `best_metric` values
+
+It does not recompute ranks; use `EvaluationService.recalculate_ranks`.
 
 ## Troubleshooting
 
 | Problem | Fix |
 | --- | --- |
-| Evaluation missing on task leaderboard | Confirm dataset is linked to task and rerun rank recalculation: `EvaluationService.recalculate_ranks(task_id, dataset_id)`. |
-| Rankings reversed (higher WER looks “better”) | Ensure metric direction is set to `lower_is_better` in `metrics` and rerun validation script. |
-| Duplicate evaluation blocked | Distinguish entries by `best_metric`, or update existing record with PUT/PATCH. |
-| API 422 validation error | Review fields against `backend/models/evaluations.EvaluationCreateRequest`. |
+| Evaluation rejected or missing on task leaderboard | Confirm the `(task, dataset)` leaderboard has `task_dataset_metrics` rows and rerun rank recalculation: `EvaluationService.recalculate_ranks(task_id, dataset_id)`. |
+| Rankings reversed (higher WER looks “better”) | Ensure metric direction is set to `lower_is_better` in `metrics` and recalculate ranks. |
+| Duplicate evaluation | Update the existing record with `PUT /api/v1/evaluations/{evaluation_id}` instead of posting another row. |
+| API 422 validation error | Review fields against `EvaluationCreateRequest` in `backend/models/evaluations.py`. |
 
 ## Related Files
 
-- Service layer: `backend/services/dataset_service.py`, `backend/services/evaluation_service.py`
+- Service layer: `backend/services/dataset_service.py`, `backend/services/evaluation_service.py`, `backend/services/leaderboard_metric_service.py`
 - Metric tooling: `backend/database/validate_evaluation_metrics.py`
-- Triple reference: `docs/DATABASE_SCHEMA_UML.md` (`task_dataset_metrics` section)
+- Triple reference: `docs/DATABASE_SCHEMA_UML.md` (important invariants)
 - Migration convention: `backend/database/migrations/README.md`
 
-_Last updated: 7 November 2025_
+_Last updated: 20 October 2026_

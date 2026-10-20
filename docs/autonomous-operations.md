@@ -42,8 +42,8 @@ Emergency sequence from mobile:
 3. Disable only the affected operator if the incident is isolated.
 4. Review the content-free alert receipt and linked runbook.
 
-Host access is not required for normal control. Use `/connect-hetzner-vps` only
-when Tailscale re-authentication or host-level recovery is itself the incident.
+Host access is not required for normal control; reserve it for incidents where
+Tailscale re-authentication or host-level recovery is itself the problem.
 Never bypass the installed `pwc-cron`, `pwc-deploy`, `pwc-rollback`, and
 `pwc-nginx` interfaces.
 
@@ -77,14 +77,16 @@ qualified.
 
 ## Chat reliability monitoring
 
-The production chat alert monitor runs content-free Langfuse aggregate checks
-every 15 minutes. Its Langfuse requests select only `core`, `basic`, `time`, and
+The production chat alert monitor (`pwc-chat-alert-monitor.timer`, every
+minute, `backend/scripts/monitor_chat_operational_alerts.py`) runs content-free
+Langfuse aggregate checks every 15 minutes. Its Langfuse requests select only `core`, `basic`, `time`, and
 `metrics`; they never request trace input, output, or metadata. End-to-end turn
 observations supply success, interruption, first-token, and completion timing,
 while provider observations supply provider/auth/billing classes. Existing
 sanitized operational counters supply persistence and capacity failures.
 
-A separately allowlisted synthetic job polls its due/trigger state every minute
+A separately allowlisted synthetic job (`run_chat_synthetic_probe`,
+`pwc-cron-run-chat-synthetic-probe.timer`) polls its due/trigger state every minute
 under a six-minute execution envelope and runs a dedicated-account chat at most
 every four hours, plus explicit post-alert, deploy, rollback, and provider-route
 checks. It verifies login,
@@ -188,8 +190,9 @@ control-plane incident.
 
 ## Rollout and rollback
 
-All operator mutation switches remain off until their Task 15 evidence is in
-the immutable admin run history. Submission review requires seven days of
+All operator mutation switches remain off until their acceptance evidence
+(`backend/services/autonomous_acceptance_service.py`) is in the immutable admin
+run history. Submission review requires seven days of
 shadow comparisons. CRON requires each deterministic failure/recovery drill.
 Chat requires the exact staging-qualified scalable baseline and every provider,
 privacy, canary, production rollback, and retry-exhaustion drill.

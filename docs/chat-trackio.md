@@ -5,11 +5,11 @@ private [PwC Trackio Space](https://huggingface.co/spaces/nielsr/pwc-chat-traces
 It uses the Trackio 0.37 HTTP `bulk_log` API and `trackio.trace` payload, without
 loading the dashboard SDK into the web server.
 
-## Activation after merge
+## Configuration
 
-Deploy the merged change through the normal immutable-release workflow. Chat
-changes default to staging; production activation requires explicit authorization.
-Set these values in the target environment's protected host configuration:
+Production exports to Trackio; staging currently sets none of these values, so
+it does not export. The values live in the environment's protected host
+configuration (`/etc/paperswithcode/<environment>.env`):
 
 ```dotenv
 PWC_CHAT_TRACKIO_ENABLED=true
@@ -21,8 +21,7 @@ PWC_CHAT_TRACKIO_HF_TOKEN=<HF token with write access to the private Space>
 The token is used both as the private Space bearer credential and as Trackio's
 write authorization. Keep it in protected configuration, never in source control.
 The URL setting accepts only HTTPS HF Space origins and the exporter does not
-follow redirects. The existing staging configuration refresh preserves these
-four values. Do not source the development keys file into a deployed process.
+follow redirects. Do not source the development keys file into a deployed process.
 
 When enabled, Trackio replaces Langfuse **for new turn, provider and lifecycle observations**;
 it does not require Langfuse credentials or credits. Disabling Trackio restores
@@ -30,18 +29,20 @@ the previous Langfuse emission path, subject to `PWC_CHAT_LANGFUSE_ENABLED`.
 The existing `langfuse_trace_id` database column and deterministic ID contract
 remain unchanged. No database migration is needed.
 
-Langfuse historical reads, incident-content access, user feedback scores, and
-Langfuse-based reliability queries remain on their existing APIs. This change
-does not migrate those features or historical data. They still need a functioning
-Langfuse project; disabling Langfuse makes those reads/feedback unavailable.
+Langfuse historical reads, incident-content access, and Langfuse-based
+reliability queries remain on their existing APIs and still need a functioning
+Langfuse project. User thumbs ratings are stored in the `chat_feedback` table;
+with Trackio enabled each rating is mirrored as a `feedback/thumbs_up` metric in
+the daily `<environment>-feedback-YYYY-MM-DD` run (`exported_to = 'trackio'`).
 
 ## Reading the traces
 
 Open **Traces** in the Space and select the week's project, for example
 `pwc-chat-2026-W43` (see [weekly project rotation](#weekly-project-rotation)). Daily runs are named
-`staging-chat-YYYY-MM-DD` and `staging-provider-requests-YYYY-MM-DD` (or the
-configured environment). Content-free durable lifecycle events have separate
-`staging-lifecycle-YYYY-MM-DD` runs. Search the metadata `trace_id` to correlate them.
+`<environment>-chat-YYYY-MM-DD` and `<environment>-provider-requests-YYYY-MM-DD`,
+for example `production-chat-2026-10-20`. Durable lifecycle observations are
+logged as content-free numeric metrics in separate `<environment>-lifecycle-YYYY-MM-DD`
+runs. Search the metadata `trace_id` to correlate them.
 
 Chat traces contain the prompt/answer and the existing tool, title, guardrail,
 and lifecycle spans. Provider traces contain the existing content-free request
@@ -52,14 +53,14 @@ out of the export, and user IDs retain their existing hash.
 
 A successful provider request and completed turn should appear within seconds.
 Verify their trace ID, parent-child spans and token usage through `get_traces`
-after a staging test conversation. The local integration validation run uses
-release `trackio-integration-validation` and synthetic content only.
+after a test conversation in an environment that exports.
 
 ## Delivery and persistence
 
-Export is best effort. Each process has one background worker, a 32-item queue,
-and a 2 MiB per-trace payload limit. Transient network/HTTP failures retry three
-times with the same log ID, so accepted retries deduplicate in Trackio. Permanent
+Export is best effort. Each process has one background worker and a queue
+bounded at 512 entries and 64 MiB; the worker batches up to 20 entries (2 MiB)
+into one `bulk_log` POST, and a single trace over 2 MiB is dropped. Transient
+network/HTTP failures (408, 429, 5xx) get three attempts with the same log IDs, so accepted retries deduplicate in Trackio. Permanent
 HTTP/API errors, oversize traces and queue overflow emit content-free warnings
 recognized by chat operational alerts. Network I/O never waits on the chat stream.
 The final retry warning names the last status code or exception class
@@ -121,7 +122,7 @@ for example `pwc-chat-2026-W43.db`, and `<stamp>` with the UTC date.
    hf buckets rm --yes nielsr/pwc-chat-traces/trackio/<db>
    ```
 
-3. Restart the Space and confirm a staging test turn appears in Traces:
+3. Restart the Space and confirm a new production turn appears in Traces:
 
    ```bash
    hf spaces restart nielsr/pwc-chat-traces

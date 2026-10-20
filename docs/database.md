@@ -20,10 +20,12 @@ staging chat, bookmark, preference, pending-edit, and workflow state lives in
 write access to `public`, and never qualify staging by reusing the production
 application role.
 
-Read-only isolation audit:
+Read-only isolation audit, run with the staging `PWC_DB_*` settings from
+`/etc/paperswithcode/staging.env` in the environment (it refuses any role other
+than `pwc_staging`):
 
 ```bash
-sudo python deploy/audit_staging_db.py
+python deploy/audit_staging_db.py
 ```
 
 The audit proves catalog reads, rejects a catalog update, performs
@@ -36,11 +38,12 @@ transaction-rolled-back staging state writes, and verifies both search paths.
 PGPASSWORD=$(grep PWC_DB_PASSWORD backend/keys.env | cut -d= -f2) \
   psql -h localhost -U paperswithcode_user -d paperswithcode_hf
 
-# From Python
-from backend.database.connection import get_database_session
+# From Python (uv run --env-file backend/keys.env python)
+from sqlalchemy import text
+from backend.database.connection import db_manager
 
-with get_database_session() as db:
-    papers = db.execute("SELECT id, arxiv_id FROM papers LIMIT 5").all()
+with db_manager.session_local() as db:
+    papers = db.execute(text("SELECT id, arxiv_id FROM papers LIMIT 5")).all()
 ```
 
 ## Remote Access (Whitelist Required)
@@ -112,5 +115,6 @@ sudo -u postgres psql -d paperswithcode_hf -c "GRANT ALL PRIVILEGES ON ALL SEQUE
 ## References
 
 - Schema reference: `docs/DATABASE_SCHEMA_UML.md`
+- Migrations: `backend/database/migrations/` (see its `README.md`)
 - Keyword automation scripts: `backend/database/{tasks_setup,methods_setup}/`
 - Remote access helper: `scripts/manage_postgres_access.sh`

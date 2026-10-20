@@ -10,6 +10,8 @@ rollback target.
 ```text
 /srv/paperswithcode/
   repository.git
+  deployment.lock
+  python-runtime/                # base interpreter for the shared .venv
   .venv
   runtime-lock.sha256
   runtimes/<uv-lock-sha256>/
@@ -18,13 +20,14 @@ rollback target.
   environments/{production,staging}/
     current
     previous
+    activation-journal.json
     active -> slots/{blue,green}
     slots/{blue,green}/
-      release -> ../../../releases/<release-id>
+      release -> /srv/paperswithcode/releases/<release-id>
       backend.sock -> /run/paperswithcode/<environment>-<slot>.sock
 
 /etc/paperswithcode/{production,staging}.env
-/etc/paperswithcode/production-cron.env
+/etc/paperswithcode/{production-cron,trending-cron}.env
 /var/lib/paperswithcode/{shared,production,staging}
 
 /srv/paperswithcode/mcp/
@@ -39,28 +42,34 @@ Nginx resolves backend requests through `active/backend.sock` and static files
 through `active/release/frontend-dist`. New connections therefore move
 together when `active` is replaced, while established SSE connections remain
 attached to the old Unix socket. Each slot runs from the immutable runtime
-whose ID is the release's `uv.lock` SHA-256. The legacy shared `.venv` and
-fixed-port services remain a migration fallback until both environments have
-passed a slot rollback window. Public staging is static and gated to
-allowlisted project contributors and admins; it never runs Vite or HMR.
+whose ID is the release's `uv.lock` SHA-256. Both environments have migrated to
+slots: the legacy fixed-port `paperswithcode-backend@<environment>` unit is
+disabled (`pwc-status` reports `legacy_service: inactive`), and the shared
+`.venv` remains only as a fallback interpreter for operator helpers. Public
+staging is static and gated to allowlisted project contributors and admins; it
+never runs Vite or HMR.
 
-The external Pi worker is packaged independently under `runtimes/external-pi`.
-It exposes the content-free shadow comparison and an authenticated active-turn
-tracer. Packaging and shadow activation do not route browser chat traffic to
-the tracer: external admission remains a separate staging-only switch, and
-runtime validation rejects every external migration switch in production until
-the durable dispatch, fencing, recovery, workspace-retention, and qualification
-gates have been approved. The runtime identity covers the package manifest,
+The external Pi worker is packaged independently under `runtimes/external-pi`
+and runs beside each slot as `paperswithcode-<environment>-external-pi@<slot>`
+(durable supervisor) and `paperswithcode-<environment>-external-pi-worker@<slot>`
+(Node worker fleet). External admission serves browser chat in both
+environments. Production enters or leaves the reviewed durable 32-turn profile
+only through `configure_host_env.py --production-durable-external-enable-only`
+(or `--production-durable-external-disable-only`) with the matching
+`--confirm ENABLE_PRODUCTION_DURABLE_EXTERNAL` /
+`DISABLE_PRODUCTION_DURABLE_EXTERNAL`, followed by an exact-SHA
+`--refresh-environment`. The runtime identity covers the package manifest,
 lockfile, TypeScript build inputs, canonical prompt inputs, and pinned Node
 22.19.0 distribution contract. Packaging does not activate worker traffic. A
 build uses a temporary directory, exact locked dependencies, a production
 TypeScript build, production-dependency pruning, and an atomic rename.
 `runtime.json` records contract `external-pi-v1`, source release, entry point,
 Node identity, and a strict file-digest inventory. Reuse rejects mutable,
-missing, extra, or digest-mismatched files. The staging `release.json` records
-the selected runtime ID, contract, and identity-schema version so cleanup and
-rollback never recalculate a historical identity with newer packaging rules.
-Only protected staging releases participate in external Pi retention. While
+missing, extra, or digest-mismatched files. Each staging and production
+`release.json` records the selected runtime ID, contract, and identity-schema
+version (`external_pi_runtime`) so cleanup and rollback never recalculate a
+historical identity with newer packaging rules. Protected releases of both
+environments participate in external Pi retention. While
 any protected pre-descriptor staging release remains, cleanup conservatively
 retains the full external Pi namespace rather than guessing its identity;
 descriptor-less production releases do not disable staging cleanup.
@@ -131,52 +140,21 @@ result is `success-with-draining` and `pwc-reap` finishes cleanup later.
 With the external Pi lifecycle enabled, the next deploy or rollback runs that
 reap itself before it touches the displaced slot again.
 
-Production chat remains disabled when source is merely landed or deployed with
-`PWC_CHAT_ENABLED=false`. A separately authorized protected configuration
-change to `true` causes the next new exact-SHA production release to build chat
-into both backend and frontend manifests with the active immutable runtime
-descriptor. The deploy rejects an existing same-SHA release whose activation
-mode differs, so operators must use a new exact source SHA rather than mutate an
-immutable bundle. Runtime readiness still fails closed until every production
-chat prerequisite is configured. A disabled production release may contain the
-sealed, production-isolated OpenRouter contract, but funded dispatch, public
-admission, sandbox admission, and the blank pool remain false until the guarded
-activation step changes all four together.
+Production chat is enabled by the protected `PWC_CHAT_ENABLED=true`. Each new
+exact-SHA production release builds chat into both backend and frontend
+manifests only when that protected value is set, and the deploy fails closed
+unless `pwc-chat-alert-monitor.timer` and
+`pwc-cron-run-chat-synthetic-probe.timer` are enabled. The deploy rejects an
+existing same-SHA release whose chat activation mode differs, so a change of
+mode needs a new exact source SHA rather than a mutated immutable bundle.
+Runtime readiness still fails closed until every production chat prerequisite
+is configured.
 
-For the one-time migration from a legacy service, install the committed tools
-and slot units. A source-only compatibility landing may use the explicit
-staging-only bridge mode before any slot exists, but only when `uv.lock`
-matches the installed shared runtime:
-
-```bash
-sudo python deploy/install_deploy_tools.py <exact-sha>
-sudo python deploy/install_host_layout.py
-sudo pwc-deploy staging <exact-sha> --legacy-bridge
-sudo pwc-deploy staging <current-sha> --qualify-only
-```
-
-Production may use the same bridge only with the explicit production
-confirmation when its current legacy release predates the slot operator
-endpoints:
-
-```bash
-sudo pwc-deploy production <exact-main-sha> \
-  --legacy-bridge --confirm DEPLOY_PRODUCTION
-sudo pwc-deploy production <exact-main-sha> \
-  --qualify-only --confirm DEPLOY_PRODUCTION
-```
-
-`--legacy-bridge` is rejected after nginx or an active slot is present and can
-never mutate the shared dependency set. Production additionally requires the
-candidate to be reachable from `origin/main`. Qualification creates
-`active -> slots/blue` but leaves live nginx and the legacy service
-unchanged. Applying the checked-in active-slot nginx template is a separately
-authorized `pwc-nginx` operation. After that one-time cutover, verify both
-staging hosts and run the ordinary exact-SHA slot deployment. After its live
-smoke succeeds, that deployment gracefully retires only the legacy staging
-service; a failure to stop it is recorded as `legacy-retirement-pending`
-without rolling back an otherwise healthy slot activation.
-`--defer-public-smoke` is retired.
+`--qualify-only` prepares the candidate in the inactive slot (result
+`candidate-prepared`) after the rolling-compatibility check, without switching
+`active`. `--legacy-bridge` existed only for the one-time migration from the
+fixed-port services and is rejected once nginx or an active slot is present,
+which is now true for both environments. `--defer-public-smoke` is retired.
 
 Rollback:
 
@@ -233,9 +211,7 @@ restarting it, so the active release starts again after a host reboot. The
 permanent service is one process on loopback (`8002` production, `8003` staging),
 with `MemoryMax=768M`, `CPUQuota=75%`, `TasksMax=64`, protected system paths,
 and no database or bucket credentials. The installer requires at least 512 MiB
-of free release capacity. Reconfirm host capacity and listener ownership before
-first activation; these initial budgets are qualification limits, not sizing
-guarantees.
+of free release capacity.
 
 The root-owned mode-`0640` files `mcp-production.env` and `mcp-staging.env` have
 different API URLs, Host allowlists, ports, and cursor secrets. They must contain
@@ -260,84 +236,40 @@ cookies and authorization and uses a content-free MCP access log. Existing
 catalog/API infrastructure has its own request logging and retention policy, so
 this is not an end-to-end no-logging claim.
 
-Before staging activation:
+Qualification fails closed unless health's protocol value equals the protocol
+actually negotiated by initialize. After an MCP deploy, smoke browser `/mcp`,
+`/mcp/health`, and the MCP protocol (initialize, discovery, a read-only call).
+Roll back nginx immediately for routing/content-negotiation failures; roll back
+the MCP component for readiness, protocol, error-rate, latency, saturation, or
+memory regressions. The Hugging Face Space is a non-canonical fallback, never
+the URL clients should save.
 
-1. Migrate canonical paper Markdown to content-addressed objects and verify a
-   version-bound byte continuation through the staging loopback API.
-2. Confirm `8003` is free, the protected staging config has the exact staging
-   API URL/allowlists, and `pwc-status --component mcp` reports no invalid
-   pointer.
-3. Qualify the exact MCP SHA. Health's protocol value must equal the protocol
-   actually negotiated by initialize; a metadata-only claim fails closed.
-4. Apply staging nginx only through `pwc-nginx`, then smoke authenticated browser
-   documentation, anonymous `/mcp/health`, initialize, discovery, and every
-   read-only capability. Exercise rate, body, concurrency, deadline, and memory
-   limits before leaving it exposed.
-5. Drill `pwc-rollback staging --component mcp` and retain the evidence.
+## Chat runtime
 
-For production, require the merged application and MCP SHAs, repeat the API
-capability check, confirm `8002`, qualify the production API URL directly, deploy
-the MCP component, apply nginx with `pwc-nginx production`, and smoke `/health`,
-the site, an SPA route, an API route, browser `/mcp`, `/mcp/health`, and the MCP
-protocol. Roll back nginx immediately for routing/content-negotiation failures;
-roll back the MCP component for readiness, protocol, error-rate, latency,
-saturation, or memory regressions. The Hugging Face Space is a non-canonical
-fallback qualification target, never the URL clients should save.
+Chat runs in both environments with fail-closed prerequisites:
 
-## Staging sandbox-chat bridge
-
-The sandbox chat bridge has additional fail-closed prerequisites:
-
-1. Publish the standalone CLI release and verify its checksums and provenance.
-2. Build the Modal image from that committed source, then commit the emitted
-   immutable `im-...` image ID as `MODAL_IMAGE_ID`. A source revision with an
-   empty ID cannot pass release validation.
-3. Provision TLS for `chat-gateway-staging.paperswithcode.co`, install the
-   committed nginx template with the explicit `pwc-nginx staging` lifecycle,
-   and set `PWC_CHAT_GATEWAY_URL` to
-   `https://chat-gateway-staging.paperswithcode.co/api/internal/chat-gateway`.
-   The dedicated host exposes only the capability-authenticated gateway
-   routes, including the anonymous read-only HF catalog route and the bounded
-   artifact preparation/publication routes.
-4. Apply `add_chat_sandbox_runtime.sql`, `add_chat_turn_latency.sql`,
-   `add_chat_turn_jobs.sql`,
-   `add_chat_sandbox_pool.sql`, `add_chat_active_cost.sql`,
-   `add_chat_user_billing.sql`, `add_chat_qualification_metadata.sql`,
-   `add_chat_openrouter_user_budget.sql`, and
-   `add_chat_sandbox_spend_cap.sql`, `add_chat_web_search.sql`, and
-   `add_chat_hf_catalog.sql`, `add_chat_reasoning_effort.sql`, and
-   `add_chat_ttft_profiles.sql`, `add_chat_sandbox_egress_policy.sql`,
-   `add_chat_artifacts.sql`, `expand_chat_artifact_foundation.sql`, and
-   `add_chat_warm_assignment_race.sql` as
-   PostgreSQL superuser with
-   `search_path=staging,public`. The guarded migrations refuse any other schema,
-   assign the new tables to `pwc_staging_owner`, grant `pwc_staging`, and
-   revoke the production application role. The pool migration remains required
-   even while `PWC_CHAT_BLANK_POOL_ENABLED=false`, because readiness validates
-   the rollback-safe audit schema before pool activation.
-   Keep `PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED=false` until this migration is
-   verified in the staging schema and the exact release passes turn-ownership
-   qualification; an application deployment does not apply the migration.
-5. Keep `PWC_CHAT_WORKSPACE_SNAPSHOTS_ENABLED=false`; snapshot activation is
-   outside the latency project and requires a separate approved plan. V1 uses
-   Modal's isolated, automatically reclaimed ephemeral disk; PID and memory
-   ceilings remain hard qualification probes.
-
-The persistent executor endpoint is
-`wss://chat-executor-staging.paperswithcode.co/v1/generations/<generation>/environment`.
-Create `chat-executor-staging` as a **proxied** Cloudflare A record pointing to
-the origin server. The host firewall permits web traffic only from Cloudflare;
-DNS-only records cannot reach it. Keep the hostname at one subdomain level so
-Cloudflare Universal SSL covers it. Provision the matching origin certificate,
-apply the staging nginx template through `pwc-nginx`, and verify public TLS
-before qualifying the transport and enabling persistent admissions.
-
-Posterly's additive gateway contract uses one zero-assignment bridge release.
-Deploy the first gateway-29 release with `POSTERLY_ENABLED=false`; only after
-that release is both current and the rollback target accepts contract 29 may a
-second exact-SHA release set `POSTERLY_ENABLED=true`. The bridge contains the
-image, schema, storage provenance, and routes, but the launcher keeps artifact
-admission and publication disabled.
+1. Sandbox executor changes need a new Modal image built from committed source;
+   commit the emitted immutable `im-...` ID as `MODAL_IMAGE_ID` (staging) or
+   `PRODUCTION_MODAL_IMAGE_ID` in `backend/chat_sandbox_worker/contract.py`. A
+   source revision with an empty ID cannot pass release validation.
+2. Each environment has a dedicated gateway host
+   (`chat-gateway[-staging].paperswithcode.co`) and executor host
+   (`chat-executor[-staging].paperswithcode.co`) in the checked-in nginx
+   templates, applied only through `pwc-nginx`. The gateway host exposes only
+   the capability-authenticated gateway routes. Executor hostnames must be
+   **proxied** Cloudflare records at one subdomain level (the host firewall
+   admits web traffic only from Cloudflare, and Universal SSL covers only one
+   level).
+3. Chat schema migrations live in `backend/database/migrations/` and are never
+   applied by an application deploy. Staging migrations run as PostgreSQL
+   superuser with `search_path=staging,public`; the guarded migrations refuse
+   any other schema, assign new tables to `pwc_staging_owner`, grant
+   `pwc_staging`, and revoke the production application role. Their
+   `*_production.sql` counterparts run with `search_path=public`, own objects
+   with `paperswithcode_user`, and revoke `pwc_staging`.
+4. Keep `PWC_CHAT_WORKSPACE_SNAPSHOTS_ENABLED=false`; snapshot activation
+   requires a separate approved plan. Sandboxes use Modal's isolated,
+   automatically reclaimed ephemeral disk.
 
 Staging web search uses a server-owned Exa key and remains fail-closed unless
 the feature flag, protected credential, monthly circuit, database tables, and
@@ -361,9 +293,9 @@ followed by `pwc-deploy staging <exact-current-sha> --refresh-environment` when
 the active source SHA is unchanged. These staging steps never enable or mutate
 the production web-search feature.
 
-After production rollout is explicitly approved, install the same bounded
-configuration from production's server-owned Exa key, then deploy or refresh
-the intended exact production release:
+Production web search is enabled with the same bounded configuration from
+production's own server-owned Exa key. Install or rotate it, then deploy or
+refresh the intended exact production release:
 
 ```bash
 sudo python deploy/configure_host_env.py \
@@ -380,18 +312,17 @@ sudo python deploy/configure_host_env.py \
   --legacy-env backend/keys.env --staging-github-only
 ```
 
-The worker system prompt embeds
-`backend/chat_sandbox_worker/PWC_CLI_SKILL.md` plus the bounded area/task
-taxonomy in `backend/chat_sandbox_worker/TASK_CATALOG.md` and the bounded,
-area-grouped method snapshot in
-`backend/chat_sandbox_worker/METHOD_CATALOG.md`. The hourly
-`sync-pwc-cli-skill.yml` workflow compares the skill with
+The worker system prompt is rendered from the files listed in
+`PROMPT_INPUTS` in `deploy/external_pi_runtime.py`, including
+`backend/chat_sandbox_worker/PWC_MCP_SKILL.md`, `PWC_CLI_SKILL.md`, the bounded
+area/task taxonomy in `TASK_CATALOG.md`, and the area-grouped method snapshot in
+`METHOD_CATALOG.md`. They are part of the external Pi runtime identity, so a
+prompt or skill change reaches chat with the next exact-SHA `pwc-deploy`; a new
+Modal image is needed only for sandbox executor changes. The hourly
+`sync-pwc-cli-skill.yml` workflow compares the CLI skill with
 `huggingface/pwc-cli:standalone_cli/SKILL.md` and commits validated skill changes
 directly to `main`. A concurrent update to `main` is rebased before push; a
 conflict fails the run so the next hourly checkout can retry from a clean base.
-After a skill sync, publish a new immutable Modal image, commit its
-`MODAL_IMAGE_ID`, and deploy that exact commit to staging; an application deploy
-cannot alter an already-published worker image.
 
 `sync-chat-task-catalog.yml` refreshes the checked-in fallback
 `TASK_CATALOG.md` from the production taxonomy API every 15 minutes and on
@@ -414,196 +345,19 @@ scheduler tail latency without changing the circuit's worst-case resource rate.
 Reapplying the qualified capacity shape preserves an explicit blank-pool toggle;
 pool enablement and disablement remain separate operator actions.
 
-Before any non-zero rollout, deploy two distinct zero-percent bridge commits so
-both `current` and `previous` understand `modal_cli`. Then run the operator-only
-infrastructure qualification from the selected immutable release:
-
-The durable-turn compatibility bridge is a separate, reversible staging-only
-checkpoint. The guarded `add_chat_turn_jobs.sql` migration must already be
-applied with `search_path=staging,public`, and its schema, ownership, grants,
-production-role revocation, and indexes must be audited before enabling the
-bridge. Keep staging capacity at exactly two
-(`PWC_CHAT_MAX_CONCURRENCY=2`) throughout enablement, qualification, and
-rollback; this toggle must not change capacity, external-worker, executor,
-workspace, or provider switches.
-
-Resolve and validate the active immutable staging release before any protected
-configuration write. Audit the schema while the bridge is still disabled, then
-enable only through that exact release's helper, refresh its exact SHA, and
-verify that `current` still resolves to the audited release before normal
-qualification:
-
-```bash
-release_root=/srv/paperswithcode/releases
-staging_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-case "$staging_release" in
-  "$release_root"/????????????-staging) ;;
-  *) echo "active staging release is not immutable" >&2; exit 1 ;;
-esac
-cd -- "$staging_release" || exit 1
-readarray -t staging_identity < <(/srv/paperswithcode/.venv/bin/python -c '
-import json, re, sys
-manifest = json.load(open(sys.argv[1], encoding="utf-8"))
-sha = manifest.get("git_sha")
-assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
-assert manifest.get("release_id") == f"{sha[:12]}-staging"
-runtime = manifest.get("chat_runtime")
-assert isinstance(runtime, dict)
-worker = runtime.get("worker_contract_version")
-assert isinstance(worker, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", worker)
-print(sha)
-print(manifest["release_id"])
-print(worker)
-' "$staging_release/release.json") || exit 1
-test "${#staging_identity[@]}" -eq 3 || exit 1
-staging_sha="${staging_identity[0]}"
-staging_release_id="${staging_identity[1]}"
-staging_worker_contract="${staging_identity[2]}"
-test "$(basename -- "$staging_release")" = "$staging_release_id" || exit 1
-runtime_id="$(sha256sum "$staging_release/uv.lock" | awk '{print $1}')" || exit 1
-case "$runtime_id" in
-  *[!0-9a-f]*|'') echo "staging runtime ID is invalid" >&2; exit 1 ;;
-esac
-test "${#runtime_id}" -eq 64 || {
-  echo "staging runtime ID is invalid" >&2
-  exit 1
-}
-runtime_python="/srv/paperswithcode/runtimes/$runtime_id/bin/python"
-test -x "$runtime_python" || {
-  echo "installed staging runtime Python is missing" >&2
-  exit 1
-}
-
-run_staging_chat_gate() {
-  case "${1-}" in
-    audit-disabled)
-      test "$#" -eq 1 || return 1
-      gate_module=backend.scripts.qualify_chat_durable_dispatch
-      gate_args=(
-        --release-dir "$staging_release"
-        --confirm QUALIFY_STAGING_DURABLE_DISPATCH
-        --audit-disabled-only
-      )
-      ;;
-    qualify-enabled)
-      test "$#" -eq 1 || return 1
-      gate_module=backend.scripts.qualify_chat_durable_dispatch
-      gate_args=(
-        --release-dir "$staging_release"
-        --confirm QUALIFY_STAGING_DURABLE_DISPATCH
-        --qualify-enabled-only
-      )
-      ;;
-    soak)
-      test "$#" -eq 1 || return 1
-      gate_module=backend.scripts.qualify_chat_soak
-      gate_args=(
-        --release-dir "$staging_release"
-        --confirm QUALIFY_STAGING_CHAT_SOAK
-      )
-      ;;
-    soak-audit)
-      test "$#" -eq 2 || return 1
-      gate_module=backend.scripts.audit_chat_soak
-      gate_args=(
-        --started-at "$2"
-        --release-dir "$staging_release"
-        --confirm AUDIT_STAGING_CHAT_SOAK
-      )
-      ;;
-    *) echo "invalid staging chat gate" >&2; return 1 ;;
-  esac
-  sudo systemd-run --quiet --wait --pipe --collect \
-    --uid=pwc-staging --gid=pwc-staging \
-    --working-directory="$staging_release" \
-    --property=EnvironmentFile=/etc/paperswithcode/staging.env \
-    -- /usr/bin/env \
-    PWC_RELEASE_ID="$staging_release_id" \
-    PWC_CHAT_WORKER_CONTRACT_VERSION="$staging_worker_contract" \
-    "$runtime_python" -m "$gate_module" "${gate_args[@]}"
-}
-
-run_staging_chat_gate audit-disabled || exit 1
-
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$staging_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-chat-durable-dispatch-enable-only || exit 1
-sudo pwc-deploy staging "$staging_sha" --refresh-environment || exit 1
-
-refreshed_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-test "$refreshed_release" = "$staging_release" || exit 1
-refreshed_sha="$(/srv/paperswithcode/.venv/bin/python -c '
-import json, sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
-' "$refreshed_release/release.json")" || exit 1
-test "$refreshed_sha" = "$staging_sha" || exit 1
-cd -- "$refreshed_release" || exit 1
-run_staging_chat_gate qualify-enabled || exit 1
-run_staging_chat_gate soak || exit 1
-run_staging_chat_gate soak-audit '<durable-bridge-activation-time>' || exit 1
-```
-
-The disabled-state audit must emit `mode=disabled_schema_audit`,
-`status.passed=true`, and all six schema audit booleans as true before the
-enable helper is run. It performs no inserts, updates, deletes, model/provider
-calls, tool calls, or sandbox work. `--audit-disabled-only` refuses an enabled
-bridge; `--qualify-enabled-only` refuses a disabled bridge. Both modes require
-the exact staging confirmation, live immutable release and worker contract,
-staging search path, and complete PostgreSQL schema/role/owner/grant/index/
-constraint contract. The catalog inspection runs in a database-enforced
-read-only transaction.
-
-Complete the authenticated staging turn-ownership matrix for new turns,
-follow-ups, cancellation, edit/retry, and resume before treating the bridge as
-qualified. The durable-dispatch command must report all seven scenarios passed,
-all six schema audit booleans true, and `cleanup.clean=true`; it never calls a
-model, provider, sandbox, or user-visible chat route. Any non-zero exit, failed
-scenario, false audit boolean, or incomplete cleanup is a rollback gate. On any
-failed gate, resolve and verify the still-active audited release, invoke its
-exact disable helper, and refresh the same exact SHA through the immutable
-deployment path:
-
-```bash
-rollback_root=/srv/paperswithcode/releases
-rollback_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-case "$rollback_release" in
-  "$rollback_root"/????????????-staging) ;;
-  *) echo "rollback release is not immutable staging" >&2; exit 1 ;;
-esac
-readarray -t rollback_identity < <(/srv/paperswithcode/.venv/bin/python -c '
-import json, re, sys
-manifest = json.load(open(sys.argv[1], encoding="utf-8"))
-sha = manifest.get("git_sha")
-assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
-assert manifest.get("release_id") == f"{sha[:12]}-staging"
-runtime = manifest.get("chat_runtime")
-assert isinstance(runtime, dict)
-worker = runtime.get("worker_contract_version")
-assert isinstance(worker, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,64}", worker)
-print(sha)
-print(manifest["release_id"])
-print(worker)
-' "$rollback_release/release.json") || exit 1
-test "${#rollback_identity[@]}" -eq 3 || exit 1
-rollback_sha="${rollback_identity[0]}"
-rollback_release_id="${rollback_identity[1]}"
-rollback_worker_contract="${rollback_identity[2]}"
-test "$(basename -- "$rollback_release")" = "$rollback_release_id" || exit 1
-test -n "$rollback_worker_contract" || exit 1
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$rollback_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-chat-durable-dispatch-disable-only || exit 1
-sudo pwc-deploy staging "$rollback_sha" --refresh-environment || exit 1
-rollback_refreshed="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-test "$rollback_refreshed" = "$rollback_release" || exit 1
-rollback_refreshed_sha="$(/srv/paperswithcode/.venv/bin/python -c '
-import json, sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
-' "$rollback_refreshed/release.json")" || exit 1
-test "$rollback_refreshed_sha" = "$rollback_sha" || exit 1
-```
+Durable turn dispatch (`PWC_CHAT_DURABLE_TURN_DISPATCH_ENABLED=true`) is on in
+both environments and is part of the durable external Pi profile. The staging
+gates remain available for requalification from the active immutable release:
+`backend.scripts.qualify_chat_durable_dispatch` with `--audit-disabled-only`
+(refuses an enabled bridge) or `--qualify-enabled-only` (refuses a disabled
+bridge) and `--confirm QUALIFY_STAGING_DURABLE_DISPATCH`; it runs the catalog
+inspection in a database-enforced read-only transaction and never calls a
+model, provider, sandbox, or user-visible chat route. Run gates as
+`pwc-staging` with `/etc/paperswithcode/staging.env` and the release's
+`runtimes/<uv-lock-sha256>/bin/python`, with `PWC_RELEASE_ID` and
+`PWC_CHAT_WORKER_CONTRACT_VERSION` taken from the release's `release.json`.
+`configure_host_env.py --staging-chat-durable-dispatch-{enable,disable}-only`
+toggles only that flag; follow it with an exact-SHA `--refresh-environment`.
 
 ### Chat capacity tiers
 
@@ -641,146 +395,14 @@ higher tier.
 
 ### Staging durable external Pi qualification profile
 
-The 32-turn durable external Pi qualification is a staging-only, explicitly
-confirmed configuration profile. It does not enable ordinary external
-admission: public staging remains at two ordinary concurrent turns with the
-three-sandbox safety cap. Resolve the exact active immutable release, enable
-the profile with that release's helper, and refresh that same SHA:
-
-```bash
-qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-case "$qualification_release" in
-  /srv/paperswithcode/releases/????????????-staging) ;;
-  *) echo "qualification release is not immutable staging" >&2; exit 1 ;;
-esac
-qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
-import json, re, sys
-manifest = json.load(open(sys.argv[1], encoding="utf-8"))
-sha = manifest.get("git_sha")
-assert isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha)
-assert manifest.get("release_id") == f"{sha[:12]}-staging"
-print(sha)
-' "$qualification_release/release.json")" || exit 1
-test "$(basename -- "$qualification_release")" = "${qualification_sha:0:12}-staging" || exit 1
-
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$qualification_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-modal-rate-evidence-install-only \
-  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
-  --staging-modal-rate-microusd-per-second 53 \
-  --confirm INSTALL_STAGING_MODAL_RATE_EVIDENCE || exit 1
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$qualification_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-durable-external-qualification-enable-only \
-  --confirm ENABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
-sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
-test "$(readlink -e /srv/paperswithcode/environments/staging/current)" = \
-  "$qualification_release" || exit 1
-```
-
-`53` is the explicitly reviewed current Modal executor rate in microusd per
-second. The helper has no rate default or fallback: re-review and supply the
-rate explicitly for each candidate. It binds the three-key evidence file to
-the exact active staging release and atomically installs it as root-owned mode
-`0600`. It does not invent an attestation timestamp or print the rate, release,
-credentials, or file contents.
-
-Before starting an explicitly authorized qualifier, run `pwc-status` and verify
-the active external worker without exposing its bearer token:
-
-```bash
-pwc-status || exit 1
-sudo grep -E '^(PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED|PWC_CHAT_MAX_CONCURRENCY|PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY|PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP|PWC_CHAT_BLANK_POOL_ENABLED|PWC_CHAT_PI_PREWARM_ENABLED)=' \
-  /etc/paperswithcode/staging.env
-sudo /srv/paperswithcode/.venv/bin/python - <<'PY'
-import json
-from pathlib import Path
-
-slot = Path("/srv/paperswithcode/environments/staging/active").resolve().name
-statuses = [
-    json.loads(
-        Path(
-            f"/run/paperswithcode/external-pi/staging-{slot}-{index:02d}.json"
-        ).read_text()
-    )
-    for index in range(8)
-]
-assert all(status["state"] == "ready" for status in statuses)
-assert all(status["authenticated"] is True for status in statuses)
-assert all(status["registered"] is True for status in statuses)
-assert all(status["maximum_sessions"] == 4 for status in statuses)
-assert sum(status["maximum_sessions"] for status in statuses) == 32
-print("eight external workers ready; aggregate maximum_sessions=32")
-PY
-sudo -u postgres psql -d paperswithcode_hf -Atc \
-  "SELECT count(*) FROM staging.chat_sandbox_pool WHERE state IN ('starting','blank_ready','claimed','draining');"
-```
-
-The selected environment values must include
-`PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED=false`,
-`PWC_CHAT_MAX_CONCURRENCY=2`, `PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3`, and both
-pool/prewarm flags set to `false`. The qualification profile must also set
-`PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY=32`; otherwise the ordinary four-call
-gateway limit serializes the 32-user cohort and invalidates its TTFT result.
-The pool query must return `0`; any other
-value is a stop gate, not authorization to delete rows. The qualifier itself is
-a separate, explicitly authorized operation.
-
-Run the qualifier with Locust in a transient environment outside the immutable
-release. The deployed application runtime intentionally does not contain load-
-testing dependencies:
-
-```bash
-uv_bin="$(command -v uv)" || exit 1
-sudo systemd-run --quiet --wait --pipe --collect \
-  --uid=root --gid=root \
-  --working-directory="$qualification_release" \
-  --property=EnvironmentFile=/etc/paperswithcode/staging.env \
-  --property=PrivateTmp=yes \
-  -- /usr/bin/env \
-  PWC_RELEASE_ID="$(basename -- "$qualification_release")" \
-  UV_PROJECT_ENVIRONMENT=/tmp/pwc-staging-qualifier-project \
-  "$uv_bin" run --frozen --with locust python \
-  -m backend.scripts.qualify_durable_external_turns \
-  --environment staging \
-  --release-id "$(basename -- "$qualification_release")" \
-  --profile 32-functional-turns \
-  --max-spend-usd 10 \
-  --confirm QUALIFY_STAGING_DURABLE_EXTERNAL_TURNS
-```
-
-Restore the paired baseline with the same still-active release and refresh the
-same SHA whether qualification passes or fails:
-
-```bash
-qualification_release="$(readlink -e /srv/paperswithcode/environments/staging/current)" || exit 1
-qualification_sha="$(/srv/paperswithcode/.venv/bin/python -c '
-import json, sys
-print(json.load(open(sys.argv[1], encoding="utf-8"))["git_sha"])
-' "$qualification_release/release.json")" || exit 1
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$qualification_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-durable-external-qualification-disable-only \
-  --confirm DISABLE_STAGING_DURABLE_EXTERNAL_QUALIFICATION || exit 1
-sudo pwc-deploy staging "$qualification_sha" --refresh-environment || exit 1
-sudo /srv/paperswithcode/.venv/bin/python \
-  "$qualification_release/deploy/configure_host_env.py" \
-  --legacy-env /etc/paperswithcode/staging.env \
-  --staging-modal-rate-evidence-remove-only \
-  --staging-modal-rate-release-id "$(basename -- "$qualification_release")" \
-  --confirm REMOVE_STAGING_MODAL_RATE_EVIDENCE || exit 1
-```
-
-Verify ordinary admission is still false, concurrency/cap remain `2`/`3`, and
-pool/prewarm are restored to `true`. `pwc-rollback staging` does not restore
-protected `/etc` configuration, so release rollback alone is not this profile's
-rollback. Run the separately confirmed exact-release removal even when the
-qualifier fails; it refuses a missing, symlinked, misowned, mispermissioned,
-wrong-source, or wrong-release evidence file. Production remains unchanged and
-has no corresponding activation mode.
+The staging-only 32-turn qualification helpers
+(`--staging-durable-external-qualification-{enable,disable}-only`,
+`--staging-modal-rate-evidence-{install,remove}-only`, and
+`backend.scripts.qualify_durable_external_turns`) require the former ordinary
+staging baseline (external admission off, `PWC_CHAT_MAX_CONCURRENCY=2`,
+`PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP=3`) and refuse a drifted baseline. Staging now
+runs the 32 tier with external admission on, so they no longer apply to it as
+configured. `pwc-rollback` never restores protected `/etc` configuration.
 
 Pi prewarming and blank-pool admission are independent protected staging
 controls. Toggle Pi prewarming without changing admission, then refresh the
@@ -797,10 +419,11 @@ Use `--staging-chat-pi-prewarm-disable-only` for the independent rollback. The
 existing `--staging-chat-pool-enable-only` and
 `--staging-chat-pool-disable-only` modes control admission separately.
 
-Production Pi prewarm is a separately authorized chat change. It reuses the
-qualified DeepSeek Hugging Face `:baseten` / `low` profile and requires the
-already-admitted one-blank production pool. It does not enable Luna, Gemini, or
-any other alternative model:
+Both environments currently run the pool-free external Pi profile
+(`PWC_CHAT_BLANK_POOL_ENABLED=false`, `PWC_CHAT_PI_PREWARM_ENABLED=false`).
+Production Pi prewarm is a separately authorized chat change; its helper
+refuses unless production chat, the blank pool, the persistent worker, and
+sandbox admission are already enabled, and it rejects an alternative model:
 
 ```bash
 sudo /srv/paperswithcode/.venv/bin/python deploy/configure_host_env.py \
@@ -813,6 +436,9 @@ sudo pwc-deploy production <exact-current-main-sha> \
 
 Use `--production-chat-pi-prewarm-disable-only` with
 `--confirm DISABLE_PRODUCTION_CHAT_PI_PREWARM` for the independent rollback.
+
+The operator-only sandbox infrastructure qualification runs from the active
+staging release:
 
 ```bash
 sudo systemd-run --quiet --wait --pipe --collect \
@@ -829,11 +455,10 @@ sudo systemd-run --quiet --wait --pipe --collect \
 The runner creates only tagged disposable qualification sandboxes. It verifies
 the pinned CLI, dedicated-gateway reachability without a capability, blocked
 general egress, agent/broker UID and `/proc` isolation, and cancellation by
-sandbox termination. Directory snapshots remain disabled for this latency
-project. It emits timings and no environment values, commands, prompts,
-credentials, or tool output. Full model,
-SDK compaction, resume, edit/retry, and citation qualification still runs
-through authenticated staging chats before increasing the rollout percentage.
+sandbox termination. It emits timings and no environment values, commands,
+prompts, credentials, or tool output. Full model, SDK compaction, resume,
+edit/retry, and citation qualification runs through authenticated staging
+chats.
 
 The release-scoped reliability gate uses explicit qualification metadata rather
 than synthetic usernames. Run the naturally paced SLO cohort and the broader
@@ -862,8 +487,14 @@ uv run --env-file /etc/paperswithcode/staging.env python \
 The auditor reads all legacy and blue/green staging journal units, reports only
 content-free error codes and aggregates, scopes health and SLO gates to the
 active release, and keeps insufficient pre-soak samples distinct from failures.
-Production and staging expose DeepSeek V4 Flash under one stable public model
-ID. `PWC_CHAT_DEEPSEEK_V4_FLASH_PROVIDER` selects the user-funded Hugging Face
+
+Model discovery is defined in `backend/chat_configuration/registry.py`.
+Production exposes GPT-6 Luna through the direct OpenAI route plus the
+HF-org-funded DeepSeek V4.1 Flash when `PWC_CHAT_SPONSORED_DEEPSEEK_ENABLED` is
+set; GLM-5.3-Flash is hidden and its sessions continue on Luna. Staging
+defaults to direct GPT-6 Luna when the direct route is enabled and also exposes
+DeepSeek V4 Flash under one stable public model ID plus comparison models.
+`PWC_CHAT_DEEPSEEK_V4_FLASH_PROVIDER` selects the user-funded Hugging Face
 route `deepseek-ai/DeepSeek-V4-Flash-0731:baseten` by default or the
 server-funded OpenRouter route `deepseek/deepseek-v4-flash-0731`. Both routes
 remain registered at the private gateway so a rolling switch does not invalidate
@@ -887,17 +518,16 @@ in-flight and unknown-cost calls count at their conservative reservation. Only
 the staging-only `operator:pi-qualification:` identity may bypass these short
 window and daily circuits so explicitly authorized load tests do not weaken or
 misrepresent the public protections. Monthly per-user and provider workspace
-limits still apply. Production exposes the same allowance and BYOK product
-behavior only after its production schema and protected secrets pass closed
-qualification; it never reuses staging credentials or state.
+limits still apply. Production keeps server-funded OpenRouter dispatch disabled
+(`PWC_CHAT_OPENROUTER_SERVER_FUNDED_ENABLED=false`) and never reuses staging
+credentials or state.
 
-Automatic title generation uses the server-funded OpenRouter credential and
-routes `deepseek/deepseek-v4-flash-0731` through Nitro throughput sorting. It
-reserves against a persistent,
-environment-isolated `$25/month` title circuit before dispatch. Missing
-credentials, ledger uncertainty, provider failure, or exhaustion falls back to
-a local prompt-derived title. Production uses its production research key but a
-separate production `$25` title ledger and circuit. Neither environment may
+Automatic title generation uses `PWC_CHAT_TITLE_PROVIDER` (`huggingface` in
+both environments, with the pinned `zai-org/GLM-5.3-Flash:baseten` model;
+`openrouter` remains supported in `backend/services/chat_title_service.py`). It
+reserves against a persistent, environment-isolated `$25/month` title circuit
+before dispatch. Missing credentials, ledger uncertainty, provider failure, or
+exhaustion falls back to a local prompt-derived title. Neither environment may
 read or borrow the other's title or research budget.
 
 Production additionally uses the allowlisted
@@ -915,8 +545,9 @@ timeout. Its minute timer enforces the four-hour due gate and reacts to new
 releases, provider routes, and critical alert timestamps without blocking the
 journal poll.
 
-The committed timer is installed with the deployment tools but is never enabled
-implicitly. Enabling it is a reviewed production preparation mutation:
+Both timers are installed with the deployment tools but never enabled
+implicitly; they are enabled on the production host. Re-enabling them is a
+reviewed production mutation:
 
 ```bash
 sudo python deploy/install_deploy_tools.py <exact-main-sha>
@@ -928,26 +559,28 @@ An enabled production-chat deployment fails closed unless both timers are
 enabled. Both timers invoke only the `pwc-cron` allowlist, and only the
 operational monitor's transient unit receives read access to the system journal.
 
-Seal the reviewed production preparation inputs into a root-owned, non-loaded
-overlay. The named mode-`0600` Modal profile is imported in memory, so its token
-pair is never printed or copied into the local source input:
+Production chat was activated through the guarded sealed-bundle helpers in
+`deploy/configure_host_env.py`:
 
-```bash
-sudo python deploy/configure_host_env.py \
-  --legacy-env deploy/env/production.env \
-  --production-chat-seal-only \
-  --modal-profile pwc-production \
-  --confirm SEAL_PRODUCTION_CHAT_PREPARATION
-```
+- `--production-chat-seal-only --modal-profile pwc-production --confirm
+  SEAL_PRODUCTION_CHAT_PREPARATION` imports the named mode-`0600` Modal profile
+  in memory and writes only the non-loaded root-owned
+  `/etc/paperswithcode/production-chat-prepared.env`. It rejects unsafe alert
+  URLs, an invalid budget attestation, an invalid OpenRouter keyring contract,
+  or reuse of the staging OpenRouter key.
+- `--production-chat-install-only --confirm INSTALL_PRODUCTION_CHAT_PREPARATION`
+  revalidates that sealed bundle, rejects missing, stale, or added keys, and
+  installs it atomically into `production.env` with admission still closed.
+- `--production-chat-admission-enable-only --confirm
+  ENABLE_PRODUCTION_CHAT_ADMISSION` opens funded dispatch, public admission,
+  sandbox admission, and the pool together; refresh the exact active release
+  afterwards.
 
-The helper rejects a missing or group/world-readable Modal profile, incomplete
-credentials, conflicts with an explicitly configured pair, unsafe alert URLs,
-an invalid budget attestation, a missing/invalid OpenRouter keyring contract,
-or reuse of the staging OpenRouter key. It generates or preserves production-
-only BYOK encryption and tracking secrets, fixes the `$5`/`$200` policy, and
-writes only
-`/etc/paperswithcode/production-chat-prepared.env`; no service loads that file
-implicitly.
+None of these restarts a service. `backend.scripts.qualify_chat_sandbox_spend
+--environment production --qualification-id <unique-id> --confirm
+QUALIFY_PRODUCTION_CHAT_SPEND`, run as `pwc-production` with both environment
+files, exercises sandbox, title, provider-health, and runtime-alert transitions
+without creating provider compute.
 
 Sandbox reservations, local accrued-cost estimates, pool projections, and active-turn
 estimates include Modal’s 1.75× multiplier for the pinned `eu-west` region.
@@ -957,56 +590,14 @@ reconciliation covers them; this change does not rewrite provider reports.
 
 Production uses the Team service user `pwc-production`, which must be
 Contributor on only `pwc-chat-production` and retain No Access on `main` and
-every other Environment. The provider-side production Environment budget is
-$125 per billing period, between the durable $100 application circuit and the
-$250 workspace backstop. Rotate the sealed pair only after both `current` and
+every other Environment. The durable application circuit
+(`PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD`, currently $225) sits below the
+$250 environment and workspace backstops
+(`PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD`,
+`PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD`); keep the provider-side Environment
+budget consistent with them. Rotate the sealed pair only after both `current` and
 `previous` production releases accept the Team policy, so direct rollback does
 not depend on restoring an older owner credential.
-
-After a disabled production bridge release contains the qualification tooling,
-exercise all sandbox, title, provider-health, and runtime-alert transitions
-without creating provider compute. The sealed overlay must have been produced
-by the protected preparation helper and is loaded only into this transient
-process:
-
-```bash
-sudo systemd-run --quiet --wait --pipe --collect \
-  --uid=pwc-production --gid=pwc-production \
-  --working-directory=/srv/paperswithcode/environments/production/current \
-  --property=EnvironmentFile=/etc/paperswithcode/production.env \
-  --property=EnvironmentFile=/etc/paperswithcode/production-chat-prepared.env \
-  /srv/paperswithcode/.venv/bin/python \
-  -m backend.scripts.qualify_chat_sandbox_spend \
-  --environment production --qualification-id <unique-id> \
-  --confirm QUALIFY_PRODUCTION_CHAT_SPEND
-```
-
-Record human acknowledgement from both independently routed destinations. The
-synthetic rows remain environment-qualified and contain no prompt, answer,
-credential, capability, or provider compute.
-
-Before sealing an OpenRouter-capable production release, apply
-`backend/database/migrations/add_chat_openrouter_user_budget_production.sql` as
-PostgreSQL superuser with `search_path=public`. The guarded migration owns the
-four production OpenRouter tables and audit sequence with
-`paperswithcode_user`, grants only the production application role, and
-explicitly revokes `pwc_staging`. Audit table/sequence ownership, columns,
-constraints, and both role boundaries before continuing. This migration does
-not enable chat or dispatch a provider request.
-
-The common production chat schema must also include the guarded public
-counterparts `add_chat_web_search_production.sql`,
-`add_chat_hf_catalog_production.sql`, and
-`add_chat_reasoning_effort_production.sql`. They keep disabled feature columns
-compatible with the shared ORM, complete OpenRouter reasoning accounting, own
-new objects with `paperswithcode_user`, and deny staging writes. Apply them in
-that order after the base chat/OpenRouter tables exist and before opening
-production admission.
-
-Chat session reads also require the common typed-artifact foundation even when
-paper authoring is disabled. Apply `add_chat_artifacts.sql` and then
-`expand_chat_artifact_foundation.sql` with `search_path=public` before deploying
-an ORM release that includes the artifact models.
 
 Enabled immutable chat releases derive inline paper mentions and the bounded
 read-only Hugging Face catalog capability from the release manifest in both
@@ -1014,45 +605,11 @@ environments. Disabled releases force both capabilities off, so an ordinary
 release rollback also restores their prior activation state without editing
 protected configuration.
 
-Only after the two disabled production bridge releases are active, the sealed
-bundle has passed qualification, and the exact activation SHA has separate
-production authorization, install the same revalidated bundle into the live
-production environment. This changes protected configuration but does not
-restart a service, deploy a release, open public or sandbox admission, or enable
-the blank pool:
-
-```bash
-sudo python deploy/configure_host_env.py \
-  --legacy-env deploy/env/production.env \
-  --production-chat-install-only \
-  --confirm INSTALL_PRODUCTION_CHAT_PREPARATION
-```
-
-The installer reads only the previously sealed root-owned bundle, rejects
-missing, stale, or added keys, and revalidates title metadata, Modal policy,
-alert separation, capacity, and the isolated OpenRouter accounting contract
-before an atomic write. Funded dispatch and all three admission/capacity gates
-remain false, so the same installed configuration remains rollback-compatible
-without editing secrets during an incident.
-
-After the enabled release passes production smoke with admission closed, open
-funded dispatch, public admission, sandbox admission, and the one-blank pool
-together through the guarded configuration path. This revalidates the exact
-sealed bundle, rejects drift, and does not restart a service; refresh the exact
-active release so the new activation state is loaded:
-
-```bash
-sudo python deploy/configure_host_env.py \
-  --legacy-env deploy/env/production.env \
-  --production-chat-admission-enable-only \
-  --confirm ENABLE_PRODUCTION_CHAT_ADMISSION
-```
-
-Install the staging title policy from a protected local environment file through
-the narrow staging-only helper. It validates the exact owner, environment,
-model, provider, and `$25` circuit and does not write production. Legacy HF
-credential fields remain temporarily required for rollback compatibility but
-are not used by the OpenRouter title call:
+Install the staging title credential from a protected local environment file
+through the narrow staging-only helper. It requires title generation enabled,
+`PWC_CHAT_TITLE_BILL_TO=huggingface`, the expected credential owner, and the
+`staging` credential environment, rejects reuse of the general HF token or the
+production title token, and does not write production:
 
 ```bash
 sudo python deploy/configure_host_env.py \
@@ -1073,11 +630,6 @@ Direct OpenAI uses a separate staging project credential. Put only
 the credential if it matches either production OpenAI key. It writes the key
 only to the trusted staging gateway environment, enables the direct route, and
 sets the single blank profile to direct Luna/low without changing production:
-
-Gateway contract 30 requires one direct-disabled bridge release first. Deploy
-that bridge with the historical OpenRouter Luna/low profile, then enable the
-protected direct configuration and deploy a second distinct contract-30 release.
-This keeps both the forward drain and automatic rollback paths executable.
 
 ```bash
 sudo python deploy/configure_host_env.py \
@@ -1165,14 +717,14 @@ reconciliation and keeps Hugging Face-backed chat available.
 
 Production bundles the reviewed same-origin MCP App host whenever production
 chat is enabled, but the backend route, worker registration, and sandbox egress
-remain disabled until both protected Excalidraw switches are enabled. The
+stay disabled unless both protected switches (`PWC_CHAT_EXCALIDRAW_ENABLED`,
+`PWC_CHAT_MCP_APPS_HOST_ENABLED`) are enabled; both are on in production. The
 official App HTML is accepted in production only when it matches the SHA-256
 pinned in `backend/chat_sandbox_worker/mcp_app_providers.json`; staging retains
 its compatibility-gated drift policy.
 
 Enable the worker and App host together, then deploy the exact compatible
-release so its frontend, backend, and newly compatible blank sandbox pool become
-active atomically:
+release so its frontend and backend become active atomically:
 
 ```bash
 sudo /srv/paperswithcode/.venv/bin/python deploy/configure_host_env.py \
@@ -1183,8 +735,8 @@ sudo pwc-deploy production <exact-current-main-sha> --confirm DEPLOY_PRODUCTION
 ```
 
 The independent feature rollback disables both switches before refreshing the
-exact active release. This drains the Excalidraw egress profile and causes the
-one-blank pool to refill with a compatible gateway-only sandbox:
+exact active release. This drains the Excalidraw egress profile; an enabled
+blank pool refills with a compatible gateway-only sandbox:
 
 ```bash
 sudo /srv/paperswithcode/.venv/bin/python deploy/configure_host_env.py \
@@ -1227,16 +779,17 @@ prepared slot releases. Never remove a release or runtime directory by hand.
 
 ## Invariants
 
-`release.json` stores the full SHA, build profile, build time, frontend
-entrypoint, backend/frontend feature manifests, and rolling gateway/database
-contracts. `features.json` lives
+`release.json` stores the full SHA, release ID, build profile, build time,
+frontend entrypoint, backend/frontend feature manifests and their contract
+version, the chat runtime descriptor (including rolling gateway/database
+contracts), and the external Pi runtime descriptor. `features.json` lives
 beside built `index.html`. Startup fails if a deployed shell references
 `/src/main.tsx`, assets are missing, paths are relative or inside a release,
 or feature manifests disagree.
 
-While chat remains staging-only, production build and runtime configuration
-disable it; its backend router is absent and `/chat` redirects home.
-Production is the sole OAuth/session authority. It signs
+A release built with chat disabled has no chat backend router and `/chat`
+redirects home; production releases enable chat only from the protected
+`PWC_CHAT_ENABLED=true` (see [Commands](#commands)). Production is the sole OAuth/session authority. It signs
 `pwc_shared_session` with an Ed25519 private key and scopes the cookie to
 `.paperswithcode.co`; staging receives only the public verification key.
 The host-only `pwc_session` and `pwc_staging_session` cookies and their
@@ -1244,12 +797,11 @@ distinct HS256 secrets remain temporarily readable for rollback compatibility.
 Staging login redirects through the production callback, whose return
 destinations are restricted to the production and staging HTTPS origins.
 
-Codex add-evals and enrich-paper buttons are enabled only in production and
-remain protected by Hugging Face admin authentication in both the frontend and
-API. Production owns the writable catalog and receives the remote-job
-credentials through its protected environment. Staging keeps both controls
-disabled because its catalog role is read-only and it has no job credentials.
-Each release launcher derives the non-secret capability flags from that
+Codex add-evals and enrich-paper buttons are enabled in both environments'
+release manifests (`profile_features` in `deploy/release.py`; staging inherits
+production capabilities) and remain protected by Hugging Face admin
+authentication in both the frontend and API. Remote-job credentials come from
+each environment's protected configuration. Each release launcher derives the non-secret capability flags from that
 release's validated manifest, so rolling back also restores the matching
 frontend/backend feature state.
 
@@ -1261,10 +813,14 @@ never edits or reloads nginx.
 
 ## Scheduled work and backup
 
-GitHub Actions calls `sudo /usr/local/sbin/pwc-cron <registered-job>`. The
-launcher runs as `pwc-cron`, loads production plus CRON-only configuration,
-resolves `production/current`, records its release ID, and uses absolute
-lock/log directories.
+Host systemd timers generated from `deploy/cron_schedules.py` (units in
+`deploy/systemd/cron/`) run `/usr/local/sbin/pwc-cron-throttled <job>`, which
+invokes `/usr/local/sbin/pwc-cron <registered-job>`; the matching
+`.github/workflows/cron-*.yml` workflows are manual-dispatch only. See
+[operations](operations.md#host-timer-scheduling). The launcher runs as
+`pwc-cron` (trending jobs as `pwc-cron-trending` with `trending-cron.env`),
+loads production plus CRON-only configuration, resolves `production/current`,
+records its release ID, and uses absolute lock/log directories.
 
 ```bash
 sudo pwc-cron status
@@ -1279,7 +835,7 @@ those boundaries; bucket access controls must also prevent unauthorized visibili
 changes between checks and after upload. A public-backup incident remains open for
 historical exposure assessment even after the bucket becomes private.
 
-`pwc-postgres-backup.timer` remains at 03:15 UTC. It runs the backup script from
+`pwc-postgres-backup.timer` runs at 03:15 UTC. It runs the backup script from
 `production/current` as `pwc-cron`, dumps both `public` and `staging` with the
 read-only `pwc_backup` role, verifies the local checksum and remote object
 listing, keeps three local dumps, and keeps thirty remote dumps.
@@ -1291,11 +847,10 @@ the curation path that enables thumbnail mutations and writes the shared
 thumbnail mirror. Stale processing claims are recoverable, and an operator can
 retry terminal failures once per invocation with
 `sudo pwc-cron process_curation_thumbnails --retry-failed`.
-Install the committed deploy tools and apply
-`backend/database/migrations/add_curation_thumbnail_queue.sql` before enabling
-the timer with `sudo systemctl enable --now pwc-curation-thumbnails.timer`.
+The timer is enabled; its queue table comes from
+`backend/database/migrations/add_curation_thumbnail_queue.sql`.
 
-The hourly GitHub Actions monitor uses the same
+The hourly `hourly-application-smoke.yml` GitHub Actions monitor uses the same
 `deploy/smoke_test.py --monitor-subset` implementation as releases. It checks
 the production SPA and hashed asset MIME types plus the staging health/auth
 boundary without creating an authenticated session.
@@ -1306,30 +861,18 @@ Use `uv run --env-file backend/keys.env ...` for local backend commands and
 `npm run dev` for a localhost frontend. `check_services.sh` delegates to
 `pwc-status`.
 
-### Production executor certificate renewal
+## Production executor certificate renewal
 
 The executor hostname serves only ACME challenge files from
 `/var/lib/letsencrypt/pwc-executor-production/.well-known/acme-challenge/`
 plus its generation-bound WebSocket route. Other HTTPS paths return 404.
 The HTTP challenge location is served directly; other HTTP paths redirect to HTTPS.
 
-After merging and installing the reviewed deployment tools and nginx template,
-create the challenge directory (root-owned, mode 0755), apply the production
-nginx template through `pwc-nginx`, and switch the existing certificate from
-manual DNS validation to webroot validation:
-
-```bash
-sudo certbot reconfigure \
-  --cert-name chat-executor.paperswithcode.co \
-  --authenticator webroot \
-  --webroot-path /var/lib/letsencrypt/pwc-executor-production \
-  --preferred-challenges http \
-  --deploy-hook 'pwc-nginx production --confirm APPLY_NGINX_PRODUCTION --reload-renewed-certificate'
-```
-
-`reconfigure` must pass its renewal test before the parameters are saved. Confirm
-the saved renewal configuration uses `webroot` and that `certbot.timer` is enabled.
-The renewal hook requires Certbot's exact `RENEWED_LINEAGE` for the executor host,
-validates the live nginx configuration before reloading, then smoke-tests the
-active application release. It does not install a template or change release
-pointers. Remove the old DNS TXT challenge after certificate issuance.
+The `chat-executor.paperswithcode.co` certificate renews through `certbot.timer`
+with the `webroot` authenticator at `/var/lib/letsencrypt/pwc-executor-production`
+and the renewal hook
+`pwc-nginx production --confirm APPLY_NGINX_PRODUCTION --reload-renewed-certificate`
+(see `/etc/letsencrypt/renewal/chat-executor.paperswithcode.co.conf`). The hook
+requires Certbot's exact `RENEWED_LINEAGE` for the executor host, validates the
+live nginx configuration before reloading, then smoke-tests the active
+application release. It does not install a template or change release pointers.

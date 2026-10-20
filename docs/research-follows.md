@@ -48,42 +48,32 @@ follows, and List-Unsubscribe supports one-click POST. Signed webhooks verify
 the raw payload and reject timestamps outside five minutes. Bounce/complaint
 suppression is address-wide and idempotent.
 
-## Staging preview
+Code: `backend/services/research_follow_service.py` (follows and feed),
+`backend/services/research_delivery_service.py` (digest selection, outbox,
+Resend), and `backend/routers/research.py` (API and
+`POST /api/v1/research/resend-webhook`).
 
-Apply `backend/database/migrations/add_research_follows_staging.sql` as the
-schema owner before deploying the reviewed feature commit. It changes only
-staging private state. Do not install production event triggers or the digest
-timer for the preview. Delivery is always disabled in staging. Production and
-staging interests and preferences remain separate.
+## Operations
 
-## Production activation (after staging review)
+Schema: `backend/database/migrations/add_research_follows.sql` (production:
+shared catalog event triggers plus private tables; rerunnable and additive) and
+`add_research_follows_staging.sql` (staging private state only, no event
+triggers). Production and staging interests and preferences stay separate, and
+delivery is always disabled in staging.
 
-Apply `backend/database/migrations/add_research_follows.sql` as the database
-owner before deploying the merged release. This additive migration installs
-shared catalog event capture and isolated private tables. It can be rerun.
-An application rollback can leave these additive tables/triggers installed.
+Production sends through `send_research_digests` (`pwc-cron`). The hourly
+`pwc-cron-send-research-digests.timer` sends the Monday 08:00 UTC digest and
+retries for the next 23 hours; other executions are no-ops. Never run the source
+script as a production job.
 
-Register `send_research_digests` through the installed `pwc-cron` launcher and
-its generated systemd units when rolling out production. The hourly timer
-sends the Monday 08:00 digest and provides retries for the next 23 hours; all
-other executions are no-ops. Never run the source script as a production job.
+Delivery requires `PWC_RESEARCH_EMAIL_ENABLED=true` plus `PWC_RESEND_API_KEY`,
+`PWC_RESEND_FROM`, `PWC_RESEND_DOMAIN_VERIFIED=true`,
+`PWC_RESEND_WEBHOOK_SECRET`, and `PWC_RESEND_WEBHOOKS_READY=true` in the
+protected production backend and production-CRON environment files, never in
+source control. The Resend webhook is registered for `email.bounced`,
+`email.complained`, and `email.suppressed`.
 
-Keep `PWC_RESEARCH_EMAIL_ENABLED=false` until a Resend account, credentials,
-verified sender domain, and tested delivery webhooks are ready. Configure
-these in the protected production/backend and production-CRON environment
-files, never in source control:
-
-- `PWC_RESEND_API_KEY`
-- `PWC_RESEND_FROM`
-- `PWC_RESEND_DOMAIN_VERIFIED=true`
-- `PWC_RESEND_WEBHOOK_SECRET`
-- `PWC_RESEND_WEBHOOKS_READY=true`
-
-Register `https://paperswithcode.co/api/v1/research/resend-webhook` for
-`email.bounced`, `email.complained`, and `email.suppressed`. Only after provider
-setup and authorized qualification should the delivery flag be enabled.
-
-Review the email before enabling the timer. Neither command writes the outbox:
+Review an email without writing the outbox:
 
 ```bash
 sudo pwc-cron send_research_digests --preview <hf-username> [--html]
@@ -93,6 +83,4 @@ sudo pwc-cron send_research_digests --test-to <hf-username>
 `--preview` renders the past week's Following-feed matches for that account.
 `--test-to` sends one `[Test]` digest, only to that account's own opted-in,
 unsuppressed address, and requires every delivery gate. Real digests still
-contain only updates discovered after each follow and opt-in. Once the test
-looks right, enable `pwc-cron-send-research-digests.timer`.
-No credentials, domain activation, or outbound tests are part of this rollout.
+contain only updates discovered after each follow and opt-in.

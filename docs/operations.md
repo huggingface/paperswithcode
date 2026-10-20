@@ -6,33 +6,23 @@ acceptance gates, and incident procedures are documented in
 
 ## Cron Job Overview
 
-Job implementations live in `.github/workflows/scripts/`, but production never
-executes them from a checkout. GitHub Actions invokes the installed
-`pwc-cron` launcher, which pins execution to `production/current`, runs as
-`pwc-cron`, enforces an allowlist and timeout, and records release provenance.
+Job implementations live in `.github/workflows/scripts/` and `backend/scripts/`,
+but production never executes them from a checkout. Host systemd timers invoke
+the installed `pwc-cron` launcher, which pins execution to `production/current`,
+runs as `pwc-cron`, enforces the allowlist and timeout in
+`deploy/cron_launcher.py`, and records release provenance.
 
-| Schedule | Script | Purpose |
-| --- | --- | --- |
-| Every minute (local systemd timer) | `.github/workflows/scripts/hourly/process_curation_thumbnails.py` | Claim remote-curation thumbnail requests and record terminal results as `pwc-cron`. |
-| Hourly with randomized delay (packaged, disabled until acceptance) | `.github/workflows/scripts/review_submissions.py` | Launch one pinned, database-free HF Job for at most 25 oldest eligible submissions. |
-| Manual dispatch only | `.github/workflows/scripts/hourly/update_hot_github_trending.py` | Staging-ready hot pipeline; production schedule remains intentionally disabled. |
-| `0 * * * *` | `.github/workflows/scripts/hourly/update_github_stars.py` | Refresh fresh and weekly official repositories concurrently using separate GitHub accounts. |
-| `15 * * * *` | `.github/workflows/scripts/hourly/calculate_trending_scores.py` | Compute EMA-based trending scores using repository star history. |
-| `30 * * * *` | `.github/workflows/scripts/hourly/update_citations.py` | Pull citation counts from Semantic Scholar for ArXiv papers. |
-| `45 * * * *` | `.github/workflows/scripts/hourly/extract_urls.py` | AI-assisted GitHub/project URL extraction for papers lacking resources. |
-| `0 * * * *` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` | Import the current day's Hugging Face submissions not yet in the DB (hourly). |
-| `5 * * * *` | `.github/workflows/scripts/hourly/sync_3d_arena.py` | Refresh paper-linked Elo results from the living 3D Arena leaderboard. |
-| `55 * * * *` | `.github/workflows/scripts/hourly/sync_tabarena.py` | Refresh paper-linked Elo results from the living TabArena model leaderboard. |
-| `15 * * * *` | `.github/workflows/scripts/hourly/sync_open_asr.py` | Discover unambiguous arXiv-backed models and refresh paper-linked WER and RTFx results from the living Open ASR Leaderboard. |
-| `18 * * * *` | `.github/workflows/scripts/hourly/sync_open_tts.py` | Atomically refresh paper-linked English and all-language-average WER and RTFx results across Seed-TTS and CV3-Eval from the living Open TTS Leaderboard. |
-| `12 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v2` | Refresh paper-linked MMEB-v2 overall scores from the official MMEB Space. |
-| `42 * * * *` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` | Refresh paper-linked MMEB-v3 overall scores from the official MMEB Space. |
-| `35 */2 * * *` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` | Index missing reviewed model releases and refresh paper-linked Artificial Analysis Intelligence, Agentic, and text-to-speech Quality Elo scores. |
-| `20 2 * * *` | `.github/workflows/scripts/daily/sync_hf_organizations.py` | Reconcile the strict featured HF organization manifest and append new paper links. |
-| `50 2 * * *` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` | Move papers claimed on HF in the last 30 days to the claiming account's author and refresh avatars. |
-| `40 3 * * *` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` | Snapshot organization momentum and refresh rolling 30-day ranks. |
-| `30 4 * * *` | `.github/workflows/scripts/daily/preload_thumbnails.py` | Generate and upload missing paper thumbnails to the HF bucket. |
-| `0 5 * * *` | `.github/workflows/scripts/daily/mirror_thumbnails_to_disk.py` | Mirror the entire thumbnail bucket prefix down to the VPS local cache so `/api/thumbnails/{filename}` always serves from local disk. |
+- Schedules: `deploy/cron_schedules.py` is the source of truth for every
+  `pwc-cron-*.timer` (see [Host timer scheduling](#host-timer-scheduling)).
+  The per-job table lives in
+  [.github/workflows/scripts/README.md](../.github/workflows/scripts/README.md).
+- Timers outside that table: `pwc-curation-thumbnails.timer` (every minute),
+  `pwc-chat-alert-monitor.timer` (every minute), `pwc-postgres-backup.timer`
+  (03:15 UTC), and
+  the packaged `submission-review.timer` (hourly, randomized delay; disabled
+  until its configuration is complete).
+- `extract_urls` stays allowlisted but its schedule is paused
+  (`cron-extract-urls.yml` is `workflow_dispatch`-only).
 
 Useful production commands:
 
@@ -40,6 +30,7 @@ Useful production commands:
 sudo pwc-cron status
 pwc cron health
 pwc cron health refresh_paper_embeddings --strict --json
+journalctl -u pwc-cron-<job>.service --since today
 journalctl -u 'run-u*.service' --since today
 ```
 
@@ -102,8 +93,9 @@ The configured Job image must be a Docker reference ending in an exact
 `@sha256:` digest; tags and mutable Space URLs are rejected.
 
 Keep both `PWC_AUTONOMOUS_SUBMISSION_ENABLED` and
-`PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED` false until Task 15 shadow comparison
-and acceptance drills are recorded. The dedicated HF token must only launch
+`PWC_AUTONOMOUS_SUBMISSION_JOBS_ENABLED` false until shadow comparison and
+acceptance drills are recorded (see
+[autonomous operations](autonomous-operations.md)). The dedicated HF token must only launch
 Jobs in the configured namespace; the OpenAI credential must have an external
 operator-specific spending limit no higher than the configured run budget.
 Neither credential may be shared with paper curation or interactive Codex.
@@ -120,20 +112,21 @@ manual mode:
 sudo pwc-cron review_submissions --dry-run
 ```
 
-After acceptance, enable the timer without running the script from a checkout:
+The timer state follows configuration: every `install_deploy_tools.py` run
+enables `submission-review.timer` only when both flags are true and distinct
+primary and fallback alert webhooks are set, disables it otherwise, and records
+the decision in
+`/var/lib/paperswithcode/production/cron-logs/submission-review-schedule.json`.
+A hand `systemctl enable` or `disable` is overridden on the next install.
 
 ```bash
-sudo systemctl enable --now submission-review.timer
 systemctl status submission-review.timer
 sudo pwc-cron status
 ```
 
 Disable remotely through the admin autonomy control first; for host recovery,
-disable the timer and its configuration flag:
-
-```bash
-sudo systemctl disable --now submission-review.timer
-```
+set the configuration flag false and stop the timer
+(`sudo systemctl disable --now submission-review.timer`).
 
 Only one matching remote Job may be active. Each callback is HMAC-bound to its
 claim token, immutable snapshot, and exact decision. Exact repeats are safe;
@@ -149,9 +142,9 @@ the remote provider project enforces the independent cost ceiling.
 
 - Route: `/admin-dashboard` on the frontend (linked from the admin user menu). The old `/cron-dashboard` URL redirects here.
 - Backend endpoints: `/api/v1/cron/status`, `/api/v1/cron/job/{name}`, `/api/v1/cron/health`.
-- Codex add-evals/enrich controls and their remote-job queue are intentionally
-  disabled during the environment migration. Staging cannot mutate the shared
-  catalog and production does not expose the retired write-capable sidecar.
+- Tabs: Critical Jobs, Leaderboard Syncs, Codex Paper Jobs (the curation queue
+  described under [Autonomous HF daily-paper curation](#autonomous-hf-daily-paper-curation)),
+  Catalog Audit, and Chat Compute.
 - Auto-refreshes CRON health every 30 seconds (toggleable).
 - Pulls production CRON health from
   `/var/lib/paperswithcode/production/cron-logs`.
@@ -187,8 +180,10 @@ most `PWC_CRON_THROTTLE_SLOTS` (default 3) concurrent launches through slot
 locks in `/run/paperswithcode/cron-slots` before delegating to the immutable
 `pwc-cron` launcher; producer chains additionally declare `After=` orderings
 for catch-up storms. The former GitHub `schedule:` triggers were removed; the
-workflows stay `workflow_dispatch`-only for manual recovery. Enable or inspect
-a job's schedule with `systemctl status pwc-cron-<job>.timer`; list all with
+workflows stay `workflow_dispatch`-only for manual recovery. Installing units
+does not enable a new timer: run `sudo systemctl enable --now
+pwc-cron-<job>.timer` once after the release containing the job is live.
+Inspect one with `systemctl status pwc-cron-<job>.timer`; list all with
 `systemctl list-timers 'pwc-cron-*'`.
 
 Environment deployment, rollback, nginx, backup, and release layout are
@@ -253,8 +248,7 @@ smoke inspection before another deployment.
 
 ## Trending Pipeline
 
-Once production activation is separately authorized, queue ownership is
-exclusive: the 15-minute hot job owns latest papers aged
+Queue ownership is exclusive: the 15-minute hot job owns latest papers aged
 0–30 days (500 calls/run), the hourly fresh queue owns days 31–180 (2,500
 calls/run), and the weekly queue owns older repositories (1,000 calls/run).
 The 30-day ownership boundary is intentionally fixed across selection and
@@ -288,7 +282,7 @@ returning the token value.
 4. Database views and `/api/v1/papers/trending` expose the resulting scores.
 
 ```bash
-curl "http://localhost:8000/api/v1/papers/trending?limit=10&max_age_days=180"
+curl "https://paperswithcode.co/api/v1/papers/trending?limit=10&max_age_days=180"
 ```
 
 Response snippet:
@@ -313,22 +307,9 @@ Response snippet:
 }
 ```
 
-Frontend integration (`frontend/src/pages/Papers.tsx`) uses the dedicated endpoint when users select the 🔥 Trending tab without a search query, and gracefully falls back to `/papers` plus sort options for mixed queries.
-
-The checked-in workflow is `workflow_dispatch`-only. A merge to `main` or a
-staging deployment does not activate production, and the installed
-`/usr/local/sbin/pwc-cron` will not recognize this command until deploy tooling
-from the authorized production SHA is installed.
-
-Production activation requires a separately authorized and reviewed sequence:
-
-1. Install the checked-in deploy tooling from the exact authorized production SHA.
-2. Deploy that same SHA to production so the immutable release contains the job.
-3. Verify `sudo pwc-cron status` lists `update_hot_github_trending`.
-4. In a separate reviewed commit, add the `*/15 * * * *` schedule to
-   `cron-update-hot-github-trending.yml`.
-
-After those steps, recovery and selection-only checks are:
+The hot job runs every 15 minutes through
+`pwc-cron-update-hot-github-trending.timer`. Recovery and selection-only checks
+are:
 
 ```bash
 pwc cron health update_hot_github_trending --strict --json
@@ -336,13 +317,14 @@ sudo pwc-cron update_hot_github_trending --dry-run
 ```
 
 The dry run prints the bounded selected population and projected shared-token
-calls without GitHub requests or database writes. Disable the schedule to roll
+calls without GitHub requests or database writes. Disable the timer to roll
 back; snapshots are retained. If it stays disabled, restore hot papers to the
 hourly fresh ownership before releasing that rollback.
 
 The hourly paper reconciliation also supports temporary, linearly decaying
 emergency floors. Configure comma-separated `identifier:decay_hours` entries in
-the production CRON overlay (hours default to 72):
+`/etc/paperswithcode/trending-cron.env`, the only environment file the
+restricted `pwc-cron-trending` jobs load (hours default to 72):
 
 ```dotenv
 PWC_TRENDING_PIN_ARXIV_IDS=2606.16140:72
@@ -359,7 +341,7 @@ Use pins only as a bridge while the underlying ranking signal is corrected.
 - Helper: `_is_valid_pdf` in `backend/utils/pdf_utils.py`
 - Ensures downloaded files start with `%PDF-`, contain `%%EOF`, exceed 1 KB, and are not HTML/reCAPTCHA placeholders.
 - Critical errors (rate limiting, CAPTCHA) are surfaced so papers are retried later instead of being marked as processed.
-- Unit tests: `tests/test_pdf_validation.py`, integration tests: `tests/test_pdf_download_integration.py`.
+- Unit tests: `backend/tests/paper/test_pdf_validation.py`, integration tests: `backend/tests/paper/test_pdf_download_integration.py`.
 
 ## Thumbnail Storage
 
@@ -374,16 +356,8 @@ PWC_THUMBNAIL_HF_BUCKET_PREFIX=thumbnails
 PWC_HF_TOKEN=<token with bucket access>
 ```
 
-Use a dry run before uploading the current VPS cache:
-
-```bash
-uv run --env-file backend/keys.env scripts/sync_thumbnails_to_hf_bucket.py --create-bucket
-uv run --env-file backend/keys.env scripts/sync_thumbnails_to_hf_bucket.py --create-bucket --apply
-```
-
-After spot-checking `/api/thumbnails/...`, the old `thumbnails/` directory can be
-removed from the VPS because the bucket is the durable copy. The backend keeps a
-small `PWC_THUMBNAIL_TEMP_CACHE_DIR` for recently served bucket objects.
+`scripts/sync_thumbnails_to_hf_bucket.py` (dry run by default, `--apply` to
+upload) bootstraps the bucket from a local cache.
 
 ### Local disk mirror
 
@@ -392,9 +366,11 @@ from `huggingface.co/buckets/...`; every `<img src="/api/thumbnails/...">`
 request has to go through FastAPI. To keep that fast, the daily
 `mirror_thumbnails_to_disk` cron runs `huggingface_hub.sync_bucket` to
 incrementally pull the entire bucket prefix into `PWC_THUMBNAIL_TEMP_CACHE_DIR`
-on the VPS. Once the mirror finishes, `ThumbnailService` finds every requested
-file on local disk and never has to do a per-request HF download. To run it
-manually (e.g. for first-time bootstrap):
+on the VPS. `GET /api/thumbnails/{filename}` serves only from that local disk
+(`ThumbnailService.get_local_thumbnail_path`) and never downloads from the
+bucket or generates on request, so an object published to the bucket returns
+404 until the next mirror run. To run it manually (for example, right after
+publishing a replacement):
 
 ```bash
 sudo pwc-cron mirror_thumbnails_to_disk
@@ -405,9 +381,10 @@ sudo pwc-cron mirror_thumbnails_to_disk
 | Issue | Resolution |
 | --- | --- |
 | Trending endpoint empty | Verify GitHub stars job is running and trending scores have at least two snapshots; check `repositories.trending_score_updated_at`. |
-| Cron dashboard shows “Unknown” | Run `pwc-cron status`, inspect `/var/lib/paperswithcode/production/cron-logs`, and check the matching GitHub Actions run. |
+| Cron dashboard shows “Unknown” | Run `sudo pwc-cron status`, inspect `/var/lib/paperswithcode/production/cron-logs`, and check `systemctl status pwc-cron-<job>.timer` and its service journal. |
 | AI URL extraction stalls | Inspect production CRON health and the matching immutable-release job logs; do not rerun it from the checkout. |
 | Pending edits not landing in DB | Confirm the submitter is signed in (HF session cookie); the `POST /api/v1/me/paper-edits` endpoint requires `require_user`. Then run `SELECT * FROM pending_paper_edits WHERE status='pending' ORDER BY created_at DESC LIMIT 10;` to inspect recent submissions. |
+| Cron logs filling disk | Verify `systemd-tmpfiles` policy; production CRON logs are bounded to 30 days. Use `pwc-status` to include disk usage in the audit. |
 
 ## Pending Paper Edits Review
 
@@ -417,8 +394,9 @@ methods, evaluations, GitHub repositories, project pages) through
 `pending_paper_edits` table with `status = 'pending'`; live data does not
 change until an admin approves it. Admin direct edits via the existing
 `/papers/{id}/...` and `/evaluations/...` admin endpoints still bypass this
-queue. The frontend admin queue UI is intentionally deferred — review and
-approval happens through SQL plus the admin API.
+queue. Admins review the queue at `/submissions` on the frontend, through the
+admin API below, or with
+`uv run --env-file backend/keys.env pwc submissions list --environment production`.
 
 ### List pending submissions
 
@@ -453,27 +431,13 @@ for you.
 
 ### Approve or reject via the admin API
 
-Both endpoints require the HF admin cookie (sign in via the site) or the
-`X-Admin-Token` header. Approval re-uses the same backend mutation services
-that admin direct edits call, so a future "auto-approve author edits" hook can
-reuse the exact same code path. Reject simply records the row as rejected with
-an optional note; it does not touch live data.
-
-```bash
-# Approve
-curl -X POST \
-    -H "X-Admin-Token: $PWC_ADMIN_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"admin_note": "looks correct"}' \
-    https://paperswithcode.co/api/v1/admin/paper-edits/{edit_id}/approve
-
-# Reject
-curl -X POST \
-    -H "X-Admin-Token: $PWC_ADMIN_TOKEN" \
-    -H "Content-Type: application/json" \
-    -d '{"admin_note": "task tag was incorrect"}' \
-    https://paperswithcode.co/api/v1/admin/paper-edits/{edit_id}/reject
-```
+Both endpoints require an allowlisted Hugging Face admin session
+(`require_hf_admin`); `X-Admin-Token` is not accepted. Use the `/submissions`
+page or send the signed-in session cookie with
+`POST /api/v1/admin/paper-edits/{edit_id}/approve` or `/reject` and an optional
+`{"admin_note": "..."}` body. Approval re-uses the same backend mutation
+services that admin direct edits call. Reject simply records the row as
+rejected with an optional note; it does not touch live data.
 
 `GET /api/v1/admin/paper-edits` lists rows server-side (status / paper_id /
 edit_type filters supported) and `GET /api/v1/admin/paper-edits/{id}` returns
@@ -511,7 +475,12 @@ different terminal decision, or already-reviewed row fails closed.
 
 ### Payload shapes
 
-Each `proposed_payload` matches the underlying admin mutation endpoint:
+`EDIT_SPECS` in `backend/services/pending_edit_payloads.py` is the
+authoritative list of edit types and validators. Besides the shapes below,
+`organizations`, `source_url`, `hf_artifacts`, and `x_threads` edit a paper,
+and `new_task`, `new_method`, `new_benchmark`, `new_metric`, `new_conference`,
+`new_organization`, and `new_external_paper` are taxonomy or resource
+suggestions. Common shapes:
 
 - `tasks` &rarr; `{"task_ids": [int, ...]}`
 - `methods` &rarr; `{"method_ids": [int, ...]}`
@@ -521,9 +490,7 @@ Each `proposed_payload` matches the underlying admin mutation endpoint:
   - `create` &rarr; `{ "op": "create", "data": { task_id, dataset_id, metrics, best_metric, ... } }`
   - `update` &rarr; `{ "op": "update", "evaluation_id": int, "data": { ... } }`
   - `delete` &rarr; `{ "op": "delete", "evaluation_id": int }`
-| Cron logs filling disk | Verify `systemd-tmpfiles` policy; production CRON logs are bounded to 30 days. Use `pwc-status` to include disk usage in the audit. |
 
-_Last updated: 7 November 2025_
 ## One-time evaluation Hugging Face metadata backfill
 
 Existing evaluation metadata can be reviewed with the bounded, fill-only command
@@ -544,25 +511,6 @@ uv run --env-file backend/keys.env python \
 ```
 
 ## Autonomous HF daily-paper curation
-
-### Enrichment dashboard export
-
-The private Hugging Face Space at
-`https://huggingface.co/spaces/nielsr/pwc-enrichment-dashboard` reads its
-latest snapshot from the private dataset
-`nielsr/pwc-enrichment-dashboard-data`. The daily
-`export_enrichment_dashboard` job rebuilds the complete historical snapshot
-from production curation jobs, evaluations, and benchmark-gap evidence, then
-uploads it to the dataset. A manual backfill or verification can be run with:
-
-```bash
-sudo pwc-cron export_enrichment_dashboard
-```
-
-The Space never connects directly to PostgreSQL. Keep
-`PWC_ENRICHMENT_DASHBOARD_REPO_ID` and the write-capable `PWC_HF_TOKEN` only in
-the production CRON environment; the Space uses its own read-only download
-secret.
 
 The reconciler runs hourly at minute `27` through the installed immutable-release
 launcher. Besides discovering new daily-paper cohorts, each pass requeues papers
@@ -731,40 +679,6 @@ deploying source that uses this operator. The migration adds the disabled
 control row and expands only the autonomous operator constraints; it does not
 enable curation or release scheduled dispatch.
 
-### Benchmark-gap review
-
-`enqueue_benchmark_gap_review` (daily, 06:35 UTC) runs two more job kinds on
-the same queue under trigger `benchmark-gap-cron`: one `review-benchmark-gaps`
-overseer per day and up to 20 `add-benchmark` jobs per UTC day. They obey the
-scheduled dispatch pause and the curation operator switch, take at most two of
-the scheduled slots, and do not count toward the daily token guardrail or the
-failure-rate breaker. The overseer alone may take any free slot, outside that
-two-job lane, and it still runs while the daily-paper health breakers
-(`terminal_failure_rate`, `apply_or_verification_failures`) hold scheduled
-work; an operator, token-guardrail, or policy pause still stops it. They use the curation operator's
-`create_benchmark_from_gap` capability, the only autonomous path that creates
-datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
-
-Both kinds run on the existing curator image: the runner treats them as
-paper-less jobs, `jobs/url_preflight.py` skips paper sources for them, and the
-instructions live in the bootstrapped `remote-paper-curation` skill. Apply
-`backend/database/migrations/add_benchmark_gap_review.sql` and
-`add_benchmark_gap_review_scope.sql` as `postgres` before deploying, then
-install and enable the timer:
-
-```bash
-sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review.sql
-sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review_scope.sql
-sudo systemctl enable --now pwc-cron-enqueue-benchmark-gap-review.timer
-```
-
-Each promoted candidate records the rows it used or created in
-`benchmark_curation_candidates.resolution`. Roll back a wrong benchmark with
-`POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`
-(also on the admin curation queue). Rollback refuses while evidence rechecks
-are running or when papers outside the evidence set have scores on the
-leaderboard, and it marks the candidate rejected.
-
 Retry a terminal scheduled stage by its durable job UUID through the same
 allowlisted queue. Operator retries use priority 50 (ahead of ordinary daily
 work but behind priority-0 admin jobs), and repeating the command for an already
@@ -821,13 +735,6 @@ the persisted `proposal` and current callback validators. Revert a bad scoped
 mutation through the existing paper/evaluation admin surfaces using the stored
 before-state/diff; there is intentionally no broad automatic restore button.
 
-Benchmark gaps remain review-only until an administrator configures the exact
-existing task, dataset, and leaderboard metric. The dashboard promotion action
-then marks the candidate promoted and idempotently requeues only its evidence
-papers as `add-evals`; it never creates taxonomy, datasets, metrics, or
-leaderboards. Thumbnail generation and citation/reference tagging remain
-separate workflows.
-
 Scheduled enrichment preserves every repository and every manual or
 unknown-source project page. It may remove an importer-written `hf_api` project
 page only after a complete URL search and a URL-specific recorded reason that
@@ -840,6 +747,65 @@ Apply `backend/database/migrations/add_autonomous_paper_curation.sql` before the
 first release that enables the scheduler. Thumbnail generation and the
 citation/reference method linker remain separate jobs and are not dependencies
 of this workflow.
+
+### Benchmark-gap review
+
+`enqueue_benchmark_gap_review` (daily, 06:35 UTC) runs two more job kinds on
+the same queue under trigger `benchmark-gap-cron`: one `review-benchmark-gaps`
+overseer per day and up to 20 `add-benchmark` jobs per UTC day. They obey the
+scheduled dispatch pause and the curation operator switch, take at most two of
+the scheduled slots, and do not count toward the daily token guardrail or the
+failure-rate breaker. The overseer alone may take any free slot, outside that
+two-job lane, and it still runs while the daily-paper health breakers
+(`terminal_failure_rate`, `apply_or_verification_failures`) hold scheduled
+work; an operator, token-guardrail, or policy pause still stops it. They use the curation operator's
+`create_benchmark_from_gap` capability, the only autonomous path that creates
+datasets, metrics, or tasks (see `docs/autonomous-operations.md`).
+
+Both kinds run on the existing curator image: the runner treats them as
+paper-less jobs, `jobs/url_preflight.py` skips paper sources for them, and the
+instructions live in the bootstrapped `remote-paper-curation` skill. Apply
+`backend/database/migrations/add_benchmark_gap_review.sql` and
+`add_benchmark_gap_review_scope.sql` as `postgres` before deploying, then
+install and enable the timer:
+
+```bash
+sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review.sql
+sudo -u postgres psql -d paperswithcode_hf -f backend/database/migrations/add_benchmark_gap_review_scope.sql
+sudo systemctl enable --now pwc-cron-enqueue-benchmark-gap-review.timer
+```
+
+Each promoted candidate records the rows it used or created in
+`benchmark_curation_candidates.resolution`. Roll back a wrong benchmark with
+`POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`
+(also on the admin curation queue). Rollback refuses while evidence rechecks
+are running or when papers outside the evidence set have scores on the
+leaderboard, and it marks the candidate rejected.
+
+An administrator can also promote a candidate by hand from the dashboard after
+configuring the exact existing task, dataset, and leaderboard metric. Manual
+promotion marks the candidate promoted and idempotently requeues only its
+evidence papers as `add-evals`; it creates no taxonomy, datasets, metrics, or
+leaderboards.
+
+### Enrichment dashboard export
+
+The private Hugging Face Space at
+`https://huggingface.co/spaces/nielsr/pwc-enrichment-dashboard` reads its
+latest snapshot from the private dataset
+`nielsr/pwc-enrichment-dashboard-data`. The daily
+`export_enrichment_dashboard` job rebuilds the complete historical snapshot
+from production curation jobs, evaluations, and benchmark-gap evidence, then
+uploads it to the dataset. A manual backfill or verification can be run with:
+
+```bash
+sudo pwc-cron export_enrichment_dashboard
+```
+
+The Space never connects directly to PostgreSQL. Keep
+`PWC_ENRICHMENT_DASHBOARD_REPO_ID` and the write-capable `PWC_HF_TOKEN` only in
+the production CRON environment; the Space uses its own read-only download
+secret.
 
 ## Durable chat sessions (staging)
 
@@ -904,8 +870,13 @@ review demonstrates that structured logs and traces are insufficient.
 
 ## Persistent chat executor transport
 
-The persistent executor transport is default-off in both environments. A
-feature PR stops after local verification. Only the designated publishing task
+`PWC_CHAT_EXECUTOR_REMOTE_TRANSPORT_ENABLED` defaults to false. Staging runs
+the transport: it has the backend admission-credential drop-in and live
+`pwc-chat-executor-rendezvous@staging-<generation>` and
+`pwc-chat-executor-harness-proxy@staging-<generation>` units. Production runs
+no executor generation and has no admission-credential drop-in. Inspect with
+`systemctl list-units 'pwc-chat-executor*'`. A feature PR stops after local
+verification. Only the designated publishing task
 may install these units, use `pwc-nginx`, or publish to staging after the PR is
 merged and Cursor Bugbot and required checks are clear. Production needs
 separate explicit authorization and must reuse the exact staging-qualified
@@ -923,8 +894,9 @@ declared access (the rollback audit remains insert/select only), and that
 migrations.
 
 Each service generation is addressed as `<environment>/<positive-generation>`.
-Escape that path with `systemd-escape --path` and start matching rendezvous and
-harness instances. Their only listeners are
+Escape that path with `systemd-escape --path` and start matching
+`pwc-chat-executor-rendezvous@` and `pwc-chat-executor-harness-proxy@`
+instances. Their only listeners are
 `/run/paperswithcode/<environment>/<generation>/chat-executor-rendezvous.sock`
 and `chat-executor-harness.sock`. Nginx exposes only
 `/v1/generations/<generation>/environment` on the environment's dedicated TLS
@@ -1060,7 +1032,7 @@ behavior is not restored, roll back the exact application release with
 host can interrupt both local executor services even though Modal environments
 remain isolated.
 
-### Evaluation verification issues
+## Evaluation verification issues
 
 The hourly `create_eval_verification_issues` job (minute 52 UTC) requests author
 verification after native evals settle. It runs independently of daily enrichment,

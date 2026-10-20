@@ -1,7 +1,9 @@
 # Papers With Code database schema
 
-Audited against the live PostgreSQL database and
-`backend/models/database.py` on 2026-08-28.
+Live structure audited against PostgreSQL on 2026-08-28. The table inventory
+was refreshed against the ORM in `backend/models/database/` and the migrations
+in `backend/database/migrations/` on 2026-10-20; tables added since the live
+audit are named here but their live placement was not re-audited.
 
 ## Authority and topology
 
@@ -57,6 +59,7 @@ erDiagram
     REPOSITORIES ||--o{ REPOSITORY_STAR_HISTORY : snapshots
     PAPERS ||--o{ PAPER_PROJECT_PAGES : links
     PROJECT_PAGES ||--o{ PAPER_PROJECT_PAGES : showcases
+    PAPERS ||--o{ PAPER_X_THREADS : discussed_in
 
     PAPERS ||--o{ PAPER_HF_ARTIFACTS : links
     HF_ARTIFACTS ||--o{ PAPER_HF_ARTIFACTS : hosts
@@ -80,9 +83,10 @@ erDiagram
 
 ## Important invariants
 
-- A paper version is identified by `(arxiv_id, version)`; use
+- An arXiv paper version is identified by `(arxiv_id, version)`, enforced by a
+  partial unique index when `arxiv_id` is present; use
   `papers.is_latest_version` when querying the current version. External papers
-  use `source='external'` and require `source_url`.
+  use `source='external'`, may omit `arxiv_id`, and require `source_url`.
 - Tasks form an arbitrary-depth tree through `tasks.parent_id`; `level` caches
   the depth. Evaluations and leaderboards belong to the most-specific task.
 - `task_datasets` controls benchmark membership and display metadata.
@@ -113,10 +117,11 @@ keys unless they have an explicit `id`.
 | Domain | Tables |
 | --- | --- |
 | Research taxonomy | `areas`, `tasks`, `methods`, `datasets`, `metrics` |
-| Papers and results | `papers`, `authors`, `evaluations`, `evaluation_badge_tombstones` |
+| Papers and results | `papers`, `authors`, `author_aliases`, `paper_suggested_questions`, `evaluations`, `evaluation_badge_tombstones` |
 | Code and project links | `repositories`, `repository_star_history`, `project_pages` |
 | Hugging Face and model identity | `hf_artifacts`, `model_releases`, `model_release_artifacts`, `model_provider_aliases`, `trending_model_candidates`, `trending_model_curation_state` |
-| Venues and organizations | `conferences`, `conference_deadlines`, `organizations`, `organization_trending_history` |
+| Venues and organizations | `conferences`, `conference_deadlines`, `conference_deadline_sweeps`, `organizations`, `organization_trending_history` |
+| X (Twitter) | `paper_x_threads`, `paper_x_thread_scans`, `paper_x_posts`, `x_insight_posts` |
 | Framework catalogue | `framework_domains`, `framework_categories`, `frameworks` |
 
 ### Catalog relationships
@@ -141,7 +146,7 @@ table. New framework recommendations use `task_frameworks`.
 | Remote paper curation | `paper_curation_jobs`, `paper_curation_workflows`, `paper_curation_scheduler_state` |
 | Benchmark discovery | `benchmark_curation_candidates`, `benchmark_curation_evidence` |
 | Catalog audit | `catalog_mutation_events`, `catalog_mutation_idempotency`, `catalog_audit_read_progress` |
-| User proposals | `pending_paper_edits` |
+| User proposals and agent edits | `pending_paper_edits`, `paper_edit_accounts`, `paper_edit_authorizations` |
 
 These state tables exist in `public`; most also have staging-owned shadows in
 `staging`.
@@ -152,6 +157,11 @@ These state tables exist in `public`; most also have staging-owned shadows in
 `user_profile_aliases` exist in both environment schemas. The staging-only
 `staging_access_requests` table records contributor access requests.
 
+Research follows (`research_follows`, `research_subscriptions`,
+`research_suppressions`, `research_digests`) are created in both schemas by
+`add_research_follows.sql` and `add_research_follows_staging.sql`;
+`research_events` is created only in `public`.
+
 ### Chat and sandbox state
 
 Chat tables are environment-owned state. Most exist in both `public` and
@@ -159,10 +169,12 @@ Chat tables are environment-owned state. Most exist in both `public` and
 
 | Domain | Tables |
 | --- | --- |
-| Conversations | `chat_sessions`, `chat_messages`, `chat_shares` |
-| Durable dispatch and capabilities | `chat_turn_jobs`, `chat_turn_capabilities`, `chat_turn_latency`, `chat_harness_assignment_audit` |
+| Conversations | `chat_sessions`, `chat_messages`, `chat_shares`, `chat_feedback` |
+| Durable dispatch and capabilities | `chat_turn_jobs`, `chat_turn_event_chunks`, `chat_turn_reservations`, `chat_turn_admission_budgets`, `chat_turn_capabilities`, `chat_turn_latency`, `chat_harness_assignment_audit` |
 | Artifacts and LaTeX | `chat_artifacts`, `chat_artifact_versions`, `chat_shared_artifacts`, `chat_latex_paper_versions`, `chat_latex_paper_figure_blobs`, `chat_latex_paper_figure_references`, `chat_latex_paper_storage_cleanup` |
-| Sandbox lifecycle | `chat_sandbox_leases`, `chat_sandbox_pool`, `chat_external_workers`, `chat_sandbox_compute_intervals` |
+| Sandbox lifecycle | `chat_sandbox_leases`, `chat_sandbox_pool`, `chat_external_workers`, `chat_external_worker_reservations`, `chat_sandbox_compute_intervals` |
+| Executor registry and transport | `chat_executor_registrations`, `chat_executor_manifests`, `chat_executor_cells`, `chat_executor_shards`, `chat_executor_claims`, `chat_executor_nonces`, `chat_executor_key_revocations`, `chat_executor_rollback_audits`, `chat_executor_transport_circuits`, `chat_executor_transport_alerts` |
+| Qualification evidence | `chat_qualification_scopes`, `chat_qualification_evidence_events` |
 | Sandbox spend control | `chat_sandbox_budget_states`, `chat_sandbox_circuit_events` |
 | Title generation | `chat_title_budget_states`, `chat_title_provider_calls`, `chat_title_budget_events` |
 | Web search | `chat_web_search_budget_states`, `chat_web_search_circuit_events`, `chat_web_search_owner_usage` |
@@ -175,19 +187,20 @@ LaTeX figure/storage tables existed only in `staging`. The ORM also declared
 `chat_reliability_baseline` and `chat_provider_runtime_state`, but neither had
 been created in either live schema.
 
-### Autonomous operations (modeled, not yet live)
+### Autonomous operations
 
-The checkout declares the following tables, but the corresponding migrations
-had not been applied to either live schema at the audit point:
+The checkout declares the following tables (`backend/models/database/autonomous.py`).
+The `add_autonomous_operations.sql` migration had not been applied to either
+live schema at the audit point, and `autonomous_alert_delivery` was added later:
 
 `autonomous_submission_claim`, `autonomous_operator_state`,
 `autonomous_execution_intent`, `autonomous_run`,
 `autonomous_budget_reservation`, `autonomous_action`,
 `autonomous_release_consumption`, `autonomous_control_event`,
-`autonomous_repair_lease`, and `autonomous_incident_attempt`.
+`autonomous_repair_lease`, `autonomous_incident_attempt`, and
+`autonomous_alert_delivery`.
 
-Do not write code that assumes these tables are deployed until the guarded
-migrations have been applied and verified.
+Verify that these tables exist in the target schema before relying on them.
 
 ### Migration-managed tables not mapped by the ORM
 
