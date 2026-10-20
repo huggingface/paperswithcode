@@ -22,6 +22,7 @@ the rollback window.
 from __future__ import annotations
 
 import base64
+import hmac
 import secrets
 import time
 from typing import Literal, Optional
@@ -67,6 +68,9 @@ def session_cookie_name() -> str:
 
 SESSION_TTL_SECONDS = 30 * 24 * 60 * 60  # 30 days
 STATE_TTL_SECONDS = 5 * 60  # 5 minutes
+# Binds the OAuth state to the browser that started the login (login CSRF).
+OAUTH_STATE_COOKIE_NAME = "pwc_oauth_state"
+OAUTH_CALLBACK_PATH = "/api/v1/auth/hf/callback"
 POSTHOG_SIGNUP_COOKIE_NAME = "pwc_posthog_signup"
 POSTHOG_SIGNUP_COOKIE_MAX_AGE_SECONDS = 5 * 60
 
@@ -98,7 +102,7 @@ def _origin_from_request(request: Request) -> str:
 def _redirect_uri(request: Request) -> str:
     """Compute the absolute redirect URI registered with the HF OAuth app."""
 
-    return f"{_origin_from_request(request)}/api/v1/auth/hf/callback"
+    return f"{_origin_from_request(request)}{OAUTH_CALLBACK_PATH}"
 
 
 def _safe_return_to(value: Optional[str]) -> str:
@@ -145,6 +149,7 @@ def _encode_state(
     return_to: str,
     host: str,
     *,
+    nonce: str,
     authorize_inference: bool = False,
     authorize_bucket: bool = False,
     bucket_create: bool = False,
@@ -152,7 +157,7 @@ def _encode_state(
 ) -> str:
     settings = get_settings()
     payload = {
-        "nonce": secrets.token_urlsafe(16),
+        "nonce": nonce,
         "host": host,
         "return_to": return_to,
         "authorize_inference": authorize_inference,
@@ -355,6 +360,30 @@ def _is_secure_origin(request: Request) -> bool:
     return proto == "https"
 
 
+def _set_oauth_state_cookie(response: Response, nonce: str, secure: bool) -> None:
+    # Host-only: the login handler and the callback share the redirect URI's
+    # origin (staging forwards logins to the auth authority first).
+    response.set_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        nonce,
+        max_age=STATE_TTL_SECONDS,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+        path=OAUTH_CALLBACK_PATH,
+    )
+
+
+def _clear_oauth_state_cookie(response: Response, secure: bool) -> None:
+    response.delete_cookie(
+        OAUTH_STATE_COOKIE_NAME,
+        path=OAUTH_CALLBACK_PATH,
+        httponly=True,
+        secure=secure,
+        samesite="lax",
+    )
+
+
 def _oauth_cookie_max_age(token_payload: dict) -> int:
     expires_in = token_payload.get("expires_in")
     if isinstance(expires_in, bool):
@@ -407,9 +436,11 @@ def hf_login(
             detail="Hugging Face OAuth is not configured on this server",
         )
 
+    nonce = secrets.token_urlsafe(16)
     state = _encode_state(
         safe_return,
         request.headers.get("host", ""),
+        nonce=nonce,
         authorize_inference=authorize_inference,
         authorize_bucket=authorize_bucket,
         bucket_create=bucket_create,
@@ -433,10 +464,12 @@ def hf_login(
         "response_type": "code",
         "state": state,
     }
-    return RedirectResponse(
+    response = RedirectResponse(
         url=f"{HF_AUTHORIZE_URL}?{urlencode(params)}",
         status_code=status.HTTP_302_FOUND,
     )
+    _set_oauth_state_cookie(response, nonce, secure=_is_secure_origin(request))
+    return response
 
 
 @router.get("/auth/hf/callback")
@@ -446,8 +479,32 @@ async def hf_callback(
     state: Optional[str] = Query(default=None),
     error: Optional[str] = Query(default=None),
 ):
-    """Complete the OAuth flow: trade the code for a token, set cookie."""
+    """Complete the OAuth flow: trade the code for a token, set cookie.
 
+    The single-use state cookie is cleared whether the callback succeeds or not.
+    """
+
+    secure = _is_secure_origin(request)
+    try:
+        response = await _complete_hf_callback(request, code, state, error)
+    except HTTPException as exc:
+        cleared = Response()
+        _clear_oauth_state_cookie(cleared, secure)
+        exc.headers = {
+            **(exc.headers or {}),
+            "set-cookie": cleared.headers["set-cookie"],
+        }
+        raise
+    _clear_oauth_state_cookie(response, secure)
+    return response
+
+
+async def _complete_hf_callback(
+    request: Request,
+    code: Optional[str],
+    state: Optional[str],
+    error: Optional[str],
+) -> Response:
     settings = get_settings()
     if error:
         raise HTTPException(
@@ -479,6 +536,17 @@ async def hf_callback(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="OAuth state host mismatch",
+        )
+    browser_nonce = request.cookies.get(OAUTH_STATE_COOKIE_NAME, "")
+    state_nonce = state_payload.get("nonce")
+    if (
+        not browser_nonce
+        or not isinstance(state_nonce, str)
+        or not hmac.compare_digest(browser_nonce.encode(), state_nonce.encode())
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OAuth state does not belong to this browser; sign in again",
         )
 
     return_to = _safe_return_to(state_payload.get("return_to"))

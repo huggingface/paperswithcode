@@ -21,6 +21,32 @@ from backend.services.paper_bucket_service import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _no_profile_database(monkeypatch):
+    """Callbacks upsert the HF identity; keep these tests off PostgreSQL."""
+
+    from backend.database.connection import db_manager
+    from backend.services.user_profile_service import UserProfileService
+
+    class FakeSession:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def get(self, *_args):
+            return None
+
+        def commit(self):
+            return None
+
+    monkeypatch.setattr(db_manager, "_session_local", FakeSession)
+    monkeypatch.setattr(
+        UserProfileService, "upsert_verified_identity", lambda *_args: None
+    )
+
+
 def _key_values() -> tuple[str, str]:
     private_key = Ed25519PrivateKey.from_private_bytes(b"\x02" * 32)
     private_value = base64.urlsafe_b64encode(b"\x02" * 32).rstrip(b"=").decode()
@@ -254,12 +280,13 @@ def test_oauth_callback_sets_encrypted_bucket_cookie(monkeypatch):
     state = auth._encode_state(
         "/paper/2601.00001",
         "paperswithcode.co",
+        nonce="browser-nonce",
         authorize_bucket=True,
     )
 
     response = asyncio.run(
         auth.hf_callback(
-            _request("paperswithcode.co"),
+            _request("paperswithcode.co", "pwc_oauth_state=browser-nonce"),
             code="authorization-code",
             state=state,
             error=None,
@@ -302,13 +329,14 @@ def test_new_bucket_authorization_sets_manage_cookie(monkeypatch):
     state = auth._encode_state(
         "/paper/2601.00001",
         "paperswithcode.co",
+        nonce="browser-nonce",
         authorize_bucket=True,
         bucket_create=True,
     )
 
     response = asyncio.run(
         auth.hf_callback(
-            _request("paperswithcode.co"),
+            _request("paperswithcode.co", "pwc_oauth_state=browser-nonce"),
             code="authorization-code",
             state=state,
             error=None,
@@ -358,12 +386,13 @@ def test_oauth_callback_sets_inference_cookie_only_for_inference_authorization(
     state = auth._encode_state(
         "/settings",
         "paperswithcode.co",
+        nonce="browser-nonce",
         authorize_inference=authorize_inference,
     )
 
     response = asyncio.run(
         auth.hf_callback(
-            _request("paperswithcode.co"),
+            _request("paperswithcode.co", "pwc_oauth_state=browser-nonce"),
             code="authorization-code",
             state=state,
             error=None,
@@ -399,3 +428,116 @@ def test_absolute_return_destinations_are_allowlisted(monkeypatch):
         == "https://staging.paperswithcode.co/chat"
     )
     assert auth._safe_return_to("https://evil.example/chat") == "/"
+
+
+class _LoginClient:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, *_args):
+        return None
+
+    async def post(self, url, **_kwargs):
+        assert url == auth.HF_TOKEN_URL
+        return httpx.Response(200, json={"access_token": "login-access"})
+
+    async def get(self, url, **_kwargs):
+        assert url == auth.HF_USERINFO_URL
+        return httpx.Response(
+            200, json={"sub": "hf-123", "preferred_username": "alice"}
+        )
+
+
+class _ExchangeForbidden:
+    def __init__(self, **_kwargs):
+        raise AssertionError("code must not be exchanged without a bound browser")
+
+
+def _state_cookie(response) -> SimpleCookie:
+    cookies = SimpleCookie()
+    for header in response.headers.getlist("set-cookie"):
+        if header.startswith(f"{auth.OAUTH_STATE_COOKIE_NAME}="):
+            cookies.load(header)
+    return cookies
+
+
+def test_login_binds_state_nonce_to_a_callback_scoped_cookie(monkeypatch):
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=True))
+
+    response = auth.hf_login(_request("paperswithcode.co"), return_to="/settings")
+
+    query = parse_qs(urlparse(response.headers["location"]).query)
+    state = auth._decode_state(query["state"][0])
+    cookie = _state_cookie(response)[auth.OAUTH_STATE_COOKIE_NAME]
+    assert cookie.value == state["nonce"]
+    assert cookie["path"] == "/api/v1/auth/hf/callback"
+    assert cookie["max-age"] == str(auth.STATE_TTL_SECONDS)
+    assert cookie["httponly"] is True
+    assert cookie["secure"] is True
+    assert cookie["samesite"] == "lax"
+    assert cookie["domain"] == ""
+
+
+def test_staging_login_sets_state_cookie_only_on_auth_authority(monkeypatch):
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=False))
+    staging = auth.hf_login(_request("staging.paperswithcode.co"), return_to="/")
+    assert not _state_cookie(staging)
+
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=True))
+    authority = auth.hf_login(
+        _request("paperswithcode.co"),
+        return_to=parse_qs(urlparse(staging.headers["location"]).query)["return_to"][0],
+    )
+    assert auth.OAUTH_STATE_COOKIE_NAME in _state_cookie(authority)
+
+
+@pytest.mark.parametrize("cookie", ["", "pwc_oauth_state=attacker-nonce"])
+def test_callback_rejects_state_not_bound_to_this_browser(monkeypatch, cookie):
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=True))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", _ExchangeForbidden)
+    state = auth._encode_state("/", "paperswithcode.co", nonce="victim-nonce")
+
+    with pytest.raises(auth.HTTPException) as exc_info:
+        asyncio.run(
+            auth.hf_callback(
+                _request("paperswithcode.co", cookie),
+                code="attacker-code",
+                state=state,
+                error=None,
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    cleared = SimpleCookie()
+    cleared.load(exc_info.value.headers["set-cookie"])
+    assert cleared[auth.OAUTH_STATE_COOKIE_NAME]["max-age"] == "0"
+    assert cleared[auth.OAUTH_STATE_COOKIE_NAME]["path"] == "/api/v1/auth/hf/callback"
+
+
+def test_callback_accepts_matching_browser_and_preserves_return_to(monkeypatch):
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=True))
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: _LoginClient())
+    login = auth.hf_login(
+        _request("paperswithcode.co"),
+        return_to="https://staging.paperswithcode.co/chat?paper=123",
+    )
+    state = parse_qs(urlparse(login.headers["location"]).query)["state"][0]
+    nonce = _state_cookie(login)[auth.OAUTH_STATE_COOKIE_NAME].value
+
+    response = asyncio.run(
+        auth.hf_callback(
+            _request("paperswithcode.co", f"pwc_oauth_state={nonce}"),
+            code="authorization-code",
+            state=state,
+            error=None,
+        )
+    )
+
+    assert response.headers["location"] == (
+        "https://staging.paperswithcode.co/chat?paper=123"
+    )
+    assert any(
+        header.startswith("pwc_shared_session=")
+        for header in response.headers.getlist("set-cookie")
+    )
+    assert _state_cookie(response)[auth.OAUTH_STATE_COOKIE_NAME]["max-age"] == "0"
