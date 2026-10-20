@@ -94,6 +94,7 @@ def test_reclaim_refuses_symlinks_planted_outside_the_tree(
 def test_reclaim_allows_venv_launchers_to_reach_the_system_python(tmp_path: Path):
     (tmp_path / "bin").mkdir()
     (tmp_path / "bin" / "python").symlink_to("/usr/bin/python3")
+    (tmp_path / "bin" / "python3").symlink_to("python")
     (tmp_path / "lib64").symlink_to("lib")
 
     build_sandbox.reclaim(tmp_path, allow=build_sandbox.is_venv_python_launcher)
@@ -156,3 +157,29 @@ def test_runtime_build_runs_uv_and_python_as_build_user(
     assert not any(
         path.name.startswith(".") for path in (tmp_path / "runtimes").iterdir()
     )
+
+
+def test_reclaim_refuses_launchers_that_hop_through_an_outside_pivot(
+    tmp_path: Path,
+):
+    # The build user could later retarget a pivot it owns outside the tree,
+    # even though it currently resolves to the system interpreter.
+    tree = tmp_path / "runtime"
+    (tree / "bin").mkdir(parents=True)
+    pivot = tmp_path / "pivot"
+    pivot.symlink_to("/usr/bin/python3")
+    (tree / "bin" / "python").symlink_to(pivot)
+
+    with pytest.raises(RuntimeError, match="bin/python"):
+        build_sandbox.reclaim(tree, allow=build_sandbox.is_venv_python_launcher)
+
+
+def test_reclaim_refuses_dot_dot_escapes_through_an_inside_link(tmp_path: Path):
+    # "here" stays inside literally, but "here/../x" resolves above the tree.
+    tree = tmp_path / "source"
+    tree.mkdir()
+    (tree / "here").symlink_to(".")
+    (tree / "escape").symlink_to("here/../../outside")
+
+    with pytest.raises(RuntimeError, match="escape"):
+        build_sandbox.reclaim(tree)

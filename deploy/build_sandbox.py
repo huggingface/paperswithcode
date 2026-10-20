@@ -28,7 +28,7 @@ def _identity() -> pwd.struct_passwd:
         return pwd.getpwnam(BUILD_USER)
     except KeyError as error:
         raise RuntimeError(
-            f"build user {BUILD_USER!r} is missing; run deploy/install_host_layout.py"
+            f"build user {BUILD_USER!r} is missing; install deploy tools (deploy/install_deploy_tools.py) to create it"
         ) from error
 
 
@@ -89,17 +89,34 @@ def _stop_build_processes() -> None:
     raise RuntimeError(f"processes owned by {BUILD_USER!r} keep running")
 
 
-def _reject_escaping_symlinks(root: Path, allow: Callable[[Path, Path], bool]) -> None:
+def _inside(path: Path, root: Path) -> bool:
+    return path == root or root in path.parents
+
+
+def _reject_escaping_symlinks(
+    root: Path, allow: Callable[[Path, Path, Path], bool]
+) -> None:
+    """Every link must point inside the tree, both literally and when resolved.
+
+    Checking only the final resolution would accept a link that hops through
+    an outside path the build user controls (``bin/python -> /tmp/pivot ->
+    /usr/bin/python3``) and could retarget later. Checking each link's own
+    target keeps every hop inside the now root-owned tree.
+    """
+
     resolved_root = root.resolve()
     for directory, names, files in os.walk(root, followlinks=False):
         for name in (*names, *files):
             path = Path(directory, name)
             if not path.is_symlink():
                 continue
-            target = Path(os.path.realpath(path))
-            if target == resolved_root or resolved_root in target.parents:
+            literal = Path(os.path.normpath(os.path.join(directory, os.readlink(path))))
+            resolved = Path(os.path.realpath(path))
+            if _inside(literal, root) and _inside(resolved, resolved_root):
                 continue
-            if allow(path.relative_to(root), target):
+            if _inside(literal, root):
+                literal = literal.relative_to(root)
+            if allow(path.relative_to(root), literal, resolved):
                 continue
             raise RuntimeError(
                 f"build left a symlink outside its tree: {path.relative_to(root)}"
@@ -109,7 +126,7 @@ def _reject_escaping_symlinks(root: Path, allow: Callable[[Path, Path], bool]) -
 def reclaim(
     root: Path,
     *,
-    allow: Callable[[Path, Path], bool] = lambda _link, _target: False,
+    allow: Callable[[Path, Path, Path], bool] = lambda *_link: False,
 ) -> None:
     """Stop leftover build processes, return ``root`` to root, then vet it.
 
@@ -118,7 +135,8 @@ def reclaim(
     set-user-ID bits a build step left behind. Later root steps write and
     chmod paths inside the tree, so a symlink the build planted pointing out
     of it (for example ``release.json -> /etc/shadow``) is refused unless
-    ``allow`` accepts the link (relative to ``root``) and its resolved target.
+    ``allow`` accepts the link and its literal target (both relative to
+    ``root`` when inside it) and its resolved target.
     """
 
     if enabled():
@@ -128,12 +146,20 @@ def reclaim(
     _reject_escaping_symlinks(root, allow)
 
 
-def is_venv_python_launcher(link: Path, target: Path) -> bool:
-    """A virtualenv's ``bin/python*`` launchers point at the host interpreter."""
+def is_venv_python_launcher(link: Path, literal: Path, resolved: Path) -> bool:
+    """A virtualenv's ``bin/python*`` launchers point at the host interpreter.
+
+    The link must name ``/usr/bin/python3*`` directly (root-owned, so nothing
+    can retarget it) or another ``bin/`` launcher inside the tree, which is
+    checked on its own.
+    """
+
+    def system_python(path: Path) -> bool:
+        return path.parent == Path("/usr/bin") and path.name.startswith("python3")
 
     return (
         link.parent == Path("bin")
         and link.name.startswith("python")
-        and target.parent == Path("/usr/bin")
-        and target.name.startswith("python3")
+        and system_python(resolved)
+        and (system_python(literal) or literal.parent == Path("bin"))
     )
