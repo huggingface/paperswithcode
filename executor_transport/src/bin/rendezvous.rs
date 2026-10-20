@@ -39,6 +39,10 @@ use uuid::Uuid;
 const ROUTE: &str = "/v1/environment";
 const SERVICE_DRAIN_SECONDS: u64 = 240;
 const MAX_LOCAL_PREAUTH_FRAME_BYTES: usize = 16 * 1024;
+// Trusted backend and harness control connections get their own capacity so
+// anonymous network sockets waiting out their pre-auth deadline can never
+// starve liveness, attach, resume, detach, or route-health traffic.
+const MAX_LOCAL_SOCKETS: usize = MAX_PREAUTH_SOCKETS;
 const MAX_LOCAL_PEER_FRAME_BYTES: usize = 64 * 1024;
 const MAX_OUTER_MESSAGE_BYTES: usize = 128 * 1024;
 type ConnectionError = Box<dyn std::error::Error + Send + Sync>;
@@ -71,6 +75,7 @@ struct State {
     scheduler: Mutex<ReconnectScheduler>,
     invalid_gate: Mutex<InvalidAttemptGate>,
     capacity: Arc<Semaphore>,
+    local_capacity: Arc<Semaphore>,
     live: Mutex<HashMap<Uuid, LiveRegistration>>,
 }
 
@@ -209,6 +214,7 @@ async fn serve(
         scheduler: Mutex::new(ReconnectScheduler::new()),
         invalid_gate: Mutex::new(InvalidAttemptGate::new(unix_ms()?)),
         capacity: Arc::new(Semaphore::new(MAX_PREAUTH_SOCKETS)),
+        local_capacity: Arc::new(Semaphore::new(MAX_LOCAL_SOCKETS)),
         live: Mutex::new(HashMap::new()),
     });
     let recovery_state = state.clone();
@@ -239,12 +245,23 @@ async fn serve(
             _ = terminate.recv() => break,
         };
         let (stream, _) = accepted?;
-        let Ok(permit) = Arc::clone(&state.capacity).try_acquire_owned() else {
+        let allowed_backend_uid = config.allowed_backend_uid;
+        let allowed_harness_uid = config.allowed_harness_uid;
+        // Classify by kernel-reported peer credentials before taking capacity:
+        // nginx-proxied network sockets never draw from the trusted pool.
+        let trusted = stream.peer_cred().is_ok_and(|credentials| {
+            let uid = credentials.uid();
+            uid == allowed_backend_uid || uid == allowed_harness_uid
+        });
+        let pool = if trusted {
+            &state.local_capacity
+        } else {
+            &state.capacity
+        };
+        let Ok(permit) = Arc::clone(pool).try_acquire_owned() else {
             continue;
         };
         let state = Arc::clone(&state);
-        let allowed_backend_uid = config.allowed_backend_uid;
-        let allowed_harness_uid = config.allowed_harness_uid;
         tokio::spawn(async move {
             let _permit = permit;
             if let Err(error) =
