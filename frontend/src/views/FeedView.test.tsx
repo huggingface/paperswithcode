@@ -78,6 +78,10 @@ describe("AskAssistant", () => {
 
     expect(textarea).toHaveValue(SUGGESTED_CHAT_PROMPTS[0]);
     expect(textarea).toHaveFocus();
+    await waitFor(() => expect(textarea).toHaveProperty(
+      "selectionStart",
+      SUGGESTED_CHAT_PROMPTS[0].length,
+    ));
   });
 
   it("completes a started suggestion on Tab and previews the rest", async () => {
@@ -86,11 +90,13 @@ describe("AskAssistant", () => {
     const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
 
     await user.type(textarea, "find rel");
+    (textarea as HTMLTextAreaElement).setSelectionRange(2, 2);
     expect(container.querySelector(".chat-prompt-completion"))
       .toHaveTextContent("evant papers on RLVR");
 
     await user.keyboard("{Tab}");
     expect(textarea).toHaveValue("find relevant papers on RLVR");
+    await waitFor(() => expect(textarea).toHaveProperty("selectionStart", 28));
     expect(container.querySelector(".chat-prompt-completion")).not.toBeInTheDocument();
   });
 

@@ -267,6 +267,7 @@ export const AskAssistant: React.FC = () => {
                 event.preventDefault();
                 const text = question + completion;
                 mentions.updateText(text, text.length);
+                window.requestAnimationFrame(() => ref.current?.setSelectionRange(text.length, text.length));
                 return;
               }
               if (event.key === "Enter" && !event.shiftKey) {
