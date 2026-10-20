@@ -236,8 +236,10 @@ python -c "from backend.database.connection import get_engine; print('✅ Databa
 # Initialize database tables
 python -m backend.database.connection init
 
-# Reset database (development only)
-python -m backend.database.connection reset
+# Reset database: drops every table. Refused when PWC_ENVIRONMENT is
+# production or staging, and --confirm must repeat the configured PWC_DB_NAME.
+# Never run it with backend/keys.env, which points at the production database.
+PWC_DB_NAME=pwc_scratch python -m backend.database.connection reset --confirm pwc_scratch
 ```
 
 ## Configuration Options

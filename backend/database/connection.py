@@ -5,6 +5,7 @@ This module provides SQLAlchemy integration for the FastAPI backend,
 building on top of the existing psycopg2-based database utilities.
 """
 
+import argparse
 import os
 from typing import Generator
 
@@ -14,6 +15,30 @@ from sqlalchemy.pool import QueuePool
 
 from backend.config import get_settings
 from backend.models.database import Base
+
+LIVE_ENVIRONMENTS = {"production", "staging"}
+
+
+class DestructiveDatabaseOperationRefused(RuntimeError):
+    """Raised when dropping tables is not explicitly aimed at a disposable DB."""
+
+
+def drop_refusal_reason(settings, confirm_database: str | None) -> str | None:
+    """Explain why dropping every table must be refused, or return None.
+
+    Dropping is allowed only outside production and staging, and only when the
+    caller names the configured database, so a stray default or a production
+    ``keys.env`` cannot silently wipe the live catalog.
+    """
+    environment = settings.environment.lower()
+    if environment in LIVE_ENVIRONMENTS:
+        return f"PWC_ENVIRONMENT={environment} names a live environment"
+    if confirm_database != settings.db_name:
+        return (
+            f"confirmation {confirm_database!r} does not match the configured "
+            f"database {settings.db_name!r}"
+        )
+    return None
 
 
 def database_pool_configuration(settings) -> dict[str, int]:
@@ -82,8 +107,15 @@ class DatabaseManager:
         """Create all database tables."""
         Base.metadata.create_all(bind=self.engine)
 
-    def drop_tables(self):
-        """Drop all database tables (use with caution!)."""
+    def drop_tables(self, confirm_database: str | None = None):
+        """Drop all tables; ``confirm_database`` must name a disposable DB."""
+        reason = drop_refusal_reason(self.settings, confirm_database)
+        if reason is not None:
+            raise DestructiveDatabaseOperationRefused(
+                f"Refusing to drop all tables in {self.settings.database_log_identifier}: "
+                f"{reason}. Point PWC_DB_* at a disposable database outside "
+                "production and staging and confirm it by name."
+            )
         Base.metadata.drop_all(bind=self.engine)
 
     def get_session(self) -> Generator[Session, None, None]:
@@ -128,18 +160,18 @@ def create_tables():
     db_manager.create_tables()
 
 
-def drop_tables():
-    """Drop all database tables."""
-    db_manager.drop_tables()
+def drop_tables(confirm_database: str | None = None):
+    """Drop all tables; ``confirm_database`` must name a disposable DB."""
+    db_manager.drop_tables(confirm_database)
 
 
 # Utility functions for testing and development
 
 
-def reset_database():
-    """Reset the database (drop and recreate all tables)."""
+def reset_database(confirm_database: str | None = None):
+    """Drop and recreate all tables in a confirmed disposable database."""
     print("⚠️  Resetting database...")
-    drop_tables()
+    drop_tables(confirm_database)
     create_tables()
     print("✅ Database reset complete")
 
@@ -151,30 +183,51 @@ def init_database():
     print("✅ Database initialized")
 
 
-if __name__ == "__main__":
-    # For testing the database connection
-    import sys
+def check_connection():
+    """Check that the configured database accepts connections."""
+    print("🔍 Testing database connection...")
+    try:
+        from sqlalchemy import text
 
-    if len(sys.argv) > 1:
-        command = sys.argv[1]
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+            print("✅ Database connection successful!")
+    except Exception as e:
+        print(f"❌ Database connection failed: {e}")
 
-        if command == "init":
-            init_database()
-        elif command == "reset":
-            reset_database()
-        elif command == "test":
-            print("🔍 Testing database connection...")
-            try:
-                from sqlalchemy import text
 
-                engine = get_engine()
-                with engine.connect() as conn:
-                    result = conn.execute(text("SELECT 1"))
-                    print("✅ Database connection successful!")
-            except Exception as e:
-                print(f"❌ Database connection failed: {e}")
-        else:
-            print("Usage: python -m backend.database.connection [init|reset|test]")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        prog="python -m backend.database.connection",
+        description="Initialize, reset, or test the configured database.",
+    )
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    subparsers.add_parser("init", help="Create tables that do not exist yet.")
+    reset_parser = subparsers.add_parser(
+        "reset",
+        help="Drop and recreate every table (disposable databases only).",
+    )
+    reset_parser.add_argument(
+        "--confirm",
+        required=True,
+        metavar="DATABASE",
+        help="Name of the configured database (PWC_DB_NAME) to wipe.",
+    )
+    subparsers.add_parser("test", help="Check the database connection.")
+    args = parser.parse_args(argv)
+
+    if args.command == "init":
+        init_database()
+    elif args.command == "reset":
+        try:
+            reset_database(args.confirm)
+        except DestructiveDatabaseOperationRefused as error:
+            print(f"❌ {error}")
+            return 1
     else:
-        print("Database connection module")
-        print("Available commands: init, reset, test")
+        check_connection()
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
