@@ -22,6 +22,8 @@ GITHUB_URL_PATTERN = r"\bhttps?:\/\/github\.com[^\s]*\b"
 PROJECT_PAGE_URL_PATTERN = r"\bhttps?:\/\/[^\s\/]+\.github\.io[^\s]*\b"
 MAX_TEXT_BYTES = 2_000_000
 MAX_PDF_BYTES = 20_000_000
+# Image-heavy technical reports often exceed MAX_PDF_BYTES; only page 1 is read.
+MAX_FRONT_MATTER_PDF_BYTES = 60_000_000
 TIMEOUT_SECONDS = 20
 TEMPLATE_REPOSITORIES = {"academicpages/academicpages.github.io", "alshedivat/al-folio"}
 OCR_MARKDOWN_BUCKET_ID = "huggingface/pwc-papers-content"
@@ -147,6 +149,26 @@ def _fetch_ocr_markdown(
         return body, url
 
 
+def extract_front_matter(pdf: bytes) -> str:
+    """Return page 1 text and hyperlinks, where author affiliations live."""
+    page = PdfReader(io.BytesIO(pdf), strict=False).pages[0]
+    text = (page.extract_text() or "").strip()
+    if not text:
+        raise ValueError("first PDF page has no extractable text")
+    links: list[str] = []
+    try:
+        for annotation_ref in page.get("/Annots") or []:
+            uri = (annotation_ref.get_object().get("/A") or {}).get("/URI")
+            if uri and str(uri) not in links:
+                links.append(str(uri))
+    except (PdfReadError, AttributeError, TypeError, KeyError):
+        pass
+    lines = ["# PDF page 1 (author affiliations and release links)", "", text]
+    if links:
+        lines += ["", "## Hyperlinks on page 1", ""] + [f"- {link}" for link in links]
+    return "\n".join(lines) + "\n"
+
+
 def normalize_candidate(raw: str, base_url: str | None = None) -> str | None:
     raw = raw.strip().rstrip(".,;:!?)]}'\"")
     if base_url:
@@ -209,6 +231,8 @@ def extract_candidates(
     candidates: dict[str, dict] = {}
     errors: list[dict] = []
     sources: list[dict] = []
+
+    front_matter_pdf: tuple[str, bytes] | None = None
 
     def fetched(source: str, url: str, body: bytes, final_url: str) -> None:
         sources.append(
@@ -347,6 +371,7 @@ def extract_candidates(
             text = "\n".join(page.extract_text() or "" for page in reader.pages[:2])
             validate_paper_text(text.encode())
             paper_pdf_available = True
+            front_matter_pdf = (url, pdf)
             fetched("paper_pdf", url, pdf, final_url)
             for page_number, page in enumerate(reader.pages[:2], start=1):
                 for raw in _matches(page.extract_text() or ""):
@@ -360,6 +385,34 @@ def extract_candidates(
         except Exception as exc:
             errors.append({"source": "paper_pdf", "error": type(exc).__name__})
         check_liveness()
+
+    # Organization tagging reads author affiliations, which arXiv HTML copies of
+    # the Markdown frequently drop. Page 1 of the PDF keeps them.
+    front_matter: dict | None = None
+    if (
+        (context.get("job") or {}).get("kind") == "enrich-paper"
+        and arxiv_id
+        and source_cache_dir is not None
+        and (hf_markdown_available or ocr_markdown_available or paper_pdf_available)
+    ):
+        try:
+            if front_matter_pdf is None:
+                url = f"https://arxiv.org/pdf/{arxiv_id}"
+                front_matter_pdf = (url, fetch(url, MAX_FRONT_MATTER_PDF_BYTES)[0])
+            url, pdf = front_matter_pdf
+            body = extract_front_matter(pdf).encode()
+            sha256 = hashlib.sha256(body).hexdigest()
+            source_cache_dir.mkdir(parents=True, exist_ok=True)
+            cached = source_cache_dir / f"{sha256}.front-matter.md"
+            cached.write_bytes(body)
+            front_matter = {
+                "kind": "paper_front_matter",
+                "url": url,
+                "local_path": str(cached.resolve()),
+                "sha256": sha256,
+            }
+        except Exception as exc:
+            errors.append({"source": "paper_front_matter", "error": type(exc).__name__})
 
     if not has_live("github"):
         project_pages.extend(
@@ -454,6 +507,9 @@ def extract_candidates(
         elif source.get("source") == "paper_pdf":
             document("paper_pdf", source.get("url"))
 
+    if front_matter is not None:
+        source_documents.append(front_matter)
+
     markdown_available = hf_markdown_available or ocr_markdown_available
     paper_text_available = markdown_available or paper_pdf_available
     official_source_available = has_live("github") or has_live("project_page")
@@ -468,6 +524,10 @@ def extract_candidates(
             return paper_text_available
         if source == "paper_pdf":
             return paper_text_available
+        if source == "paper_front_matter":
+            # Only organization tagging uses it; the skill falls back to the
+            # Markdown header and the paper's release links.
+            return True
         if source == "project_page_html" and error.get("http_status") in {404, 410}:
             return paper_text_available
         return False
