@@ -164,6 +164,30 @@ def ensure_mcp_config(
         temporary.unlink(missing_ok=True)
 
 
+def restrict_cron_access() -> None:
+    """Let CRON users reach their production state without the app's group.
+
+    Membership in pwc-production would let any CRON job read production.env
+    and its backups. The jobs only need to traverse the production state
+    directory to reach cron-logs, cron-locks, backups and hf-cache, which they
+    own themselves, so grant traversal by ACL and drop the membership.
+    """
+
+    subprocess.run(
+        [
+            "setfacl",
+            "--modify",
+            "user:pwc-cron:--x,user:pwc-cron-trending:--x",
+            str(STATE_ROOT / "production"),
+        ],
+        check=True,
+    )
+    if "pwc-cron" in grp.getgrnam("pwc-production").gr_mem:
+        subprocess.run(
+            ["gpasswd", "--delete", "pwc-cron", "pwc-production"], check=True
+        )
+
+
 def main() -> int:
     if os.geteuid() != 0:
         raise SystemExit("run through sudo")
@@ -288,6 +312,7 @@ def main() -> int:
         STATE_ROOT / "production" / "cron-locks",
     ):
         ensure_dir(path, "pwc-cron", "pwc-production", 0o750)
+    restrict_cron_access()
     for path in (
         STATE_ROOT / "production" / "trending-cron-logs",
         STATE_ROOT / "production" / "trending-cron-locks",

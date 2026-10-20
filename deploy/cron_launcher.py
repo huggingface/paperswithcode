@@ -53,6 +53,43 @@ RESTRICTED_TRENDING_ENV_KEYS = RESTRICTED_TRENDING_PASSTHROUGH_KEYS | {
     "PYTHONPATH",
 }
 
+# production.env is shared with the web app, so general jobs would otherwise
+# inherit secrets that only the app or chat runtime uses. No CRON job reads
+# these (session/OAuth signing, admin API, chat providers and sandboxes), so a
+# compromised job must not receive them.
+APP_ONLY_SECRET_KEYS = frozenset(
+    {
+        "PWC_SESSION_SIGNING_PRIVATE_KEY",
+        "PWC_JWT_SECRET",
+        "PWC_HF_OAUTH_CLIENT_SECRET",
+        "PWC_HF_OAUTH_CREDENTIAL_SECRET",
+        "PWC_ADMIN_API_TOKEN",
+        "PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN",
+        "PWC_CHAT_OPENROUTER_API_KEY",
+        "PWC_CHAT_OPENROUTER_CREDENTIAL_KEYRING",
+        "PWC_CHAT_OPENROUTER_USER_TRACKING_SECRET",
+        "PWC_CHAT_SCOPE_GUARDRAIL_HF_TOKEN",
+        "PWC_CHAT_SCOPE_GUARDRAIL_OPENAI_API_KEY",
+        "PWC_CHAT_TITLE_HF_TOKEN",
+        "PWC_CHAT_TRACKIO_HF_TOKEN",
+        "PWC_CHAT_WEB_SEARCH_EXA_API_KEY",
+        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION",
+        "MODAL_TOKEN_ID",
+        "MODAL_TOKEN_SECRET",
+    }
+)
+# The manual legacy URL extractor still drives Modal from the VPS.
+APP_SECRET_EXCEPTIONS = {
+    "extract_urls": frozenset({"MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"}),
+}
+
+
+def general_environment(source: dict[str, str], job: str) -> dict[str, str]:
+    """Copy the CRON environment without app-only secrets the job never uses."""
+
+    withheld = APP_ONLY_SECRET_KEYS - APP_SECRET_EXCEPTIONS.get(job, frozenset())
+    return {key: value for key, value in source.items() if key not in withheld}
+
 
 def restricted_trending_environment(
     source: dict[str, str], *, release_id: str
@@ -729,7 +766,7 @@ def main() -> int:
             print(str(exc), file=sys.stderr)
             return 2
     else:
-        env = os.environ.copy()
+        env = general_environment(dict(os.environ), job)
         env["PWC_ENVIRONMENT"] = "production"
         env["PWC_RELEASE_ID"] = manifest["release_id"]
         env["PWC_CRON_LOG_DIR"] = str(log_dir)

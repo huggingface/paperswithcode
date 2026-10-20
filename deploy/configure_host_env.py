@@ -10,10 +10,8 @@ import grp
 import hashlib
 import json
 import os
-import pwd
 import re
 import secrets
-import subprocess
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -3111,12 +3109,9 @@ def main() -> int:
         trending_cron,
         "pwc-cron-trending",
     )
-    production_group = grp.getgrnam("pwc-production").gr_name
-    cron_user = pwd.getpwnam("pwc-cron").pw_name
-    subprocess.run(
-        ["usermod", "--append", "--groups", production_group, cron_user],
-        check=True,
-    )
+    # pwc-cron is deliberately not in the pwc-production group: that group can
+    # read production.env. install_host_layout.restrict_cron_access() grants the
+    # directory traversal CRON needs instead.
     print("installed production, staging, and CRON environment files")
     return 0
 

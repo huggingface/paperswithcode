@@ -832,6 +832,14 @@ invokes `/usr/local/sbin/pwc-cron <registered-job>`; the matching
 loads production plus CRON-only configuration, resolves `production/current`,
 records its release ID, and uses absolute lock/log directories.
 
+General jobs never receive the app-only secrets in `production.env`, such as
+the session and OAuth signing keys, the admin API token, and chat provider and
+sandbox credentials (`APP_ONLY_SECRET_KEYS` in `deploy/cron_launcher.py`).
+`pwc-cron` is not a member of `pwc-production`, so it cannot read
+`production.env` directly. systemd loads the environment files as root, and a
+`user:pwc-cron:--x` ACL lets jobs traverse `/var/lib/paperswithcode/production`
+to their own directories (`install_host_layout.restrict_cron_access`).
+
 ```bash
 sudo pwc-cron status
 pwc cron health refresh_paper_embeddings --strict --json
