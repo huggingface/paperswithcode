@@ -1,61 +1,83 @@
 # PapersWithCode Cron Jobs
 
-Production cron scheduling is driven by host systemd timers generated from
-`deploy/cron_schedules.py` into `deploy/systemd/cron/`; each timer invokes the
-allowlisted `pwc-cron` launcher through the bounded `pwc-cron-throttled`
-wrapper. The workflows under `.github/workflows/cron-*.yml` are
-`workflow_dispatch`-only manual-recovery paths that SSH into the VPS and run
-the same `pwc-cron` jobs. The schedule columns below describe the timer
-cadence, which preserves the former GitHub Actions minute offsets.
+Production CRON jobs run from host systemd timers. `deploy/cron_schedules.py`
+is the schedule's single source of truth: `python deploy/generate_cron_units.py`
+renders it into the committed units in `deploy/systemd/cron/`, and each timer
+invokes the allowlisted `pwc-cron` launcher (`deploy/cron_launcher.py`) through
+the bounded `pwc-cron-throttled` wrapper. The `.github/workflows/cron-*.yml`
+workflows are `workflow_dispatch`-only recovery paths that SSH into the VPS and
+run the same `pwc-cron` jobs. Schedules keep the minute offsets the old GitHub
+Actions triggers used, so load stays staggered.
 
-## Production Jobs and Pending Activations
+## Production Timers
 
-| Workflow | Schedule (UTC) | VPS entrypoint | Python job |
+Generated from `deploy/cron_schedules.py`; update this table when you change it.
+
+| Timer | OnCalendar (UTC) | `pwc-cron` invocation | Python job |
 | --- | --- | --- | --- |
-| local `pwc-curation-thumbnails.timer` | Every minute | `pwc-cron process_curation_thumbnails` | `.github/workflows/scripts/hourly/process_curation_thumbnails.py` |
-| `cron-update-hot-github-trending.yml` | Every 15 minutes | `.github/workflows/scripts/run_hot_github_trending.sh` | `.github/workflows/scripts/hourly/update_hot_github_trending.py` |
-| `cron-update-github-stars.yml` | `0 * * * *` | `.github/workflows/scripts/run_github_stars.sh` | `.github/workflows/scripts/hourly/update_github_stars.py` |
-| `cron-calculate-trending-scores.yml` | `15 * * * *` | `.github/workflows/scripts/run_trending_scores.sh` | `.github/workflows/scripts/hourly/calculate_trending_scores.py` |
-| `cron-update-citations.yml` | `30 * * * *` | `.github/workflows/scripts/run_citations_hourly.sh` | `.github/workflows/scripts/hourly/update_citations.py` |
-| `cron-extract-urls.yml` | `45 * * * *` | `.github/workflows/scripts/run_extract_urls_hourly.sh` | `.github/workflows/scripts/hourly/extract_urls.py` |
-| `cron-import-hf-daily-papers.yml` | `0 * * * *` | `pwc-cron import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
-| `cron-enqueue-hf-daily-paper-curation.yml` | `27 * * * *` | `pwc-cron enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
-| `cron-enqueue-hf-trending-model-curation.yml` | `42 * * * *` | `pwc-cron enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
-| local `pwc-cron-enqueue-benchmark-gap-review.timer` | `35 6 * * *` | `pwc-cron enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
-| local `pwc-cron-scan-model-releases.timer` | `48 1/3 * * *` | `pwc-cron scan_model_releases` | `backend/scripts/scan_model_releases.py` |
-| local `pwc-cron-discover-x-threads.timer` | `22 8,20 * * *` | `pwc-cron discover_x_threads` | `backend/scripts/discover_x_threads.py` |
-| local `pwc-cron-post-trending-paper-to-x.timer` | `13 */4 * * *` | `pwc-cron post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
-| local `pwc-cron-warm-paper-suggested-questions.timer` | `33 * * * *` | `pwc-cron warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
-| local `pwc-cron-post-x-insight.timer` | `43 9,17 * * *` | `pwc-cron post_x_insight` | `backend/scripts/post_x_insight.py` |
-| `cron-sync-3d-arena.yml` | `5 * * * *` | `pwc-cron sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
-| `cron-sync-tabarena.yml` | `55 * * * *` | `pwc-cron sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
-| `cron-sync-open-asr.yml` | `15 * * * *` | `pwc-cron sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
-| `cron-sync-open-tts.yml` | `18 * * * *` | `pwc-cron sync_open_tts` | `.github/workflows/scripts/hourly/sync_open_tts.py` (English and all-language-average views) |
-| `cron-sync-mmteb-overall.yml` | `7 * * * *` | `pwc-cron sync_mmteb_overall` | `.github/workflows/scripts/hourly/sync_mmteb.py overall` |
-| `cron-sync-mmteb-retrieval.yml` | `22 * * * *` | `pwc-cron sync_mmteb_retrieval` | `.github/workflows/scripts/hourly/sync_mmteb.py retrieval` |
-| `cron-sync-mmteb-reranking.yml` | `37 * * * *` | `pwc-cron sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py reranking` |
-| `cron-sync-mmeb-v2.yml` | `12 * * * *` | `pwc-cron sync_mmeb_v2` | `.github/workflows/scripts/hourly/sync_mmeb.py v2` |
-| `cron-sync-mmeb-v3.yml` | `42 * * * *` | `pwc-cron sync_mmeb_v3` | `.github/workflows/scripts/hourly/sync_mmeb.py v3` |
-| `cron-sync-deepswe.yml` | `25 * * * *` | `pwc-cron sync_deepswe` | `.github/workflows/scripts/hourly/sync_deepswe.py` |
-| `cron-sync-artificial-analysis.yml` | `35 */2 * * *` | `pwc-cron sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
-| `cron-sync-programbench.yml` | `40 * * * *` | `pwc-cron sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
-| `cron-sync-frontiercode.yml` | `45 * * * *` | `pwc-cron sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
-| `cron-sync-parsebench.yml` | `20 * * * *` | `pwc-cron sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
-| `cron-sync-extractbench.yml` | `32 * * * *` | `pwc-cron sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
-| `cron-sync-physics-iq-verified.yml` | `28 * * * *` | `pwc-cron sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
-| `cron-sync-vals-finance-agent.yml` | `47 * * * *` | `pwc-cron sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
-| `cron-sync-surge-chartography.yml` | `38 * * * *` | `pwc-cron sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
-| `cron-sync-coarena.yml` | `50 * * * *` | `pwc-cron sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
-| `cron-sync-arc-prize.yml` | `10 * * * *` | `pwc-cron sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
-| `cron-sync-hf-organizations.yml` | `20 2 * * *` | `pwc-cron sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
-| `cron-sync-hf-author-profiles.yml` | `50 2 * * *` | `pwc-cron sync_hf_author_profiles` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` |
-| `cron-calculate-organization-trending-scores.yml` | `40 3 * * *` | `pwc-cron calculate_organization_trending_scores` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` |
-| `cron-refresh-paper-embeddings.yml` | `15 * * * *` | `.github/workflows/scripts/run_refresh_paper_embeddings.sh` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
-| `cron-update-hf-artifacts.yml` | `30 * * * *` | `pwc-cron update_hf_artifacts` | `.github/workflows/scripts/hourly/update_hf_artifacts.py` |
-| `cron-backfill-method-keywords.yml` | `10 1 * * *` | `pwc-cron backfill_method_keywords --resume --limit 250000 --max-runtime-seconds 3300` | `.github/workflows/scripts/backfill/backfill_method_keywords.py` |
-| `cron-backfill-method-references.yml` | `15 * * * *` | `pwc-cron backfill_method_references --provider openalex --resume --retry-failures --limit 10000 --max-runtime-seconds 19800` | `.github/workflows/scripts/backfill/backfill_method_references.py` |
-| `cron-link-methods-by-references.yml` | `0 4 * * 0` | `.github/workflows/scripts/run_link_methods_by_references_weekly.sh` | `.github/workflows/scripts/weekly/link_methods_by_references.py` |
-| `cron-link-papers-by-task-keywords.yml` | `0 5 * * 0` | `.github/workflows/scripts/run_link_papers_by_task_keywords_weekly.sh` | `.github/workflows/scripts/weekly/link_papers_by_task_keywords.py` |
+| `pwc-cron-send-research-digests.timer` | `*-*-* *:00:00` | `send_research_digests` | `backend/scripts/send_research_digests.py` |
+| `pwc-cron-create-eval-verification-issues.timer` | `*-*-* *:52:00` | `create_eval_verification_issues` | `backend/scripts/create_eval_verification_issues.py` `--execute` |
+| `pwc-cron-run-chat-synthetic-probe.timer` | `*-*-* *:*:00` | `run_chat_synthetic_probe` | `backend/scripts/run_chat_synthetic_probe.py` |
+| `pwc-cron-update-github-stars.timer` | `*-*-* *:00:00` | `update_github_stars` | `.github/workflows/scripts/hourly/update_github_stars.py` |
+| `pwc-cron-update-hot-github-trending.timer` | `*-*-* *:00/15:00` | `update_hot_github_trending` | `.github/workflows/scripts/hourly/update_hot_github_trending.py` |
+| `pwc-cron-calculate-trending-scores.timer` | `*-*-* *:15:00` | `calculate_trending_scores` | `.github/workflows/scripts/hourly/calculate_trending_scores.py` |
+| `pwc-cron-update-citations.timer` | `*-*-* *:30:00` | `update_citations` | `.github/workflows/scripts/hourly/update_citations.py` |
+| `pwc-cron-update-hf-artifacts.timer` | `*-*-* *:30:00` | `update_hf_artifacts` | `.github/workflows/scripts/hourly/update_hf_artifacts.py` |
+| `pwc-cron-calculate-paper-trending-scores.timer` | `*-*-* *:45:00` | `calculate_paper_trending_scores` | `.github/workflows/scripts/hourly/calculate_paper_trending_scores.py` |
+| `pwc-cron-import-hf-daily-papers.timer` | `*-*-* *:00:00` | `import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
+| `pwc-cron-refresh-paper-embeddings.timer` | `*-*-* *:15:00` | `refresh_paper_embeddings` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
+| `pwc-cron-paper-markdown-backfill.timer` | `*-*-* *:17:00` | `paper_markdown_backfill --execute --confirm`<br>`paper_markdown_backfill --full --execute --confirm` | `.github/workflows/scripts/hourly/backfill_paper_markdown.py` |
+| `pwc-cron-enqueue-hf-daily-paper-curation.timer` | `*-*-* *:27:00` | `enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
+| `pwc-cron-enqueue-hf-trending-model-curation.timer` | `*-*-* *:42:00` | `enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
+| `pwc-cron-enqueue-benchmark-gap-review.timer` | `*-*-* 06:35:00` | `enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |
+| `pwc-cron-scan-model-releases.timer` | `*-*-* 01/3:48:00` | `scan_model_releases` | `backend/scripts/scan_model_releases.py` |
+| `pwc-cron-sweep-conference-deadlines.timer` | `Sun *-*-* 02:35:00` | `sweep_conference_deadlines` | `backend/scripts/sweep_conference_deadlines.py` |
+| `pwc-cron-refresh-conference-deadlines.timer` | `*-*-* 07:40:00`<br>`*-*-* 19:40:00` | `refresh_conference_deadlines` | `backend/scripts/refresh_conference_deadlines.py` |
+| `pwc-cron-discover-x-threads.timer` | `*-*-* 08,20:22:00` | `discover_x_threads` | `backend/scripts/discover_x_threads.py` |
+| `pwc-cron-post-trending-paper-to-x.timer` | `*-*-* 00/4:13:00` | `post_trending_paper_to_x` | `backend/scripts/post_trending_paper_to_x.py` |
+| `pwc-cron-post-x-insight.timer` | `*-*-* 09,17:43:00` | `post_x_insight` | `backend/scripts/post_x_insight.py` |
+| `pwc-cron-warm-paper-suggested-questions.timer` | `*-*-* *:33:00` | `warm_paper_suggested_questions` | `backend/scripts/warm_paper_suggested_questions.py` |
+| `pwc-cron-sync-3d-arena.timer` | `*-*-* *:05:00` | `sync_3d_arena` | `.github/workflows/scripts/hourly/sync_3d_arena.py` |
+| `pwc-cron-sync-mmteb-overall.timer` | `*-*-* *:07:00` | `sync_mmteb_overall` | `.github/workflows/scripts/hourly/sync_mmteb.py` overall |
+| `pwc-cron-sync-arc-prize.timer` | `*-*-* *:10:00` | `sync_arc_prize` | `.github/workflows/scripts/hourly/sync_arc_prize.py` |
+| `pwc-cron-sync-mmeb-v2.timer` | `*-*-* *:12:00` | `sync_mmeb_v2` | `.github/workflows/scripts/hourly/sync_mmeb.py` v2 |
+| `pwc-cron-sync-open-asr.timer` | `*-*-* *:15:00` | `sync_open_asr` | `.github/workflows/scripts/hourly/sync_open_asr.py` |
+| `pwc-cron-sync-open-tts.timer` | `*-*-* *:18:00` | `sync_open_tts` | `.github/workflows/scripts/hourly/sync_open_tts.py` |
+| `pwc-cron-sync-parsebench.timer` | `*-*-* *:20:00` | `sync_parsebench` | `.github/workflows/scripts/hourly/sync_parsebench.py` |
+| `pwc-cron-sync-mmteb-retrieval.timer` | `*-*-* *:22:00` | `sync_mmteb_retrieval` | `.github/workflows/scripts/hourly/sync_mmteb.py` retrieval |
+| `pwc-cron-sync-deepswe.timer` | `*-*-* *:25:00` | `sync_deepswe` | `.github/workflows/scripts/hourly/sync_deepswe.py` |
+| `pwc-cron-sync-extractbench.timer` | `*-*-* *:32:00` | `sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
+| `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
+| `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
+| `pwc-cron-sync-physics-iq-verified.timer` | `*-*-* *:28:00` | `sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
+| `pwc-cron-sync-artificial-analysis.timer` | `*-*-* 00/2:35:00` | `sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
+| `pwc-cron-sync-mmteb-reranking.timer` | `*-*-* *:37:00` | `sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py` reranking |
+| `pwc-cron-sync-programbench.timer` | `*-*-* *:40:00` | `sync_programbench` | `.github/workflows/scripts/hourly/sync_programbench.py` |
+| `pwc-cron-sync-mmeb-v3.timer` | `*-*-* *:42:00` | `sync_mmeb_v3` | `.github/workflows/scripts/hourly/sync_mmeb.py` v3 |
+| `pwc-cron-sync-frontiercode.timer` | `*-*-* *:45:00` | `sync_frontiercode` | `.github/workflows/scripts/hourly/sync_frontiercode.py` |
+| `pwc-cron-sync-coarena.timer` | `*-*-* *:50:00` | `sync_coarena` | `.github/workflows/scripts/hourly/sync_coarena.py` |
+| `pwc-cron-sync-tabarena.timer` | `*-*-* *:55:00` | `sync_tabarena` | `.github/workflows/scripts/hourly/sync_tabarena.py` |
+| `pwc-cron-backfill-method-keywords.timer` | `*-*-* 01:10:00` | `backfill_method_keywords --resume --limit 250000 --max-runtime-seconds 3300` | `.github/workflows/scripts/backfill/backfill_method_keywords.py` |
+| `pwc-cron-sync-hf-organizations.timer` | `*-*-* 02:20:00` | `sync_hf_organizations` | `.github/workflows/scripts/daily/sync_hf_organizations.py` |
+| `pwc-cron-sync-hf-author-profiles.timer` | `*-*-* 02:50:00` | `sync_hf_author_profiles` | `.github/workflows/scripts/daily/sync_hf_author_profiles.py` |
+| `pwc-cron-export-enrichment-dashboard.timer` | `*-*-* 03:10:00` | `export_enrichment_dashboard` | `backend/scripts/export_enrichment_dashboard.py` `--upload` |
+| `pwc-cron-calculate-organization-trending-scores.timer` | `*-*-* 03:40:00` | `calculate_organization_trending_scores` | `.github/workflows/scripts/daily/calculate_organization_trending_scores.py` |
+| `pwc-cron-mirror-thumbnails-to-disk.timer` | `*-*-* 05:00:00` | `mirror_thumbnails_to_disk` | `.github/workflows/scripts/daily/mirror_thumbnails_to_disk.py` |
+| `pwc-cron-backfill-method-references.timer` | `*-*-* *:15:00` | `backfill_method_references --provider openalex --resume --retry-failures --limit 10000 --max-runtime-seconds 19800` | `.github/workflows/scripts/backfill/backfill_method_references.py` |
+| `pwc-cron-link-methods-by-references.timer` | `Sun *-*-* 04:00:00` | `link_methods_by_references` | `.github/workflows/scripts/weekly/link_methods_by_references.py` |
+| `pwc-cron-link-papers-by-task-keywords.timer` | `Sun *-*-* 05:00:00` | `link_papers_by_task_keywords` | `.github/workflows/scripts/weekly/link_papers_by_task_keywords.py` |
+| `pwc-cron-preload-thumbnails-visible.timer` | `*-*-* 00/3:00:00` | `preload_thumbnails --priority visible --citation-top 1000 --trending-top 500 --newest-top 300 --per-task 20 --per-method 20 --limit 10000 --missing-only --trust-local-cache --max-runtime-seconds 6000` | `.github/workflows/scripts/daily/preload_thumbnails.py` |
+| `pwc-cron-preload-thumbnails-task-top.timer` | `*-*-* 04:00:00` | `preload_thumbnails --priority task-top --per-task 50 --missing-only --trust-local-cache --max-runtime-seconds 6000` | `.github/workflows/scripts/daily/preload_thumbnails.py` |
+| `pwc-cron-preload-thumbnails-method-top.timer` | `*-*-* 04:15:00` | `preload_thumbnails --priority method-top --per-method 50 --missing-only --trust-local-cache --max-runtime-seconds 6000` | `.github/workflows/scripts/daily/preload_thumbnails.py` |
+| `pwc-cron-preload-thumbnails-recent.timer` | `*-*-* 04:30:00` | `preload_thumbnails --priority recent --recent-days 30 --limit 500 --max-runtime-seconds 6000` | `.github/workflows/scripts/daily/preload_thumbnails.py` |
+| `pwc-cron-preload-thumbnails-external.timer` | `*-*-* 04:45:00` | `preload_thumbnails --priority external-missing --limit 2000 --request-delay-seconds 2 --max-failures -1 --max-runtime-seconds 6000` | `.github/workflows/scripts/daily/preload_thumbnails.py` |
+
+Host timers outside that table: `pwc-curation-thumbnails.timer` (every minute,
+`process_curation_thumbnails`), `pwc-chat-alert-monitor.timer` (every minute),
+and `pwc-postgres-backup.timer` (03:15) under `deploy/systemd/`, plus
+`submission-review.timer`, which `deploy/install_deploy_tools.py` writes. `extract_urls` has no timer; its hourly schedule has been
+paused since 2026-07-13, so it runs only through `cron-extract-urls.yml`
+dispatch.
 
 The `test-database.yml` workflow is unrelated to cron scheduling.
 
@@ -111,7 +133,8 @@ use `VACUUM FULL`.
 │   └── link_papers_by_task_keywords.py
 ├── maintenance/
 │   ├── cleanup_invalid_repositories.py
-│   └── run_cleanup_invalid_repositories.sh
+│   ├── run_cleanup_invalid_repositories.sh
+│   └── thumbnail_coverage.py
 ├── utils/
 │   ├── cron_helpers.py
 │   └── hf_paper_importer.py
@@ -119,14 +142,20 @@ use `VACUUM FULL`.
 └── run_*.sh
 ```
 
+`hourly/` also holds every leaderboard `sync_*.py` job, `update_hf_artifacts.py`,
+`calculate_paper_trending_scores.py`, and `backfill_paper_markdown.py`; `daily/`
+also holds `sync_hf_author_profiles.py`, `preload_thumbnails.py`, and
+`mirror_thumbnails_to_disk.py`. Many scheduled jobs live in `backend/scripts/`
+instead; the timer table names each job's module. The top-level `run_*.sh`
+wrappers predate `pwc-cron` and nothing invokes them any more.
+
 Generated logs are written to `.github/workflows/scripts/logs/`. Backfill checkpoint state is runtime
 data and is intentionally ignored by git.
 
 ## Job Summary
 
 `update_hot_github_trending.py` is designed to own official repositories for
-latest papers aged 0–30 days. Once separately activated in production, every
-15 minutes it snapshots up to 500 normalized repository groups, calculates
+latest papers aged 0–30 days. Every 15 minutes it snapshots up to 500 normalized repository groups, calculates
 repository EMA only for touched rows, then writes composite scores only for
 their linked latest papers using full-corpus normalization.
 
@@ -139,7 +168,7 @@ health; only cadence, caps, delays, and credentials are configurable.
 history and stores them on repositories for the trending API/view pipeline.
 
 `update_citations.py` pulls citation counts from Semantic Scholar for ArXiv
-papers. Runs are bounded so hourly Actions do not pile up under API throttling.
+papers. Runs are bounded so hourly runs do not pile up under API throttling.
 
 `discover_x_threads.py` finds X posts in which authors introduce recent
 papers and links them to the paper page's "X threads" card. Twice a day it
@@ -277,7 +306,8 @@ uv run --env-file backend/keys.env python -m backend.scripts.scan_model_releases
 ```
 
 `extract_urls.py` uses Gemini to find official GitHub repositories and project
-pages for papers that still have `urls_extracted = false`.
+pages for papers that still have `urls_extracted = false`. It is unscheduled
+(see above) and runs only on manual dispatch.
 
 `import_hf_daily_papers.py` runs hourly, imports the current day's Hugging Face
 papers that are not yet in the database, and auto-tags tasks/methods using
@@ -382,14 +412,14 @@ organization sync. It upserts one raw snapshot per featured organization and UTC
 date, calculates the trailing 30-day arithmetic mean, and retains 120 days of
 bounded history.
 
-`refresh_paper_embeddings.py` runs 15 minutes later and sends only missing or
+`refresh_paper_embeddings.py` runs at :15, after the HF import, and sends only missing or
 content-changed latest papers to the protected TEI endpoint. It validates and
 upserts normalized vectors into the active generation in bounded batches. The
-VPS supplies the endpoint URL and `PWC_HF_TOKEN` from `backend/keys.env`.
+production environment supplies the endpoint URL and `PWC_HF_TOKEN`.
 
 ## Manual Utilities
 
-The backfill and maintenance scripts are not scheduled by GitHub Actions:
+These backfill and maintenance scripts have no timer:
 
 ```bash
 uv run --env-file backend/keys.env python .github/workflows/scripts/hourly/update_hf_artifacts.py --backfill
@@ -443,23 +473,26 @@ Requests reuse a session, retain GitHub rate headers, honor `Retry-After`, and
 retry transient 5xx responses with bounded jittered backoff. Structured
 `api_calls` counts every HTTP attempt, including retry attempts.
 
-The workflow is intentionally `workflow_dispatch`-only for staging review.
-Production activation is not implied by merging or staging deployment. First
-install the checked-in deploy tooling from the exact authorized production SHA,
-then deploy that SHA to production and confirm `sudo pwc-cron status` lists the
-new command. Only then add `*/15 * * * *` in a separately reviewed workflow
-commit.
-
 The management script discovers `hourly/`, `daily/`, `weekly/`, and `monthly/`
 Python jobs. It does not schedule jobs itself.
 
 ## Adding A Job
 
-1. Put scheduled jobs under `.github/workflows/scripts/hourly/` or `.github/workflows/scripts/daily/`.
-2. Reuse `DatabaseCronJob` from `.github/workflows/scripts/utils/cron_helpers.py` for DB-backed jobs.
-3. Add or update a shell wrapper if the GitHub Action needs one.
-4. Add a `.github/workflows/cron-*.yml` workflow if the job should run in production.
-5. Run with `uv run --env-file backend/keys.env ...` before enabling a schedule.
+1. Put the job under `.github/workflows/scripts/<cadence>/` or `backend/scripts/`;
+   reuse `DatabaseCronJob` from `.github/workflows/scripts/utils/cron_helpers.py`
+   for DB-backed jobs.
+2. Test it against a disposable database with
+   `uv run --env-file <disposable env> ...`; never point a test run at production.
+3. Register it in `COMMANDS` in `deploy/cron_launcher.py` (timeout, idempotency).
+4. Add a `TimerSpec` to `deploy/cron_schedules.py`, run
+   `python deploy/generate_cron_units.py`, and commit the generated units.
+   Add a row to the timer table above.
+5. Optionally add a `workflow_dispatch` `.github/workflows/cron-*.yml` recovery
+   workflow.
+6. After the merged commit is deployed, install the deploy tooling from that
+   commit and run `sudo systemctl enable --now pwc-cron-<job>.timer` once;
+   installing units does not enable a new timer
+   ([host timer scheduling](../../../docs/operations.md#host-timer-scheduling)).
 
 ## References
 

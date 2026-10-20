@@ -61,8 +61,8 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   and 8001 belong to production and staging.
 - For frontend work, use `npm run dev` and `npm run lint`. Do not routinely run
   `npm run build`; it writes `frontend/dist` and consumes scarce disk. Define
-  routes before the catch-all, and use `frontend/src/lib/api.ts` with TanStack
-  Query for server state.
+  routes before the catch-all, and use the domain clients in
+  `frontend/src/lib/api/` with TanStack Query for server state.
 
 ## Publishing and releases
 

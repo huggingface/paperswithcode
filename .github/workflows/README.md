@@ -1,7 +1,9 @@
 # GitHub Actions workflows
 
-Scheduled production workflows use SSH only to invoke the installed,
-allowlisted runner:
+Production CRON jobs are scheduled by host systemd timers
+(`deploy/cron_schedules.py`; see `scripts/README.md`). The `cron-*.yml`
+workflows are `workflow_dispatch`-only recovery paths that use SSH only to
+invoke the installed, allowlisted runner:
 
 ```text
 sudo /usr/local/sbin/pwc-cron <registered-job>
@@ -18,11 +20,6 @@ the host's `pwc-postgres-backup.timer` at 03:15 UTC. The
 `backup-postgres-to-hf-bucket.yml` workflow is a manual remote trigger for that
 same unit, not a second schedule.
 
-Remote-curation thumbnails are also host-scheduled:
-`pwc-curation-thumbnails.timer` invokes the same allowlisted launcher every
-minute. It is local so a scoped remote curation job can observe a bounded result
-without waiting for a GitHub Actions schedule.
-
 `hourly-application-smoke.yml` runs at `:37` and uses
 `deploy/smoke_test.py --monitor-subset` to check the production SPA, hashed
 JavaScript/CSS MIME types, and the unauthenticated staging boundary. It is
@@ -36,7 +33,7 @@ execution with:
 ```bash
 sudo pwc-cron status
 pwc cron health
-journalctl -u 'run-u*.service' --since today
+journalctl -u 'pwc-cron-*.service' --since today
 ```
 
 Compatibility `run_*.sh` files delegate to `pwc-cron`; they are not independent
