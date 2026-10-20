@@ -516,8 +516,11 @@ def run_queue(
                 stats["rate_limit_limit"] = result.rate_limit.limit
                 stats["rate_limit_remaining"] = result.rate_limit.remaining
                 stats["rate_limit_reset"] = result.rate_limit.reset
-                if result.failure == "classic_pat_forbidden" and fallback_token:
-                    # Rate stats stay on the queue's own token.
+                used_fallback = result.failure == "classic_pat_forbidden" and bool(
+                    fallback_token
+                )
+                if used_fallback:
+                    # Rate stats and stops stay on the queue's own token.
                     stats["classic_pat_fallbacks"] += 1
                     result = fetch_github_stars(
                         group["owner"], group["name"], fallback_token, http=http
@@ -545,7 +548,7 @@ def run_queue(
                     stats["failures"] += 1
                     if result.failure in {"http_401", "http_403"}:
                         stats["credential_failures"] += 1
-                    if result.failure == "rate_limit":
+                    if result.failure == "rate_limit" and not used_fallback:
                         stats["rate_limit_stops"] += 1
                         break
                 else:

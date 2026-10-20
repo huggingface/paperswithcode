@@ -519,3 +519,46 @@ def test_weekly_queue_retries_classic_pat_forbidden_groups_with_fallback_token(
     assert result["api_calls"] == 2
     assert result["rate_limit_remaining"] == 4000
     require_successful_queues([result])
+
+
+def test_rate_limited_fallback_does_not_stop_the_weekly_queue(monkeypatch):
+    groups = [
+        {
+            "owner": owner,
+            "name": "repo",
+            "repository_ids": [index],
+            "eligible_group_count": 2,
+            "oldest_eligible_paper_date": None,
+        }
+        for index, owner in enumerate(("huggingface", "someone"))
+    ]
+    responses = iter(
+        [
+            GitHubFetchResult(None, 403, RateLimit(), failure="classic_pat_forbidden"),
+            GitHubFetchResult(None, 429, RateLimit(remaining=0), failure="rate_limit"),
+            GitHubFetchResult(5, 200, RateLimit(remaining=3000)),
+        ]
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_service",
+        lambda: (Mock(), Mock()),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_groups",
+        lambda *_args, **_kwargs: groups,
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.fetch_github_stars",
+        lambda *_args, **_kwargs: next(responses),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.update_repository_group_stars",
+        lambda _service, _session, ids, stars: (len(ids), len(ids)),
+    )
+
+    result = run_queue("weekly", "classic", 2, 60, delay=0, fallback_token="fresh")
+
+    assert result["processed_groups"] == 2
+    assert result["successes"] == 1
+    assert result["failures"] == 1
+    assert result["rate_limit_stops"] == 0
