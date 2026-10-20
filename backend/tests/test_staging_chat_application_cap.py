@@ -11,8 +11,8 @@ from backend.tests.deployment.harness import deployed_settings, make_bundle
 from deploy.configure_host_env import decoded_value
 from deploy.configure_staging_chat_application_cap import raised_values
 
-OLD = "modal-workspace-nielsrogge-250-staging-starter-v1"
-NEW = "modal-workspace-nielsrogge-250-staging-starter-app105-v2"
+OLD = "modal-workspace-example-workspace-250-staging-starter-v1"
+NEW = "modal-workspace-example-workspace-250-staging-starter-app105-v2"
 
 
 def policy():
@@ -20,7 +20,7 @@ def policy():
         _env_file=None,
         environment="staging",
         chat_sandbox_provider_mode="starter_workspace",
-        chat_sandbox_modal_workspace="nielsrogge",
+        chat_sandbox_modal_workspace="example-workspace",
         chat_sandbox_warning_microusd=75_000_000,
         chat_sandbox_application_cap_microusd=105_000_000,
         chat_sandbox_environment_cap_microusd=0,
@@ -75,7 +75,7 @@ def test_runtime_accepts_105_only_with_exact_staging_attestation(tmp_path):
 def test_protected_installer_preserves_all_other_values():
     values = {
         "PWC_ENVIRONMENT": "staging",
-        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": "nielsrogge",
+        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": "example-workspace",
         "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "75000000",
         "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "100000000",
         "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD": "0",

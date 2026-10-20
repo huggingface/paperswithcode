@@ -598,8 +598,8 @@ class ChatObservabilitySettings(BaseModel):
 
     chat_trackio_enabled: bool = Field(default=False)
     chat_trackio_url: str = Field(
-        default="https://nielsr-pwc-chat-traces.hf.space",
-        pattern=r"^https://[a-z0-9][a-z0-9-]*\.hf\.space/?$",
+        default="",
+        pattern=r"^(https://[a-z0-9][a-z0-9-]*\.hf\.space/?)?$",
     )
     chat_trackio_hf_token: str = Field(default="", repr=False)
     chat_trackio_project: str = Field(default="pwc-chat", min_length=1, max_length=100)

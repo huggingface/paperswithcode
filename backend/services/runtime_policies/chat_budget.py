@@ -93,7 +93,6 @@ def _validate_chat_capacity_and_spend_policy(
         expected_spend = _STARTER_SANDBOX_SPEND_POLICY
         if (
             settings.environment == "staging"
-            and settings.chat_sandbox_modal_workspace == "nielsrogge"
             and configured_spend == _STAGING_STARTER_105_SPEND_POLICY
         ):
             expected_spend = _STAGING_STARTER_105_SPEND_POLICY

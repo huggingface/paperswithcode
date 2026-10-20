@@ -96,14 +96,16 @@ def reviewed_policy_transition_allowed(state, settings: Settings) -> bool:
 def reviewed_higher_caps_allowed(state, settings: Settings) -> bool:
     """Accept only higher application guardrails below unchanged provider caps."""
 
+    workspace_attestation = (
+        f"modal-workspace-{settings.chat_sandbox_modal_workspace}-250-staging"
+    )
     if (
         settings.environment == "staging"
         and settings.chat_sandbox_provider_mode == "starter_workspace"
-        and settings.chat_sandbox_modal_workspace == "nielsrogge"
-        and state.policy_attestation
-        == "modal-workspace-nielsrogge-250-staging-starter-v1"
+        and settings.chat_sandbox_modal_workspace
+        and state.policy_attestation == f"{workspace_attestation}-starter-v1"
         and settings.chat_sandbox_budget_attestation
-        == "modal-workspace-nielsrogge-250-staging-starter-app105-v2"
+        == f"{workspace_attestation}-starter-app105-v2"
         and state.warning_microusd
         == settings.chat_sandbox_warning_microusd
         == 75_000_000

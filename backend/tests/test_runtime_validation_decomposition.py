@@ -1027,7 +1027,7 @@ def test_chat_descriptor_owns_immutable_runtime_identity(settings_factory):
         (
             "chat_gateway_url",
             "https://paperswithcode.co/api/internal/chat-gateway",
-            "chat gateway must use chat-gateway-staging.paperswithcode.co",
+            "chat gateway must not share the public site origin",
         ),
         (
             "chat_openrouter_api_key",

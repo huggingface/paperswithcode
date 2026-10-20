@@ -96,6 +96,29 @@ def test_enabled_chat_requires_hf_glm_title_credential(tmp_path: Path):
         validate_runtime(settings)
 
 
+def test_enabled_chat_requires_named_environment_scoped_title_owner(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    for field, value in [
+        ("chat_title_credential_owner", " "),
+        ("chat_title_credential_environment", "production"),
+    ]:
+        with pytest.raises(RuntimeError, match="title credential with a named owner"):
+            validate_runtime(settings.model_copy(update={field: value}))
+
+
+def test_title_circuit_accepts_operator_chosen_monthly_cap(tmp_path: Path):
+    release = make_bundle(tmp_path, chat=True)
+    settings = deployed_settings(tmp_path, release, "staging")
+    settings.chat_title_monthly_cap_microusd = 50_000_000
+
+    assert validate_runtime(settings) == profile_features("staging")
+
+    settings.chat_title_warning_microusd = 50_000_000
+    with pytest.raises(RuntimeError, match="monthly circuit"):
+        validate_runtime(settings)
+
+
 def test_enforced_runtime_rejects_legacy_openrouter_title_policy(tmp_path: Path):
     release = make_bundle(tmp_path, chat=True)
     settings = deployed_settings(tmp_path, release, "staging")

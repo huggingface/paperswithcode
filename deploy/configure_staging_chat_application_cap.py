@@ -17,16 +17,21 @@ CONFIRMATION = "RAISE_STAGING_CHAT_APPLICATION_CAP_105"
 
 
 def raised_values(current: dict[str, str]) -> dict[str, str]:
+    workspace = decoded_value(
+        current.get("PWC_CHAT_SANDBOX_MODAL_WORKSPACE", "")
+    ).strip()
+    if not workspace:
+        raise ValueError("PWC_CHAT_SANDBOX_MODAL_WORKSPACE is required")
     expected = {
         "PWC_ENVIRONMENT": "staging",
-        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": "nielsrogge",
+        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": workspace,
         "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "75000000",
         "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "100000000",
         "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD": "0",
         "PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD": "250000000",
         "PWC_CHAT_SANDBOX_PROVIDER_MODE": "starter_workspace",
         "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": (
-            "modal-workspace-nielsrogge-250-staging-starter-v1"
+            f"modal-workspace-{workspace}-250-staging-starter-v1"
         ),
     }
     actual = {key: decoded_value(current.get(key, "")).strip() for key in expected}
@@ -39,7 +44,7 @@ def raised_values(current: dict[str, str]) -> dict[str, str]:
         {
             "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "105000000",
             "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": (
-                "modal-workspace-nielsrogge-250-staging-starter-app105-v2"
+                f"modal-workspace-{workspace}-250-staging-starter-app105-v2"
             ),
         },
     )

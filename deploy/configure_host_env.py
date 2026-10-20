@@ -24,7 +24,12 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 CONFIG_ROOT = Path("/etc/paperswithcode")
 APP_ROOT = Path("/srv/paperswithcode")
 PRODUCTION_CHAT_SEALED_CONFIG = CONFIG_ROOT / "production-chat-prepared.env"
+# Operator profile for paperswithcode.co. The backend only requires these to be
+# set; a self-hosted deployment changes them here, not in validation code.
 STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
+CHAT_TITLE_CREDENTIAL_OWNER = "nielsr"
+STAGING_CHAT_MODAL_WORKSPACE = "nielsrogge"
+STAGING_CHAT_MODAL_OWNER_USERNAME = "nielsrogge"
 
 STAGING_EXCLUDED_PREFIXES = (
     "PWC_POSTGRES_BACKUP_",
@@ -508,7 +513,7 @@ def scope_title_hf_values(
     expected = {
         "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
         "PWC_CHAT_TITLE_BILL_TO": "huggingface",
-        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": CHAT_TITLE_CREDENTIAL_OWNER,
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": environment,
     }
     for key, value in expected.items():
@@ -685,7 +690,7 @@ def staging_title_values(
     expected = {
         "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
         "PWC_CHAT_TITLE_BILL_TO": "huggingface",
-        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": CHAT_TITLE_CREDENTIAL_OWNER,
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": "staging",
     }
     for key, value in expected.items():
@@ -739,7 +744,7 @@ def production_title_values(
     expected = {
         "PWC_CHAT_TITLE_GENERATION_ENABLED": "true",
         "PWC_CHAT_TITLE_BILL_TO": "huggingface",
-        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": "nielsr",
+        "PWC_CHAT_TITLE_CREDENTIAL_OWNER": CHAT_TITLE_CREDENTIAL_OWNER,
         "PWC_CHAT_TITLE_CREDENTIAL_ENVIRONMENT": "production",
     }
     for key, value in expected.items():
@@ -1360,13 +1365,15 @@ def staging_chat_spend_values() -> dict[str, str]:
         "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "75000000",
         "PWC_CHAT_SANDBOX_SPEND_ENFORCEMENT_ENABLED": "true",
         "PWC_CHAT_SANDBOX_PROVIDER_MODE": "starter_workspace",
-        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": "modal-workspace-nielsrogge-250-staging-starter-v1",
+        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": (
+            f"modal-workspace-{STAGING_CHAT_MODAL_WORKSPACE}-250-staging-starter-v1"
+        ),
         "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "100000000",
         "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD": "0",
         "PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD": "250000000",
         "PWC_CHAT_SANDBOX_MODAL_ENVIRONMENT": "pwc-chat-staging",
-        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": "nielsrogge",
-        "PWC_CHAT_SANDBOX_MODAL_OWNER_USERNAME": "nielsrogge",
+        "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": STAGING_CHAT_MODAL_WORKSPACE,
+        "PWC_CHAT_SANDBOX_MODAL_OWNER_USERNAME": STAGING_CHAT_MODAL_OWNER_USERNAME,
         "MODAL_ENVIRONMENT": "pwc-chat-staging",
         "PWC_CHAT_SANDBOX_WATCHDOG_SECONDS": "15",
         "PWC_CHAT_SANDBOX_DRAIN_GRACE_SECONDS": "30",

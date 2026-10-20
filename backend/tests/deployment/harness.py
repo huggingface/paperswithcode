@@ -130,16 +130,18 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
         chat_sandbox_spend_enforcement_enabled=environment == "staging",
         chat_sandbox_provider_mode="starter_workspace",
         chat_sandbox_budget_attestation=(
-            "modal-workspace-nielsrogge-250-staging-starter-v1"
+            "modal-workspace-example-workspace-250-staging-starter-v1"
             if environment == "staging"
             else ""
         ),
         chat_sandbox_modal_environment=(
             "pwc-chat-staging" if environment == "staging" else ""
         ),
-        chat_sandbox_modal_workspace=("nielsrogge" if environment == "staging" else ""),
+        chat_sandbox_modal_workspace=(
+            "example-workspace" if environment == "staging" else ""
+        ),
         chat_sandbox_modal_owner_username=(
-            "nielsrogge" if environment == "staging" else ""
+            "example-owner" if environment == "staging" else ""
         ),
         chat_sandbox_slack_webhook_url=(
             "https://hooks.slack.test/services/test" if environment == "staging" else ""
@@ -161,7 +163,9 @@ def deployed_settings(tmp_path: Path, release: Path, environment: str) -> Settin
             "test-only-isolated-title-token" if environment == "staging" else ""
         ),
         chat_title_bill_to=("huggingface" if environment == "staging" else ""),
-        chat_title_credential_owner=("nielsr" if environment == "staging" else ""),
+        chat_title_credential_owner=(
+            "example-owner" if environment == "staging" else ""
+        ),
         chat_title_credential_environment=(
             "staging" if environment == "staging" else ""
         ),
@@ -219,7 +223,7 @@ def configure_hf_scope_and_title(settings: Settings, environment: str) -> None:
     settings.chat_title_model = "zai-org/GLM-5.3-Flash:baseten"
     settings.chat_title_hf_token = f"test-only-title-{environment}"
     settings.chat_title_bill_to = "huggingface"
-    settings.chat_title_credential_owner = "nielsr"
+    settings.chat_title_credential_owner = "example-owner"
     settings.chat_title_credential_environment = environment
     settings.chat_scope_guardrail_enabled = True
     settings.chat_scope_guardrail_hf_token = settings.chat_title_hf_token
