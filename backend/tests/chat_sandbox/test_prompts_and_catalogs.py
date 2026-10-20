@@ -58,6 +58,12 @@ def test_system_prompt_prevents_unsupported_method_search_flags():
         "desc" in prompt
     )
     assert "latest release versus latest technical report" in prompt
+    assert "relevance-ranked `pwc search` can surface older papers first" in prompt
+    assert "`--order-by date_published --order-dir desc`, or a `--start-date`" in prompt
+    assert "report each cited paper's\npublication date" in prompt
+    assert "For long-form writing in the chat answer" in prompt
+    assert "Write one part per turn, at most about 1,500 words" in prompt
+    assert "offer to continue\nwith the next section" in prompt
     assert '"reader_mode":false' in prompt
 
 

@@ -61,6 +61,9 @@ test("MCP research turns are sandbox-free and mention every registered tool", ()
   assert.match(rendered, /When the method index does not list it, call pwc_get_method/u);
   assert.match(rendered, /When a conversation opens without a paper in view[^.]*call at least one catalog tool before answering/u);
   assert.match(rendered, /Read a bare topic or short phrase[^.]*as a request for the key and recent papers/u);
+  assert.match(rendered, /For latest, newest, recent[^.]*do not rely on pwc_search_papers/u);
+  assert.match(rendered, /Call pwc_list_papers with task and\/or search, order_by "date_published", and order_direction "desc"/u);
+  assert.match(rendered, /report each cited paper's publication date/u);
   assert.match(rendered, /# PwC MCP skill/u);
   assert.match(rendered, /next_cursor/u);
   assert.doesNotMatch(rendered, /pass `"next"` before any read/u);
