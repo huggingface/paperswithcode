@@ -101,7 +101,7 @@ jobs:
           from backend.database.connection import create_tables, drop_tables, get_engine
           from backend.models.database import Paper
 
-          drop_tables()
+          drop_tables(confirm_database="paperswithcode_hf")
           create_tables()
 
           engine = get_engine()
@@ -125,6 +125,6 @@ jobs:
               count = session.query(Paper).filter(Paper.arxiv_id == "2605.00001").count()
               assert count == 1
 
-          drop_tables()
+          drop_tables(confirm_database="paperswithcode_hf")
           print("Database smoke test passed")
           PY
