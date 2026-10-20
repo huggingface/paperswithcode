@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  isSponsoredChatModel,
   labelForChatModel,
   PRODUCTION_FALLBACK_CHAT_MODELS,
   providerForChatModel,
@@ -30,6 +31,17 @@ describe("legacy model compatibility", () => {
   it("recognizes production OpenAI Luna without discovery", () => {
     expect(providerForChatModel([], "gpt-5.6-luna@openai")).toBe("openai");
     expect(labelForChatModel([], "gpt-5.6-luna@openai")).toBe("GPT-6 Luna");
+  });
+
+  it("recognizes the sponsored model before discovery loads", () => {
+    const sponsored = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
+    expect(isSponsoredChatModel([], sponsored)).toBe(true);
+    expect(isSponsoredChatModel([], "moonshotai/Kimi-K3")).toBe(false);
+    // Discovery wins once it has loaded.
+    expect(isSponsoredChatModel(
+      [{ id: sponsored, label: "DeepSeek", provider: "huggingface" }],
+      sponsored,
+    )).toBe(false);
   });
 });
 

@@ -152,6 +152,10 @@ export interface ChatModelChoice {
 export const DEFAULT_CHAT_MODEL = "gpt-5.6-luna@openai";
 const DEEPSEEK_CHAT_MODEL = "deepseek-ai/DeepSeek-V4-Flash-0731";
 const LEGACY_OPENROUTER_LUNA_MODEL = "openai/gpt-5.6-luna";
+// Billed to the organization. Known here so deep links, restored drafts, and
+// existing sessions skip HF authorization before discovery loads; when it is
+// switched off the backend moves those sessions to Luna, which needs none.
+const SPONSORED_CHAT_MODEL = "deepseek-ai/DeepSeek-V4.1-Flash-1017";
 
 export function providerForChatModel(
   models: ChatModelChoice[],
@@ -169,7 +173,8 @@ export function isSponsoredChatModel(
   models: ChatModelChoice[],
   selectedModel: string,
 ): boolean {
-  return models.find((model) => model.id === selectedModel)?.sponsored === true;
+  const model = models.find((choice) => choice.id === selectedModel);
+  return model ? model.sponsored === true : selectedModel === SPONSORED_CHAT_MODEL;
 }
 
 export function labelForChatModel(
