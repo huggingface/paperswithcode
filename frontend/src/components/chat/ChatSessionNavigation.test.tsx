@@ -142,3 +142,20 @@ describe("ChatSessionNavigation history and MCP showcase", () => {
     expect(allowed).toBe(false);
   });
 });
+
+describe("ChatSessionNavigation backdrop", () => {
+  it("closes the sidebar when tapping outside it", () => {
+    const onClose = vi.fn();
+    const { container } = render(<ChatSessionNavigation {...props} onClose={onClose} />);
+
+    fireEvent.click(container.querySelector(".chat-sidebar-backdrop")!);
+
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders no backdrop while the sidebar is closed", () => {
+    const { container } = render(<ChatSessionNavigation {...props} open={false} />);
+
+    expect(container.querySelector(".chat-sidebar-backdrop")).toBeNull();
+  });
+});

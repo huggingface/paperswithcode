@@ -9,6 +9,7 @@
   flex-direction: column;
   transition: margin-left 0.2s ease;
 }
+.chat-sidebar-backdrop { display: none; }
 .chat-sidebar-resize-handle {
   position: absolute;
   top: 0;
@@ -207,6 +208,12 @@
     z-index: 60;
     box-shadow: 0 0 40px rgba(0, 0, 0, 0.2);
     width: var(--app-leading-column-width);
+  }
+  .chat-sidebar-backdrop {
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 59;
   }
   .chat-sidebar-resize-handle { display: none; }
   .chat-sidebar-closed { margin-left: 0; transform: translateX(-101%); box-shadow: none; }

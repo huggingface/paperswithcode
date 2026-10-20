@@ -108,6 +108,8 @@ export function ChatSessionNavigation({
   };
 
   return (
+    <>
+    {open && <div className="chat-sidebar-backdrop" aria-hidden="true" onClick={onClose} />}
     <aside
       className={`chat-sidebar${open ? "" : " chat-sidebar-closed"}`}
       style={{ "--chat-sidebar-width": `${sidebarWidth}px` } as CSSProperties}
@@ -236,5 +238,6 @@ export function ChatSessionNavigation({
         }}>Rename chat</button>
       </div>}
     </aside>
+    </>
   );
 }
