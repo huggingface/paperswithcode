@@ -483,6 +483,11 @@ def prepare_release(sha: str, environment: str) -> Path:
         frontend = source / "frontend"
         build_home = build_root / "home"
         build_home.mkdir()
+        npm_cache = build_root / "npm-cache"
+        npm_cache.mkdir()
+        # The build user may enter build_root but never rename its entries, so
+        # it cannot swap ``source`` for a symlink before root publishes it.
+        build_root.chmod(0o711)
         # npm lifecycle scripts and the Vite config are release code: build as
         # the unprivileged build user with a private HOME and npm cache instead
         # of root's environment.
@@ -490,7 +495,7 @@ def prepare_release(sha: str, environment: str) -> Path:
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             "HOME": str(build_home),
             "LANG": "C.UTF-8",
-            "npm_config_cache": str(build_root / "npm-cache"),
+            "npm_config_cache": str(npm_cache),
             "npm_config_update_notifier": "false",
         }
         build_env.update(
@@ -501,7 +506,8 @@ def prepare_release(sha: str, environment: str) -> Path:
         )
         build_env.update(frontend_analytics_environment(environment))
         build_env.update(frontend_host_environment(environment))
-        build_sandbox.lend(build_root)
+        for lent in (source, build_home, npm_cache):
+            build_sandbox.lend(lent)
         try:
             run(build_sandbox.command(["npm", "ci"]), cwd=frontend, env=build_env)
             run(
@@ -515,7 +521,7 @@ def prepare_release(sha: str, environment: str) -> Path:
                 source, environment, chat_enabled=expected_features["chat"]
             )
         finally:
-            build_sandbox.reclaim(build_root)
+            build_sandbox.reclaim(source)
         shutil.move(str(frontend / "dist"), str(source / "frontend-dist"))
         shutil.rmtree(frontend / "node_modules")
         for env_file in source.rglob(".env*"):

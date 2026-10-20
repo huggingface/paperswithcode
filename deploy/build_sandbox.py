@@ -14,6 +14,8 @@ from __future__ import annotations
 import os
 import pwd
 import subprocess
+import time
+from collections.abc import Callable
 from pathlib import Path
 
 BUILD_USER = "pwc-build"
@@ -63,23 +65,75 @@ def _chown_tree(root: Path, uid: int, gid: int) -> None:
 
 
 def lend(root: Path) -> None:
-    """Give the build user ownership of ``root`` for the next build step."""
+    """Give the build user ownership of ``root`` for the next build step.
+
+    ``root``'s parent must stay root-owned so the build cannot replace
+    ``root`` itself with a symlink.
+    """
 
     if enabled():
         identity = _identity()
         _chown_tree(root, identity.pw_uid, identity.pw_gid)
 
 
-def reclaim(root: Path) -> None:
-    """Stop leftover build processes, then return ``root`` to root ownership.
+def _stop_build_processes() -> None:
+    # A process forked while pkill scans can survive one pass, so repeat
+    # until nothing runs as the build user.
+    for _attempt in range(50):
+        found = subprocess.run(
+            [str(PKILL), "--signal", "KILL", "-u", BUILD_USER], check=False
+        )
+        if found.returncode == 1:
+            return
+        time.sleep(0.1)
+    raise RuntimeError(f"processes owned by {BUILD_USER!r} keep running")
 
-    Killing first means no build process can swap files while root walks the
-    tree. ``lchown`` never follows symlinks, and changing the owner clears any
-    set-user-ID bits a build step left behind.
+
+def _reject_escaping_symlinks(root: Path, allow: Callable[[Path, Path], bool]) -> None:
+    resolved_root = root.resolve()
+    for directory, names, files in os.walk(root, followlinks=False):
+        for name in (*names, *files):
+            path = Path(directory, name)
+            if not path.is_symlink():
+                continue
+            target = Path(os.path.realpath(path))
+            if target == resolved_root or resolved_root in target.parents:
+                continue
+            if allow(path.relative_to(root), target):
+                continue
+            raise RuntimeError(
+                f"build left a symlink outside its tree: {path.relative_to(root)}"
+            )
+
+
+def reclaim(
+    root: Path,
+    *,
+    allow: Callable[[Path, Path], bool] = lambda _link, _target: False,
+) -> None:
+    """Stop leftover build processes, return ``root`` to root, then vet it.
+
+    Killing first means no build process can change the tree while root walks
+    it. ``lchown`` never follows symlinks, and changing the owner clears any
+    set-user-ID bits a build step left behind. Later root steps write and
+    chmod paths inside the tree, so a symlink the build planted pointing out
+    of it (for example ``release.json -> /etc/shadow``) is refused unless
+    ``allow`` accepts the link (relative to ``root``) and its resolved target.
     """
 
-    if not enabled():
-        return
-    _identity()
-    subprocess.run([str(PKILL), "--signal", "KILL", "-u", BUILD_USER], check=False)
-    _chown_tree(root, 0, 0)
+    if enabled():
+        _identity()
+        _stop_build_processes()
+        _chown_tree(root, 0, 0)
+    _reject_escaping_symlinks(root, allow)
+
+
+def is_venv_python_launcher(link: Path, target: Path) -> bool:
+    """A virtualenv's ``bin/python*`` launchers point at the host interpreter."""
+
+    return (
+        link.parent == Path("bin")
+        and link.name.startswith("python")
+        and target.parent == Path("/usr/bin")
+        and target.name.startswith("python3")
+    )

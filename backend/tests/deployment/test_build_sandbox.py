@@ -6,6 +6,8 @@ import os
 import pwd
 from pathlib import Path
 
+from types import SimpleNamespace
+
 import pytest
 
 from deploy import build_sandbox
@@ -20,11 +22,13 @@ def as_root(monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(build_sandbox, "enabled", lambda: True)
     monkeypatch.setattr(build_sandbox.pwd, "getpwnam", lambda name: BUILD)
     killed: list[list[str]] = []
-    monkeypatch.setattr(
-        build_sandbox.subprocess,
-        "run",
-        lambda command, check: killed.append(command),
-    )
+
+    def pkill(command, check):
+        killed.append(command)
+        # pkill exits 1 once no process matched.
+        return SimpleNamespace(returncode=0 if len(killed) == 1 else 1)
+
+    monkeypatch.setattr(build_sandbox.subprocess, "run", pkill)
     owners: dict[str, tuple[int, int]] = {}
     monkeypatch.setattr(
         build_sandbox.os,
@@ -55,16 +59,46 @@ def test_lend_and_reclaim_never_follow_symlinks(tmp_path: Path, as_root):
     killed, owners = as_root
     (tmp_path / "frontend").mkdir()
     (tmp_path / "frontend" / "package.json").write_text("{}")
-    (tmp_path / "escape").symlink_to("/etc")
+    (tmp_path / "frontend" / "inside").symlink_to("package.json")
 
     build_sandbox.lend(tmp_path)
     assert set(owners.values()) == {(990, 980)}
-    assert str(tmp_path / "escape") in owners
-    assert not any(path.startswith("/etc/") for path in owners)
+    assert str(tmp_path / "frontend" / "inside") in owners
 
     build_sandbox.reclaim(tmp_path)
-    assert killed == [["/usr/bin/pkill", "--signal", "KILL", "-u", "pwc-build"]]
+    # pkill repeats until no build process is left.
+    assert killed == [["/usr/bin/pkill", "--signal", "KILL", "-u", "pwc-build"]] * 2
     assert set(owners.values()) == {(0, 0)}
+
+
+@pytest.mark.parametrize(
+    "link, target",
+    [
+        ("release.json", "/etc/shadow"),
+        ("frontend/dist", "/etc"),
+        ("bin/python", "/etc/passwd"),
+        ("runtime.json", "/usr/bin/python3"),
+    ],
+)
+def test_reclaim_refuses_symlinks_planted_outside_the_tree(
+    tmp_path: Path, as_root, link: str, target: str
+):
+    planted = tmp_path / link
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.symlink_to(target)
+
+    with pytest.raises(RuntimeError, match="symlink outside its tree"):
+        build_sandbox.reclaim(tmp_path, allow=build_sandbox.is_venv_python_launcher)
+
+
+def test_reclaim_allows_venv_launchers_to_reach_the_system_python(tmp_path: Path):
+    (tmp_path / "bin").mkdir()
+    (tmp_path / "bin" / "python").symlink_to("/usr/bin/python3")
+    (tmp_path / "lib64").symlink_to("lib")
+
+    build_sandbox.reclaim(tmp_path, allow=build_sandbox.is_venv_python_launcher)
+    with pytest.raises(RuntimeError, match="bin/python"):
+        build_sandbox.reclaim(tmp_path)
 
 
 def test_missing_build_user_fails_closed(monkeypatch: pytest.MonkeyPatch):
@@ -96,7 +130,7 @@ def test_runtime_build_runs_uv_and_python_as_build_user(
     (release / "uv.lock").write_text("lock")
     seen: list[tuple[list[str], dict]] = []
 
-    def build(command, *, env, check):
+    def build(command, *, cwd, env, check):
         seen.append((command, env))
         target = Path(env["UV_PROJECT_ENVIRONMENT"])
         (target / "bin").mkdir()

@@ -411,7 +411,7 @@ def test_immutable_runtime_build_reuse_and_failed_cleanup(tmp_path: Path):
     runtimes = tmp_path / "runtimes"
     builds = 0
 
-    def build(command, *, env, check):
+    def build(command, *, cwd, env, check):
         nonlocal builds
         builds += 1
         target = Path(env["UV_PROJECT_ENVIRONMENT"])
@@ -467,7 +467,7 @@ def test_runtime_builder_uses_stable_absolute_uv_path(
     monkeypatch.setattr(runtime_module, "UV_BINARY", uv)
     command_seen: list[str] = []
 
-    def build(command, *, env, check):
+    def build(command, *, cwd, env, check):
         command_seen.extend(command)
         assert env["UV_PYTHON"] == "/usr/bin/python3"
         assert env["UV_PYTHON_PREFERENCE"] == "only-system"

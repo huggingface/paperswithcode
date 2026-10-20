@@ -97,19 +97,25 @@ def prepare_runtime(
                         str(release),
                     ]
                 ),
+                cwd=release,
                 env=environment,
                 check=True,
             )
             version = version_runner(
                 build_sandbox.command([str(temporary / "bin" / "python"), "--version"]),
+                cwd=release,
                 check=True,
                 capture_output=True,
                 text=True,
             ).stdout.strip()
         finally:
-            build_sandbox.reclaim(temporary)
-            build_sandbox.reclaim(cache)
-        (temporary / "runtime.json").write_text(
+            build_sandbox.reclaim(
+                temporary, allow=build_sandbox.is_venv_python_launcher
+            )
+        shutil.rmtree(cache)
+        runtime_json = temporary / "runtime.json"
+        runtime_json.unlink(missing_ok=True)
+        runtime_json.write_text(
             json.dumps(
                 {
                     "lock_sha256": identifier,
