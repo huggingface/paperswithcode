@@ -1716,7 +1716,11 @@ async def delete_session(
 ):
     try:
         service = ChatSessionService(db, settings)
-        receipt = service.delete_session(owner_from_user(user), session_id)
+        # Deleting a private paper terminates its compiler sandbox through
+        # Modal's blocking client; keep that off the event loop.
+        receipt = await asyncio.to_thread(
+            service.delete_session, owner_from_user(user), session_id
+        )
         if receipt.sandbox_id or receipt.snapshot_id:
             try:
                 await SandboxSessionManager(settings).cleanup_deleted(

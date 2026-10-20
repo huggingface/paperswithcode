@@ -25,13 +25,9 @@ MAX_LOG_BYTES = 64 * 1024
 MAX_ENVELOPE_LIFETIME_SECONDS = 10 * 60
 SANDBOX_WORKSPACE_ISOLATION_ATTESTATION = "sandbox-tmpfs-96m-v1"
 SANDBOX_WORKSPACE_LIMIT_BYTES = 96 * 1024 * 1024
-_QUALIFIED_COMPILER_IMAGE = re.compile(
-    r"^registry\.hf\.space/[a-z0-9][a-z0-9._-]{0,254}@sha256:[0-9a-f]{64}$"
-)
-STAGING_SANDBOX_COMPILER_NAMESPACE = "nielsr"
-_STAGING_SANDBOX_COMPILER_IMAGE = re.compile(
-    r"^registry\.hf\.space/nielsr-pwc-latex-compiler-[a-z0-9-]+-staging@sha256:[0-9a-f]{64}$"
-)
+# A published Modal image ID is immutable: it names one built image layer set.
+_QUALIFIED_COMPILER_IMAGE = re.compile(r"^im-[A-Za-z0-9]{20,32}$")
+STAGING_COMPILER_MODAL_ENVIRONMENT = "pwc-latex-staging"
 
 
 class EnvelopeError(ValueError):
@@ -257,27 +253,19 @@ def validate_public_key(public_key_base64: str) -> None:
 
 
 def validate_qualified_compiler_image(image: str) -> str:
-    """Require the exact private HF registry image identity used by a Sandbox."""
+    """Require the exact immutable Modal image identity used by a sandbox."""
     if not _QUALIFIED_COMPILER_IMAGE.fullmatch(image):
-        raise EnvelopeError("Compiler qualified image must be a pinned HF digest")
+        raise EnvelopeError("Compiler qualified image must be a Modal image ID")
     return image
 
 
-def validate_staging_sandbox_compiler_identity(image: str, namespace: str) -> str:
-    """Bind user-facing compiler work to the one approved private staging owner."""
-    if namespace != STAGING_SANDBOX_COMPILER_NAMESPACE:
+def validate_staging_compiler_identity(image: str, environment: str) -> str:
+    """Bind user-facing compiler work to the one approved staging environment."""
+    if environment != STAGING_COMPILER_MODAL_ENVIRONMENT:
         raise EnvelopeError(
-            "Compiler Sandbox must use the approved staging compiler identity"
+            "Compiler sandbox must use the approved staging compiler environment"
         )
-    image = validate_qualified_compiler_image(image)
-    if (
-        not _STAGING_SANDBOX_COMPILER_IMAGE.fullmatch(image)
-        or "production" in image.lower()
-    ):
-        raise EnvelopeError(
-            "Compiler Sandbox must use the approved staging compiler identity"
-        )
-    return image
+    return validate_qualified_compiler_image(image)
 
 
 def validate_result(result: CompilerResult, *, expected: CompilerEnvelope) -> None:
