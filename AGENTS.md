@@ -105,13 +105,17 @@ It runs on a Hetzner CPX42 with 8 vCPUs, 16 GB RAM, and an 80 GB disk.
   First confirm the worktree is clean and that `main` contains the branch's
   changes (for a squash merge, compare the branch diff against the merge
   commit's diff). Clean up only the task's own worktree and branch.
-- Keep the agent session until all of its work is live in production. Do not
-  archive, delete, or offer to archive a session whose merged changes are
-  undeployed or deployed only to staging, such as a chat change awaiting
-  production authorization. Before ending a turn in that state, record what
-  is unshipped and the exact SHA to deploy in the PR description or a comment,
-  so the work survives if the session is lost. Documentation-only and
-  local-only tasks are complete once merged or done.
+- Keep the agent session until all of its work is live in production and
+  nothing it was asked to do remains open. Merging one pull request does not
+  finish a session whose task is broader, such as a review whose other
+  findings are still unaddressed. Do not archive, delete, or offer to archive
+  a session with open work, or with merged changes that are undeployed or
+  deployed only to staging, such as a chat change awaiting production
+  authorization. Before ending a turn in that state, record what is unshipped
+  or unfinished, and any exact SHA to deploy, in the PR description or a
+  comment, so the work survives if the session is lost. The app must not
+  archive sessions when their pull request closes; leave that setting off and
+  rely on inactivity archiving instead.
 - Never force-push. If local and remote `main` have diverged, stop and resolve the
   divergence safely before pushing.
 - Production is the default for publishable non-chat source changes unless the
