@@ -452,3 +452,70 @@ def test_weekly_credential_prefers_neutral_name_and_keeps_legacy_fallback(
     monkeypatch.delenv("PWC_GITHUB_TOKEN_WEEKLY")
     monkeypatch.delenv("GITHUB_CLASSIC_TOKEN_AICONSULTANCYNIELSROGGE")
     assert queue_credentials()["weekly"] == "PWC_GITHUB_TOKEN_WEEKLY"
+
+
+def test_fetch_reports_classic_pat_forbidden_separately_from_credential_failure():
+    http = Mock()
+    http.get.return_value = SimpleNamespace(
+        status_code=403,
+        headers={"X-RateLimit-Remaining": "4000"},
+        text=(
+            '{"message":"`huggingface` forbids access via a personal access '
+            'token (classic). Please use a GitHub App"}'
+        ),
+    )
+
+    result = fetch_github_stars("huggingface", "transformers", "token", http=http)
+
+    assert result.stars is None
+    assert result.failure == "classic_pat_forbidden"
+    assert result.retries == 0
+
+
+def test_weekly_queue_retries_classic_pat_forbidden_groups_with_fallback_token(
+    monkeypatch,
+):
+    groups = [
+        {
+            "owner": "huggingface",
+            "name": "transformers",
+            "repository_ids": [7],
+            "eligible_group_count": 1,
+            "oldest_eligible_paper_date": None,
+        }
+    ]
+    responses = {
+        "classic": GitHubFetchResult(
+            None, 403, RateLimit(remaining=4000), failure="classic_pat_forbidden"
+        ),
+        "fallback": GitHubFetchResult(42, 200, RateLimit(remaining=10)),
+    }
+    tokens = []
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_service",
+        lambda: (Mock(), Mock()),
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.get_repository_groups",
+        lambda *_args, **_kwargs: groups,
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.fetch_github_stars",
+        lambda _owner, _name, token, **_kwargs: tokens.append(token)
+        or responses[token],
+    )
+    monkeypatch.setattr(
+        "scripts.hourly.update_github_stars.update_repository_group_stars",
+        lambda _service, _session, ids, stars: (len(ids), len(ids)),
+    )
+
+    result = run_queue("weekly", "classic", 1, 60, delay=0, fallback_token="fallback")
+
+    assert tokens == ["classic", "fallback"]
+    assert result["successes"] == 1
+    assert result["failures"] == 0
+    assert result["credential_failures"] == 0
+    assert result["classic_pat_fallbacks"] == 1
+    assert result["api_calls"] == 2
+    assert result["rate_limit_remaining"] == 4000
+    require_successful_queues([result])
