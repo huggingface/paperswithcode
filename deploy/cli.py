@@ -402,20 +402,14 @@ def frontend_feature_environment(
     }
 
 
-def frontend_analytics_environment(environment: str) -> dict[str, str]:
-    """Return optional browser-analytics settings for a frontend build.
-
-    The project token is intentionally kept in the protected environment file
-    rather than the repository. Vite still embeds it in the browser bundle,
-    as required by PostHog's client-side SDK.
-    """
+def _protected_frontend_values(environment: str, allowed: set[str]) -> dict[str, str]:
+    """Read the allowed non-empty keys from the protected environment file."""
 
     config_path = CONFIG_ROOT / f"{environment}.env"
     if not config_path.is_file():
         return {}
 
     values: dict[str, str] = {}
-    allowed = {"VITE_POSTHOG_PROJECT_TOKEN", "VITE_POSTHOG_HOST"}
     for raw_line in config_path.read_text(encoding="utf-8").splitlines():
         line = raw_line.strip()
         if not line or line.startswith("#") or "=" not in line:
@@ -424,7 +418,30 @@ def frontend_analytics_environment(environment: str) -> dict[str, str]:
         key = key.strip()
         if key in allowed and value.strip():
             values[key] = value.strip().strip('"').strip("'")
+    return values
 
+
+def frontend_host_environment(environment: str) -> dict[str, str]:
+    """Return host-only frontend build settings, such as origin host aliases.
+
+    Hostnames that would reveal the origin server stay in the protected
+    environment file instead of the repository.
+    """
+
+    return _protected_frontend_values(environment, {"VITE_INTERNAL_HOST_ALIASES"})
+
+
+def frontend_analytics_environment(environment: str) -> dict[str, str]:
+    """Return optional browser-analytics settings for a frontend build.
+
+    The project token is intentionally kept in the protected environment file
+    rather than the repository. Vite still embeds it in the browser bundle,
+    as required by PostHog's client-side SDK.
+    """
+
+    values = _protected_frontend_values(
+        environment, {"VITE_POSTHOG_PROJECT_TOKEN", "VITE_POSTHOG_HOST"}
+    )
     if "VITE_POSTHOG_PROJECT_TOKEN" not in values:
         return {}
     values.setdefault("VITE_POSTHOG_HOST", "https://eu.i.posthog.com")
@@ -466,6 +483,7 @@ def prepare_release(sha: str, environment: str) -> Path:
             )
         )
         build_env.update(frontend_analytics_environment(environment))
+        build_env.update(frontend_host_environment(environment))
         run(["npm", "ci"], cwd=frontend, env=build_env)
         run(
             ["npm", "run", "build", "--", "--mode", environment],

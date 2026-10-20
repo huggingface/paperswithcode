@@ -1,11 +1,20 @@
 import { normalizePaperRouteId } from "@/lib/utils";
 
+export function parseHostList(raw: string | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((host) => host.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+// Extra hostnames (such as the origin server IP) that stored links may use for
+// this site; supplied at build time instead of being committed to source.
 const INTERNAL_HOSTS = new Set([
   "paperswithcode.co",
   "www.paperswithcode.co",
   "localhost",
   "127.0.0.1",
-  "167.235.148.241",
+  ...parseHostList(import.meta.env.VITE_INTERNAL_HOST_ALIASES),
 ]);
 
 const INTERNAL_PATH_PREFIXES = [

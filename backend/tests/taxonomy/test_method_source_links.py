@@ -1,11 +1,13 @@
 from datetime import date
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.compiler import compiles
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
+from backend.config import get_settings
 from backend.models.database import (
     Base,
     Method as DBMethod,
@@ -19,6 +21,17 @@ from backend.database.methods_setup.check_method_source_links import (
     build_source_link_plan,
     parse_trusted_source_url,
 )
+from backend.utils.urls import normalize_local_paper_source_url
+
+ORIGIN_ALIAS = "203.0.113.10"
+
+
+@pytest.fixture
+def origin_alias(monkeypatch):
+    monkeypatch.setenv("PWC_LOCAL_HOST_ALIASES", f" {ORIGIN_ALIAS} , ")
+    get_settings.cache_clear()
+    yield ORIGIN_ALIAS
+    get_settings.cache_clear()
 
 
 @compiles(ARRAY, "sqlite")
@@ -91,7 +104,9 @@ def test_paper_response_keeps_source_paper_id_on_methods_without_url_fallback():
     assert [method.name for method in introduced_methods] == ["Whisper"]
 
 
-def test_method_response_normalizes_internal_source_url_to_relative_paper_route():
+def test_method_response_normalizes_internal_source_url_to_relative_paper_route(
+    origin_alias,
+):
     engine = create_engine(
         "sqlite:///:memory:",
         connect_args={"check_same_thread": False},
@@ -118,7 +133,7 @@ def test_method_response_normalizes_internal_source_url_to_relative_paper_route(
                 name="Whisper",
                 slug="whisper",
                 source_paper_id=1,
-                source_url="http://167.235.148.241:8080/paper/wrong-host-link",
+                source_url=f"http://{origin_alias}:8080/paper/wrong-host-link",
                 source_title="Robust Speech Recognition via Large-Scale Weak Supervision",
             )
         )
@@ -148,6 +163,27 @@ def test_method_response_normalizes_internal_source_url_to_relative_paper_route(
         "external": 0,
         "whisper": 1,
     }
+
+
+def test_local_host_aliases_are_configured_not_hardcoded(monkeypatch):
+    monkeypatch.delenv("PWC_LOCAL_HOST_ALIASES", raising=False)
+    get_settings.cache_clear()
+    try:
+        url = f"http://{ORIGIN_ALIAS}:8080/paper/2212.04356"
+        assert normalize_local_paper_source_url(url) == url
+        assert parse_trusted_source_url(url) is None
+        assert (
+            normalize_local_paper_source_url("https://paperswithcode.co/abs/2212.04356")
+            == "/paper/2212.04356"
+        )
+    finally:
+        get_settings.cache_clear()
+
+
+def test_local_host_aliases_mark_origin_links_as_internal(origin_alias):
+    url = f"http://{origin_alias}:8080/paper/2212.04356v2"
+    assert normalize_local_paper_source_url(url) == "/paper/2212.04356v2"
+    assert parse_trusted_source_url(url).arxiv_id == "2212.04356"
 
 
 def test_parse_trusted_source_url_accepts_site_and_arxiv_routes_only():

@@ -77,6 +77,13 @@ class Settings(BaseSettings, ChatSettings):
             "API."
         ),
     )
+    local_host_aliases: str = Field(
+        default="",
+        description=(
+            "Comma-separated extra hostnames (for example the origin server IP) "
+            "that stored links may use to point at this site's own pages."
+        ),
+    )
     extra_allowed_origin_regex: str = Field(
         default="",
         description=(
@@ -492,6 +499,16 @@ class Settings(BaseSettings, ChatSettings):
             name.strip().lower()
             for name in self.admin_hf_usernames.split(",")
             if name.strip()
+        }
+
+    @property
+    def local_host_alias_set(self) -> set[str]:
+        """Return configured local host aliases, lowercased and trimmed."""
+
+        return {
+            host.strip().lower()
+            for host in self.local_host_aliases.split(",")
+            if host.strip()
         }
 
     @staticmethod

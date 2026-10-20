@@ -2,8 +2,19 @@ import { describe, expect, it } from "vitest";
 
 import {
   extractPaperRouteId,
+  parseHostList,
   resolveInternalPath,
 } from "@/lib/internalLinks";
+
+describe("parseHostList", () => {
+  it("splits, trims, lowercases and drops empty entries", () => {
+    expect(parseHostList(" 203.0.113.10, Example.TEST ,,")).toEqual([
+      "203.0.113.10",
+      "example.test",
+    ]);
+    expect(parseHostList(undefined)).toEqual([]);
+  });
+});
 
 describe("resolveInternalPath", () => {
   it.each([
@@ -23,6 +34,7 @@ describe("resolveInternalPath", () => {
 
   it.each([
     "https://example.com/paper/2501.12326",
+    "http://203.0.113.10:8080/paper/2501.12326",
     "https://paperswithcode.co/about",
     "not a URL",
   ])("rejects non-internal URL %s", (href) => {

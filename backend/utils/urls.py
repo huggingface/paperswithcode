@@ -12,14 +12,21 @@ from urllib.parse import urlparse
 from backend.config import get_settings
 
 
-LOCAL_PAPER_SOURCE_HOSTS = {
-    "",
-    "localhost",
-    "127.0.0.1",
-    "167.235.148.241",
-    "paperswithcode.co",
-    "www.paperswithcode.co",
-}
+LOCAL_PAPER_SOURCE_HOSTS = frozenset(
+    {
+        "",
+        "localhost",
+        "127.0.0.1",
+        "paperswithcode.co",
+        "www.paperswithcode.co",
+    }
+)
+
+
+def local_paper_source_hosts() -> frozenset[str]:
+    """Hosts whose paper links point at this site, plus PWC_LOCAL_HOST_ALIASES."""
+
+    return LOCAL_PAPER_SOURCE_HOSTS | get_settings().local_host_alias_set
 
 
 def get_arxiv_abs_url(arxiv_id: str, version: Optional[str] = None) -> Optional[str]:
@@ -159,7 +166,7 @@ def normalize_local_paper_source_url(source_url: Optional[str]) -> Optional[str]
         return source_url
 
     parsed = urlparse(source_url)
-    if parsed.scheme and (parsed.hostname or "") not in LOCAL_PAPER_SOURCE_HOSTS:
+    if parsed.scheme and (parsed.hostname or "") not in local_paper_source_hosts():
         return source_url
 
     path = parsed.path if parsed.scheme or parsed.netloc else source_url

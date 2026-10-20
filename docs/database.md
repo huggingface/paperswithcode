@@ -61,7 +61,7 @@ sudo ./scripts/manage_postgres_access.sh remove 84.198.172.145
 After whitelisting, connect with:
 
 ```
-Host: 167.235.148.241
+Host: <origin-ip>
 Port: 5432
 DB:   paperswithcode_hf
 User: paperswithcode_user

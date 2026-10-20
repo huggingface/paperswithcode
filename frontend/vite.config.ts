@@ -6,10 +6,18 @@ import fs from "fs";
 // Prod dev server runs on :8080; staging runs on :8081.
 // For DNS-backed staging, set VITE_HMR_HOST / VITE_HMR_PROTOCOL / VITE_HMR_CLIENT_PORT.
 // Without those env vars, Vite uses the browser's current origin, which keeps raw-IP
-// previews like http://167.235.148.241:8081 from reconnecting to the wrong HMR host.
+// previews like http://<origin-ip>:8081 from reconnecting to the wrong HMR host.
+// Extra dev/preview hostnames (origin IP, tailnet names) come from the
+// comma-separated VITE_ALLOWED_HOSTS env var rather than being committed here.
 export default defineConfig(({ mode }) => {
   const isStaging = mode === "staging";
   const env = loadEnv(mode, process.cwd(), "");
+  const extraAllowedHosts = String(
+    process.env.VITE_ALLOWED_HOSTS ?? env.VITE_ALLOWED_HOSTS ?? "",
+  )
+    .split(",")
+    .map((host) => host.trim())
+    .filter(Boolean);
   const chatEnabled = ["1", "true", "yes"].includes(
     String(process.env.VITE_CHAT_ENABLED ?? env.VITE_CHAT_ENABLED ?? "")
       .trim()
@@ -85,15 +93,12 @@ export default defineConfig(({ mode }) => {
       host: "::",
       port: isStaging ? 8081 : 8080,
       strictPort: true,
-      allowedHosts: isStaging
-        ? [
-            "staging.paperswithcode.co",
-            "167.235.148.241",
-            // Tailnet-only preview (ufw opens 8081 on tailscale0 only)
-            "100.107.126.51",
-            "paperswithcode-vps.taildb5d.ts.net",
-          ]
-        : ["paperswithcode.co", "www.paperswithcode.co"],
+      allowedHosts: [
+        ...(isStaging
+          ? ["staging.paperswithcode.co"]
+          : ["paperswithcode.co", "www.paperswithcode.co"]),
+        ...extraAllowedHosts,
+      ],
       ...(hmr ? { hmr } : {}),
       proxy,
     },
@@ -101,9 +106,12 @@ export default defineConfig(({ mode }) => {
       host: "::",
       port: isStaging ? 8081 : 8080,
       strictPort: true,
-      allowedHosts: isStaging
-        ? ["staging.paperswithcode.co", "167.235.148.241"]
-        : ["paperswithcode.co", "www.paperswithcode.co", "167.235.148.241"],
+      allowedHosts: [
+        ...(isStaging
+          ? ["staging.paperswithcode.co"]
+          : ["paperswithcode.co", "www.paperswithcode.co"]),
+        ...extraAllowedHosts,
+      ],
       proxy,
     },
     plugins: [

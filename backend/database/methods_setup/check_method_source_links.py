@@ -19,16 +19,9 @@ from sqlalchemy.orm import Session
 
 from backend.database.connection import db_manager
 from backend.models.database import Method, Paper, PaperMethod
+from backend.utils.urls import local_paper_source_hosts
 
 
-LOCAL_HOSTS = {
-    "",
-    "localhost",
-    "127.0.0.1",
-    "167.235.148.241",
-    "paperswithcode.co",
-    "www.paperswithcode.co",
-}
 ARXIV_HOSTS = {"arxiv.org", "www.arxiv.org"}
 LOCAL_PAPER_PATH_RE = re.compile(r"^/(?:paper|abs|pdf)/(.+?)(?:\.pdf)?/?$")
 ARXIV_PAPER_PATH_RE = re.compile(r"^/(?:abs|pdf)/(.+?)(?:\.pdf)?/?$")
@@ -80,7 +73,7 @@ def parse_trusted_source_url(source_url: str | None) -> SourcePaperRef | None:
         match = ARXIV_PAPER_PATH_RE.match(parsed.path.rstrip("/"))
         return _split_version(match.group(1)) if match else None
 
-    if parsed.scheme and host not in LOCAL_HOSTS:
+    if parsed.scheme and host not in local_paper_source_hosts():
         return None
 
     path = parsed.path if parsed.scheme or parsed.netloc else source_url

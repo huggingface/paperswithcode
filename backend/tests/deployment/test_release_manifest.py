@@ -578,3 +578,24 @@ def test_codex_jobs_require_all_credentials(tmp_path: Path, environment: str):
     settings.codex_jobs_token = ""
     with pytest.raises(RuntimeError, match="Codex jobs require"):
         validate_runtime(settings)
+
+
+def test_frontend_host_environment_reads_only_host_aliases(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(deploy_cli, "CONFIG_ROOT", tmp_path)
+    assert deploy_cli.frontend_host_environment("production") == {}
+
+    (tmp_path / "production.env").write_text(
+        "PWC_DB_PASSWORD=secret\n"
+        "# VITE_INTERNAL_HOST_ALIASES=ignored\n"
+        "VITE_INTERNAL_HOST_ALIASES='203.0.113.10'\n"
+        "VITE_POSTHOG_PROJECT_TOKEN=phc_test\n"
+    )
+    assert deploy_cli.frontend_host_environment("production") == {
+        "VITE_INTERNAL_HOST_ALIASES": "203.0.113.10"
+    }
+    assert deploy_cli.frontend_analytics_environment("production") == {
+        "VITE_POSTHOG_PROJECT_TOKEN": "phc_test",
+        "VITE_POSTHOG_HOST": "https://eu.i.posthog.com",
+    }
