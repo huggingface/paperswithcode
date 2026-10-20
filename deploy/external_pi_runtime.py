@@ -22,9 +22,11 @@ from pathlib import Path
 from backend.chat_sandbox_worker.contract import PI_NODE_SHA256, PI_NODE_VERSION
 
 try:
+    from deploy import build_sandbox
     from deploy.release import sha256_file
     from deploy.runtime import make_tree_readonly
 except ModuleNotFoundError:
+    import build_sandbox  # type: ignore[no-redef]
     from release import sha256_file  # type: ignore[no-redef]
     from runtime import make_tree_readonly  # type: ignore[no-redef]
 
@@ -820,45 +822,61 @@ def prepare_external_pi_runtime(
             "check": True,
             "timeout": BUILD_TIMEOUT_SECONDS,
         }
-        _run_build_command(
-            runner,
-            [
-                *npm_command,
-                "ci",
-                "--ignore-scripts",
-                "--no-audit",
-                "--no-fund",
-            ],
-            root=temporary,
-            **common,
-        )
-        _run_build_command(
-            runner,
-            [*npm_command, "run", "build"],
-            root=temporary,
-            **common,
-        )
-        _run_build_command(
-            runner,
-            [*npm_command, "prune", "--omit=dev", "--ignore-scripts"],
-            root=temporary,
-            **common,
-        )
-        prompt_environment = environment.copy()
-        prompt_environment["PYTHONPATH"] = str(release)
-        _run_build_command(
-            runner,
-            [
-                str(python_binary),
-                str(release / "backend/chat_sandbox_worker/render_pi_prompt_asset.py"),
-                str(temporary / "assets/pi-system-prompt.txt"),
-            ],
-            root=temporary,
-            cwd=release,
-            env=prompt_environment,
-            check=True,
-            timeout=BUILD_TIMEOUT_SECONDS,
-        )
+        # The npm build script and the prompt renderer are release code, so
+        # they run as the unprivileged build user, never as root.
+        build_sandbox.lend(temporary)
+        try:
+            _run_build_command(
+                runner,
+                build_sandbox.command(
+                    [
+                        *npm_command,
+                        "ci",
+                        "--ignore-scripts",
+                        "--no-audit",
+                        "--no-fund",
+                    ]
+                ),
+                root=temporary,
+                **common,
+            )
+            _run_build_command(
+                runner,
+                build_sandbox.command([*npm_command, "run", "build"]),
+                root=temporary,
+                **common,
+            )
+            _run_build_command(
+                runner,
+                build_sandbox.command(
+                    [*npm_command, "prune", "--omit=dev", "--ignore-scripts"]
+                ),
+                root=temporary,
+                **common,
+            )
+            prompt_environment = environment.copy()
+            prompt_environment["PYTHONPATH"] = str(release)
+            prompt_environment["PYTHONDONTWRITEBYTECODE"] = "1"
+            _run_build_command(
+                runner,
+                build_sandbox.command(
+                    [
+                        str(python_binary),
+                        str(
+                            release
+                            / "backend/chat_sandbox_worker/render_pi_prompt_asset.py"
+                        ),
+                        str(temporary / "assets/pi-system-prompt.txt"),
+                    ]
+                ),
+                root=temporary,
+                cwd=release,
+                env=prompt_environment,
+                check=True,
+                timeout=BUILD_TIMEOUT_SECONDS,
+            )
+        finally:
+            build_sandbox.reclaim(temporary)
 
         shutil.rmtree(app / "src")
         shutil.rmtree(app / "test")

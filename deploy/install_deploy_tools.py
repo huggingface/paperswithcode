@@ -21,6 +21,8 @@ PRODUCTION_CRON_ENV_PATH = Path("/etc/paperswithcode/production-cron.env")
 SUBMISSION_REVIEW_SCHEDULE_STATE_PATH = Path(
     "/var/lib/paperswithcode/production/cron-logs/submission-review-schedule.json"
 )
+# pwc-deploy runs release build steps as this account (deploy/build_sandbox.py).
+BUILD_USER = "pwc-build"
 COMMANDS = (
     "pwc-deploy",
     "pwc-rollback",
@@ -285,6 +287,25 @@ def install_autonomous_sudoers() -> None:
         temporary.unlink(missing_ok=True)
 
 
+def ensure_build_user() -> None:
+    """Create the unprivileged account that builds releases for pwc-deploy."""
+
+    if subprocess.run(["id", "-u", BUILD_USER], capture_output=True).returncode:
+        subprocess.run(
+            [
+                "useradd",
+                "--system",
+                "--home",
+                "/nonexistent",
+                "--shell",
+                "/usr/sbin/nologin",
+                "--user-group",
+                BUILD_USER,
+            ],
+            check=True,
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog="install-deploy-tools")
     parser.add_argument("source", help="exact commit or ref to install")
@@ -292,6 +313,7 @@ def main() -> int:
     if os.geteuid() != 0:
         parser.error("run through sudo")
     SUDOERS_PATH.unlink(missing_ok=True)
+    ensure_build_user()
     repo = Path(__file__).resolve().parents[1]
     sha = subprocess.run(
         ["git", "rev-parse", f"{args.source}^{{commit}}"],

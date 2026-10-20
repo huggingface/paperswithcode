@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 
 import psycopg2
+import pytest
 
 TEST_DATABASE_OPT_IN = "PWC_TEST_DATABASE"
 LIVE_ENVIRONMENTS = {"production", "staging"}
@@ -51,3 +52,17 @@ def pytest_configure(config):
     # time, so this also covers engines built from ``db_manager``.
     psycopg2.connect = guarded_connect
     config.add_cleanup(lambda: setattr(psycopg2, "connect", real_connect))
+
+
+@pytest.fixture(autouse=True)
+def _build_as_the_test_user(monkeypatch):
+    """Run deploy build steps directly when the suite itself runs as root.
+
+    ``deploy.build_sandbox`` drops to the ``pwc-build`` account whenever the
+    caller is root, which on a deployment host would also apply to tests.
+    ``test_build_sandbox.py`` covers the privilege drop explicitly.
+    """
+
+    from deploy import build_sandbox
+
+    monkeypatch.setattr(build_sandbox, "enabled", lambda: False)

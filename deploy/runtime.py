@@ -10,8 +10,10 @@ import tempfile
 from pathlib import Path
 
 try:
+    from deploy import build_sandbox
     from deploy.release import sha256_file
 except ModuleNotFoundError:
+    import build_sandbox  # type: ignore[no-redef]
     from release import sha256_file  # type: ignore[no-redef]
 
 UV_BINARY = Path(os.environ.get("PWC_DEPLOY_UV", "/usr/local/bin/uv"))
@@ -64,8 +66,16 @@ def prepare_runtime(
         return target, False
     runtimes_root.mkdir(parents=True, exist_ok=True)
     temporary = Path(tempfile.mkdtemp(prefix=f".{identifier}.new-", dir=runtimes_root))
+    # uv.lock picks the packages and may build sdists, so the build user runs
+    # uv with a throwaway cache rather than root's environment and cache.
+    cache = Path(tempfile.mkdtemp(prefix=f".{identifier}.cache-", dir=runtimes_root))
     try:
-        environment = os.environ.copy()
+        environment = {
+            "PATH": "/usr/local/bin:/usr/bin:/bin",
+            "HOME": str(cache),
+            "LANG": "C.UTF-8",
+            "UV_CACHE_DIR": str(cache),
+        }
         environment["UV_PROJECT_ENVIRONMENT"] = str(temporary)
         environment["UV_PYTHON"] = "/usr/bin/python3"
         environment["UV_PYTHON_PREFERENCE"] = "only-system"
@@ -73,24 +83,32 @@ def prepare_runtime(
         # hard-linked runtime read-only would also mutate the cache inode and
         # any other environment linked to it.
         environment["UV_LINK_MODE"] = "copy"
-        runner(
-            [
-                str(UV_BINARY),
-                "sync",
-                "--frozen",
-                "--no-install-project",
-                "--project",
-                str(release),
-            ],
-            env=environment,
-            check=True,
-        )
-        version = version_runner(
-            [str(temporary / "bin" / "python"), "--version"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
+        build_sandbox.lend(temporary)
+        build_sandbox.lend(cache)
+        try:
+            runner(
+                build_sandbox.command(
+                    [
+                        str(UV_BINARY),
+                        "sync",
+                        "--frozen",
+                        "--no-install-project",
+                        "--project",
+                        str(release),
+                    ]
+                ),
+                env=environment,
+                check=True,
+            )
+            version = version_runner(
+                build_sandbox.command([str(temporary / "bin" / "python"), "--version"]),
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+        finally:
+            build_sandbox.reclaim(temporary)
+            build_sandbox.reclaim(cache)
         (temporary / "runtime.json").write_text(
             json.dumps(
                 {
@@ -124,6 +142,7 @@ def prepare_runtime(
         return target, True
     finally:
         shutil.rmtree(temporary, ignore_errors=True)
+        shutil.rmtree(cache, ignore_errors=True)
 
 
 def cleanup_runtimes(runtimes_root: Path, protected_ids: set[str]) -> list[str]:

@@ -180,6 +180,16 @@ Install deployment tooling only from committed source:
 sudo python deploy/install_deploy_tools.py <commit>
 ```
 
+`pwc-deploy` runs as root, but never runs release-controlled build code as
+root. The frontend `npm ci`/`npm run build`, the release chat descriptor
+import, the runtime `uv sync`, and the external Pi worker build run as the
+unprivileged `pwc-build` account (`deploy/build_sandbox.py`). Each step uses a
+cleared environment, a throwaway HOME and package cache, no supplementary
+groups or capabilities, and `no_new_privs`. Root takes the build tree back
+(killing leftover `pwc-build` processes first) before inspecting or publishing
+it. `install_deploy_tools.py` creates the account; a deploy fails closed if it
+is missing.
+
 ## First-party MCP component
 
 The remote MCP server is an independent immutable component even though its

@@ -176,6 +176,7 @@ def main() -> int:
         "pwc-external-pi",
         "pwc-chat-executor",
         "pwc-mcp",
+        "pwc-build",
     ):
         ensure_user(user)
     subprocess.run(
