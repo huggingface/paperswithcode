@@ -16,7 +16,8 @@ At `45 * * * *`, `cron-extract-urls.yml` runs three isolated jobs:
 ## Requirements
 
 - GitHub repository secrets: `VPS_HOST`, `VPS_USER`,
-  `VPS_SSH_PRIVATE_KEY`, `MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET`.
+  `VPS_SSH_PRIVATE_KEY`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
+  `MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET`.
 - Existing Modal secret `anthropic`, containing the HF Inference Providers
   endpoint/token/model environment used by `paper_parsing_agent_v2`.
 - Modal deployment access. The discovery job deploys the current app before

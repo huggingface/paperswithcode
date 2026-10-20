@@ -29,8 +29,11 @@ JavaScript/CSS MIME types, and the unauthenticated staging boundary. It is
 read-only and does not create an admin session.
 
 Other workflows retain their normal CI or Hugging Face Space responsibilities.
-The VPS credentials used by scheduled workflows are `VPS_SSH_PRIVATE_KEY`,
-`VPS_HOST`, and `VPS_USER`. Inspect runs in GitHub Actions and inspect host-side
+The VPS credentials used by manually dispatched workflows are
+`VPS_SSH_PRIVATE_KEY`, `VPS_HOST`, and `VPS_USER`. Each SSH job first joins the
+tailnet as an ephemeral `tag:ci` node with the `TS_OAUTH_CLIENT_ID` and
+`TS_OAUTH_SECRET` OAuth client, so `VPS_HOST` can be the VPS's Tailscale
+address and public port 22 can stay closed. Inspect runs in GitHub Actions and inspect host-side
 execution with:
 
 ```bash
