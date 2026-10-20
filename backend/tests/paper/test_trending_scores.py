@@ -146,3 +146,41 @@ def test_decaying_pins_share_state_for_arxiv_and_internal_paper_ids(
     state = json.loads(state_path.read_text())
     assert state["2606.16140"]["decay_hours"] == 48.0
     assert state["paper:104054"]["decay_hours"] == 96.0
+
+
+def test_full_run_clears_scores_of_papers_that_left_the_window(monkeypatch):
+    cron = _load_module()
+    population = {1: {"github_raw": 10.0, "existing": False, "artifacts": []}}
+    monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
+    monkeypatch.setattr(
+        cron, "get_aged_out_scored_paper_ids", lambda _session, _cutoff: [7, 8]
+    )
+    writes = []
+    monkeypatch.setattr(
+        cron,
+        "write_scores",
+        lambda _session, updates, clears: writes.append((updates, clears))
+        or (len(updates), len(clears)),
+    )
+
+    result = cron.calculate_paper_scores(Mock())
+
+    assert writes[0][1] == [7, 8]
+    assert result["cleared"] == 2
+
+
+def test_targeted_run_leaves_aged_out_scores_to_the_full_run(monkeypatch):
+    cron = _load_module()
+    population = {1: {"github_raw": 10.0, "existing": False, "artifacts": []}}
+    monkeypatch.setattr(cron, "load_population", lambda _session, _cutoff: population)
+    aged_out = Mock(return_value=[7])
+    monkeypatch.setattr(cron, "get_aged_out_scored_paper_ids", aged_out)
+    monkeypatch.setattr(
+        cron,
+        "write_scores",
+        lambda _session, updates, clears: (len(updates), len(clears)),
+    )
+
+    cron.calculate_paper_scores(Mock(), paper_ids=[1])
+
+    aged_out.assert_not_called()
