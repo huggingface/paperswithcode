@@ -138,8 +138,11 @@ async def generate_thumbnail(
             )
             if existing_url:
                 if not paper.thumbnail_url:
-                    paper.thumbnail_url = existing_url
-                    db.commit()
+                    # `paper` is the hydrated API model; persist on the ORM row.
+                    db_paper = db.get(DBPaper, paper.id)
+                    if db_paper is not None:
+                        db_paper.thumbnail_url = existing_url
+                        db.commit()
                 return {
                     "thumbnail_url": existing_url,
                     "status": "cached",
@@ -290,15 +293,15 @@ def get_thumbnail_status(
         )
 
 
-@router.get("/cache/stats")
+@router.get("/cache/stats", dependencies=[Depends(require_admin)])
 def get_cache_stats(
     thumbnail_service: ThumbnailService = Depends(get_thumbnail_service),
 ):
     """
-    Get thumbnail cache statistics.
+    Get thumbnail cache statistics (admin only).
 
     Returns:
-        Dictionary with cache statistics
+        Dictionary with file count, size, and storage backend
     """
     return thumbnail_service.get_cache_stats()
 

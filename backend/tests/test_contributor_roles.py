@@ -344,6 +344,7 @@ def test_representative_excluded_boundaries_remain_admin_only():
         "/api/thumbnails/cache/cleanup",
     ):
         assert "require_admin" in routes[("POST", path)]
+    assert "require_admin" in routes[("GET", "/api/thumbnails/cache/stats")]
 
 
 def test_chat_spend_dashboard_route_is_admin_only():

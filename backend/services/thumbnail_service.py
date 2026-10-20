@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 
 THUMBNAIL_RENDERER_CACHE_BUST = "fit9"
 EXPECTED_THUMBNAIL_WIDTH = 400
+CACHE_STATS_TTL_SECONDS = 300.0
+_cache_stats_cache: dict[tuple[str, str], tuple[float, dict]] = {}
 EXPECTED_THUMBNAIL_FORMAT = "JPEG"
 EXTERNAL_THUMBNAIL_DIRECT_HOSTS = frozenset(
     {
@@ -975,46 +977,38 @@ class ThumbnailService:
 
     def get_cache_stats(self) -> dict:
         """
-        Get statistics about the thumbnail cache.
+        Get counts and sizes for the local thumbnail cache.
 
-        Returns:
-            Dictionary with cache statistics
+        Walking the cache directory touches every file, so results are cached
+        per directory for ``CACHE_STATS_TTL_SECONDS``. Server paths and bucket
+        identifiers are deliberately left out of the payload.
         """
-        try:
-            cache_dir = (
-                self.temp_cache_dir
-                if self.storage_backend == "hf_bucket"
-                else self.legacy_cache_dir
-            )
-            thumbnail_files = list(cache_dir.glob("*.jpg"))
-            total_files = len(thumbnail_files)
+        cache_dir = (
+            self.temp_cache_dir
+            if self.storage_backend == "hf_bucket"
+            else self.legacy_cache_dir
+        )
+        key = (str(cache_dir), self.storage_backend)
+        cached = _cache_stats_cache.get(key)
+        now = time.monotonic()
+        if cached is not None and now - cached[0] < CACHE_STATS_TTL_SECONDS:
+            return dict(cached[1])
 
-            total_size = sum(f.stat().st_size for f in thumbnail_files)
-            total_size_mb = total_size / (1024 * 1024)
+        total_files = 0
+        total_size = 0
+        if cache_dir.is_dir():
+            for thumbnail_file in cache_dir.glob("*.jpg"):
+                try:
+                    size = thumbnail_file.stat().st_size
+                except FileNotFoundError:
+                    continue  # removed by a concurrent cleanup/mirror
+                total_files += 1
+                total_size += size
 
-            stats = {
-                "total_files": total_files,
-                "total_size_mb": round(total_size_mb, 2),
-                "cache_dir": str(cache_dir),
-                "storage_backend": self.storage_backend,
-            }
-            if self.storage_backend == "hf_bucket":
-                stats.update(
-                    {
-                        "bucket_id": self.bucket_id,
-                        "bucket_prefix": self.bucket_prefix,
-                        "legacy_cache_dir": str(self.legacy_cache_dir),
-                    }
-                )
-            return stats
-        except Exception:
-            return {
-                "total_files": 0,
-                "total_size_mb": 0,
-                "cache_dir": str(
-                    self.temp_cache_dir
-                    if self.storage_backend == "hf_bucket"
-                    else self.legacy_cache_dir
-                ),
-                "storage_backend": self.storage_backend,
-            }
+        stats = {
+            "total_files": total_files,
+            "total_size_mb": round(total_size / (1024 * 1024), 2),
+            "storage_backend": self.storage_backend,
+        }
+        _cache_stats_cache[key] = (now, stats)
+        return dict(stats)
