@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import ctypes
 import fcntl
 import json
 import os
@@ -701,7 +702,26 @@ def terminal_record(start: dict, event: str, *, returncode: int) -> dict:
     }
 
 
+PR_SET_DUMPABLE = 4
+
+
+def hide_launcher_environment() -> None:
+    """Keep the launcher's full environment away from the jobs it starts.
+
+    systemd hands the launcher every configured secret, while jobs get a
+    filtered copy. Jobs run as the same user, so they could otherwise read the
+    launcher's /proc/<pid>/environ. A non-dumpable process's /proc entries are
+    owned by root.
+    """
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(PR_SET_DUMPABLE, 0, 0, 0, 0) != 0:
+        error = ctypes.get_errno()
+        raise OSError(error, os.strerror(error))
+
+
 def main() -> int:
+    hide_launcher_environment()
     manifest = json.loads((CURRENT / "release.json").read_text())
     if len(sys.argv) == 2 and sys.argv[1] == "status":
         print(

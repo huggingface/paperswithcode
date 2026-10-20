@@ -541,3 +541,21 @@ def test_host_layout_grants_cron_traversal_and_drops_production_group(monkeypatc
         ],
         ["gpasswd", "--delete", "pwc-cron", "pwc-production"],
     ]
+
+
+def test_launcher_hides_its_environment_from_same_user_jobs(tmp_path: Path):
+    # Run in a child so the test process itself stays dumpable.
+    script = tmp_path / "probe.py"
+    script.write_text(
+        "import ctypes, sys\n"
+        f"sys.path.insert(0, {str(Path(cron_launcher.__file__).parent)!r})\n"
+        "import cron_launcher\n"
+        "cron_launcher.hide_launcher_environment()\n"
+        "libc = ctypes.CDLL(None)\n"
+        "print(libc.prctl(3, 0, 0, 0, 0))\n",  # PR_GET_DUMPABLE
+        encoding="utf-8",
+    )
+    result = subprocess.run(
+        ["python3", "-I", str(script)], check=True, capture_output=True, text=True
+    )
+    assert result.stdout.strip() == "0"
