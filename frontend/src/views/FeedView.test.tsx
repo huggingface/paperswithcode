@@ -63,8 +63,47 @@ describe("AskAssistant", () => {
   it("shows the paper mention hint above the chat window", () => {
     renderAskAssistant();
 
-    expect(screen.getByText("Hint: type @ to bring papers into context"))
-      .toBeVisible();
+    expect(screen.getByText(
+      "Hint: type @ to bring papers into context, or press Tab to use a suggestion",
+    )).toBeVisible();
+  });
+
+  it("fills the empty box with the shown suggestion on Tab", async () => {
+    const user = userEvent.setup();
+    renderAskAssistant();
+    const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
+
+    await user.click(textarea);
+    await user.keyboard("{Tab}");
+
+    expect(textarea).toHaveValue(SUGGESTED_CHAT_PROMPTS[0]);
+    expect(textarea).toHaveFocus();
+  });
+
+  it("completes a started suggestion on Tab and previews the rest", async () => {
+    const user = userEvent.setup();
+    const { container } = renderAskAssistant();
+    const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
+
+    await user.type(textarea, "find rel");
+    expect(container.querySelector(".chat-prompt-completion"))
+      .toHaveTextContent("evant papers on RLVR");
+
+    await user.keyboard("{Tab}");
+    expect(textarea).toHaveValue("find relevant papers on RLVR");
+    expect(container.querySelector(".chat-prompt-completion")).not.toBeInTheDocument();
+  });
+
+  it("leaves Tab to move focus when the text matches no suggestion", async () => {
+    const user = userEvent.setup();
+    renderAskAssistant();
+    const textarea = screen.getByRole("textbox", { name: "Ask the assistant" });
+
+    await user.type(textarea, "Compare diffusion models");
+    await user.keyboard("{Tab}");
+
+    expect(textarea).toHaveValue("Compare diffusion models");
+    expect(textarea).not.toHaveFocus();
   });
 
   it("opens the canonical chat in a new tab on the Hugging Face Space mirror", async () => {

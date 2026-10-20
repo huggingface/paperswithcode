@@ -25,7 +25,7 @@ import {
 } from "@/lib/apiUrl";
 import type { ChatDraft, ReasoningEffort } from "@/lib/chat";
 import { queueChatLaunch } from "@/lib/chatLaunch";
-import { SUGGESTED_CHAT_PROMPTS } from "@/lib/chatPrompts";
+import { SUGGESTED_CHAT_PROMPTS, completeSuggestedChatPrompt } from "@/lib/chatPrompts";
 import {
   createSession,
   DEFAULT_CHAT_MODEL,
@@ -58,14 +58,18 @@ const PLACEHOLDER_HOLD_MS = 1_800;
 const PLACEHOLDER_ERASE_MS = 25;
 const PLACEHOLDER_GAP_MS = 350;
 
+// Returns the animated placeholder and the full prompt it is showing, which Tab
+// accepts into the empty chat box.
 const useRotatingChatPlaceholder = (active: boolean) => {
   const [placeholder, setPlaceholder] = useState(SUGGESTED_CHAT_PROMPTS[0].slice(0, 1));
+  const [promptIndex, setPromptIndex] = useState(0);
 
   useEffect(() => {
     if (!active) return;
 
     if (window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches) {
       setPlaceholder(SUGGESTED_CHAT_PROMPTS[0]);
+      setPromptIndex(0);
       return;
     }
 
@@ -74,6 +78,7 @@ const useRotatingChatPlaceholder = (active: boolean) => {
     let erasing = false;
     let timer: number;
     setPlaceholder(SUGGESTED_CHAT_PROMPTS[0].slice(0, characterIndex));
+    setPromptIndex(0);
 
     const tick = () => {
       const prompt = SUGGESTED_CHAT_PROMPTS[promptIndex];
@@ -95,6 +100,7 @@ const useRotatingChatPlaceholder = (active: boolean) => {
       if (characterIndex === 0) {
         erasing = false;
         promptIndex = (promptIndex + 1) % SUGGESTED_CHAT_PROMPTS.length;
+        setPromptIndex(promptIndex);
         timer = window.setTimeout(tick, PLACEHOLDER_GAP_MS);
         return;
       }
@@ -105,7 +111,7 @@ const useRotatingChatPlaceholder = (active: boolean) => {
     return () => window.clearTimeout(timer);
   }, [active]);
 
-  return placeholder;
+  return { placeholder, prompt: SUGGESTED_CHAT_PROMPTS[promptIndex] };
 };
 
 const parseOrderBy = (value: string | null): OrderBy => {
@@ -144,7 +150,10 @@ export const AskAssistant: React.FC = () => {
   // Set when the browser blocks the mirror's new tab, so the question survives
   // as a link the visitor can open themselves.
   const [blockedHandoffUrl, setBlockedHandoffUrl] = useState<string | null>(null);
-  const placeholder = useRotatingChatPlaceholder(!question);
+  const { placeholder, prompt: placeholderPrompt } = useRotatingChatPlaceholder(!question);
+  // Tab accepts the shown suggestion: the whole prompt in an empty box, or the
+  // rest of a suggestion the visitor has started typing.
+  const completion = question ? completeSuggestedChatPrompt(question) : placeholderPrompt;
   const ref = useRef<HTMLTextAreaElement>(null);
   const availabilityQuery = useQuery({
     queryKey: ["chatAvailability"],
@@ -226,7 +235,7 @@ export const AskAssistant: React.FC = () => {
     <>
       {!mirror && (
         <div className="ask-home-new">
-          Hint: type @ to bring papers into context
+          Hint: type @ to bring papers into context, or press Tab to use a suggestion
         </div>
       )}
       <div className="ask-home">
@@ -236,6 +245,7 @@ export const AskAssistant: React.FC = () => {
             mentions={draft.paperMentions}
             scrollTop={scrollTop}
             variant="home"
+            completion={question ? completion : ""}
           />
           <textarea
             ref={ref}
@@ -253,6 +263,12 @@ export const AskAssistant: React.FC = () => {
             }}
             onKeyDown={(event) => {
               if (mentions.keyDown(event)) return;
+              if (event.key === "Tab" && !event.shiftKey && completion) {
+                event.preventDefault();
+                const text = question + completion;
+                mentions.updateText(text, text.length);
+                return;
+              }
               if (event.key === "Enter" && !event.shiftKey) {
                 event.preventDefault();
                 void submit();

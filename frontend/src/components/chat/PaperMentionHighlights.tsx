@@ -7,6 +7,8 @@ interface PaperMentionHighlightsProps {
   mentions: PaperMentionDraft[];
   scrollTop?: number;
   variant?: "composer" | "editor" | "home";
+  // Faint suggested continuation painted after the typed text.
+  completion?: string;
 }
 
 /**
@@ -19,6 +21,7 @@ export const PaperMentionHighlights: React.FC<PaperMentionHighlightsProps> = ({
   mentions,
   scrollTop = 0,
   variant = "composer",
+  completion = "",
 }) => {
   const pieces: React.ReactNode[] = [];
   let cursor = 0;
@@ -41,6 +44,9 @@ export const PaperMentionHighlights: React.FC<PaperMentionHighlightsProps> = ({
   }
 
   pieces.push(text.slice(cursor));
+  if (completion) {
+    pieces.push(<span className="chat-prompt-completion" key="completion">{completion}</span>);
+  }
   if (text.endsWith("\n")) pieces.push("\u200b");
 
   return (
