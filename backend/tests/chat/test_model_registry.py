@@ -183,7 +183,7 @@ def test_sponsored_deepseek_is_offered_next_to_luna_in_production_only():
         },
         {
             "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-            "label": "DeepSeek V4.1 Flash (Free)",
+            "label": "DeepSeek V4.1 Flash",
             "route": "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",
             "provider": "huggingface",
             "provider_model": "deepseek-ai/DeepSeek-V4.1-Flash-1017:novita",

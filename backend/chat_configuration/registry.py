@@ -101,7 +101,7 @@ def _direct_luna(settings: Settings, label: str) -> ChatModelRecord:
 def _sponsored_deepseek(settings: Settings) -> ChatModelRecord:
     return _anthropic_route(
         SPONSORED_DEEPSEEK_ID,
-        "DeepSeek V4.1 Flash (Free)",
+        "DeepSeek V4.1 Flash",
         settings.chat_sponsored_deepseek_route,
         "huggingface",
         "hf_org_funded",

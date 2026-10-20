@@ -197,7 +197,7 @@ export const PRODUCTION_FALLBACK_CHAT_MODELS: ChatModelChoice[] = [
   },
   {
     id: SPONSORED_CHAT_MODEL,
-    label: "DeepSeek V4.1 Flash (Free)",
+    label: "DeepSeek V4.1 Flash",
     provider: "huggingface",
     sponsored: true,
   },

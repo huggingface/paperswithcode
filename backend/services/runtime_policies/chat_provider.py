@@ -143,7 +143,7 @@ def validate_chat_provider_policy(
         expected_discovery += (
             {
                 "id": "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-                "label": "DeepSeek V4.1 Flash (Free)",
+                "label": "DeepSeek V4.1 Flash",
                 "route": expected_sponsored_route,
                 "provider": "huggingface",
             },

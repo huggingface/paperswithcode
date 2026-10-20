@@ -364,7 +364,7 @@ describe("ChatView inference authorization", () => {
     mocks.getChatModels.mockResolvedValue({
       items: [{
         id: "deepseek-ai/DeepSeek-V4.1-Flash-1017",
-        label: "DeepSeek V4.1 Flash (Free)",
+        label: "DeepSeek V4.1 Flash",
         provider: "huggingface",
         sponsored: true,
       }],

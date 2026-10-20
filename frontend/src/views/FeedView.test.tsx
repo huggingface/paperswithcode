@@ -158,7 +158,7 @@ describe("AskAssistant", () => {
     const picker = screen.getByRole("combobox", { name: "Research model" });
     expect(picker).toHaveValue("gpt-5.6-luna@openai");
     expect([...picker.querySelectorAll("option")].map((option) => option.textContent)).toEqual([
-      "DeepSeek V4.1 Flash (Free)",
+      "DeepSeek V4.1 Flash",
       "GPT-6 Luna",
     ]);
     expect(chatApi.getModels).not.toHaveBeenCalled();
