@@ -257,6 +257,9 @@ class CurationTraceService:
         manifest_bytes = json.dumps(manifest, sort_keys=True, indent=2).encode()
         object_values["manifest.json"] = manifest_bytes
         result = self._upload(row, object_values)
+        # Apply may commit while the upload runs; re-read the row under a lock
+        # so the check below sees any result the server recorded meanwhile.
+        self.db.refresh(row, with_for_update=True)
         row.trace_status = (
             "complete" if result["status"] == "stored" else result["status"]
         )

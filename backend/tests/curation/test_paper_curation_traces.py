@@ -73,6 +73,9 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatc
         def commit(self):
             pass
 
+        def refresh(self, _row, *, with_for_update):
+            assert with_for_update
+
         def get(self, model, *_args):
             return scheduler if model is PaperCurationSchedulerState else None
 
@@ -150,9 +153,19 @@ def test_trace_bundle_manifest_hashes_every_uploaded_object(tmp_path, monkeypatc
 def test_finalize_cannot_replace_the_server_recorded_mutation_result(
     tmp_path, monkeypatch
 ):
+    # A resolve-model-paper job: no paper_id on the row, so the thumbnail
+    # queue targets the paper the server recorded when it applied the result.
+    applied = {"status": "resolved", "paper_id": 7}
+
     class Database:
         def commit(self):
             pass
+
+        def refresh(self, row, *, with_for_update):
+            # Apply committed while the trace was uploading; the locked re-read
+            # must surface it even though the request loaded the row earlier.
+            assert with_for_update
+            row.mutation_result = dict(applied)
 
         def get(self, *_args):
             return None
@@ -169,9 +182,6 @@ def test_finalize_cannot_replace_the_server_recorded_mutation_result(
             "codex_add_evals_spool_dir": str(tmp_path),
         }
     )
-    # A resolve-model-paper job: no paper_id on the row, so the thumbnail
-    # queue targets the paper the server recorded when it applied the result.
-    applied = {"status": "resolved", "paper_id": 7}
     row = SimpleNamespace(
         id=uuid.uuid4(),
         paper_id=None,
@@ -187,7 +197,7 @@ def test_finalize_cannot_replace_the_server_recorded_mutation_result(
         proposal=None,
         url_candidates=None,
         trace_uri=None,
-        mutation_result=dict(applied),
+        mutation_result=None,
     )
     events = base64.b64encode(gzip.compress(b'{"type":"done"}\n')).decode()
 
