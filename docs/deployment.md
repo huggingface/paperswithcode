@@ -330,9 +330,10 @@ area/task taxonomy in `TASK_CATALOG.md`, and the area-grouped method snapshot in
 prompt or skill change reaches chat with the next exact-SHA `pwc-deploy`; a new
 Modal image is needed only for sandbox executor changes. The hourly
 `sync-pwc-cli-skill.yml` workflow compares the CLI skill with
-`huggingface/pwc-cli:standalone_cli/SKILL.md` and commits validated skill changes
-directly to `main`. A concurrent update to `main` is rebased before push; a
-conflict fails the run so the next hourly checkout can retry from a clean base.
+`huggingface/pwc-cli:standalone_cli/SKILL.md`. Because that text is appended
+verbatim to the system prompt, a validated change is never pushed to `main`.
+The workflow pushes it to an `automation/sync-pwc-cli-skill-<upstream-sha>`
+branch and opens a pull request for review, one per upstream commit.
 
 `sync-chat-task-catalog.yml` refreshes the checked-in fallback
 `TASK_CATALOG.md` from the production taxonomy API every 15 minutes and on
