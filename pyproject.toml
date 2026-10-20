@@ -1,8 +1,10 @@
 [project]
 name = "paperswithcode"
 version = "0.1.0"
-description = "Add your description here"
+description = "Papers with Code: open AI research papers, code, and leaderboards"
 readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 requires-python = ">=3.12"
 dependencies = [
     "aiofiles>=24.1.0",

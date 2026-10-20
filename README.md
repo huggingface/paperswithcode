@@ -168,3 +168,7 @@ Hugging Face buckets in the `huggingface` organization:
 - [docs/deployment.md](docs/deployment.md): releases, nginx, and smoke checks
 - [.github/workflows/scripts/README.md](.github/workflows/scripts/README.md): scheduled job scripts
 - [AGENTS.md](AGENTS.md): instructions for coding agents
+
+## License
+
+Papers with Code is licensed under the [Apache License 2.0](LICENSE).
