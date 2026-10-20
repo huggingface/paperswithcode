@@ -1,5 +1,7 @@
 """Parsing, adoption, and rename tests for the Vals AI Finance Agent v2 sync."""
 
+from dataclasses import replace
+from decimal import Decimal
 from pathlib import Path
 
 import httpx
@@ -287,6 +289,27 @@ def test_first_run_adopts_renames_creates_and_reports():
         0,
         [],
     )
+
+
+def test_dated_deepseek_checkpoint_attaches_to_its_release_paper():
+    session = _session()
+    entries = parse_vals_finance_agent(HTML)
+    flash = next(entry for entry in entries if entry.label == "DeepSeek V4.1 Flash")
+    checkpoint = replace(
+        flash,
+        position=len(entries) + 1,
+        label="DeepSeek V4.1 Flash 1017",
+        accuracy=Decimal("54.10"),
+    )
+    stats = ValsFinanceAgentSyncService(session).sync([*entries, checkpoint])
+
+    assert stats.unreviewed == []
+    rows = _rows(session)
+    row = rows["DeepSeek-V4.1-Flash-1017"]
+    assert row.paper_id == rows["DeepSeek-V4.1-Flash"].paper_id
+    assert row.paper_id == _paper_id("2609.19969")
+    assert row.is_open
+    assert row.metrics == {METRIC_NAME: 54.1}
 
 
 def test_rename_requires_a_matching_score():

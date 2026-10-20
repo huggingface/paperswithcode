@@ -27,6 +27,7 @@ from backend.services.arc_prize_sync_service import (
     ArcPrizeSyncService,
     VERSION_CONFIGS,
     VersionConfig,
+    _entry_identity,
     parse_arc_prize_leaderboard,
 )
 
@@ -223,6 +224,34 @@ def test_v3_parser_accepts_leaderboard_growth_past_one_hundred_rows():
     }
 
     assert len(parse_arc_prize_leaderboard(payload, config).entries) == 102
+
+
+@pytest.mark.parametrize(
+    ("group", "identity_key"),
+    [
+        (
+            "anthropic-claude-opus-5-5",
+            "source:https://www.anthropic.com/claude-opus-5-5",
+        ),
+        (
+            "openai-gpt-6-1-sol",
+            "source:https://openai.com/index/introducing-gpt-6-1-sol/",
+        ),
+        ("openai-gpt-6-astra", "source:https://openai.com/index/gpt-6-astra/"),
+        (
+            "openai-gpt-6-luna",
+            "source:https://openai.com/index/introducing-gpt-6-sol-and-luna/",
+        ),
+        ("deepseek-v4-1-flash", "arxiv:2609.19969"),
+        ("zai-glm-5-3-flash", "source:https://z.ai/blog/glm-5.3-flash"),
+        # Provider-adapter variants stay unmapped until they are reviewed.
+        ("openai-gpt-6-astra-provider-adapter", None),
+    ],
+)
+def test_reviewed_model_groups_resolve_to_release_papers(group, identity_key):
+    entry = _entry("v1", f"{group}-high", group, group, 0.5)
+    identity = _entry_identity(entry)
+    assert (identity.key if identity else None) == identity_key
 
 
 def test_sync_adopts_legacy_preserves_stronger_manual_and_deletes_only_managed():

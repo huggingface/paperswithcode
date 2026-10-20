@@ -47,6 +47,28 @@ class PaperIdentity:
 # Product labels are never fuzzily attached to papers. New upstream models remain
 # unmatched until a curator adds a defensible release identity here.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "gpt-6-astra": PaperIdentity(source_url="https://openai.com/index/gpt-6-astra/"),
+    "gemini-3-8-flash": PaperIdentity(
+        source_url=(
+            "https://blog.google/innovation-and-ai/models-and-research/"
+            "gemini-models/3-8-flash-and-3-8-flash-cyber/"
+        )
+    ),
+    "glm-5-3": PaperIdentity(source_url="https://z.ai/blog/glm-5.3", is_open=True),
+    "glm-5-3-flash": PaperIdentity(
+        source_url="https://z.ai/blog/glm-5.3-flash", is_open=True
+    ),
+    "grok-4-6": PaperIdentity(source_url="https://x.ai/news/grok-4-6"),
+    "muse-spark-1-2": PaperIdentity(
+        source_url="https://developer.meta.com/ai/resources/blog/build-with-muse-code/"
+    ),
+    "qwen3-8-max": PaperIdentity(source_url="https://qwen.ai/blog?id=qwen3.8"),
+    "gemini-3-7-flash": PaperIdentity(
+        source_url=(
+            "https://blog.google/innovation-and-ai/models-and-research/"
+            "gemini-models/introducing-gemini-3-7-flash/"
+        )
+    ),
     "claude-opus-5": PaperIdentity(
         source_url="https://www.anthropic.com/news/claude-opus-5"
     ),
@@ -104,6 +126,10 @@ MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
 }
 
 MODEL_DISPLAY_NAMES = {
+    "gpt-6-astra": "GPT-6 Astra",
+    "gemini-3-8-flash": "Gemini 3.8 Flash",
+    "glm-5-3": "GLM-5.3",
+    "glm-5-3-flash": "GLM-5.3-Flash",
     "claude-opus-5": "Claude Opus 5",
     "gpt-5-6-sol": "GPT-5.6 Sol",
     "claude-fable-5": "Claude Fable 5",

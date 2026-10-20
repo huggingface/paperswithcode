@@ -23,6 +23,7 @@ from backend.models.database import (
     TaskDataset,
     TaskDatasetMetric,
 )
+from backend.services import mmteb_sync_service
 from backend.services.mmteb_sync_service import (
     BENCHMARK_NAME,
     LANES,
@@ -31,6 +32,7 @@ from backend.services.mmteb_sync_service import (
     MMTEB_API_URL,
     MmtebEntry,
     MmtebSyncService,
+    MmtebSyncStats,
     fetch_mmteb_leaderboard,
     parse_mmteb_leaderboard,
 )
@@ -414,3 +416,31 @@ def test_dry_run_rolls_back_all_evaluation_and_paper_changes():
     assert stats.created == 1
     assert session.query(Evaluation).count() == 0
     assert session.query(Paper).filter_by(id=1).one().hf_models in (None, [])
+
+
+def test_curated_override_resolves_a_cited_but_ambiguous_report(monkeypatch):
+    session = _session()
+    # An override applies only when the upstream citation includes its report.
+    monkeypatch.setattr(
+        mmteb_sync_service,
+        "MODEL_ARXIV_OVERRIDES",
+        {"gamma": "2501.00003", "delta": "2501.00001"},
+    )
+    entries = [
+        _entry(
+            "gamma",
+            ("2501.00002", "2501.00003"),
+            model_url="https://huggingface.co/example/gamma",
+        ),
+        _entry(
+            "delta",
+            ("2501.00002", "2501.00003"),
+            model_url="https://huggingface.co/example/delta",
+        ),
+    ]
+    stats = MmtebSyncStats()
+
+    resolved = MmtebSyncService(session)._resolve_papers(entries, stats)
+
+    assert {name: paper.id for name, paper in resolved.items()} == {"gamma": 3}
+    assert stats.ambiguous_papers == ["delta:2501.00002,2501.00003"]

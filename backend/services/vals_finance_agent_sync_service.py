@@ -250,6 +250,12 @@ MODEL_IDENTITIES: dict[str, ModelIdentity] = {
         is_open=True,
         hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash-0731",
     ),
+    "DeepSeek V4.1 Flash 1017": ModelIdentity(
+        "DeepSeek-V4.1-Flash-1017",
+        arxiv_id="2609.19969",
+        is_open=True,
+        hf_model_url="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash-1017",
+    ),
     "GPT-6 Sol": ModelIdentity(
         "GPT-6 Sol",
         source_url="https://openai.com/index/introducing-gpt-6-sol-and-luna/",

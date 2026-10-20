@@ -104,6 +104,39 @@ def _arxiv(
 # Exact upstream group/model IDs are the trust boundary between a display label
 # and a canonical release paper. Unknown families remain visible in job warnings.
 SELECTOR_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "group:anthropic-claude-opus-5-5": _source(
+        "https://www.anthropic.com/claude-opus-5-5"
+    ),
+    "group:anthropic-claude-haiku-5-5": _source(
+        "https://www.anthropic.com/claude-haiku-5-5"
+    ),
+    "group:anthropic-claude-fable-5-1": _source(
+        "https://www.anthropic.com/claude-fable-and-mythos-5-1"
+    ),
+    "group:openai-gpt-6-1-sol": _source(
+        "https://openai.com/index/introducing-gpt-6-1-sol/"
+    ),
+    "group:openai-gpt-6-astra": _source("https://openai.com/index/gpt-6-astra/"),
+    "group:openai-gpt-6-sol": _source(
+        "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
+    ),
+    "group:openai-gpt-6-luna": _source(
+        "https://openai.com/index/introducing-gpt-6-sol-and-luna/"
+    ),
+    "group:google-gemini-4-argon": _source(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/gemini-4-argon/"
+    ),
+    "group:google-gemini-3-8-flash": _source(
+        "https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/"
+    ),
+    "group:deepseek-v4-1-flash": _arxiv(
+        "2609.19969", hf="https://huggingface.co/deepseek-ai/DeepSeek-V4.1-Flash"
+    ),
+    "group:zai-glm-5-3-flash": _source(
+        "https://z.ai/blog/glm-5.3-flash",
+        is_open=True,
+        hf="https://huggingface.co/zai-org/GLM-5.3-Flash",
+    ),
     "group:anthropic-claude-fable-5": _source(
         "https://www.anthropic.com/news/claude-fable-5-mythos-5"
     ),
