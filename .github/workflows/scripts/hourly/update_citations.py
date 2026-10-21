@@ -38,6 +38,7 @@ from scripts.utils.cron_helpers import DatabaseCronJob
 from backend.config import get_settings
 from backend.services.paper_service import PaperService
 from backend.database.connection import get_database_session
+from backend.utils.exceptions import DatabaseError
 
 
 @dataclass
@@ -505,7 +506,21 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             }
             for result in results
         ]
-        update_stats = self.paper_service.update_citation_counts_batch(citation_updates)
+        try:
+            update_stats = self.paper_service.update_citation_counts_batch(
+                citation_updates
+            )
+        except DatabaseError as error:
+            # Rate-limit waits leave the session idle long enough for the
+            # server to drop it. The service has already rolled back, so the
+            # next attempt reconnects; the results are still in memory.
+            self.logger.warning(
+                "Citation batch write failed (%s); retrying once on a fresh connection",
+                error,
+            )
+            update_stats = self.paper_service.update_citation_counts_batch(
+                citation_updates
+            )
         self.stats["citations_updated"] += update_stats["updated"]
         self.logger.debug(
             f"Updated {update_stats['updated']} papers with citations, "

@@ -156,3 +156,35 @@ def test_rate_limit_does_not_retry_beyond_deadline(monkeypatch):
     assert job.stats["deadline_reached"] is True
     sleep.assert_not_awaited()
     assert job.client.get.await_count == 1
+
+
+def test_batch_write_retries_once_after_dropped_connection():
+    job = _job()
+    job.paper_service = Mock()
+    job.paper_service.update_citation_counts_batch.side_effect = [
+        MODULE.DatabaseError("SSL connection has been closed unexpectedly"),
+        {"updated": 1, "failed": 0},
+    ]
+    result = MODULE.CitationResult(1, "2601.00001", "One", 3, "s2", True)
+
+    job.update_citations_batch([result])
+
+    assert job.paper_service.update_citation_counts_batch.call_count == 2
+    assert job.stats["citations_updated"] == 1
+
+
+def test_batch_write_raises_when_retry_also_fails():
+    job = _job()
+    job.paper_service = Mock()
+    job.paper_service.update_citation_counts_batch.side_effect = MODULE.DatabaseError(
+        "down"
+    )
+    result = MODULE.CitationResult(1, "2601.00001", "One", 3, "s2", True)
+
+    try:
+        job.update_citations_batch([result])
+    except MODULE.DatabaseError:
+        pass
+    else:
+        raise AssertionError("second failure must propagate")
+    assert job.paper_service.update_citation_counts_batch.call_count == 2
