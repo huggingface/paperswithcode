@@ -34,6 +34,7 @@ def _job():
     job.request_delay = 1.5
     job.flush_reserve_seconds = 30
     job.api_key = None
+    job.db_session = Mock()
     return job
 
 
@@ -62,6 +63,8 @@ def test_short_due_selection_is_topped_up_with_early_refreshes():
     asyncio.run(job.process_papers_in_streaming_chunks(3))
 
     job.get_early_refresh_chunk.assert_called_once_with(2)
+    # The selection transaction ends before any Semantic Scholar call.
+    job.db_session.close.assert_called_once_with()
     assert job.stats["papers_selected"] == 3
     assert job.stats["papers_refreshed_early"] == 2
     assert [

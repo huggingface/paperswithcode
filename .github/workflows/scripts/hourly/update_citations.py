@@ -230,6 +230,9 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         if len(papers) < total_papers_to_process:
             early = self.get_early_refresh_chunk(total_papers_to_process - len(papers))
         papers += early
+        # End the selection's read transaction before slow API calls: the
+        # database role kills sessions idle in a transaction for 10 minutes.
+        self.db_session.close()
         self.stats["papers_refreshed_early"] = len(early)
         self.stats["papers_selected"] = len(papers)
         if not papers:
