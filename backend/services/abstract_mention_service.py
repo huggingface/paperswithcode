@@ -24,6 +24,9 @@ Matching rules:
   whether it names something else.
 - A plain-word method name capitalised inside a longer capitalised name
   (``World Embedding Benchmark``) belongs to that name and is skipped.
+- A generic method is dropped from an abstract that also mentions a more
+  specific method containing its name: ``Transformer`` goes when ``Looped Transformer``
+  or ``Diffusion Transformer`` is present.
 - Text inside ``$...$`` math is skipped.
 - Method names written ``Diffusion Transformer (DiT)`` match as the long form
   and as the abbreviation; ``Diffusion Transformers (DiTs)`` becomes one span.
@@ -96,6 +99,8 @@ class MentionIndex:
     surfaces: dict[tuple[str, ...], list[_Surface]]
     max_tokens: int
     unresolved: list[tuple[str, list[CatalogEntity]]]
+    # (entity_type, entity_id) -> lowercased tokens of its matchable name
+    names: dict[tuple[str, int], tuple[str, ...]]
 
 
 def normalize_name(name: str) -> str:
@@ -204,8 +209,16 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         owner, written = next(iter(distinct.values()))
         tokens = tuple(tokenize(written))
         surfaces[key] = [_Surface(owner, tokens, _case_sensitive(owner, tokens))]
+    names = {
+        (o.entity_type, o.entity_id): key
+        for key, owners in targets.items()
+        for rank, o, _ in owners
+        if rank == NAME and key in surfaces
+    }
     max_tokens = max((len(k) for k in surfaces), default=0)
-    return MentionIndex(surfaces=surfaces, max_tokens=max_tokens, unresolved=unresolved)
+    return MentionIndex(
+        surfaces=surfaces, max_tokens=max_tokens, unresolved=unresolved, names=names
+    )
 
 
 def _masked(abstract: str) -> str:
@@ -286,7 +299,30 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         i += n
         while i < len(tokens) and tokens[i].start() < end:
             i += 1
-    return candidates
+    return _drop_subsumed(candidates, index)
+
+
+def _drop_subsumed(candidates: list[Candidate], index: MentionIndex) -> list[Candidate]:
+    present = {
+        (c.entity_type, c.entity_id) for c in candidates if c.entity_type == "method"
+    }
+    names = {key: index.names.get(key, ()) for key in present}
+
+    def subsumed(key: tuple[str, int]) -> bool:
+        name = names[key]
+        return bool(name) and any(
+            other != key and len(longer) > len(name) and _contains(longer, name)
+            for other, longer in names.items()
+        )
+
+    dropped = {key for key in present if subsumed(key)}
+    return [c for c in candidates if (c.entity_type, c.entity_id) not in dropped]
+
+
+def _contains(longer: tuple[str, ...], part: tuple[str, ...]) -> bool:
+    return any(
+        longer[i : i + len(part)] == part for i in range(len(longer) - len(part) + 1)
+    )
 
 
 def _is_capitalised_plain_word(surface: _Surface, written: str) -> bool:

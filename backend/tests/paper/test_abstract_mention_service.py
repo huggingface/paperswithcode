@@ -28,6 +28,7 @@ CATALOG = [
     method(11, "REPA"),
     method(12, "Mixture-of-Experts (MoE)"),
     method(13, "Reranker (cross-encoder)"),
+    method(14, "Looped Transformer"),
     dataset(10, "SWE-Bench"),
     dataset(11, "SWE-Bench Verified"),
     dataset(12, "Terminal Bench 2.0"),
@@ -151,7 +152,7 @@ def test_bracketed_abbreviations_and_plurals_match_methods():
         ("DiT", "method", 8),
         ("MoE", "method", 12),
     ]
-    assert links("mixture-of-experts and Transformers") == [
+    assert links("mixture-of-experts. Transformers too") == [
         ("mixture-of-experts", "method", 12),
         ("Transformers", "method", 9),
     ]
@@ -171,4 +172,18 @@ def test_plain_words_inside_a_longer_capitalised_name_are_skipped():
     assert links("Attention helps. We add attention.") == [
         ("Attention", "method", 7),
         ("attention", "method", 7),
+    ]
+
+
+def test_generic_entity_yields_to_a_more_specific_one_in_the_same_abstract():
+    assert links("Looped Transformers reuse shared Transformer blocks.") == [
+        ("Looped Transformers", "method", 14)
+    ]
+    assert links("Diffusion Transformers (DiTs) with a transformer block") == [
+        ("Diffusion Transformers (DiTs)", "method", 8)
+    ]
+    assert links("A Transformer.") == [("Transformer", "method", 9)]
+    assert links("on LIBERO and LIBERO-Plus") == [
+        ("LIBERO", "dataset", 20),
+        ("LIBERO-Plus", "dataset", 22),
     ]
