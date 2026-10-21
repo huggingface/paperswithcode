@@ -131,6 +131,29 @@ def test_trusted_and_known_domains_apply(db_session, paper_fixture):
     assert known.status == "approved"
 
 
+def test_host_only_mentioned_in_other_urls_earns_no_trust(db_session, paper_fixture):
+    db_session.add_all(
+        DBProjectPage(
+            url=f"https://someone.github.io/p{i}?ref=https://lab.example.org/x",
+            is_official=False,
+        )
+        for i in range(3)
+    )
+    db_session.commit()
+
+    row = submit(
+        db_session,
+        "project_pages",
+        {
+            "project_pages": [
+                {"url": "https://lab.example.org/new", "is_official": True}
+            ]
+        },
+    )
+
+    assert row.status == "pending"
+
+
 def test_extra_configured_domain_applies(db_session, paper_fixture, monkeypatch):
     monkeypatch.setattr(
         get_settings(), "paper_edit_auto_approve_extra_domains", "lab.example.org"

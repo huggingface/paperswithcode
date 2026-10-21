@@ -14,7 +14,6 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 from urllib.parse import urlparse
 
-from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from backend.config import get_settings
@@ -49,6 +48,7 @@ TRUSTED_HOST_SUFFIXES = (
 )
 ACADEMIC_HOST = re.compile(r"\.(edu|ac\.[a-z]{2})$")
 KNOWN_HOST_MIN_PAGES = 3
+KNOWN_HOST_CANDIDATES = 500
 URL_EDIT_TYPES = frozenset({"repositories", "project_pages", "source_url"})
 ID_FIELDS = {
     "tasks": ("tasks", "task_ids"),
@@ -176,17 +176,18 @@ class AutoApprovalPolicy:
             or ACADEMIC_HOST.search(host)
         ):
             return True
-        known = (
-            self.db.query(ProjectPage.id)
-            .filter(
-                or_(
-                    ProjectPage.url.ilike(f"%//{host}/%"),
-                    ProjectPage.url.ilike(f"%//www.{host}/%"),
-                    ProjectPage.url.ilike(f"%//{host}"),
-                )
-            )
-            .limit(KNOWN_HOST_MIN_PAGES)
-            .count()
+        # LIKE only narrows the candidates; the hostname of each is compared
+        # exactly, so a host mentioned in a path or query string earns no trust.
+        escaped = host.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        urls = (
+            self.db.query(ProjectPage.url)
+            .filter(ProjectPage.url.ilike(f"%//%{escaped}%", escape="\\"))
+            .limit(KNOWN_HOST_CANDIDATES)
+            .all()
+        )
+        known = sum(
+            (urlparse(url).hostname or "").lower().removeprefix("www.") == host
+            for (url,) in urls
         )
         return known >= KNOWN_HOST_MIN_PAGES
 

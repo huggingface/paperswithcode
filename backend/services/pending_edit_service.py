@@ -215,14 +215,6 @@ class PendingEditService:
             return duplicate
         if not exempt_from_limits:
             self._enforce_limits(stable_subject, source_ip)
-        decision = AutoApprovalPolicy(self.db).decide(
-            hf_subject=stable_subject,
-            paper_id=paper_id,
-            edit_type=edit_type,
-            current=current_payload,
-            proposed=normalized_payload,
-        )
-
         row = PendingPaperEdit(
             paper_id=paper_id,
             hf_username=hf_username,
@@ -238,28 +230,48 @@ class PendingEditService:
             edit_type=edit_type,
             proposed_payload=normalized_payload,
             current_payload=current_payload,
-            admin_note=decision.note,
             status="pending",
         )
         self.db.add(row)
         self.db.commit()
         self.db.refresh(row)
         logger.info(
-            "submission_created id=%s subject=%s edit_type=%s paper_id=%s "
-            "auto_apply=%s held=%s",
+            "submission_created id=%s subject=%s edit_type=%s paper_id=%s",
             row.id,
             stable_subject,
             edit_type,
             paper_id,
-            decision.apply,
-            decision.held_reason,
         )
-        if decision.apply:
-            self._auto_approve(row)
+        self._auto_approve(row)
         return row
 
     def _auto_approve(self, row: PendingPaperEdit) -> None:
-        """Apply a freshly stored submission; on any failure it stays queued."""
+        """Apply a freshly stored submission; on any failure it stays queued.
+
+        The submitter lock is taken again because the one held while storing the
+        row ended with its commit. Deciding and applying under it makes the
+        daily and removal limits hold for parallel requests from one account.
+        """
+        self._lock_submitter(row.hf_subject)
+        decision = AutoApprovalPolicy(self.db).decide(
+            hf_subject=row.hf_subject,
+            paper_id=row.paper_id,
+            edit_type=row.edit_type,
+            current=row.current_payload or {},
+            proposed=row.proposed_payload,
+        )
+        logger.info(
+            "submission_auto_decision id=%s apply=%s held=%s",
+            row.id,
+            decision.apply,
+            decision.held_reason,
+        )
+        if not decision.apply:
+            if decision.note:
+                row.admin_note = decision.note
+            self.db.commit()
+            self.db.refresh(row)
+            return
         try:
             self.approve(
                 edit_id=row.id,
