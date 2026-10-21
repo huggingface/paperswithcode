@@ -35,6 +35,13 @@ CATALOG = [
     method(16, "Key-value cache", "Key-value cache (KV cache)"),
     method(17, "LLaVA"),
     method(18, "Grokking", "Grokking (Delayed Generalization)"),
+    method(19, "Integrated Gradients", "Integrated Gradients (IG)"),
+    method(20, "REPA2", "Representation Alignment (REPA2)"),
+    method(21, "Diffusion Policy"),
+    dataset(75, "Humanoid-v2"),
+    dataset(76, "OSWorld"),
+    dataset(77, "ImageNet V2"),
+    dataset(78, "Imagenet-1k (ILSVRC-2012)"),
     CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
     CatalogEntity("framework", 101, "Transformers", "transformers"),
     CatalogEntity("framework", 102, "Transformers", "transformers-vision"),
@@ -232,3 +239,17 @@ def test_bare_benchmark_name_links_its_latest_explicit_version():
     ]
     assert links("on CIFAR and SWE-Bench") == [("SWE-Bench", "dataset", 10)]
     assert links("on LIBERO") == [("LIBERO", "dataset", 20)]
+
+
+def test_locally_defined_abbreviations_are_not_linked():
+    assert links("Inadequate Generalization (IG) and later IG again") == []
+    assert links("attributions via IG are noisy") == [("IG", "method", 19)]
+
+
+def test_full_name_long_forms_and_bad_suffixes_do_not_match():
+    assert links("visual representation alignment") == []
+    assert links("Humanoid robots") == []
+    assert links("65.4% on OSWorld-G and OSWorld") == [("OSWorld", "dataset", 76)]
+    assert links("ImageNet training") == []
+    [policy] = find_candidates("an improved 3D Diffusion Policy learner", INDEX)
+    assert policy.variant_suspect

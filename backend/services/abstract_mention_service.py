@@ -28,8 +28,10 @@ Matching rules:
   specific method containing its name: ``Transformer`` goes when ``Looped Transformer``
   or ``Diffusion Transformer`` is present.
 - Method names written ``Diffusion Transformer (DiT)`` match as the long form
-  and as the abbreviation, and so does the method's full name
-  (``World Action Models (WAMs)`` gives ``WAMs`` and ``WAM``); ``Diffusion Transformers (DiTs)`` becomes one span.
+  and as the abbreviation; a full name contributes its abbreviation only
+  (``World Action Models (WAMs)`` gives ``WAMs`` and ``WAM``). An abbreviation
+  the abstract defines with another expansion (``Inadequate Generalization
+  (IG)``) is not linked anywhere in that abstract; ``Diffusion Transformers (DiTs)`` becomes one span.
   Method names also match their plural (``DiTs``, ``LLMs``, ``Transformers``).
   An exact catalog name always beats an abbreviation or plural.
 - A version after a family name keeps the match (``LLaVA-1.5`` links
@@ -70,7 +72,7 @@ _ABBREVIATION = re.compile(
     r"\s*\(((?=[^\s)]*[A-Z][^\s)]*[A-Z])[A-Za-z0-9\-]+(?: [A-Za-z0-9\-]+){0,2})\)\s*$"
 )
 _SIZE_SUFFIX = re.compile(
-    r"-(?:(?:XXL|XL|XS|[SMLBHG])(?:/\d+)?|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
+    r"-(?:(?:XXL|XL|XS)(?:/\d+)?|[SMLBHG]\+?/\d+|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
 )
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
@@ -104,6 +106,7 @@ class _Surface:
     entity: CatalogEntity
     tokens: tuple[str, ...]
     case_sensitive: bool
+    rank: int = 0
 
 
 @dataclass
@@ -183,9 +186,10 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             if last[-1:].isalpha() and last[-1:].lower() != "s":
                 add(written + "s", entity, PLURAL)
 
-    def add_named(written: str, entity: CatalogEntity, rank: int) -> None:
+    def add_named(written: str, entity: CatalogEntity, long_form: bool) -> None:
         abbreviation = _ABBREVIATION.search(written)
-        add(base_name(written), entity, rank)
+        if long_form:
+            add(base_name(written), entity, NAME)
         if abbreviation:
             short = abbreviation.group(1)
             add(short, entity, ABBREVIATION)
@@ -194,9 +198,10 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
 
     for entity in entities:
         if entity.entity_type == "method":
-            add_named(entity.name, entity, NAME)
+            add_named(entity.name, entity, long_form=True)
             if entity.full_name and entity.full_name != entity.name:
-                add_named(entity.full_name, entity, ABBREVIATION)
+                # Only the abbreviation: full names' long forms are often generic.
+                add_named(entity.full_name, entity, long_form=False)
         elif entity.entity_type == "framework":
             add(entity.name, entity, NAME)
 
@@ -213,6 +218,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         written = base_name((target if target in members else members[0]).name)
         targets[tuple(key_text.split())].append((NAME, target, written))
 
+    group_names = {normalize_name(base_name(d.name)) for d in datasets.values()}
     latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
     for dataset in datasets.values():
         versioned = _VERSIONED.match(base_name(dataset.name))
@@ -223,8 +229,11 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             int(n) for n in (versioned.group(2) or versioned.group(3)).split(".")
         )
         key = tuple(normalize_name(family).split())
-        if " ".join(key) in groups:
-            continue  # a benchmark already owns the bare name (ImageNet)
+        if _PLAIN_WORD.fullmatch(family) or any(
+            other.split()[: len(key)] == list(key) and not _VERSIONED.match(other)
+            for other in group_names
+        ):
+            continue  # Humanoid-v2; ImageNet V2 next to Imagenet-1k
         if key not in latest or version > latest[key][0]:
             latest[key] = (version, dataset, family)
     for key, (_, dataset, family) in latest.items():
@@ -240,7 +249,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
                 (o.entity_type, o.entity_id): (o, w) for r, o, w in owners if r == rank
             }
             if len(distinct) == 1:
-                chosen = next(iter(distinct.values()))
+                chosen, chosen_rank = next(iter(distinct.values())), rank
                 break
             # Two entities share this name; a lower-ranked unique owner may still win.
             unresolved.append((" ".join(key), [o for o, _ in distinct.values()]))
@@ -248,7 +257,9 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             continue
         owner, written = chosen
         tokens = tuple(tokenize(written))
-        surfaces[key] = [_Surface(owner, tokens, _case_sensitive(owner, tokens))]
+        surfaces[key] = [
+            _Surface(owner, tokens, _case_sensitive(owner, tokens), chosen_rank)
+        ]
     names = {
         (o.entity_type, o.entity_id): key
         for key, owners in targets.items()
@@ -300,7 +311,8 @@ def _preceded_by_name_word(text_value: str, start: int) -> bool:
     """True for ``Geometry-Change VLA``; false at a sentence or clause start."""
     match = re.search(r"(\S+)[ \t]+$", text_value[:start])
     word = match.group(1) if match else ""
-    if not word or not word[0].isupper() or not word[-1].isalnum():
+    name_like = word[:1].isupper() or (word[:1].isdigit() and word.upper() == word)
+    if not word or not name_like or not word[-1].isalnum():
         return False
     before = text_value[: match.start()].rstrip()
     return bool(before) and before[-1] not in ".!?:;"
@@ -315,6 +327,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
     words = [t.group() for t in tokens]
     lowered = [w.lower() for w in words]
     candidates: list[Candidate] = []
+    redefined: set[tuple[str, int]] = set()
     i = 0
     while i < len(tokens):
         matched = _longest_match(index, masked, tokens, words, lowered, i)
@@ -327,6 +340,8 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         inside_name = _followed_by_variant_word(masked, end) or _preceded_by_name_word(
             masked, start
         )
+        if surface.rank == ABBREVIATION and _defined_in_brackets(masked, start, end):
+            redefined.add((surface.entity.entity_type, surface.entity.entity_id))
         part_of_other_name = (
             _continues_as_variant(masked, end, surface)
             or _has_hyphenated_prefix(masked, start)
@@ -348,7 +363,17 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         i += n
         while i < len(tokens) and tokens[i].start() < end:
             i += 1
+    candidates = [
+        c for c in candidates if (c.entity_type, c.entity_id) not in redefined
+    ]
     return _drop_subsumed(candidates, index)
+
+
+def _defined_in_brackets(text_value: str, start: int, end: int) -> bool:
+    """``Inadequate Generalization (IG)``: the abstract defines its own ``IG``."""
+    return text_value[:start].rstrip(" \t").endswith("(") and text_value[end:].lstrip(
+        " \t"
+    ).startswith(")")
 
 
 def _drop_subsumed(candidates: list[Candidate], index: MentionIndex) -> list[Candidate]:
