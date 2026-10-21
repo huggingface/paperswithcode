@@ -1099,8 +1099,14 @@ class BenchmarkGapReviewService:
             if not TrendingModelResolutionService._paper_supported_by_evidence(
                 paper, evidence_urls
             ):
+                canonical = (
+                    f"https://arxiv.org/abs/{paper.arxiv_id}"
+                    if paper.arxiv_id
+                    else paper.source_url
+                )
                 raise ValueError(
-                    "Source paper requires its canonical URL in evidence_urls"
+                    "Source paper requires its canonical URL in evidence_urls; "
+                    f"add {canonical}"
                 )
             return paper
         if source.arxiv_id is not None:
@@ -1110,7 +1116,10 @@ class BenchmarkGapReviewService:
                 )
                 for url in evidence_urls
             ):
-                raise ValueError("arXiv source paper requires matching evidence_urls")
+                raise ValueError(
+                    f"arXiv source paper {source.arxiv_id} requires its canonical URL "
+                    f"in evidence_urls; add https://arxiv.org/abs/{source.arxiv_id}"
+                )
             paper, _ = asyncio.run(
                 PaperIngestionService(self.db).get_or_import_arxiv_paper(
                     source.arxiv_id, commit=False
@@ -1121,7 +1130,10 @@ class BenchmarkGapReviewService:
         if external.source_url.rstrip("/") not in {
             url.rstrip("/") for url in evidence_urls
         }:
-            raise ValueError("External source paper requires matching evidence_urls")
+            raise ValueError(
+                "External source paper requires its source_url in evidence_urls; "
+                f"add {external.source_url} exactly"
+            )
         result = ExternalResourceService(self.db).add_external_resource(
             ExternalResourceInput(
                 source_url=external.source_url,

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 import uuid
@@ -413,6 +414,64 @@ def test_create_requires_source_paper_evidence(db):
         service(db).apply_add_benchmark(
             job, create_mutation(evidence_urls=["https://modelnet.cs.princeton.edu/"])
         )
+
+
+def test_arxiv_source_evidence_rejection_names_the_url_to_add(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match=r"add https://arxiv\.org/abs/2407\.04973$"):
+        service(db).apply_add_benchmark(
+            job,
+            create_mutation(
+                source_paper={"arxiv_id": "2407.04973"},
+                evidence_urls=["https://arxiv.org/html/2605.25571"],
+            ),
+        )
+
+
+def test_external_source_evidence_rejection_names_the_source_url(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match="add https://example.com/faust exactly"):
+        service(db).apply_add_benchmark(
+            job,
+            create_mutation(
+                source_paper={
+                    "external_paper": {
+                        "title": "FAUST",
+                        "abstract": "Mesh registration benchmark.",
+                        "source_url": "https://example.com/faust",
+                        "date_published": "2014-06-24",
+                    }
+                },
+                evidence_urls=["https://example.com/other"],
+            ),
+        )
+
+
+def test_runner_preflight_requires_the_source_paper_in_evidence():
+    def proposal(source, evidence):
+        return {"add_benchmark": {"source_paper": source, "evidence_urls": evidence}}
+
+    with pytest.raises(ValueError, match=r"add https://arxiv\.org/abs/1903\.12261$"):
+        curation_api.check_benchmark_source_evidence(
+            proposal({"arxiv_id": "1903.12261"}, ["https://arxiv.org/html/2609.00374"])
+        )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"arxiv_id": "1903.12261"}, ["https://arxiv.org/html/1903.12261v2"])
+    )
+    faust = "https://openaccess.thecvf.com/content_cvpr_2014/html/Bogo_FAUST.html"
+    with pytest.raises(ValueError, match=f"add {re.escape(faust)}$"):
+        curation_api.check_benchmark_source_evidence(
+            proposal({"external_paper": {"source_url": faust}}, [])
+        )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"external_paper": {"source_url": faust}}, [faust + "/"])
+    )
+    curation_api.check_benchmark_source_evidence(
+        proposal({"existing_paper_id": 10}, [])
+    )
+    curation_api.check_benchmark_source_evidence({"evaluations": []})
 
 
 def test_map_existing_adds_links_without_rewriting_the_dataset(db):

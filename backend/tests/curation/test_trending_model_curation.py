@@ -473,6 +473,26 @@ def test_arxiv_evidence_requires_the_canonical_arxiv_host():
     assert not TrendingModelResolutionService._canonical_arxiv_evidence(
         "2608.54321", "https://example.com/abs/2608.54321"
     )
+    for url in (
+        "https://arxiv.org/abs/2608.54321v2",
+        "https://arxiv.org/html/2608.54321",
+        "https://www.arxiv.org/html/2608.54321v3/",
+        "https://arxiv.org/pdf/2608.54321v1.pdf",
+    ):
+        assert TrendingModelResolutionService._canonical_arxiv_evidence(
+            "2608.54321", url
+        ), url
+    assert TrendingModelResolutionService._canonical_arxiv_evidence(
+        "2608.54321v2", "https://arxiv.org/abs/2608.54321"
+    )
+    for url in (
+        "https://arxiv.org/abs/2608.543210",
+        "https://arxiv.org/html/2605.25571",
+        "https://arxiv.org/list/2608.54321",
+    ):
+        assert not TrendingModelResolutionService._canonical_arxiv_evidence(
+            "2608.54321", url
+        ), url
 
 
 def test_resolution_links_existing_paper_release_and_hf_artifact():

@@ -500,8 +500,10 @@ Decide:
   evaluates on it; follow the reporting papers' citations. Prefer
   `existing_paper_id`, then `arxiv_id`, then `external_paper` (a homepage or
   technical report with a credible publication date) for a benchmark with no
-  paper. Include that paper's canonical URL (arXiv abs URL or `source_url`) in
-  `evidence_urls`.
+  paper. Always put that paper's own canonical URL in `evidence_urls`
+  (`https://arxiv.org/abs/<arxiv_id>`, or `external_paper.source_url` exactly);
+  the reporting papers' URLs alone do not count, and the server rejects the
+  create without it.
 - `reject` a candidate that is not a reusable benchmark after all, or `defer`
   when primary sources cannot be read.
 
