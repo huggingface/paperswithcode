@@ -225,6 +225,7 @@ def _raise_artifact(error: ArtifactError) -> None:
         "artifact_too_large": 413,
         "poster_storage_quota_exceeded": 429,
         "artifact_quota_exceeded": 429,
+        "compile_capacity_exceeded": 429,
         "artifact_storage_failed": 503,
         "artifact_deletion_failed": 503,
         "artifact_corrupt": 503,

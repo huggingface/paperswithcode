@@ -10,6 +10,7 @@ import uuid
 import zipfile
 from collections.abc import Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from pathlib import PurePosixPath
 
@@ -53,6 +54,11 @@ from latex_compiler_contract import CompilerJobState, CompilerResult, EnvelopeEr
 _PAPER_IDENTIFIER = "latex-paper"
 _PREVIEW_PDF = "preview.pdf"
 _MAX_REPAIR_ATTEMPTS = 3
+# Every compile starts a fresh paid provider sandbox, so each owner has an
+# aggregate budget on top of the per-job limits. Repair candidates are already
+# capped per failed version, which these version counts bound in turn.
+_MAX_ACTIVE_COMPILES_PER_OWNER = 2
+_MAX_COMPILES_PER_OWNER_PER_DAY = 100
 _REPAIR_POLL_ATTEMPTS = 20
 _REPAIR_POLL_SECONDS = 0.25
 _AUDIT_PROVENANCE_KEY = "_audit_provenance"
@@ -322,6 +328,7 @@ class LatexPaperService:
 
         source_bytes, bundle = self._source_bundle(files)
         lock_owner_artifact_quota(self.db, owner_id)
+        self._require_compile_capacity(owner_id)
         self._require_owner_quota(owner_id, additional_text_bytes=source_bytes)
         manifest = LatexPaperManifest(
             title=" ".join(title.split()) or "Untitled Research Draft",
@@ -407,6 +414,7 @@ class LatexPaperService:
             raise ArtifactError("compiler_disabled", "Paper compilation is disabled")
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
+        self._require_compile_capacity(owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
             raise ArtifactError(
                 "paper_conflict",
@@ -573,6 +581,7 @@ class LatexPaperService:
         media_type = self._validate_figure(path, data, declared_media_type)
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
+        self._require_compile_capacity(owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
             raise ArtifactError(
                 "paper_conflict",
@@ -753,6 +762,7 @@ class LatexPaperService:
             raise ArtifactError("artifacts_disabled", "Paper editing is disabled")
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
+        self._require_compile_capacity(owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
             raise ArtifactError(
                 "paper_conflict",
@@ -883,6 +893,7 @@ class LatexPaperService:
         """Compile one AI repair candidate without persisting failed attempts."""
         artifact = self._artifact(owner_id, artifact_id, lock=True)
         lock_owner_artifact_quota(self.db, owner_id)
+        self._require_compile_capacity(owner_id)
         if artifact.source_head_version_id != expected_parent_version_id:
             raise ArtifactError(
                 "paper_conflict",
@@ -1259,6 +1270,32 @@ class LatexPaperService:
 
     def _owner_durable_bytes(self, owner_id: str) -> int:
         return owner_artifact_storage_bytes(self.db, owner_id)
+
+    def _require_compile_capacity(self, owner_id: str) -> None:
+        """Admit one more provider sandbox for this owner, under the owner lock."""
+
+        day_ago = datetime.now(UTC) - timedelta(days=1)
+        recent, active = self.db.execute(
+            select(
+                func.count().filter(ChatLatexPaperVersion.created_at >= day_ago),
+                func.count().filter(
+                    ChatLatexPaperVersion.compile_status.in_(("queued", "compiling"))
+                ),
+            )
+            .join(ChatArtifact, ChatLatexPaperVersion.artifact_id == ChatArtifact.id)
+            .join(ChatSession, ChatArtifact.session_id == ChatSession.id)
+            .where(ChatSession.hf_user_id == owner_id)
+        ).one()
+        if active >= _MAX_ACTIVE_COMPILES_PER_OWNER:
+            raise ArtifactError(
+                "compile_capacity_exceeded",
+                "Wait for your running paper compiles to finish before starting another",
+            )
+        if recent >= _MAX_COMPILES_PER_OWNER_PER_DAY:
+            raise ArtifactError(
+                "compile_capacity_exceeded",
+                "Daily paper compile limit reached; try again tomorrow",
+            )
 
     def _require_owner_quota(
         self,
