@@ -18,8 +18,7 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Protocol
 
-import httpx
-from huggingface_hub.errors import SandboxError
+from modal.exception import Error as ModalError
 
 from backend.config import Settings, get_settings
 from backend.services.latex_compiler_qualification_service import (
@@ -29,6 +28,7 @@ from backend.services.latex_compiler_qualification_service import (
 )
 from backend.services.latex_compiler_service import (
     LatexCompilerTransport,
+    CompilerRequestRejected,
     compiler_transport_from_settings,
 )
 from latex_compiler_contract import (
@@ -36,7 +36,8 @@ from latex_compiler_contract import (
     EnvelopeError,
     SANDBOX_WORKSPACE_ISOLATION_ATTESTATION,
     SANDBOX_WORKSPACE_LIMIT_BYTES,
-    validate_staging_sandbox_compiler_identity,
+    STAGING_COMPILER_MODAL_ENVIRONMENT,
+    validate_staging_compiler_identity,
 )
 
 CONFIRMATION = "QUALIFY_PRIVATE_LATEX_COMPILER_SANDBOX"
@@ -106,8 +107,8 @@ def run_case(
         status = compiler.submit(
             job_id=job_id, bundle=case.bundle, entrypoint="main.tex"
         )
-    except httpx.HTTPStatusError as error:
-        if error.response.status_code == 422:
+    except CompilerRequestRejected as error:
+        if error.status_code == 422:
             return "rejected", _elapsed_ms(started)
         raise
     deadline = time.monotonic() + 135
@@ -119,13 +120,17 @@ def run_case(
         }:
             # Read and validate the terminal response so the disposable VM is
             # released by the transport. Do not expose its content.
-            compiler.result(job_id)
+            result = compiler.result(job_id)
+            # The compiler refuses an unsafe archive while unpacking it, before
+            # LaTeX runs, and reports that as an invalid_bundle failure.
+            if result.failure_category == "invalid_bundle":
+                return "rejected", _elapsed_ms(started)
             return status.state.value, _elapsed_ms(started)
         time.sleep(POLL_SECONDS)
         status = compiler.status(job_id)
     try:
         compiler.cancel(job_id)
-    except (httpx.HTTPError, RuntimeError):
+    except RuntimeError:
         pass
     return "timeout", _elapsed_ms(started)
 
@@ -182,7 +187,7 @@ def run_operational_checks(
             if isolation
             == {
                 "image": compiler.image,
-                "forward_hf_token": False,
+                "block_network": True,
                 "secrets": False,
                 "volumes": False,
                 "network_isolation": "sandbox-netns-v1",
@@ -191,12 +196,12 @@ def run_operational_checks(
             }
             else "failed"
         )
-    except (httpx.HTTPError, RuntimeError, ValueError):
+    except (RuntimeError, ValueError):
         pass
     finally:
         try:
             compiler.cancel(job_id)
-        except (httpx.HTTPError, RuntimeError):
+        except RuntimeError:
             pass
     elapsed = _elapsed_ms(started)
     return [(_check(name), outcomes[name], elapsed) for name in _OPERATIONAL_CHECKS]
@@ -232,12 +237,12 @@ def run_restart_reconciliation_checks(
                 and reconciled.provider_job_id == provider_job_id
                 else "failed"
             )
-    except (AttributeError, httpx.HTTPError, RuntimeError, ValueError):
+    except (AttributeError, RuntimeError, ValueError):
         pass
     finally:
         try:
             compiler.cancel(job_id)
-        except (httpx.HTTPError, RuntimeError):
+        except RuntimeError:
             pass
     elapsed = _elapsed_ms(started)
     return [(_check(name), outcomes[name], elapsed) for name in _RECOVERY_CHECKS]
@@ -267,9 +272,9 @@ def validate_settings(settings: Settings) -> None:
     ):
         raise RuntimeError("Qualification requires the private artifact store")
     try:
-        validate_staging_sandbox_compiler_identity(
-            settings.chat_latex_compiler_hf_sandbox_image,
-            settings.chat_latex_compiler_hf_sandbox_namespace,
+        validate_staging_compiler_identity(
+            settings.chat_latex_compiler_modal_image_id,
+            settings.chat_latex_compiler_modal_environment,
         )
     except EnvelopeError as error:
         raise RuntimeError(
@@ -330,7 +335,9 @@ def _validate_qualification_evidence_payload(payload: dict[str, object]) -> None
     ):
         raise ValueError("Qualification evidence does not satisfy its contract")
     try:
-        validate_staging_sandbox_compiler_identity(payload["compiler_image"], "nielsr")
+        validate_staging_compiler_identity(
+            payload["compiler_image"], STAGING_COMPILER_MODAL_ENVIRONMENT
+        )
     except EnvelopeError as error:
         raise ValueError("Qualification evidence compiler image is invalid") from error
 
@@ -449,8 +456,7 @@ def main() -> int:
             results.extend(run_restart_reconciliation_checks(compiler))
     except (
         EnvelopeError,
-        SandboxError,
-        httpx.HTTPError,
+        ModalError,
         OSError,
         RuntimeError,
         ValueError,
