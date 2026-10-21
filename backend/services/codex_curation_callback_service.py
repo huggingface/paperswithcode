@@ -1761,6 +1761,19 @@ class CodexCurationCallbackService:
         """Resolve the callback's closed mutation surface from catalog state."""
         capability, primary_resource = curation_primary_authorization(self.db, row)
         if row.kind == "review-benchmark-gaps" and body.review_benchmark_gaps:
+            # A mistyped id is a fixable proposal error, not a capability denial.
+            scope = set(self._review_scope(row))
+            outside = [
+                str(decision.candidate_id)
+                for decision in body.review_benchmark_gaps.decisions
+                if str(decision.candidate_id) not in scope
+            ]
+            if outside:
+                raise ValueError(
+                    "Candidates outside this review's batch: "
+                    f"{', '.join(outside[:20])}. Copy each candidate_id exactly "
+                    "from context.review.candidates"
+                )
             return tuple(
                 (
                     capability,

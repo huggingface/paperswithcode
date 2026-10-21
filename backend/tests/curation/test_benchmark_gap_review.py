@@ -51,6 +51,7 @@ from backend.services.benchmark_gap_service import (
 from backend.services.codex_add_evals_service import CodexPaperJobService
 from backend.services.codex_curation_callback_service import (
     CodexCurationCallbackService,
+    _retryable_validation,
 )
 from jobs import curation_api
 
@@ -921,6 +922,48 @@ def test_review_decides_exactly_the_batch_it_was_served(db):
     assert result["skipped_no_longer_eligible"] == [str(gone.id)]
     assert gone.status == "rejected"
     assert late.status == "candidate" and late.reviewed_at is None
+
+
+def test_mistyped_review_candidate_is_a_retryable_proposal_error(db):
+    candidate = add_candidate(db, "H2O", papers=5)
+    review = service(db)
+    job = review.job_service.enqueue_benchmark_job(
+        db,
+        kind="review-benchmark-gaps",
+        benchmark_candidate_id=None,
+        requested_by="test",
+        settings=get_settings(),
+        priority=10,
+    )
+    review.review_context(job)
+    callback = CodexCurationCallbackService(db)
+    typo = uuid.UUID(
+        str(candidate.id)[:-1] + ("0" if str(candidate.id)[-1] != "0" else "1")
+    )
+
+    def body(candidate_id):
+        return ApplyMutationRequest(
+            review_benchmark_gaps={
+                "summary": "x",
+                "decisions": [
+                    {
+                        "candidate_id": str(candidate_id),
+                        "decision": "reject",
+                        "reason": "x",
+                    }
+                ],
+            }
+        )
+
+    with pytest.raises(
+        ValueError, match=f"outside this review's batch: {typo}"
+    ) as error:
+        callback._validate_scheduled_capability_boundary(job, body(typo))
+    assert _retryable_validation(job, error.value)
+    [(_, resource)] = callback._validate_scheduled_capability_boundary(
+        job, body(candidate.id)
+    )
+    assert resource.exists
 
 
 def test_skipped_merges_do_not_block_eligible_merges_into_them(db):
