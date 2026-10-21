@@ -589,6 +589,7 @@ export class PiWorker {
       this.emit(run.request_id, { type: "workspace_ready" });
       this.failurePhase = "model_prompt";
       let mirrorFailed = false;
+      let reasoningLowered = false;
       let recovery: RecoverySummary = {
         reason: null,
         attempts: 0,
@@ -608,11 +609,15 @@ export class PiWorker {
           },
           disableTools: () => this.session!.setActiveToolsByName([]),
           lowerReasoning: () => {
-            if (run.reasoning_effort === "max") this.session!.setThinkingLevel("high");
+            if (run.reasoning_effort !== "max") return;
+            reasoningLowered = true;
+            this.session!.setThinkingLevel("high");
           },
           canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
         });
       } finally {
+        // The session is reused by later turns on this worker; do not leak the downgrade.
+        if (reasoningLowered) this.session?.setThinkingLevel(thinkingLevel(run.reasoning_effort));
         this.compaction.finish();
         unsubscribe();
         this.failurePhase = "transcript_finalize";

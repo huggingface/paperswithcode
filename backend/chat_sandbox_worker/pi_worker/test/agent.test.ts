@@ -181,7 +181,7 @@ test("a length-limited answer without tools can continue without forced compacti
     poster_mode: false, paper_artifacts_enabled: false, reasoning_effort: "max", hf_username: "test" });
   assert.equal(prompts, 2);
   assert.equal(compactions, 0);
-  assert.deepEqual(thinkingLevels, ["high"]);
+  assert.deepEqual(thinkingLevels, ["high", "max"]);
   assert.equal(events.filter((event) => event.type === "error").length, 0);
   assert.equal(events.find((event) => event.type === "done")?.finish_reason, "success");
 });
