@@ -67,11 +67,23 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         self.paper_service = PaperService(self.db_session)
 
         # Semantic Scholar API configuration
-        self.api_key = self.settings.semantic_scholar_api_key
+        # Each key has its own Semantic Scholar rate limit, so requests rotate
+        # across the distinct configured keys at the same per-key spacing.
+        self.api_keys = list(
+            dict.fromkeys(
+                key
+                for key in (
+                    self.settings.semantic_scholar_api_key,
+                    self.settings.semantic_scholar_api_key_2,
+                )
+                if key
+            )
+        )
+        self._key_index = 0
         self.base_url = "https://api.semanticscholar.org/graph/v1"
 
         # Conservative hourly bounds leave room for Semantic Scholar throttling.
-        self.request_delay = 1.5
+        self.request_delay = 1.5 / max(1, len(self.api_keys))
         self.batch_size = 100  # Larger batches for efficiency
         self.max_papers_per_run = 1500
         self.request_timeout = 10.0  # Shorter timeout for hourly jobs
@@ -109,6 +121,7 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             "papers_selected": 0,
             "papers_deferred": 0,
             "papers_refreshed_early": 0,
+            "api_keys": len(self.api_keys),
             "deadline_reached": False,
             "shutdown_requested": False,
             "elapsed_seconds": 0,
@@ -309,11 +322,10 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         )
 
         # Create HTTP client with optimized settings
-        headers = {"x-api-key": self.api_key} if self.api_key else {}
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=10)
 
         async with httpx.AsyncClient(
-            timeout=self.request_timeout, limits=limits, headers=headers
+            timeout=self.request_timeout, limits=limits
         ) as client:
             self.client = client
 
@@ -413,6 +425,14 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
                 error_message="Not found in Semantic Scholar",
             )
 
+    def _next_key_headers(self) -> Dict[str, str]:
+        """Return the next key in rotation, so a 429 retry also changes key."""
+        if not self.api_keys:
+            return {}
+        key = self.api_keys[self._key_index % len(self.api_keys)]
+        self._key_index += 1
+        return {"x-api-key": key}
+
     async def fetch_citation_data(
         self, arxiv_id: str, title: str
     ) -> Optional[Dict[str, Any]]:
@@ -423,7 +443,9 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         try:
             for attempt in range(3):
                 self.stats["api_calls"] += 1
-                response = await self.client.get(url, params=params)
+                response = await self.client.get(
+                    url, params=params, headers=self._next_key_headers()
+                )
                 if response.status_code != 429:
                     break
                 self.stats["rate_limit_hits"] += 1

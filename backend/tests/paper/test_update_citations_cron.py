@@ -33,7 +33,8 @@ def _job():
     job.request_timeout = 10
     job.request_delay = 1.5
     job.flush_reserve_seconds = 30
-    job.api_key = None
+    job.api_keys = []
+    job._key_index = 0
     job.db_session = Mock()
     return job
 
@@ -179,6 +180,52 @@ def _fetch_job(responses):
     job.client = SimpleNamespace(get=AsyncMock(side_effect=responses))
     job.stats.update(api_calls=0, api_successes=0, api_errors=0, rate_limit_hits=0)
     return job
+
+
+def test_requests_rotate_across_distinct_keys_including_429_retries(monkeypatch):
+    data = {"title": "One", "citationCount": 12}
+    job = _fetch_job(
+        [
+            SimpleNamespace(status_code=429, headers={}),
+            SimpleNamespace(status_code=200, json=lambda: data),
+            SimpleNamespace(status_code=200, json=lambda: data),
+        ]
+    )
+    job.api_keys = ["primary", "secondary"]
+    monkeypatch.setattr(MODULE.asyncio, "sleep", AsyncMock())
+
+    asyncio.run(job.fetch_citation_data("2601.00001", "One"))
+    asyncio.run(job.fetch_citation_data("2601.00001", "One"))
+
+    keys = [call.kwargs["headers"] for call in job.client.get.await_args_list]
+    assert keys == [
+        {"x-api-key": "primary"},
+        {"x-api-key": "secondary"},
+        {"x-api-key": "primary"},
+    ]
+
+
+def test_keys_are_deduplicated_and_spacing_scales_per_key(monkeypatch):
+    def job_with(primary, secondary):
+        settings = SimpleNamespace(
+            semantic_scholar_api_key=primary, semantic_scholar_api_key_2=secondary
+        )
+        monkeypatch.setattr(MODULE, "get_settings", lambda: settings)
+        monkeypatch.setattr(MODULE, "get_database_session", lambda: iter([Mock()]))
+        monkeypatch.setattr(MODULE.signal, "signal", Mock())
+        monkeypatch.setattr(MODULE.DatabaseCronJob, "__init__", lambda *a, **k: None)
+        return MODULE.CitationHourlyUpdateJob()
+
+    two = job_with("a", "b")
+    assert (two.api_keys, two.request_delay) == (["a", "b"], 0.75)
+    same = job_with("a", "a")
+    assert (same.api_keys, same.request_delay) == (["a"], 1.5)
+    none = job_with("", "")
+    assert (none.api_keys, none.request_delay, none._next_key_headers()) == (
+        [],
+        1.5,
+        {},
+    )
 
 
 def test_rate_limit_retries_same_paper_and_honors_retry_after(monkeypatch):

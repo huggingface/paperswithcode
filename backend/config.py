@@ -158,7 +158,10 @@ class Settings(BaseSettings, ChatSettings):
     )
     semantic_scholar_api_key_2: str = Field(
         default="",
-        description="Secondary Semantic Scholar key reserved for historical backfills",
+        description=(
+            "Secondary Semantic Scholar key for historical backfills; the "
+            "hourly citation refresh also rotates through it"
+        ),
     )
     openalex_api_key: str = Field(
         default="", description="Optional OpenAlex API key for historical backfills"
