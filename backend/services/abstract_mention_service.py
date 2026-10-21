@@ -22,7 +22,15 @@ Matching rules:
   ``RoboTwin 2.0``), or preceded by a capitalised word in the same phrase
   (``Geometry-Change VLA``), is flagged ``variant_suspect`` so the judge decides
   whether it names something else.
+- A plain-word method name capitalised inside a longer capitalised name
+  (``World Embedding Benchmark``) belongs to that name and is skipped.
 - Text inside ``$...$`` math is skipped.
+- Method names written ``Diffusion Transformer (DiT)`` match as the long form
+  and as the abbreviation; ``Diffusion Transformers (DiTs)`` becomes one span.
+  Method names also match their plural (``DiTs``, ``LLMs``, ``Transformers``).
+  An exact catalog name always beats an abbreviation or plural.
+- A model-size suffix keeps the match: ``REPA-XL/2``, ``Qwen3-8B``, and
+  ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier. When
   several benchmarks share the resulting base name, the unqualified one wins,
   then the group's single parent, then a parent all variants share; otherwise
@@ -47,6 +55,14 @@ _QUALIFIER = re.compile(r"\s*(?:\([^()]*\)|\s—\s.*)\s*$")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$", re.S)
 _PLAIN_WORD = re.compile(r"[A-Za-z][a-z]*")
 _VARIANT_WORD = re.compile(r"[A-Z0-9]")
+_ABBREVIATION = re.compile(r"\s*\(([A-Za-z0-9\-]*[A-Z][A-Za-z0-9\-]*)\)\s*$")
+_SIZE_SUFFIX = re.compile(
+    r"-(?:(?:XXL|XL|XS|[SMLBHG])(?:/\d+)?|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
+)
+_PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
+
+# Lower ranks win when two entities claim the same surface.
+NAME, ABBREVIATION, PLURAL = 0, 1, 2
 
 
 @dataclass(frozen=True)
@@ -135,15 +151,29 @@ def _resolve_benchmark_group(
 def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
     entities = list(entities)
     datasets = {e.entity_id: e for e in entities if e.entity_type == "dataset"}
-    # name tokens -> (owning entity, the name as written)
-    targets: dict[tuple[str, ...], list[tuple[CatalogEntity, str]]] = defaultdict(list)
+    # name tokens -> (rank, owning entity, the name as written)
+    targets: dict[tuple[str, ...], list[tuple[int, CatalogEntity, str]]] = defaultdict(
+        list
+    )
     unresolved: list[tuple[str, list[CatalogEntity]]] = []
+
+    def add(written: str, entity: CatalogEntity, rank: int) -> None:
+        key = tuple(normalize_name(written).split())
+        if key:
+            targets[key].append((rank, entity, written))
+        if entity.entity_type == "method" and rank != PLURAL and key:
+            last = tokenize(written)[-1]
+            if last[-1:].isalpha() and last[-1:].lower() != "s":
+                add(written + "s", entity, PLURAL)
 
     for entity in entities:
         if entity.entity_type == "method":
-            key = tuple(normalize_name(entity.name).split())
-            if key:
-                targets[key].append((entity, entity.name))
+            abbreviation = _ABBREVIATION.search(entity.name)
+            if abbreviation:
+                add(entity.name[: abbreviation.start()], entity, NAME)
+                add(abbreviation.group(1), entity, ABBREVIATION)
+            else:
+                add(base_name(entity.name), entity, NAME)
 
     groups: dict[str, list[CatalogEntity]] = defaultdict(list)
     for dataset in datasets.values():
@@ -156,13 +186,18 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             unresolved.append((key_text, members))
             continue
         written = base_name((target if target in members else members[0]).name)
-        targets[tuple(key_text.split())].append((target, written))
+        targets[tuple(key_text.split())].append((NAME, target, written))
 
     surfaces: dict[tuple[str, ...], list[_Surface]] = {}
     for key, owners in targets.items():
         if len(key) > MAX_NAME_TOKENS:
             continue
-        distinct = {(o.entity_type, o.entity_id): (o, w) for o, w in owners}
+        best = min(rank for rank, _, _ in owners)
+        distinct = {
+            (o.entity_type, o.entity_id): (o, w)
+            for rank, o, w in owners
+            if rank == best
+        }
         if len(distinct) > 1:
             unresolved.append((" ".join(key), [o for o, _ in distinct.values()]))
             continue
@@ -183,6 +218,8 @@ def _continues_as_variant(text_value: str, end: int) -> bool:
         return False
     if rest[0] == "." and rest[1].isdigit():
         return True
+    if _SIZE_SUFFIX.match(text_value, end):
+        return False
     return rest[0] == "-" and (rest[1].isupper() or rest[1].isdigit())
 
 
@@ -218,26 +255,24 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
     candidates: list[Candidate] = []
     i = 0
     while i < len(tokens):
-        matched = None
-        for n in range(min(index.max_tokens, len(tokens) - i), 0, -1):
-            surfaces = index.surfaces.get(tuple(lowered[i : i + n]))
-            if not surfaces:
-                continue
-            if not _contiguous(masked, tokens[i : i + n]):
-                continue
-            surface = surfaces[0]
-            if surface.case_sensitive and tuple(words[i : i + n]) != surface.tokens:
-                continue
-            matched = (n, surface)
-            break
+        matched = _longest_match(index, masked, tokens, words, lowered, i)
         if matched is None:
             i += 1
             continue
         n, surface = matched
         start, end = tokens[i].start(), tokens[i + n - 1].end()
-        if not _continues_as_variant(masked, end) and not _has_hyphenated_prefix(
+        end = _absorb_parenthesised_alias(index, abstract, masked, end, surface)
+        inside_name = _followed_by_variant_word(masked, end) or _preceded_by_name_word(
             masked, start
-        ):
+        )
+        part_of_other_name = (
+            _continues_as_variant(masked, end)
+            or _has_hyphenated_prefix(masked, start)
+            or (
+                inside_name and _is_capitalised_plain_word(surface, abstract[start:end])
+            )
+        )
+        if not part_of_other_name:
             candidates.append(
                 Candidate(
                     entity_type=surface.entity.entity_type,
@@ -245,12 +280,51 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     start=start,
                     end=end,
                     surface=abstract[start:end],
-                    variant_suspect=_followed_by_variant_word(masked, end)
-                    or _preceded_by_name_word(masked, start),
+                    variant_suspect=inside_name,
                 )
             )
         i += n
+        while i < len(tokens) and tokens[i].start() < end:
+            i += 1
     return candidates
+
+
+def _is_capitalised_plain_word(surface: _Surface, written: str) -> bool:
+    return (
+        surface.entity.entity_type == "method"
+        and len(surface.tokens) == 1
+        and not surface.case_sensitive
+        and written[:1].isupper()
+    )
+
+
+def _longest_match(index, masked, tokens, words, lowered, i):
+    for n in range(min(index.max_tokens, len(tokens) - i), 0, -1):
+        surfaces = index.surfaces.get(tuple(lowered[i : i + n]))
+        if not surfaces or not _contiguous(masked, tokens[i : i + n]):
+            continue
+        surface = surfaces[0]
+        if surface.case_sensitive and tuple(words[i : i + n]) != surface.tokens:
+            continue
+        return n, surface
+    return None
+
+
+def _absorb_parenthesised_alias(
+    index: MentionIndex, abstract: str, masked: str, end: int, surface: _Surface
+) -> int:
+    """Extend ``Diffusion Transformers`` over a following ``(DiTs)``."""
+    paren = _PAREN_ALIAS.match(masked, end)
+    if not paren:
+        return end
+    inner = list(_TOKEN.finditer(paren.group(1)))
+    words = [t.group() for t in inner]
+    matched = _longest_match(
+        index, paren.group(1), inner, words, [w.lower() for w in words], 0
+    )
+    if matched and matched[0] == len(inner) and matched[1].entity == surface.entity:
+        return paren.end()
+    return end
 
 
 def _contiguous(text_value: str, tokens: list[re.Match]) -> bool:

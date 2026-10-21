@@ -22,6 +22,12 @@ CATALOG = [
     method(5, "Dropout"),
     method(6, "Qwen3"),
     method(7, "Attention"),
+    method(8, "Diffusion Transformer (DiT)"),
+    method(9, "Transformer"),
+    method(10, "Diffusion"),
+    method(11, "REPA"),
+    method(12, "Mixture-of-Experts (MoE)"),
+    method(13, "Reranker (cross-encoder)"),
     dataset(10, "SWE-Bench"),
     dataset(11, "SWE-Bench Verified"),
     dataset(12, "Terminal Bench 2.0"),
@@ -136,3 +142,33 @@ def test_capitalised_neighbours_mark_variant_suspect():
     assert not any(c.variant_suspect for c in listed)
     [versioned] = find_candidates("on SWE-Bench 2.0 tasks", INDEX)
     assert versioned.variant_suspect
+
+
+def test_bracketed_abbreviations_and_plurals_match_methods():
+    text = "Diffusion Transformers (DiTs) scale well. DiT's stream and MoE layers."
+    assert links(text) == [
+        ("Diffusion Transformers (DiTs)", "method", 8),
+        ("DiT", "method", 8),
+        ("MoE", "method", 12),
+    ]
+    assert links("mixture-of-experts and Transformers") == [
+        ("mixture-of-experts", "method", 12),
+        ("Transformers", "method", 9),
+    ]
+    assert links("a Reranker (cross-encoder)") == [("Reranker", "method", 13)]
+
+
+def test_model_size_suffixes_keep_the_base_name():
+    assert links("improving a strong REPA-XL/2 model and Qwen3-8B") == [
+        ("REPA", "method", 11),
+        ("Qwen3", "method", 6),
+    ]
+    assert links("REPA-Tuned") == []
+
+
+def test_plain_words_inside_a_longer_capitalised_name_are_skipped():
+    assert links("on the World Attention Benchmark and Attention Maps") == []
+    assert links("Attention helps. We add attention.") == [
+        ("Attention", "method", 7),
+        ("attention", "method", 7),
+    ]
