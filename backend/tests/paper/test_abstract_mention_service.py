@@ -55,6 +55,11 @@ CATALOG = [
     dataset(52, "SkillsBench (SkillGate, 16-skill slate)", parent_id=50),
     dataset(60, "MATH"),
     dataset(61, "Spider"),
+    dataset(70, "MMEB-v2"),
+    dataset(71, "MMEB-v3"),
+    dataset(72, "CIFAR-10"),
+    dataset(73, "CIFAR-100"),
+    dataset(74, "LIBERO v2"),
 ]
 INDEX = build_index(CATALOG)
 
@@ -218,3 +223,12 @@ def test_frameworks_and_urls():
     assert links("code at https://github.com/x/GRPO-repo and GRPO") == [
         ("GRPO", "method", 4)
     ]
+
+
+def test_bare_benchmark_name_links_its_latest_explicit_version():
+    assert links("results on MMEB and MMEB-v2") == [
+        ("MMEB", "dataset", 71),
+        ("MMEB-v2", "dataset", 70),
+    ]
+    assert links("on CIFAR and SWE-Bench") == [("SWE-Bench", "dataset", 10)]
+    assert links("on LIBERO") == [("LIBERO", "dataset", 20)]

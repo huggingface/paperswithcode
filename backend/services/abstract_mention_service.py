@@ -39,6 +39,8 @@ Matching rules:
 - URLs and ``$...$`` math are skipped.
 - A model-size suffix keeps the match: ``REPA-XL/2``, ``Qwen3-8B``, and
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
+- A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
+  links its bare name to the latest version.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier. When
   several benchmarks share the resulting base name, the unqualified one wins,
   then the group's single parent, then a parent all variants share; otherwise
@@ -70,6 +72,7 @@ _ABBREVIATION = re.compile(
 _SIZE_SUFFIX = re.compile(
     r"-(?:(?:XXL|XL|XS|[SMLBHG])(?:/\d+)?|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
 )
+_VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
 
 # Lower ranks win when two entities claim the same surface.
@@ -209,6 +212,23 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             continue
         written = base_name((target if target in members else members[0]).name)
         targets[tuple(key_text.split())].append((NAME, target, written))
+
+    latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
+    for dataset in datasets.values():
+        versioned = _VERSIONED.match(base_name(dataset.name))
+        if not versioned or not versioned.group(1).strip():
+            continue
+        family = versioned.group(1).strip()
+        version = tuple(
+            int(n) for n in (versioned.group(2) or versioned.group(3)).split(".")
+        )
+        key = tuple(normalize_name(family).split())
+        if " ".join(key) in groups:
+            continue  # a benchmark already owns the bare name (ImageNet)
+        if key not in latest or version > latest[key][0]:
+            latest[key] = (version, dataset, family)
+    for key, (_, dataset, family) in latest.items():
+        targets[key].append((ABBREVIATION, dataset, family))
 
     surfaces: dict[tuple[str, ...], list[_Surface]] = {}
     for key, owners in targets.items():
