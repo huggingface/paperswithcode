@@ -38,7 +38,8 @@ Matching rules:
   ``LLaVA``); a name that already carries a version does not (``Qwen3.5`` is
   not ``Qwen3``).
 - Frameworks (``llama.cpp``, ``vLLM``) match like single names, without plurals.
-- URLs and ``$...$`` math are skipped.
+- URLs and ``$...$`` math are skipped, and an abbreviation between a name and
+  its version is read through (``Terminal-Bench (TB) 3.0``).
 - A model-size suffix keeps the match: ``REPA-XL/2``, ``Qwen3-8B``, and
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
@@ -75,6 +76,8 @@ _SIZE_SUFFIX = re.compile(
     r"-(?:(?:XXL|XL|XS)(?:/\d+)?|[SMLBHG]\+?/\d+|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
 )
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
+# "Terminal-Bench (TB) 3.0": an abbreviation between a name and its version.
+_INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+\d)")
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
 
 # Lower ranks win when two entities claim the same surface.
@@ -272,8 +275,12 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
     )
 
 
+def _blank(match: re.Match) -> str:
+    return " " * len(match.group())  # keeps character offsets stable
+
+
 def _masked(abstract: str) -> str:
-    return _MATH.sub(lambda m: " " * len(m.group()), abstract)
+    return _INFIX_ABBREVIATION.sub(_blank, _MATH.sub(_blank, abstract))
 
 
 def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:

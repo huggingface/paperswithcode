@@ -42,6 +42,7 @@ CATALOG = [
     dataset(76, "OSWorld"),
     dataset(77, "ImageNet V2"),
     dataset(78, "Imagenet-1k (ILSVRC-2012)"),
+    dataset(79, "Terminal Bench 3.0"),
     CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
     CatalogEntity("framework", 101, "Transformers", "transformers"),
     CatalogEntity("framework", 102, "Transformers", "transformers-vision"),
@@ -253,3 +254,9 @@ def test_full_name_long_forms_and_bad_suffixes_do_not_match():
     assert links("ImageNet training") == []
     [policy] = find_candidates("an improved 3D Diffusion Policy learner", INDEX)
     assert policy.variant_suspect
+
+
+def test_abbreviation_between_name_and_version_is_read_through():
+    assert links("on Terminal-Bench (TB) 3.0 and TB") == [
+        ("Terminal-Bench (TB) 3.0", "dataset", 79)
+    ]
