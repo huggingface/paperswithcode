@@ -599,3 +599,48 @@ def test_gateway_paper_read_returns_controlled_upstream_error(monkeypatch):
         )
     assert exc_info.value.status_code == 502
     assert exc_info.value.detail == "Paper Markdown could not be read"
+
+
+@pytest.mark.parametrize(
+    "path, metered_as",
+    [
+        ("paper/search", "search"),
+        ("/paper/search/match/", "search"),
+        ("paper/CorpusId:1234/references", "semantic_scholar"),
+    ],
+)
+def test_gateway_meters_every_semantic_scholar_search_as_a_search(
+    monkeypatch, path, metered_as
+):
+    class DB:
+        def commit(self):
+            pass
+
+    metered: list[str] = []
+    monkeypatch.setattr(
+        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+    )
+    monkeypatch.setattr(
+        ChatCapabilityService,
+        "meter_catalog",
+        lambda _self, _capability, operation, **_kwargs: metered.append(operation),
+    )
+    monkeypatch.setattr(
+        "backend.chat_gateway_app.fetch_semantic_scholar",
+        lambda *_args, **_kwargs: {"data": []},
+    )
+
+    catalog(
+        CatalogRequest(
+            operation="semantic_scholar",
+            arguments={"path": path, "query": {"query": "mamba"}},
+        ),
+        authorization="Bearer test",
+        x_pwc_session=str(uuid.uuid4()),
+        x_pwc_turn=str(uuid.uuid4()),
+        turn_fence=None,
+        db=DB(),
+        settings=SimpleNamespace(chat_max_direct_search_calls=4),
+    )
+
+    assert metered == [metered_as]

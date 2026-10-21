@@ -16,6 +16,13 @@ _PAPER_GRAPH_PATH = re.compile(
     r"^paper/[^/]{1,500}/(?:references|citations)$", re.IGNORECASE
 )
 _ALLOWED_QUERY_KEYS = frozenset({"query", "limit", "offset", "year", "fields"})
+# Credentialed keyword searches. The gateway meters every one against the
+# turn's direct-search allowance, so keep this the only place they are listed.
+SEARCH_PATHS = frozenset({"paper/search", "paper/search/match"})
+
+
+def is_search_path(path: str) -> bool:
+    return path.strip("/") in SEARCH_PATHS
 
 
 class SemanticScholarGatewayError(RuntimeError):
@@ -27,7 +34,7 @@ class SemanticScholarGatewayError(RuntimeError):
 
 def _validate_request(path: str, query: dict[str, Any]) -> tuple[str, dict[str, str]]:
     normalized_path = path.strip("/")
-    if normalized_path not in {"paper/search", "paper/search/match"} and not (
+    if normalized_path not in SEARCH_PATHS and not (
         _PAPER_GRAPH_PATH.fullmatch(normalized_path)
     ):
         raise ValueError("Unsupported Semantic Scholar operation")
