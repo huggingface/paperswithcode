@@ -385,23 +385,44 @@ def test_create_refuses_duplicates_of_existing_catalog_rows(db):
 
     with pytest.raises(ValueError, match="dataset 77.*map_existing"):
         service(db).apply_add_benchmark(job, create_mutation())
-    with pytest.raises(ValueError, match="duplicates metric 3"):
+
+
+def _respelled_overall_accuracy(direction: str) -> list[dict]:
+    return [
+        {
+            "new_metric": {
+                "name": "overall accuracy",
+                "full_name": "Overall accuracy",
+                "direction": direction,
+                "description": "Share of correct shapes.",
+            }
+        }
+    ]
+
+
+def test_create_reuses_an_existing_metric_proposed_under_a_new_spelling(db):
+    candidate, job, _source, _parent = creation_setup(db)
+
+    service(db).apply_add_benchmark(
+        job,
+        create_mutation(metrics=_respelled_overall_accuracy("higher_is_better")),
+    )
+
+    dataset = db.query(Dataset).filter(Dataset.slug == "modelnet40").one()
+    task = db.query(Task).filter(Task.slug == "3d-shape-classification").one()
+    assert db.query(Metric).count() == 1
+    assert db.get(TaskDatasetMetric, (task.id, dataset.id, 3)) is not None
+    assert candidate.resolution["metric_ids"] == [3]
+    assert candidate.resolution["created"]["metric_ids"] == []
+
+
+def test_create_refuses_a_respelled_metric_with_the_opposite_direction(db):
+    _candidate, job, _source, _parent = creation_setup(db)
+
+    with pytest.raises(ValueError, match="duplicates metric 3.*higher_is_better"):
         service(db).apply_add_benchmark(
             job,
-            create_mutation(
-                new_task=None,
-                existing_task_id=263,
-                metrics=[
-                    {
-                        "new_metric": {
-                            "name": "overall accuracy",
-                            "full_name": "Overall accuracy",
-                            "direction": "higher_is_better",
-                            "description": "Share of correct shapes.",
-                        }
-                    }
-                ],
-            ),
+            create_mutation(metrics=_respelled_overall_accuracy("lower_is_better")),
         )
 
 

@@ -1073,10 +1073,16 @@ class BenchmarkGapReviewService:
             Metric.id, Metric.name, Metric.full_name
         ):
             if key in {_name_key(name), _name_key(full_name)}:
-                raise ValueError(
-                    f"Metric {proposal.name!r} duplicates metric {metric_id} "
-                    f"({name!r}); use existing_metric_id"
-                )
+                # A new metric that only respells an existing one reuses it,
+                # unless the proposal ranks it the other way round.
+                metric = self.db.get(Metric, metric_id)
+                if metric.direction != proposal.direction:
+                    raise ValueError(
+                        f"Metric {proposal.name!r} duplicates metric {metric_id} "
+                        f"({name!r}), which is {metric.direction}; use "
+                        "existing_metric_id or a distinct metric name"
+                    )
+                return metric
         metric = Metric(
             name=proposal.name.strip(),
             full_name=proposal.full_name.strip(),
