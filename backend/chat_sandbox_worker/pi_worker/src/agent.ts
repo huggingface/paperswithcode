@@ -607,6 +607,9 @@ export class PiWorker {
             });
           },
           disableTools: () => this.session!.setActiveToolsByName([]),
+          lowerReasoning: () => {
+            if (run.reasoning_effort === "max") this.session!.setThinkingLevel("high");
+          },
           canContinue: () => !adapter.failed && !this.compaction.failed && !this.cancelled && !subscribeFailed,
         });
       } finally {
