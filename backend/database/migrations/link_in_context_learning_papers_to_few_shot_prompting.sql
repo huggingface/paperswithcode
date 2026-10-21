@@ -1,6 +1,7 @@
 -- Few-shot prompting (method 185, source: GPT-3) is in-context learning.
--- Name it so, and link 287 reviewed papers whose titles are about ICL.
-UPDATE methods SET full_name = 'Few-shot prompting (In-Context Learning)', updated_at = CURRENT_TIMESTAMP
+-- Name it so (search matches the name), and link 287 reviewed papers whose titles are about ICL.
+UPDATE methods SET name = 'In-Context Learning (Few-shot prompting)',
+    full_name = 'In-Context Learning (Few-shot prompting)', updated_at = CURRENT_TIMESTAMP
 WHERE slug = 'few-shot-prompting';
 
 CREATE TEMP TABLE icl_papers (paper_id BIGINT PRIMARY KEY);
