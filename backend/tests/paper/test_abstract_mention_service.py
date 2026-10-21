@@ -6,8 +6,10 @@ from backend.services.abstract_mention_service import (
 )
 
 
-def method(entity_id, name):
-    return CatalogEntity("method", entity_id, name, name.lower().replace(" ", "-"))
+def method(entity_id, name, full_name=None):
+    return CatalogEntity(
+        "method", entity_id, name, name.lower().replace(" ", "-"), full_name=full_name
+    )
 
 
 def dataset(entity_id, name, parent_id=None):
@@ -29,6 +31,13 @@ CATALOG = [
     method(12, "Mixture-of-Experts (MoE)"),
     method(13, "Reranker (cross-encoder)"),
     method(14, "Looped Transformer"),
+    method(15, "World Action Models", "World Action Models (WAMs)"),
+    method(16, "Key-value cache", "Key-value cache (KV cache)"),
+    method(17, "LLaVA"),
+    method(18, "Grokking", "Grokking (Delayed Generalization)"),
+    CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
+    CatalogEntity("framework", 101, "Transformers", "transformers"),
+    CatalogEntity("framework", 102, "Transformers", "transformers-vision"),
     dataset(10, "SWE-Bench"),
     dataset(11, "SWE-Bench Verified"),
     dataset(12, "Terminal Bench 2.0"),
@@ -186,4 +195,26 @@ def test_generic_entity_yields_to_a_more_specific_one_in_the_same_abstract():
     assert links("on LIBERO and LIBERO-Plus") == [
         ("LIBERO", "dataset", 20),
         ("LIBERO-Plus", "dataset", 22),
+    ]
+
+
+def test_full_name_abbreviations_and_their_singulars_match():
+    assert links("World action models. WAMs differ; a WAM acts.") == [
+        ("World action models", "method", 15),
+        ("WAMs", "method", 15),
+        ("WAM", "method", 15),
+    ]
+    assert links("The KV cache grows.") == [("KV cache", "method", 16)]
+    assert links("delayed generalization") == []
+
+
+def test_family_names_keep_version_suffixes():
+    assert links("LLaVA-1.5-7B and LLaVA-NeXT") == [("LLaVA", "method", 17)]
+
+
+def test_frameworks_and_urls():
+    assert links("served with llama.cpp") == [("llama.cpp", "framework", 100)]
+    assert links("Hugging Face Transformers") == []
+    assert links("code at https://github.com/x/GRPO-repo and GRPO") == [
+        ("GRPO", "method", 4)
     ]

@@ -27,11 +27,16 @@ Matching rules:
 - A generic method is dropped from an abstract that also mentions a more
   specific method containing its name: ``Transformer`` goes when ``Looped Transformer``
   or ``Diffusion Transformer`` is present.
-- Text inside ``$...$`` math is skipped.
 - Method names written ``Diffusion Transformer (DiT)`` match as the long form
-  and as the abbreviation; ``Diffusion Transformers (DiTs)`` becomes one span.
+  and as the abbreviation, and so does the method's full name
+  (``World Action Models (WAMs)`` gives ``WAMs`` and ``WAM``); ``Diffusion Transformers (DiTs)`` becomes one span.
   Method names also match their plural (``DiTs``, ``LLMs``, ``Transformers``).
   An exact catalog name always beats an abbreviation or plural.
+- A version after a family name keeps the match (``LLaVA-1.5`` links
+  ``LLaVA``); a name that already carries a version does not (``Qwen3.5`` is
+  not ``Qwen3``).
+- Frameworks (``llama.cpp``, ``vLLM``) match like single names, without plurals.
+- URLs and ``$...$`` math are skipped.
 - A model-size suffix keeps the match: ``REPA-XL/2``, ``Qwen3-8B``, and
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier. When
@@ -55,10 +60,13 @@ MAX_NAME_TOKENS = 16
 _TOKEN = re.compile(r"[^\W_](?:[\w.+]*[\w+])?")
 _SEPARATOR = re.compile(r"[\s\-_/'’]+")
 _QUALIFIER = re.compile(r"\s*(?:\([^()]*\)|\s—\s.*)\s*$")
-_MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$", re.S)
+_MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|https?://\S+", re.S)
 _PLAIN_WORD = re.compile(r"[A-Za-z][a-z]*")
 _VARIANT_WORD = re.compile(r"[A-Z0-9]")
-_ABBREVIATION = re.compile(r"\s*\(([A-Za-z0-9\-]*[A-Z][A-Za-z0-9\-]*)\)\s*$")
+# A trailing bracket whose first word has two capitals: (DiT), (WAMs), (KV cache).
+_ABBREVIATION = re.compile(
+    r"\s*\(((?=[^\s)]*[A-Z][^\s)]*[A-Z])[A-Za-z0-9\-]+(?: [A-Za-z0-9\-]+){0,2})\)\s*$"
+)
 _SIZE_SUFFIX = re.compile(
     r"-(?:(?:XXL|XL|XS|[SMLBHG])(?:/\d+)?|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
 )
@@ -70,11 +78,12 @@ NAME, ABBREVIATION, PLURAL = 0, 1, 2
 
 @dataclass(frozen=True)
 class CatalogEntity:
-    entity_type: str  # "method" or "dataset"
+    entity_type: str  # "method", "dataset", or "framework"
     entity_id: int
     name: str
     slug: str
     parent_id: int | None = None
+    full_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -171,14 +180,22 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             if last[-1:].isalpha() and last[-1:].lower() != "s":
                 add(written + "s", entity, PLURAL)
 
+    def add_named(written: str, entity: CatalogEntity, rank: int) -> None:
+        abbreviation = _ABBREVIATION.search(written)
+        add(base_name(written), entity, rank)
+        if abbreviation:
+            short = abbreviation.group(1)
+            add(short, entity, ABBREVIATION)
+            if re.fullmatch(r"[A-Z][A-Za-z0-9\-]*[A-Z]s", short):
+                add(short[:-1], entity, ABBREVIATION)  # WAMs -> WAM
+
     for entity in entities:
         if entity.entity_type == "method":
-            abbreviation = _ABBREVIATION.search(entity.name)
-            if abbreviation:
-                add(entity.name[: abbreviation.start()], entity, NAME)
-                add(abbreviation.group(1), entity, ABBREVIATION)
-            else:
-                add(base_name(entity.name), entity, NAME)
+            add_named(entity.name, entity, NAME)
+            if entity.full_name and entity.full_name != entity.name:
+                add_named(entity.full_name, entity, ABBREVIATION)
+        elif entity.entity_type == "framework":
+            add(entity.name, entity, NAME)
 
     groups: dict[str, list[CatalogEntity]] = defaultdict(list)
     for dataset in datasets.values():
@@ -197,16 +214,19 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
     for key, owners in targets.items():
         if len(key) > MAX_NAME_TOKENS:
             continue
-        best = min(rank for rank, _, _ in owners)
-        distinct = {
-            (o.entity_type, o.entity_id): (o, w)
-            for rank, o, w in owners
-            if rank == best
-        }
-        if len(distinct) > 1:
+        chosen = None
+        for rank in sorted({rank for rank, _, _ in owners}):
+            distinct = {
+                (o.entity_type, o.entity_id): (o, w) for r, o, w in owners if r == rank
+            }
+            if len(distinct) == 1:
+                chosen = next(iter(distinct.values()))
+                break
+            # Two entities share this name; a lower-ranked unique owner may still win.
             unresolved.append((" ".join(key), [o for o, _ in distinct.values()]))
+        if chosen is None:
             continue
-        owner, written = next(iter(distinct.values()))
+        owner, written = chosen
         tokens = tuple(tokenize(written))
         surfaces[key] = [_Surface(owner, tokens, _case_sensitive(owner, tokens))]
     names = {
@@ -225,15 +245,24 @@ def _masked(abstract: str) -> str:
     return _MATH.sub(lambda m: " " * len(m.group()), abstract)
 
 
-def _continues_as_variant(text_value: str, end: int) -> bool:
+def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:
     rest = text_value[end : end + 2]
     if len(rest) < 2:
         return False
-    if rest[0] == "." and rest[1].isdigit():
-        return True
     if _SIZE_SUFFIX.match(text_value, end):
         return False
+    versioned = rest[0] in ".-" and rest[1].isdigit()
+    if versioned and _is_unversioned_method(surface):
+        return False  # LLaVA-1.5 is still LLaVA
+    if rest[0] == "." and rest[1].isdigit():
+        return True
     return rest[0] == "-" and (rest[1].isupper() or rest[1].isdigit())
+
+
+def _is_unversioned_method(surface: _Surface) -> bool:
+    return surface.entity.entity_type == "method" and not any(
+        ch.isdigit() for token in surface.tokens for ch in token
+    )
 
 
 def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
@@ -279,7 +308,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
             masked, start
         )
         part_of_other_name = (
-            _continues_as_variant(masked, end)
+            _continues_as_variant(masked, end, surface)
             or _has_hyphenated_prefix(masked, start)
             or (
                 inside_name and _is_capitalised_plain_word(surface, abstract[start:end])
@@ -375,14 +404,24 @@ def load_catalog_entities(db: Session) -> list[CatalogEntity]:
     rows = db.execute(
         text(
             """
-            SELECT 'method' AS entity_type, id, name, slug, NULL::bigint AS parent_id
+            SELECT 'method' AS entity_type, id, name, slug,
+                   NULL::bigint AS parent_id, full_name
             FROM methods WHERE slug IS NOT NULL
             UNION ALL
-            SELECT 'dataset', id, name, slug, parent_dataset_id FROM datasets
+            SELECT 'dataset', id, name, slug, parent_dataset_id, NULL FROM datasets
+            UNION ALL
+            SELECT 'framework', id, name, slug, NULL, NULL FROM frameworks
             """
         )
     ).all()
     return [
-        CatalogEntity(row.entity_type, int(row.id), row.name, row.slug, row.parent_id)
+        CatalogEntity(
+            row.entity_type,
+            int(row.id),
+            row.name,
+            row.slug,
+            row.parent_id,
+            row.full_name,
+        )
         for row in rows
     ]
