@@ -25,6 +25,7 @@ Performance:
 
 import asyncio
 import json
+import math
 import signal
 import sys
 import time
@@ -78,6 +79,9 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             7  # Only update papers older than this (reduced for more frequent updates)
         )
         self.chunk_size = 500  # Process papers in smaller chunks to reduce memory usage
+        # Each run refreshes at least this share of the cycle, so papers that
+        # were refreshed on the same days do not all come due together.
+        self.steady_rate_headroom = 1.2
 
         # Timeout protection: keep each hourly tick bounded.
         self.max_runtime_seconds = 45 * 60
@@ -104,6 +108,7 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             "credential_failures": 0,
             "papers_selected": 0,
             "papers_deferred": 0,
+            "papers_refreshed_early": 0,
             "deadline_reached": False,
             "shutdown_requested": False,
             "elapsed_seconds": 0,
@@ -124,15 +129,17 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
 
         # Get total count of papers that need citation updates
         total_papers = self.get_papers_count()
-
-        if total_papers == 0:
-            self.logger.info("No papers need citation updates at this time")
-            return
-
         self.logger.info(f"Found {total_papers} papers to update")
 
-        # Limit the number of papers per run to respect rate limits
-        papers_to_process = min(total_papers, self.max_papers_per_run)
+        # Refresh at least the steady hourly share, topping up with papers
+        # that are not due yet, and at most the rate-limit bound.
+        papers_to_process = min(
+            max(total_papers, self.steady_papers_per_run()),
+            self.max_papers_per_run,
+        )
+        if papers_to_process == 0:
+            self.logger.info("No papers need citation updates at this time")
+            return
         if papers_to_process < total_papers:
             self.logger.info(
                 f"Limited to {papers_to_process} papers for this hourly run"
@@ -198,6 +205,18 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         self.stats["papers_found"] = count
         return count
 
+    def steady_papers_per_run(self) -> int:
+        """Return the hourly share that refreshes every paper once per cycle."""
+        refreshable = self.paper_service.get_citation_refreshable_count()
+        cycle_hours = self.update_threshold_days * 24
+        return math.ceil(refreshable * self.steady_rate_headroom / cycle_hours)
+
+    def get_early_refresh_chunk(self, limit: int) -> List[Dict]:
+        """Get not-yet-due papers that were refreshed longest ago."""
+        return self.paper_service.get_papers_for_early_citation_refresh(
+            limit, self.update_threshold_days
+        )
+
     def get_papers_chunk(self, offset: int, limit: int) -> List[Dict]:
         """Get a chunk of papers that need citation updates."""
         return self.paper_service.get_papers_needing_citation_update_chunk(
@@ -207,6 +226,11 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
     async def process_papers_in_streaming_chunks(self, total_papers_to_process: int):
         """Process a stable bounded selection in memory-efficient chunks."""
         papers = self.get_papers_chunk(0, total_papers_to_process)
+        early = []
+        if len(papers) < total_papers_to_process:
+            early = self.get_early_refresh_chunk(total_papers_to_process - len(papers))
+        papers += early
+        self.stats["papers_refreshed_early"] = len(early)
         self.stats["papers_selected"] = len(papers)
         if not papers:
             self.logger.info("No pending papers remained after selection")

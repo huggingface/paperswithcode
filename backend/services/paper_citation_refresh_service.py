@@ -56,6 +56,37 @@ class PaperCitationRefreshService:
                 f"Error counting papers needing citation updates: {error}"
             )
 
+    def count_refreshable(self) -> int:
+        """Return every ArXiv paper the hourly refresh cycles through."""
+        return (
+            self.db.query(DBPaper)
+            .filter(DBPaper.is_latest_version)
+            .filter(DBPaper.arxiv_id.is_not(None))
+            .count()
+        )
+
+    def refresh_ahead_chunk(
+        self, limit: int, threshold_days: int = 7
+    ) -> list[dict[str, Any]]:
+        """Return not-yet-due papers whose citations were refreshed longest ago.
+
+        Refreshing them early in quiet hours spreads a weekly wave of papers
+        refreshed on the same days across the whole cycle.
+        """
+        threshold_date = datetime.now() - timedelta(  # noqa: DTZ005
+            days=threshold_days
+        )
+        papers = (
+            self.db.query(DBPaper)
+            .filter(DBPaper.is_latest_version)
+            .filter(DBPaper.arxiv_id.is_not(None))
+            .filter(DBPaper.citation_updated_at >= threshold_date)
+            .order_by(DBPaper.citation_updated_at.asc(), DBPaper.id.asc())
+            .limit(limit)
+            .all()
+        )
+        return [self._pending_projection(paper) for paper in papers]
+
     def pending_chunk(
         self, offset: int, limit: int, threshold_days: int = 7
     ) -> list[dict[str, Any]]:

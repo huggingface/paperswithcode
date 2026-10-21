@@ -210,6 +210,54 @@ def test_cron_selection_projection_and_statistics_contract(tmp_path):
         }
 
 
+def test_early_refresh_picks_oldest_not_yet_due_arxiv_papers(tmp_path):
+    session_factory = _session_factory(tmp_path, "citation-early.db")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    with session_factory() as db:
+        db.add_all(
+            [
+                _paper(
+                    1,
+                    citation_count=3,
+                    citation_updated_at=now - timedelta(days=30),
+                    published=date(2025, 1, 1),
+                ),
+                _paper(
+                    2,
+                    citation_count=3,
+                    citation_updated_at=now - timedelta(days=2),
+                    published=date(2025, 1, 1),
+                ),
+                _paper(
+                    3,
+                    citation_count=3,
+                    citation_updated_at=now - timedelta(days=6),
+                    published=date(2025, 1, 1),
+                ),
+                _paper(
+                    4,
+                    citation_count=3,
+                    citation_updated_at=now - timedelta(days=5),
+                    published=date(2025, 1, 1),
+                    latest=False,
+                ),
+                _paper(
+                    5,
+                    citation_count=3,
+                    citation_updated_at=None,
+                    published=date(2025, 1, 1),
+                ),
+            ]
+        )
+        db.commit()
+        service = PaperCitationRefreshService(db)
+
+        assert service.count_refreshable() == 4
+        rows = service.refresh_ahead_chunk(5, 7)
+        # Due and never-refreshed papers belong to the regular pending set.
+        assert [row["id"] for row in rows] == [3, 2]
+
+
 def test_cron_batch_persists_successes_and_marks_failures_processed(tmp_path):
     session_factory = _session_factory(tmp_path, "citation-update.db")
     with session_factory() as db:

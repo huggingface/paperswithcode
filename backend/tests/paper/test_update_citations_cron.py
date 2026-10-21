@@ -53,6 +53,58 @@ def test_streaming_chunks_use_one_stable_selection():
     ] == [[0, 1], [2, 3], [4]]
 
 
+def test_short_due_selection_is_topped_up_with_early_refreshes():
+    job = _job()
+    job.get_papers_chunk = Mock(return_value=[{"id": 1}])
+    job.get_early_refresh_chunk = Mock(return_value=[{"id": 7}, {"id": 8}])
+    job.process_papers_with_rate_limiting = AsyncMock(return_value=True)
+
+    asyncio.run(job.process_papers_in_streaming_chunks(3))
+
+    job.get_early_refresh_chunk.assert_called_once_with(2)
+    assert job.stats["papers_selected"] == 3
+    assert job.stats["papers_refreshed_early"] == 2
+    assert [
+        [paper["id"] for paper in call.args[0]]
+        for call in job.process_papers_with_rate_limiting.await_args_list
+    ] == [[1, 7], [8]]
+
+
+def test_steady_share_covers_the_cycle_with_headroom():
+    job = _job()
+    job.update_threshold_days = 7
+    job.steady_rate_headroom = 1.2
+    job.paper_service = Mock()
+    job.paper_service.get_citation_refreshable_count.return_value = 115_283
+
+    # 115,283 * 1.2 / 168 hours, rounded up.
+    assert job.steady_papers_per_run() == 824
+
+
+def test_run_refreshes_the_steady_share_when_nothing_is_due():
+    job = _job()
+    job.max_papers_per_run = 1500
+    job.soft_runtime_seconds = 60
+    job.max_runtime_seconds = 120
+    job.stats.update(
+        papers_deferred=0,
+        credential_failures=0,
+        api_calls=0,
+        api_successes=0,
+        api_errors=0,
+        rate_limit_hits=0,
+    )
+    job.get_papers_count = Mock(return_value=0)
+    job.steady_papers_per_run = Mock(return_value=824)
+    job.process_papers_in_streaming_chunks = AsyncMock()
+    job.log_summary = Mock()
+    job.vacuum_analyze_table = Mock()
+
+    job.run()
+
+    job.process_papers_in_streaming_chunks.assert_awaited_once_with(824)
+
+
 def test_streaming_chunks_stop_after_partial_chunk():
     job = _job()
     papers = [{"id": paper_id} for paper_id in range(5)]
