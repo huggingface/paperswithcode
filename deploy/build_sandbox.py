@@ -74,6 +74,16 @@ def lend(root: Path) -> None:
     if enabled():
         identity = _identity()
         _chown_tree(root, identity.pw_uid, identity.pw_gid)
+        _make_owner_writable(root)
+
+
+def _make_owner_writable(root: Path) -> None:
+    # Root ignored permission bits on files it copied from the read-only
+    # release (e.g. package-lock.json, which npm prune rewrites); the build
+    # user does not, so give the owner the write access root had.
+    for path in (root, *root.rglob("*")):
+        if not path.is_symlink():
+            path.chmod(path.stat().st_mode | 0o200)
 
 
 def _stop_build_processes() -> None:

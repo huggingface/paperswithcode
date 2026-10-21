@@ -183,3 +183,22 @@ def test_reclaim_refuses_dot_dot_escapes_through_an_inside_link(tmp_path: Path):
 
     with pytest.raises(RuntimeError, match="escape"):
         build_sandbox.reclaim(tree)
+
+
+def test_lend_lets_the_build_user_write_files_copied_from_the_release(
+    tmp_path: Path, as_root
+):
+    # The Pi build copies package-lock.json from the 0444 release; npm prune
+    # rewrites it, which root could do regardless of mode but pwc-build cannot.
+    app = tmp_path / "app"
+    app.mkdir()
+    lock = app / "package-lock.json"
+    lock.write_text("{}")
+    lock.chmod(0o444)
+    app.chmod(0o555)
+    (tmp_path / "link").symlink_to("/etc/passwd")
+
+    build_sandbox.lend(tmp_path)
+
+    assert lock.stat().st_mode & 0o777 == 0o644
+    assert app.stat().st_mode & 0o777 == 0o755
