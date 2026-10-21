@@ -120,3 +120,19 @@ def test_benchmark_base_names_resolve_through_the_catalog_hierarchy():
     # Co-equal variants with no parent stay unlinked and are reported.
     assert links("SNU-FILM") == []
     assert "snu film" in [key for key, _ in INDEX.unresolved]
+
+
+def test_hyphenated_prefixes_make_a_different_name():
+    assert links("Flow-GRPO, delta-VAE and Thrifty-GRPO") == []
+    assert links("then GRPO") == [("GRPO", "method", 4)]
+
+
+def test_capitalised_neighbours_mark_variant_suspect():
+    [inside] = find_candidates("We introduce Geometry-Change GRPO here.", INDEX)
+    assert inside.variant_suspect
+    [start] = find_candidates("Results improve. GRPO helps.", INDEX)
+    assert not start.variant_suspect
+    listed = find_candidates("On MATH, SWE-Bench, Spider and GRPO", INDEX)
+    assert not any(c.variant_suspect for c in listed)
+    [versioned] = find_candidates("on SWE-Bench 2.0 tasks", INDEX)
+    assert versioned.variant_suspect

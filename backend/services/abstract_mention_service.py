@@ -16,8 +16,12 @@ Matching rules:
 - A version continuation ends nothing: ``Qwen3.5``, ``Qwen3-VL``, and
   ``LIBERO-Goal`` never yield ``Qwen3`` or ``LIBERO``. Lowercase modifiers stay
   allowed (``GRPO-based``).
-- A match followed by a capitalised word or a number (``SWE-Bench Lite``) is
-  flagged ``variant_suspect`` so the judge decides whether it names a variant.
+- A hyphenated prefix makes a different name: ``Flow-GRPO``, ``delta-VAE``,
+  and ``m-EuroSAT`` never yield ``GRPO``, ``VAE``, or ``EuroSAT``.
+- A match followed by a capitalised word or a number (``SWE-Bench Lite``,
+  ``RoboTwin 2.0``), or preceded by a capitalised word in the same phrase
+  (``Geometry-Change VLA``), is flagged ``variant_suspect`` so the judge decides
+  whether it names something else.
 - Text inside ``$...$`` math is skipped.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier. When
   several benchmarks share the resulting base name, the unqualified one wins,
@@ -182,9 +186,25 @@ def _continues_as_variant(text_value: str, end: int) -> bool:
     return rest[0] == "-" and (rest[1].isupper() or rest[1].isdigit())
 
 
+def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
+    return (
+        start >= 2 and text_value[start - 1] == "-" and text_value[start - 2].isalnum()
+    )
+
+
 def _followed_by_variant_word(text_value: str, end: int) -> bool:
     match = re.match(r"[ \t]+(\S)", text_value[end:])
     return bool(match and _VARIANT_WORD.match(match.group(1)))
+
+
+def _preceded_by_name_word(text_value: str, start: int) -> bool:
+    """True for ``Geometry-Change VLA``; false at a sentence or clause start."""
+    match = re.search(r"(\S+)[ \t]+$", text_value[:start])
+    word = match.group(1) if match else ""
+    if not word or not word[0].isupper() or not word[-1].isalnum():
+        return False
+    before = text_value[: match.start()].rstrip()
+    return bool(before) and before[-1] not in ".!?:;"
 
 
 def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
@@ -215,7 +235,9 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
             continue
         n, surface = matched
         start, end = tokens[i].start(), tokens[i + n - 1].end()
-        if not _continues_as_variant(masked, end):
+        if not _continues_as_variant(masked, end) and not _has_hyphenated_prefix(
+            masked, start
+        ):
             candidates.append(
                 Candidate(
                     entity_type=surface.entity.entity_type,
@@ -223,7 +245,8 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     start=start,
                     end=end,
                     surface=abstract[start:end],
-                    variant_suspect=_followed_by_variant_word(masked, end),
+                    variant_suspect=_followed_by_variant_word(masked, end)
+                    or _preceded_by_name_word(masked, start),
                 )
             )
         i += n
