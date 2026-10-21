@@ -9,6 +9,7 @@ use crate::registry::{MAX_PUBLIC_NOISE_KEY_BYTES, RegistrationRequest};
 
 pub struct PostgresRegistry {
     client: Client,
+    database_url: String,
     shard_database_id: Uuid,
 }
 
@@ -17,16 +18,25 @@ impl PostgresRegistry {
         database_url: &str,
         shard_database_id: Uuid,
     ) -> Result<Self, DurableRegistryError> {
-        let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
-        tokio::spawn(async move {
-            if connection.await.is_err() {
-                eprintln!("executor registry connection closed");
-            }
-        });
         Ok(Self {
-            client,
+            client: open(database_url).await?,
+            database_url: database_url.to_owned(),
             shard_database_id,
         })
+    }
+
+    /// Reopen the single registry connection once PostgreSQL has closed it.
+    ///
+    /// A server restart, terminated backend, or network loss closes the
+    /// connection for good; without reopening it every later registry call
+    /// fails until the daemon restarts. A loss that is not yet visible fails
+    /// one call, which closes the client, and the next call reconnects.
+    async fn ensure_connected(&mut self) -> Result<(), DurableRegistryError> {
+        if self.client.is_closed() {
+            self.client = open(&self.database_url).await?;
+            eprintln!("executor registry reconnected");
+        }
+        Ok(())
     }
 
     pub async fn consume_and_register(
@@ -34,6 +44,7 @@ impl PostgresRegistry {
         request: &RegistrationRequest,
         admission: &VerifiedAdmission,
     ) -> Result<Uuid, DurableRegistryError> {
+        self.ensure_connected().await?;
         let claims = admission.claims();
         if claims.environment_id != request.environment_id
             || claims.environment_generation != request.environment_generation
@@ -345,6 +356,7 @@ impl PostgresRegistry {
     }
 
     pub async fn invalidate_ready_on_startup(&mut self) -> Result<u64, DurableRegistryError> {
+        self.ensure_connected().await?;
         let transaction = self.client.transaction().await?;
         let changed = transaction
             .execute(
@@ -382,6 +394,7 @@ impl PostgresRegistry {
     }
 
     pub async fn expire_suspect_recoveries(&mut self) -> Result<u64, DurableRegistryError> {
+        self.ensure_connected().await?;
         let transaction = self.client.transaction().await?;
         let rows = transaction
             .query(
@@ -434,9 +447,10 @@ impl PostgresRegistry {
     }
 
     pub async fn persist_nonce(
-        &self,
+        &mut self,
         admission: &VerifiedAdmission,
     ) -> Result<(), DurableRegistryError> {
+        self.ensure_connected().await?;
         let claims = admission.claims();
         let ttl_seconds = match claims.purpose {
             AdmissionPurpose::Registration => 60_i64,
@@ -519,6 +533,7 @@ impl PostgresRegistry {
         &mut self,
         registration_id: Uuid,
     ) -> Result<(), DurableRegistryError> {
+        self.ensure_connected().await?;
         let transaction = self.client.transaction().await?;
         let row = transaction
             .query_opt(
@@ -588,9 +603,10 @@ impl PostgresRegistry {
     }
 
     pub async fn checkpoint_seen(
-        &self,
+        &mut self,
         registration_ids: &[Uuid],
     ) -> Result<u64, DurableRegistryError> {
+        self.ensure_connected().await?;
         Ok(self
             .client
             .execute(
@@ -605,6 +621,16 @@ impl PostgresRegistry {
             )
             .await?)
     }
+}
+
+async fn open(database_url: &str) -> Result<Client, DurableRegistryError> {
+    let (client, connection) = tokio_postgres::connect(database_url, NoTls).await?;
+    tokio::spawn(async move {
+        if connection.await.is_err() {
+            eprintln!("executor registry connection closed");
+        }
+    });
+    Ok(client)
 }
 
 fn hex_lower(bytes: &[u8]) -> String {
