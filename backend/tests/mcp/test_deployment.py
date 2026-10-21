@@ -128,11 +128,13 @@ def test_prepare_release_makes_new_release_traversable(tmp_path, monkeypatch):
     monkeypatch.setattr(mcp_release, "MCP_RELEASES", releases)
     monkeypatch.setattr(mcp_release, "_extract", lambda *args: None)
     commands = []
-    monkeypatch.setattr(
-        mcp_release,
-        "_run",
-        lambda command, **kwargs: commands.append(command),
-    )
+    environments = []
+
+    def run(command, **kwargs):
+        commands.append(command)
+        environments.append(kwargs["env"])
+
+    monkeypatch.setattr(mcp_release.subprocess, "run", run)
     monkeypatch.setattr(
         mcp_release,
         "_descriptor",
@@ -148,6 +150,11 @@ def test_prepare_release_makes_new_release_traversable(tmp_path, monkeypatch):
 
     assert release.stat().st_mode & 0o777 == 0o755
     assert "--no-editable" in commands[0]
+    # uv runs with a throwaway cache, not root's, and the cache is removed.
+    cache = environments[0]["UV_CACHE_DIR"]
+    assert environments[0]["HOME"] == cache
+    assert not cache.startswith("/root")
+    assert [path.name for path in releases.iterdir()] == [release.name]
     assert commands[0][commands[0].index("--python") + 1] == "/usr/bin/python3"
     assert "--no-managed-python" in commands[0]
 

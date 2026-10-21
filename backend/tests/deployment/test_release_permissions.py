@@ -11,37 +11,6 @@ import deploy.configure_host_env as configure_host_env
 import deploy.configure_role_allowlists as configure_role_allowlists
 
 
-def test_shared_runtime_is_made_service_readable(tmp_path: Path, monkeypatch):
-    runtime = tmp_path / ".venv"
-    package = runtime / "lib" / "package.py"
-    base = tmp_path / "base-python"
-    neutral_base = tmp_path / "python-runtime"
-    interpreter = base / "bin" / "python3.12"
-    package.parent.mkdir(parents=True)
-    (runtime / "bin").mkdir()
-    interpreter.parent.mkdir(parents=True)
-    package.write_text("value = 1\n")
-    interpreter.write_text("python")
-    interpreter.chmod(0o755)
-    (runtime / "bin" / "python").symlink_to(interpreter)
-    (runtime / "pyvenv.cfg").write_text(f"home = {base / 'bin'}\n")
-    runtime.chmod(0o700)
-    package.parent.chmod(0o700)
-    package.chmod(0o600)
-    monkeypatch.setattr(deploy_cli, "VENV", runtime)
-    monkeypatch.setattr(deploy_cli, "PYTHON_RUNTIME", neutral_base)
-
-    deploy_cli.make_runtime_readable()
-
-    assert runtime.stat().st_mode & 0o055 == 0o055
-    assert package.parent.stat().st_mode & 0o055 == 0o055
-    assert package.stat().st_mode & 0o044 == 0o044
-    assert (runtime / "bin" / "python").resolve() == (
-        neutral_base / "bin" / "python3.12"
-    )
-    assert str(neutral_base) in (runtime / "pyvenv.cfg").read_text()
-
-
 def test_immutable_release_is_world_readable(tmp_path: Path):
     release = tmp_path / "release"
     package = release / "backend"

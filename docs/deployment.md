@@ -152,9 +152,9 @@ is configured.
 
 `--qualify-only` prepares the candidate in the inactive slot (result
 `candidate-prepared`) after the rolling-compatibility check, without switching
-`active`. `--legacy-bridge` existed only for the one-time migration from the
-fixed-port services and is rejected once nginx or an active slot is present,
-which is now true for both environments. `--defer-public-smoke` is retired.
+`active`. `--legacy-bridge` (the one-time migration from the fixed-port
+services) and the matching fixed-port rollback are retired and refused, as is
+`--defer-public-smoke`.
 
 Rollback:
 
@@ -180,10 +180,12 @@ Install deployment tooling only from committed source:
 sudo python deploy/install_deploy_tools.py <commit>
 ```
 
-`pwc-deploy` runs as root, but never runs release-controlled build code as
-root. The frontend `npm ci`/`npm run build`, the release chat descriptor
-import, the runtime `uv sync`, and the external Pi worker build run as the
-unprivileged `pwc-build` account (`deploy/build_sandbox.py`). Each step uses a
+`pwc-deploy` runs as root, but never runs release-controlled code as root.
+The frontend `npm ci`/`npm run build`, the release chat descriptor import, the
+runtime `uv sync`, the external Pi worker build, and the MCP component's
+`uv sync` run as the unprivileged `pwc-build` account
+(`deploy/build_sandbox.py`). Deploy smoke tests, which run the release's
+runtime interpreter, run as that environment's own `pwc-<environment>` account. Each step uses a
 cleared environment, a throwaway HOME and package cache, no supplementary
 groups or capabilities, and `no_new_privs`. Root takes the build tree back
 (killing leftover `pwc-build` processes first) before inspecting or publishing

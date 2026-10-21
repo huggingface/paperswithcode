@@ -202,3 +202,29 @@ def test_lend_lets_the_build_user_write_files_copied_from_the_release(
 
     assert lock.stat().st_mode & 0o777 == 0o644
     assert app.stat().st_mode & 0o777 == 0o755
+
+
+def test_deploy_smokes_run_release_runtime_as_the_environment_account(
+    tmp_path: Path, as_root, monkeypatch: pytest.MonkeyPatch
+):
+    from deploy import cli as deploy_cli
+
+    staging = pwd.struct_passwd(
+        ("pwc-staging", "x", 991, 982, "", "/nonexistent", "/usr/sbin/nologin")
+    )
+    monkeypatch.setattr(build_sandbox.pwd, "getpwnam", lambda name: staging)
+    calls: list[tuple[list[str], dict]] = []
+    monkeypatch.setattr(
+        deploy_cli, "run", lambda command, **kwargs: calls.append((command, kwargs))
+    )
+    runtime = tmp_path / "runtime"
+    (runtime / "bin").mkdir(parents=True)
+
+    deploy_cli._smoke_slot_candidate(
+        "staging", "blue", tmp_path, runtime, {"release_id": "r-staging"}
+    )
+    deploy_cli.smoke_public(tmp_path, "staging", "r-staging")
+
+    for command, kwargs in calls:
+        assert command[:3] == ["/usr/bin/setpriv", "--reuid=991", "--regid=982"]
+        assert kwargs["env"]["HOME"] == "/nonexistent"
