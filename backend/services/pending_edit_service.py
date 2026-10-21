@@ -252,6 +252,14 @@ class PendingEditService:
         row ended with its commit. Deciding and applying under it makes the
         daily and removal limits hold for parallel requests from one account.
         """
+        try:
+            self._decide_and_apply(row)
+        except Exception:
+            logger.exception("submission_auto_approve_failed id=%s", row.id)
+            self.db.rollback()
+        self.db.refresh(row)
+
+    def _decide_and_apply(self, row: PendingPaperEdit) -> None:
         self._lock_submitter(row.hf_subject)
         decision = AutoApprovalPolicy(self.db).decide(
             hf_subject=row.hf_subject,
@@ -270,17 +278,12 @@ class PendingEditService:
             if decision.note:
                 row.admin_note = decision.note
             self.db.commit()
-            self.db.refresh(row)
             return
-        try:
-            self.approve(
-                edit_id=row.id,
-                reviewer_username=AUTO_REVIEWER,
-                reviewer_kind="auto",
-            )
-        except Exception:
-            logger.exception("submission_auto_approve_failed id=%s", row.id)
-        self.db.refresh(row)
+        self.approve(
+            edit_id=row.id,
+            reviewer_username=AUTO_REVIEWER,
+            reviewer_kind="auto",
+        )
 
     def _lock_submitter(self, hf_subject: str) -> None:
         if self.db.bind is not None and self.db.bind.dialect.name == "postgresql":

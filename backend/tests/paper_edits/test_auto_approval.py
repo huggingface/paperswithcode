@@ -13,6 +13,7 @@ from backend.models.database import Paper as DBPaper
 from backend.models.database import ProjectPage as DBProjectPage
 from backend.models.database import Task as DBTask
 from backend.services.pending_edit_auto_approval import (
+    AutoApprovalPolicy,
     removed_values,
 )
 from backend.services.pending_edit_service import PendingEditService
@@ -252,6 +253,20 @@ def test_apply_failure_leaves_the_edit_queued(db_session, paper_fixture, monkeyp
         "backend.services.pending_edit_mutations.PendingEditMutationService.apply_human_review",
         fail,
     )
+
+    row = submit(db_session, "tasks", {"task_ids": [1, 2, 3]})
+
+    assert row.status == "pending"
+    assert task_ids(db_session) == {1, 2}
+
+
+def test_policy_error_leaves_the_stored_edit_queued(
+    db_session, paper_fixture, monkeypatch
+):
+    def fail(*_args, **_kwargs):
+        raise RuntimeError("policy query failed")
+
+    monkeypatch.setattr(AutoApprovalPolicy, "decide", fail)
 
     row = submit(db_session, "tasks", {"task_ids": [1, 2, 3]})
 
