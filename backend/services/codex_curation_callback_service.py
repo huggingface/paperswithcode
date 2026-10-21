@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit
 
+from pydantic import ValidationError
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
@@ -1434,6 +1435,14 @@ class CodexCurationCallbackService:
             )
         return skipped
 
+    @staticmethod
+    def _preapply_proposal(row) -> dict[str, Any] | None:
+        try:
+            proposal = ApplyMutationRequest.model_validate(row.proposal or {})
+        except ValidationError:
+            return None
+        return proposal.model_dump(mode="json")
+
     def _validate_scheduled_policy(
         self, row, body: ApplyMutationRequest
     ) -> dict[str, Any]:
@@ -1443,6 +1452,12 @@ class CodexCurationCallbackService:
         if row.trace_status not in {"preapply_stored", "disabled"}:
             raise CodexCurationMutationClosedError(
                 "Scheduled mutation requires a durable pre-apply trace"
+            )
+        # The pre-apply trace is the reviewable record of what a scheduled job
+        # intends to change, so the apply must be exactly that proposal.
+        if self._preapply_proposal(row) != body.model_dump(mode="json"):
+            raise CodexCurationMutationClosedError(
+                "Scheduled mutation does not match its pre-apply proposal"
             )
         if row.kind in BENCHMARK_GAP_KINDS:
             return {"policy": "benchmark-gap-v1"}
