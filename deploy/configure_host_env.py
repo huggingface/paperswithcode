@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import ast
 import base64
+import binascii
 import grp
 import hashlib
 import json
@@ -28,6 +29,8 @@ STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
 CHAT_TITLE_CREDENTIAL_OWNER = "nielsr"
 STAGING_CHAT_MODAL_WORKSPACE = "nielsrogge"
 STAGING_CHAT_MODAL_OWNER_USERNAME = "nielsrogge"
+STAGING_LATEX_COMPILER_IMAGE = re.compile(r"im-[A-Za-z0-9]{20,32}")
+STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT = "pwc-latex-staging"
 
 STAGING_EXCLUDED_PREFIXES = (
     "PWC_POSTGRES_BACKUP_",
@@ -77,11 +80,21 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "MODAL_TOKEN_SECRET",
     "MODAL_ENVIRONMENT",
     "PWC_CHAT_DEFAULT_BACKEND",
+    "PWC_CHAT_ARTIFACTS_ENABLED",
+    "PWC_CHAT_ARTIFACT_HF_BUCKET_ID",
+    "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED",
+    "PWC_CHAT_ARTIFACT_STORAGE_BACKEND",
     "PWC_CHAT_LANGFUSE_ENABLED",
     "PWC_CHAT_TRACKIO_ENABLED",
     "PWC_CHAT_TRACKIO_URL",
     "PWC_CHAT_TRACKIO_PROJECT",
     "PWC_CHAT_TRACKIO_HF_TOKEN",
+    "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID",
+    "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE",
+    "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
+    "PWC_CHAT_LATEX_PAPER_ENABLED",
     "PWC_CHAT_MAX_CONCURRENCY",
     "PWC_CHAT_ALTERNATIVE_MODEL",
     "PWC_CHAT_ALTERNATIVE_MODEL_ENABLED",
@@ -109,6 +122,7 @@ STAGING_RUNTIME_PASSTHROUGH_KEYS = {
     "PWC_CHAT_PI_PREWARM_ENABLED",
     "PWC_CHAT_PI_PREWARM_MODEL",
     "PWC_CHAT_PI_PREWARM_REASONING_EFFORT",
+    "PWC_CHAT_POSTERLY_ENABLED",
     "PWC_CHAT_PWC_CLI_VERSION",
     "PWC_CHAT_SANDBOX_CPU",
     "PWC_CHAT_SANDBOX_CPU_LIMIT",
@@ -479,6 +493,100 @@ def staging_scope_guardrail_values(current: dict[str, str]) -> dict[str, str]:
         "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
         "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_CHAT_ARTIFACT_BUCKET_ID,
         "PWC_CHAT_POSTERLY_ENABLED": "false",
+    }
+
+
+STAGING_LATEX_COMPILER_SOURCE_KEYS = {
+    "PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID",
+    "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT",
+    "PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY",
+}
+
+
+def staging_latex_paper_install_values(source: dict[str, str]) -> dict[str, str]:
+    """Validate protected compiler pins and install them with every gate off."""
+
+    values = {
+        key: decoded_value(source[key]).strip()
+        for key in STAGING_LATEX_COMPILER_SOURCE_KEYS
+        if key in source and decoded_value(source[key]).strip()
+    }
+    missing = sorted(STAGING_LATEX_COMPILER_SOURCE_KEYS - values.keys())
+    if missing:
+        raise ValueError("staging compiler source is missing: " + ", ".join(missing))
+    image = values["PWC_CHAT_LATEX_COMPILER_MODAL_IMAGE_ID"]
+    if STAGING_LATEX_COMPILER_IMAGE.fullmatch(image) is None:
+        raise ValueError("staging compiler requires an immutable Modal image ID")
+    if (
+        values["PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT"]
+        != STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT
+    ):
+        raise ValueError(
+            "PWC_CHAT_LATEX_COMPILER_MODAL_ENVIRONMENT must be "
+            + STAGING_LATEX_COMPILER_MODAL_ENVIRONMENT
+        )
+    encoded_key = values["PWC_CHAT_LATEX_COMPILER_SIGNING_PRIVATE_KEY"]
+    try:
+        raw_key = base64.b64decode(
+            encoded_key + "=" * (-len(encoded_key) % 4),
+            altchars=b"-_",
+            validate=True,
+        )
+        Ed25519PrivateKey.from_private_bytes(raw_key)
+    except (binascii.Error, ValueError) as error:
+        raise ValueError("staging compiler signing key is invalid") from error
+    return {
+        **values,
+        **staging_latex_paper_mode_values({}, mode="disable"),
+    }
+
+
+def staging_latex_paper_mode_values(
+    current: dict[str, str], *, mode: str
+) -> dict[str, str]:
+    """Build one coherent staging-only qualification, activation, or kill state."""
+
+    if mode not in {"qualification", "activation", "disable"}:
+        raise ValueError("staging paper mode is invalid")
+    if mode != "disable":
+        try:
+            staging_latex_paper_install_values(
+                {key: current[key] for key in STAGING_LATEX_COMPILER_SOURCE_KEYS}
+            )
+        except (KeyError, ValueError) as error:
+            raise ValueError(
+                "staging compiler configuration must be installed first"
+            ) from error
+        if (
+            "PWC_HF_TOKEN" not in current
+            or not decoded_value(current["PWC_HF_TOKEN"]).strip()
+        ):
+            raise ValueError("staging compiler requires PWC_HF_TOKEN")
+        # The compiler has no credential of its own: the backend creates its
+        # sandboxes with the staging Modal workspace credential.
+        for key in ("MODAL_TOKEN_ID", "MODAL_TOKEN_SECRET"):
+            if key not in current or not decoded_value(current[key]).strip():
+                raise ValueError(f"staging compiler requires {key}")
+    # Paper turns run only on the Modal sandbox worker; external Pi admission
+    # accepts ordinary research and the backend refuses to boot otherwise.
+    if (
+        mode == "activation"
+        and _decoded_flag(current, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") == "true"
+    ):
+        raise ValueError(
+            "staging paper activation requires external Pi admission to be off"
+        )
+    return {
+        "PWC_CHAT_ARTIFACTS_ENABLED": str(mode != "qualification").lower(),
+        "PWC_CHAT_POSTERLY_ENABLED": "false",
+        "PWC_CHAT_LATEX_PAPER_ENABLED": str(mode == "activation").lower(),
+        "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED": str(mode == "activation").lower(),
+        "PWC_CHAT_LATEX_COMPILER_QUALIFICATION_MODE": str(
+            mode == "qualification"
+        ).lower(),
+        "PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED": "false",
+        "PWC_CHAT_ARTIFACT_STORAGE_BACKEND": "hf_bucket",
+        "PWC_CHAT_ARTIFACT_HF_BUCKET_ID": STAGING_CHAT_ARTIFACT_BUCKET_ID,
     }
 
 
@@ -1051,6 +1159,72 @@ _STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED = {
     "PWC_CHAT_PI_PREWARM_ENABLED": "true",
     "PWC_CHAT_OPENAI_GLOBAL_MAX_CONCURRENCY": "4",
 }
+
+
+# Admission off returns staging chat to the Modal sandbox worker, which is the
+# only path that runs private paper turns. Every switch that requires admission
+# turns off with it, and the pool, prewarm and concurrency values return to the
+# sandbox-worker baseline.
+_STAGING_EXTERNAL_PI_OFF = {
+    "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED": "false",
+    "PWC_CHAT_EXECUTOR_REMOTE_TRANSPORT_ENABLED": "false",
+    "PWC_CHAT_SAFE_CLI_FAST_PATH_ENABLED": "false",
+    **_STAGING_DURABLE_EXTERNAL_QUALIFICATION_DISABLED,
+    # The sandbox worker's reviewed capacity profile (chat_capacity.py).
+    "PWC_CHAT_MAX_CONCURRENCY": "2",
+    "PWC_CHAT_USER_MAX_CONCURRENCY": "2",
+    "PWC_CHAT_SANDBOX_TOTAL_LIVE_CAP": "3",
+    "PWC_CHAT_BLANK_POOL_MIN": "1",
+    "PWC_CHAT_BLANK_POOL_MAX": "1",
+}
+# A full staging rebuild keeps whichever side of the transition is installed,
+# so it can never mix paper gates with a stale external Pi profile.
+STAGING_RUNTIME_PASSTHROUGH_KEYS.update(_STAGING_EXTERNAL_PI_OFF)
+STAGING_EXTERNAL_PI_PROFILE_BACKUP = CONFIG_ROOT / "staging-external-pi-profile.env"
+_ABSENT_KEYS = "PWC_STAGING_EXTERNAL_PI_ABSENT_KEYS"
+_STAGING_PAPER_GATES = (
+    "PWC_CHAT_LATEX_PAPER_ENABLED",
+    "PWC_CHAT_LATEX_COMPILER_JOBS_ENABLED",
+)
+
+
+def staging_external_pi_disable_values(
+    current: dict[str, str],
+) -> tuple[dict[str, str], dict[str, str]]:
+    """Turn staging external Pi admission off and capture what it replaces.
+
+    Returns the values to write and the exact prior lines of every changed key,
+    so the enable transition restores staging's own tuned profile.
+    """
+
+    if _decoded_flag(current, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") != "true":
+        raise ValueError("staging external Pi admission is already off")
+    backup = {key: current[key] for key in _STAGING_EXTERNAL_PI_OFF if key in current}
+    absent = sorted(set(_STAGING_EXTERNAL_PI_OFF) - set(current))
+    backup[_ABSENT_KEYS] = f"{_ABSENT_KEYS}={','.join(absent)}"
+    return dict(_STAGING_EXTERNAL_PI_OFF), backup
+
+
+def staging_external_pi_enable_lines(
+    current: dict[str, str], backup: dict[str, str]
+) -> dict[str, str]:
+    """Restore the saved external Pi profile once papers are off again."""
+
+    if any(_decoded_flag(current, key) == "true" for key in _STAGING_PAPER_GATES):
+        raise ValueError(
+            "disable the staging LaTeX paper feature before enabling external Pi"
+        )
+    if (
+        _ABSENT_KEYS not in backup
+        or _decoded_flag(backup, "PWC_CHAT_EXTERNAL_PI_ADMISSION_ENABLED") != "true"
+    ):
+        raise ValueError("no saved staging external Pi profile to restore")
+    absent = {key for key in decoded_value(backup[_ABSENT_KEYS]).split(",") if key}
+    if set(backup) - {_ABSENT_KEYS} | absent != set(_STAGING_EXTERNAL_PI_OFF):
+        raise ValueError("saved staging external Pi profile is incomplete")
+    restored = {key: line for key, line in current.items() if key not in absent}
+    restored.update({key: line for key, line in backup.items() if key != _ABSENT_KEYS})
+    return restored
 
 
 def staging_durable_external_qualification_values(
@@ -1669,6 +1843,16 @@ def main() -> int:
     parser.add_argument(
         "--staging-modal-rate-evidence-remove-only", action="store_true"
     )
+    parser.add_argument("--staging-latex-paper-install-only", action="store_true")
+    parser.add_argument(
+        "--staging-latex-paper-qualification-enable-only", action="store_true"
+    )
+    parser.add_argument(
+        "--staging-latex-paper-activation-enable-only", action="store_true"
+    )
+    parser.add_argument("--staging-latex-paper-disable-only", action="store_true")
+    parser.add_argument("--staging-external-pi-disable-only", action="store_true")
+    parser.add_argument("--staging-external-pi-enable-only", action="store_true")
     parser.add_argument("--staging-modal-rate-release-id")
     parser.add_argument("--staging-modal-rate-microusd-per-second", type=int)
     parser.add_argument("--staging-chat-pi-prewarm-enable-only", action="store_true")
@@ -1790,6 +1974,108 @@ def main() -> int:
         print(f"set {environment} chat capacity tier {tier}; deploy/refresh to apply")
         return 0
     legacy = read_lines(args.legacy_env)
+    latex_paper_mode_names = {
+        "staging_latex_paper_install_only": (
+            "install",
+            "INSTALL_STAGING_LATEX_PAPER",
+        ),
+        "staging_latex_paper_qualification_enable_only": (
+            "qualification",
+            "ENABLE_STAGING_LATEX_PAPER_QUALIFICATION",
+        ),
+        "staging_latex_paper_activation_enable_only": (
+            "activation",
+            "ENABLE_STAGING_LATEX_PAPER",
+        ),
+        "staging_latex_paper_disable_only": (
+            "disable",
+            "DISABLE_STAGING_LATEX_PAPER",
+        ),
+    }
+    selected_latex_modes = [
+        name for name in latex_paper_mode_names if getattr(args, name)
+    ]
+    if selected_latex_modes:
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key not in latex_paper_mode_names and isinstance(value, bool) and value
+        ]
+        if (
+            len(selected_latex_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("staging LaTeX paper mode must run alone")
+        mode, confirmation = latex_paper_mode_names[selected_latex_modes[0]]
+        if args.confirm != confirmation:
+            parser.error(f"--confirm must be {confirmation}")
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            if mode == "install":
+                if (
+                    not args.legacy_env.is_file()
+                    or args.legacy_env.stat().st_uid != 0
+                    or args.legacy_env.stat().st_mode & 0o077
+                ):
+                    raise ValueError(
+                        "staging compiler source must be a protected root-only file"
+                    )
+                values = staging_latex_paper_install_values(legacy)
+            else:
+                values = staging_latex_paper_mode_values(current, mode=mode)
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(
+            CONFIG_ROOT / "staging.env",
+            assign(current, values),
+            "pwc-staging",
+        )
+        print(f"configured staging LaTeX paper {mode} state; no service was restarted")
+        return 0
+    external_pi_modes = {
+        "staging_external_pi_disable_only": "DISABLE_STAGING_EXTERNAL_PI",
+        "staging_external_pi_enable_only": "ENABLE_STAGING_EXTERNAL_PI",
+    }
+    selected_external_pi_modes = [
+        name for name in external_pi_modes if getattr(args, name)
+    ]
+    if selected_external_pi_modes:
+        other_modes = [
+            value
+            for key, value in vars(args).items()
+            if key not in external_pi_modes and isinstance(value, bool) and value
+        ]
+        if (
+            len(selected_external_pi_modes) != 1
+            or other_modes
+            or args.codex_jobs_namespace
+            or args.modal_profile
+        ):
+            parser.error("staging external Pi mode must run alone")
+        selected = selected_external_pi_modes[0]
+        if args.confirm != external_pi_modes[selected]:
+            parser.error(f"--confirm must be {external_pi_modes[selected]}")
+        current = read_lines(CONFIG_ROOT / "staging.env")
+        try:
+            if selected == "staging_external_pi_disable_only":
+                values, backup = staging_external_pi_disable_values(current)
+                # Save the profile first so a failed write cannot lose it.
+                write_env(STAGING_EXTERNAL_PI_PROFILE_BACKUP, backup, "root")
+                lines = assign(current, values)
+            else:
+                lines = staging_external_pi_enable_lines(
+                    current, read_lines(STAGING_EXTERNAL_PI_PROFILE_BACKUP)
+                )
+        except ValueError as error:
+            parser.error(str(error))
+        write_env(CONFIG_ROOT / "staging.env", lines, "pwc-staging")
+        if selected == "staging_external_pi_enable_only":
+            STAGING_EXTERNAL_PI_PROFILE_BACKUP.unlink()
+        state = "off" if selected == "staging_external_pi_disable_only" else "on"
+        print(f"set staging external Pi admission {state}; no service was restarted")
+        return 0
     modal_rate_modes = (
         args.staging_modal_rate_evidence_install_only,
         args.staging_modal_rate_evidence_remove_only,

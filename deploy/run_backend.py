@@ -91,9 +91,7 @@ def configure_release_environment(release: Path) -> dict:
         )
         os.environ["PWC_CHAT_ARTIFACTS_ENABLED"] = str(artifact_foundation).lower()
         os.environ["PWC_CHAT_POSTERLY_ENABLED"] = str(posterly_release).lower()
-        os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] = str(
-            artifact_foundation
-        ).lower()
+        os.environ["PWC_CHAT_ARTIFACT_SHARED_PREVIEW_ENABLED"] = "false"
         if artifact_foundation:
             os.environ["PWC_CHAT_ARTIFACT_STORAGE_BACKEND"] = "hf_bucket"
             os.environ["PWC_CHAT_ARTIFACT_HF_BUCKET_ID"] = runtime[
