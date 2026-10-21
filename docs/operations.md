@@ -398,6 +398,38 @@ queue. Admins review the queue at `/submissions` on the frontend, through the
 admin API below, or with
 `uv run --env-file backend/keys.env pwc submissions list --environment production`.
 
+### Auto-applied edits
+
+By default (`PWC_PAPER_EDIT_AUTO_APPROVE_ENABLED=true`) a signed-in user's edit to
+a paper-page surface is applied as soon as it is submitted and reviewed
+afterwards: the row is stored as `status = 'approved'`, `reviewed_by_kind =
+'auto'`, and its `catalog_mutation_events` row (`request_id =
+'submission-auto:<id>'`) is attributed to the submitter. Taxonomy suggestions and
+new external papers always stay queued. An edit is held in the queue, with the
+reason in `admin_note`, when it:
+
+- adds a link to a site that is not trusted (GitHub, Hugging Face, arXiv, X,
+  `.edu`/`.ac.*`, `PWC_PAPER_EDIT_AUTO_APPROVE_EXTRA_DOMAINS`, or a host already on
+  at least three project pages);
+- creates or changes an evaluation on a benchmark or metric that is not configured;
+- would be a removal or replacement on more than
+  `PWC_PAPER_EDIT_AUTO_APPROVE_REMOVAL_PAPERS` (10) distinct papers within 24 hours
+  (undoing one's own earlier addition does not count); or
+- would exceed `PWC_PAPER_EDIT_AUTO_APPROVE_DAILY_PAPERS` (100) auto-applied
+  papers per account per UTC day.
+
+If applying fails, the edit simply stays pending. Set
+`PWC_PAPER_EDIT_AUTO_APPROVE_ENABLED=false` and restart the backend to queue every
+edit again.
+
+Review auto-applied edits weekly on `/submissions` with the "auto-applied only"
+filter. "Revert this edit" calls the catalog-audit rollback for that edit's event;
+"Revert all by @user" (optionally with suspension) calls
+`POST /api/v1/admin/submitters/{hf_subject}/revert-auto-approved` with
+`{"since_hours": 168, "suspend": false}`, which rolls back newest first and
+reports edits it skipped because the paper changed since. A revert leaves no
+trace visible to the user.
+
 ### List pending submissions
 
 Run this against the production DB to surface the current review queue:

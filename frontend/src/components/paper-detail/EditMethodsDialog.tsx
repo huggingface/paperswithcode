@@ -10,6 +10,7 @@ import type { Method as APIMethod } from "@/lib/api/catalog.types";
 import { catalogApi } from "@/lib/api/catalog";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
@@ -138,10 +139,17 @@ export function EditMethodsDialog({
   const updateMethodsMutation = useMutation({
     mutationFn: async ({ paperId, methodIds }: { paperId: string; methodIds: number[] }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "methods",
           proposed_payload: { method_ids: methodIds },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed method changes shortly.",
         });
         return null;
       }
@@ -149,11 +157,6 @@ export function EditMethodsDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed method changes shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         return;

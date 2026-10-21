@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { githubUrlsMatch, normalizeGithubUrl } from "@/lib/github";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
@@ -65,10 +66,17 @@ export function EditRepositoriesDialog({
   const updateRepositoriesMutation = useMutation({
     mutationFn: async ({ paperId, repositories }: { paperId: string; repositories: Repository[] }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "repositories",
           proposed_payload: { repositories },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed repository changes shortly.",
         });
         return null;
       }
@@ -76,11 +84,6 @@ export function EditRepositoriesDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed repository changes shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         setNewRepositoryUrl("");

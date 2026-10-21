@@ -17,6 +17,7 @@ import {
 import { catalogApi } from "@/lib/api/catalog";
 import { evaluationsApi } from "@/lib/api/evaluations";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import {
   mapApiEvaluationsToEditable,
   prepareEvaluationDraft,
@@ -293,12 +294,24 @@ export function EditEvaluationsDialog({
 
       const numericPaperId = Number.parseInt(paperId, 10);
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: numericPaperId,
           edit_type: "evaluations",
           proposed_payload: {
             operations: toPendingEvaluationOperations(canonical),
           },
+        });
+        if (submitted.status === "approved") {
+          refreshEvaluationQueries(
+            queryClient,
+            evaluationChange(paperId, initialEvaluations, canonical, arxivId),
+          );
+        }
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription: "Thanks! An admin will review your proposed evaluation changes shortly.",
         });
       } else {
         const change = evaluationChange(paperId, initialEvaluations, canonical, arxivId);
@@ -310,15 +323,6 @@ export function EditEvaluationsDialog({
       }
     },
     onSuccess: () => {
-      if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description: "Thanks! An admin will review your proposed evaluation changes shortly.",
-        });
-        onSuccess?.();
-        onOpenChange(false);
-        return;
-      }
       onSuccess?.();
       onOpenChange(false);
     },

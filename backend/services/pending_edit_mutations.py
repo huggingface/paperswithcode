@@ -186,6 +186,14 @@ class PendingEditMutationService:
             resources.extend(self._evaluation_resources(payload))
         return resources
 
+    def unresolved_evaluation_resources(self, payload: Payload) -> list[str]:
+        """Evaluation targets that are missing or not configured for the benchmark."""
+        return [
+            f"{resource.kind.value} {resource.identifier}"
+            for resource in self._evaluation_resources(payload)
+            if not resource.exists
+        ]
+
     def _resolved_resource(
         self, model: type, kind: ResourceKind, identifier: int | None
     ) -> ResourceRef:

@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
@@ -64,10 +65,17 @@ export function EditProjectPagesDialog({
   const updateProjectPagesMutation = useMutation({
     mutationFn: async ({ paperId, projectPages }: { paperId: string; projectPages: ProjectPage[] }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "project_pages",
           proposed_payload: { project_pages: projectPages },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed project page changes shortly.",
         });
         return null;
       }
@@ -75,11 +83,6 @@ export function EditProjectPagesDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed project page changes shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         setNewProjectPageUrl("");

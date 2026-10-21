@@ -1,19 +1,22 @@
 """Private contributor history and admin audit endpoints."""
 
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from backend.models.paper_edits import EditingSuspension
 from backend.database.connection import get_database_session
+from backend.services.auto_approved_revert_service import AutoApprovedRevertService
 from backend.services.catalog_mutation_service import CatalogMutationService
 from backend.services.contribution_audit_service import (
     ContributionAuditEventNotFoundError,
     ContributionAuditRollbackError,
     ContributionAuditService,
 )
+from backend.services.submitter_moderation_service import SubmitterModerationService
 from backend.utils.auth import require_admin, require_contributor_role
 
 router = APIRouter()
@@ -69,6 +72,38 @@ def rollback_catalog_event(
         raise HTTPException(status_code=404, detail=str(error)) from error
     except ContributionAuditRollbackError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+class RevertAutoApprovedRequest(BaseModel):
+    since_hours: int = Field(default=24 * 7, ge=1, le=24 * 90)
+    suspend: bool = False
+    reason: str = Field(default="Auto-applied edits reverted", max_length=2000)
+
+
+@router.post("/admin/submitters/{hf_subject}/revert-auto-approved")
+def revert_auto_approved_edits(
+    hf_subject: str,
+    body: RevertAutoApprovedRequest,
+    request: Request,
+    actor: dict = Depends(require_admin),
+    db: Session = Depends(get_database_session),
+):
+    """Revert one account's auto-applied edits, optionally suspending it first."""
+    request_id = request.headers.get("X-Request-ID") or str(id(request))
+    if body.suspend:
+        SubmitterModerationService(db).set_suspension(
+            hf_subject=hf_subject,
+            suspended=True,
+            reason=body.reason,
+            actor=actor,
+            request_id=request_id,
+        )
+    return AutoApprovedRevertService(db).revert(
+        hf_subject=hf_subject,
+        since=datetime.now(UTC) - timedelta(hours=body.since_hours),
+        actor=actor,
+        request_id=request_id,
+    )
 
 
 @router.get("/papers/{paper_id}/edit-history")

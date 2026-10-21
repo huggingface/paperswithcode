@@ -55,6 +55,18 @@ def pytest_configure(config):
 
 
 @pytest.fixture(autouse=True)
+def _queue_paper_edits_by_default(monkeypatch):
+    """Existing submission tests exercise the review queue.
+
+    Tests of immediate application enable ``paper_edit_auto_approve_enabled``.
+    """
+
+    from backend.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "paper_edit_auto_approve_enabled", False)
+
+
+@pytest.fixture(autouse=True)
 def _build_as_the_test_user(monkeypatch):
     """Run deploy build steps directly when the suite itself runs as root.
 
