@@ -237,3 +237,14 @@ INSERT INTO task_dataset_metrics (task_id, dataset_id, metric_id)
 SELECT t.id, d.id, m.id FROM tasks t, datasets d, metrics m
 WHERE t.slug = 'egocentric-vision' AND d.slug = 'ego4d-vq2d-validation' AND m.name = 'tAP@0.25'
 ON CONFLICT DO NOTHING;
+
+-- Tag each benchmark's introducing paper with the benchmark's tasks.
+INSERT INTO paper_tasks (paper_id, task_id, source)
+SELECT DISTINCT d.introducing_paper_id, td.task_id, 'manual'
+FROM datasets d
+JOIN task_datasets td ON td.dataset_id = d.id
+WHERE d.slug IN ('pii-trace', 'piibench', 'pii-bench-query-aware', 'text-anonymization-benchmark',
+                 'i2b2-2014-de-identification', 'charades-ego', 'hd-epic-vqa', 'ego4d-lta-test',
+                 'ego4d-mq-validation', 'ego4d-vq2d-validation')
+  AND d.introducing_paper_id IS NOT NULL
+ON CONFLICT (paper_id, task_id) DO UPDATE SET source = 'manual';
