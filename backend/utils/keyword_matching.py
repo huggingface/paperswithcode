@@ -382,6 +382,21 @@ def has_strong_image_classification_signal(text: str) -> bool:
     )
 
 
+# Reinforcement Learning (task 22) covers RL for LLMs and foundation models;
+# Classic Reinforcement Learning covers control, games, offline RL, and MARL.
+# The two share generic RL keywords, so a paper may hold only one of them.
+_LLM_RL_PATTERN = re.compile(
+    r"\b(?:LLMs?|MLLMs?|VLMs?|large language models?|language models?|"
+    r"vision[- ]language|RLHF|RLAIF|RLVR|GRPO|DPO|chain[- ]of[- ]thought|"
+    r"reasoning models?|foundation models?)\b",
+    re.IGNORECASE,
+)
+
+
+def has_llm_rl_signal(text: str) -> bool:
+    return bool(_LLM_RL_PATTERN.search(text))
+
+
 def apply_task_supersession_rules(
     matched_task_ids: Set[int],
     slug_to_id: Dict[str, int],
@@ -427,6 +442,11 @@ def apply_task_supersession_rules(
         and not has_healthcare_context(text, title)
     ):
         result.discard(healthcare_task_id)
+
+    rl_task_id = slug_to_id.get("reinforcement-learning")
+    classic_rl_task_id = slug_to_id.get("classic-reinforcement-learning")
+    if text and rl_task_id in result and classic_rl_task_id in result:
+        result.discard(classic_rl_task_id if has_llm_rl_signal(text) else rl_task_id)
 
     if title:
         result = _resolve_image_video_task_conflicts(

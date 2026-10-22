@@ -29,6 +29,16 @@ TASKS = [
         "keywords": "video understanding, video reasoning, video question answering, video-language model",
     },
     {"id": 7, "slug": "healthcare", "keywords": "healthcare, diagnosis"},
+    {
+        "id": 8,
+        "slug": "reinforcement-learning",
+        "keywords": "reinforcement learning, GRPO, PPO",
+    },
+    {
+        "id": 9,
+        "slug": "classic-reinforcement-learning",
+        "keywords": "PPO, multi-agent RL, Atari",
+    },
 ]
 
 
@@ -214,3 +224,17 @@ def test_whole_slide_diagnosis_keeps_healthcare_match() -> None:
         "Attention-Stabilized Learning for Whole-Slide Imaging",
         "We improve whole slide image diagnosis across public WSI datasets.",
     ) == {7}
+
+
+def test_llm_rl_paper_drops_classic_reinforcement_learning() -> None:
+    assert match(
+        "Stable PPO for Large Language Model Reasoning",
+        "We apply reinforcement learning with PPO to LLM math reasoning.",
+    ) == {8}
+
+
+def test_classic_rl_paper_drops_llm_reinforcement_learning() -> None:
+    assert match(
+        "Sample-Efficient PPO on Atari",
+        "We study reinforcement learning with PPO on Atari games.",
+    ) == {9}
