@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -622,3 +623,61 @@ def test_staging_chat_latency_rollout_settings_are_preserved():
 
     assert rollout_keys <= configure_host_env.STAGING_RUNTIME_PASSTHROUGH_KEYS
     assert configure_host_env.staging_runtime_passthrough(lines) == lines
+
+
+def test_environment_files_are_never_readable_while_being_written(
+    tmp_path, monkeypatch
+):
+    import stat
+
+    import deploy.configure_host_env as host_env
+
+    modes = []
+    real_replace = host_env.os.replace
+
+    def replace(source, destination):
+        modes.append(stat.S_IMODE(os.stat(source).st_mode))
+        real_replace(source, destination)
+
+    monkeypatch.setattr(host_env.os, "chown", lambda *_args: None)
+    monkeypatch.setattr(
+        host_env.grp, "getgrnam", lambda _name: type("G", (), {"gr_gid": 0})()
+    )
+    monkeypatch.setattr(host_env.os, "replace", replace)
+    created = []
+    real_mkstemp = host_env.tempfile.mkstemp
+
+    def mkstemp(**kwargs):
+        descriptor, path = real_mkstemp(**kwargs)
+        created.append(stat.S_IMODE(os.fstat(descriptor).st_mode))
+        return descriptor, path
+
+    monkeypatch.setattr(host_env.tempfile, "mkstemp", mkstemp)
+
+    host_env.write_env(tmp_path / "production.env", {"A": "A=secret"}, "pwc-production")
+
+    assert created == [0o600]
+    assert modes == [0o640]
+    assert (tmp_path / "production.env").read_text() == "A=secret\n"
+
+
+def test_autonomous_sudo_grants_are_opt_in():
+    source = (Path(__file__).parents[3] / "deploy/install_deploy_tools.py").read_text()
+
+    assert (
+        "if args.enable_autonomous_brokers:\n            install_autonomous_sudoers()"
+        in source
+    )
+
+
+def test_backup_unit_does_not_load_the_application_environment():
+    unit = (
+        Path(__file__).parents[3] / "deploy/systemd/pwc-postgres-backup.service"
+    ).read_text()
+
+    environment_files = [
+        line for line in unit.splitlines() if line.startswith("EnvironmentFile=")
+    ]
+    assert environment_files == [
+        "EnvironmentFile=/etc/paperswithcode/production-cron.env"
+    ]

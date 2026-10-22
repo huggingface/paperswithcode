@@ -192,6 +192,13 @@ groups or capabilities, and `no_new_privs`. Root takes the build tree back
 it. `install_deploy_tools.py` creates the account; a deploy fails closed if it
 is missing.
 
+The autonomous root brokers (`pwc-autonomous-check`, `-release`, `-source`,
+`-cron-retry`) are installed, but `pwc-cron` may only `sudo` them when the
+tools are installed with `--enable-autonomous-brokers`. The default leaves
+`/etc/sudoers.d/paperswithcode-autonomous-operations` absent, because the
+source broker runs root Git on a `pwc-cron`-writable worktree; re-enable only
+after that broker imports patches into a root-owned repository.
+
 ## Operator profile
 
 `config/operator.toml` names the accounts and resources the hosted

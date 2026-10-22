@@ -8,7 +8,12 @@ Type=oneshot
 User=pwc-cron
 Group=pwc-cron
 WorkingDirectory=/srv/paperswithcode/environments/production/current
-EnvironmentFile=/etc/paperswithcode/production.env
+# Only the non-secret connection target comes from the app's configuration.
+# The backup reads its own role and token from production-cron.env, so it never
+# holds production.env's secrets in a process other pwc-cron jobs could read.
+Environment=PWC_DB_HOST=localhost
+Environment=PWC_DB_PORT=5432
+Environment=PWC_DB_NAME=paperswithcode_hf
 EnvironmentFile=/etc/paperswithcode/production-cron.env
 ExecStart=/srv/paperswithcode/environments/production/current/scripts/backup_postgres_to_hf_bucket.sh
 SyslogIdentifier=paperswithcode-backup

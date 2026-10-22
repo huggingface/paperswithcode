@@ -12,6 +12,7 @@ import json
 import os
 import re
 import secrets
+import tempfile
 import sys
 import tomllib
 from pathlib import Path
@@ -862,14 +863,18 @@ def write_env(path: Path, lines: dict[str, str], group: str) -> None:
     # Identities need search permission to reach their own group-readable file,
     # but must not be able to list the other environment filenames.
     path.parent.chmod(0o711)
-    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
-    temporary.write_text(
-        "\n".join(lines[key] for key in sorted(lines)) + "\n",
-        encoding="utf-8",
-    )
-    os.chown(temporary, 0, grp.getgrnam(group).gr_gid)
-    temporary.chmod(0o640)
-    os.replace(temporary, path)
+    # mkstemp creates the file 0600, so the secrets are never readable by other
+    # local identities while they are being written.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(lines[key] for key in sorted(lines)) + "\n")
+        os.chown(temporary, 0, grp.getgrnam(group).gr_gid)
+        os.chmod(temporary, 0o640)
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def validate_active_staging_release(app_root: Path, release_id: str) -> None:

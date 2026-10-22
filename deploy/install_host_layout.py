@@ -9,6 +9,7 @@ import pwd
 import secrets
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 APP_ROOT = Path("/srv/paperswithcode")
@@ -153,15 +154,15 @@ def ensure_mcp_config(
         "PWC_MCP_CURSOR_KEY_PREVIOUS",
     ]
     order.extend(sorted(set(values) - set(order)))
-    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
-    temporary.write_text(
-        "".join(f"{key}={values[key]}\n" for key in order), encoding="utf-8"
-    )
-    temporary.chmod(0o600)
+    # mkstemp creates the file 0600 before any secret is written to it.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("".join(f"{key}={values[key]}\n" for key in order))
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def restrict_cron_access() -> None:
