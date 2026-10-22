@@ -38,6 +38,8 @@ interface RecoveryActions {
   prompt(value: string): Promise<void>;
   disableTools(): void;
   canContinue(): boolean;
+  /** Called once before recovery starts so a call that spent its whole output budget thinking is not repeated at the same effort. */
+  lowerReasoning?(): void;
 }
 
 export async function recoverIncompleteResponse(
@@ -54,6 +56,7 @@ export async function recoverIncompleteResponse(
     return { reason, attempts: 0, outcome: "aborted" };
   }
 
+  actions.lowerReasoning?.();
   let attempts = 0;
   if (!policy.toolingClosed) {
     attempts += 1;

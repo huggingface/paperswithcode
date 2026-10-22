@@ -2011,6 +2011,16 @@ class PaperService:
             offset, limit, threshold_days
         )
 
+    def get_citation_refreshable_count(self) -> int:
+        return PaperCitationRefreshService(self.db).count_refreshable()
+
+    def get_papers_for_early_citation_refresh(
+        self, limit: int, threshold_days: int = 7
+    ) -> List[Dict[str, Any]]:
+        return PaperCitationRefreshService(self.db).refresh_ahead_chunk(
+            limit, threshold_days
+        )
+
     def update_citation_counts_batch(
         self, citation_updates: List[Dict[str, Any]]
     ) -> Dict[str, int]:

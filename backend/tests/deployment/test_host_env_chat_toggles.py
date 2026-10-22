@@ -592,13 +592,11 @@ def test_staging_chat_durable_dispatch_mode_is_narrow_and_staging_only(
         "PWC_CHAT_SANDBOX_EXECUTOR_ENABLED=true\n"
         "UNRELATED=preserved\n"
     )
-    assert chown_requests == [
-        (
-            staging_path.with_name(f".staging.env.new-{os.getpid()}"),
-            0,
-            os.getgid(),
-        )
-    ]
+    # The private temporary file (mkstemp) is handed to root:pwc-staging.
+    [(temporary, uid, gid)] = chown_requests
+    assert Path(temporary).parent == staging_path.parent
+    assert Path(temporary).name.startswith(".staging.env.")
+    assert (uid, gid) == (0, os.getgid())
     assert group_requests == ["pwc-staging"]
     assert staging_path.stat().st_uid == os.getuid()
     assert staging_path.stat().st_gid == os.getgid()

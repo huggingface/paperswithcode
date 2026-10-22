@@ -510,9 +510,14 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     selected.append({**entry, "retry": disposition is not None})
         return selected[:limit], len(missing)
 
-    def _busy_paper_keys(self, jobs: list[object]) -> set[str]:
-        """Papers already in an active job's manifest, so no shard repeats them."""
+    def _busy_paper_keys(self, jobs: list[object]) -> tuple[set[str], bool]:
+        """Papers already in an active job's manifest, so no shard repeats them.
+
+        Also reports whether every active OCR manifest was readable, because
+        an unreadable manifest hides which papers are busy.
+        """
         keys: set[str] = set()
+        complete = True
         for job in jobs:
             labels = job_labels(job)
             if job_stage(job) not in ACTIVE_STAGES:
@@ -520,6 +525,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             if labels.get("job_type", "ocr") != "ocr":
                 continue
             if not labels.get("run_id") or not labels.get("shard_id"):
+                complete = False
                 continue
             path = (
                 f"hf://buckets/{self.settings.paper_markdown_hf_bucket_id}/_jobs/"
@@ -529,9 +535,10 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 with self.filesystem.open(path, "rb", block_size=0) as handle:
                     lines = handle.read().decode("utf-8").splitlines()
             except (OSError, UnicodeDecodeError, HfHubHTTPError):
+                complete = False
                 continue
             keys.update(entry_paper_key(json.loads(line)) for line in lines if line)
-        return keys
+        return keys, complete
 
     def _copy_upstream(
         self, missing: list[dict[str, object]]
@@ -1013,13 +1020,19 @@ class PaperMarkdownBackfillJob(CronJobBase):
     ) -> list[dict[str, str]]:
         remote_jobs = self._reap_stalled_scheduling(self._remote_jobs())
         active = self._active_jobs(remote_jobs)
-        busy = self._busy_paper_keys(remote_jobs)
+        busy, busy_known = self._busy_paper_keys(remote_jobs)
         candidates = [item for item in candidates if entry_paper_key(item) not in busy]
-        if active and any(item.get("replace_invalid_sha256") for item in candidates):
+        # Repairs overwrite existing objects, so they run beside active workers
+        # only when every active manifest proves the paper is not in flight.
+        if not busy_known and any(
+            item.get("replace_invalid_sha256") for item in candidates
+        ):
             self.logger.warning(
-                "Markdown repair waits for all active workers to finish"
+                "Markdown repair waits: an active worker's manifest is unreadable"
             )
-            return []
+            candidates = [
+                item for item in candidates if not item.get("replace_invalid_sha256")
+            ]
         concurrency = self.profile.concurrency
         if self.max_jobs is not None:
             concurrency = min(concurrency, self.max_jobs)

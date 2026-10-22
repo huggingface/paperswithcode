@@ -152,9 +152,9 @@ is configured.
 
 `--qualify-only` prepares the candidate in the inactive slot (result
 `candidate-prepared`) after the rolling-compatibility check, without switching
-`active`. `--legacy-bridge` existed only for the one-time migration from the
-fixed-port services and is rejected once nginx or an active slot is present,
-which is now true for both environments. `--defer-public-smoke` is retired.
+`active`. `--legacy-bridge` (the one-time migration from the fixed-port
+services) and the matching fixed-port rollback are retired and refused, as is
+`--defer-public-smoke`.
 
 Rollback:
 
@@ -180,15 +180,36 @@ Install deployment tooling only from committed source:
 sudo python deploy/install_deploy_tools.py <commit>
 ```
 
-`pwc-deploy` runs as root, but never runs release-controlled build code as
-root. The frontend `npm ci`/`npm run build`, the release chat descriptor
-import, the runtime `uv sync`, and the external Pi worker build run as the
-unprivileged `pwc-build` account (`deploy/build_sandbox.py`). Each step uses a
+`pwc-deploy` runs as root, but never runs release-controlled code as root.
+The frontend `npm ci`/`npm run build`, the release chat descriptor import, the
+runtime `uv sync`, the external Pi worker build, and the MCP component's
+`uv sync` run as the unprivileged `pwc-build` account
+(`deploy/build_sandbox.py`). Deploy smoke tests, which run the release's
+runtime interpreter, run as that environment's own `pwc-<environment>` account. Each step uses a
 cleared environment, a throwaway HOME and package cache, no supplementary
 groups or capabilities, and `no_new_privs`. Root takes the build tree back
 (killing leftover `pwc-build` processes first) before inspecting or publishing
 it. `install_deploy_tools.py` creates the account; a deploy fails closed if it
 is missing.
+
+The autonomous root brokers (`pwc-autonomous-check`, `-release`, `-source`,
+`-cron-retry`) are installed, but `pwc-cron` may only `sudo` them when the
+tools are installed with `--enable-autonomous-brokers`. The default leaves
+`/etc/sudoers.d/paperswithcode-autonomous-operations` absent, because the
+source broker runs root Git on a `pwc-cron`-writable worktree; re-enable only
+after that broker imports patches into a root-owned repository.
+
+## Operator profile
+
+`config/operator.toml` names the accounts and resources the hosted
+paperswithcode.co deployment owns: the Hugging Face namespace, the staging chat
+artifact bucket, the paper-page assets dataset, the Codex curator image
+repository, the chat-title billing account, and the staging Modal workspace.
+Code, `configure_host_env.py`, release manifests, and the curator image
+workflow read them through `backend/operator_profile.py`; the deploy-tools
+bundle ships the file. A self-hosted deployment edits this one file instead of
+source. Release manifests record the bucket, so changing it requires a new
+release, like any other pinned value.
 
 ## First-party MCP component
 
@@ -807,6 +828,15 @@ The host-only `pwc_session` and `pwc_staging_session` cookies and their
 distinct HS256 secrets remain temporarily readable for rollback compatibility.
 Staging login redirects through the production callback, whose return
 destinations are restricted to the production and staging HTTPS origins.
+Every session production issues carries a random `sid` backed by a
+`public.auth_sessions` row (migration `add_auth_sessions.sql`, applied as
+`postgres` before the first release that checks it). Both environments accept a
+cookie only while its row is unrevoked and unexpired; staging has `SELECT` only.
+`POST /api/v1/auth/logout` revokes the presented session on production
+(`?everywhere=true` revokes all of the user's sessions), and staging's logout
+goes through that production endpoint, so a copied or undeletable cookie stops
+working everywhere. Tokens without a `sid` are rejected, except staging's own
+HS256 qualification cookies.
 
 Codex add-evals and enrich-paper buttons are enabled in both environments'
 release manifests (`profile_features` in `deploy/release.py`; staging inherits

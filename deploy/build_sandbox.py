@@ -38,12 +38,7 @@ def enabled() -> bool:
     return os.geteuid() == 0
 
 
-def command(argv: list[str]) -> list[str]:
-    """Wrap ``argv`` so it runs as the build user without root's authority."""
-
-    if not enabled():
-        return list(argv)
-    identity = _identity()
+def _drop_to(identity: pwd.struct_passwd, argv: list[str]) -> list[str]:
     return [
         str(SETPRIV),
         f"--reuid={identity.pw_uid}",
@@ -55,6 +50,26 @@ def command(argv: list[str]) -> list[str]:
         "--",
         *argv,
     ]
+
+
+def command(argv: list[str]) -> list[str]:
+    """Wrap ``argv`` so it runs as the build user without root's authority."""
+
+    if not enabled():
+        return list(argv)
+    return _drop_to(_identity(), argv)
+
+
+def command_as(user: str, argv: list[str]) -> list[str]:
+    """Wrap ``argv`` to run as an existing service account, e.g. pwc-staging.
+
+    For release code that must reach that account's own resources (its
+    backend socket) and that the account already runs anyway.
+    """
+
+    if not enabled():
+        return list(argv)
+    return _drop_to(pwd.getpwnam(user), argv)
 
 
 def _chown_tree(root: Path, uid: int, gid: int) -> None:
@@ -74,6 +89,16 @@ def lend(root: Path) -> None:
     if enabled():
         identity = _identity()
         _chown_tree(root, identity.pw_uid, identity.pw_gid)
+        _make_owner_writable(root)
+
+
+def _make_owner_writable(root: Path) -> None:
+    # Root ignored permission bits on files it copied from the read-only
+    # release (e.g. package-lock.json, which npm prune rewrites); the build
+    # user does not, so give the owner the write access root had.
+    for path in (root, *root.rglob("*")):
+        if not path.is_symlink():
+            path.chmod(path.stat().st_mode | 0o200)
 
 
 def _stop_build_processes() -> None:
@@ -150,16 +175,16 @@ def is_venv_python_launcher(link: Path, literal: Path, resolved: Path) -> bool:
     """A virtualenv's ``bin/python*`` launchers point at the host interpreter.
 
     The link must name ``/usr/bin/python3*`` directly (root-owned, so nothing
-    can retarget it) or another ``bin/`` launcher inside the tree, which is
-    checked on its own.
+    can retarget it) or a sibling launcher in the same ``bin/`` directory,
+    which is checked on its own. The venv may be nested (``mcp_server/.venv``).
     """
 
     def system_python(path: Path) -> bool:
         return path.parent == Path("/usr/bin") and path.name.startswith("python3")
 
     return (
-        link.parent == Path("bin")
+        link.parent.name == "bin"
         and link.name.startswith("python")
         and system_python(resolved)
-        and (system_python(literal) or literal.parent == Path("bin"))
+        and (system_python(literal) or literal.parent == link.parent)
     )

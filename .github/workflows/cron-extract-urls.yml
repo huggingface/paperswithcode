@@ -27,6 +27,7 @@ permissions: {}
 
 jobs:
   select:
+    environment: vps-operations
     permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 10
@@ -79,6 +80,7 @@ jobs:
           retention-days: 1
 
   discover:
+    environment: vps-operations
     permissions:
       contents: read
     needs: select
@@ -122,6 +124,7 @@ jobs:
           retention-days: 7
 
   persist:
+    environment: vps-operations
     permissions: {}
     needs: discover
     if: ${{ inputs.persist == true }}

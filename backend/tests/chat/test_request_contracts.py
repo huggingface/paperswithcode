@@ -137,13 +137,18 @@ def test_reasoning_effort_request_contract_accepts_native_values_only():
         )
 
 
-def test_require_user_returns_immutable_oauth_subject(monkeypatch):
+def test_require_user_returns_immutable_oauth_subject(monkeypatch, auth_sessions):
     from backend.routers import auth
 
+    session_id = auth_sessions.issue("hf-immutable-123")
     monkeypatch.setattr(
         auth,
         "decode_session_cookie",
-        lambda _token: {"sub": "hf-immutable-123", "username": "Alice"},
+        lambda _token: {
+            "sid": session_id,
+            "sub": "hf-immutable-123",
+            "username": "Alice",
+        },
     )
     user = require_user(_cookie_request())
     assert user["source"] == "cookie"

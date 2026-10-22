@@ -9,6 +9,7 @@ import pwd
 import secrets
 import shutil
 import subprocess
+import tempfile
 from pathlib import Path
 
 APP_ROOT = Path("/srv/paperswithcode")
@@ -153,15 +154,15 @@ def ensure_mcp_config(
         "PWC_MCP_CURSOR_KEY_PREVIOUS",
     ]
     order.extend(sorted(set(values) - set(order)))
-    temporary = path.with_name(f".{path.name}.new-{os.getpid()}")
-    temporary.write_text(
-        "".join(f"{key}={values[key]}\n" for key in order), encoding="utf-8"
-    )
-    temporary.chmod(0o600)
+    # mkstemp creates the file 0600 before any secret is written to it.
+    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write("".join(f"{key}={values[key]}\n" for key in order))
         os.replace(temporary, path)
     finally:
-        temporary.unlink(missing_ok=True)
+        if os.path.exists(temporary):
+            os.unlink(temporary)
 
 
 def restrict_cron_access() -> None:
@@ -198,6 +199,7 @@ def main() -> int:
         "pwc-cron",
         "pwc-cron-trending",
         "pwc-external-pi",
+        "pwc-external-pi-staging",
         "pwc-chat-executor",
         "pwc-mcp",
         "pwc-build",
@@ -239,13 +241,13 @@ def main() -> int:
         )
         os.chown(mcp_config, 0, grp.getgrnam("pwc-mcp").gr_gid)
         mcp_config.chmod(0o640)
-    for worker_environment in (
-        CONFIG_ROOT / "external-pi-worker.env",
-        CONFIG_ROOT / "external-pi-worker-production.env",
+    for worker_environment, worker_user in (
+        (CONFIG_ROOT / "external-pi-worker.env", "pwc-external-pi-staging"),
+        (CONFIG_ROOT / "external-pi-worker-production.env", "pwc-external-pi"),
     ):
         if not worker_environment.exists():
             worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
-        os.chown(worker_environment, 0, grp.getgrnam("pwc-external-pi").gr_gid)
+        os.chown(worker_environment, 0, grp.getgrnam(worker_user).gr_gid)
         worker_environment.chmod(0o640)
     install_external_pi_hosts(CONFIG_ROOT / "external-pi-hosts")
     for path in (

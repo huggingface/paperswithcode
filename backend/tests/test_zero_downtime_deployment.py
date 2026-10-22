@@ -494,6 +494,10 @@ def test_legacy_bridge_flag_is_explicit_on_deploy_parser(environment: str):
     args = parser.parse_args([environment, "a" * 40, "--legacy-bridge"])
     assert args.legacy_bridge is True
     assert args.qualify_only is False
+    # The flag still parses, but the fixed-port bridge is retired.
+    args.confirm = "DEPLOY_PRODUCTION"
+    with pytest.raises(deploy_cli.DeployError, match="--legacy-bridge is retired"):
+        deploy_cli.deploy(args)
 
 
 @pytest.fixture(autouse=True)

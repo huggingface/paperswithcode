@@ -62,7 +62,8 @@ METHODOLOGY_BY_DATASET = {
 }
 
 _MODEL_LINK_RE = re.compile(
-    r'<a\b[^>]*\bhref=["\']https://huggingface\.co/([^"\'?#]+)["\'][^>]*>(.*?)</a>',
+    r'<a\b[^>]*\bhref=["\']https://huggingface\.co/([^"\'?#]+)["\'][^>]*>(.*?)</a>'
+    r"(?:\s*<sup>[^<]*</sup>)?",
     re.IGNORECASE,
 )
 _TAG_RE = re.compile(r"<[^>]+>")

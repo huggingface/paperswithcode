@@ -20,9 +20,6 @@ from deploy.install_deploy_tools import (
     bundle_runtime_contract,
     deployment_wrapper,
 )
-from deploy.release import (
-    profile_features,
-)
 
 
 def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
@@ -40,8 +37,8 @@ def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
     bundle_runtime_contract(staging, source)
 
     for relative in RUNTIME_CONTRACT_PATHS:
-        backend_relative = Path(relative).relative_to("backend")
-        assert (source / "backend" / backend_relative).is_file()
+        # backend/… and config/… keep their layout under the installed tree.
+        assert (source / relative).is_file()
     result = subprocess.run(
         [
             sys.executable,
@@ -151,35 +148,6 @@ def test_production_sha_resolves_from_bare_main_ref(
         text=True,
     )
     assert missing_remote_ref.returncode != 0
-
-
-def test_candidate_overrides_follow_environment_file(tmp_path: Path):
-    release = tmp_path / "release"
-    manifest = {
-        "release_id": "a" * 12 + "-production",
-        "backend_features": profile_features("production"),
-    }
-    command = deploy_cli.candidate_start_command(
-        release, "production", manifest, 8123, "candidate-test"
-    )
-
-    environment_file = command.index(
-        f"EnvironmentFile={deploy_cli.CONFIG_ROOT / 'production.env'}"
-    )
-    env_command = command.index("/usr/bin/env")
-    python = command.index(str(deploy_cli.VENV / "bin" / "python"))
-    assert environment_file < env_command < python
-    assert command[env_command + 1 : python] == [
-        "UVICORN_PORT=8123",
-        "PWC_PORT=8123",
-        f"PWC_RELEASE_ID={manifest['release_id']}",
-        f"PWC_FRONTEND_DIST_DIR={release / 'frontend-dist'}",
-        "PWC_CHAT_ENABLED=false",
-        "PWC_CODEX_ADD_EVALS_ENABLED=true",
-        "PWC_CODEX_ENRICH_PAPER_ENABLED=true",
-        "PWC_CODEX_JOBS_ENABLED=true",
-    ]
-    assert "--setenv" not in command
 
 
 @pytest.mark.parametrize(

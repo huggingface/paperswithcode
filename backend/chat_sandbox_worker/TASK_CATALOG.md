@@ -20,10 +20,10 @@ The goal is to split up those tasks in the future.
 - `speaker-verification` — Speaker Verification
 - `audio-compression` — Audio Compression
 - `speech-translation` — Speech Translation
+- `audio-source-separation` — Audio Source Separation
+- `speech-to-speech` — Speech-to-Speech
 - `speaker-diarization` — Speaker Diarization
 - `voice-cloning` — Voice cloning
-- `audio-classification` — Audio Classification
-- `sound-event-detection` — Sound Event Detection
 
 ### General
 
@@ -31,9 +31,9 @@ The goal is to split up those tasks in the future.
 - `classic-reinforcement-learning` — Classic Reinforcement Learning
 - `language-modeling` — Language Modeling
 - `reasoning` — Reasoning
+- `robotics` — Robotics
 - `agents` — Agents
 - `math` — Mathematics
-- `robotics` — Robotics
 - `continual-learning` — Continual Learning
 - `world-models` — World Models
 - `pseudo-labelling` — Pseudo Labelling
@@ -66,6 +66,7 @@ The goal is to split up those tasks in the future.
 - `motion-sensing` — Motion Sensing
 - `time-series-classification` — Time-series classification
 - `sleep-stage-classification` — Sleep Stage Classification
+- `ecg-classification` — ECG Classification
 - `biology` — Biology
 - `knowledge-tracing` — Knowledge Tracing
 
@@ -126,11 +127,13 @@ This compact index contains every current task and subtask. Treat names and slug
 - `audio-classification` — Audio Classification
 - `audio-compression` — Audio Compression
 - `audio-generation` — Audio Generation
+- `audio-source-separation` — Audio Source Separation
 - `audio-understanding` — Audio understanding
 - `auto-research` — Auto-Research
 - `automatic-music-transcription` — Automatic Music Transcription
 - `automatic-speech-recognition` — Automatic Speech Recognition
 - `autonomous-driving` — Autonomous Driving
+- `backdoor-attack` — Backdoor Attack
 - `biology` — Biology
 - `brain-computer-interface` — Brain-Computer Interface
 - `camera-pose-estimation` — Camera Pose Estimation
@@ -158,6 +161,8 @@ This compact index contains every current task and subtask. Treat names and slug
 - `document-understanding` — Document Understanding
 - `domain-generalization` — Domain Generalization
 - `earth-observation` — Earth Observation
+- `ecg-classification` — ECG Classification
+- `egocentric-vision` — Egocentric Vision
 - `embedding-models` — Embedding models
 - `emotion-recognition` — Emotion Recognition
 - `entity-typing` — Entity Typing
@@ -166,6 +171,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `face-verification` — Face Verification
 - `facial-landmark-detection` — Facial Landmark Detection
 - `fake-news-detection` — Fake News Detection
+- `fall-detection` — Fall Detection
 - `few-shot-object-detection` — Few-Shot Object Detection
 - `full-duplex-spoken-dialogue` — Full-Duplex Spoken Dialogue
 - `gaze-estimation` — Gaze Estimation
@@ -176,6 +182,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `handwritten-text-recognition` — Handwritten Text Recognition
 - `head-pose-estimation` — Head Pose Estimation
 - `healthcare` — Healthcare & Medical AI
+- `human-mesh-recovery` — Human Mesh Recovery
 - `human-object-interaction-detection` — Human-Object Interaction Detection
 - `hyperspectral-image-classification` — Hyperspectral Image Classification
 - `image-anomaly-detection` — Image Anomaly Detection
@@ -197,6 +204,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `image-super-resolution` — Image super-resolution
 - `image-understanding` — Image Understanding
 - `image-to-image-translation` — Image-to-Image Translation
+- `instance-segmentation` — Instance Segmentation
 - `instruction-following` — Instruction Following
 - `knowledge-graph-completion` — Knowledge Graph Completion
 - `knowledge-tracing` — Knowledge Tracing
@@ -205,6 +213,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `learning-to-rank` — Learning to Rank
 - `link-prediction` — Link Prediction
 - `long-context` — Long Context
+- `long-horizon-agents` — Long-Horizon Agents
 - `low-light-image-enhancement` — Low-Light Image Enhancement
 - `machine-translation` — Machine Translation
 - `math` — Mathematics
@@ -233,6 +242,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `oriented-object-detection` — Oriented Object Detection
 - `part-of-speech-tagging` — Part-of-Speech Tagging
 - `person-re-identification` — Person Re-Identification
+- `pii-detection` — PII Detection
 - `point-cloud-registration` — Point Cloud Registration
 - `pose-estimation` — Pose Estimation
 - `procedural-generalization` — Procedural Generalization
@@ -250,6 +260,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `robotics` — Robotics
 - `safety-and-grounding` — Safety and Grounding
 - `saliency-detection` — Saliency Detection
+- `scene-graph-generation` — Scene Graph Generation
 - `scene-text-detection` — Scene Text Detection
 - `scene-text-recognition` — Scene Text Recognition
 - `semi-supervised-image-classification` — Semi-Supervised Image Classification
@@ -262,8 +273,10 @@ This compact index contains every current task and subtask. Treat names and slug
 - `speaker-verification` — Speaker Verification
 - `speech-enhancement` — Speech Enhancement
 - `speech-translation` — Speech Translation
+- `speech-to-speech` — Speech-to-Speech
 - `spoken-language-identification` — Spoken Language Identification
 - `stereo-matching` — Stereo Matching
+- `style-transfer` — Style Transfer
 - `summarization` — Summarization
 - `surface-normal-estimation` — Surface Normal Estimation
 - `table-question-answering` — Table question answering
@@ -273,6 +286,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `temporal-graph-learning` — Temporal Graph Learning
 - `text-classification` — Text classification
 - `text-reranking` — Text Reranking
+- `text-to-image-generation` — Text-to-Image Generation
 - `text-to-speech` — Text-to-speech
 - `text-to-sql` — Text-to-SQL
 - `time-series-anomaly-detection` — Time Series Anomaly Detection
@@ -310,7 +324,7 @@ This compact index contains every current task and subtask. Treat names and slug
 
 Frameworks are software libraries, inference engines, serving systems, and toolkits; this index lists every catalog framework by domain and category. Use the slug with `pwc framework --name FRAMEWORK`.
 
-- Large Language Models / Inference & Serving: `vllm` vLLM, `sglang` SGLang, `llama-cpp` llama.cpp, `mlx-lm` MLX-LM, `mlx-vlm` MLX-VLM, `ollama` Ollama, `text-embeddings-inference` Text Embeddings Inference, `vllm-omni` vLLM-Omni, `tensorrt-llm` TensorRT-LLM
+- Large Language Models / Inference & Serving: `vllm` vLLM, `sglang` SGLang, `llama-cpp` llama.cpp, `mlx-lm` MLX-LM, `mlx-vlm` MLX-VLM, `ollama` Ollama, `text-embeddings-inference` Text Embeddings Inference, `vllm-omni` vLLM-Omni, `tensorrt-llm` TensorRT-LLM, `open-webui` Open WebUI
 - Large Language Models / Training & Fine-tuning: `trl` TRL, `unsloth` Unsloth, `prime-rl` prime-rl, `verl` verl
 - Large Language Models / Model Libraries: `transformers` Transformers, `sentence-transformers` Sentence Transformers
 - Large Language Models / Agent Frameworks: `hermes-agent` Hermes Agent, `openclaw` OpenClaw, `cua` Cua, `browser-use` Browser Use

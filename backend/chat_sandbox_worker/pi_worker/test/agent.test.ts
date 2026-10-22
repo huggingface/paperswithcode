@@ -114,6 +114,7 @@ for (const mode of ["timeout", "timeout-reject", "stop", "stop-reject", "compact
       abortCompaction() {},
       async abort() { finishPrompt(); },
       setActiveToolsByName() {},
+      setThinkingLevel() {},
     };
     Reflect.set(worker, "session", session);
     Reflect.set(worker, "manager", manager);
@@ -154,6 +155,7 @@ test("a length-limited answer without tools can continue without forced compacti
   let listener = (_event: unknown) => {};
   let prompts = 0;
   let compactions = 0;
+  const thinkingLevels: string[] = [];
   const session = {
     subscribe(callback: typeof listener) { listener = callback; return () => {}; },
     async prompt() {
@@ -166,6 +168,7 @@ test("a length-limited answer without tools can continue without forced compacti
     },
     async compact() { compactions++; throw new Error("No safe compaction boundary"); },
     setActiveToolsByName() {},
+    setThinkingLevel(level: string) { thinkingLevels.push(level); },
   };
   Reflect.set(worker, "session", session);
   Reflect.set(worker, "manager", SessionManager.inMemory("/workspace"));
@@ -178,6 +181,7 @@ test("a length-limited answer without tools can continue without forced compacti
     poster_mode: false, paper_artifacts_enabled: false, reasoning_effort: "max", hf_username: "test" });
   assert.equal(prompts, 2);
   assert.equal(compactions, 0);
+  assert.deepEqual(thinkingLevels, ["high", "max"]);
   assert.equal(events.filter((event) => event.type === "error").length, 0);
   assert.equal(events.find((event) => event.type === "done")?.finish_reason, "success");
 });

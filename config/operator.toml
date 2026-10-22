@@ -1,0 +1,22 @@
+# Accounts and resources of the hosted paperswithcode.co deployment.
+#
+# This is the one place that names them. Code, deploy tooling, and CI read
+# these values instead of hardcoding an operator's personal accounts. A
+# self-hosted deployment replaces them with its own.
+
+[huggingface]
+# Hub user or organization that owns the operator resources below.
+namespace = "nielsr"
+# Bucket for staging chat artifacts (posters, compiled papers).
+chat_artifact_bucket = "nielsr/pwc-chat-artifacts-staging"
+# Dataset repo holding paper-page assets (e.g. extracted figures).
+paper_page_assets_repo = "nielsr/paper-page-assets"
+# Container repository of the Codex curator Jobs image.
+curator_image_repository = "cr.hf.co/nielsr/pwc-codex-curator"
+# Hub account billed for chat title generation.
+chat_title_credential_owner = "nielsr"
+
+[modal]
+# Modal Starter Workspace and its sole owner used by staging chat sandboxes.
+staging_workspace = "nielsrogge"
+staging_owner_username = "nielsrogge"

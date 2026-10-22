@@ -118,6 +118,7 @@ from backend.models.database.frameworks import (
     TaskFramework,
 )
 from backend.models.database.identity import (
+    AuthSession,
     UserBookmark,
     UserPreference,
     StagingAccessRequest,
@@ -275,6 +276,7 @@ __all__ = [
     "Framework",
     "FrameworkPlatform",
     "TaskFramework",
+    "AuthSession",
     "UserBookmark",
     "UserPreference",
     "StagingAccessRequest",

@@ -8,7 +8,7 @@ https://huggingface.co/docs/hub/oauth :
   * `GET  /auth/hf/callback`  — exchanges the auth code for an access token,
                                 fetches the userinfo, sets a signed session
                                 cookie and redirects back to `return_to`.
-  * `POST /auth/logout`       — clears the session cookie.
+  * `POST /auth/logout`       — revokes the session and clears its cookies.
   * `GET  /auth/me`           — returns the signed-in user (or 401).
   * `GET  /auth/admin-check`  — 204/401/403 gate for nginx `auth_request`
                                 (used to admin-lock staging.paperswithcode.co).
@@ -17,6 +17,10 @@ Production signs the shared session cookie with Ed25519. Staging has only the
 public verification key, so it can consume production sessions without being
 able to forge them. Environment-specific HS256 cookies remain readable during
 the rollback window.
+
+Every session production issues carries a server-side ``sid`` (see
+``auth_session_service``); a token is accepted only while that session is live,
+so logout also invalidates copies of the cookie taken earlier.
 """
 
 from __future__ import annotations
@@ -39,6 +43,7 @@ from fastapi.responses import JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from backend.config import Settings, get_settings
+from backend.services import auth_session_service
 from backend.services.hf_inference_billing_service import (
     OAUTH_COOKIE_NAME,
     HfInferenceCredential,
@@ -181,10 +186,11 @@ def _decode_state(token: str) -> dict:
     return jwt.decode(token, settings.jwt_secret, algorithms=["HS256"])
 
 
-def _encode_session(user: dict) -> str:
+def _encode_session(user: dict, session_id: str) -> str:
     settings = get_settings()
     now = int(time.time())
     payload = {
+        "sid": session_id,
         "sub": user["sub"],
         "username": user["username"],
         "name": user.get("name"),
@@ -206,15 +212,25 @@ def _encode_session(user: dict) -> str:
     return jwt.encode(payload, settings.jwt_secret, algorithm="HS256")
 
 
-def _encode_legacy_session(user: dict) -> str:
+def _encode_legacy_session(user: dict, session_id: Optional[str] = None) -> str:
     settings = get_settings()
-    return encode_qualification_session(user, settings, is_admin=_is_admin(user))
+    return encode_qualification_session(
+        user, settings, is_admin=_is_admin(user), session_id=session_id
+    )
 
 
 def encode_qualification_session(
-    user: dict, settings: Settings, *, is_admin: bool = False
+    user: dict,
+    settings: Settings,
+    *,
+    is_admin: bool = False,
+    session_id: Optional[str] = None,
 ) -> str:
-    """Encode the staging qualification cookie with explicitly supplied keys."""
+    """Encode the staging qualification cookie with explicitly supplied keys.
+
+    Without ``session_id`` the cookie is accepted only by staging, as its own
+    operator qualification identity.
+    """
     payload = {
         "sub": user["sub"],
         "username": user["username"],
@@ -223,6 +239,8 @@ def encode_qualification_session(
         "is_admin": is_admin,
         "exp": int(time.time()) + SESSION_TTL_SECONDS,
     }
+    if session_id is not None:
+        payload["sid"] = session_id
     qualification_owner = user.get("chat_qualification_owner")
     if (
         settings.environment == "staging"
@@ -274,20 +292,55 @@ def decode_session_cookie(token: str) -> Optional[dict]:
         return None
 
 
-def decode_request_session(request: Request) -> Optional[dict]:
-    """Prefer the shared session, then accept the local legacy cookie."""
+def _decode_presented_sessions(request: Request) -> list[tuple[dict, bool]]:
+    """Signature-valid session payloads, shared first, with whether each is
+    staging's own legacy cookie (the only kind allowed to lack a ``sid``)."""
 
     settings = get_settings()
+    payloads: list[tuple[dict, bool]] = []
     if settings.shared_session_cookie_name:
         shared = request.cookies.get(settings.shared_session_cookie_name)
-        if shared:
-            payload = _decode_shared_session(shared)
-            if payload:
-                return payload
+        payload = _decode_shared_session(shared) if shared else None
+        if payload:
+            payloads.append((payload, False))
     legacy = request.cookies.get(settings.session_cookie_name)
-    if not legacy:
-        return None
-    return decode_session_cookie(legacy)
+    payload = decode_session_cookie(legacy) if legacy else None
+    if payload:
+        payloads.append((payload, settings.environment == "staging"))
+    return payloads
+
+
+def _session_is_live(payload: dict, staging_local: bool) -> bool:
+    session_id = payload.get("sid")
+    if session_id is None:
+        return staging_local
+    if not isinstance(session_id, str):
+        return False
+    from backend.database.connection import db_manager
+
+    with db_manager.session_local() as db:
+        return auth_session_service.session_is_active(
+            db, session_id, payload.get("sub")
+        )
+
+
+def decode_request_session(request: Request) -> Optional[dict]:
+    """Prefer the shared session, then accept the local legacy cookie.
+
+    Only a session whose server-side ``sid`` is still live counts. The result is
+    memoised on the request, which several dependencies decode.
+    """
+
+    if not hasattr(request.state, "pwc_session"):
+        request.state.pwc_session = next(
+            (
+                payload
+                for payload, staging_local in _decode_presented_sessions(request)
+                if _session_is_live(payload, staging_local)
+            ),
+            None,
+        )
+    return request.state.pwc_session
 
 
 def _cookie_domain() -> Optional[str]:
@@ -635,7 +688,10 @@ async def _complete_hf_callback(
         is_new_profile = profile_db.get(UserProfile, hf_user_id) is None
         UserProfileService(profile_db).upsert_verified_identity(hf_user_id, username)
         profile_db.commit()
-    session_token = _encode_session(user)
+        session_id = auth_session_service.create_session(
+            profile_db, hf_user_id, ttl_seconds=SESSION_TTL_SECONDS
+        )
+    session_token = _encode_session(user, session_id)
 
     response = RedirectResponse(url=return_to, status_code=status.HTTP_302_FOUND)
     _set_session_cookie(response, session_token, secure=_is_secure_origin(request))
@@ -683,7 +739,7 @@ async def _complete_hf_callback(
     if settings.session_signing_private_key:
         response.set_cookie(
             settings.session_cookie_name,
-            _encode_legacy_session(user),
+            _encode_legacy_session(user, session_id),
             max_age=SESSION_TTL_SECONDS,
             httponly=True,
             secure=_is_secure_origin(request),
@@ -694,11 +750,40 @@ async def _complete_hf_callback(
     return response
 
 
+def _revoke_presented_sessions(request: Request, everywhere: bool) -> None:
+    """Revoke every session the request's cookies name.
+
+    Staging can only read production's sessions; its logout goes through the
+    production authority (``VITE_AUTH_URL``), which revokes them.
+    """
+
+    if get_settings().environment == "staging":
+        return
+    from backend.database.connection import db_manager
+
+    live = decode_request_session(request)
+    session_ids = {
+        payload["sid"]
+        for payload, _staging_local in _decode_presented_sessions(request)
+        if isinstance(payload.get("sid"), str)
+    }
+    with db_manager.session_local() as db:
+        if everywhere and live and isinstance(live.get("sub"), str):
+            auth_session_service.revoke_all_sessions(db, live["sub"])
+        else:
+            auth_session_service.revoke_sessions(db, session_ids)
+
+
 @router.post("/auth/logout")
 def logout(
     request: Request,
     return_to: Optional[str] = Query(default=None),
+    everywhere: bool = Query(default=False),
 ):
+    """Revoke this session (or, with ``everywhere``, all of the user's
+    sessions) and clear the cookies this origin can delete."""
+
+    _revoke_presented_sessions(request, everywhere)
     safe_return = _safe_return_to(return_to)
     response: Response
     if return_to and safe_return != "/":

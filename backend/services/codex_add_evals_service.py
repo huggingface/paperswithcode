@@ -1736,6 +1736,22 @@ class CodexPaperJobService:
         if workflow is None:
             return
         if row.status == "completed" and row.kind == "enrich-paper":
+            evals_done = (
+                db.query(PaperCurationJob.id)
+                .filter(
+                    PaperCurationJob.parent_workflow_id == workflow.id,
+                    PaperCurationJob.kind == "add-evals",
+                    PaperCurationJob.status == "completed",
+                )
+                .first()
+            )
+            if evals_done is not None:
+                # A late or admin re-run of enrich must not leave a workflow
+                # open whose evaluation stage already finished; retry() reopens
+                # it before the re-run starts.
+                workflow.status = "completed"
+                workflow.finished_at = workflow.finished_at or _now()
+                return
             workflow.status = "running"
             exists = (
                 db.query(PaperCurationJob)

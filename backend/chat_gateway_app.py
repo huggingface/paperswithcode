@@ -64,6 +64,7 @@ from backend.services.chat_pi_transcript_service import (
 from backend.services.chat_semantic_scholar_service import (
     SemanticScholarGatewayError,
     fetch_semantic_scholar,
+    is_search_path,
 )
 from backend.services.chat_session_service import ChatServiceError
 from backend.services.chat_session_store_gateway import (
@@ -410,7 +411,7 @@ def catalog(
         elif body.operation == "semantic_scholar":
             operation = (
                 "search"
-                if body.arguments.get("path", "").strip("/") == "paper/search"
+                if is_search_path(str(body.arguments.get("path", "")))
                 else body.operation
             )
             ChatCapabilityService(db).meter_catalog(

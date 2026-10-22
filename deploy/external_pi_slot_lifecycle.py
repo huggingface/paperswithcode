@@ -52,7 +52,9 @@ PRODUCTION_STATUS_ROOT = Path(
         "/run/paperswithcode/external-pi-status-production",
     )
 )
-WORKER_USER = "pwc-external-pi"
+# Staging and production workers run as different users so a compromised
+# staging worker cannot read production's token or runtime state.
+WORKER_USERS = {"staging": "pwc-external-pi-staging", "production": "pwc-external-pi"}
 WORKER_CONFIG = CONFIG_ROOT / "external-pi-worker.env"
 RUNUSER = "/usr/sbin/runuser"
 PSQL = "/usr/bin/psql"
@@ -867,7 +869,7 @@ def sync_worker_environment(environment: str) -> None:
             os.fchmod(handle.fileno(), 0o640)
             handle.write(f"PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN={token}\n")
             handle.write(f"PWC_CHAT_PWC_MCP_ENABLED={mcp_enabled}\n")
-        os.chown(temporary, 0, grp.getgrnam(WORKER_USER).gr_gid)
+        os.chown(temporary, 0, grp.getgrnam(WORKER_USERS[environment]).gr_gid)
         os.replace(temporary, worker_config)
     except OSError:
         temporary.unlink(missing_ok=True)

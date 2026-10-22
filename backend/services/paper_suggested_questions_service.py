@@ -86,11 +86,19 @@ def generate_suggested_questions(
     return [q for q in questions if q][:QUESTION_COUNT]
 
 
-def get_suggested_questions(db: Session, paper_id: int) -> list[str]:
-    """Stored questions for a paper, generating them on first request."""
+def get_suggested_questions(
+    db: Session, paper_id: int, *, generate: bool = True
+) -> list[str]:
+    """Stored questions for a paper, generating them on first request.
+
+    ``generate=False`` only reads: generation spends the server's OpenAI key, so
+    anonymous readers get stored questions and the hourly warm job fills gaps.
+    """
     stored = db.get(PaperSuggestedQuestions, paper_id)
     if stored is not None:
         return stored.questions
+    if not generate:
+        return []
 
     paper = db.get(DBPaper, paper_id)
     api_key = get_settings().openai_api_key

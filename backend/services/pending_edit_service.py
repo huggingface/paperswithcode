@@ -30,6 +30,11 @@ from backend.services.autonomous_capabilities import (
 )
 from backend.services.autonomous_operations_repository import RunContext
 from backend.services.autonomous_policy import AutonomousPolicy
+from backend.services.pending_edit_auto_approval import (
+    AUTO_EDIT_TYPES,
+    AUTO_REVIEWER,
+    AutoApprovalPolicy,
+)
 from backend.services.pending_edit_errors import (
     PendingEditAlreadyReviewedError,
     PendingEditApplyError,
@@ -210,7 +215,6 @@ class PendingEditService:
             return duplicate
         if not exempt_from_limits:
             self._enforce_limits(stable_subject, source_ip)
-
         row = PendingPaperEdit(
             paper_id=paper_id,
             hf_username=hf_username,
@@ -238,7 +242,48 @@ class PendingEditService:
             edit_type,
             paper_id,
         )
+        self._auto_approve(row)
         return row
+
+    def _auto_approve(self, row: PendingPaperEdit) -> None:
+        """Apply a freshly stored submission; on any failure it stays queued.
+
+        The submitter lock is taken again because the one held while storing the
+        row ended with its commit. Deciding and applying under it makes the
+        daily and removal limits hold for parallel requests from one account.
+        """
+        try:
+            self._decide_and_apply(row)
+        except Exception:
+            logger.exception("submission_auto_approve_failed id=%s", row.id)
+            self.db.rollback()
+        self.db.refresh(row)
+
+    def _decide_and_apply(self, row: PendingPaperEdit) -> None:
+        self._lock_submitter(row.hf_subject)
+        decision = AutoApprovalPolicy(self.db).decide(
+            hf_subject=row.hf_subject,
+            paper_id=row.paper_id,
+            edit_type=row.edit_type,
+            current=row.current_payload or {},
+            proposed=row.proposed_payload,
+        )
+        logger.info(
+            "submission_auto_decision id=%s apply=%s held=%s",
+            row.id,
+            decision.apply,
+            decision.held_reason,
+        )
+        if not decision.apply:
+            if decision.note:
+                row.admin_note = decision.note
+            self.db.commit()
+            return
+        self.approve(
+            edit_id=row.id,
+            reviewer_username=AUTO_REVIEWER,
+            reviewer_kind="auto",
+        )
 
     def _lock_submitter(self, hf_subject: str) -> None:
         if self.db.bind is not None and self.db.bind.dialect.name == "postgresql":
@@ -324,6 +369,8 @@ class PendingEditService:
         status: Optional[str] = None,
         edit_type: Optional[str] = None,
         paper_id: Optional[int] = None,
+        reviewed_by_kind: Optional[str] = None,
+        hf_username: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> tuple[list[PendingPaperEdit], int]:
@@ -342,6 +389,10 @@ class PendingEditService:
             query = query.filter(PendingPaperEdit.edit_type == edit_type)
         if paper_id is not None:
             query = query.filter(PendingPaperEdit.paper_id == paper_id)
+        if reviewed_by_kind:
+            query = query.filter(PendingPaperEdit.reviewed_by_kind == reviewed_by_kind)
+        if hf_username:
+            query = query.filter(PendingPaperEdit.hf_username.ilike(hf_username))
         total = query.count()
         rows = (
             query.order_by(desc(PendingPaperEdit.created_at))
@@ -404,13 +455,15 @@ class PendingEditService:
         admin_note: Optional[str] = None,
         user_review_reason: Optional[str] = None,
     ) -> PendingPaperEdit:
-        if reviewer_kind not in {"human", "codex"}:
+        if reviewer_kind not in {"human", "codex", "auto"}:
             raise PendingEditError("Unsupported reviewer kind")
         row = self._pending_for_review(edit_id)
         if reviewer_kind == "codex" and row.edit_type in HUMAN_ONLY_EDIT_TYPES:
             raise PendingEditError(
                 "Autonomous reviews must defer human-only taxonomy resources"
             )
+        if reviewer_kind == "auto" and row.edit_type not in AUTO_EDIT_TYPES:
+            raise PendingEditError("This edit type is not eligible for auto-approval")
         if reviewer_kind == "codex":
             autonomous_context = self._authorize_codex_review(row, autonomous_context)
         spec = edit_spec(row.edit_type)
@@ -493,7 +546,12 @@ class PendingEditService:
                 result_id=result_id,
             )
             event = self._approval_event(
-                row, reviewer_username, reviewer_hf_subject, before, after
+                row,
+                reviewer_username,
+                reviewer_hf_subject,
+                before,
+                after,
+                auto=reviewer_kind == "auto",
             )
             self.db.add(event)
             self.db.flush()
@@ -533,6 +591,8 @@ class PendingEditService:
         reviewer_hf_subject: str | None,
         before: Any,
         after: Any,
+        *,
+        auto: bool = False,
     ) -> CatalogMutationEvent:
         if row.edit_type.startswith("new_"):
             entity_type = f"submission_created_{row.result_entity_type}"
@@ -551,16 +611,20 @@ class PendingEditService:
         else:
             entity_type = f"submission_created_{row.result_entity_type}"
             entity_id = row.result_entity_id
+        # Auto-applied edits are attributed to the submitter so that contributor
+        # history and bulk revert by account see them.
         return CatalogMutationEvent(
-            actor_hf_subject=reviewer_hf_subject or "legacy-human-reviewer",
-            actor_username=reviewer_username,
-            actor_role="admin",
+            actor_hf_subject=row.hf_subject
+            if auto
+            else reviewer_hf_subject or "legacy-human-reviewer",
+            actor_username=row.hf_username if auto else reviewer_username,
+            actor_role="contributor" if auto else "admin",
             operation="approve_submission",
             entity_type=entity_type,
             entity_id=entity_id,
             before_snapshot=json_safe(before),
             after_snapshot=json_safe(after),
-            request_id=f"submission-review:{row.id}",
+            request_id=f"submission-{'auto' if auto else 'review'}:{row.id}",
             source_environment=get_settings().environment,
             release_id=get_settings().release_id,
         )

@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
@@ -56,10 +57,17 @@ export function EditSourceUrlDialog({
   const updateSourceUrlMutation = useMutation({
     mutationFn: async ({ paperId, sourceUrl }: { paperId: string; sourceUrl: string }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "source_url",
           proposed_payload: { source_url: sourceUrl },
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed source URL change shortly.",
         });
         return null;
       }
@@ -67,11 +75,6 @@ export function EditSourceUrlDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed source URL change shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         return;

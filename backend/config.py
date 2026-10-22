@@ -158,7 +158,10 @@ class Settings(BaseSettings, ChatSettings):
     )
     semantic_scholar_api_key_2: str = Field(
         default="",
-        description="Secondary Semantic Scholar key reserved for historical backfills",
+        description=(
+            "Secondary Semantic Scholar key for historical backfills; the "
+            "hourly citation refresh also rotates through it"
+        ),
     )
     openalex_api_key: str = Field(
         default="", description="Optional OpenAlex API key for historical backfills"
@@ -302,6 +305,17 @@ class Settings(BaseSettings, ChatSettings):
     submission_hourly_subject_limit: int = Field(default=20, ge=1, le=1000)
     submission_hourly_ip_limit: int = Field(default=100, ge=1, le=10000)
     submission_max_payload_bytes: int = Field(default=262_144, ge=1024, le=2_097_152)
+    paper_edit_auto_approve_enabled: bool = Field(
+        default=True,
+        description="Apply signed-in users' paper-page edits immediately; "
+        "false queues every edit for admin review",
+    )
+    paper_edit_auto_approve_daily_papers: int = Field(default=100, ge=1, le=10000)
+    paper_edit_auto_approve_removal_papers: int = Field(default=10, ge=1, le=1000)
+    paper_edit_auto_approve_extra_domains: str = Field(
+        default="",
+        description="Comma-separated hosts whose links auto-apply without review",
+    )
     session_cookie_domain: str = Field(
         default="",
         description=(

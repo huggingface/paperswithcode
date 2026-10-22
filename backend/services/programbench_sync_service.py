@@ -54,6 +54,13 @@ class PaperIdentity:
 # and its reviewed official release page. New runs remain unpublished until the
 # model identity has been reviewed here.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "claude-fable-5-1-xhigh": PaperIdentity(
+        "https://www.anthropic.com/claude-fable-and-mythos-5-1"
+    ),
+    "claude-opus-5-5-xhigh": PaperIdentity("https://www.anthropic.com/claude-opus-5-5"),
+    "gpt-6-astra-max": PaperIdentity("https://openai.com/index/gpt-6-astra/"),
+    "muse-wonder-full": PaperIdentity("https://research.meta.ai/blog/muse-wonder"),
+    "muse-wonder-xhigh": PaperIdentity("https://research.meta.ai/blog/muse-wonder"),
     "muse-spark-1-1-xhigh": PaperIdentity(
         "https://ai.meta.com/blog/introducing-muse-spark-meta-model-api/"
     ),

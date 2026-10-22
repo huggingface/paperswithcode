@@ -287,6 +287,16 @@ def test_mcp_jsonrpc_result_parses_sse_and_json():
     assert chat_mcp_app_proxy.mcp_jsonrpc_result(raw) == {"ok": True}
 
 
+def _review_fake_app_html(monkeypatch):
+    import hashlib
+
+    reviewed = replace(
+        chat_router.WORKER_MCP_PROVIDERS[0],
+        app_html_sha256=hashlib.sha256(APP_HTML.encode()).hexdigest(),
+    )
+    monkeypatch.setattr(chat_router, "WORKER_MCP_PROVIDERS", (reviewed,))
+
+
 def test_html_endpoint_returns_cached_app_shell(monkeypatch):
     chat_mcp_app_proxy.reset_excalidraw_app_html_cache()
     clients: list[_FakeHtmlClient] = []
@@ -297,6 +307,7 @@ def test_html_endpoint_returns_cached_app_shell(monkeypatch):
         return client
 
     monkeypatch.setattr(chat_mcp_app_proxy.httpx, "AsyncClient", factory)
+    _review_fake_app_html(monkeypatch)
     with TestClient(_app(_settings())) as client:
         first = client.get(
             HTML_PATH,
@@ -360,3 +371,16 @@ def test_production_html_endpoint_accepts_reviewed_digest(monkeypatch):
         )
     assert response.status_code == 200
     assert response.text == APP_HTML
+
+
+def test_staging_html_endpoint_refuses_unreviewed_app_html(monkeypatch):
+    # Staging serves only the reviewed digest too; the fake upstream HTML here
+    # does not match the registry's pinned digest.
+    chat_mcp_app_proxy.reset_excalidraw_app_html_cache()
+    monkeypatch.setattr(chat_mcp_app_proxy.httpx, "AsyncClient", _FakeHtmlClient)
+    with TestClient(_app(_settings(environment="staging"))) as client:
+        response = client.get(
+            HTML_PATH,
+            headers={"Origin": "https://testserver", "sec-fetch-site": "same-origin"},
+        )
+    assert response.status_code == 502

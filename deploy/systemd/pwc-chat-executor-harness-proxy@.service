@@ -10,7 +10,8 @@ StartLimitBurst=5
 Type=exec
 User=pwc-chat-executor
 Group=www-data
-SupplementaryGroups=pwc-production pwc-staging
+# No pwc-production/pwc-staging membership: those groups can read the
+# environments' env files. Socket ownership changes run as root ("+") instead.
 WorkingDirectory=/srv/paperswithcode
 RuntimeDirectory=paperswithcode/%I
 RuntimeDirectoryMode=0750
@@ -21,7 +22,7 @@ LoadCredential=authorization-key:/etc/paperswithcode/chat-executor/%I/authorizat
 ExecStartPre=/srv/paperswithcode/chat-executor/%I/bin/harness_proxy --self-test
 ExecStart=/srv/paperswithcode/chat-executor/%I/bin/harness_proxy --unix-socket /run/paperswithcode/%I/chat-executor-harness.sock --rendezvous-socket /run/paperswithcode/%I/chat-executor-rendezvous.sock --config /etc/paperswithcode/chat-executor/%I/harness.json --harness-key-file ${CREDENTIALS_DIRECTORY}/harness-key --authorization-key-file ${CREDENTIALS_DIRECTORY}/authorization-key
 ExecStartPost=/usr/bin/test -S /run/paperswithcode/%I/chat-executor-harness.sock
-ExecStartPost=/usr/bin/chgrp ${PWC_CHAT_EXECUTOR_BACKEND_GROUP} /run/paperswithcode/%I/chat-executor-harness.sock
+ExecStartPost=+/usr/bin/chgrp ${PWC_CHAT_EXECUTOR_BACKEND_GROUP} /run/paperswithcode/%I/chat-executor-harness.sock
 Restart=on-failure
 RestartSec=2
 TimeoutStartSec=20

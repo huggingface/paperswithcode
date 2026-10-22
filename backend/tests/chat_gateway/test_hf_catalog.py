@@ -73,6 +73,12 @@ class FakeApi:
         self.calls.append(("repo_info", repo_id, kwargs))
         return SimpleNamespace(sha="b" * 40, private=False)
 
+    card_size = 64
+
+    def get_paths_info(self, repo_id, paths, **kwargs):
+        self.calls.append(("get_paths_info", repo_id, tuple(paths), kwargs))
+        return [SimpleNamespace(path=path, size=self.card_size) for path in paths]
+
     def hf_hub_download(self, repo_id, filename, **kwargs):
         self.calls.append(("hf_hub_download", repo_id, filename, kwargs))
         path = Path(kwargs["cache_dir"]) / "README.md"
@@ -461,3 +467,29 @@ def test_worker_contract_pins_restricted_cli_and_skill_digests():
 
     skill = repository / "backend" / "chat_sandbox_worker" / "HF_CLI_SKILL.md"
     assert hashlib.sha256(skill.read_bytes()).hexdigest() == HF_CLI_SKILL_SHA256
+
+
+def test_oversized_card_is_refused_before_download():
+    class HugeCardApi(FakeApi):
+        card_size = 50 * 1024 * 1024
+
+        def hf_hub_download(self, *_args, **_kwargs):
+            raise AssertionError("downloaded an oversized card")
+
+    ChatHfHubService.reset_cache_for_tests()
+    subject = ChatHfHubService(SimpleNamespace(), api=HugeCardApi())
+
+    with pytest.raises(ChatHfHubError) as error:
+        subject.execute("model_card", {"repo_id": "owner/model"})
+    assert error.value.code == "hf_card_too_large"
+
+
+def test_card_front_matter_with_yaml_aliases_is_not_expanded():
+    from backend.services.chat_hf_hub_service import _split_card
+
+    bomb = "---\na: &a [x, x, x]\nb: &b [*a, *a, *a]\nc: [*b, *b, *b]\n---\n# Card"
+
+    metadata, body = _split_card(bomb)
+
+    assert metadata == {"_malformed_front_matter": True}
+    assert body == "# Card"

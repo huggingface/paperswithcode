@@ -14,6 +14,7 @@ import {
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { papersApi } from "@/lib/api/papers";
 import { submissionsApi } from "@/lib/api/submissions";
+import { reportSubmission } from "@/lib/submissionOutcome";
 import { refreshPaperQueries } from "@/lib/queryInvalidation";
 import { useToast } from "@/hooks/use-toast";
 import { PendingEditNotice } from "@/components/paper-detail/PendingEditNotice";
@@ -112,10 +113,17 @@ export function EditHfArtifactsDialog({
   const updateArtifactsMutation = useMutation({
     mutationFn: async ({ paperId, artifacts }: { paperId: string; artifacts: HfArtifactsPayload }) => {
       if (submitMode === "pending") {
-        await submissionsApi.submit({
+        const submitted = await submissionsApi.submit({
           paper_id: parseInt(paperId),
           edit_type: "hf_artifacts",
           proposed_payload: artifacts,
+        });
+        reportSubmission(submitted, {
+          toast,
+          queryClient,
+          paperIds: [paperId, arxivId],
+          queuedDescription:
+            "Thanks! An admin will review your proposed Hugging Face artifact changes shortly.",
         });
         return null;
       }
@@ -123,11 +131,6 @@ export function EditHfArtifactsDialog({
     },
     onSuccess: (updatedPaper) => {
       if (submitMode === "pending") {
-        toast({
-          title: "Edit submitted for review",
-          description:
-            "Thanks! An admin will review your proposed Hugging Face artifact changes shortly.",
-        });
         onSuccess?.();
         onOpenChange(false);
         setNewUrls({ hf_models: "", hf_datasets: "", hf_spaces: "" });

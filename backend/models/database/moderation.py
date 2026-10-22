@@ -102,7 +102,7 @@ class PendingPaperEdit(Base):
             name="pending_paper_edits_status_check",
         ),
         CheckConstraint(
-            "reviewed_by_kind IS NULL OR reviewed_by_kind IN ('human', 'codex')",
+            "reviewed_by_kind IS NULL OR reviewed_by_kind IN ('human', 'codex', 'auto')",
             name="pending_paper_edits_reviewed_by_kind_check",
         ),
         Index(

@@ -789,7 +789,9 @@ def prepare_external_pi_runtime(
         worker = release / WORKER_ROOT
         app.mkdir()
         for name in ("package.json", "package-lock.json", "tsconfig.json"):
-            shutil.copy2(worker / name, app / name)
+            # Release files are read-only; copy2 would keep that mode and the
+            # build user could not rewrite package-lock.json during npm prune.
+            shutil.copyfile(worker / name, app / name)
         shutil.copytree(worker / "src", app / "src")
         shutil.copytree(worker / "test", app / "test")
         (temporary / "assets").mkdir()

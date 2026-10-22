@@ -25,6 +25,7 @@ Performance:
 
 import asyncio
 import json
+import math
 import signal
 import sys
 import time
@@ -38,6 +39,7 @@ from scripts.utils.cron_helpers import DatabaseCronJob
 from backend.config import get_settings
 from backend.services.paper_service import PaperService
 from backend.database.connection import get_database_session
+from backend.utils.exceptions import DatabaseError
 
 
 @dataclass
@@ -65,11 +67,23 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         self.paper_service = PaperService(self.db_session)
 
         # Semantic Scholar API configuration
-        self.api_key = self.settings.semantic_scholar_api_key
+        # Each key has its own Semantic Scholar rate limit, so requests rotate
+        # across the distinct configured keys at the same per-key spacing.
+        self.api_keys = list(
+            dict.fromkeys(
+                key
+                for key in (
+                    self.settings.semantic_scholar_api_key,
+                    self.settings.semantic_scholar_api_key_2,
+                )
+                if key
+            )
+        )
+        self._key_index = 0
         self.base_url = "https://api.semanticscholar.org/graph/v1"
 
         # Conservative hourly bounds leave room for Semantic Scholar throttling.
-        self.request_delay = 1.5
+        self.request_delay = 1.5 / max(1, len(self.api_keys))
         self.batch_size = 100  # Larger batches for efficiency
         self.max_papers_per_run = 1500
         self.request_timeout = 10.0  # Shorter timeout for hourly jobs
@@ -77,6 +91,9 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             7  # Only update papers older than this (reduced for more frequent updates)
         )
         self.chunk_size = 500  # Process papers in smaller chunks to reduce memory usage
+        # Each run refreshes at least this share of the cycle, so papers that
+        # were refreshed on the same days do not all come due together.
+        self.steady_rate_headroom = 1.2
 
         # Timeout protection: keep each hourly tick bounded.
         self.max_runtime_seconds = 45 * 60
@@ -103,6 +120,8 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             "credential_failures": 0,
             "papers_selected": 0,
             "papers_deferred": 0,
+            "papers_refreshed_early": 0,
+            "api_keys": len(self.api_keys),
             "deadline_reached": False,
             "shutdown_requested": False,
             "elapsed_seconds": 0,
@@ -123,15 +142,17 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
 
         # Get total count of papers that need citation updates
         total_papers = self.get_papers_count()
-
-        if total_papers == 0:
-            self.logger.info("No papers need citation updates at this time")
-            return
-
         self.logger.info(f"Found {total_papers} papers to update")
 
-        # Limit the number of papers per run to respect rate limits
-        papers_to_process = min(total_papers, self.max_papers_per_run)
+        # Refresh at least the steady hourly share, topping up with papers
+        # that are not due yet, and at most the rate-limit bound.
+        papers_to_process = min(
+            max(total_papers, self.steady_papers_per_run()),
+            self.max_papers_per_run,
+        )
+        if papers_to_process == 0:
+            self.logger.info("No papers need citation updates at this time")
+            return
         if papers_to_process < total_papers:
             self.logger.info(
                 f"Limited to {papers_to_process} papers for this hourly run"
@@ -197,6 +218,18 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         self.stats["papers_found"] = count
         return count
 
+    def steady_papers_per_run(self) -> int:
+        """Return the hourly share that refreshes every paper once per cycle."""
+        refreshable = self.paper_service.get_citation_refreshable_count()
+        cycle_hours = self.update_threshold_days * 24
+        return math.ceil(refreshable * self.steady_rate_headroom / cycle_hours)
+
+    def get_early_refresh_chunk(self, limit: int) -> List[Dict]:
+        """Get not-yet-due papers that were refreshed longest ago."""
+        return self.paper_service.get_papers_for_early_citation_refresh(
+            limit, self.update_threshold_days
+        )
+
     def get_papers_chunk(self, offset: int, limit: int) -> List[Dict]:
         """Get a chunk of papers that need citation updates."""
         return self.paper_service.get_papers_needing_citation_update_chunk(
@@ -206,6 +239,14 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
     async def process_papers_in_streaming_chunks(self, total_papers_to_process: int):
         """Process a stable bounded selection in memory-efficient chunks."""
         papers = self.get_papers_chunk(0, total_papers_to_process)
+        early = []
+        if len(papers) < total_papers_to_process:
+            early = self.get_early_refresh_chunk(total_papers_to_process - len(papers))
+        papers += early
+        # End the selection's read transaction before slow API calls: the
+        # database role kills sessions idle in a transaction for 10 minutes.
+        self.db_session.close()
+        self.stats["papers_refreshed_early"] = len(early)
         self.stats["papers_selected"] = len(papers)
         if not papers:
             self.logger.info("No pending papers remained after selection")
@@ -281,11 +322,10 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         )
 
         # Create HTTP client with optimized settings
-        headers = {"x-api-key": self.api_key} if self.api_key else {}
         limits = httpx.Limits(max_keepalive_connections=10, max_connections=10)
 
         async with httpx.AsyncClient(
-            timeout=self.request_timeout, limits=limits, headers=headers
+            timeout=self.request_timeout, limits=limits
         ) as client:
             self.client = client
 
@@ -385,6 +425,14 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
                 error_message="Not found in Semantic Scholar",
             )
 
+    def _next_key_headers(self) -> Dict[str, str]:
+        """Return the next key in rotation, so a 429 retry also changes key."""
+        if not self.api_keys:
+            return {}
+        key = self.api_keys[self._key_index % len(self.api_keys)]
+        self._key_index += 1
+        return {"x-api-key": key}
+
     async def fetch_citation_data(
         self, arxiv_id: str, title: str
     ) -> Optional[Dict[str, Any]]:
@@ -395,7 +443,9 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
         try:
             for attempt in range(3):
                 self.stats["api_calls"] += 1
-                response = await self.client.get(url, params=params)
+                response = await self.client.get(
+                    url, params=params, headers=self._next_key_headers()
+                )
                 if response.status_code != 429:
                     break
                 self.stats["rate_limit_hits"] += 1
@@ -505,7 +555,21 @@ class CitationHourlyUpdateJob(DatabaseCronJob):
             }
             for result in results
         ]
-        update_stats = self.paper_service.update_citation_counts_batch(citation_updates)
+        try:
+            update_stats = self.paper_service.update_citation_counts_batch(
+                citation_updates
+            )
+        except DatabaseError as error:
+            # Rate-limit waits leave the session idle long enough for the
+            # server to drop it. The service has already rolled back, so the
+            # next attempt reconnects; the results are still in memory.
+            self.logger.warning(
+                "Citation batch write failed (%s); retrying once on a fresh connection",
+                error,
+            )
+            update_stats = self.paper_service.update_citation_counts_batch(
+                citation_updates
+            )
         self.stats["citations_updated"] += update_stats["updated"]
         self.logger.debug(
             f"Updated {update_stats['updated']} papers with citations, "

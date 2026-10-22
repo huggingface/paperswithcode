@@ -324,6 +324,20 @@ def evaluation_mutation_context(
     }
 
 
+def has_session(request: Request) -> bool:
+    """Whether the request carries a valid signed-in Hugging Face session."""
+
+    from backend.routers.auth import decode_request_session
+
+    payload = decode_request_session(request) or {}
+    subject = payload.get("sub")
+    return (
+        bool(payload.get("username"))
+        and isinstance(subject, str)
+        and bool(subject.strip())
+    )
+
+
 def require_user(request: Request) -> dict:
     """Allow any signed-in HF user.
 

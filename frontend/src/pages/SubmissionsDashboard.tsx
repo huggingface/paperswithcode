@@ -7,6 +7,7 @@ import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/rea
 import {
   CheckCircle2,
   Inbox,
+  Undo2,
   Loader2,
   RefreshCw,
   ShieldAlert,
@@ -24,6 +25,7 @@ import {
 } from "@/lib/pendingEdits";
 import { papersApi } from "@/lib/api/papers";
 import type { Paper } from "@/lib/api/papers.types";
+import { catalogApi } from "@/lib/api/catalog";
 import { submissionsApi } from "@/lib/api/submissions";
 import { cn } from "@/lib/utils";
 
@@ -133,12 +135,15 @@ async function fetchSubmissions(
   status: PendingEditStatus | "all",
   editType: PendingEditType | "all",
   visibleLimit: number,
+  autoOnly: boolean,
 ): Promise<ListData> {
   const edit_type = editType === "all" ? undefined : editType;
+  const reviewed_by_kind = autoOnly ? "auto" : undefined;
   if (status !== "all") {
     return submissionsApi.list({
       status,
       edit_type,
+      reviewed_by_kind,
       limit: visibleLimit,
       offset: 0,
     });
@@ -149,6 +154,7 @@ async function fetchSubmissions(
       submissionsApi.list({
         status: itemStatus,
         edit_type,
+        reviewed_by_kind,
         limit: visibleLimit,
         offset: 0,
       }),
@@ -277,9 +283,62 @@ function SubmissionCard({
     },
   });
 
+  const revertMutation = useMutation<unknown, unknown, void>({
+    mutationFn: () => catalogApi.rollbackEvent(submission.catalog_event_id as string),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
+      if (submission.paper_id != null) {
+        invalidatePaperDetails(queryClient, [String(submission.paper_id), paper?.arxiv_id]);
+        invalidatePaperFeeds(queryClient);
+      }
+      toast({ title: "Edit reverted", description: `Restored ${paperTitle} to its previous state.` });
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not revert edit",
+        description: errorDescription(error, "The paper changed after this edit, or it was already reverted."),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const bulkRevertMutation = useMutation<
+    { reverted: number; skipped: unknown[] },
+    unknown,
+    boolean
+  >({
+    mutationFn: (suspend) =>
+      submissionsApi.revertAutoApproved(submission.hf_subject as string, { suspend }),
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ["pendingPaperEdits"] });
+      invalidatePaperFeeds(queryClient);
+      toast({
+        title: `Reverted ${result.reverted} edits by @${submission.hf_username}`,
+        description: result.skipped.length
+          ? `${result.skipped.length} were skipped because the paper changed since.`
+          : undefined,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Could not revert edits",
+        description: errorDescription(error, "Bulk revert failed. Please try again."),
+        variant: "destructive",
+      });
+    },
+  });
+
+  const confirmBulkRevert = (suspend: boolean) => {
+    const message = `Revert every edit @${submission.hf_username} had auto-applied in the last 7 days${suspend ? " and suspend the account" : ""}?`;
+    if (window.confirm(message)) bulkRevertMutation.mutate(suspend);
+  };
+
+  const isAutoApplied = submission.reviewed_by_kind === "auto";
+  const canRevert = isAutoApplied && !!submission.catalog_event_id;
   const isApproving = approveMutation.isPending;
   const isRejecting = rejectMutation.isPending;
   const isMutating = isApproving || isRejecting;
+  const isReverting = revertMutation.isPending || bulkRevertMutation.isPending;
 
   return (
     <article id={`submission-${submission.id}`} className="submission-card">
@@ -310,6 +369,7 @@ function SubmissionCard({
           </div>
           <div className="submission-badges">
             <span className="submission-pill">{formatLabel(submission.edit_type)}</span>
+            {isAutoApplied && <span className="submission-pill">Auto-applied</span>}
             {submission.is_author && (
               <span className="submission-pill author">Linked author</span>
             )}
@@ -383,6 +443,39 @@ function SubmissionCard({
             {showSubmitterVisibleReason && (
               <span>Submitter-visible reason: <strong>{submission.user_review_reason}</strong></span>
             )}
+            {canRevert && (
+              <div className="submission-action-buttons">
+                <button
+                  type="button"
+                  onClick={() => revertMutation.mutate()}
+                  disabled={isReverting}
+                  className="submission-action-btn reject"
+                >
+                  {revertMutation.isPending ? <Loader2 className="spin" size={14} /> : <Undo2 size={14} />}
+                  Revert this edit
+                </button>
+                {submission.hf_subject && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => confirmBulkRevert(false)}
+                      disabled={isReverting}
+                      className="submission-action-btn reject"
+                    >
+                      Revert all by @{submission.hf_username}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => confirmBulkRevert(true)}
+                      disabled={isReverting}
+                      className="submission-action-btn reject"
+                    >
+                      Revert all and suspend
+                    </button>
+                  </>
+                )}
+              </div>
+            )}
             {submission.applied_payload && (
               <details>
                 <summary>
@@ -408,15 +501,16 @@ export default function SubmissionsDashboard() {
   const { toast } = useToast();
   const [status, setStatus] = React.useState<PendingEditStatus | "all">("pending");
   const [editType, setEditType] = React.useState<PendingEditType | "all">("all");
+  const [autoOnly, setAutoOnly] = React.useState(false);
   const [visibleLimit, setVisibleLimit] = React.useState(PAGE_SIZE);
   const isAdmin = !!user?.is_admin;
 
   React.useEffect(() => {
     setVisibleLimit(PAGE_SIZE);
-  }, [status, editType]);
+  }, [status, editType, autoOnly]);
 
   const countsQuery = useQuery({
-    queryKey: ["pendingPaperEdits", "counts", editType],
+    queryKey: ["pendingPaperEdits", "counts", editType, autoOnly],
     queryFn: async () => {
       const edit_type = editType === "all" ? undefined : editType;
       const pages = await Promise.all(
@@ -424,6 +518,7 @@ export default function SubmissionsDashboard() {
           submissionsApi.list({
             status: itemStatus,
             edit_type,
+            reviewed_by_kind: autoOnly ? "auto" : undefined,
             limit: 1,
             offset: 0,
           }),
@@ -438,8 +533,8 @@ export default function SubmissionsDashboard() {
   });
 
   const listQuery = useQuery({
-    queryKey: ["pendingPaperEdits", { status, editType, visibleLimit }],
-    queryFn: () => fetchSubmissions(status, editType, visibleLimit),
+    queryKey: ["pendingPaperEdits", { status, editType, visibleLimit, autoOnly }],
+    queryFn: () => fetchSubmissions(status, editType, visibleLimit, autoOnly),
     enabled: isAdmin,
     retry: false,
   });
@@ -540,6 +635,16 @@ export default function SubmissionsDashboard() {
                 {statusCounts[item] != null && <span className="submission-count">{statusCounts[item]}</span>}
               </button>
             ))}
+            <button
+              type="button"
+              className={cn("period-btn", autoOnly && "active")}
+              onClick={() => {
+                setAutoOnly((value) => !value);
+                if (!autoOnly) setStatus("approved");
+              }}
+            >
+              auto-applied only
+            </button>
           </div>
         </div>
         <div className="submission-filter-block">

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import uuid
 from datetime import UTC, datetime
 from types import SimpleNamespace
@@ -101,7 +102,9 @@ def test_gateway_releases_capability_lock_before_openrouter_budget_check(monkeyp
             self.headers = {}
 
         async def body(self):
-            return b'{"model":"deepseek/deepseek-v4","max_tokens":100,"messages":[]}'
+            return json.dumps(
+                {"model": row.model, "max_tokens": 100, "messages": []}
+            ).encode()
 
     settings = _settings()
     row = SimpleNamespace(

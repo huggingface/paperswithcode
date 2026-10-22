@@ -42,6 +42,8 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
+    "backend/operator_profile.py",
+    "config/operator.toml",
     "backend/chat_sandbox_worker/prompt.py",
     "backend/services/__init__.py",
     "backend/services/chat_runtime_contract.py",
@@ -51,6 +53,8 @@ RUNTIME_CONTRACT_PATHS = (
 def bundle_runtime_contract(staging: Path, source: Path) -> None:
     """Vendor the backend modules imported by the installed release tooling."""
     shutil.copytree(staging / "backend", source / "backend")
+    # backend/operator_profile.py reads ../config/operator.toml.
+    shutil.copytree(staging / "config", source / "config")
 
 
 def deployment_wrapper(command: str) -> str:
@@ -309,6 +313,14 @@ def ensure_build_user() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(prog="install-deploy-tools")
     parser.add_argument("source", help="exact commit or ref to install")
+    parser.add_argument(
+        "--enable-autonomous-brokers",
+        action="store_true",
+        help=(
+            "let pwc-cron sudo the autonomous root brokers; off by default "
+            "because the source broker trusts pwc-cron-writable Git metadata"
+        ),
+    )
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("run through sudo")
@@ -383,7 +395,8 @@ def main() -> int:
         wrapper.write_text(autonomous_cron_retry_wrapper())
         wrapper.chmod(0o755)
         verify_autonomous_release_broker_schema()
-        install_autonomous_sudoers()
+        if args.enable_autonomous_brokers:
+            install_autonomous_sudoers()
         wrapper = BIN_ROOT / "pwc-cron"
         wrapper.write_text(cron_wrapper())
         wrapper.chmod(0o755)

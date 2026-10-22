@@ -21,6 +21,17 @@ from backend.services.codex_curation_callback_service import (
 )
 
 
+def _scheduled_policy(service, row, body):
+    """Run the scheduled policy the way the worker reaches it: after pre-apply.
+
+    jobs/curation_api.py stores the exact proposal in the pre-apply trace and
+    then applies it, so the job row holds the same proposal as the request.
+    """
+
+    row.proposal = body.model_dump(mode="json")
+    return service._validate_scheduled_policy(row, body)
+
+
 def _evaluation(
     *,
     paper_id: int = 42,
@@ -690,7 +701,8 @@ def test_scheduled_enrichment_can_leave_project_pages_unchanged():
         def query(self, _model):
             return _ListQuery([])
 
-    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+    result = _scheduled_policy(
+        _service(Database(), SimpleNamespace()),
         SimpleNamespace(
             kind="enrich-paper",
             paper_id=42,
@@ -704,6 +716,42 @@ def test_scheduled_enrichment_can_leave_project_pages_unchanged():
     )
 
     assert result["removed_hf_api_project_pages"] == []
+
+
+@pytest.mark.parametrize(
+    "preapply_proposal",
+    [
+        # The worker previewed adding a task but applies something else.
+        {"enrich": {"task_ids": [7], "method_ids": [], "urls_extracted": True}},
+        # No usable pre-apply proposal was recorded.
+        {},
+        None,
+    ],
+)
+def test_scheduled_apply_must_match_its_preapply_proposal(preapply_proposal):
+    class Database:
+        def get(self, _model, _key):
+            return SimpleNamespace(id=42)
+
+        def query(self, _model):
+            return _ListQuery([])
+
+    row = SimpleNamespace(
+        kind="enrich-paper",
+        paper_id=42,
+        trigger="hf-daily-cron",
+        trace_status="preapply_stored",
+        url_candidates={"complete": True},
+        proposal=preapply_proposal,
+    )
+    body = ApplyMutationRequest(
+        enrich=EnrichPaperMutation(task_ids=[], method_ids=[], urls_extracted=True)
+    )
+
+    with pytest.raises(
+        CodexCurationMutationClosedError, match="does not match its pre-apply"
+    ):
+        _service(Database(), SimpleNamespace())._validate_scheduled_policy(row, body)
 
 
 def test_scheduled_enrichment_allows_evidenced_hf_project_page_removal():
@@ -732,7 +780,8 @@ def test_scheduled_enrichment_allows_evidenced_hf_project_page_removal():
         def query(self, _model):
             return Query()
 
-    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+    result = _scheduled_policy(
+        _service(Database(), SimpleNamespace()),
         SimpleNamespace(
             kind="enrich-paper",
             paper_id=42,
@@ -788,7 +837,8 @@ def test_scheduled_enrichment_rejects_project_page_removal_without_reason():
             return Query()
 
     with pytest.raises(ValueError, match="project-page removal requires a reason"):
-        _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+        _scheduled_policy(
+            _service(Database(), SimpleNamespace()),
             SimpleNamespace(
                 kind="enrich-paper",
                 paper_id=42,
@@ -883,9 +933,9 @@ def test_scheduled_evaluation_accepts_configured_metric_names(
     service = _service(Database(), SimpleNamespace())
     if error:
         with pytest.raises(ValueError, match=error):
-            service._validate_scheduled_policy(row, body)
+            _scheduled_policy(service, row, body)
         return
-    result = service._validate_scheduled_policy(row, body)
+    result = _scheduled_policy(service, row, body)
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
 
 
@@ -993,9 +1043,9 @@ def test_scheduled_evaluation_checks_sub_one_percent_against_leaderboard(
     service = _service(Database(), SimpleNamespace())
     if error:
         with pytest.raises(ValueError, match=error):
-            service._validate_scheduled_policy(row, body)
+            _scheduled_policy(service, row, body)
         return
-    result = service._validate_scheduled_policy(row, body)
+    result = _scheduled_policy(service, row, body)
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
 
 
@@ -1049,9 +1099,7 @@ def test_scheduled_evaluation_canonicalizes_noncanonical_arxiv_source_url():
         score_evidence=[_score_evidence()],
     )
 
-    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
-        row, body
-    )
+    result = _scheduled_policy(_service(Database(), SimpleNamespace()), row, body)
 
     assert result == {"policy": "scheduled-add-evals-v1", "evaluations": 1}
     assert body.evaluations[0].source_url == (
@@ -1076,7 +1124,8 @@ def test_scheduled_score_evidence_cannot_be_duplicated_or_reused_for_another_lea
     service = _service(SimpleNamespace(get=lambda *_: paper), SimpleNamespace())
     service._validate_scheduled_capability_boundary = lambda *_: None
     with pytest.raises(ValueError, match="exactly one score_evidence"):
-        service._validate_scheduled_policy(
+        _scheduled_policy(
+            service,
             SimpleNamespace(
                 trigger="hf-daily-cron",
                 kind="add-evals",
@@ -1143,7 +1192,8 @@ def test_scheduled_source_canonicalization_is_recorded_in_existing_row_diff():
         score_evidence=[_score_evidence()],
     )
 
-    result = _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+    result = _scheduled_policy(
+        _service(Database(), SimpleNamespace()),
         SimpleNamespace(
             kind="add-evals",
             paper_id=42,
@@ -1183,7 +1233,8 @@ def test_scheduled_evaluation_rejects_multiple_models_per_leaderboard():
     source = "https://paperswithcode.co/paper/2601.00001"
 
     with pytest.raises(ValueError, match="best eligible target result"):
-        _service(Database(), SimpleNamespace())._validate_scheduled_policy(
+        _scheduled_policy(
+            _service(Database(), SimpleNamespace()),
             row,
             ApplyMutationRequest(
                 evaluations=[
@@ -1353,14 +1404,11 @@ def test_scheduled_enrichment_only_allows_existing_http_project_pages(url, accep
     )
     if accepted:
         assert (
-            service._validate_scheduled_policy(row, body)[
-                "removed_hf_api_project_pages"
-            ]
-            == []
+            _scheduled_policy(service, row, body)["removed_hf_api_project_pages"] == []
         )
     else:
         with pytest.raises(ValueError, match="Project page links must use HTTPS"):
-            service._validate_scheduled_policy(row, body)
+            _scheduled_policy(service, row, body)
 
 
 def test_retry_feedback_is_scoped_and_exposes_only_rejection_details():

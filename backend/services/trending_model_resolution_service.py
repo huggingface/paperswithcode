@@ -309,12 +309,11 @@ class TrendingModelResolutionService:
             "www.arxiv.org",
         }:
             return False
-        path = parsed.path.rstrip("/")
-        return path in {
-            f"/abs/{arxiv_id}",
-            f"/pdf/{arxiv_id}",
-            f"/pdf/{arxiv_id}.pdf",
-        }
+        # The abstract, PDF, and HTML pages of any version name the same paper.
+        match = re.fullmatch(
+            r"/(?:abs|pdf|html)/(.+?)(?:v\d+)?(?:\.pdf)?", parsed.path.rstrip("/")
+        )
+        return bool(match) and match.group(1) == re.sub(r"v\d+$", "", arxiv_id)
 
     def _find_release(self, candidate, paper, proposal) -> ModelRelease | None:
         if candidate.model_release_id is not None:

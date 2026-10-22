@@ -155,6 +155,7 @@ class PendingEditResponse(BaseModel):
     id: int
     paper_id: Optional[int]
     hf_username: str
+    hf_subject: Optional[str] = None
     is_author: bool
     edit_type: EditType
     proposed_payload: Dict[str, Any]
@@ -168,6 +169,7 @@ class PendingEditResponse(BaseModel):
     user_review_reason: Optional[str] = None
     reviewed_by: Optional[str] = None
     reviewed_by_kind: Optional[str] = None
+    catalog_event_id: Optional[uuid.UUID] = None
     review_evidence: Optional[Dict[str, Any]] = None
     created_at: datetime
     updated_at: datetime
@@ -291,6 +293,8 @@ def list_pending_paper_edits(
     ),
     edit_type: Optional[EditType] = Query(default=None),
     paper_id: Optional[int] = Query(default=None, ge=1),
+    reviewed_by_kind: Optional[Literal["human", "codex", "auto"]] = Query(default=None),
+    hf_username: Optional[str] = Query(default=None, max_length=255),
     limit: int = Query(default=100, ge=1, le=500),
     offset: int = Query(default=0, ge=0),
     _admin: dict = Depends(require_hf_admin),
@@ -302,6 +306,8 @@ def list_pending_paper_edits(
             status=status_filter,
             edit_type=edit_type,
             paper_id=paper_id,
+            reviewed_by_kind=reviewed_by_kind,
+            hf_username=hf_username,
             limit=limit,
             offset=offset,
         )

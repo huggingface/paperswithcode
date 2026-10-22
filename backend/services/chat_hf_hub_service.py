@@ -51,6 +51,9 @@ MAX_DEPTH = 10
 MAX_CARD_METADATA_BYTES = 32 * 1024
 MAX_CARD_TEXT_BYTES = 192 * 1024
 MAX_CARD_TOTAL_BYTES = 224 * 1024
+# Only MAX_CARD_TOTAL_BYTES of a card is read; refuse to download far larger
+# files, which would fill the backend's disk before any limit applied.
+MAX_CARD_DOWNLOAD_BYTES = 1024 * 1024
 MAX_LIST_BYTES = 256 * 1024
 MAX_RESPONSE_BYTES = 256 * 1024
 MAX_CACHE_ENTRIES = 512
@@ -649,6 +652,20 @@ class ChatHfHubService:
             raise ChatHfHubError(
                 404, "hf_not_found", "Repository has no resolved revision"
             )
+        [card_info] = self.api.get_paths_info(
+            args["repo_id"],
+            ["README.md"],
+            repo_type=repo_type,
+            revision=sha,
+            token=False,
+        ) or [None]
+        if card_info is None:
+            raise ChatHfHubError(404, "hf_not_found", "Repository has no card")
+        if (getattr(card_info, "size", 0) or 0) > MAX_CARD_DOWNLOAD_BYTES:
+            raise ChatHfHubError(
+                413, "hf_card_too_large", "Repository card is too large"
+            )
+        self._check_deadline()
         with tempfile.TemporaryDirectory(prefix="pwc-hf-card-") as directory:
             path = self.api.hf_hub_download(
                 args["repo_id"],
@@ -909,7 +926,12 @@ def _split_card(text: str) -> tuple[dict, str]:
         return {}, text
     front = text[4:end]
     try:
-        metadata = yaml.safe_load(front) or {}
+        # Aliases let a small document expand multiplicatively once copied;
+        # model cards have no use for them.
+        if any(isinstance(event, yaml.AliasEvent) for event in yaml.parse(front)):
+            metadata = {"_malformed_front_matter": True}
+        else:
+            metadata = yaml.safe_load(front) or {}
     except yaml.YAMLError:
         metadata = {"_malformed_front_matter": True}
     if not isinstance(metadata, dict):

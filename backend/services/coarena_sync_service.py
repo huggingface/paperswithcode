@@ -48,6 +48,22 @@ class PaperIdentity:
 # Exact upstream IDs are the trust boundary between a product label and a paper.
 # New models remain unmatched until their release identity has been reviewed.
 MODEL_PAPER_IDENTITIES: dict[str, PaperIdentity] = {
+    "muse-wonder-1-0": PaperIdentity(
+        source_url="https://research.meta.ai/blog/muse-wonder", is_open=False
+    ),
+    "gemini-4-argon-vertex": PaperIdentity(
+        source_url=(
+            "https://blog.google/innovation-and-ai/models-and-research/"
+            "gemini-models/gemini-4-argon/"
+        ),
+        is_open=False,
+    ),
+    "haiku-5-5": PaperIdentity(
+        source_url="https://www.anthropic.com/claude-haiku-5-5", is_open=False
+    ),
+    "muse-spark-1-3-contributor": PaperIdentity(
+        source_url="https://research.meta.ai/blog/introducing-muse-spark-1-3"
+    ),
     "gemini-3-8-flash": PaperIdentity(
         source_url="https://blog.google/innovation-and-ai/models-and-research/gemini-models/3-8-flash-and-3-8-flash-cyber/",
         is_open=False,
