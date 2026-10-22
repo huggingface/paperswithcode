@@ -551,6 +551,8 @@ COMMANDS: dict[str, Job] = {
         "-m",
         "backend.scripts.link_abstract_mentions",
         "--rescan",
+        "--limit",
+        "1000000",
         timeout="2h",
         idempotency=(
             "reuse earlier verdicts for unchanged abstracts and rewrite a paper's "

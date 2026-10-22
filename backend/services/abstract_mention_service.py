@@ -785,10 +785,10 @@ def load_catalog_entities(db: Session) -> list[CatalogEntity]:
             UNION ALL
             SELECT 'dataset', id, name, slug, parent_dataset_id, NULL, aliases,
                    abstract_linking
-            FROM datasets
+            FROM datasets WHERE slug IS NOT NULL
             UNION ALL
             SELECT 'framework', id, name, slug, NULL, NULL, aliases, abstract_linking
-            FROM frameworks
+            FROM frameworks WHERE slug IS NOT NULL
             """
         )
     ).all()

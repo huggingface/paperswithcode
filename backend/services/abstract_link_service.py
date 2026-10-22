@@ -218,7 +218,7 @@ def judge_paper(
         judged_by.update({key: judge.name for key in needs_judge})
 
     linked = {key for key, score in scores.items() if score >= JUDGE_THRESHOLD}
-    linked -= _losers_of_shared_spans(by_entity, scores, linked)
+    lost = _spans_lost_to_higher_scores(by_entity, scores, linked)
     return [
         PaperAbstractMention(
             paper_id=paper.id,
@@ -228,7 +228,7 @@ def judge_paper(
             end_offset=c.end,
             surface=c.surface,
             abstract_sha=sha,
-            linked=key in linked,
+            linked=key in linked and (key, c.start) not in lost,
             judge=judged_by.get(key),
             score=scores.get(key),
             prompt_version=PROMPT_VERSION,
@@ -288,20 +288,20 @@ def mentions_changed(
     return {tuple(row) for row in stored} != fresh
 
 
-def _losers_of_shared_spans(by_entity, scores, linked) -> set[tuple[str, int]]:
-    """Benchmark GQA vs method GQA: the lower score loses the shared words."""
-    losers = set()
+def _spans_lost_to_higher_scores(
+    by_entity, scores, linked
+) -> set[tuple[tuple[str, int], int]]:
+    """Benchmark GQA vs method GQA: the lower score loses only the shared words;
+    its other occurrences ("Grouped-Query Attention (GQA)") stay linked."""
+    lost = set()
     for a in linked:
         for b in linked:
             if a == b or scores[a] >= scores[b]:
                 continue
-            if any(
-                x.start < y.end and y.start < x.end
-                for x in by_entity[a]
-                for y in by_entity[b]
-            ):
-                losers.add(a)
-    return losers
+            for x in by_entity[a]:
+                if any(x.start < y.end and y.start < x.end for y in by_entity[b]):
+                    lost.add((a, x.start))
+    return lost
 
 
 def store_paper_mentions(

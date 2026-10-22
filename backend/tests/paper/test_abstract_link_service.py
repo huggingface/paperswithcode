@@ -192,3 +192,19 @@ def test_rescan_reuses_verdicts_and_reports_no_change():
 
     assert silent.requests == []  # every verdict came from the stored rows
     assert not mentions_changed(db, 1, again)
+
+
+def test_losing_a_shared_span_keeps_the_entitys_other_occurrences():
+    db = _session()
+    # The benchmark wins the bare "GQA"; the method keeps its long form.
+    rows = judge_paper(
+        db,
+        db.get(Paper, 1),
+        _index(),
+        FakeJudge({("method", 11): 0.7, ("dataset", 20): 0.9}),
+    )
+
+    linked = {(r.entity_type, r.surface) for r in rows if r.linked}
+    assert ("method", "Grouped-Query Attention (GQA)") in linked
+    assert ("dataset", "GQA") in linked
+    assert ("method", "GQA") not in linked
