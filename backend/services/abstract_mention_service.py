@@ -11,8 +11,9 @@ Matching rules:
   named ``Terminal Bench 2.0``.
 - The longest name wins (``SWE-Bench Verified`` beats ``SWE-Bench``).
 - Multi-token names match case-insensitively. Single-token names match exact
-  case, except plain-word method names such as ``Dropout``, so benchmark names
-  like ``MATH``, ``FRAMES``, or ``Spider`` never hit ordinary words.
+  case when they could be an ordinary word (``MATH``, ``FRAMES``, ``Spider``),
+  except plain-word method names such as ``Dropout``. Names with a digit or
+  inner capitals (``GSM8K``, ``ImageNet``, ``LLaVA``) ignore case.
 - A version continuation ends nothing: ``Qwen3.5``, ``Qwen3-VL``, and
   ``LIBERO-Goal`` never yield ``Qwen3`` or ``LIBERO``. Lowercase modifiers stay
   allowed (``GRPO-based``).
@@ -180,7 +181,10 @@ def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
         return True  # product names: "Browser Use", not "browser-use agents"
     if len(tokens) > 1:
         return False
-    return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(tokens[0]))
+    token = tokens[0]
+    if re.search(r"\d|[a-z][A-Z]", token):
+        return False  # GSM8K, ImageNet, LLaVA, DeltaNet never spell an ordinary word
+    return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(token))
 
 
 _MONTHS = (

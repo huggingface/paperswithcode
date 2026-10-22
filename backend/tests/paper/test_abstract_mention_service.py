@@ -66,6 +66,7 @@ CATALOG = [
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(88, "GQA"),
     dataset(89, "MMAU"),
+    dataset(92, "GSM8k"),
     dataset(90, "SWE-Bench Multilingual"),
     dataset(91, "SWE-Bench Pro"),
     method(30, "Direct Preference Optimization (DPO)"),
@@ -478,3 +479,11 @@ def test_short_abbreviation_trusted_when_the_abstract_names_the_entity():
 def test_capitalised_plain_word_followed_by_a_version_is_kept():
     [jev] = find_candidates("a typed decision model, Attention 1.13, consulted", INDEX)
     assert jev.surface == "Attention" and jev.variant_suspect
+
+
+def test_names_with_digits_or_inner_capitals_ignore_case():
+    assert links("on DROP and GSM8K; math and spider") == [("GSM8K", "dataset", 92)]
+    assert links("llava-1.5 and Imagenet") == [
+        ("llava", "method", 17),
+        ("Imagenet", "dataset", 78),
+    ]
