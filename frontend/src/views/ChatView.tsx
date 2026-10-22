@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { MoreVertical, X } from "lucide-react";
 
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 
 import { ChatComposerSurface } from "@/components/chat/ChatComposerSurface";
 import { ChatConversation } from "@/components/chat/ChatConversation";
@@ -91,6 +98,7 @@ export interface ChatExperienceProps {
   onSessionId?: (sessionId: string) => void;
   onReaderSubmit?: () => void;
   onReaderNewChat?: () => void;
+  onReaderClose?: () => void;
 }
 
 const GeneralArtifactProvider: React.FC<{
@@ -119,6 +127,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
   onSessionId: onReaderSessionId,
   onReaderSubmit,
   onReaderNewChat,
+  onReaderClose,
 }) => {
   const { sessionId: paramSessionId } = useParams<{ sessionId: string }>();
   const routeSessionId = suppliedSessionId ?? (mode === "general" ? paramSessionId : undefined);
@@ -647,12 +656,10 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
       <section className="chat-main" data-testid="active-chat-pane">
         <div className="chat-topbar">
           {mode === "general" && !sidebarOpen && <button type="button" className="icon-btn" onClick={() => setSidebarOpen(true)} title="Open sidebar"><PanelIcon /></button>}
-          {mode === "paper" && <button type="button" className="chat-reader-action" onClick={newChat}>New chat</button>}
           <span className="chat-topbar-title">{isRouteSessionLoading
             ? current?.title || ""
             : current?.title || detail?.title || (isEmpty ? "" : "New chat")}</span>
           {staging && <span className="chat-staging-badge">Staging</span>}
-          {mode === "paper" && <Link className="chat-reader-action" to="/chat">All chats</Link>}
           {mode === "general" && current?.primary_paper && (
             <Link
               className="chat-reader-action"
@@ -678,6 +685,24 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
               hasPaperSelection={chat.messages.some((message) => Boolean(message.paperSelection))}
               onError={setSessionError}
             />
+          )}
+          {mode === "paper" && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button type="button" className="icon-btn chat-reader-icon-btn" aria-label="Chat options" title="Chat options">
+                  <MoreVertical aria-hidden="true" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onSelect={newChat}>New chat</DropdownMenuItem>
+                <DropdownMenuItem asChild><Link to="/chat">All chats</Link></DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+          {mode === "paper" && onReaderClose && (
+            <button type="button" className="icon-btn chat-reader-icon-btn" onClick={onReaderClose} aria-label="Close chat" title="Close chat">
+              <X aria-hidden="true" />
+            </button>
           )}
         </div>
 
