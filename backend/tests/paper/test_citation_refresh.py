@@ -210,6 +210,54 @@ def test_cron_selection_projection_and_statistics_contract(tmp_path):
         }
 
 
+def test_due_selection_refreshes_recent_papers_before_older_ones(tmp_path):
+    session_factory = _session_factory(tmp_path, "citation-recent.db")
+    now = datetime.now(UTC).replace(tzinfo=None)
+    today = now.date()
+    with session_factory() as db:
+        db.add_all(
+            [
+                # Old paper, zero citations, refreshed longest ago.
+                _paper(
+                    1,
+                    citation_count=0,
+                    citation_updated_at=now - timedelta(days=60),
+                    published=date(2020, 1, 1),
+                ),
+                _paper(
+                    2,
+                    citation_count=9,
+                    citation_updated_at=now - timedelta(days=8),
+                    published=today - timedelta(days=30),
+                ),
+                _paper(
+                    3,
+                    citation_count=4,
+                    citation_updated_at=now - timedelta(days=20),
+                    published=today - timedelta(days=200),
+                ),
+                _paper(
+                    4,
+                    citation_count=0,
+                    citation_updated_at=None,
+                    published=date(2019, 1, 1),
+                ),
+                _paper(
+                    5,
+                    citation_count=7,
+                    citation_updated_at=now - timedelta(days=9),
+                    published=today - timedelta(days=400),
+                ),
+            ]
+        )
+        db.commit()
+
+        rows = PaperCitationRefreshService(db).pending_chunk(0, 5, 7)
+
+    # Never refreshed, then the last year oldest-refresh first, then the rest.
+    assert [row["id"] for row in rows] == [4, 3, 2, 1, 5]
+
+
 def test_early_refresh_picks_oldest_not_yet_due_arxiv_papers(tmp_path):
     session_factory = _session_factory(tmp_path, "citation-early.db")
     now = datetime.now(UTC).replace(tzinfo=None)

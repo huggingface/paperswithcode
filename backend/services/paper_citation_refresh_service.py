@@ -13,6 +13,9 @@ from backend.services.semantic_scholar_service import SemanticScholarService
 from backend.utils.exceptions import DatabaseError
 
 
+RECENT_PAPER_DAYS = 365
+
+
 class PaperCitationRefreshService:
     """Own Semantic Scholar refresh workflows shared by HTTP and cron callers."""
 
@@ -95,16 +98,15 @@ class PaperCitationRefreshService:
             threshold_date = datetime.now() - timedelta(  # noqa: DTZ005
                 days=threshold_days
             )
+            # Recent papers gain citations fastest and feed trending, so when
+            # Semantic Scholar throttling limits a run they refresh first.
+            recent_cutoff = (
+                datetime.now() - timedelta(days=RECENT_PAPER_DAYS)  # noqa: DTZ005
+            ).date()
             priority_order = case(
                 (DBPaper.citation_updated_at.is_(None), 0),
-                (DBPaper.citation_count == 0, 1),
+                (DBPaper.date_published >= recent_cutoff, 1),
                 else_=2,
-            )
-            year_priority = case(
-                (func.extract("year", DBPaper.date_published).between(2019, 2022), 1),
-                (func.extract("year", DBPaper.date_published).between(2017, 2018), 2),
-                (func.extract("year", DBPaper.date_published).between(2023, 2024), 3),
-                else_=4,
             )
             papers = (
                 self.db.query(DBPaper)
@@ -118,7 +120,6 @@ class PaperCitationRefreshService:
                 )
                 .order_by(
                     priority_order,
-                    year_priority,
                     DBPaper.citation_updated_at.asc().nullsfirst(),
                     DBPaper.id.asc(),
                 )
