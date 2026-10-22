@@ -20,7 +20,7 @@ CATALOG = [
     method(1, "Gated DeltaNet"),
     method(2, "Gated DeltaNet-2"),
     method(3, "Pre-training"),
-    method(4, "GRPO"),
+    method(4, "GRPO", "Group Relative Policy Optimization (GRPO)"),
     method(5, "Dropout"),
     method(6, "Qwen3"),
     method(7, "Attention"),
@@ -38,6 +38,7 @@ CATALOG = [
     method(19, "Integrated Gradients", "Integrated Gradients (IG)"),
     method(20, "REPA2", "Representation Alignment (REPA2)"),
     method(21, "Diffusion Policy"),
+    method(22, "Policy Optimization"),
     dataset(75, "Humanoid-v2"),
     dataset(76, "OSWorld"),
     dataset(77, "ImageNet V2"),
@@ -263,4 +264,19 @@ def test_full_name_long_forms_and_bad_suffixes_do_not_match():
 def test_abbreviation_between_name_and_version_is_read_through():
     assert links("on Terminal-Bench (TB) 3.0 and TB") == [
         ("Terminal-Bench (TB) 3.0", "dataset", 79)
+    ]
+
+
+def test_long_form_before_a_bracketed_name_joins_the_link():
+    text = "We train with group-relative policy optimization (GRPO). GRPO helps."
+    assert links(text) == [
+        ("group-relative policy optimization (GRPO)", "method", 4),
+        ("GRPO", "method", 4),
+    ]
+    assert links("Integrated Gradients (IG) attributions") == [
+        ("Integrated Gradients (IG)", "method", 19)
+    ]
+    assert links("a new policy optimization (GRPO) variant") == [
+        ("policy optimization", "method", 22),
+        ("GRPO", "method", 4),
     ]

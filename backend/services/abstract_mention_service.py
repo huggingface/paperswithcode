@@ -27,6 +27,8 @@ Matching rules:
 - A generic method is dropped from an abstract that also mentions a more
   specific method containing its name: ``Transformer`` goes when ``Looped Transformer``
   or ``Diffusion Transformer`` is present.
+- An abbreviation in brackets right after the method's own long form takes the
+  long form into the link: ``group-relative policy optimization (GRPO)``.
 - Method names written ``Diffusion Transformer (DiT)`` match as the long form
   and as the abbreviation; a full name contributes its abbreviation only
   (``World Action Models (WAMs)`` gives ``WAMs`` and ``WAM``). An abbreviation
@@ -121,6 +123,8 @@ class MentionIndex:
     unresolved: list[tuple[str, list[CatalogEntity]]]
     # (entity_type, entity_id) -> lowercased tokens of its matchable name
     names: dict[tuple[str, int], tuple[str, ...]]
+    # (entity_type, entity_id) -> lowercased tokens of full-name long forms
+    long_forms: dict[tuple[str, int], set[tuple[str, ...]]]
 
 
 def normalize_name(name: str) -> str:
@@ -181,6 +185,7 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         list
     )
     unresolved: list[tuple[str, list[CatalogEntity]]] = []
+    long_forms: dict[tuple[str, int], set[tuple[str, ...]]] = defaultdict(set)
 
     def add(written: str, entity: CatalogEntity, rank: int) -> None:
         key = tuple(normalize_name(written).split())
@@ -195,6 +200,10 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         abbreviation = _ABBREVIATION.search(written)
         if long_form:
             add(base_name(written), entity, NAME)
+        if abbreviation and written[: abbreviation.start()].strip():
+            long_forms[(entity.entity_type, entity.entity_id)].add(
+                tuple(normalize_name(written[: abbreviation.start()]).split())
+            )
         if abbreviation:
             short = abbreviation.group(1)
             add(short, entity, ABBREVIATION)
@@ -273,7 +282,11 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
     }
     max_tokens = max((len(k) for k in surfaces), default=0)
     return MentionIndex(
-        surfaces=surfaces, max_tokens=max_tokens, unresolved=unresolved, names=names
+        surfaces=surfaces,
+        max_tokens=max_tokens,
+        unresolved=unresolved,
+        names=names,
+        long_forms=dict(long_forms),
     )
 
 
@@ -350,8 +363,13 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         inside_name = _followed_by_variant_word(masked, end) or _preceded_by_name_word(
             masked, start
         )
-        if surface.rank == ABBREVIATION and _defined_in_brackets(masked, start, end):
-            redefined.add((surface.entity.entity_type, surface.entity.entity_id))
+        if _defined_in_brackets(masked, start, end):
+            expanded = _expand_long_form(index, masked, tokens[:i], start, end, surface)
+            if expanded:
+                start, end = expanded
+                candidates = [c for c in candidates if c.end <= start]
+            elif surface.rank == ABBREVIATION:
+                redefined.add((surface.entity.entity_type, surface.entity.entity_id))
         part_of_other_name = (
             _continues_as_variant(masked, end, surface)
             or _has_hyphenated_prefix(masked, start)
@@ -377,6 +395,21 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         c for c in candidates if (c.entity_type, c.entity_id) not in redefined
     ]
     return _drop_subsumed(candidates, index)
+
+
+def _expand_long_form(index, masked, before, start, end, surface):
+    """``group-relative policy optimization (GRPO)``: span the long form too."""
+    key = (surface.entity.entity_type, surface.entity.entity_id)
+    for long_form in index.long_forms.get(key, ()):
+        n = len(long_form)
+        if len(before) < n or not _contiguous(masked, before[-n:]):
+            continue
+        words = [t.group().lower() for t in before[-n:]]
+        plural = words[-1].endswith("s") and words[-1][:-1] == long_form[-1]
+        if tuple(words) == long_form or (words[:-1] == list(long_form[:-1]) and plural):
+            close = masked.index(")", end) + 1
+            return before[-n].start(), close
+    return None
 
 
 def _defined_in_brackets(text_value: str, start: int, end: int) -> bool:
