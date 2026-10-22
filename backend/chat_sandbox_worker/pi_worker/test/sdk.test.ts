@@ -88,7 +88,7 @@ test("registers direct OpenAI with the native Responses base path", async () => 
   assert.equal(rollback.model.contextWindow, 200_000);
 });
 
-test("advertises a 272K working window for Luna and GLM", async () => {
+test("advertises a 272K working window for Luna, GLM and DeepSeek V4", async () => {
   const direct = await createProvider("gpt-5.6-luna", "openai-responses");
 
   assert.equal(direct.model.contextWindow, 272_000);
@@ -96,6 +96,10 @@ test("advertises a 272K working window for Luna and GLM", async () => {
   assert.equal(gpt6.model.contextWindow, 272_000);
   const glm = await createProvider("zai-org/GLM-5.3-Flash:baseten");
   assert.equal(glm.model.contextWindow, 272_000);
+  const sponsored = await createProvider("deepseek-ai/DeepSeek-V4.1-Flash-1017:novita", "anthropic-messages");
+  assert.equal(sponsored.model.contextWindow, 272_000);
+  const deepseek = await createProvider("deepseek-ai/DeepSeek-V4-Flash-0731:baseten", "anthropic-messages");
+  assert.equal(deepseek.model.contextWindow, 272_000);
   assert.equal(direct.model.maxTokens, 8_000);
 });
 
