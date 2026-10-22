@@ -193,14 +193,14 @@ def test_completed_enrich_stage_queues_add_evals_in_same_lane(db):
     assert add_evals.parent_workflow_id == enrich.parent_workflow_id
 
 
-def test_late_enrich_completion_does_not_reopen_finished_workflow(db):
+def test_late_enrich_completion_closes_workflow_with_finished_evals(db):
     paper = _paper(db)
     service = CodexPaperJobService()
     enqueue_external_paper_curation(db, paper, settings=SETTINGS, jobs=service)
     db.commit()
     enrich = db.query(PaperCurationJob).one()
     workflow = db.get(PaperCurationWorkflow, enrich.parent_workflow_id)
-    workflow.status = "completed"
+    workflow.status = "running"  # as set by an admin retry
     db.add(
         PaperCurationJob(
             id=uuid.uuid4(),

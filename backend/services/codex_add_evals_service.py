@@ -1746,8 +1746,11 @@ class CodexPaperJobService:
                 .first()
             )
             if evals_done is not None:
-                # A late or admin re-run of enrich must not reopen a workflow
-                # whose evaluation stage already finished.
+                # A late or admin re-run of enrich must not leave a workflow
+                # open whose evaluation stage already finished; retry() reopens
+                # it before the re-run starts.
+                workflow.status = "completed"
+                workflow.finished_at = workflow.finished_at or _now()
                 return
             workflow.status = "running"
             exists = (
