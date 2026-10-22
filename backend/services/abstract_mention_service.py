@@ -40,7 +40,9 @@ Matching rules:
 - Frameworks (``llama.cpp``, ``vLLM``) match like single names, without plurals.
 - URLs and ``$...$`` math are skipped, and an abbreviation between a name and
   its version is read through (``Terminal-Bench (TB) 3.0``).
-- A model-size suffix keeps the match: ``REPA-XL/2``, ``Qwen3-8B``, and
+- A benchmark suffix that spells the benchmark's slug is part of the name
+  (``ImageNet-1k`` for slug ``imagenet-1k``).
+- A model-size suffix keeps a method match: ``REPA-XL/2``, ``Qwen3-8B``, and
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
   links its bare name to the latest version.
@@ -287,7 +289,7 @@ def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:
     rest = text_value[end : end + 2]
     if len(rest) < 2:
         return False
-    if _SIZE_SUFFIX.match(text_value, end):
+    if surface.entity.entity_type == "method" and _SIZE_SUFFIX.match(text_value, end):
         return False
     versioned = rest[0] in ".-" and rest[1].isdigit()
     if versioned and _is_unversioned_method(surface):
@@ -344,6 +346,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         n, surface = matched
         start, end = tokens[i].start(), tokens[i + n - 1].end()
         end = _absorb_parenthesised_alias(index, abstract, masked, end, surface)
+        end = _absorb_slug_suffix(masked, start, end, surface)
         inside_name = _followed_by_variant_word(masked, end) or _preceded_by_name_word(
             masked, start
         )
@@ -442,6 +445,16 @@ def _absorb_parenthesised_alias(
     if matched and matched[0] == len(inner) and matched[1].entity == surface.entity:
         return paren.end()
     return end
+
+
+def _absorb_slug_suffix(masked: str, start: int, end: int, surface: _Surface) -> int:
+    """``ImageNet-1k`` is the benchmark whose slug is ``imagenet-1k``."""
+    suffix = re.match(r"-[A-Za-z0-9]+", masked[end:])
+    if surface.entity.entity_type != "dataset" or not suffix:
+        return end
+    longer = end + suffix.end()
+    slug = re.sub(r"[^a-z0-9]+", "-", masked[start:longer].lower()).strip("-")
+    return longer if slug == surface.entity.slug else end
 
 
 def _contiguous(text_value: str, tokens: list[re.Match]) -> bool:

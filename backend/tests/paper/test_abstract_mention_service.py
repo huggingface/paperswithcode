@@ -41,7 +41,7 @@ CATALOG = [
     dataset(75, "Humanoid-v2"),
     dataset(76, "OSWorld"),
     dataset(77, "ImageNet V2"),
-    dataset(78, "Imagenet-1k (ILSVRC-2012)"),
+    CatalogEntity("dataset", 78, "ImageNet (ILSVRC-2012)", "imagenet-1k"),
     dataset(79, "Terminal Bench 3.0"),
     CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
     CatalogEntity("framework", 101, "Transformers", "transformers"),
@@ -251,7 +251,11 @@ def test_full_name_long_forms_and_bad_suffixes_do_not_match():
     assert links("visual representation alignment") == []
     assert links("Humanoid robots") == []
     assert links("65.4% on OSWorld-G and OSWorld") == [("OSWorld", "dataset", 76)]
-    assert links("ImageNet training") == []
+    assert links("ImageNet training") == [("ImageNet", "dataset", 78)]
+    assert links("ImageNet-1K, ImageNet-1k, ImageNet-21K") == [
+        ("ImageNet-1K", "dataset", 78),
+        ("ImageNet-1k", "dataset", 78),
+    ]
     [policy] = find_candidates("an improved 3D Diffusion Policy learner", INDEX)
     assert policy.variant_suspect
 
