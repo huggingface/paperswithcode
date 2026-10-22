@@ -73,8 +73,9 @@ vi.mock("@/components/pdf/PdfViewer", () => ({
 vi.mock("@/views/ChatView", async () => {
   const { PosterArtifact } = await import("@/components/chat/PosterArtifact");
   return {
-    ChatExperience: ({ paperSelection }: { paperSelection?: { page: number } }) => (
+    ChatExperience: ({ paperSelection, onReaderClose }: { paperSelection?: { page: number }; onReaderClose?: () => void }) => (
       <div>Paper chat{paperSelection ? ` selection page ${paperSelection.page}` : ""}
+        {onReaderClose && <button type="button" onClick={onReaderClose}>Close chat</button>}
         {mocks.showArtifact && <PosterArtifact block={{
           kind: "artifact",
           schema_version: 1,
@@ -252,11 +253,10 @@ describe("PaperReaderView", () => {
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1200);
     renderReader();
 
-    const toggle = await screen.findByRole("button", { name: "Hide chat" });
+    const close = await screen.findByRole("button", { name: "Close chat" });
     const chatPanel = screen.getByRole("tabpanel", { name: "Chat" });
-    expect(toggle).toHaveAttribute("aria-expanded", "true");
 
-    fireEvent.click(toggle);
+    fireEvent.click(close);
 
     expect(chatPanel).toHaveClass("is-collapsed");
     expect(chatPanel).toHaveStyle({ width: "0px" });
@@ -338,7 +338,7 @@ describe("PaperReaderView", () => {
     });
     vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1200);
     renderReader();
-    fireEvent.click(await screen.findByRole("button", { name: "Hide chat" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Close chat" }));
     fireEvent.click(screen.getByRole("button", { name: "Attach selection" }));
     expect(screen.getByRole("tabpanel", { name: "Chat" })).not.toHaveClass("is-collapsed");
     expect(screen.getByText("Paper chat selection page 4")).toBeVisible();
@@ -363,7 +363,7 @@ describe("PaperReaderView", () => {
     expect(screen.getByRole("tabpanel", { name: "Paper" })).not.toHaveClass("is-hidden");
     expect(document.getElementById("reader-chat-panel")).toHaveClass("is-hidden");
     expect(document.getElementById("reader-chat-panel")).toHaveAttribute("aria-hidden", "true");
-    expect(screen.queryByRole("button", { name: "Hide chat" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Close chat", hidden: true })).not.toBeInTheDocument();
   });
 
   it("docks a third far-right poster pane when PDF, chat, and artifact minima fit", async () => {

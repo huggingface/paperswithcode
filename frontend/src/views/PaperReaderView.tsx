@@ -359,6 +359,7 @@ function PaperReaderExperience() {
     onSessionId={selectSession}
     onReaderSubmit={() => setMobileTab("assistant")}
     onReaderNewChat={newChat}
+    onReaderClose={desktopSplit ? () => setAssistantCollapsed(true) : undefined}
   /> : <div className="reader-chat-unavailable">Chat is not enabled for this preview.</div>;
 
   if (query.isLoading) return <div className="reader-status" role="status">Loading paper…</div>;
@@ -463,13 +464,13 @@ function PaperReaderExperience() {
         aria-hidden={(!desktopSplit && mobileTab !== "assistant") || collapsed}
       ><PdfCitationContext.Provider value={citationTarget}>{assistant}</PdfCitationContext.Provider></aside>
       <div className="sr-only" aria-live="polite">{selectionStatus}</div>
-      {desktopSplit && <button
+      {desktopSplit && collapsed && <button
         type="button"
         className="reader-collapse-assistant"
         aria-controls="reader-chat-panel"
-        aria-expanded={!collapsed}
-        onClick={() => setAssistantCollapsed(!collapsed)}
-      >{collapsed ? "Open chat" : "Hide chat"}</button>}
+        aria-expanded={false}
+        onClick={() => setAssistantCollapsed(false)}
+      >Open chat</button>}
     </div>
     </ArtifactWorkspace>
   </div>;
