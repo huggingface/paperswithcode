@@ -127,6 +127,8 @@ class CatalogEntity:
     full_name: str | None = None
     # Curated alternative names: "Multimodal Large Language Model (MLLM)" for VLM.
     aliases: tuple[str, ...] = ()
+    # "always" links every clean match, "judge" asks the judge, "never" skips.
+    mode: str = "judge"
 
 
 @dataclass(frozen=True)
@@ -777,24 +779,29 @@ def load_catalog_entities(db: Session) -> list[CatalogEntity]:
     rows = db.execute(
         text(
             """
-            SELECT 'method' AS entity_type, id, name, slug,
-                   NULL::bigint AS parent_id, full_name
+            SELECT 'method' AS entity_type, id, name, slug, NULL::bigint AS parent_id,
+                   full_name, aliases, abstract_linking
             FROM methods WHERE slug IS NOT NULL
             UNION ALL
-            SELECT 'dataset', id, name, slug, parent_dataset_id, NULL FROM datasets
+            SELECT 'dataset', id, name, slug, parent_dataset_id, NULL, aliases,
+                   abstract_linking
+            FROM datasets
             UNION ALL
-            SELECT 'framework', id, name, slug, NULL, NULL FROM frameworks
+            SELECT 'framework', id, name, slug, NULL, NULL, aliases, abstract_linking
+            FROM frameworks
             """
         )
     ).all()
     return [
         CatalogEntity(
-            row.entity_type,
-            int(row.id),
-            row.name,
-            row.slug,
-            row.parent_id,
-            row.full_name,
+            entity_type=row.entity_type,
+            entity_id=int(row.id),
+            name=row.name,
+            slug=row.slug,
+            parent_id=row.parent_id,
+            full_name=row.full_name,
+            aliases=tuple(row.aliases or ()),
+            mode=row.abstract_linking,
         )
         for row in rows
     ]
