@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.ed25519 import (
     Ed25519PrivateKey,
 )
 
+from backend.operator_profile import OPERATOR
 from backend.config import Settings
 from backend.chat_sandbox_worker.executor_protocol import PROTOCOL as EXECUTOR_CONTRACT
 from backend.services.chat_runtime_contract import (
@@ -109,7 +110,6 @@ __all__ = [
     "validate_runtime_storage",
 ]
 
-_STAGING_LATEX_COMPILER_ARTIFACT_BUCKET = "nielsr/pwc-chat-artifacts-staging"
 _STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
 _STAGING_LATEX_COMPILER_EVIDENCE_GROUP = "pwc-staging"
 STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
@@ -135,6 +135,7 @@ def _validate_private_paper_compiler_settings(settings: Settings) -> str:
         image = validate_staging_sandbox_compiler_identity(
             settings.chat_latex_compiler_hf_sandbox_image,
             settings.chat_latex_compiler_hf_sandbox_namespace,
+            OPERATOR.hf_namespace,
         )
     except EnvelopeError as error:
         raise RuntimeError(
@@ -235,8 +236,7 @@ def validate_private_paper_runtime(settings: Settings) -> None:
         raise RuntimeError("private paper runtime shared previews must remain disabled")
     if (
         settings.chat_artifact_storage_backend != "hf_bucket"
-        or settings.chat_artifact_hf_bucket_id
-        != _STAGING_LATEX_COMPILER_ARTIFACT_BUCKET
+        or settings.chat_artifact_hf_bucket_id != OPERATOR.chat_artifact_bucket
     ):
         raise RuntimeError("private paper runtime requires the private bucket")
     image = _validate_private_paper_compiler_settings(settings)

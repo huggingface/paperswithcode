@@ -42,6 +42,8 @@ RUNTIME_CONTRACT_PATHS = (
     "backend/chat_sandbox_worker/TASK_CATALOG.md",
     "backend/chat_sandbox_worker/PAPER_AUTHORING_PROMPT.md",
     "backend/chat_sandbox_worker/contract.py",
+    "backend/operator_profile.py",
+    "config/operator.toml",
     "backend/chat_sandbox_worker/prompt.py",
     "backend/services/__init__.py",
     "backend/services/chat_runtime_contract.py",
@@ -51,6 +53,8 @@ RUNTIME_CONTRACT_PATHS = (
 def bundle_runtime_contract(staging: Path, source: Path) -> None:
     """Vendor the backend modules imported by the installed release tooling."""
     shutil.copytree(staging / "backend", source / "backend")
+    # backend/operator_profile.py reads ../config/operator.toml.
+    shutil.copytree(staging / "config", source / "config")
 
 
 def deployment_wrapper(command: str) -> str:

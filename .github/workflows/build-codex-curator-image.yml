@@ -16,9 +16,6 @@ permissions: {}
 concurrency:
   group: build-codex-curator-image-${{ github.ref }}
 
-env:
-  IMAGE: cr.hf.co/nielsr/pwc-codex-curator
-
 jobs:
   build:
     permissions:
@@ -26,13 +23,21 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Read the curator image repository from the operator profile
+        run: |
+          python3 - <<'PY' >> "$GITHUB_ENV"
+          import tomllib
+          profile = tomllib.load(open("config/operator.toml", "rb"))["huggingface"]
+          print(f"IMAGE={profile['curator_image_repository']}")
+          print(f"REGISTRY_USER={profile['namespace']}")
+          PY
       - name: Tag with the runner content hash
         id: runner
         run: echo "tag=runner-$(sha256sum jobs/run_paper_curation.py | cut -c1-12)" >> "$GITHUB_OUTPUT"
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           registry: cr.hf.co
-          username: nielsr
+          username: ${{ env.REGISTRY_USER }}
           password: ${{ secrets.HF_REGISTRY_TOKEN }}
       - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
       - id: build

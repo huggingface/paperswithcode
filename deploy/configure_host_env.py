@@ -12,10 +12,17 @@ import json
 import os
 import re
 import secrets
+import sys
 import tomllib
 from pathlib import Path
 from urllib.parse import urlsplit
 
+try:
+    from backend.operator_profile import OPERATOR
+except ModuleNotFoundError:
+    # Run from a checkout as `python deploy/configure_host_env.py`.
+    sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+    from backend.operator_profile import OPERATOR
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -24,10 +31,10 @@ APP_ROOT = Path("/srv/paperswithcode")
 PRODUCTION_CHAT_SEALED_CONFIG = CONFIG_ROOT / "production-chat-prepared.env"
 # Operator profile for paperswithcode.co. The backend only requires these to be
 # set; a self-hosted deployment changes them here, not in validation code.
-STAGING_CHAT_ARTIFACT_BUCKET_ID = "nielsr/pwc-chat-artifacts-staging"
-CHAT_TITLE_CREDENTIAL_OWNER = "nielsr"
-STAGING_CHAT_MODAL_WORKSPACE = "nielsrogge"
-STAGING_CHAT_MODAL_OWNER_USERNAME = "nielsrogge"
+STAGING_CHAT_ARTIFACT_BUCKET_ID = OPERATOR.chat_artifact_bucket
+CHAT_TITLE_CREDENTIAL_OWNER = OPERATOR.chat_title_credential_owner
+STAGING_CHAT_MODAL_WORKSPACE = OPERATOR.modal_staging_workspace
+STAGING_CHAT_MODAL_OWNER_USERNAME = OPERATOR.modal_staging_owner_username
 
 STAGING_EXCLUDED_PREFIXES = (
     "PWC_POSTGRES_BACKUP_",
@@ -1622,7 +1629,7 @@ def production_codex_values(
 def production_codex_image_values() -> dict[str, str]:
     return {
         "PWC_CODEX_JOBS_IMAGE": (
-            "cr.hf.co/nielsr/pwc-codex-curator:runner-8fc62f3ce865"
+            f"{OPERATOR.curator_image_repository}:runner-8fc62f3ce865"
             "@sha256:93d70eb1c02345d37a099182e322463b47f4480a472720376c1b98068fe075a9"
         ),
         "PWC_CODEX_JOBS_IMAGE_REVISION": "",

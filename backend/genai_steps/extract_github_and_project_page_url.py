@@ -42,6 +42,7 @@ from backend.utils.paper_utils import (
 from backend.models.generators import Message
 from backend.generators.openrouter_generator import OpenRouterGenerator
 from backend.models.generators import Generator
+from backend.operator_profile import OPERATOR
 
 
 class Response(BaseModel):
@@ -101,7 +102,7 @@ class FewShotPDFCache:
             logger.info(f"Downloading few-shot PDF {idx} to cache...")
             downloaded_path = await asyncio.to_thread(
                 hf_hub_download,
-                repo_id="nielsr/paper-page-assets",
+                repo_id=OPERATOR.paper_page_assets_repo,
                 filename=f"paper_pdfs_step_1/pdf_{idx}.pdf",
                 repo_type="dataset",
             )

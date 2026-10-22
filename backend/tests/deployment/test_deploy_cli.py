@@ -37,8 +37,8 @@ def test_deployment_tool_bundle_includes_chat_runtime_contract(tmp_path: Path):
     bundle_runtime_contract(staging, source)
 
     for relative in RUNTIME_CONTRACT_PATHS:
-        backend_relative = Path(relative).relative_to("backend")
-        assert (source / "backend" / backend_relative).is_file()
+        # backend/… and config/… keep their layout under the installed tree.
+        assert (source / relative).is_file()
     result = subprocess.run(
         [
             sys.executable,

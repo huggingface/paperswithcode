@@ -224,6 +224,16 @@ try:
     from deploy import production_chat_contract as production_contract
 except ImportError:
     production_contract = None
+
+
+def posterly_artifact_bucket_id():
+    try:
+        from backend.operator_profile import OPERATOR
+    except ImportError:
+        # Releases from before config/operator.toml pinned it in the contract.
+        return contract.POSTERLY_ARTIFACT_BUCKET_ID
+    return OPERATOR.chat_artifact_bucket
+
 enabled = os.environ["PWC_RELEASE_CHAT_ENABLED"] == "true"
 production = os.environ["PWC_RELEASE_ENVIRONMENT"] == "production"
 descriptor = {
@@ -298,7 +308,7 @@ if present_pi_fields:
         "posterly_license": contract.POSTERLY_LICENSE,
         "posterly_playwright_version": contract.POSTERLY_PLAYWRIGHT_VERSION,
         "posterly_chromium_revision": contract.POSTERLY_CHROMIUM_REVISION,
-        "posterly_artifact_bucket_id": contract.POSTERLY_ARTIFACT_BUCKET_ID,
+        "posterly_artifact_bucket_id": posterly_artifact_bucket_id(),
     })
 print(json.dumps(descriptor, sort_keys=True))
 """

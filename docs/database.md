@@ -52,10 +52,10 @@ The server allows remote connections only for explicit IPs using `scripts/manage
 
 ```bash
 # Add your public IP (requires sudo)
-sudo ./scripts/manage_postgres_access.sh add 84.198.172.145 paperswithcode_user paperswithcode_hf
+sudo ./scripts/manage_postgres_access.sh add 203.0.113.10 paperswithcode_user paperswithcode_hf
 
 # Remove an IP
-sudo ./scripts/manage_postgres_access.sh remove 84.198.172.145
+sudo ./scripts/manage_postgres_access.sh remove 203.0.113.10
 
 # List current entries
 ./scripts/manage_postgres_access.sh list

@@ -192,6 +192,18 @@ groups or capabilities, and `no_new_privs`. Root takes the build tree back
 it. `install_deploy_tools.py` creates the account; a deploy fails closed if it
 is missing.
 
+## Operator profile
+
+`config/operator.toml` names the accounts and resources the hosted
+paperswithcode.co deployment owns: the Hugging Face namespace, the staging chat
+artifact bucket, the paper-page assets dataset, the Codex curator image
+repository, the chat-title billing account, and the staging Modal workspace.
+Code, `configure_host_env.py`, release manifests, and the curator image
+workflow read them through `backend/operator_profile.py`; the deploy-tools
+bundle ships the file. A self-hosted deployment edits this one file instead of
+source. Release manifests record the bucket, so changing it requires a new
+release, like any other pinned value.
+
 ## First-party MCP component
 
 The remote MCP server is an independent immutable component even though its
