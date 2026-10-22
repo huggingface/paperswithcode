@@ -927,3 +927,42 @@ def test_protocol_adapters_own_no_transactions():
         assert "db_manager" not in source, module.__name__
         assert ".commit()" not in source, module.__name__
         assert ".rollback()" not in source, module.__name__
+
+
+def test_unauthorized_caller_is_rejected_before_the_body_is_read(monkeypatch):
+    import asyncio
+    import uuid
+
+    from fastapi import HTTPException
+
+    from backend.services.chat_provider_gateway.lifecycle import ProviderCallLifecycle
+
+    class Request:
+        async def body(self):
+            raise AssertionError("body read before authorization")
+
+    class Protocol:
+        def check_available(self):
+            return None
+
+        def observe_rejection(self, phase):
+            assert phase == "capability_scope"
+
+    def reject(_token, _model):
+        raise HTTPException(status_code=403, detail="Capability rejected")
+
+    lifecycle = ProviderCallLifecycle(
+        db=object(),
+        settings=SimpleNamespace(),
+        authenticate=lambda: "token",
+        authorize=reject,
+        owner=lambda _row: "owner",
+    )
+    monkeypatch.setattr(
+        "backend.services.chat_provider_gateway.lifecycle.record_gateway_timing",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(lifecycle.run(Protocol(), Request(), str(uuid.uuid4())))
+    assert error.value.status_code == 403

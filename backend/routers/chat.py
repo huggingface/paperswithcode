@@ -438,13 +438,13 @@ async def excalidraw_app_html(
     del user
     _require_mcp_apps_host(settings)
     _require_same_origin_csrf(request, settings)
-    expected_sha256 = None
-    if settings.environment == "production":
-        expected_sha256 = next(
-            provider.app_html_sha256
-            for provider in WORKER_MCP_PROVIDERS
-            if provider.id == "excalidraw"
-        )
+    # The App runs in an iframe beside private diagram content, so every
+    # environment serves only the reviewed HTML digest, never upstream changes.
+    expected_sha256 = next(
+        provider.app_html_sha256
+        for provider in WORKER_MCP_PROVIDERS
+        if provider.id == "excalidraw"
+    )
     html = await fetch_excalidraw_app_html(expected_sha256=expected_sha256)
     return Response(content=html, media_type=APP_HTML_MIME)
 
