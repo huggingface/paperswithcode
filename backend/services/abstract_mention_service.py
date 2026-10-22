@@ -54,8 +54,9 @@ Matching rules:
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
   links its bare name to the latest version.
-- Curated aliases match like names but rank below them; a one-word alias
-  (``Astra``) always goes to the judge.
+- Curated aliases match like names but rank below them; a capitalised
+  one-word alias (``Astra``) always goes to the judge, a lowercase technical
+  word (``autoregressive``) does not.
 - When a benchmark and a method share a name (benchmark ``GQA``, method
   ``Grouped-Query Attention (GQA)``), both become candidates for the judge,
   which keeps at most one per span.
@@ -538,7 +539,11 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     variant_suspect=inside_name
                     or len(fitting) > 1
                     or (surface.rank == ABBREVIATION and end - start <= 2)
-                    or (surface.rank == ALIAS and len(surface.tokens) == 1),
+                    or (
+                        surface.rank == ALIAS
+                        and len(surface.tokens) == 1
+                        and surface.tokens[0][:1].isupper()
+                    ),
                 )
             )
         end = furthest

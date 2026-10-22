@@ -71,7 +71,9 @@ CATALOG = [
     method(30, "Direct Preference Optimization (DPO)"),
     method(31, "Quantization"),
     method(34, "BiLSTM"),
-    method(35, "Autoregressive Model (AR)"),
+    CatalogEntity(
+        "method", 35, "Autoregressive Model (AR)", "ar", aliases=("autoregressive",)
+    ),
     method(32, "Qwen2.5"),
     method(33, "Qwen2.5-VL"),
     CatalogEntity("framework", 103, "Browser Use", "browser-use"),
@@ -452,3 +454,8 @@ def test_abbreviation_inside_a_name_is_read_through():
         ("autoregressive (AR) models", "method", 35),
         ("GRPO", "method", 4),
     ]
+
+
+def test_lowercase_one_word_alias_links_without_the_judge():
+    [ar] = find_candidates("standard autoregressive decoding", INDEX)
+    assert ar.entity_id == 35 and not ar.variant_suspect
