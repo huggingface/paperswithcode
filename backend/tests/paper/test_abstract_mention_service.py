@@ -67,6 +67,9 @@ CATALOG = [
     dataset(88, "GQA"),
     dataset(89, "MMAU"),
     method(30, "Direct Preference Optimization (DPO)"),
+    method(31, "Quantization"),
+    method(32, "Qwen2.5"),
+    method(33, "Qwen2.5-VL"),
     CatalogEntity("framework", 103, "Browser Use", "browser-use"),
     method(29, "Grouped-Query Attention", "Grouped-Query Attention (GQA)"),
     dataset(85, "HMMT Feb 2025"),
@@ -408,3 +411,12 @@ def test_shortened_long_form_keeps_the_abbreviation_and_plural_names_match_singu
     assert links("a generative World Action Model") == [
         ("World Action Model", "method", 15)
     ]
+
+
+def test_checkpoint_suffixes_and_british_spellings():
+    assert links("Qwen2.5-Math-7B, Qwen2.5-VL and Qwen3-8B-Instruct") == [
+        ("Qwen2.5", "method", 32),
+        ("Qwen2.5-VL", "method", 33),
+        ("Qwen3", "method", 6),
+    ]
+    assert links("post-training quantisation") == [("quantisation", "method", 31)]

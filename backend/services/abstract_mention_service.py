@@ -45,6 +45,8 @@ Matching rules:
   its version is read through (``Terminal-Bench (TB) 3.0``).
 - A benchmark suffix that spells the benchmark's slug is part of the name
   (``ImageNet-1k`` for slug ``imagenet-1k``).
+- Checkpoint suffixes keep a method match (``Qwen2.5-Math``, ``-Instruct``),
+  and British spellings match (``quantisation``).
 - A model-size suffix keeps a method match: ``REPA-XL/2``, ``Qwen3-8B``, and
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
@@ -92,6 +94,7 @@ _SIZE_SUFFIX = re.compile(
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
 # "Terminal-Bench (TB) 3.0": an abbreviation between a name and its version.
 _INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+\d)")
+_CHECKPOINT_SUFFIX = re.compile(r"-(?:Instruct|Base|Chat|Math|Coder|Thinking)\b")
 _VARIANT_SUFFIX = re.compile(
     r"-(?:mini|lite|tiny|small|base|large|hard|easy|full|pro|plus|test|val|dev)\b", re.I
 )
@@ -271,6 +274,9 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         if rank != PLURAL:
             for variant, variant_rank in _compact_variants(written, entity):
                 add(variant, entity, variant_rank)
+        british = re.sub(r"iz(ation|e|ed|ing|er)\b", r"is\1", written)
+        if rank != PLURAL and british != written:
+            add(british, entity, max(rank, ABBREVIATION))  # quantisation
 
     def add_named(
         written: str, entity: CatalogEntity, long_form: bool, rank: float = NAME
@@ -413,6 +419,10 @@ def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:
         return False
     if surface.entity.entity_type == "method" and _SIZE_SUFFIX.match(text_value, end):
         return False
+    if surface.entity.entity_type == "method" and _CHECKPOINT_SUFFIX.match(
+        text_value, end
+    ):
+        return False  # Qwen2.5-Math-7B, Qwen3-8B-Instruct are still Qwen2.5 / Qwen3
     versioned = rest[0] in ".-" and rest[1].isdigit()
     if versioned and _is_unversioned_method(surface):
         return False  # LLaVA-1.5 is still LLaVA
