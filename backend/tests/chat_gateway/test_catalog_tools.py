@@ -701,7 +701,8 @@ def test_gateway_meters_every_semantic_scholar_search_as_a_search(
 
     metered: list[str] = []
     monkeypatch.setattr(
-        "backend.chat_gateway_app._scope", lambda *_args, **_kwargs: object()
+        "backend.chat_gateway_app._scope",
+        lambda *_args, **_kwargs: SimpleNamespace(scopes=["catalog"]),
     )
     monkeypatch.setattr(
         ChatCapabilityService,
