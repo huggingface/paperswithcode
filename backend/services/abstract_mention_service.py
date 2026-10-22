@@ -72,9 +72,11 @@ _QUALIFIER = re.compile(r"\s*(?:\([^()]*\)|\s—\s.*)\s*$")
 _MATH = re.compile(r"\$\$.+?\$\$|\$[^$]+\$|https?://\S+", re.S)
 _PLAIN_WORD = re.compile(r"[A-Za-z][a-z]*")
 _VARIANT_WORD = re.compile(r"[A-Z0-9]")
-# A trailing bracket whose first word has two capitals: (DiT), (WAMs), (KV cache).
+# A trailing bracket of up to three words, one with two capitals: (DiT), (WAMs),
+# (KV cache), (Online RL); not (Delayed Generalization) or (cross-encoder).
 _ABBREVIATION = re.compile(
-    r"\s*\(((?=[^\s)]*[A-Z][^\s)]*[A-Z])[A-Za-z0-9\-]+(?: [A-Za-z0-9\-]+){0,2})\)\s*$"
+    r"\s*\(((?=[^)]*?\b[A-Za-z0-9\-]*[A-Z][A-Za-z0-9\-]*[A-Z])"
+    r"[A-Za-z0-9\-]+(?: [A-Za-z0-9\-]+){0,2})\)\s*$"
 )
 _SIZE_SUFFIX = re.compile(
     r"-(?:(?:XXL|XL|XS)(?:/\d+)?|[SMLBHG]\+?/\d+|\d+(?:\.\d+)?[BMKT]|\d+x\d+[BM]?)(?![\w.])"
@@ -149,6 +151,19 @@ def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
     return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(tokens[0]))
 
 
+def _compact_variants(written: str, entity: CatalogEntity) -> list[str]:
+    """``MATH 500`` -> ``MATH500``; ``AIME 2025`` -> ``AIME 25`` and ``AIME25``."""
+    variants = []
+    joined = re.sub(r"(?<=[A-Za-z])[ \-](?=\d)", "", written)
+    if joined != written:
+        variants.append(joined)
+    if entity.entity_type == "dataset":
+        short_year = re.sub(r"(?<=[A-Za-z][ \-])20(\d\d)$", r"\1", written)
+        if short_year != written:
+            variants += [short_year, re.sub(r"[ \-](?=\d\d$)", "", short_year)]
+    return variants
+
+
 def _resolve_benchmark_group(
     members: list[CatalogEntity], by_id: dict[int, CatalogEntity]
 ) -> CatalogEntity | None:
@@ -193,8 +208,13 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             targets[key].append((rank, entity, written))
         if entity.entity_type == "method" and rank != PLURAL and key:
             last = tokenize(written)[-1]
-            if last[-1:].isalpha() and last[-1:].lower() != "s":
+            if re.search(r"(?:s|x|z|ch|sh)$", last, re.I):
+                add(written + "es", entity, PLURAL)  # harness -> harnesses
+            elif last[-1:].isalpha():
                 add(written + "s", entity, PLURAL)
+        if rank != PLURAL:
+            for variant in _compact_variants(written, entity):
+                add(variant, entity, ABBREVIATION)
 
     def add_named(written: str, entity: CatalogEntity, long_form: bool) -> None:
         abbreviation = _ABBREVIATION.search(written)
@@ -231,6 +251,8 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             continue
         written = base_name((target if target in members else members[0]).name)
         targets[tuple(key_text.split())].append((NAME, target, written))
+        for variant in _compact_variants(written, target):
+            add(variant, target, ABBREVIATION)
 
     group_names = {normalize_name(base_name(d.name)) for d in datasets.values()}
     latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
@@ -319,9 +341,12 @@ def _is_unversioned_method(surface: _Surface) -> bool:
 
 
 def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
-    return (
-        start >= 2 and text_value[start - 1] == "-" and text_value[start - 2].isalnum()
-    )
+    """``Flow-GRPO``, ``delta-VAE``; a lowercase modifier on a lowercase phrase
+    (``multi-agent harness``) is not a different name."""
+    if start < 2 or text_value[start - 1] != "-" or not text_value[start - 2].isalnum():
+        return False
+    prefix = re.search(r"([A-Za-z0-9]+)-$", text_value[:start]).group(1)
+    return not (prefix.isalpha() and prefix.islower() and text_value[start].islower())
 
 
 def _followed_by_variant_word(text_value: str, end: int) -> bool:

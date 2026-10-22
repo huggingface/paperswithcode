@@ -44,6 +44,13 @@ CATALOG = [
     dataset(77, "ImageNet V2"),
     CatalogEntity("dataset", 78, "ImageNet (ILSVRC-2012)", "imagenet-1k"),
     dataset(79, "Terminal Bench 3.0"),
+    dataset(80, "AIME 2025"),
+    dataset(81, "MATH 500"),
+    dataset(82, "COCO (val2017)"),
+    dataset(83, "AIME24"),
+    dataset(84, "AIME 2024"),
+    method(23, "Agent Harness"),
+    method(24, "Online Reinforcement Learning (Online RL)"),
     CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
     CatalogEntity("framework", 101, "Transformers", "transformers"),
     CatalogEntity("framework", 102, "Transformers", "transformers-vision"),
@@ -279,4 +286,31 @@ def test_long_form_before_a_bracketed_name_joins_the_link():
     assert links("a new policy optimization (GRPO) variant") == [
         ("policy optimization", "method", 22),
         ("GRPO", "method", 4),
+    ]
+
+
+def test_compact_names_and_short_years():
+    assert links("AIME25, MATH500, AIME 2025 and MATH-500") == [
+        ("AIME25", "dataset", 80),
+        ("MATH500", "dataset", 81),
+        ("AIME 2025", "dataset", 80),
+        ("MATH-500", "dataset", 81),
+    ]
+    # An exact catalog name beats a short-year alias.
+    assert links("AIME24") == [("AIME24", "dataset", 83)]
+    assert links("on COCO") == [("COCO", "dataset", 82)]
+
+
+def test_lowercase_modifiers_and_es_plurals():
+    assert links("a self-organized multi-agent harness; multi-agent harnesses") == [
+        ("agent harness", "method", 23),
+        ("agent harnesses", "method", 23),
+    ]
+    assert links("delta-GRPO") == []
+
+
+def test_bracketed_name_with_one_capitalised_word():
+    assert links("online reinforcement learning (RL) and Online RL") == [
+        ("online reinforcement learning", "method", 24),
+        ("Online RL", "method", 24),
     ]
