@@ -524,7 +524,7 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                 _continues_as_variant(masked, end, surface)
                 or _has_hyphenated_prefix(masked, start)
                 or (
-                    inside_name
+                    _next_to_name_word(masked, start, end)
                     and _is_capitalised_plain_word(surface, abstract[start:end])
                 )
             )
@@ -674,6 +674,12 @@ def _contains(longer: tuple[str, ...], part: tuple[str, ...]) -> bool:
     return any(
         longer[i : i + len(part)] == part for i in range(len(longer) - len(part) + 1)
     )
+
+
+def _next_to_name_word(masked: str, start: int, end: int) -> bool:
+    """``World Embedding Benchmark``; a version number (``Jev 1.13``) is not a word."""
+    following = re.match(r"[ \t]+([A-Z])", masked[end:])
+    return bool(following) or _preceded_by_name_word(masked, start)
 
 
 def _is_capitalised_plain_word(surface: _Surface, written: str) -> bool:

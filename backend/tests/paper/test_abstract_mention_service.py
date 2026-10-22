@@ -473,3 +473,8 @@ def test_short_abbreviation_trusted_when_the_abstract_names_the_entity():
     ]
     [alone] = find_candidates("AR glasses render overlays.", INDEX)
     assert alone.variant_suspect
+
+
+def test_capitalised_plain_word_followed_by_a_version_is_kept():
+    [jev] = find_candidates("a typed decision model, Attention 1.13, consulted", INDEX)
+    assert jev.surface == "Attention" and jev.variant_suspect
