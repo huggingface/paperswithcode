@@ -30,6 +30,7 @@ permissions: {}
 
 jobs:
   deploy:
+    environment: hf-publish
     permissions:
       contents: read
     runs-on: ubuntu-latest

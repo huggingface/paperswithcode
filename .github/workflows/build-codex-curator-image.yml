@@ -18,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    environment: hf-publish
     permissions:
       contents: read
     runs-on: ubuntu-latest

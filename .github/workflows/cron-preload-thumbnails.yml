@@ -89,6 +89,7 @@ permissions: {}
 
 jobs:
   run:
+    environment: vps-operations
     permissions: {}
     runs-on: ubuntu-latest
     timeout-minutes: 240
