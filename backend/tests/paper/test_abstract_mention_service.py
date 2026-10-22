@@ -65,6 +65,8 @@ CATALOG = [
     ),
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(88, "GQA"),
+    dataset(89, "MMAU"),
+    CatalogEntity("framework", 103, "Browser Use", "browser-use"),
     method(29, "Grouped-Query Attention", "Grouped-Query Attention (GQA)"),
     dataset(85, "HMMT Feb 2025"),
     dataset(86, "HMMT November 2025"),
@@ -383,4 +385,15 @@ def test_name_shared_by_a_benchmark_and_a_method_yields_both_for_the_judge():
     assert all(c.variant_suspect for c in found)
     assert links("grouped-query attention (GQA)") == [
         ("grouped-query attention (GQA)", "method", 29)
+    ]
+
+
+def test_variant_suffixes_maths_versions_and_framework_case():
+    assert links("84.1 on MMAU-mini; GRPO-based; COCO-$20^i$") == [
+        ("GRPO", "method", 4)
+    ]
+    [versioned] = find_candidates("413 Elo on MMAU v2.", INDEX)
+    assert versioned.variant_suspect
+    assert links("Browser-use agents built on Browser Use") == [
+        ("Browser Use", "framework", 103)
     ]

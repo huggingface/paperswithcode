@@ -92,6 +92,9 @@ _SIZE_SUFFIX = re.compile(
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
 # "Terminal-Bench (TB) 3.0": an abbreviation between a name and its version.
 _INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+\d)")
+_VARIANT_SUFFIX = re.compile(
+    r"-(?:mini|lite|tiny|small|base|large|hard|easy|full|pro|plus|test|val|dev)\b", re.I
+)
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
 
 # Lower ranks win when two entities claim the same surface.
@@ -158,6 +161,8 @@ def base_name(name: str) -> str:
 
 
 def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
+    if entity.entity_type == "framework":
+        return True  # product names: "Browser Use", not "browser-use agents"
     if len(tokens) > 1:
         return False
     return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(tokens[0]))
@@ -411,6 +416,8 @@ def _continues_as_variant(text_value: str, end: int, surface: _Surface) -> bool:
         return False  # LLaVA-1.5 is still LLaVA
     if rest[0] == "." and rest[1].isdigit():
         return True
+    if rest[0] == "-" and (rest[1].isspace() or _VARIANT_SUFFIX.match(text_value, end)):
+        return True  # COCO-$20^i$ (masked maths), MMAU-mini
     return rest[0] == "-" and (rest[1].isupper() or rest[1].isdigit())
 
 
@@ -430,8 +437,9 @@ def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
 
 
 def _followed_by_variant_word(text_value: str, end: int) -> bool:
-    match = re.match(r"[ \t]+(\S)", text_value[end:])
-    return bool(match and _VARIANT_WORD.match(match.group(1)))
+    match = re.match(r"[ \t]+(\S+)", text_value[end:])
+    word = match.group(1) if match else ""
+    return bool(_VARIANT_WORD.match(word) or re.match(r"v\d", word))  # GDPval v2
 
 
 def _preceded_by_name_word(text_value: str, start: int) -> bool:
