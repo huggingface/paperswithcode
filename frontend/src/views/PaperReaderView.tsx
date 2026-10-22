@@ -362,7 +362,7 @@ function PaperReaderExperience() {
   const chatReady = Boolean(paper && assistantEnabled && !(webPage && !webPageReady));
   const assistant = paper && assistantEnabled && !chatReady
     ? <div className="reader-chat-unavailable" role="status">Chat opens once the paper is ready.</div>
-    : chatReady ? <ChatExperience
+    : paper && chatReady ? <ChatExperience
     mode="paper"
     routeSessionId={activeSessionId}
     primaryPaper={{ id: paper.id, routeId: canonicalRoute, title: paper.title }}
