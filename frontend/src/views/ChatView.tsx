@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { MoreHorizontal } from "lucide-react";
+import { MoreVertical } from "lucide-react";
 
 import { useChatViewportHeight } from "@/hooks/useChatViewportHeight";
 
@@ -685,7 +685,7 @@ const ChatExperienceContent: React.FC<ChatExperienceProps> = ({
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button type="button" className="chat-reader-menu-btn" aria-label="Chat actions">
-                  <MoreHorizontal aria-hidden="true" />
+                  <MoreVertical aria-hidden="true" />
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end">
