@@ -109,6 +109,16 @@ export interface RelatedPaperRecommendation {
   used_stale_source_vector: boolean;
 }
 
+/** One linked catalog name in a paper abstract. */
+export interface AbstractMention {
+  start: number;
+  end: number;
+  surface: string;
+  entity_type: "method" | "benchmark" | "framework";
+  slug: string;
+  name: string;
+}
+
 export interface Paper {
   id: string;
   arxiv_id: string | null;
@@ -143,6 +153,9 @@ export interface Paper {
   project_pages?: ProjectPage[];
   /** X (formerly Twitter) posts in which the authors introduce the paper. */
   x_threads?: XThread[];
+  /** Catalog names linked in the abstract, as character spans of `abstract`
+   *  (paper detail only). */
+  abstract_mentions?: AbstractMention[];
   /** Hugging Face model URLs explicitly linked to this paper. Populated for
    *  external rows only; arXiv rows derive HF artifacts from `arxiv_id`. */
   hf_models?: string[];

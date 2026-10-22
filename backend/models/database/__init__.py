@@ -154,6 +154,7 @@ from backend.models.database.papers import (
     PaperDataset,
     PaperRelation,
     PaperSuggestedQuestions,
+    PaperAbstractMention,
 )
 from backend.models.database.resources import (
     Repository,
@@ -313,6 +314,7 @@ __all__ = [
     "ProjectPage",
     "PaperProjectPage",
     "PaperSuggestedQuestions",
+    "PaperAbstractMention",
     "PaperXThread",
     "PaperXPost",
     "XInsightPost",

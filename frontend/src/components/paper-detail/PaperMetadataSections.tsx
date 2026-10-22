@@ -3,6 +3,9 @@ import { useState } from "react";
 import { MethodChip, TagChip } from "@/components";
 import { LatexText } from "@/components/LatexTitle";
 import type { Paper } from "@/lib/api/papers.types";
+import { isAbstractLinksEnabled } from "@/lib/apiUrl";
+
+import { AbstractText } from "./AbstractText";
 
 import { PaperSectionRule } from "./PaperSectionRule";
 import { PaperSuggestedQuestions } from "./PaperSuggestedQuestions";
@@ -41,7 +44,15 @@ export function PaperMetadataSections({
 
       <PaperSectionRule id="abstract" label="Abstract" />
       <p className="abstract-text" style={{ marginBottom: 8 }}>
-        <LatexText text={abstractView} />
+        {isAbstractLinksEnabled() && paper.abstract_mentions?.length ? (
+          <AbstractText
+            abstract={abstract}
+            mentions={paper.abstract_mentions}
+            visibleLength={abstractView === abstract ? null : ABSTRACT_PREVIEW_LENGTH}
+          />
+        ) : (
+          <LatexText text={abstractView} />
+        )}
       </p>
       {isLongAbstract && (
         <button

@@ -290,9 +290,9 @@ def _related_paper(paper_id, title):
     ("loader_method", "include_resources", "expected_queries"),
     [
         ("load_cards", False, 7),
-        ("load_details", False, 13),
+        ("load_details", False, 14),
         ("load_cards", True, 10),
-        ("load_details", True, 16),
+        ("load_details", True, 17),
     ],
 )
 @pytest.mark.parametrize(

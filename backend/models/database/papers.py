@@ -9,6 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
+    Float,
     ForeignKey,
     ForeignKeyConstraint,
     Index,
@@ -496,4 +497,35 @@ class PaperSuggestedQuestions(Base):
     model: Mapped[str] = mapped_column(String(64), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class PaperAbstractMention(Base):
+    """A literal catalog name in a paper abstract, and whether it is linked."""
+
+    __tablename__ = "paper_abstract_mentions"
+
+    paper_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="CASCADE"), primary_key=True
+    )
+    entity_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    entity_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    start_offset: Mapped[int] = mapped_column(Integer, primary_key=True)
+    end_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    surface: Mapped[str] = mapped_column(Text, nullable=False)
+    abstract_sha: Mapped[str] = mapped_column(String(64), nullable=False)
+    linked: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    judge: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    score: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "entity_type IN ('method', 'dataset', 'framework')",
+            name="paper_abstract_mentions_entity_type_check",
+        ),
+        Index("idx_paper_abstract_mentions_entity", "entity_type", "entity_id"),
     )

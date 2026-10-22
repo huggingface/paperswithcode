@@ -40,6 +40,19 @@
   text-wrap: pretty;
   margin-bottom: 32px;
 }
+.abstract-text .abstract-entity-link {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in oklch, var(--ink) 45%, transparent);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+.abstract-text .abstract-entity-link:hover,
+.abstract-text .abstract-entity-link:focus-visible {
+  color: var(--accent-text);
+  text-decoration-style: solid;
+  text-decoration-color: var(--accent-text);
+}
 .abstract-text .first-letter::first-letter {
   font-size: 3.2em;
   line-height: 0.9;
