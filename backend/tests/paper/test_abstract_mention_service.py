@@ -64,6 +64,8 @@ CATALOG = [
         ),
     ),
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
+    dataset(88, "GQA"),
+    method(29, "Grouped-Query Attention", "Grouped-Query Attention (GQA)"),
     dataset(85, "HMMT Feb 2025"),
     dataset(86, "HMMT November 2025"),
     method(24, "Online Reinforcement Learning (Online RL)"),
@@ -369,3 +371,16 @@ def test_curated_aliases_link_and_one_word_aliases_are_judged():
     ]
     [astra] = find_candidates("by 18.6 points with Astra", INDEX)
     assert astra.entity_id == 28 and astra.variant_suspect
+
+
+def test_name_shared_by_a_benchmark_and_a_method_yields_both_for_the_judge():
+    found = find_candidates("GQA achieves strong quality, unlike GQA-8.", INDEX)
+    assert [(c.surface, c.entity_type, c.entity_id) for c in found] == [
+        ("GQA", "dataset", 88),
+        ("GQA", "method", 29),
+        ("GQA", "method", 29),  # GQA-8: eight groups, still the method
+    ]
+    assert all(c.variant_suspect for c in found)
+    assert links("grouped-query attention (GQA)") == [
+        ("grouped-query attention (GQA)", "method", 29)
+    ]

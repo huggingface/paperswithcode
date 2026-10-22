@@ -51,6 +51,9 @@ Matching rules:
   links its bare name to the latest version.
 - Curated aliases match like names but rank below them; a one-word alias
   (``Astra``) always goes to the judge.
+- When a benchmark and a method share a name (benchmark ``GQA``, method
+  ``Grouped-Query Attention (GQA)``), both become candidates for the judge,
+  which keeps at most one per span.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier, except an
   abbreviation of the name's initials, which also matches
   (``Humanity's Last Exam (HLE)`` gives ``HLE``). When
@@ -352,6 +355,22 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         surfaces[key] = [
             _Surface(owner, tokens, _case_sensitive(owner, tokens), chosen_rank)
         ]
+        # A benchmark named GQA and the method Grouped-Query Attention (GQA): keep
+        # one owner per other entity type, and let the judge pick by context.
+        for entity_type in sorted(
+            {o.entity_type for _, o, _ in owners} - {owner.entity_type}
+        ):
+            rivals = {
+                (o.entity_type, o.entity_id): (r, o, w)
+                for r, o, w in owners
+                if o.entity_type == entity_type and r != PLURAL
+            }
+            if len(rivals) == 1:
+                r, o, w = next(iter(rivals.values()))
+                rival_tokens = tuple(tokenize(w))
+                surfaces[key].append(
+                    _Surface(o, rival_tokens, _case_sensitive(o, rival_tokens), r)
+                )
     names = {
         (o.entity_type, o.entity_id): key
         for key, owners in targets.items()
@@ -442,28 +461,37 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         if matched is None:
             i += 1
             continue
-        n, surface = matched
-        start, end = tokens[i].start(), tokens[i + n - 1].end()
-        end = _absorb_parenthesised_alias(index, abstract, masked, end, surface)
-        end = _absorb_slug_suffix(masked, start, end, surface)
-        inside_name = _followed_by_variant_word(masked, end) or _preceded_by_name_word(
-            masked, start
-        )
-        if _defined_in_brackets(masked, start, end):
-            expanded = _expand_long_form(index, masked, tokens[:i], start, end, surface)
-            if expanded:
-                start, end = expanded
-                candidates = [c for c in candidates if c.end <= start]
-            elif surface.rank == ABBREVIATION:
-                redefined.add((surface.entity.entity_type, surface.entity.entity_id))
-        part_of_other_name = (
-            _continues_as_variant(masked, end, surface)
-            or _has_hyphenated_prefix(masked, start)
-            or (
-                inside_name and _is_capitalised_plain_word(surface, abstract[start:end])
+        n, fitting = matched
+        furthest = tokens[i + n - 1].end()
+        for surface in fitting:
+            start, end = tokens[i].start(), tokens[i + n - 1].end()
+            end = _absorb_parenthesised_alias(index, abstract, masked, end, surface)
+            end = _absorb_slug_suffix(masked, start, end, surface)
+            inside_name = _followed_by_variant_word(
+                masked, end
+            ) or _preceded_by_name_word(masked, start)
+            if _defined_in_brackets(masked, start, end):
+                expanded = _expand_long_form(
+                    index, masked, tokens[:i], start, end, surface
+                )
+                if expanded:
+                    start, end = expanded
+                    candidates = [c for c in candidates if c.end <= start]
+                elif surface.rank == ABBREVIATION:
+                    redefined.add(
+                        (surface.entity.entity_type, surface.entity.entity_id)
+                    )
+            part_of_other_name = (
+                _continues_as_variant(masked, end, surface)
+                or _has_hyphenated_prefix(masked, start)
+                or (
+                    inside_name
+                    and _is_capitalised_plain_word(surface, abstract[start:end])
+                )
             )
-        )
-        if not part_of_other_name:
+            if part_of_other_name:
+                continue
+            furthest = max(furthest, end)
             candidates.append(
                 Candidate(
                     entity_type=surface.entity.entity_type,
@@ -472,10 +500,12 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     end=end,
                     surface=abstract[start:end],
                     variant_suspect=inside_name
+                    or len(fitting) > 1
                     or (surface.rank == ABBREVIATION and end - start <= 2)
                     or (surface.rank == ALIAS and len(surface.tokens) == 1),
                 )
             )
+        end = furthest
         i += n
         while i < len(tokens) and tokens[i].start() < end:
             i += 1
@@ -546,10 +576,13 @@ def _longest_match(index, masked, tokens, words, lowered, i):
         surfaces = index.surfaces.get(tuple(lowered[i : i + n]))
         if not surfaces or not _contiguous(masked, tokens[i : i + n]):
             continue
-        surface = surfaces[0]
-        if surface.case_sensitive and tuple(words[i : i + n]) != surface.tokens:
-            continue
-        return n, surface
+        fitting = [
+            surface
+            for surface in surfaces
+            if not surface.case_sensitive or tuple(words[i : i + n]) == surface.tokens
+        ]
+        if fitting:
+            return n, fitting
     return None
 
 
@@ -565,7 +598,11 @@ def _absorb_parenthesised_alias(
     matched = _longest_match(
         index, paren.group(1), inner, words, [w.lower() for w in words], 0
     )
-    if matched and matched[0] == len(inner) and matched[1].entity == surface.entity:
+    if (
+        matched
+        and matched[0] == len(inner)
+        and surface.entity in (other.entity for other in matched[1])
+    ):
         return paren.end()
     return end
 
