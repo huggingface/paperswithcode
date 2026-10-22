@@ -3,7 +3,8 @@ import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { gatewayPayloadLimit } from "./provider.js";
 
 const INPUT_MARGIN_TOKENS = 8000;
-const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Each paper\'s included_bytes now counts the Markdown bytes kept here, so use pwc_read_paper with that paper\'s route_id as paper and its included_bytes as offset to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
+const ESCAPES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">" };
+const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Each paper\'s included_bytes now counts the Markdown bytes kept here, so for a paper without content_origin use pwc_read_paper with its route_id as paper and its included_bytes as offset to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
 
 interface PaperBudget {
   model: Pick<Model<Api>, "contextWindow" | "maxTokens">;
@@ -51,7 +52,8 @@ export function fitPaperContext(prompt: string, budget: PaperBudget): string {
           }
           value = chars.join("").replace(/&[^;\s]*$/u, "");
         }
-        if (open.startsWith("<paper_markdown_prefix")) markdownBytes = Buffer.byteLength(value);
+        // The body is HTML-escaped; included_bytes counts the stored Markdown.
+        if (open.startsWith("<paper_markdown_prefix")) markdownBytes = Buffer.byteLength(value.replace(/&(amp|lt|gt);/gu, match => ESCAPES[match]!));
         evidenceBytes += Buffer.byteLength(value);
         return open + value + close;
       });
