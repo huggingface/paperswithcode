@@ -78,3 +78,52 @@ def _build_as_the_test_user(monkeypatch):
     from deploy import build_sandbox
 
     monkeypatch.setattr(build_sandbox, "enabled", lambda: False)
+
+
+class InMemoryAuthSessions:
+    """Stands in for the ``auth_sessions`` table in tests."""
+
+    def __init__(self) -> None:
+        self.subjects: dict[str, str] = {}
+        self.revoked: set[str] = set()
+
+    def issue(self, hf_subject: str) -> str:
+        session_id = f"sid-{len(self.subjects) + 1}"
+        self.subjects[session_id] = hf_subject
+        return session_id
+
+    def create_session(self, _db, hf_subject, *, ttl_seconds):
+        return self.issue(hf_subject)
+
+    def session_is_active(self, _db, session_id, hf_subject):
+        return (
+            self.subjects.get(session_id) == hf_subject
+            and session_id not in self.revoked
+        )
+
+    def revoke_sessions(self, _db, session_ids):
+        self.revoked |= set(session_ids) & set(self.subjects)
+
+    def revoke_all_sessions(self, _db, hf_subject):
+        self.revoked |= {
+            session_id
+            for session_id, subject in self.subjects.items()
+            if subject == hf_subject
+        }
+
+
+@pytest.fixture(autouse=True)
+def auth_sessions(monkeypatch) -> InMemoryAuthSessions:
+    """Keep session issuance and revocation checks off PostgreSQL."""
+
+    from backend.services import auth_session_service
+
+    store = InMemoryAuthSessions()
+    for name in (
+        "create_session",
+        "session_is_active",
+        "revoke_sessions",
+        "revoke_all_sessions",
+    ):
+        monkeypatch.setattr(auth_session_service, name, getattr(store, name))
+    return store

@@ -828,6 +828,15 @@ The host-only `pwc_session` and `pwc_staging_session` cookies and their
 distinct HS256 secrets remain temporarily readable for rollback compatibility.
 Staging login redirects through the production callback, whose return
 destinations are restricted to the production and staging HTTPS origins.
+Every session production issues carries a random `sid` backed by a
+`public.auth_sessions` row (migration `add_auth_sessions.sql`, applied as
+`postgres` before the first release that checks it). Both environments accept a
+cookie only while its row is unrevoked and unexpired; staging has `SELECT` only.
+`POST /api/v1/auth/logout` revokes the presented session on production
+(`?everywhere=true` revokes all of the user's sessions), and staging's logout
+goes through that production endpoint, so a copied or undeletable cookie stops
+working everywhere. Tokens without a `sid` are rejected, except staging's own
+HS256 qualification cookies.
 
 Codex add-evals and enrich-paper buttons are enabled in both environments'
 release manifests (`profile_features` in `deploy/release.py`; staging inherits

@@ -162,3 +162,28 @@ class UserProfileAlias(Base):
     )
 
     __table_args__ = (Index("idx_user_profile_aliases_subject", "hf_subject"),)
+
+
+class AuthSession(Base):
+    """Server-side handle of a browser session, so logout revokes copies.
+
+    Production issues and revokes rows; staging only reads them to verify the
+    shared production session it receives.
+    """
+
+    __tablename__ = "auth_sessions"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    hf_subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    expires_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    revoked_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (
+        Index("idx_auth_sessions_subject", "hf_subject"),
+        Index("idx_auth_sessions_expires_at", "expires_at"),
+    )

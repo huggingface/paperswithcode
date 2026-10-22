@@ -99,11 +99,12 @@ def _request(host: str, cookie: str = "") -> Request:
     )
 
 
-def test_production_session_is_verified_on_staging(monkeypatch):
+def test_production_session_is_verified_on_staging(monkeypatch, auth_sessions):
     current = _settings(production=True)
     monkeypatch.setattr(auth, "get_settings", lambda: current)
     token = auth._encode_session(
-        {"sub": "hf-123", "username": "Alice", "name": "Alice"}
+        {"sub": "hf-123", "username": "Alice", "name": "Alice"},
+        auth_sessions.issue("hf-123"),
     )
 
     current = _settings(production=False)
@@ -116,7 +117,7 @@ def test_production_session_is_verified_on_staging(monkeypatch):
     assert payload["username"] == "Alice"
 
 
-def test_verified_email_survives_shared_session_round_trip(monkeypatch):
+def test_verified_email_survives_shared_session_round_trip(monkeypatch, auth_sessions):
     current = _settings(production=True)
     monkeypatch.setattr(auth, "get_settings", lambda: current)
     token = auth._encode_session(
@@ -125,7 +126,8 @@ def test_verified_email_survives_shared_session_round_trip(monkeypatch):
             "username": "Alice",
             "email": "alice@example.com",
             "email_verified": True,
-        }
+        },
+        auth_sessions.issue("hf-123"),
     )
 
     current = _settings(production=False)
@@ -555,3 +557,192 @@ def test_callback_accepts_matching_browser_and_preserves_return_to(monkeypatch):
         for header in response.headers.getlist("set-cookie")
     )
     assert _state_cookie(response)[auth.OAUTH_STATE_COOKIE_NAME]["max-age"] == "0"
+
+
+def _sign_in(monkeypatch, settings: Settings) -> dict[str, str]:
+    """Complete a production OAuth callback and return the cookies it set."""
+
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args):
+            return None
+
+        async def post(self, _url, **_kwargs):
+            return httpx.Response(200, json={"access_token": "access"})
+
+        async def get(self, _url, **_kwargs):
+            return httpx.Response(
+                200, json={"sub": "hf-123", "preferred_username": "alice"}
+            )
+
+    monkeypatch.setattr(auth.httpx, "AsyncClient", lambda **_kwargs: FakeClient())
+    state = auth._encode_state("/", "paperswithcode.co", nonce="browser-nonce")
+    response = asyncio.run(
+        auth.hf_callback(
+            _request("paperswithcode.co", "pwc_oauth_state=browser-nonce"),
+            code="authorization-code",
+            state=state,
+            error=None,
+        )
+    )
+    cookies = SimpleCookie()
+    for header in response.headers.getlist("set-cookie"):
+        cookies.load(header)
+    return {name: morsel.value for name, morsel in cookies.items()}
+
+
+def _cookie_header(cookies: dict[str, str], *names: str) -> str:
+    return "; ".join(f"{name}={cookies[name]}" for name in names)
+
+
+def test_sign_in_binds_shared_and_legacy_cookies_to_one_live_session(
+    monkeypatch, auth_sessions
+):
+    cookies = _sign_in(monkeypatch, _settings(production=True))
+
+    shared = jwt.decode(
+        cookies["pwc_shared_session"], options={"verify_signature": False}
+    )
+    legacy = jwt.decode(cookies["pwc_session"], options={"verify_signature": False})
+    assert shared["sid"] == legacy["sid"]
+    assert auth_sessions.subjects == {shared["sid"]: "hf-123"}
+
+
+def test_copied_cookies_are_rejected_after_logout(monkeypatch, auth_sessions):
+    cookies = _sign_in(monkeypatch, _settings(production=True))
+    copied = _cookie_header(cookies, "pwc_shared_session", "pwc_session")
+    assert auth.decode_request_session(_request("paperswithcode.co", copied))
+
+    auth.logout(_request("paperswithcode.co", copied), return_to=None, everywhere=False)
+
+    assert auth.decode_request_session(_request("paperswithcode.co", copied)) is None
+    # The host-only production legacy cookie a staging logout cannot delete is
+    # revoked with the shared one.
+    residual = _cookie_header(cookies, "pwc_session")
+    assert auth.decode_request_session(_request("paperswithcode.co", residual)) is None
+
+
+def test_revoked_production_session_is_rejected_on_staging(monkeypatch, auth_sessions):
+    production = _settings(production=True)
+    cookies = _sign_in(monkeypatch, production)
+    shared = _cookie_header(cookies, "pwc_shared_session")
+    auth.logout(_request("paperswithcode.co", shared), return_to=None, everywhere=False)
+
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=False))
+
+    assert (
+        auth.decode_request_session(_request("staging.paperswithcode.co", shared))
+        is None
+    )
+
+
+def test_logout_everywhere_revokes_every_session_of_the_user(
+    monkeypatch, auth_sessions
+):
+    settings = _settings(production=True)
+    laptop = _sign_in(monkeypatch, settings)
+    phone = _sign_in(monkeypatch, settings)
+
+    auth.logout(
+        _request("paperswithcode.co", _cookie_header(laptop, "pwc_shared_session")),
+        return_to=None,
+        everywhere=True,
+    )
+
+    assert (
+        auth.decode_request_session(
+            _request("paperswithcode.co", _cookie_header(phone, "pwc_shared_session"))
+        )
+        is None
+    )
+
+
+def test_logout_revokes_only_its_own_session(monkeypatch, auth_sessions):
+    settings = _settings(production=True)
+    laptop = _sign_in(monkeypatch, settings)
+    phone = _sign_in(monkeypatch, settings)
+
+    auth.logout(
+        _request("paperswithcode.co", _cookie_header(laptop, "pwc_shared_session")),
+        return_to=None,
+        everywhere=False,
+    )
+
+    assert auth.decode_request_session(
+        _request("paperswithcode.co", _cookie_header(phone, "pwc_shared_session"))
+    )
+
+
+@pytest.mark.parametrize("production", [True, False])
+def test_session_without_a_server_side_id_is_rejected(monkeypatch, production):
+    """Tokens minted before revocation existed cannot be revoked, so they no
+    longer authenticate; their holders sign in again."""
+
+    issuing = _settings(production=True)
+    monkeypatch.setattr(auth, "get_settings", lambda: issuing)
+    private_value, _public = _key_values()
+    shared = jwt.encode(
+        {
+            "sub": "hf-123",
+            "username": "alice",
+            "iss": "https://paperswithcode.co",
+            "aud": "paperswithcode",
+            "exp": 4_000_000_000,
+        },
+        auth._private_key(private_value),
+        algorithm="EdDSA",
+    )
+    legacy = jwt.encode(
+        {"sub": "hf-123", "username": "alice", "exp": 4_000_000_000},
+        issuing.jwt_secret,
+        algorithm="HS256",
+    )
+    current = _settings(production=production)
+    monkeypatch.setattr(auth, "get_settings", lambda: current)
+
+    assert (
+        auth.decode_request_session(
+            _request("paperswithcode.co", f"pwc_shared_session={shared}")
+        )
+        is None
+    )
+    if production:
+        assert (
+            auth.decode_request_session(
+                _request("paperswithcode.co", f"pwc_session={legacy}")
+            )
+            is None
+        )
+
+
+def test_staging_qualification_cookie_needs_no_server_side_session(monkeypatch):
+    settings = _settings(production=False)
+    monkeypatch.setattr(auth, "get_settings", lambda: settings)
+    token = auth.encode_qualification_session(
+        {"sub": "operator:pi-qualification:1", "username": "operator"}, settings
+    )
+
+    payload = auth.decode_request_session(
+        _request("staging.paperswithcode.co", f"pwc_staging_session={token}")
+    )
+
+    assert payload is not None
+    assert payload["sub"] == "operator:pi-qualification:1"
+
+
+def test_staging_logout_never_writes_production_sessions(monkeypatch, auth_sessions):
+    cookies = _sign_in(monkeypatch, _settings(production=True))
+    shared = _cookie_header(cookies, "pwc_shared_session")
+    monkeypatch.setattr(auth, "get_settings", lambda: _settings(production=False))
+
+    auth.logout(
+        _request("staging.paperswithcode.co", shared),
+        return_to=None,
+        everywhere=False,
+    )
+
+    assert auth_sessions.revoked == set()
