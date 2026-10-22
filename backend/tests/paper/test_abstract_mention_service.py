@@ -52,6 +52,7 @@ CATALOG = [
     method(23, "Agent Harness"),
     method(25, "Dr. GRPO"),
     method(26, "Self-Distillation (SD)"),
+    dataset(87, "Humanity's Last Exam (HLE)"),
     dataset(85, "HMMT Feb 2025"),
     dataset(86, "HMMT November 2025"),
     method(24, "Online Reinforcement Learning (Online RL)"),
@@ -339,3 +340,11 @@ def test_month_less_year_aliases_prefer_the_earlier_sitting():
 def test_bare_two_letter_abbreviations_go_to_the_judge():
     long_form, bare = find_candidates("Self-Distillation (SD) beats SD here.", INDEX)
     assert not long_form.variant_suspect and bare.variant_suspect
+
+
+def test_benchmark_initials_abbreviation_matches():
+    assert links("52.6 on HLE and Humanity's Last Exam") == [
+        ("HLE", "dataset", 87),
+        ("Humanity's Last Exam", "dataset", 87),
+    ]
+    assert links("SFT") == []  # LIBERO-Plus (SFT) is a split, not an abbreviation

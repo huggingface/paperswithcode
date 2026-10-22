@@ -49,7 +49,9 @@ Matching rules:
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
   links its bare name to the latest version.
-- Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier. When
+- Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier, except an
+  abbreviation of the name's initials, which also matches
+  (``Humanity's Last Exam (HLE)`` gives ``HLE``). When
   several benchmarks share the resulting base name, the unqualified one wins,
   then the group's single parent, then a parent all variants share; otherwise
   the base name is unresolved and not matched.
@@ -159,6 +161,17 @@ _MONTHS = (
     "january february march april may june july august september october "
     "november december".split(),
 )
+
+
+def _initials_abbreviation(name: str) -> str | None:
+    """``Humanity's Last Exam (HLE)`` -> ``HLE``; ``LIBERO-Plus (SFT)`` -> None."""
+    bracket = re.search(r"\(([A-Z][A-Za-z0-9]{1,9})\)\s*$", name)
+    if not bracket:
+        return None
+    words = re.findall(r"[A-Za-z0-9]+", re.sub(r"'s\b", "", name[: bracket.start()]))
+    initials = "".join(w[0] for w in words).upper()
+    letters = "".join(ch for ch in bracket.group(1) if ch.isupper() or ch.isdigit())
+    return bracket.group(1) if len(letters) >= 2 and letters == initials else None
 
 
 def _compact_variants(written: str, entity: CatalogEntity) -> list[tuple[str, float]]:
@@ -282,6 +295,10 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         targets[tuple(key_text.split())].append((NAME, target, written))
         for variant, variant_rank in _compact_variants(written, target):
             add(variant, target, variant_rank)
+        for member in members:
+            abbreviation = _initials_abbreviation(member.name)
+            if abbreviation:
+                add(abbreviation, target, ABBREVIATION)
 
     group_names = {normalize_name(base_name(d.name)) for d in datasets.values()}
     latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
