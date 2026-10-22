@@ -27,7 +27,7 @@ from backend.services.chat_external_worker_capacity import (
 )
 from latex_compiler_contract import (
     EnvelopeError,
-    validate_staging_sandbox_compiler_identity,
+    validate_staging_compiler_identity,
 )
 from backend.services.runtime_policies.deployment import (
     validate_deployed_mutation_policy,
@@ -110,7 +110,6 @@ __all__ = [
     "validate_runtime_storage",
 ]
 
-_STAGING_LATEX_COMPILER_EGRESS_ATTESTATION = "sandbox-netns-v1"
 _STAGING_LATEX_COMPILER_EVIDENCE_GROUP = "pwc-staging"
 STAGING_LATEX_COMPILER_QUALIFICATION_EVIDENCE = Path(
     "/var/lib/paperswithcode/staging-compiler-qualification/"
@@ -132,29 +131,16 @@ _STAGING_LATEX_QUALIFICATION_CHECKS = frozenset(
 def _validate_private_paper_compiler_settings(settings: Settings) -> str:
     """Verify the only supported staging compiler transport without logging secrets."""
     try:
-        image = validate_staging_sandbox_compiler_identity(
-            settings.chat_latex_compiler_hf_sandbox_image,
-            settings.chat_latex_compiler_hf_sandbox_namespace,
-            OPERATOR.hf_namespace,
+        image = validate_staging_compiler_identity(
+            settings.chat_latex_compiler_modal_image_id,
+            settings.chat_latex_compiler_modal_environment,
         )
     except EnvelopeError as error:
         raise RuntimeError(
             "private paper runtime requires an immutable Sandbox image"
         ) from error
-    if not settings.chat_latex_compiler_hf_sandbox_token:
-        raise RuntimeError("private paper runtime requires a Sandbox credential")
     if not settings.hf_token:
         raise RuntimeError("private paper runtime requires the staging Hub identity")
-    if (
-        settings.chat_latex_compiler_hf_sandbox_flavor != "cpu-upgrade"
-        or settings.chat_latex_compiler_hf_sandbox_idle_timeout_seconds != 180
-    ):
-        raise RuntimeError("private paper runtime Sandbox limits are invalid")
-    if (
-        settings.chat_latex_compiler_hf_sandbox_egress_policy_attestation
-        != _STAGING_LATEX_COMPILER_EGRESS_ATTESTATION
-    ):
-        raise RuntimeError("private paper runtime Sandbox egress is unattested")
     try:
         encoded = settings.chat_latex_compiler_signing_private_key
         raw = base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4))
@@ -244,6 +230,13 @@ def validate_private_paper_runtime(settings: Settings) -> None:
         if any(user_paper_flags):
             raise RuntimeError(
                 "private paper qualification must keep user features disabled"
+            )
+        if (
+            settings.chat_artifacts_enabled
+            or settings.chat_artifact_shared_preview_enabled
+        ):
+            raise RuntimeError(
+                "private paper qualification must disable user-facing artifacts"
             )
         return
     if not all(user_paper_flags):
