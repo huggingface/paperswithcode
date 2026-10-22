@@ -82,7 +82,11 @@ def _callback_job(
             # The worker holding this token may be compromised: stop its job
             # (which also invalidates the token) rather than pausing every
             # scheduled job, which one worker must not be able to do.
+            # Revoke the token first and commit, so it is dead even if the
+            # remote cancel or the next dispatch below fails.
+            token_owner.callback_token_hash = None
             token_owner.error = "Callback token was presented for another job"
+            db.commit()
             logger.error(
                 "paper curation job canceled job_id=%s "
                 "condition=cross_paper_authorization",

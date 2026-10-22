@@ -170,7 +170,7 @@ def test_cross_job_callback_token_cancels_only_the_token_owner(monkeypatch):
         def commit(self):
             pass
 
-    owner = SimpleNamespace(id=uuid.uuid4(), error=None)
+    owner = SimpleNamespace(id=uuid.uuid4(), error=None, callback_token_hash="h")
     monkeypatch.setattr(
         codex_curation_callbacks.codex_paper_job_service,
         "authenticate",
@@ -197,6 +197,36 @@ def test_cross_job_callback_token_cancels_only_the_token_owner(monkeypatch):
     assert canceled == [owner]
     assert owner.error == "Callback token was presented for another job"
     assert added == []
+
+
+def test_cross_job_token_is_revoked_even_if_cancel_fails(monkeypatch):
+    from types import SimpleNamespace
+
+    from backend.routers import codex_curation_callbacks
+
+    commits = []
+
+    class Database:
+        def commit(self):
+            commits.append(owner.callback_token_hash)
+
+    owner = SimpleNamespace(id=uuid.uuid4(), error=None, callback_token_hash="h")
+    service = codex_curation_callbacks.codex_paper_job_service
+    monkeypatch.setattr(service, "authenticate", lambda *_args: None)
+    monkeypatch.setattr(service, "token_owner_for_other_job", lambda *_args: owner)
+
+    def remote_failure(*_args):
+        raise RuntimeError("Hugging Face unavailable")
+
+    monkeypatch.setattr(service, "cancel", remote_failure)
+
+    with pytest.raises(RuntimeError):
+        codex_curation_callbacks._callback_job(
+            uuid.uuid4(), "Bearer valid-for-another-job", Database()
+        )
+
+    # The revocation was committed before the remote cancel was attempted.
+    assert commits == [None]
 
 
 @pytest.mark.parametrize(
