@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it } from "vitest";
 
@@ -54,6 +54,22 @@ describe("AbstractText", () => {
     expect(screen.queryByRole("link", { name: "GRPO" })).toBeNull();
     expect(screen.getAllByRole("link")).toHaveLength(1);
     expect(container.textContent).toBe(`${abstract.slice(0, abstract.indexOf("GRPO") + 2)}…`);
+  });
+
+  it("shows the preview sent with the paper without fetching on hover", async () => {
+    const withPreview = [
+      {
+        ...mentions[0],
+        preview: { name: "GRPO", description: "Group relative policy optimization.", count: 1401 },
+      },
+    ];
+    renderAbstract(null, withPreview);
+
+    fireEvent.pointerEnter(screen.getByRole("link", { name: "GRPO" }), { pointerType: "mouse" });
+    fireEvent.focus(screen.getByRole("link", { name: "GRPO" }));
+
+    expect(await screen.findByText("Group relative policy optimization.")).toBeTruthy();
+    expect(screen.getByText("1,401 papers")).toBeTruthy();
   });
 
   it("ignores a stale mention whose text no longer matches", () => {

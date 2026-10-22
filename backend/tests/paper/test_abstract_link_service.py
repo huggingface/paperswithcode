@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from backend.models.database import (
     Base,
     Dataset,
+    Evaluation,
+    PaperMethod,
+    PaperRepository,
+    Repository,
     Framework,
     Method,
     Paper,
@@ -64,6 +68,10 @@ def _session() -> Session:
             Framework.__table__,
             PaperAbstractMention.__table__,
             PaperMethodExclusion.__table__,
+            PaperMethod.__table__,
+            Evaluation.__table__,
+            Repository.__table__,
+            PaperRepository.__table__,
         ],
     )
     db = Session(engine)
@@ -156,6 +164,8 @@ def test_loader_serves_only_linked_mentions_of_the_current_abstract():
         ("GQA", "method", "grouped-query-attention"),
     ]
     assert all(ABSTRACT[m.start : m.end] == m.surface for m in mentions)
+    grpo = mentions[0].preview
+    assert (grpo.name, grpo.description, grpo.count) == ("GRPO", "RL algorithm", 0)
 
     paper.abstract = ABSTRACT + " Revised."
     db.commit()

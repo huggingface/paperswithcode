@@ -30,6 +30,17 @@ export function AbstractText({
         entity={{ kind: mention.entity_type, slug: mention.slug }}
         className="abstract-entity-link"
         newTab={false}
+        initialPreview={
+          mention.preview
+            ? {
+                name: mention.preview.name,
+                description: mention.preview.description ?? null,
+                imageUrl: mention.preview.image_url ?? null,
+                count: mention.preview.count ?? null,
+                detail: mention.preview.detail ?? null,
+              }
+            : undefined
+        }
       >
         {mention.surface}
       </CatalogEntityPreviewLink>,

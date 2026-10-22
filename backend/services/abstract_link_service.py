@@ -24,11 +24,18 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Dataset,
+    Evaluation,
     Framework,
     Method,
     Paper,
     PaperAbstractMention,
+    PaperMethod,
     PaperMethodExclusion,
+    PaperRepository,
+)
+from backend.utils.entity_images import entity_image_url
+from backend.services.dataset_service import (
+    _leaderboard_row_count as leaderboard_row_count,
 )
 from backend.services.abstract_mention_service import (
     Candidate,
@@ -314,3 +321,105 @@ def stored_abstract_shas(db: Session) -> dict[int, str]:
         .distinct()
     )
     return {paper_id: sha for paper_id, sha in rows}
+
+
+@dataclass(frozen=True)
+class CatalogPreview:
+    """What a hover card shows, so the paper page needs no fetch on hover."""
+
+    slug: str
+    name: str
+    card_name: str
+    description: str | None
+    image_url: str | None
+    count: int | None
+    detail: str | None
+
+
+PREVIEW_DESCRIPTION_CHARS = 400
+
+
+def catalog_previews(
+    db: Session, keys: set[tuple[str, int]]
+) -> dict[tuple[str, int], CatalogPreview]:
+    """Card data for linked entities, matching the catalog APIs' card fields."""
+    previews: dict[tuple[str, int], CatalogPreview] = {}
+
+    def short(text: str | None) -> str | None:
+        return text[:PREVIEW_DESCRIPTION_CHARS] if text else None
+
+    method_ids = [i for kind, i in keys if kind == "method"]
+    if method_ids:
+        counts = dict(
+            db.execute(
+                select(PaperMethod.method_id, func.count(PaperMethod.paper_id))
+                .where(PaperMethod.method_id.in_(method_ids))
+                .group_by(PaperMethod.method_id)
+            ).all()
+        )
+        for m in db.scalars(select(Method).where(Method.id.in_(method_ids))):
+            previews[("method", m.id)] = CatalogPreview(
+                slug=m.slug,
+                name=m.name,
+                card_name=m.full_name or m.name,
+                description=short(m.description),
+                image_url=entity_image_url(
+                    "methods",
+                    m.slug,
+                    m.image_mime_type is not None,
+                    m.image_url,
+                    m.updated_at,
+                ),
+                count=counts.get(m.id, 0),
+                detail=f"Introduced {m.introduced_year}" if m.introduced_year else None,
+            )
+
+    dataset_ids = [i for kind, i in keys if kind == "dataset"]
+    if dataset_ids:
+        counts = dict(
+            db.execute(
+                select(Dataset.id, leaderboard_row_count())
+                .outerjoin(Evaluation, Evaluation.dataset_id == Dataset.id)
+                .where(Dataset.id.in_(dataset_ids))
+                .group_by(Dataset.id)
+            ).all()
+        )
+        for d in db.scalars(select(Dataset).where(Dataset.id.in_(dataset_ids))):
+            previews[("dataset", d.id)] = CatalogPreview(
+                slug=d.slug,
+                name=d.name,
+                card_name=d.full_name or d.name,
+                description=short(d.description),
+                image_url=None,
+                count=counts.get(d.id, 0),
+                detail=f"Introduced {d.introduced_year}" if d.introduced_year else None,
+            )
+
+    framework_ids = [i for kind, i in keys if kind == "framework"]
+    if framework_ids:
+        counts = dict(
+            db.execute(
+                select(Framework.id, func.count(func.distinct(Paper.id)))
+                .outerjoin(
+                    PaperRepository,
+                    PaperRepository.repository_id == Framework.repository_id,
+                )
+                .outerjoin(
+                    Paper,
+                    (Paper.id == PaperRepository.paper_id) & Paper.is_latest_version,
+                )
+                .where(Framework.id.in_(framework_ids))
+                .group_by(Framework.id)
+            ).all()
+        )
+        for f in db.scalars(select(Framework).where(Framework.id.in_(framework_ids))):
+            previews[("framework", f.id)] = CatalogPreview(
+                slug=f.slug,
+                name=f.name,
+                card_name=f.name,
+                description=short(f.description),
+                image_url=None,
+                count=counts.get(f.id, 0),
+                detail=f.organization_name,
+            )
+    return previews

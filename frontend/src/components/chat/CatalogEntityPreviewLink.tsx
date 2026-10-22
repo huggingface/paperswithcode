@@ -56,7 +56,7 @@ const COUNT_NOUN: Record<CatalogEntityKind, [string, string]> = {
   framework: ["paper", "papers"],
 };
 
-interface CatalogEntityPreview {
+export interface CatalogEntityPreview {
   name: string;
   description: string | null;
   imageUrl: string | null;
@@ -167,12 +167,15 @@ export const CatalogEntityPreviewLink: React.FC<{
   /** Defaults suit chat answers: chat link styling, opening in a new tab. */
   className?: string;
   newTab?: boolean;
-}> = ({ entity, children, className = "chat-paper-link", newTab = true }) => {
+  /** Card content already in hand (e.g. from the paper API): no fetch on hover. */
+  initialPreview?: CatalogEntityPreview;
+}> = ({ entity, children, className = "chat-paper-link", newTab = true, initialPreview }) => {
   const [open, setOpen] = React.useState(false);
   const query = useQuery({
     queryKey: ["chat-catalog-preview", entity.kind, entity.slug],
     queryFn: () => fetchPreview(entity),
-    enabled: open,
+    initialData: initialPreview,
+    enabled: open && !initialPreview,
     staleTime: 10 * 60 * 1000,
     gcTime: 30 * 60 * 1000,
     retry: false,

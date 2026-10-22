@@ -117,6 +117,14 @@ export interface AbstractMention {
   entity_type: "method" | "benchmark" | "framework";
   slug: string;
   name: string;
+  /** Hover-card content sent with the paper, so cards open without a fetch. */
+  preview?: {
+    name: string;
+    description?: string | null;
+    image_url?: string | null;
+    count?: number | null;
+    detail?: string | null;
+  } | null;
 }
 
 export interface Paper {

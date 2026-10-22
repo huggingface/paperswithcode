@@ -1051,6 +1051,16 @@ class MethodSummary(BaseModel):
         return str(v)
 
 
+class AbstractMentionPreview(BaseModel):
+    """Hover-card content, sent with the paper so cards open without a fetch."""
+
+    name: str
+    description: Optional[str] = None
+    image_url: Optional[str] = None
+    count: Optional[int] = None
+    detail: Optional[str] = None
+
+
 class AbstractMention(BaseModel):
     """One linked catalog name in a paper abstract."""
 
@@ -1060,6 +1070,7 @@ class AbstractMention(BaseModel):
     entity_type: Literal["method", "benchmark", "framework"]
     slug: str
     name: str
+    preview: Optional[AbstractMentionPreview] = None
 
 
 class FrameworkSummary(BaseModel):
