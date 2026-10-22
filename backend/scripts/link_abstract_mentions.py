@@ -14,6 +14,7 @@ Needs PWC_OPENROUTER_API_KEY for the Jev judge; `--dry-run` only counts.
     python -m backend.scripts.link_abstract_mentions
     python -m backend.scripts.link_abstract_mentions --rescan
     python -m backend.scripts.link_abstract_mentions --paper-ids 123785 123682
+    python -m backend.scripts.link_abstract_mentions --rescan --shard 3/8
 """
 
 from __future__ import annotations
@@ -47,6 +48,11 @@ def main() -> int:
     parser.add_argument("--rescan", action="store_true", help="Every paper")
     parser.add_argument("--since-days", type=int, default=3)
     parser.add_argument("--limit", type=int, default=500, help="Papers to rewrite")
+    parser.add_argument(
+        "--shard",
+        default="0/1",
+        help="i/n: only papers with id %% n == i (parallel one-off backfills)",
+    )
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -71,7 +77,12 @@ def main() -> int:
             query = query.where(
                 or_(Paper.created_at >= since, Paper.updated_at >= since)
             )
-        paper_ids = db.scalars(query.order_by(Paper.id.desc())).all()
+        shard, shards = (int(part) for part in args.shard.split("/"))
+        paper_ids = [
+            paper_id
+            for paper_id in db.scalars(query.order_by(Paper.id.desc()))
+            if paper_id % shards == shard
+        ]
         with httpx.Client(timeout=60) as client:
             judge = JevJudge(api_key, client)
             for paper_id in paper_ids:

@@ -154,11 +154,6 @@ export function isPaperReaderChatEnabled(): boolean {
   return isChatEnabled() && enabledBuildFlag(import.meta.env.VITE_PAPER_READER_CHAT_ENABLED);
 }
 
-/** Linked catalog names in paper abstracts: on for staging while in preview. */
-export function isAbstractLinksEnabled(): boolean {
-  return isStagingEnvironment() || enabledBuildFlag(import.meta.env.VITE_ABSTRACT_LINKS_ENABLED);
-}
-
 /** `true` for the staging bundle and its canonical deployed hostname. */
 export function isStagingEnvironment(): boolean {
   if (import.meta.env.MODE === "staging") return true;

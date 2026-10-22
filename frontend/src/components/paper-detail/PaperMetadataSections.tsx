@@ -3,7 +3,6 @@ import { useState } from "react";
 import { MethodChip, TagChip } from "@/components";
 import { LatexText } from "@/components/LatexTitle";
 import type { Paper } from "@/lib/api/papers.types";
-import { isAbstractLinksEnabled } from "@/lib/apiUrl";
 
 import { AbstractText } from "./AbstractText";
 
@@ -44,7 +43,7 @@ export function PaperMetadataSections({
 
       <PaperSectionRule id="abstract" label="Abstract" />
       <p className="abstract-text" style={{ marginBottom: 8 }}>
-        {isAbstractLinksEnabled() && paper.abstract_mentions?.length ? (
+        {paper.abstract_mentions?.length ? (
           <AbstractText
             abstract={abstract}
             mentions={paper.abstract_mentions}
