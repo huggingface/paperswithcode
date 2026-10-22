@@ -79,20 +79,16 @@ def _callback_job(
             db, job_id, token
         )
         if token_owner is not None:
-            state = db.get(PaperCurationSchedulerState, 1)
-            if state is None:
-                state = PaperCurationSchedulerState(id=1)
-                db.add(state)
-            if state.paused_at is None:
-                state.paused_at = datetime.now(UTC)
-                state.pause_condition = "cross_paper_authorization"
-                state.pause_reason = (
-                    "A valid curation callback token was presented for another job"
-                )
-                logger.error(
-                    "paper curation dispatch paused condition=cross_paper_authorization"
-                )
-            db.commit()
+            # The worker holding this token may be compromised: stop its job
+            # (which also invalidates the token) rather than pausing every
+            # scheduled job, which one worker must not be able to do.
+            token_owner.error = "Callback token was presented for another job"
+            logger.error(
+                "paper curation job canceled job_id=%s "
+                "condition=cross_paper_authorization",
+                token_owner.id,
+            )
+            codex_paper_job_service.cancel(db, token_owner, get_settings())
         raise HTTPException(status_code=401, detail="Invalid job bearer token")
     return row
 

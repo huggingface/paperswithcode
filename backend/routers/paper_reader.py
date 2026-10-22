@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Path
+from fastapi import APIRouter, Depends, HTTPException, Path, Request
 from fastapi.responses import JSONResponse, PlainTextResponse
 from sqlalchemy.orm import Session
 
@@ -23,6 +23,7 @@ from backend.services.paper_markdown_service import (
     PaperMarkdownStorageError,
     read_paper_markdown_bounded,
 )
+from backend.utils.auth import has_session
 
 router = APIRouter()
 # Bounded so a reader's first open stays inside the browser's patience.
@@ -47,6 +48,7 @@ def _read(paper_id: str, settings: Settings) -> str:
 
 @router.get("/papers/{paper_id}/web-markdown", response_class=PlainTextResponse)
 def get_paper_web_markdown(
+    request: Request,
     paper_id: str = Path(pattern=r"^[1-9]\d{0,18}$"),
     db: Session = Depends(get_database_session),
     settings: Settings = Depends(get_settings),
@@ -65,6 +67,10 @@ def get_paper_web_markdown(
     except PaperMarkdownStorageError as error:
         raise _error(503, "Paper content storage is temporarily unavailable") from error
     except ValueError:
+        # Scraping spends the server's Firecrawl credits, so only a signed-in
+        # reader triggers it; the Markdown backfill prepares pages for everyone.
+        if not has_session(request):
+            raise _error(503, "Paper content is still being prepared") from None
         try:
             prepare_external_page_markdown(
                 paper_id=paper_id,
