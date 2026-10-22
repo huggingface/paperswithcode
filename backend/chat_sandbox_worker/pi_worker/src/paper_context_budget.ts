@@ -3,7 +3,7 @@ import type { Api, Model, Tool } from "@earendil-works/pi-ai";
 import { gatewayPayloadLimit } from "./provider.js";
 
 const INPUT_MARGIN_TOKENS = 8000;
-const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Use pwc paper read with the paper route ID to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
+const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Each paper\'s included_bytes now counts the Markdown bytes kept here, so use pwc_read_paper with that paper\'s route_id as paper and its included_bytes as offset to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
 
 interface PaperBudget {
   model: Pick<Model<Api>, "contextWindow" | "maxTokens">;
@@ -20,6 +20,7 @@ export function fitPaperContext(prompt: string, budget: PaperBudget): string {
   if (start < 0 || end < 0) return prompt;
   const evidence = prompt.slice(start, end);
   const pattern = /(<paper_info>\n|<paper_markdown_prefix>\n)([\s\S]*?)(\n<\/paper_info>|\n<\/paper_markdown_prefix>)/gu;
+  const paperPattern = /<paper ([^>]*)>([\s\S]*?)<\/paper>/gu;
   const bodies = [...evidence.matchAll(pattern)];
   if (!bodies.length) return prompt;
   const lengths = bodies.map(match => Buffer.byteLength(match[2]!));
@@ -31,23 +32,31 @@ export function fitPaperContext(prompt: string, budget: PaperBudget): string {
   const render = (fraction: number): { prompt: string; evidenceBytes: number } => {
     let index = 0;
     let evidenceBytes = 0;
-    const trimmed = evidence.replace(pattern, (_match, open: string, body: string, close: string) => {
-      const limit = Math.floor(lengths[index++]! * fraction);
-      let value = body;
-      if (limit < Buffer.byteLength(body)) {
-        // Buffer decoding can insert U+FFFD when a UTF-8 codepoint is split.
-        // Trim by codepoint instead, then discard a partial HTML entity.
-        let size = 0;
-        const chars: string[] = [];
-        for (const char of body) {
-          size += Buffer.byteLength(char);
-          if (size > limit) break;
-          chars.push(char);
+    // included_bytes is the offset a continuation read starts from, so it must
+    // count the Markdown kept here, not the originally prepared prefix.
+    const trimmed = evidence.replace(paperPattern, (_paper, attributes: string, inner: string) => {
+      let markdownBytes = 0;
+      const body = inner.replace(pattern, (_match, open: string, body: string, close: string) => {
+        const limit = Math.floor(lengths[index++]! * fraction);
+        let value = body;
+        if (limit < Buffer.byteLength(body)) {
+          // Buffer decoding can insert U+FFFD when a UTF-8 codepoint is split.
+          // Trim by codepoint instead, then discard a partial HTML entity.
+          let size = 0;
+          const chars: string[] = [];
+          for (const char of body) {
+            size += Buffer.byteLength(char);
+            if (size > limit) break;
+            chars.push(char);
+          }
+          value = chars.join("").replace(/&[^;\s]*$/u, "");
         }
-        value = chars.join("").replace(/&[^;\s]*$/u, "");
-      }
-      evidenceBytes += Buffer.byteLength(value);
-      return open + value + close;
+        if (open.startsWith("<paper_markdown_prefix")) markdownBytes = Buffer.byteLength(value);
+        evidenceBytes += Buffer.byteLength(value);
+        return open + value + close;
+      });
+      const counted = attributes.replace(/included_bytes="\d+"/u, `included_bytes="${markdownBytes}"`);
+      return `<paper ${counted}>${body}</paper>`;
     });
     return { prompt: prefix + NOTICE + trimmed + suffix, evidenceBytes };
   };

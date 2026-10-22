@@ -109,3 +109,12 @@ test("parallel next-page requests cannot skip a page or cross papers", async () 
     { paper: "b", cursor: "b:first:signed" },
   ]);
 });
+
+test("an offset read continues from text already in context, then pages with cursor next", async () => {
+  const manager = SessionManager.inMemory();
+  const r = await reader(manager, args => ({ structuredContent: args.cursor ? { text: "rest", next_cursor: null } : { text: `from ${args.offset}`, next_cursor: "signed-next" } }));
+  const first = await r.tool.execute("call", { paper: "2610.23279", offset: 81920 }, undefined, undefined, { sessionManager: manager });
+  assert.equal(JSON.parse(first.content[0].text).text, "from 81920");
+  assert.equal(JSON.parse((await r.read("2610.23279", "next")).content[0].text).text, "rest");
+  assert.deepEqual(r.calls, [{ paper: "2610.23279", offset: 81920 }, { paper: "2610.23279", cursor: "signed-next" }]);
+});
