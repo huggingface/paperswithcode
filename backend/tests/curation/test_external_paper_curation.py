@@ -193,6 +193,35 @@ def test_completed_enrich_stage_queues_add_evals_in_same_lane(db):
     assert add_evals.parent_workflow_id == enrich.parent_workflow_id
 
 
+def test_late_enrich_completion_does_not_reopen_finished_workflow(db):
+    paper = _paper(db)
+    service = CodexPaperJobService()
+    enqueue_external_paper_curation(db, paper, settings=SETTINGS, jobs=service)
+    db.commit()
+    enrich = db.query(PaperCurationJob).one()
+    workflow = db.get(PaperCurationWorkflow, enrich.parent_workflow_id)
+    workflow.status = "completed"
+    db.add(
+        PaperCurationJob(
+            id=uuid.uuid4(),
+            kind="add-evals",
+            paper_id=paper.id,
+            requested_by="example-admin",
+            status="completed",
+            trigger="admin",
+            attempt_count=1,
+            created_at=datetime.now(UTC),
+            parent_workflow_id=workflow.id,
+        )
+    )
+    enrich.status = "completed"
+    db.flush()
+
+    service._advance_workflow(db, enrich, SETTINGS)
+
+    assert workflow.status == "completed"
+
+
 def _ingest(db, monkeypatch, enqueue, *, queue_curation=True):
     monkeypatch.setattr(
         "backend.services.external_resource_service.find_arxiv_paper_for_title",
