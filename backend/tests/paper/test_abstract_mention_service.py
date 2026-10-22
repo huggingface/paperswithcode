@@ -50,6 +50,9 @@ CATALOG = [
     dataset(83, "AIME24"),
     dataset(84, "AIME 2024"),
     method(23, "Agent Harness"),
+    method(25, "Dr. GRPO"),
+    dataset(85, "HMMT Feb 2025"),
+    dataset(86, "HMMT November 2025"),
     method(24, "Online Reinforcement Learning (Online RL)"),
     CatalogEntity("framework", 100, "llama.cpp", "llama-cpp"),
     CatalogEntity("framework", 101, "Transformers", "transformers"),
@@ -313,4 +316,20 @@ def test_bracketed_name_with_one_capitalised_word():
     assert links("online reinforcement learning (RL) and Online RL") == [
         ("online reinforcement learning", "method", 24),
         ("Online RL", "method", 24),
+    ]
+
+
+def test_title_abbreviation_full_stop_joins_a_name_and_acronyms_stay():
+    assert links("three RL algorithms (GRPO, GiGPO, Dr. GRPO)") == [
+        ("GRPO", "method", 4),
+        ("Dr. GRPO", "method", 25),
+    ]
+    assert links("We use GRPO. Dr. Smith agrees.") == [("GRPO", "method", 4)]
+
+
+def test_month_less_year_aliases_prefer_the_earlier_sitting():
+    assert links("HMMT25, HMMT 2025 and HMMT November 2025") == [
+        ("HMMT25", "dataset", 85),
+        ("HMMT 2025", "dataset", 85),
+        ("HMMT November 2025", "dataset", 86),
     ]

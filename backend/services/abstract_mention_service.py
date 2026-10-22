@@ -24,7 +24,7 @@ Matching rules:
   whether it names something else.
 - A plain-word method name capitalised inside a longer capitalised name
   (``World Embedding Benchmark``) belongs to that name and is skipped.
-- A generic method is dropped from an abstract that also mentions a more
+- A plain-word method is dropped from an abstract that also mentions a more
   specific method containing its name: ``Transformer`` goes when ``Looped Transformer``
   or ``Diffusion Transformer`` is present.
 - An abbreviation in brackets right after the method's own long form takes the
@@ -127,6 +127,8 @@ class MentionIndex:
     names: dict[tuple[str, int], tuple[str, ...]]
     # (entity_type, entity_id) -> lowercased tokens of full-name long forms
     long_forms: dict[tuple[str, int], set[tuple[str, ...]]]
+    # entities named with ordinary words only (Transformer, Diffusion Policy)
+    plain_names: set[tuple[str, int]]
 
 
 def normalize_name(name: str) -> str:
@@ -151,16 +153,42 @@ def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
     return not (entity.entity_type == "method" and _PLAIN_WORD.fullmatch(tokens[0]))
 
 
-def _compact_variants(written: str, entity: CatalogEntity) -> list[str]:
-    """``MATH 500`` -> ``MATH500``; ``AIME 2025`` -> ``AIME 25`` and ``AIME25``."""
-    variants = []
+_MONTHS = (
+    "jan feb mar apr may jun jul aug sep oct nov dec".split(),
+    "january february march april may june july august september october "
+    "november december".split(),
+)
+
+
+def _compact_variants(written: str, entity: CatalogEntity) -> list[tuple[str, float]]:
+    """Other ways papers write a name, each with its rank.
+
+    ``MATH 500`` -> ``MATH500``; ``AIME 2025`` -> ``AIME 25`` / ``AIME25``;
+    ``HMMT Feb 2025`` -> ``HMMT 2025`` / ``HMMT25``. When two sittings share a
+    year (HMMT Feb and Nov 2025), the earlier month ranks first.
+    """
+    variants: list[tuple[str, float]] = []
     joined = re.sub(r"(?<=[A-Za-z])[ \-](?=\d)", "", written)
     if joined != written:
-        variants.append(joined)
-    if entity.entity_type == "dataset":
-        short_year = re.sub(r"(?<=[A-Za-z][ \-])20(\d\d)$", r"\1", written)
-        if short_year != written:
-            variants += [short_year, re.sub(r"[ \-](?=\d\d$)", "", short_year)]
+        variants.append((joined, ABBREVIATION))
+    if entity.entity_type != "dataset":
+        return variants
+    years = [(written, ABBREVIATION)]
+    month = re.search(r" ([A-Za-z]+) (20\d\d)$", written)
+    if month:
+        word = month.group(1).lower()
+        index = next((m.index(word) for m in _MONTHS if word in m), None)
+        if index is not None:
+            undated = f"{written[: month.start()]} {month.group(2)}"
+            years.append((undated, ABBREVIATION + (index + 1) / 100))
+            variants.append(years[-1])
+    for name, rank in years:
+        short_year = re.sub(r"(?<=[A-Za-z][ \-])20(\d\d)$", r"\1", name)
+        if short_year != name:
+            variants += [
+                (short_year, rank),
+                (re.sub(r"[ \-](?=\d\d$)", "", short_year), rank),
+            ]
     return variants
 
 
@@ -213,8 +241,8 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             elif last[-1:].isalpha():
                 add(written + "s", entity, PLURAL)
         if rank != PLURAL:
-            for variant in _compact_variants(written, entity):
-                add(variant, entity, ABBREVIATION)
+            for variant, variant_rank in _compact_variants(written, entity):
+                add(variant, entity, variant_rank)
 
     def add_named(written: str, entity: CatalogEntity, long_form: bool) -> None:
         abbreviation = _ABBREVIATION.search(written)
@@ -251,8 +279,8 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             continue
         written = base_name((target if target in members else members[0]).name)
         targets[tuple(key_text.split())].append((NAME, target, written))
-        for variant in _compact_variants(written, target):
-            add(variant, target, ABBREVIATION)
+        for variant, variant_rank in _compact_variants(written, target):
+            add(variant, target, variant_rank)
 
     group_names = {normalize_name(base_name(d.name)) for d in datasets.values()}
     latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
@@ -309,6 +337,11 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         unresolved=unresolved,
         names=names,
         long_forms=dict(long_forms),
+        plain_names={
+            key
+            for key, name in names.items()
+            if all(_PLAIN_WORD.fullmatch(t) for t in surfaces[name][0].tokens)
+        },
     )
 
 
@@ -452,7 +485,9 @@ def _drop_subsumed(candidates: list[Candidate], index: MentionIndex) -> list[Can
 
     def subsumed(key: tuple[str, int]) -> bool:
         name = names[key]
-        return bool(name) and any(
+        if not name or key not in index.plain_names:
+            return False  # acronyms such as GRPO keep their link next to Dr. GRPO
+        return any(
             other != key and len(longer) > len(name) and _contains(longer, name)
             for other, longer in names.items()
         )
@@ -516,9 +551,14 @@ def _absorb_slug_suffix(masked: str, start: int, end: int, surface: _Surface) ->
 
 
 def _contiguous(text_value: str, tokens: list[re.Match]) -> bool:
-    """Tokens of one name may only be separated by name separators."""
+    """Tokens of one name may only be separated by name separators, or by the
+    full stop of a short title-case abbreviation (``Dr. GRPO``)."""
     return all(
         _SEPARATOR.fullmatch(text_value[a.end() : b.start()])
+        or (
+            re.fullmatch(r"\.[ \t]+", text_value[a.end() : b.start()])
+            and re.fullmatch(r"[A-Z][a-z]{0,2}", a.group())
+        )
         for a, b in zip(tokens, tokens[1:])
     )
 
