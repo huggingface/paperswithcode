@@ -1796,6 +1796,64 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         workflow_freshness_required=False,
     ),
     CronJobDefinition(
+        id="link_abstract_mentions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=51),),
+        schedule_grace_minutes=30,
+        systemd_timer="pwc-cron-link-abstract-mentions.timer",
+        systemd_service="pwc-cron-link-abstract-mentions.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Link Abstract Mentions",
+        category="hourly",
+        schedule="51 * * * * (hourly)",
+        script_path="backend/scripts/link_abstract_mentions.py",
+        log_name="link_abstract_mentions",
+        process_patterns=("backend.scripts.link_abstract_mentions",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/link_abstract_mentions.lock"
+        ),
+        expected_runtime_minutes=10,
+        stale_after_minutes=180,
+        critical=False,
+        # Hours without new or edited abstracts write nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query="""
+            SELECT max(created_at) AS last_write,
+                   count(*) FILTER (WHERE created_at > now() - interval '3 hours')
+                       AS recent_writes
+            FROM paper_abstract_mentions
+        """,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
+        id="rescan_abstract_mentions",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.daily(3, 21),),
+        schedule_grace_minutes=60,
+        systemd_timer="pwc-cron-rescan-abstract-mentions.timer",
+        systemd_service="pwc-cron-rescan-abstract-mentions.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Rescan Abstract Mentions",
+        category="daily",
+        schedule="21 3 * * * (daily)",
+        script_path="backend/scripts/link_abstract_mentions.py",
+        log_name="rescan_abstract_mentions",
+        process_patterns=("backend.scripts.link_abstract_mentions --rescan",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/"
+            "rescan_abstract_mentions.lock"
+        ),
+        expected_runtime_minutes=60,
+        stale_after_minutes=1560,
+        critical=False,
+        # A night without catalog changes rewrites nothing.
+        healthy_no_work_allowed=True,
+        db_freshness_query=None,
+        workflow_freshness_required=False,
+    ),
+    CronJobDefinition(
         id="warm_paper_suggested_questions",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=33),),

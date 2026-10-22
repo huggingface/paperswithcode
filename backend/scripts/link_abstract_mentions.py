@@ -1,10 +1,18 @@
 """Link literal catalog names in paper abstracts (abstract entity linking).
 
-Judges every paper whose stored mentions are missing, stale (the abstract
-changed), or from an older prompt version, newest papers first. Needs
-PWC_OPENROUTER_API_KEY for the Jev judge; `--dry-run` only counts the work.
+Hourly (default): papers created or updated in the last `--since-days` whose
+stored mentions are missing, stale (the abstract changed), or from an older
+prompt version, newest first, at most `--limit` papers.
 
-    python -m backend.scripts.link_abstract_mentions --limit 500
+Nightly (`--rescan`): every paper, so catalog changes (new methods, aliases,
+modes) reach older abstracts. Earlier verdicts for the same abstract are
+reused, so the judge is asked only about new pairs, and rows are rewritten only
+when a paper's links changed.
+
+Needs PWC_OPENROUTER_API_KEY for the Jev judge; `--dry-run` only counts.
+
+    python -m backend.scripts.link_abstract_mentions
+    python -m backend.scripts.link_abstract_mentions --rescan
     python -m backend.scripts.link_abstract_mentions --paper-ids 123785 123682
 """
 
@@ -12,9 +20,10 @@ from __future__ import annotations
 
 import argparse
 import logging
+from datetime import UTC, datetime, timedelta
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 from backend.config import get_settings
 from backend.database.connection import db_manager
@@ -24,8 +33,9 @@ from backend.services.abstract_link_service import (
     abstract_sha,
     judge_paper,
     load_index,
-    stored_abstract_shas,
+    mentions_changed,
     store_paper_mentions,
+    stored_abstract_shas,
 )
 
 logger = logging.getLogger("link_abstract_mentions")
@@ -34,7 +44,9 @@ logger = logging.getLogger("link_abstract_mentions")
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--paper-ids", type=int, nargs="*", help="Only these papers")
-    parser.add_argument("--limit", type=int, default=500, help="Papers to link")
+    parser.add_argument("--rescan", action="store_true", help="Every paper")
+    parser.add_argument("--since-days", type=int, default=3)
+    parser.add_argument("--limit", type=int, default=500, help="Papers to rewrite")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
@@ -45,7 +57,7 @@ def main() -> int:
         return 1
 
     db = db_manager.session_local()
-    linked = skipped = empty = failed = 0
+    written = unchanged = skipped = failed = 0
     try:
         index = load_index(db)
         current = stored_abstract_shas(db)
@@ -54,20 +66,24 @@ def main() -> int:
         )
         if args.paper_ids:
             query = query.where(Paper.id.in_(args.paper_ids))
+        elif not args.rescan:
+            since = datetime.now(UTC) - timedelta(days=args.since_days)
+            query = query.where(
+                or_(Paper.created_at >= since, Paper.updated_at >= since)
+            )
         paper_ids = db.scalars(query.order_by(Paper.id.desc())).all()
         with httpx.Client(timeout=60) as client:
             judge = JevJudge(api_key, client)
             for paper_id in paper_ids:
-                if linked >= args.limit:
+                if written >= args.limit:
                     break
                 paper = db.get(Paper, paper_id)
-                if not args.paper_ids and current.get(paper.id) == abstract_sha(
-                    paper.abstract
-                ):
+                fresh = current.get(paper.id) == abstract_sha(paper.abstract)
+                if fresh and not (args.rescan or args.paper_ids):
                     skipped += 1
                     continue
                 if args.dry_run:
-                    linked += 1
+                    written += 1
                     continue
                 try:
                     rows = judge_paper(db, paper, index, judge)
@@ -75,23 +91,22 @@ def main() -> int:
                     logger.warning("paper %s: judge failed: %s", paper.id, error)
                     failed += 1
                     continue
+                if not mentions_changed(db, paper.id, rows):
+                    unchanged += 1
+                    continue
                 store_paper_mentions(db, paper.id, rows)
                 db.commit()
-                if rows:
-                    linked += 1
-                else:
-                    empty += 1  # nothing to link; cheap to rescan, not counted
+                written += 1
     finally:
         db.close()
     logger.info(
-        "abstracts linked: %d, without candidates: %d, already current: %d, "
-        "judge failures: %d",
-        linked,
-        empty,
+        "papers rewritten: %d, unchanged: %d, already current: %d, judge failures: %d",
+        written,
+        unchanged,
         skipped,
         failed,
     )
-    return 0
+    return 1 if failed and not written else 0
 
 
 if __name__ == "__main__":

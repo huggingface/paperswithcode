@@ -192,6 +192,13 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 - **Independent proof:** Compare `benchmark_curation_candidates` status counts and `reviewed_at` with the latest `review-benchmark-gaps` job's `mutation_result`; open one promoted candidate's `resolution.dataset_id` on the live site and confirm the leaderboard, source paper, and primary metric.
 - **Correctness:** A review job that never applies leaves `reviewed_at` stale while eligible candidates exist. Repeated `add-benchmark` failures back a candidate off 3 days, then return it to review after two failures. Roll back a wrong benchmark with `POST /api/v1/admin/codex-curation/jobs/benchmark-candidates/<id>/rollback`.
 
+## `link_abstract_mentions` / `rescan_abstract_mentions`
+
+- **Effect:** Logs `papers rewritten`, `unchanged`, `already current`, and `judge failures`, and replaces `paper_abstract_mentions` rows per paper. The hourly job looks at papers created or updated in the last 3 days whose stored mentions are missing or stale for the current abstract (at most 500 rewritten per run); the nightly `--rescan` re-runs every abstract so catalog changes reach older papers, reusing earlier Jev verdicts for unchanged abstracts. Needs `PWC_OPENROUTER_API_KEY`; exits 1 when it is missing or when every judged paper failed.
+- **Independent proof:** `curl https://paperswithcode.co/api/v1/papers/<id>` for a paper imported in the last hour has `abstract_mentions` (spans whose `surface` equals `abstract[start:end]`), unless its abstract names no catalog entry.
+- **Correctness:** Judge failures are OpenRouter errors (key, credits, or a 429): those papers stay unlinked and retry next hour. A rescan that rewrites thousands of papers means the catalog or the matching rules changed; check `SELECT judge, count(*) FROM paper_abstract_mentions WHERE created_at > now() - interval '1 day' GROUP BY 1` for the judge share.
+- **Dashboard evidence:** latest `paper_abstract_mentions.created_at` and rows written in 3 hours. Quiet hours are healthy (no new abstracts); a full day without writes while HF daily papers were imported is not.
+
 ## `warm_paper_suggested_questions`
 
 - **Effect:** Prints a JSON summary (`candidates`, `already_stored`, `generated`, `failed`, `remaining`) and inserts `paper_suggested_questions` rows. Candidates are the home feed's first three trending pages (past week) plus the first trending page of every task and method; `remaining` is the eligible backlog beyond `--limit`. Exits 1 only when every generation failed.

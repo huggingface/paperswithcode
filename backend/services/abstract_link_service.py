@@ -7,7 +7,8 @@ entity. The verdict covers every occurrence of that entity in the abstract.
 Where two entities claim the same words, the higher score wins.
 
 Every candidate is stored, linked or not, keyed to the abstract's SHA-256, so a
-changed abstract is re-judged and an unchanged one never is.
+changed abstract is re-judged and an unchanged one never is: a rescan after a
+catalog change reuses earlier verdicts and asks the judge only about new pairs.
 """
 
 from __future__ import annotations
@@ -180,6 +181,12 @@ def judge_paper(
         else:
             needs_judge.append(key)
 
+    sha = abstract_sha(abstract)
+    judged_by: dict[tuple[str, int], str] = {}
+    for key, (score, judge_name) in _previous_verdicts(db, paper.id, sha).items():
+        if key in needs_judge:
+            scores[key], judged_by[key] = score, judge_name
+    needs_judge = [key for key in needs_judge if key not in judged_by]
     if needs_judge:
         descriptions = entity_descriptions(db, set(needs_judge))
         requests = [
@@ -201,10 +208,10 @@ def judge_paper(
             for key in needs_judge
         ]
         scores.update(judge.score(paper.title or "", abstract, requests))
+        judged_by.update({key: judge.name for key in needs_judge})
 
     linked = {key for key, score in scores.items() if score >= JUDGE_THRESHOLD}
     linked -= _losers_of_shared_spans(by_entity, scores, linked)
-    sha = abstract_sha(abstract)
     return [
         PaperAbstractMention(
             paper_id=paper.id,
@@ -215,13 +222,63 @@ def judge_paper(
             surface=c.surface,
             abstract_sha=sha,
             linked=key in linked,
-            judge=judge.name if key in needs_judge else None,
+            judge=judged_by.get(key),
             score=scores.get(key),
             prompt_version=PROMPT_VERSION,
         )
         for key, found in by_entity.items()
         for c in found
     ]
+
+
+def _previous_verdicts(
+    db: Session, paper_id: int, sha: str
+) -> dict[tuple[str, int], tuple[float, str]]:
+    """Judge scores already given for this exact abstract and prompt."""
+    rows = db.execute(
+        select(
+            PaperAbstractMention.entity_type,
+            PaperAbstractMention.entity_id,
+            PaperAbstractMention.score,
+            PaperAbstractMention.judge,
+        ).where(
+            PaperAbstractMention.paper_id == paper_id,
+            PaperAbstractMention.abstract_sha == sha,
+            PaperAbstractMention.prompt_version == PROMPT_VERSION,
+            PaperAbstractMention.judge.isnot(None),
+        )
+    )
+    return {(t, i): (score, judge) for t, i, score, judge in rows}
+
+
+def mentions_changed(
+    db: Session, paper_id: int, rows: list[PaperAbstractMention]
+) -> bool:
+    """False when the stored rows already say exactly this."""
+    stored = db.execute(
+        select(
+            PaperAbstractMention.entity_type,
+            PaperAbstractMention.entity_id,
+            PaperAbstractMention.start_offset,
+            PaperAbstractMention.end_offset,
+            PaperAbstractMention.linked,
+            PaperAbstractMention.abstract_sha,
+            PaperAbstractMention.prompt_version,
+        ).where(PaperAbstractMention.paper_id == paper_id)
+    ).all()
+    fresh = {
+        (
+            r.entity_type,
+            r.entity_id,
+            r.start_offset,
+            r.end_offset,
+            r.linked,
+            r.abstract_sha,
+            r.prompt_version,
+        )
+        for r in rows
+    }
+    return {tuple(row) for row in stored} != fresh
 
 
 def _losers_of_shared_spans(by_entity, scores, linked) -> set[tuple[str, int]]:

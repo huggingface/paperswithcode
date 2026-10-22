@@ -13,6 +13,7 @@ from backend.models.database import (
     PaperMethodExclusion,
 )
 from backend.services.abstract_link_service import (
+    mentions_changed,
     abstract_sha,
     judge_paper,
     store_paper_mentions,
@@ -165,3 +166,19 @@ def _served(db):
     relations = PaperRelations()
     PaperRelationLoader(db)._load_abstract_mentions([1], relations)
     return relations.abstract_mentions
+
+
+def test_rescan_reuses_verdicts_and_reports_no_change():
+    db = _session()
+    paper = db.get(Paper, 1)
+    first = judge_paper(
+        db, paper, _index(), FakeJudge({("method", 11): 0.9, ("dataset", 20): 0.1})
+    )
+    store_paper_mentions(db, 1, first)
+    db.commit()
+
+    silent = FakeJudge({})
+    again = judge_paper(db, paper, _index(), silent)
+
+    assert silent.requests == []  # every verdict came from the stored rows
+    assert not mentions_changed(db, 1, again)
