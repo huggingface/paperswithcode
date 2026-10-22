@@ -7,7 +7,8 @@ entity. The verdict covers every occurrence of that entity in the abstract.
 Where two entities claim the same words, the higher score wins.
 
 Every candidate is stored, linked or not, keyed to the abstract's SHA-256, so a
-changed abstract is re-judged and an unchanged one never is.
+changed abstract is re-judged and an unchanged one never is: a rescan after a
+catalog change reuses earlier verdicts and asks the judge only about new pairs.
 """
 
 from __future__ import annotations
@@ -23,11 +24,18 @@ from sqlalchemy.orm import Session
 
 from backend.models.database import (
     Dataset,
+    Evaluation,
     Framework,
     Method,
     Paper,
     PaperAbstractMention,
+    PaperMethod,
     PaperMethodExclusion,
+    PaperRepository,
+)
+from backend.utils.entity_images import entity_image_url
+from backend.services.dataset_service import (
+    _leaderboard_row_count as leaderboard_row_count,
 )
 from backend.services.abstract_mention_service import (
     Candidate,
@@ -180,6 +188,12 @@ def judge_paper(
         else:
             needs_judge.append(key)
 
+    sha = abstract_sha(abstract)
+    judged_by: dict[tuple[str, int], str] = {}
+    for key, (score, judge_name) in _previous_verdicts(db, paper.id, sha).items():
+        if key in needs_judge:
+            scores[key], judged_by[key] = score, judge_name
+    needs_judge = [key for key in needs_judge if key not in judged_by]
     if needs_judge:
         descriptions = entity_descriptions(db, set(needs_judge))
         requests = [
@@ -201,10 +215,10 @@ def judge_paper(
             for key in needs_judge
         ]
         scores.update(judge.score(paper.title or "", abstract, requests))
+        judged_by.update({key: judge.name for key in needs_judge})
 
     linked = {key for key, score in scores.items() if score >= JUDGE_THRESHOLD}
     linked -= _losers_of_shared_spans(by_entity, scores, linked)
-    sha = abstract_sha(abstract)
     return [
         PaperAbstractMention(
             paper_id=paper.id,
@@ -215,13 +229,63 @@ def judge_paper(
             surface=c.surface,
             abstract_sha=sha,
             linked=key in linked,
-            judge=judge.name if key in needs_judge else None,
+            judge=judged_by.get(key),
             score=scores.get(key),
             prompt_version=PROMPT_VERSION,
         )
         for key, found in by_entity.items()
         for c in found
     ]
+
+
+def _previous_verdicts(
+    db: Session, paper_id: int, sha: str
+) -> dict[tuple[str, int], tuple[float, str]]:
+    """Judge scores already given for this exact abstract and prompt."""
+    rows = db.execute(
+        select(
+            PaperAbstractMention.entity_type,
+            PaperAbstractMention.entity_id,
+            PaperAbstractMention.score,
+            PaperAbstractMention.judge,
+        ).where(
+            PaperAbstractMention.paper_id == paper_id,
+            PaperAbstractMention.abstract_sha == sha,
+            PaperAbstractMention.prompt_version == PROMPT_VERSION,
+            PaperAbstractMention.judge.isnot(None),
+        )
+    )
+    return {(t, i): (score, judge) for t, i, score, judge in rows}
+
+
+def mentions_changed(
+    db: Session, paper_id: int, rows: list[PaperAbstractMention]
+) -> bool:
+    """False when the stored rows already say exactly this."""
+    stored = db.execute(
+        select(
+            PaperAbstractMention.entity_type,
+            PaperAbstractMention.entity_id,
+            PaperAbstractMention.start_offset,
+            PaperAbstractMention.end_offset,
+            PaperAbstractMention.linked,
+            PaperAbstractMention.abstract_sha,
+            PaperAbstractMention.prompt_version,
+        ).where(PaperAbstractMention.paper_id == paper_id)
+    ).all()
+    fresh = {
+        (
+            r.entity_type,
+            r.entity_id,
+            r.start_offset,
+            r.end_offset,
+            r.linked,
+            r.abstract_sha,
+            r.prompt_version,
+        )
+        for r in rows
+    }
+    return {tuple(row) for row in stored} != fresh
 
 
 def _losers_of_shared_spans(by_entity, scores, linked) -> set[tuple[str, int]]:
@@ -257,3 +321,105 @@ def stored_abstract_shas(db: Session) -> dict[int, str]:
         .distinct()
     )
     return {paper_id: sha for paper_id, sha in rows}
+
+
+@dataclass(frozen=True)
+class CatalogPreview:
+    """What a hover card shows, so the paper page needs no fetch on hover."""
+
+    slug: str
+    name: str
+    card_name: str
+    description: str | None
+    image_url: str | None
+    count: int | None
+    detail: str | None
+
+
+PREVIEW_DESCRIPTION_CHARS = 400
+
+
+def catalog_previews(
+    db: Session, keys: set[tuple[str, int]]
+) -> dict[tuple[str, int], CatalogPreview]:
+    """Card data for linked entities, matching the catalog APIs' card fields."""
+    previews: dict[tuple[str, int], CatalogPreview] = {}
+
+    def short(text: str | None) -> str | None:
+        return text[:PREVIEW_DESCRIPTION_CHARS] if text else None
+
+    method_ids = [i for kind, i in keys if kind == "method"]
+    if method_ids:
+        counts = dict(
+            db.execute(
+                select(PaperMethod.method_id, func.count(PaperMethod.paper_id))
+                .where(PaperMethod.method_id.in_(method_ids))
+                .group_by(PaperMethod.method_id)
+            ).all()
+        )
+        for m in db.scalars(select(Method).where(Method.id.in_(method_ids))):
+            previews[("method", m.id)] = CatalogPreview(
+                slug=m.slug,
+                name=m.name,
+                card_name=m.full_name or m.name,
+                description=short(m.description),
+                image_url=entity_image_url(
+                    "methods",
+                    m.slug,
+                    m.image_mime_type is not None,
+                    m.image_url,
+                    m.updated_at,
+                ),
+                count=counts.get(m.id, 0),
+                detail=f"Introduced {m.introduced_year}" if m.introduced_year else None,
+            )
+
+    dataset_ids = [i for kind, i in keys if kind == "dataset"]
+    if dataset_ids:
+        counts = dict(
+            db.execute(
+                select(Dataset.id, leaderboard_row_count())
+                .outerjoin(Evaluation, Evaluation.dataset_id == Dataset.id)
+                .where(Dataset.id.in_(dataset_ids))
+                .group_by(Dataset.id)
+            ).all()
+        )
+        for d in db.scalars(select(Dataset).where(Dataset.id.in_(dataset_ids))):
+            previews[("dataset", d.id)] = CatalogPreview(
+                slug=d.slug,
+                name=d.name,
+                card_name=d.full_name or d.name,
+                description=short(d.description),
+                image_url=None,
+                count=counts.get(d.id, 0),
+                detail=f"Introduced {d.introduced_year}" if d.introduced_year else None,
+            )
+
+    framework_ids = [i for kind, i in keys if kind == "framework"]
+    if framework_ids:
+        counts = dict(
+            db.execute(
+                select(Framework.id, func.count(func.distinct(Paper.id)))
+                .outerjoin(
+                    PaperRepository,
+                    PaperRepository.repository_id == Framework.repository_id,
+                )
+                .outerjoin(
+                    Paper,
+                    (Paper.id == PaperRepository.paper_id) & Paper.is_latest_version,
+                )
+                .where(Framework.id.in_(framework_ids))
+                .group_by(Framework.id)
+            ).all()
+        )
+        for f in db.scalars(select(Framework).where(Framework.id.in_(framework_ids))):
+            previews[("framework", f.id)] = CatalogPreview(
+                slug=f.slug,
+                name=f.name,
+                card_name=f.name,
+                description=short(f.description),
+                image_url=None,
+                count=counts.get(f.id, 0),
+                detail=f.organization_name,
+            )
+    return previews

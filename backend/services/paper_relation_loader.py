@@ -14,6 +14,7 @@ from backend.models.evaluations import (
 )
 from backend.models.papers import (
     AbstractMention,
+    AbstractMentionPreview,
     AuthorLink,
     FrameworkSummary,
     MethodSummary,
@@ -50,7 +51,7 @@ from backend.models.database import (
     Repository as DBRepository,
     Task as DBTask,
 )
-from backend.services.abstract_link_service import abstract_sha
+from backend.services.abstract_link_service import abstract_sha, catalog_previews
 from backend.utils.organization_logos import organization_logo_path
 from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 
@@ -198,39 +199,30 @@ class PaperRelationLoader:
             for mention, abstract in rows
             if mention.abstract_sha == abstract_sha(abstract or "")
         ]
-        names = self._abstract_entity_names(current)
+        previews = catalog_previews(
+            self.db, {(m.entity_type, m.entity_id) for m in current}
+        )
         for mention in current:
-            entity = names.get((mention.entity_type, mention.entity_id))
-            if entity is None:
+            preview = previews.get((mention.entity_type, mention.entity_id))
+            if preview is None:
                 continue  # entity deleted since it was judged
-            slug, name = entity
             relations.abstract_mentions.setdefault(mention.paper_id, []).append(
                 AbstractMention(
                     start=mention.start_offset,
                     end=mention.end_offset,
                     surface=mention.surface,
                     entity_type=_MENTION_KIND[mention.entity_type],
-                    slug=slug,
-                    name=name,
+                    slug=preview.slug,
+                    name=preview.name,
+                    preview=AbstractMentionPreview(
+                        name=preview.card_name,
+                        description=preview.description,
+                        image_url=preview.image_url,
+                        count=preview.count,
+                        detail=preview.detail,
+                    ),
                 )
             )
-
-    def _abstract_entity_names(
-        self, mentions
-    ) -> dict[tuple[str, int], tuple[str, str]]:
-        names = {}
-        for entity_type, model in (
-            ("method", DBMethod),
-            ("dataset", DBDataset),
-            ("framework", DBFramework),
-        ):
-            ids = {m.entity_id for m in mentions if m.entity_type == entity_type}
-            if ids:
-                rows = self.db.query(model.id, model.slug, model.name).filter(
-                    model.id.in_(ids)
-                )
-                names.update({(entity_type, i): (slug, name) for i, slug, name in rows})
-        return names
 
     def _load_suggested_questions(
         self,

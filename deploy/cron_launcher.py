@@ -538,6 +538,26 @@ COMMANDS: dict[str, Job] = {
             "after the post, so a subject is never posted twice"
         ),
     ),
+    "link_abstract_mentions": job(
+        "-m",
+        "backend.scripts.link_abstract_mentions",
+        timeout="45m",
+        idempotency=(
+            "judge only papers whose stored mentions are missing or stale for the "
+            "current abstract; each paper's rows are replaced in one transaction"
+        ),
+    ),
+    "rescan_abstract_mentions": job(
+        "-m",
+        "backend.scripts.link_abstract_mentions",
+        "--rescan",
+        timeout="2h",
+        idempotency=(
+            "reuse earlier verdicts for unchanged abstracts and rewrite a paper's "
+            "rows only when its links changed"
+        ),
+        health_job="link_abstract_mentions",
+    ),
     "warm_paper_suggested_questions": job(
         "-m",
         "backend.scripts.warm_paper_suggested_questions",

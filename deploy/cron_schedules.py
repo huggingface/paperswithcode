@@ -168,6 +168,16 @@ TIMERS: tuple[TimerSpec, ...] = (
         description="Post a SOTA, trend, or roundup insight to X twice daily",
     ),
     TimerSpec(
+        job="link_abstract_mentions",
+        on_calendar=("*-*-* *:51:00",),
+        description="Link catalog names in new and changed paper abstracts",
+    ),
+    TimerSpec(
+        job="rescan_abstract_mentions",
+        on_calendar=("*-*-* 03:21:00",),
+        description="Re-link every abstract after catalog changes",
+    ),
+    TimerSpec(
         job="warm_paper_suggested_questions",
         on_calendar=("*-*-* *:33:00",),
         description="Pre-generate suggested questions for the papers visitors see first",

@@ -6,6 +6,10 @@ from sqlalchemy.orm import Session
 from backend.models.database import (
     Base,
     Dataset,
+    Evaluation,
+    PaperMethod,
+    PaperRepository,
+    Repository,
     Framework,
     Method,
     Paper,
@@ -13,6 +17,7 @@ from backend.models.database import (
     PaperMethodExclusion,
 )
 from backend.services.abstract_link_service import (
+    mentions_changed,
     abstract_sha,
     judge_paper,
     store_paper_mentions,
@@ -63,6 +68,10 @@ def _session() -> Session:
             Framework.__table__,
             PaperAbstractMention.__table__,
             PaperMethodExclusion.__table__,
+            PaperMethod.__table__,
+            Evaluation.__table__,
+            Repository.__table__,
+            PaperRepository.__table__,
         ],
     )
     db = Session(engine)
@@ -155,6 +164,8 @@ def test_loader_serves_only_linked_mentions_of_the_current_abstract():
         ("GQA", "method", "grouped-query-attention"),
     ]
     assert all(ABSTRACT[m.start : m.end] == m.surface for m in mentions)
+    grpo = mentions[0].preview
+    assert (grpo.name, grpo.description, grpo.count) == ("GRPO", "RL algorithm", 0)
 
     paper.abstract = ABSTRACT + " Revised."
     db.commit()
@@ -165,3 +176,19 @@ def _served(db):
     relations = PaperRelations()
     PaperRelationLoader(db)._load_abstract_mentions([1], relations)
     return relations.abstract_mentions
+
+
+def test_rescan_reuses_verdicts_and_reports_no_change():
+    db = _session()
+    paper = db.get(Paper, 1)
+    first = judge_paper(
+        db, paper, _index(), FakeJudge({("method", 11): 0.9, ("dataset", 20): 0.1})
+    )
+    store_paper_mentions(db, 1, first)
+    db.commit()
+
+    silent = FakeJudge({})
+    again = judge_paper(db, paper, _index(), silent)
+
+    assert silent.requests == []  # every verdict came from the stored rows
+    assert not mentions_changed(db, 1, again)

@@ -1,0 +1,12 @@
+[Unit]
+Description=Timer: Link catalog names in new and changed paper abstracts
+
+[Timer]
+OnCalendar=*-*-* *:51:00
+RandomizedDelaySec=90
+AccuracySec=1m
+Persistent=true
+Unit=pwc-cron-link-abstract-mentions.service
+
+[Install]
+WantedBy=timers.target
