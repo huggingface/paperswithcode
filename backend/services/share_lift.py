@@ -10,7 +10,9 @@ support, computes::
     trend_score    = share_lift * ln(1 + entity_recent_papers)
 
 The recent window is the last ``recent_days``; the baseline window is the
-``baseline_days`` immediately preceding it.
+``baseline_days`` immediately preceding it. Only arXiv papers count: external
+papers arrive in bulk backfills (model pages, leaderboard sources), which
+would swamp the baseline share and inflate every lift.
 """
 
 from dataclasses import dataclass
@@ -59,12 +61,13 @@ def rank_by_share_lift(
     recent_start = today - timedelta(days=recent_days)
     baseline_start = recent_start - timedelta(days=baseline_days)
 
-    # Combined window predicate: only consider latest-version papers published
-    # anywhere between baseline_start and today. Pushing this into the WHERE
+    # Combined window predicate: only consider latest-version arXiv papers
+    # published anywhere between baseline_start and today. Pushing this into the WHERE
     # clause lets Postgres skip the bulk of `papers` and the matching junction
     # rows before aggregation instead of discarding them inside a CASE.
     in_window = and_(
         DBPaper.is_latest_version,
+        DBPaper.source == "arxiv",
         DBPaper.date_published > baseline_start,
         DBPaper.date_published <= today,
     )
