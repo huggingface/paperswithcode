@@ -34,7 +34,6 @@ from backend.chat_execution_policy import (
     MAX_PROVIDER_REQUESTS,
     MAX_PROVIDER_TURN_TOKENS,
 )
-
 from backend.chat_sandbox_worker.contract import PROVIDER_OUTPUT_TOKEN_LIMIT
 from backend.config import Settings
 from backend.database.connection import db_manager
@@ -381,19 +380,18 @@ class ProviderCallLifecycle:
             raise HTTPException(status_code=403, detail="Capability rejected") from None
         record_gateway_timing(settings, turn_id, received_at=datetime.now(UTC))
         token = self.authenticate()
-        # Authorize the token and turn before reading or decoding a body of up
-        # to 8 MiB; the model-bound check below needs the parsed model.
+        # Authorize (and meter) the token and turn once, before reading or
+        # decoding a body of up to 8 MiB; then bind the parsed model to the
+        # capability, as validate(model=...) would, without metering again.
         try:
-            self.authorize(token, None)
+            row = self.authorize(token, None)
         except HTTPException:
             protocol.observe_rejection("capability_scope")
             raise
         parsed = protocol.parse(await request.body())
-        try:
-            row = self.authorize(token, parsed.capability_model)
-        except HTTPException:
+        if parsed.capability_model is not None and row.model != parsed.capability_model:
             protocol.observe_rejection("capability_scope")
-            raise
+            raise HTTPException(status_code=403, detail="Capability rejected")
         call = protocol.prepare(
             parsed, row, self.db, lambda: self.owner(row), turn_id=turn_id
         )

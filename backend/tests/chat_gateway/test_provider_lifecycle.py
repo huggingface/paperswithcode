@@ -966,3 +966,56 @@ def test_unauthorized_caller_is_rejected_before_the_body_is_read(monkeypatch):
     with pytest.raises(HTTPException) as error:
         asyncio.run(lifecycle.run(Protocol(), Request(), str(uuid.uuid4())))
     assert error.value.status_code == 403
+
+
+def test_provider_call_authorizes_once_and_binds_the_parsed_model(monkeypatch):
+    import asyncio
+    import uuid
+
+    from fastapi import HTTPException
+
+    from backend.services.chat_provider_gateway.lifecycle import (
+        ParsedProviderRequest,
+        ProviderCallLifecycle,
+    )
+
+    calls = []
+
+    class Request:
+        async def body(self):
+            return b"{}"
+
+    class Protocol:
+        def check_available(self):
+            return None
+
+        def observe_rejection(self, phase):
+            assert phase == "capability_scope"
+
+        def parse(self, raw):
+            return ParsedProviderRequest(
+                payload={}, raw=raw, capability_model="other/model", maximum_tokens=1
+            )
+
+    def authorize(token, model):
+        calls.append(model)
+        return SimpleNamespace(model="granted/model")
+
+    monkeypatch.setattr(
+        "backend.services.chat_provider_gateway.lifecycle.record_gateway_timing",
+        lambda *_args, **_kwargs: None,
+    )
+    lifecycle = ProviderCallLifecycle(
+        db=object(),
+        settings=SimpleNamespace(),
+        authenticate=lambda: "token",
+        authorize=authorize,
+        owner=lambda _row: "owner",
+    )
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(lifecycle.run(Protocol(), Request(), str(uuid.uuid4())))
+
+    assert error.value.status_code == 403
+    # One metered authorization per call; the model is checked locally.
+    assert calls == [None]
