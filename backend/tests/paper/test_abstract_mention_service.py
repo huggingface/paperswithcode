@@ -66,6 +66,8 @@ CATALOG = [
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(88, "GQA"),
     dataset(89, "MMAU"),
+    dataset(90, "SWE-Bench Multilingual"),
+    dataset(91, "SWE-Bench Pro"),
     method(30, "Direct Preference Optimization (DPO)"),
     method(31, "Quantization"),
     method(32, "Qwen2.5"),
@@ -420,3 +422,16 @@ def test_checkpoint_suffixes_and_british_spellings():
         ("Qwen3", "method", 6),
     ]
     assert links("post-training quantisation") == [("quantisation", "method", 31)]
+
+
+def test_coordinated_list_members_link_to_their_own_entries():
+    text = "on SWE-bench Verified, Multilingual, and Pro, and outperforms GRPO"
+    assert links(text) == [
+        ("SWE-bench Verified", "dataset", 11),
+        ("Multilingual", "dataset", 90),
+        ("Pro", "dataset", 91),
+        ("GRPO", "method", 4),
+    ]
+    assert links("SWE-bench Verified and Lite") == [
+        ("SWE-bench Verified", "dataset", 11)
+    ]

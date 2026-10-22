@@ -56,6 +56,8 @@ Matching rules:
 - When a benchmark and a method share a name (benchmark ``GQA``, method
   ``Grouped-Query Attention (GQA)``), both become candidates for the judge,
   which keeps at most one per span.
+- A list that writes the family once links each member that is a catalog
+  name: ``SWE-bench Verified, Multilingual, and Pro``.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier, except an
   abbreviation of the name's initials, which also matches
   (``Humanity's Last Exam (HLE)`` gives ``HLE``). When
@@ -534,7 +536,48 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
     candidates = [
         c for c in candidates if (c.entity_type, c.entity_id) not in redefined
     ]
+    candidates = _add_coordinated_siblings(candidates, index, abstract, masked)
     return _drop_subsumed(candidates, index)
+
+
+_LIST_ITEM = re.compile(
+    r"(?:,[ \t]*(?:and[ \t]+|or[ \t]+)?|[ \t]+(?:and|or)[ \t]+)"
+    r"([A-Z0-9][\w.+\-]*(?:[ \t][A-Z][\w.+\-]*)?)"
+)
+
+
+def _add_coordinated_siblings(candidates, index, abstract, masked):
+    """``SWE-bench Verified, Multilingual, and Pro``: the family is written once."""
+    added = []
+    for candidate in candidates:
+        family = index.names.get((candidate.entity_type, candidate.entity_id), ())[:-1]
+        if not family:
+            continue
+        end = candidate.end
+        while item := _LIST_ITEM.match(masked, end):
+            key = family + tuple(t.lower() for t in tokenize(item.group(1)))
+            sibling = next(
+                (
+                    s.entity
+                    for s in index.surfaces.get(key, ())
+                    if s.entity.entity_type == candidate.entity_type
+                ),
+                None,
+            )
+            if sibling is None:
+                break
+            start, end = item.start(1), item.end(1)
+            added.append(
+                Candidate(
+                    entity_type=sibling.entity_type,
+                    entity_id=sibling.entity_id,
+                    start=start,
+                    end=end,
+                    surface=abstract[start:end],
+                    variant_suspect=False,
+                )
+            )
+    return sorted(candidates + added, key=lambda c: c.start)
 
 
 def _expand_long_form(index, masked, before, start, end, surface):
