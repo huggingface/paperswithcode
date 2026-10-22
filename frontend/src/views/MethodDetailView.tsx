@@ -172,7 +172,7 @@ const MethodDetailView: React.FC = () => {
           <div className="tag-hero-eyebrow">METHOD</div>
           <h1 className="tag-hero-title method-hero-title">{m.name}</h1>
           <ResearchFollowButton kind="method" entityId={m.id} />
-          {m.full_name && m.full_name !== m.name && (
+          {m.full_name && !m.name.includes(m.full_name) && (
             <div style={{ fontFamily: "var(--serif)", fontSize: 16, fontStyle: "italic", color: "var(--ink-soft)", marginTop: 8 }}>
               {m.full_name}
             </div>
