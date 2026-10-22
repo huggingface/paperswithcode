@@ -22,7 +22,8 @@ Matching rules:
   ``RoboTwin 2.0``), or preceded by a capitalised word in the same phrase
   (``Geometry-Change VLA``), is flagged ``variant_suspect`` so the judge decides
   whether it names something else. A bare one- or two-letter abbreviation
-  (``SD``, ``CE``) is flagged too, since it often means something else.
+  (``SD``, ``CE``, ``AR``) is flagged too, unless the same abstract also names
+  the entity in full.
 - A plain-word method name capitalised inside a longer capitalised name
   (``World Embedding Benchmark``) belongs to that name and is skipped.
 - A plain-word method is dropped from an abstract that also mentions a more
@@ -74,6 +75,7 @@ from __future__ import annotations
 
 import re
 from collections import defaultdict
+import dataclasses
 from dataclasses import dataclass
 from typing import Iterable
 
@@ -554,7 +556,30 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
         c for c in candidates if (c.entity_type, c.entity_id) not in redefined
     ]
     candidates = _add_coordinated_siblings(candidates, index, abstract, masked)
+    candidates = _trust_short_forms_backed_by_full_names(candidates)
     return _drop_subsumed(candidates, index)
+
+
+def _is_short_form(candidate: Candidate) -> bool:
+    return len(candidate.surface) <= 2 and candidate.surface.isupper()
+
+
+def _trust_short_forms_backed_by_full_names(
+    candidates: list[Candidate],
+) -> list[Candidate]:
+    """A bare ``AR`` means the autoregressive model when the same abstract also
+    says ``autoregressive``; without that evidence it stays with the judge."""
+    backed = {
+        (c.entity_type, c.entity_id)
+        for c in candidates
+        if not _is_short_form(c) and not c.variant_suspect
+    }
+    return [
+        dataclasses.replace(c, variant_suspect=False)
+        if _is_short_form(c) and (c.entity_type, c.entity_id) in backed
+        else c
+        for c in candidates
+    ]
 
 
 _LIST_ITEM = re.compile(

@@ -363,8 +363,10 @@ def test_month_less_year_aliases_prefer_the_earlier_sitting():
 
 
 def test_bare_two_letter_abbreviations_go_to_the_judge():
-    long_form, bare = find_candidates("Self-Distillation (SD) beats SD here.", INDEX)
-    assert not long_form.variant_suspect and bare.variant_suspect
+    [bare] = find_candidates("We compare SD with SFT.", INDEX)
+    assert bare.surface == "SD" and bare.variant_suspect
+    long_form, backed = find_candidates("Self-Distillation (SD) beats SD here.", INDEX)
+    assert not long_form.variant_suspect and not backed.variant_suspect
 
 
 def test_benchmark_initials_abbreviation_matches():
@@ -459,3 +461,15 @@ def test_abbreviation_inside_a_name_is_read_through():
 def test_lowercase_one_word_alias_links_without_the_judge():
     [ar] = find_candidates("standard autoregressive decoding", INDEX)
     assert ar.entity_id == 35 and not ar.variant_suspect
+
+
+def test_short_abbreviation_trusted_when_the_abstract_names_the_entity():
+    backed = find_candidates(
+        "Unlike autoregressive decoding, AR models are slow.", INDEX
+    )
+    assert [(c.surface, c.variant_suspect) for c in backed] == [
+        ("autoregressive", False),
+        ("AR", False),
+    ]
+    [alone] = find_candidates("AR glasses render overlays.", INDEX)
+    assert alone.variant_suspect
