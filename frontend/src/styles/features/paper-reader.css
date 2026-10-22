@@ -6,6 +6,7 @@
 .reader-paper-pane, .reader-assistant-pane { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
 .reader-paper-pane { background: #fff; transition: width 240ms cubic-bezier(.22, 1, .36, 1); }
 .reader-assistant-pane { visibility: visible; background: var(--bg); opacity: 1; transform: translateX(0); transition: width 240ms cubic-bezier(.22, 1, .36, 1), opacity 180ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1), visibility 0s; }
+.reader-assistant-pane:focus { outline: none; }
 .reader-assistant-pane.is-collapsed { visibility: hidden; opacity: 0; transform: translateX(28px); pointer-events: none; transition: width 240ms cubic-bezier(.22, 1, .36, 1), opacity 140ms ease, transform 240ms cubic-bezier(.22, 1, .36, 1), visibility 0s linear 240ms; }
 .reader-workspace.is-resizing { cursor: col-resize; user-select: none; }
 .reader-workspace.is-resizing .reader-paper-pane, .reader-workspace.is-resizing .reader-assistant-pane { transition: none; }

@@ -260,9 +260,34 @@ describe("PaperReaderView", () => {
 
     expect(chatPanel).toHaveClass("is-collapsed");
     expect(chatPanel).toHaveStyle({ width: "0px" });
-    expect(screen.getByRole("button", { name: "Open chat" })).toHaveAttribute("aria-expanded", "false");
+    const open = screen.getByRole("button", { name: "Open chat" });
+    expect(open).toHaveAttribute("aria-expanded", "false");
+    expect(open).toHaveFocus();
     expect(screen.getByRole("region", { name: "Paper PDF" }))
       .toHaveAttribute("data-resize-active", "true");
+
+    fireEvent.click(open);
+    expect(chatPanel).not.toHaveClass("is-collapsed");
+    expect(chatPanel).toHaveFocus();
+  });
+
+  it("keeps the floating Hide chat toggle when the desktop chat is unavailable", async () => {
+    mocks.getAvailability.mockResolvedValueOnce({
+      status: "available",
+      reason: null,
+      expected_recovery_at: null,
+      paper_mentions_enabled: true,
+      web_search_available: true,
+      native_pdf_reader_enabled: true,
+      paper_reader_chat_enabled: false,
+      paper_reader_selection_enabled: false,
+    });
+    vi.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(1200);
+    renderReader();
+
+    expect(await screen.findByText("Chat is not enabled for this preview.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Hide chat" }));
+    expect(screen.getByRole("button", { name: "Open chat" })).toHaveFocus();
   });
 
   it("coalesces desktop divider dragging without width transitions or per-move persistence", async () => {
