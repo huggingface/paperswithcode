@@ -31,9 +31,9 @@ The goal is to split up those tasks in the future.
 - `classic-reinforcement-learning` — Classic Reinforcement Learning
 - `language-modeling` — Language Modeling
 - `reasoning` — Reasoning
+- `robotics` — Robotics
 - `agents` — Agents
 - `math` — Mathematics
-- `robotics` — Robotics
 - `continual-learning` — Continual Learning
 - `world-models` — World Models
 - `pseudo-labelling` — Pseudo Labelling
@@ -213,6 +213,7 @@ This compact index contains every current task and subtask. Treat names and slug
 - `learning-to-rank` — Learning to Rank
 - `link-prediction` — Link Prediction
 - `long-context` — Long Context
+- `long-horizon-agents` — Long-Horizon Agents
 - `low-light-image-enhancement` — Low-Light Image Enhancement
 - `machine-translation` — Machine Translation
 - `math` — Mathematics
@@ -256,7 +257,6 @@ This compact index contains every current task and subtask. Treat names and slug
 - `remote-sensing` — Remote Sensing
 - `retrieval` — Retrieval
 - `retrieval-augmented-generation` — Retrieval-Augmented Generation
-- `robotic-manipulation` — Robotic Manipulation
 - `robotics` — Robotics
 - `safety-and-grounding` — Safety and Grounding
 - `saliency-detection` — Saliency Detection

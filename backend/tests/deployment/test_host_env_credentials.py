@@ -681,3 +681,16 @@ def test_backup_unit_does_not_load_the_application_environment():
     assert environment_files == [
         "EnvironmentFile=/etc/paperswithcode/production-cron.env"
     ]
+
+
+def test_chat_executor_units_cannot_read_environment_files():
+    root = Path(__file__).parents[3] / "deploy/systemd"
+    for name in (
+        "pwc-chat-executor-rendezvous@.service",
+        "pwc-chat-executor-harness-proxy@.service",
+    ):
+        unit = (root / name).read_text()
+        assert "SupplementaryGroups" not in unit, name
+        for line in unit.splitlines():
+            if "chgrp" in line:
+                assert line.startswith("ExecStartPost=+"), line

@@ -69,6 +69,7 @@ from backend.services.paper_ingestion_service import (
 )
 from backend.utils.auth import (
     catalog_mutation_context,
+    has_session,
     require_admin,
     require_contributor,
     require_user,
@@ -210,16 +211,18 @@ def get_paper_curation_state(
     summary="Get starter questions to ask the assistant about a paper",
 )
 def get_paper_suggested_questions(
+    request: Request,
     paper_id: int = Path(..., description="Internal paper database ID"),
     db: Session = Depends(get_database_session),
 ):
     """
     Return three short questions about the paper, written by a small LLM from
-    its title and abstract. Generated on first request and stored; returns an
-    empty list when they cannot be generated right now.
+    its title and abstract. Generated on a signed-in reader's first request and
+    stored; returns an empty list when none are stored yet for an anonymous
+    reader or they cannot be generated right now.
     """
     return PaperSuggestedQuestionsResponse(
-        questions=get_suggested_questions(db, paper_id)
+        questions=get_suggested_questions(db, paper_id, generate=has_session(request))
     )
 
 

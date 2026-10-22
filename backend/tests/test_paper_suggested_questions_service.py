@@ -125,3 +125,29 @@ def test_upstream_failure_is_not_stored(openai_key, monkeypatch):
 
     assert service.get_suggested_questions(db, 1) == []
     assert db.executed == []
+
+
+def test_reading_without_generation_never_calls_openai(openai_key, luna):
+    db = FakeSession(paper=SimpleNamespace(title="T", abstract="An abstract."))
+
+    assert service.get_suggested_questions(db, 1, generate=False) == []
+    assert luna == []
+    assert db.executed == []
+
+
+def test_route_generates_only_for_signed_in_readers(monkeypatch):
+    from backend.routers import papers as papers_router
+
+    calls = []
+    monkeypatch.setattr(
+        papers_router,
+        "get_suggested_questions",
+        lambda _db, _paper_id, *, generate: calls.append(generate) or [],
+    )
+    for signed_in in (False, True):
+        monkeypatch.setattr(
+            papers_router, "has_session", lambda _request, s=signed_in: s
+        )
+        papers_router.get_paper_suggested_questions(object(), 1, object())
+
+    assert calls == [False, True]
