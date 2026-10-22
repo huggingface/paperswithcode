@@ -49,6 +49,8 @@ Matching rules:
   ``ViT-B/16`` link ``REPA``, ``Qwen3``, and ``ViT``.
 - A benchmark that only exists as explicit versions (``MMEB-v2``, ``MMEB-v3``)
   links its bare name to the latest version.
+- Curated aliases match like names but rank below them; a one-word alias
+  (``Astra``) always goes to the judge.
 - Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier, except an
   abbreviation of the name's initials, which also matches
   (``Humanity's Last Exam (HLE)`` gives ``HLE``). When
@@ -90,7 +92,7 @@ _INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+
 _PAREN_ALIAS = re.compile(r"[ \t]*\([ \t]*([^()\n]{1,40}?)[ \t]*\)")
 
 # Lower ranks win when two entities claim the same surface.
-NAME, ABBREVIATION, PLURAL = 0, 1, 2
+NAME, ABBREVIATION, ALIAS, PLURAL = 0, 1, 1.5, 2
 
 
 @dataclass(frozen=True)
@@ -101,6 +103,8 @@ class CatalogEntity:
     slug: str
     parent_id: int | None = None
     full_name: str | None = None
+    # Curated alternative names: "Multimodal Large Language Model (MLLM)" for VLM.
+    aliases: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -258,19 +262,25 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             for variant, variant_rank in _compact_variants(written, entity):
                 add(variant, entity, variant_rank)
 
-    def add_named(written: str, entity: CatalogEntity, long_form: bool) -> None:
+    def add_named(
+        written: str, entity: CatalogEntity, long_form: bool, rank: float = NAME
+    ) -> None:
         abbreviation = _ABBREVIATION.search(written)
         if long_form:
-            add(base_name(written), entity, NAME)
+            add(base_name(written), entity, rank)
         if abbreviation and written[: abbreviation.start()].strip():
             long_forms[(entity.entity_type, entity.entity_id)].add(
                 tuple(normalize_name(written[: abbreviation.start()]).split())
             )
         if abbreviation:
             short = abbreviation.group(1)
-            add(short, entity, ABBREVIATION)
+            add(short, entity, max(rank, ABBREVIATION))
             if re.fullmatch(r"[A-Z][A-Za-z0-9\-]*[A-Z]s", short):
-                add(short[:-1], entity, ABBREVIATION)  # WAMs -> WAM
+                add(short[:-1], entity, max(rank, ABBREVIATION))  # WAMs -> WAM
+
+    for entity in entities:
+        for alias in entity.aliases:
+            add_named(alias, entity, long_form=True, rank=ALIAS)
 
     for entity in entities:
         if entity.entity_type == "method":
@@ -462,7 +472,8 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     end=end,
                     surface=abstract[start:end],
                     variant_suspect=inside_name
-                    or (surface.rank == ABBREVIATION and end - start <= 2),
+                    or (surface.rank == ABBREVIATION and end - start <= 2)
+                    or (surface.rank == ALIAS and len(surface.tokens) == 1),
                 )
             )
         i += n

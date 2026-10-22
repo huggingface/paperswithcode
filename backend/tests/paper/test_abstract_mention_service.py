@@ -53,6 +53,17 @@ CATALOG = [
     method(25, "Dr. GRPO"),
     method(26, "Self-Distillation (SD)"),
     dataset(87, "Humanity's Last Exam (HLE)"),
+    CatalogEntity(
+        "method",
+        27,
+        "Vision-language model (VLM)",
+        "vlm",
+        aliases=(
+            "Multimodal Large Language Model (MLLM)",
+            "Large Vision-Language Model (LVLM)",
+        ),
+    ),
+    CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(85, "HMMT Feb 2025"),
     dataset(86, "HMMT November 2025"),
     method(24, "Online Reinforcement Learning (Online RL)"),
@@ -348,3 +359,13 @@ def test_benchmark_initials_abbreviation_matches():
         ("Humanity's Last Exam", "dataset", 87),
     ]
     assert links("SFT") == []  # LIBERO-Plus (SFT) is a split, not an abbreviation
+
+
+def test_curated_aliases_link_and_one_word_aliases_are_judged():
+    assert links("Multimodal large language models (MLLMs) and LVLMs; MLLM") == [
+        ("Multimodal large language models (MLLMs)", "method", 27),
+        ("LVLMs", "method", 27),
+        ("MLLM", "method", 27),
+    ]
+    [astra] = find_candidates("by 18.6 points with Astra", INDEX)
+    assert astra.entity_id == 28 and astra.variant_suspect
