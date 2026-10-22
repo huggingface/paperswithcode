@@ -42,7 +42,8 @@ Matching rules:
   not ``Qwen3``).
 - Frameworks (``llama.cpp``, ``vLLM``) match like single names, without plurals.
 - URLs and ``$...$`` math are skipped, and an abbreviation between a name and
-  its version is read through (``Terminal-Bench (TB) 3.0``).
+  its version, or inside a longer name, is read through
+  (``Terminal-Bench (TB) 3.0``, ``autoregressive (AR) models``).
 - A benchmark suffix that spells the benchmark's slug is part of the name
   (``ImageNet-1k`` for slug ``imagenet-1k``).
 - A one-word name made of a prefix and an acronym also matches hyphenated
@@ -98,6 +99,10 @@ _SIZE_SUFFIX = re.compile(
 _VERSIONED = re.compile(r"^(.*?)(?:[\s\-]v(\d+(?:\.\d+)*)|\s(\d+\.\d+))$", re.I)
 # "Terminal-Bench (TB) 3.0": an abbreviation between a name and its version.
 _INFIX_ABBREVIATION = re.compile(r"(?<=\w)[ \t]+\([A-Za-z0-9\-]{1,10}\)(?=[ \t]+\d)")
+# "autoregressive (AR) models": an abbreviation inside a longer name.
+_BRACKET_GAP = re.compile(
+    r"[ \t]+\((?=[^)]*[A-Z][^)]*[A-Z])[A-Za-z0-9\-]{2,10}\)[ \t]+"
+)
 _CHECKPOINT_SUFFIX = re.compile(r"-(?:Instruct|Base|Chat|Math|Coder|Thinking)\b")
 _VARIANT_SUFFIX = re.compile(
     r"-(?:mini|lite|tiny|small|base|large|hard|easy|full|pro|plus|test|val|dev)\b", re.I
@@ -651,18 +656,36 @@ def _is_capitalised_plain_word(surface: _Surface, written: str) -> bool:
 
 
 def _longest_match(index, masked, tokens, words, lowered, i):
-    for n in range(min(index.max_tokens, len(tokens) - i), 0, -1):
-        surfaces = index.surfaces.get(tuple(lowered[i : i + n]))
-        if not surfaces or not _contiguous(masked, tokens[i : i + n]):
+    for n in range(min(index.max_tokens + 1, len(tokens) - i), 0, -1):
+        # "autoregressive (AR) models": skip a bracketed abbreviation inside the window.
+        kept = [
+            k
+            for k in range(i, i + n)
+            if k in (i, i + n - 1) or not _in_bracket_gap(masked, tokens[k])
+        ]
+        surfaces = index.surfaces.get(tuple(lowered[k] for k in kept))
+        if not surfaces or not _contiguous(masked, [tokens[k] for k in kept]):
             continue
         fitting = [
             surface
             for surface in surfaces
-            if not surface.case_sensitive or tuple(words[i : i + n]) == surface.tokens
+            if not surface.case_sensitive
+            or tuple(words[k] for k in kept) == surface.tokens
         ]
         if fitting:
             return n, fitting
     return None
+
+
+def _in_bracket_gap(masked: str, token: re.Match) -> bool:
+    """True for ``AR`` in ``autoregressive (AR) models``."""
+    before = masked.rfind(" ", 0, token.start())
+    after = masked.find(" ", token.end())
+    return (
+        before >= 0
+        and after >= 0
+        and bool(_BRACKET_GAP.fullmatch(masked[before : after + 1]))
+    )
 
 
 def _absorb_parenthesised_alias(
@@ -705,6 +728,7 @@ def _contiguous(text_value: str, tokens: list[re.Match]) -> bool:
             re.fullmatch(r"\.[ \t]+", text_value[a.end() : b.start()])
             and re.fullmatch(r"[A-Z][a-z]{0,2}", a.group())
         )
+        or _BRACKET_GAP.fullmatch(text_value[a.end() : b.start()])
         for a, b in zip(tokens, tokens[1:])
     )
 

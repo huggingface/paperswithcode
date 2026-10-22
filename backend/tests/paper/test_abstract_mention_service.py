@@ -71,6 +71,7 @@ CATALOG = [
     method(30, "Direct Preference Optimization (DPO)"),
     method(31, "Quantization"),
     method(34, "BiLSTM"),
+    method(35, "Autoregressive Model (AR)"),
     method(32, "Qwen2.5"),
     method(33, "Qwen2.5-VL"),
     CatalogEntity("framework", 103, "Browser Use", "browser-use"),
@@ -443,4 +444,11 @@ def test_prefixed_acronym_names_match_hyphenated():
         ("dropout", "method", 5),
         ("Bi-LSTMs", "method", 34),
         ("BiLSTM", "method", 34),
+    ]
+
+
+def test_abbreviation_inside_a_name_is_read_through():
+    assert links("Unlike autoregressive (AR) models, GRPO (ours) helps") == [
+        ("autoregressive (AR) models", "method", 35),
+        ("GRPO", "method", 4),
     ]
