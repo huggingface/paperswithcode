@@ -21,7 +21,8 @@ Matching rules:
 - A match followed by a capitalised word or a number (``SWE-Bench Lite``,
   ``RoboTwin 2.0``), or preceded by a capitalised word in the same phrase
   (``Geometry-Change VLA``), is flagged ``variant_suspect`` so the judge decides
-  whether it names something else.
+  whether it names something else. A bare one- or two-letter abbreviation
+  (``SD``, ``CE``) is flagged too, since it often means something else.
 - A plain-word method name capitalised inside a longer capitalised name
   (``World Embedding Benchmark``) belongs to that name and is skipped.
 - A plain-word method is dropped from an abstract that also mentions a more
@@ -443,7 +444,8 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                     start=start,
                     end=end,
                     surface=abstract[start:end],
-                    variant_suspect=inside_name,
+                    variant_suspect=inside_name
+                    or (surface.rank == ABBREVIATION and end - start <= 2),
                 )
             )
         i += n

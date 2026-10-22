@@ -51,6 +51,7 @@ CATALOG = [
     dataset(84, "AIME 2024"),
     method(23, "Agent Harness"),
     method(25, "Dr. GRPO"),
+    method(26, "Self-Distillation (SD)"),
     dataset(85, "HMMT Feb 2025"),
     dataset(86, "HMMT November 2025"),
     method(24, "Online Reinforcement Learning (Online RL)"),
@@ -333,3 +334,8 @@ def test_month_less_year_aliases_prefer_the_earlier_sitting():
         ("HMMT 2025", "dataset", 85),
         ("HMMT November 2025", "dataset", 86),
     ]
+
+
+def test_bare_two_letter_abbreviations_go_to_the_judge():
+    long_form, bare = find_candidates("Self-Distillation (SD) beats SD here.", INDEX)
+    assert not long_form.variant_suspect and bare.variant_suspect
