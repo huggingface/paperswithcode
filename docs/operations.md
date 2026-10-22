@@ -948,7 +948,12 @@ memory, tasks, restart rate, startup, and the 240-second stop drain; their
 `--self-test` and Unix-socket probes are the local liveness and readiness gates.
 The non-secret `service.env` contains exactly
 `PWC_CHAT_EXECUTOR_BACKEND_GROUP=pwc-production` or `pwc-staging`; the harness
-configuration independently pins the matching backend UID.
+configuration independently pins the matching backend UID. The units run as
+`pwc-chat-executor` with no `pwc-production`/`pwc-staging` membership, because
+those groups can read `production.env`/`staging.env`. Any per-instance drop-in
+that hands a socket to the backend group must run as root with systemd's `+`
+prefix, for example `ExecStartPost=+/usr/bin/chgrp pwc-staging
+/run/paperswithcode/%I/chat-executor-rendezvous.sock`.
 
 Before starting a generation, render the two bounded JSON files from the
 qualified release manifest. `rendezvous.json` has exactly

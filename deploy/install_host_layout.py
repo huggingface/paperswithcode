@@ -199,6 +199,7 @@ def main() -> int:
         "pwc-cron",
         "pwc-cron-trending",
         "pwc-external-pi",
+        "pwc-external-pi-staging",
         "pwc-chat-executor",
         "pwc-mcp",
         "pwc-build",
@@ -240,13 +241,13 @@ def main() -> int:
         )
         os.chown(mcp_config, 0, grp.getgrnam("pwc-mcp").gr_gid)
         mcp_config.chmod(0o640)
-    for worker_environment in (
-        CONFIG_ROOT / "external-pi-worker.env",
-        CONFIG_ROOT / "external-pi-worker-production.env",
+    for worker_environment, worker_user in (
+        (CONFIG_ROOT / "external-pi-worker.env", "pwc-external-pi-staging"),
+        (CONFIG_ROOT / "external-pi-worker-production.env", "pwc-external-pi"),
     ):
         if not worker_environment.exists():
             worker_environment.write_text("PWC_CHAT_EXTERNAL_PI_WORKER_TOKEN=\n")
-        os.chown(worker_environment, 0, grp.getgrnam("pwc-external-pi").gr_gid)
+        os.chown(worker_environment, 0, grp.getgrnam(worker_user).gr_gid)
         worker_environment.chmod(0o640)
     install_external_pi_hosts(CONFIG_ROOT / "external-pi-hosts")
     for path in (
