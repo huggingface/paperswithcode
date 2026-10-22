@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
+import { X } from "lucide-react";
 
 import { PdfViewer } from "@/components/pdf/PdfViewer";
 import { WebPaperViewer } from "@/components/pdf/WebPaperViewer";
@@ -465,11 +466,13 @@ function PaperReaderExperience() {
       <div className="sr-only" aria-live="polite">{selectionStatus}</div>
       {desktopSplit && <button
         type="button"
-        className="reader-collapse-assistant"
+        className={`reader-collapse-assistant${collapsed ? "" : " reader-collapse-assistant--icon"}`}
         aria-controls="reader-chat-panel"
         aria-expanded={!collapsed}
+        aria-label={collapsed ? undefined : "Hide chat"}
+        title={collapsed ? undefined : "Hide chat"}
         onClick={() => setAssistantCollapsed(!collapsed)}
-      >{collapsed ? "Open chat" : "Hide chat"}</button>}
+      >{collapsed ? "Open chat" : <X aria-hidden="true" />}</button>}
     </div>
     </ArtifactWorkspace>
   </div>;

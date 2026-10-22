@@ -13,6 +13,8 @@
 .reader-resize-handle::before { content: ""; position: absolute; inset: 0 -8px 0 0; }
 .reader-resize-handle:focus-visible { box-shadow: 0 0 0 2px var(--accent); }
 .reader-collapse-assistant { position: absolute; z-index: 8; top: 0; right: 16px; height: 48px; display: flex; align-items: center; border: 0; padding: 0; background: transparent; color: var(--ink); font-size: 12px; line-height: 1.5; }
+.reader-collapse-assistant--icon { width: 32px; justify-content: center; }
+.reader-collapse-assistant--icon svg { width: 16px; height: 16px; }
 .reader-workspace.is-assistant-collapsed .pdf-toolbar { padding-right: 96px; }
 .reader-tabs { height: 40px; flex: 0 0 auto; display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
 .reader-tabs button { flex: 1; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--ink-muted); }
