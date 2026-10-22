@@ -66,6 +66,7 @@ CATALOG = [
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(88, "GQA"),
     dataset(89, "MMAU"),
+    method(30, "Direct Preference Optimization (DPO)"),
     CatalogEntity("framework", 103, "Browser Use", "browser-use"),
     method(29, "Grouped-Query Attention", "Grouped-Query Attention (GQA)"),
     dataset(85, "HMMT Feb 2025"),
@@ -396,4 +397,14 @@ def test_variant_suffixes_maths_versions_and_framework_case():
     assert versioned.variant_suspect
     assert links("Browser-use agents built on Browser Use") == [
         ("Browser Use", "framework", 103)
+    ]
+
+
+def test_shortened_long_form_keeps_the_abbreviation_and_plural_names_match_singular():
+    assert links("from SFT to preference optimization (DPO); the DPO update") == [
+        ("DPO", "method", 30),
+        ("DPO", "method", 30),
+    ]
+    assert links("a generative World Action Model") == [
+        ("World Action Model", "method", 15)
     ]

@@ -262,7 +262,9 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             targets[key].append((rank, entity, written))
         if entity.entity_type == "method" and rank != PLURAL and key:
             last = tokenize(written)[-1]
-            if re.search(r"(?:s|x|z|ch|sh)$", last, re.I):
+            if re.search(r"[a-z]{3,}[^s]s$", last) and len(tokenize(written)) > 1:
+                add(written[:-1], entity, PLURAL)  # World Action Models -> Model
+            elif re.search(r"(?:s|x|z|ch|sh)$", last, re.I):
                 add(written + "es", entity, PLURAL)  # harness -> harnesses
             elif last[-1:].isalpha():
                 add(written + "s", entity, PLURAL)
@@ -485,7 +487,9 @@ def find_candidates(abstract: str, index: MentionIndex) -> list[Candidate]:
                 if expanded:
                     start, end = expanded
                     candidates = [c for c in candidates if c.end <= start]
-                elif surface.rank == ABBREVIATION:
+                elif surface.rank == ABBREVIATION and not _shares_long_form(
+                    index, tokens[:i], surface
+                ):
                     redefined.add(
                         (surface.entity.entity_type, surface.entity.entity_id)
                     )
@@ -536,6 +540,13 @@ def _expand_long_form(index, masked, before, start, end, surface):
             close = masked.index(")", end) + 1
             return before[-n].start(), close
     return None
+
+
+def _shares_long_form(index: MentionIndex, before: list[re.Match], surface) -> bool:
+    """``preference optimization (DPO)`` shortens DPO's own long form."""
+    words = {t.group().lower() for t in before[-4:]}
+    key = (surface.entity.entity_type, surface.entity.entity_id)
+    return any(words & set(form) for form in index.long_forms.get(key, ()))
 
 
 def _defined_in_brackets(text_value: str, start: int, end: int) -> bool:
