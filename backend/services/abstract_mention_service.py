@@ -45,6 +45,8 @@ Matching rules:
   its version is read through (``Terminal-Bench (TB) 3.0``).
 - A benchmark suffix that spells the benchmark's slug is part of the name
   (``ImageNet-1k`` for slug ``imagenet-1k``).
+- A one-word name made of a prefix and an acronym also matches hyphenated
+  (``BiLSTM`` and ``Bi-LSTMs``).
 - Checkpoint suffixes keep a method match (``Qwen2.5-Math``, ``-Instruct``),
   and British spellings match (``quantisation``).
 - A model-size suffix keeps a method match: ``REPA-XL/2``, ``Qwen3-8B``, and
@@ -276,6 +278,11 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
         if rank != PLURAL:
             for variant, variant_rank in _compact_variants(written, entity):
                 add(variant, entity, variant_rank)
+        prefixed = re.fullmatch(r"([A-Z][a-z]+)([A-Z]{2,}[A-Za-z0-9]*)", written)
+        if rank != PLURAL and prefixed:
+            add(
+                f"{prefixed.group(1)}-{prefixed.group(2)}", entity, ABBREVIATION
+            )  # Bi-LSTM
         british = re.sub(r"iz(ation|e|ed|ing|er)\b", r"is\1", written)
         if rank != PLURAL and british != written:
             add(british, entity, max(rank, ABBREVIATION))  # quantisation

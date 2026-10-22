@@ -70,6 +70,7 @@ CATALOG = [
     dataset(91, "SWE-Bench Pro"),
     method(30, "Direct Preference Optimization (DPO)"),
     method(31, "Quantization"),
+    method(34, "BiLSTM"),
     method(32, "Qwen2.5"),
     method(33, "Qwen2.5-VL"),
     CatalogEntity("framework", 103, "Browser Use", "browser-use"),
@@ -434,4 +435,12 @@ def test_coordinated_list_members_link_to_their_own_entries():
     ]
     assert links("SWE-bench Verified and Lite") == [
         ("SWE-bench Verified", "dataset", 11)
+    ]
+
+
+def test_prefixed_acronym_names_match_hyphenated():
+    assert links("variational dropout Bi-LSTMs and a BiLSTM") == [
+        ("dropout", "method", 5),
+        ("Bi-LSTMs", "method", 34),
+        ("BiLSTM", "method", 34),
     ]
