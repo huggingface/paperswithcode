@@ -5,7 +5,7 @@ This runbook covers the application circuit for Modal chat sandboxes. Research t
 ## Required provider policy
 
 - Workspace: `$250` enforced monthly budget and native account-email notifications.
-- Staging (`PWC_CHAT_SANDBOX_PROVIDER_MODE=starter_workspace`): the `pwc-chat-staging` Environment in the `nielsrogge` Starter Workspace, using the sole owner's personal token, no Environment cap or credential isolation, and the reviewed `$75` warning / `$105` application trip (attestation `...-starter-app105-v2`).
+- Staging (`PWC_CHAT_SANDBOX_PROVIDER_MODE=starter_workspace`): the `pwc-chat-staging` Environment in the `nielsrogge` Starter Workspace, using the sole owner's personal token, no Environment cap or credential isolation, and the reviewed `$120` warning / `$150` application trip (attestation `...-starter-app150-v3`; the previous `$75`/`$105` `...-starter-app105-v2` policy remains valid).
 - Production (`team_environments`): the `pwc-chat-production` Environment in the `paperswithcode` Workspace, with a `$200` warning and `$225` application trip inside the provider's `$250` Environment and Workspace budgets, preserving `$25` of provider headroom for reporting delay and termination. The local ledger prices resource requests; hourly provider reconciliation raises the effective value when actual burst usage is higher.
 - In Team mode, Environment-scoped service credentials must not list or terminate the other chat Environment's sandboxes.
 
@@ -108,7 +108,7 @@ After any provider policy change, record the Workspace setting, optional Team En
 
 Both current caps are already applied by one-shot transition scripts that accept
 only the previous policy: `deploy/configure_staging_chat_application_cap.py`
-(`starter-v1` to `starter-app105-v2`) and
+(now `starter-app105-v2` to `starter-app150-v3`, `--confirm RAISE_STAGING_CHAT_APPLICATION_CAP_150`; the earlier `starter-v1` to `starter-app105-v2` step is done) and
 `deploy/configure_production_chat_application_cap.py` (`250-v2` to
 `250-warn200-app225-v3`). A further change needs a new reviewed transition. After
 applying a cap change to the protected configuration, refresh the exact active release with
