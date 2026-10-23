@@ -1,9 +1,9 @@
 -- Keep each benchmark leaderboard on one task.
 --
--- A (dataset, best_metric) leaderboard belongs to the task holding most of its
--- evaluations. An evaluation that would start or grow a smaller copy of that
--- leaderboard under another task is rejected at commit time, so a transaction
--- that moves a whole board between tasks still succeeds. A task that measures
+-- A (dataset, best_metric) leaderboard lives on exactly one task. An
+-- evaluation that would leave the same leaderboard on a second task is
+-- rejected at commit time, so a transaction that moves a whole board between
+-- tasks still succeeds. A task that measures
 -- a different protocol under the same metric name should use a renamed
 -- benchmark variant (for example "ImageNet (256x256)"); the few existing
 -- same-metric boards that predate this guard are listed as exceptions.
@@ -46,7 +46,6 @@ RETURNS trigger
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    own_count BIGINT;
     rival RECORD;
     dataset_name TEXT;
 BEGIN
@@ -55,15 +54,16 @@ BEGIN
             SELECT 1 FROM public.benchmark_task_board_exceptions x
             WHERE x.dataset_id = NEW.dataset_id AND x.task_id = NEW.task_id
         )
+        -- A later statement in this transaction moved the row away.
+        OR NOT EXISTS (
+            SELECT 1 FROM public.evaluations
+            WHERE dataset_id = NEW.dataset_id
+              AND task_id = NEW.task_id
+              AND best_metric = NEW.best_metric
+        )
     THEN
         RETURN NULL;
     END IF;
-
-    SELECT count(*) INTO own_count
-    FROM public.evaluations
-    WHERE dataset_id = NEW.dataset_id
-      AND task_id = NEW.task_id
-      AND best_metric = NEW.best_metric;
 
     SELECT t.name, count(*) AS n INTO rival
     FROM public.evaluations e
@@ -79,8 +79,7 @@ BEGIN
     ORDER BY n DESC
     LIMIT 1;
 
-    -- own_count is 0 when a later statement in this transaction moved the row.
-    IF own_count = 0 OR rival.n IS NULL OR rival.n < own_count THEN
+    IF rival.n IS NULL THEN
         RETURN NULL;
     END IF;
 
@@ -90,6 +89,35 @@ BEGIN
         dataset_name, NEW.best_metric, rival.name, rival.n
         USING ERRCODE = 'check_violation',
               CONSTRAINT = 'evaluations_single_benchmark_board';
+END;
+$$;
+
+-- The guard assumes no split leaderboards remain; merge any first.
+DO $$
+DECLARE
+    split TEXT;
+BEGIN
+    SELECT string_agg(DISTINCT d.slug || ' / ' || e.best_metric, ', ') INTO split
+    FROM public.evaluations e
+    JOIN public.datasets d ON d.id = e.dataset_id
+    WHERE e.best_metric IS NOT NULL
+      AND NOT EXISTS (
+          SELECT 1 FROM public.benchmark_task_board_exceptions x
+          WHERE x.dataset_id = e.dataset_id AND x.task_id = e.task_id
+      )
+      AND EXISTS (
+          SELECT 1 FROM public.evaluations o
+          WHERE o.dataset_id = e.dataset_id
+            AND o.best_metric = e.best_metric
+            AND o.task_id <> e.task_id
+            AND NOT EXISTS (
+                SELECT 1 FROM public.benchmark_task_board_exceptions x
+                WHERE x.dataset_id = o.dataset_id AND x.task_id = o.task_id
+            )
+      );
+    IF split IS NOT NULL THEN
+        RAISE EXCEPTION 'Split leaderboards remain: %', split;
+    END IF;
 END;
 $$;
 
