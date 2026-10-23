@@ -93,6 +93,57 @@ prune_local_backups() {
     done
 }
 
+prune_uploaded_local_backups_before_dump() {
+    # The dump about to be written counts toward LOCAL_KEEP_COUNT, so older
+    # local dumps make room for it first: keeping yesterday's dump while
+    # writing today's needs two dumps of free disk. Only dumps whose dump and
+    # checksum the bucket already holds are removed, so a dump whose upload
+    # failed is never lost.
+    shopt -s nullglob
+    local dumps=("$BACKUP_DIR"/"${PWC_DB_NAME}"_*.dump)
+    shopt -u nullglob
+    local keep=$(( LOCAL_KEEP_COUNT > 0 ? LOCAL_KEEP_COUNT - 1 : 0 ))
+    (( ${#dumps[@]} > keep )) || return 0
+
+    readarray -t dumps < <(printf '%s\n' "${dumps[@]}" | sort)
+    local listing
+    listing="$(list_remote_files)"
+    local index
+    for (( index = 0; index < ${#dumps[@]} - keep; index++ )); do
+        local dump_path="${dumps[$index]}"
+        local name="${dump_path##*/}"
+        if grep -Fxq "$REMOTE_PREFIX/$name" <<<"$listing" \
+            && grep -Fxq "$REMOTE_PREFIX/$name.sha256" <<<"$listing"; then
+            log "Pruned uploaded local dump before dumping: $dump_path"
+            rm -f -- "$dump_path" "$dump_path.sha256"
+        else
+            log "Keeping local dump that is missing from the bucket: $dump_path"
+        fi
+    done
+}
+
+require_space_for_dump() {
+    # A dump that fills the disk also stops PostgreSQL and the site from
+    # writing, so refuse to start without room for one more dump.
+    local expected_bytes="$1"
+    (( expected_bytes > 0 )) || return 0
+    local required_bytes=$(( expected_bytes + expected_bytes / 10 ))
+    local available_bytes
+    available_bytes="$(df -B1 --output=avail "$BACKUP_DIR" | tail -1 | tr -d ' ')"
+    (( available_bytes >= required_bytes )) || die "Not enough free disk for a dump: \
+$(( available_bytes / 1024 / 1024 )) MiB free, about $(( required_bytes / 1024 / 1024 )) MiB needed"
+}
+
+newest_local_dump_bytes() {
+    shopt -s nullglob
+    local dumps=("$BACKUP_DIR"/"${PWC_DB_NAME}"_*.dump)
+    shopt -u nullglob
+    (( ${#dumps[@]} > 0 )) || { echo 0; return; }
+    local newest
+    newest="$(printf '%s\n' "${dumps[@]}" | sort | tail -1)"
+    stat -c %s "$newest"
+}
+
 list_remote_files() {
     run_hf buckets list "$REMOTE_BUCKET/$REMOTE_PREFIX" --recursive --format quiet
 }
@@ -187,6 +238,11 @@ main() {
     local timestamp backup_name dump_path checksum_path remote_listing
     timestamp="$(date -u +%Y%m%d_%H%M%S)"
     backup_name="${PWC_DB_NAME}_${timestamp}.dump"
+    local expected_bytes
+    expected_bytes="$(newest_local_dump_bytes)"
+    prune_uploaded_local_backups_before_dump
+    require_space_for_dump "$expected_bytes"
+
     # PrivateTmp may be another mount: copying a full dump can fill the disk.
     # Keep the in-progress file beside its final name for an atomic rename.
     tmp_dump="$(mktemp "$BACKUP_DIR/.$backup_name.XXXXXX.partial")"
