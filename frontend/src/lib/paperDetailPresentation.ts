@@ -201,7 +201,6 @@ export function buildPaperDetailPresentation(
     safeAbstractUrl: safeExternalHref(paper.url_abs),
     safeConferenceUrl: safeExternalHref(paper.conference_url_abs),
     safePdfUrl: safeExternalHref(paper.url_pdf),
-    sourceActionLabel: paper.source === "external" ? "Source page" : "arXiv page",
     successorPapers: paper.successor_papers ?? [],
   };
 }
