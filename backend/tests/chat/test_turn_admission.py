@@ -54,6 +54,17 @@ def _reserve(service, db, ordinal, *, owner=None, amount=10_000):
     )
 
 
+def test_raised_cap_lifts_the_ledger_but_a_lower_cap_is_refused(service, db):
+    ChatTurnAdmissionService(
+        environment="staging", spend_limit_microusd=1_500_000
+    ).initialize(db, now=NOW)
+    assert db.get(ChatTurnAdmissionBudget, "staging").spend_limit_microusd == 1_500_000
+    with pytest.raises(ValueError, match="spend limit changed"):
+        ChatTurnAdmissionService(
+            environment="staging", spend_limit_microusd=1_000_000
+        ).initialize(db, now=NOW)
+
+
 def test_same_account_contention_and_idempotent_request(service, db):
     first = _reserve(service, db, 1, owner="same-owner")
 
