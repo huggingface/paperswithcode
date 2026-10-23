@@ -106,6 +106,14 @@ uv run --env-file backend/keys.env python backend/database/import_entity_image.p
 
 Prefer the main architecture diagram (encoder block, lattice, joint network) over alignment heatmaps unless the user asks otherwise.
 
+**Never generate or draw the image.** Do not use AI-generated, matplotlib-drawn, or hand-made illustrations, and never credit one as "Illustration by Papers with Code". Every method image must be a real figure with attribution. When the source paper has no usable figure (classic or pre-arXiv methods, code-only papers), use, in this order:
+
+1. A figure from a later paper that explains the method (survey, follow-up), credited as `[Title](/paper/<id>)`.
+2. A Creative Commons or public-domain figure from Wikimedia Commons, credited as a markdown link to its Commons file page, plus author and license in the same string (for example `[Gradient descent](https://commons.wikimedia.org/wiki/File:Gradient_descent.svg), public domain`). Respect share-alike and attribution terms.
+3. If neither exists, leave the image empty rather than inventing one, and tell the user.
+
+Skip figures with no open license (company blogs, system cards) unless the user supplies the image.
+
 No frontend rebuild is needed for entity images — they are served from the backend API.
 
 ### 5. Create and apply migration
