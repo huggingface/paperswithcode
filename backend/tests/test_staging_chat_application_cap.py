@@ -13,6 +13,7 @@ from deploy.configure_staging_chat_application_cap import raised_values
 
 OLD = "modal-workspace-example-workspace-250-staging-starter-v1"
 NEW = "modal-workspace-example-workspace-250-staging-starter-app105-v2"
+APP150 = "modal-workspace-example-workspace-250-staging-starter-app150-v3"
 
 
 def policy():
@@ -72,30 +73,71 @@ def test_runtime_accepts_105_only_with_exact_staging_attestation(tmp_path):
             )
 
 
+def test_reviewed_raise_from_105_to_150():
+    state = SimpleNamespace(
+        warning_microusd=75_000_000,
+        application_cap_microusd=105_000_000,
+        environment_cap_microusd=0,
+        workspace_cap_microusd=250_000_000,
+        policy_attestation=NEW,
+    )
+    raised = policy().model_copy(
+        update={
+            "chat_sandbox_warning_microusd": 120_000_000,
+            "chat_sandbox_application_cap_microusd": 150_000_000,
+            "chat_sandbox_budget_attestation": APP150,
+        }
+    )
+    assert reviewed_higher_caps_allowed(state, raised)
+    assert not reviewed_higher_caps_allowed(
+        state, raised.model_copy(update={"chat_sandbox_budget_attestation": NEW})
+    )
+
+
+def test_runtime_accepts_150_only_with_exact_staging_attestation(tmp_path):
+    settings = deployed_settings(tmp_path, make_bundle(tmp_path, chat=True), "staging")
+    settings.chat_sandbox_warning_microusd = 120_000_000
+    settings.chat_sandbox_application_cap_microusd = 150_000_000
+    settings.chat_sandbox_budget_attestation = APP150
+    validate_chat_capacity_and_spend_policy(settings)
+    for field, value in [
+        ("environment", "production"),
+        ("chat_sandbox_budget_attestation", NEW),
+        ("chat_sandbox_warning_microusd", 75_000_000),
+        ("chat_sandbox_application_cap_microusd", 151_000_000),
+    ]:
+        with pytest.raises(RuntimeError):
+            validate_chat_capacity_and_spend_policy(
+                settings.model_copy(update={field: value})
+            )
+
+
 def test_protected_installer_preserves_all_other_values():
     values = {
         "PWC_ENVIRONMENT": "staging",
         "PWC_CHAT_SANDBOX_MODAL_WORKSPACE": "example-workspace",
         "PWC_CHAT_SANDBOX_WARNING_MICROUSD": "75000000",
-        "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "100000000",
+        "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD": "105000000",
         "PWC_CHAT_SANDBOX_ENVIRONMENT_CAP_MICROUSD": "0",
         "PWC_CHAT_SANDBOX_WORKSPACE_CAP_MICROUSD": "250000000",
         "PWC_CHAT_SANDBOX_PROVIDER_MODE": "starter_workspace",
-        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": OLD,
+        "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION": NEW,
         "PWC_UNRELATED": "preserved",
     }
     current = {key: f"{key}={value}" for key, value in values.items()}
     result = raised_values(current)
     changed = {key for key in current if current[key] != result[key]}
     assert changed == {
+        "PWC_CHAT_SANDBOX_WARNING_MICROUSD",
         "PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD",
         "PWC_CHAT_SANDBOX_BUDGET_ATTESTATION",
     }
+    assert decoded_value(result["PWC_CHAT_SANDBOX_WARNING_MICROUSD"]) == "120000000"
     assert (
         decoded_value(result["PWC_CHAT_SANDBOX_APPLICATION_CAP_MICROUSD"])
-        == "105000000"
+        == "150000000"
     )
-    assert decoded_value(result["PWC_CHAT_SANDBOX_BUDGET_ATTESTATION"]) == NEW
+    assert decoded_value(result["PWC_CHAT_SANDBOX_BUDGET_ATTESTATION"]) == APP150
     for key in values:
         if key == "PWC_UNRELATED":
             continue

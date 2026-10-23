@@ -35,12 +35,20 @@ _STARTER_SANDBOX_SPEND_POLICY = SandboxSpendPolicy(
 )
 
 
-_STAGING_STARTER_105_SPEND_POLICY = SandboxSpendPolicy(
-    warning_microusd=75_000_000,
-    application_cap_microusd=105_000_000,
-    environment_cap_microusd=0,
-    workspace_cap_microusd=250_000_000,
-)
+_STAGING_STARTER_SPEND_POLICIES = {
+    "starter-app105-v2": SandboxSpendPolicy(
+        warning_microusd=75_000_000,
+        application_cap_microusd=105_000_000,
+        environment_cap_microusd=0,
+        workspace_cap_microusd=250_000_000,
+    ),
+    "starter-app150-v3": SandboxSpendPolicy(
+        warning_microusd=120_000_000,
+        application_cap_microusd=150_000_000,
+        environment_cap_microusd=0,
+        workspace_cap_microusd=250_000_000,
+    ),
+}
 
 
 _TEAM_SANDBOX_SPEND_POLICIES = {
@@ -91,11 +99,12 @@ def _validate_chat_capacity_and_spend_policy(
     else:
         team_policy_version = None
         expected_spend = _STARTER_SANDBOX_SPEND_POLICY
-        if (
-            settings.environment == "staging"
-            and configured_spend == _STAGING_STARTER_105_SPEND_POLICY
-        ):
-            expected_spend = _STAGING_STARTER_105_SPEND_POLICY
+        starter_suffix = "starter-v1"
+        if settings.environment == "staging":
+            for suffix, policy in _STAGING_STARTER_SPEND_POLICIES.items():
+                if configured_spend == policy:
+                    expected_spend = policy
+                    starter_suffix = suffix
     if configured_spend != expected_spend:
         if settings.chat_sandbox_provider_mode == "starter_workspace":
             raise RuntimeError(
@@ -123,11 +132,6 @@ def _validate_chat_capacity_and_spend_policy(
             f"{settings.environment}-{policy_suffix}"
         )
     else:
-        starter_suffix = (
-            "starter-app105-v2"
-            if expected_spend == _STAGING_STARTER_105_SPEND_POLICY
-            else "starter-v1"
-        )
         expected_attestation = (
             f"modal-workspace-{settings.chat_sandbox_modal_workspace}-250-"
             f"{settings.environment}-{starter_suffix}"
