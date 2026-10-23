@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -81,6 +82,7 @@ class DeploymentLifecycle:
         self._active_http_requests = 0
         self._active_chat_streams = 0
         self._active_gateway_streams = 0
+        self._publish_pending = False
         self._drain_started_at: str | None = None
         self._identity = _LifecycleIdentity(
             environment=os.environ.get("PWC_ENVIRONMENT", ""),
@@ -161,12 +163,15 @@ class DeploymentLifecycle:
     def _publish_locked(self) -> None:
         if self._worker_path is None:
             return
+        # Stays set if the write below fails, so status() retries it.
+        self._publish_pending = True
         if not (
             self._active_http_requests
             or self._active_chat_streams
             or self._active_gateway_streams
         ):
             self._worker_path.unlink(missing_ok=True)
+            self._publish_pending = False
             return
         self._write_json(
             self._worker_path,
@@ -180,6 +185,7 @@ class DeploymentLifecycle:
                 "active_gateway_streams": self._active_gateway_streams,
             },
         )
+        self._publish_pending = False
 
     def _shared_counters_locked(self) -> tuple[int, int, int]:
         assert self._state_directory is not None
@@ -248,8 +254,11 @@ class DeploymentLifecycle:
                 self._active_chat_streams += 1
             if gateway:
                 self._active_gateway_streams += 1
-            self._publish_locked()
+        # Publish inside the try: a failed write (for example ENOSPC) must not
+        # leak the increment, or a drained slot reports busy until it stops.
         try:
+            with self._lock:
+                self._publish_locked()
             yield
         finally:
             with self._lock:
@@ -312,6 +321,11 @@ class DeploymentLifecycle:
 
     def _status_locked(self) -> DeploymentStatus:
         if self._state_directory is not None:
+            if self._publish_pending:
+                # Repair this worker's record after a failed write, so a slot
+                # that receives no more traffic still reports its real counts.
+                with contextlib.suppress(OSError):
+                    self._publish_locked()
             http, chat, gateway = self._shared_counters_locked()
             drain_started_at = self._shared_drain_started_at_locked()
             accepting_chat_turns = drain_started_at is None

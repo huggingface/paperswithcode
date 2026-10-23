@@ -97,6 +97,10 @@ CONFIG_ROOT = Path(os.environ.get("PWC_DEPLOY_CONFIG_ROOT", "/etc/paperswithcode
 LOG_ROOT = Path(os.environ.get("PWC_DEPLOY_LOG_ROOT", "/var/log/paperswithcode/deploy"))
 MIN_FREE_BYTES = int(os.environ.get("PWC_DEPLOY_MIN_FREE_BYTES", str(1536 * 1024**2)))
 DEPLOY_LOCK = APP_ROOT / "deployment.lock"
+# A drained slot whose only remaining work is plain HTTP requests is stopped
+# anyway after this long: such requests are short, so a count that outlives it
+# is a leaked accounting record, not a live request.
+BOUNDED_DRAIN_SECONDS = 600
 PORTS = {"production": 8000, "staging": 8001}
 PUBLIC_URLS = {
     "production": "https://paperswithcode.co",
@@ -980,10 +984,12 @@ def _prepare_slot(environment: str, slot: str, release: Path, runtime: Path) -> 
             + int(existing.get("active_chat_streams", 0))
             + int(existing.get("active_gateway_streams", 0))
         )
-        if busy:
+        if busy and not _drain_is_stale(existing):
             raise DeployError(
                 f"inactive slot {slot} is still draining with {busy} streams"
             )
+        if busy:
+            _log_forced_reap(environment, slot, existing)
     subprocess.run(["systemctl", "stop", _slot_unit(environment, slot)], check=False)
     subprocess.run(
         ["systemctl", "stop", _slot_unit(environment, slot, "socket")], check=False
@@ -1140,6 +1146,45 @@ def _drain_deadline_seconds(environment: str) -> float:
                 except ValueError:
                     raise DeployError(f"{key} must be numeric for drain calculation")
     return max(values.values()) + 60
+
+
+def _drain_is_stale(status: dict) -> bool:
+    """Return whether only plain HTTP requests outlived the bounded drain."""
+
+    started_at = status.get("drain_started_at")
+    if (
+        status.get("accepting_chat_turns")
+        or not isinstance(started_at, str)
+        or int(status.get("active_chat_streams", 0))
+        or int(status.get("active_gateway_streams", 0))
+    ):
+        return False
+    drained_for = datetime.now(timezone.utc) - datetime.fromisoformat(started_at)
+    return drained_for.total_seconds() >= BOUNDED_DRAIN_SECONDS
+
+
+def _log_forced_reap(environment: str, slot: str, status: dict) -> None:
+    log_event(
+        "forced-reap",
+        environment,
+        "success",
+        slot=slot,
+        active_http_requests=int(status.get("active_http_requests", 0)),
+        drain_started_at=status.get("drain_started_at"),
+        bounded_drain_seconds=BOUNDED_DRAIN_SECONDS,
+    )
+
+
+def _force_stop_stale_drained_slot(environment: str, slot: str) -> bool:
+    """Stop a drained slot stuck on plain HTTP requests past the bounded drain."""
+
+    status = _unix_json(environment, slot, "/internal/deployment-status", check=False)
+    if not status or not _drain_is_stale(status):
+        return False
+    _log_forced_reap(environment, slot, status)
+    run(["systemctl", "stop", _slot_unit(environment, slot)])
+    run(["systemctl", "stop", _slot_unit(environment, slot, "socket")])
+    return True
 
 
 def _stop_drained_slot(environment: str, slot: str) -> bool:
@@ -1752,7 +1797,10 @@ def _reap_draining_slot(environment: str, draining: str) -> dict | None:
         "/internal/deployment-status",
         check=False,
     )
-    if status_value is not None and not _stop_drained_slot(environment, draining):
+    if status_value is not None and not (
+        _stop_drained_slot(environment, draining)
+        or _force_stop_stale_drained_slot(environment, draining)
+    ):
         return status_value
     draining_release = _slot_release(environment, draining)
     if draining_release is None:
@@ -1798,6 +1846,10 @@ def reap(args: argparse.Namespace) -> int:
                         "active_gateway_streams": status_value.get(
                             "active_gateway_streams", 0
                         ),
+                        "active_http_requests": status_value.get(
+                            "active_http_requests", 0
+                        ),
+                        "drain_started_at": status_value.get("drain_started_at"),
                     },
                     indent=2,
                 )
