@@ -64,12 +64,13 @@ Matching rules:
   which keeps at most one per span.
 - A list that writes the family once links each member that is a catalog
   name: ``SWE-bench Verified, Multilingual, and Pro``.
-- Benchmark names lose a trailing ``(...)`` or `` — ...`` qualifier, except an
+- Benchmark names lose a trailing ``(...)``, `` — ...``, or split word (``test``,
+  ``val``, ``dev``), except an
   abbreviation of the name's initials, which also matches
   (``Humanity's Last Exam (HLE)`` gives ``HLE``). When
   several benchmarks share the resulting base name, the unqualified one wins,
-  then the group's single parent, then a parent all variants share; otherwise
-  the base name is unresolved and not matched.
+  then the group's single parent, then a parent all variants share, then the
+  test split, then the split with the most leaderboard evaluations.
 """
 
 from __future__ import annotations
@@ -129,6 +130,8 @@ class CatalogEntity:
     aliases: tuple[str, ...] = ()
     # "always" links every clean match, "judge" asks the judge, "never" skips.
     mode: str = "judge"
+    # Leaderboard evaluations; breaks ties between sibling benchmark splits.
+    evals: int = 0
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,17 @@ def base_name(name: str) -> str:
     return name
 
 
+_SPLIT_WORD = re.compile(r"\s+(?:test|val|dev|validation)$", re.I)
+
+
+def benchmark_base_name(name: str) -> str:
+    """``RefCOCOg test`` and ``GLUE (test)`` -> ``RefCOCOg`` and ``GLUE``."""
+    previous = None
+    while previous != name:
+        previous, name = name, _SPLIT_WORD.sub("", base_name(name)).strip()
+    return name
+
+
 def _case_sensitive(entity: CatalogEntity, tokens: tuple[str, ...]) -> bool:
     if entity.entity_type == "framework":
         return True  # product names: "Browser Use", not "browser-use agents"
@@ -215,6 +229,9 @@ def _compact_variants(written: str, entity: CatalogEntity) -> list[tuple[str, fl
     year (HMMT Feb and Nov 2025), the earlier month ranks first.
     """
     variants: list[tuple[str, float]] = []
+    numbered = re.fullmatch(r"(.*\S)\s+(\d+(?:\.\d+)+)", written)
+    if numbered:  # SQuAD 1.1 -> SQuAD v1.1
+        variants.append((f"{numbered.group(1)} v{numbered.group(2)}", ABBREVIATION))
     joined = re.sub(r"(?<=[A-Za-z])[ \-](?=\d)", "", written)
     if joined != written:
         variants.append((joined, ABBREVIATION))
@@ -241,12 +258,12 @@ def _compact_variants(written: str, entity: CatalogEntity) -> list[tuple[str, fl
 
 def _resolve_benchmark_group(
     members: list[CatalogEntity], by_id: dict[int, CatalogEntity]
-) -> CatalogEntity | None:
-    plain = [m for m in members if base_name(m.name) == m.name]
+) -> CatalogEntity:
+    plain = [m for m in members if benchmark_base_name(m.name) == m.name]
     if len(plain) == 1:
         return plain[0]
-    if len(plain) > 1:
-        return None
+    if plain:
+        return _default_split(plain)
     ids = {m.entity_id for m in members}
     roots = [m for m in members if m.parent_id not in ids]
     if len(roots) == 1 and len(members) > 1:
@@ -257,14 +274,26 @@ def _resolve_benchmark_group(
         child = members[0]
         parent = by_id.get(child.parent_id) if child.parent_id else None
         if parent and normalize_name(parent.name).startswith(
-            normalize_name(base_name(child.name))
+            normalize_name(benchmark_base_name(child.name))
         ):
             return parent
         return child
     shared = {m.parent_id for m in roots}
     if len(shared) == 1 and (parent_id := shared.pop()) in by_id:
         return by_id[parent_id]
-    return None
+    return _default_split(roots)
+
+
+def _default_split(candidates: list[CatalogEntity]) -> CatalogEntity:
+    """Sibling splits with no parent: the test split, else the most evals."""
+    return min(
+        candidates,
+        key=lambda m: (
+            not re.search(r"\btest\b", m.name, re.I),
+            -m.evals,
+            m.entity_id,
+        ),
+    )
 
 
 def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
@@ -332,15 +361,17 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
 
     groups: dict[str, list[CatalogEntity]] = defaultdict(list)
     for dataset in datasets.values():
-        groups[normalize_name(base_name(dataset.name))].append(dataset)
+        groups[normalize_name(benchmark_base_name(dataset.name))].append(dataset)
     for key_text, members in groups.items():
         if not key_text:
             continue
         target = _resolve_benchmark_group(members, datasets)
-        if target is None:
-            unresolved.append((key_text, members))
-            continue
-        written = base_name((target if target in members else members[0]).name)
+        for member in members:
+            if _SPLIT_WORD.search(base_name(member.name)):
+                add(base_name(member.name), member, NAME)  # "RefCOCOg val" itself
+        written = benchmark_base_name(
+            (target if target in members else members[0]).name
+        )
         targets[tuple(key_text.split())].append((NAME, target, written))
         for variant, variant_rank in _compact_variants(written, target):
             add(variant, target, variant_rank)
@@ -349,7 +380,9 @@ def build_index(entities: Iterable[CatalogEntity]) -> MentionIndex:
             if abbreviation:
                 add(abbreviation, target, ABBREVIATION)
 
-    group_names = {normalize_name(base_name(d.name)) for d in datasets.values()}
+    group_names = {
+        normalize_name(benchmark_base_name(d.name)) for d in datasets.values()
+    }
     latest: dict[tuple[str, ...], tuple[tuple[int, ...], CatalogEntity, str]] = {}
     for dataset in datasets.values():
         versioned = _VERSIONED.match(base_name(dataset.name))
@@ -781,14 +814,15 @@ def load_catalog_entities(db: Session) -> list[CatalogEntity]:
         text(
             """
             SELECT 'method' AS entity_type, id, name, slug, NULL::bigint AS parent_id,
-                   full_name, aliases, abstract_linking
+                   full_name, aliases, abstract_linking, 0 AS evals
             FROM methods WHERE slug IS NOT NULL
             UNION ALL
             SELECT 'dataset', id, name, slug, parent_dataset_id, NULL, aliases,
-                   abstract_linking
+                   abstract_linking,
+                   (SELECT count(*) FROM evaluations WHERE dataset_id = datasets.id)
             FROM datasets WHERE slug IS NOT NULL
             UNION ALL
-            SELECT 'framework', id, name, slug, NULL, NULL, aliases, abstract_linking
+            SELECT 'framework', id, name, slug, NULL, NULL, aliases, abstract_linking, 0
             FROM frameworks WHERE slug IS NOT NULL
             """
         )
@@ -803,6 +837,7 @@ def load_catalog_entities(db: Session) -> list[CatalogEntity]:
             full_name=row.full_name,
             aliases=tuple(row.aliases or ()),
             mode=row.abstract_linking,
+            evals=int(row.evals),
         )
         for row in rows
     ]

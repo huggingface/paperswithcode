@@ -66,6 +66,12 @@ CATALOG = [
     CatalogEntity("method", 28, "GPT-6 Astra", "gpt-6-astra", aliases=("Astra",)),
     dataset(88, "GQA"),
     dataset(89, "MMAU"),
+    CatalogEntity("dataset", 93, "GLUE (dev)", "glue-dev", evals=16),
+    CatalogEntity("dataset", 94, "GLUE (test)", "glue-test", evals=9),
+    CatalogEntity("dataset", 95, "RefCOCOg test", "refcocog-test", evals=4),
+    CatalogEntity("dataset", 96, "RefCOCOg val", "refcocog-val", evals=3),
+    dataset(97, "SQuAD 1.1"),
+    dataset(98, "SQuAD 2.0"),
     dataset(92, "GSM8k"),
     dataset(90, "SWE-Bench Multilingual"),
     dataset(91, "SWE-Bench Pro"),
@@ -94,7 +100,7 @@ CATALOG = [
     dataset(22, "LIBERO-Plus (Zero-Shot Transfer)", parent_id=20),
     dataset(23, "LIBERO-Plus (SFT)", parent_id=22),
     dataset(30, "SNU-FILM (Easy)"),
-    dataset(31, "SNU-FILM (Hard)"),
+    CatalogEntity("dataset", 31, "SNU-FILM (Hard)", "d31", evals=27),
     dataset(40, "WEAR Outdoor Sports Activity Recognition"),
     dataset(41, "WEAR (Inertia-1 Protocol)", parent_id=40),
     dataset(50, "SkillsBench v1.1 (With Skills)"),
@@ -185,9 +191,8 @@ def test_benchmark_base_names_resolve_through_the_catalog_hierarchy():
     assert links("WEAR") == [("WEAR", "dataset", 40)]
     # Variants sharing one outside parent resolve to it.
     assert links("SkillsBench") == [("SkillsBench", "dataset", 50)]
-    # Co-equal variants with no parent stay unlinked and are reported.
-    assert links("SNU-FILM") == []
-    assert "snu film" in [key for key, _ in INDEX.unresolved]
+    # Co-equal variants with no parent: the one with the most evaluations.
+    assert links("SNU-FILM") == [("SNU-FILM", "dataset", 31)]
 
 
 def test_hyphenated_prefixes_make_a_different_name():
@@ -492,4 +497,19 @@ def test_names_with_digits_or_inner_capitals_ignore_case():
 def test_non_ascii_hyphenated_prefixes_do_not_crash():
     assert links("an α-GRPO variant and an x²-GRPO one beat GRPO") == [
         ("GRPO", "method", 4)
+    ]
+
+
+def test_split_siblings_default_to_the_test_split_then_most_evals():
+    assert links("the GLUE score and RefCOCOg") == [
+        ("GLUE", "dataset", 94),
+        ("RefCOCOg", "dataset", 95),
+    ]
+    assert links("RefCOCOg val") == [("RefCOCOg val", "dataset", 96)]
+
+
+def test_versioned_names_also_match_with_a_v_prefix():
+    assert links("SQuAD v1.1 and SQuAD v2.0 Test F1") == [
+        ("SQuAD v1.1", "dataset", 97),
+        ("SQuAD v2.0", "dataset", 98),
     ]
