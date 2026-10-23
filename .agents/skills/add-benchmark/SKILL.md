@@ -55,6 +55,7 @@ Be careful about provenance: the benchmark source paper is the paper that introd
    - Preserve unrelated existing paper task/method links; only add missing links unless the user explicitly asks to retag the paper.
 
 5. Link the benchmark to the task:
+   - One benchmark has one leaderboard per metric, on one task. Before linking an existing dataset to another task, check where its evaluations live (`SELECT task_id, best_metric, count(*) FROM evaluations WHERE dataset_id = :id GROUP BY 1, 2`). If the requested metric already has a leaderboard on another task, do not link it a second time: use that task, or create a renamed benchmark variant when the new task measures a different protocol (for example `ImageNet (256x256)` for image generation, because `ImageNet` is the image classification board). The database rejects evaluations that would split a leaderboard (`evaluations_single_benchmark_board`); record a genuine same-metric exception in `benchmark_task_board_exceptions` only when the user approves it.
    - Ensure `(task_id, dataset_id)` exists in `task_datasets`.
    - Benchmark display order is derived from the benchmark trending signal; do not add manual ordering metadata.
 
