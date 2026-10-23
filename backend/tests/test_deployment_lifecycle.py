@@ -79,3 +79,16 @@ def test_status_retries_a_failed_decrement_publish(tmp_path, monkeypatch):
         # The record still says 2; nothing else will rewrite it on an idle slot.
         assert lifecycle._read_json(lifecycle._worker_path)["active_http_requests"] == 2
         assert lifecycle.status().active_http_requests == 1
+
+
+def test_chat_reconnect_stream_is_counted_as_an_active_chat_stream():
+    """The bounded drain only force-stops slots without chat streams, so a
+    reconnect SSE on a displaced slot must count as one."""
+    lifecycle = DeploymentLifecycle()
+
+    with lifecycle.request(
+        "/api/v1/chat/sessions/6f1c9a8e-2c1d-4c1b-9a37-2f0f1b0c9d11/stream"
+    ):
+        assert lifecycle.status().active_chat_streams == 1
+    with lifecycle.request("/api/v1/chat/sessions"):
+        assert lifecycle.status().active_chat_streams == 0

@@ -241,7 +241,10 @@ class DeploymentLifecycle:
 
     @contextmanager
     def request(self, path: str) -> Iterator[None]:
-        chat = path == "/api/v1/chat/stream"
+        # A reconnect SSE (/chat/sessions/{id}/stream) relays a live turn too.
+        chat = path == "/api/v1/chat/stream" or (
+            path.startswith("/api/v1/chat/sessions/") and path.endswith("/stream")
+        )
         gateway = path.endswith(
             (
                 "/api/internal/chat-gateway/v1/messages",
