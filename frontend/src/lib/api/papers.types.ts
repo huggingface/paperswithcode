@@ -54,6 +54,13 @@ interface HfArtifactSummary {
   best_url: string | null;
 }
 
+/** Hub links stored by the HF sync, most popular first (paper detail only). */
+interface LinkedHfArtifacts {
+  models: string[];
+  datasets: string[];
+  spaces: string[];
+}
+
 interface BenchmarkSummary {
   id: string;
   name: string;
@@ -173,6 +180,8 @@ export interface Paper {
   hf_spaces?: string[];
   /** Compact HF artifact summary used by feed cards (counts + best-category link). */
   hf_artifact_summary?: HfArtifactSummary | null;
+  /** Up to 100 stored Hub links per kind; returned with include_resources. */
+  linked_hf_artifacts?: LinkedHfArtifacts | null;
   tasks?: Task[];
   methods?: Method[];
   introduced_benchmarks?: BenchmarkSummary[];

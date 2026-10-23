@@ -227,6 +227,14 @@ class Paper(BaseModel):
             "most popular category link) used by paper feed cards."
         ),
     )
+    linked_hf_artifacts: Optional["LinkedHfArtifacts"] = Field(
+        None,
+        description=(
+            "Hugging Face artifacts stored for this paper by the HF sync, up to "
+            "100 per kind ordered by popularity. Populated only on paper detail "
+            "responses with include_resources=true."
+        ),
+    )
     has_official_implementation: bool = Field(
         default=False,
         description=(
@@ -742,6 +750,14 @@ class HfArtifactSummary(BaseModel):
     )
 
 
+class LinkedHfArtifacts(BaseModel):
+    """Stored Hugging Face artifact URLs for one paper, most popular first."""
+
+    models: List[str] = Field(default_factory=list)
+    datasets: List[str] = Field(default_factory=list)
+    spaces: List[str] = Field(default_factory=list)
+
+
 class RepositoryStarHistory(BaseModel):
     """
     Repository star history snapshot.
@@ -1180,6 +1196,7 @@ __all__ = [
     "RepositoryTrendingScore",
     "RepositoryTrendingPaper",
     "HfArtifactSummary",
+    "LinkedHfArtifacts",
     "RepositoryStarHistory",
     "RepositoryStarHistoryList",
     "PaperRepository",

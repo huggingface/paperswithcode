@@ -56,6 +56,7 @@ from backend.models.papers import (
     FrameworkSummary as FrameworkSummary,
     GithubRepositoryPreview as GithubRepositoryPreview,
     HfArtifactSummary as HfArtifactSummary,
+    LinkedHfArtifacts as LinkedHfArtifacts,
     MethodSummary as MethodSummary,
     OrganizationSummary as OrganizationSummary,
     Paper as Paper,

@@ -453,6 +453,7 @@ FRONTEND_PAPER_FIELDS = {
     "hf_datasets",
     "hf_spaces",
     "hf_artifact_summary",
+    "linked_hf_artifacts",
     "tasks",
     "methods",
     "introduced_benchmarks",

@@ -17,6 +17,7 @@ from backend.models.papers import (
     AbstractMentionPreview,
     AuthorLink,
     FrameworkSummary,
+    LinkedHfArtifacts,
     MethodSummary,
     OrganizationSummary,
     ProjectPage,
@@ -59,6 +60,10 @@ from backend.utils.urls import get_method_source_url, get_paper_route_identifier
 CARD_AUTHOR_LINKS = 3
 
 
+# Per-kind cap on stored Hub links returned with detail resources.
+LINKED_HF_ARTIFACT_LIMIT = 100
+
+
 @dataclass(frozen=True, slots=True)
 class PaperConferenceRelation:
     """Conference fields embedded in a paper API response."""
@@ -94,6 +99,7 @@ class PaperRelations:
     repositories: dict[int, list[Repository]] = field(default_factory=dict)
     repository_coverage: dict[int, tuple[bool, int]] = field(default_factory=dict)
     project_pages: dict[int, list[ProjectPage]] = field(default_factory=dict)
+    linked_hf_artifacts: dict[int, LinkedHfArtifacts] = field(default_factory=dict)
     x_threads: dict[int, list[XThread]] = field(default_factory=dict)
     suggested_questions: dict[int, list[str]] = field(default_factory=dict)
     abstract_mentions: dict[int, list[AbstractMention]] = field(default_factory=dict)
@@ -394,6 +400,60 @@ class PaperRelationLoader:
                 XThread.model_validate(row, from_attributes=True),
             )
 
+        return relations
+
+    def load_linked_hf_artifacts(
+        self,
+        paper_ids: Sequence[int],
+        relations: PaperRelations,
+    ) -> PaperRelations:
+        """Add each paper's most popular stored Hub links for detail pages."""
+        unique_ids = self._unique_ids(paper_ids)
+        if not unique_ids:
+            return relations
+
+        popularity_rank = (
+            func.row_number()
+            .over(
+                partition_by=(DBPaperHfArtifact.paper_id, DBHfArtifact.kind),
+                order_by=(
+                    DBHfArtifact.trending_score.desc().nullslast(),
+                    DBHfArtifact.downloads.desc().nullslast(),
+                    DBHfArtifact.likes.desc().nullslast(),
+                    DBHfArtifact.repo_id,
+                ),
+            )
+            .label("popularity_rank")
+        )
+        ranked_hf_artifacts = (
+            self.db.query(
+                DBPaperHfArtifact.paper_id,
+                DBHfArtifact.kind,
+                DBHfArtifact.url,
+                popularity_rank,
+            )
+            .join(
+                DBHfArtifact,
+                DBPaperHfArtifact.hf_artifact_id == DBHfArtifact.id,
+            )
+            .filter(DBPaperHfArtifact.paper_id.in_(unique_ids))
+            .subquery()
+        )
+        hf_artifact_rows = (
+            self.db.query(
+                ranked_hf_artifacts.c.paper_id,
+                ranked_hf_artifacts.c.kind,
+                ranked_hf_artifacts.c.url,
+            )
+            .filter(ranked_hf_artifacts.c.popularity_rank <= LINKED_HF_ARTIFACT_LIMIT)
+            .order_by(ranked_hf_artifacts.c.popularity_rank)
+            .all()
+        )
+        for paper_id, kind, url in hf_artifact_rows:
+            linked = relations.linked_hf_artifacts.setdefault(
+                int(paper_id), LinkedHfArtifacts()
+            )
+            getattr(linked, f"{kind}s").append(url)
         return relations
 
     def _load_card_relations(

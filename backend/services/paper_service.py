@@ -187,6 +187,7 @@ class PaperService:
         relations = loader.load_details(paper_ids)
         if include_resources:
             loader.load_resources(paper_ids, relations)
+            loader.load_linked_hf_artifacts(paper_ids, relations)
         return [self._to_api_paper(paper, relations) for paper in papers]
 
     # Map the singular DB artifact kind to the Hugging Face listing path segment.
@@ -358,6 +359,7 @@ class PaperService:
             "hf_datasets": db_paper.hf_datasets or [],
             "hf_spaces": db_paper.hf_spaces or [],
             "hf_artifact_summary": hf_artifact_summary,
+            "linked_hf_artifacts": relations.linked_hf_artifacts.get(db_paper.id),
             "has_official_implementation": has_official_implementation,
             "code_repository_count": code_repository_count,
             "repositories": repositories,
