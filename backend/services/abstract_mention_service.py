@@ -467,7 +467,8 @@ def _has_hyphenated_prefix(text_value: str, start: int) -> bool:
     (``multi-agent harness``) is not a different name."""
     if start < 2 or text_value[start - 1] != "-" or not text_value[start - 2].isalnum():
         return False
-    prefix = re.search(r"([A-Za-z0-9]+)-$", text_value[:start]).group(1)
+    # [^\W_] is exactly str.isalnum(), so "α-GRPO" or "é-GRPO" match too.
+    prefix = re.search(r"([^\W_]+)-$", text_value[:start]).group(1)
     return not (prefix.isalpha() and prefix.islower() and text_value[start].islower())
 
 

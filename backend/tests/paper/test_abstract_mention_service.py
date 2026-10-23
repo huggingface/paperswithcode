@@ -487,3 +487,9 @@ def test_names_with_digits_or_inner_capitals_ignore_case():
         ("llava", "method", 17),
         ("Imagenet", "dataset", 78),
     ]
+
+
+def test_non_ascii_hyphenated_prefixes_do_not_crash():
+    assert links("an α-GRPO variant and an x²-GRPO one beat GRPO") == [
+        ("GRPO", "method", 4)
+    ]
