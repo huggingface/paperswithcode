@@ -90,6 +90,8 @@ export function PdfOutline({ entries, activeIndex, onSelect }: PdfOutlineProps) 
   const endTouch = (event: PointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === "mouse") return;
     if (dragged.current && scrub) {
+      // Drop focus too, or :focus-within opens the panel over the heading.
+      event.currentTarget.blur();
       setPinned(false);
       onSelect(entries[scrub.position]);
     }

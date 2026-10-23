@@ -425,6 +425,7 @@ describe("PdfViewer resize rendering", () => {
     const ticks = [...rail.querySelectorAll<HTMLElement>(".pdf-outline-tick")];
     ticks.forEach((tick, position) => vi.spyOn(tick, "getBoundingClientRect").mockReturnValue({ top: position * 10, height: 2 } as DOMRect));
 
+    rail.focus();
     fireEvent.pointerDown(rail, { pointerType: "touch", pointerId: 1, clientY: 0 });
     expect(ticks[0]).toHaveClass("is-scrubbed");
     expect(document.querySelector(".pdf-outline-scrub-label")).toBeNull();
@@ -439,6 +440,7 @@ describe("PdfViewer resize rendering", () => {
     expect(window.location.hash).toBe("#pdf-section-2");
     expect(scrollTo).toHaveBeenCalled();
     expect(rail).toHaveAttribute("aria-expanded", "false");
+    expect(rail).not.toHaveFocus();
     expect(document.querySelector(".pdf-outline-scrub-label")).toBeNull();
     expect(ticks[2]).not.toHaveClass("is-scrubbed");
 
