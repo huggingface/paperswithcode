@@ -49,6 +49,7 @@ export function PdfOutline({ entries, activeIndex, onSelect }: PdfOutlineProps) 
   const [scrub, setScrub] = useState<Scrub | null>(null);
   const touchStart = useRef<number | null>(null);
   const dragged = useRef(false);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!pinned) return;
     // Capture phase, so Escape closes the panel before the reader's own
@@ -61,6 +62,15 @@ export function PdfOutline({ entries, activeIndex, onSelect }: PdfOutlineProps) 
     window.addEventListener("keydown", close, { capture: true });
     return () => window.removeEventListener("keydown", close, { capture: true });
   }, [pinned]);
+  const scrubPosition = scrub?.position;
+  useEffect(() => {
+    const panel = panelRef.current;
+    const entry = scrubPosition === undefined ? null : panel?.querySelectorAll<HTMLElement>("li")[scrubPosition];
+    if (!panel || !entry) return;
+    // Centre the highlighted entry by scrolling only the panel (its offset parent);
+    // scrollIntoView would also scroll the reader's overflow-hidden ancestors.
+    panel.scrollTop = entry.offsetTop + entry.offsetHeight / 2 - panel.clientHeight / 2;
+  }, [scrubPosition]);
   if (!entries.length) return null;
 
   const track = (event: PointerEvent<HTMLButtonElement>) => {
@@ -135,10 +145,11 @@ export function PdfOutline({ entries, activeIndex, onSelect }: PdfOutlineProps) 
       />)}
     </button>
     {label && <span className="pdf-outline-scrub-label" style={{ top: scrub!.top }} aria-hidden="true">{label.title}</span>}
-    <div id={panelId} className="pdf-outline-panel">
+    <div id={panelId} ref={panelRef} className="pdf-outline-panel">
       <ol>
-        {entries.map((entry) => <li key={entry.index} className={`level-${entry.level}`}>
+        {entries.map((entry, position) => <li key={entry.index} className={`level-${entry.level}`}>
           <a
+            className={scrub?.position === position ? "is-scrubbed" : undefined}
             href={`#pdf-section-${entry.index}`}
             aria-current={entry.index === activeIndex ? "location" : undefined}
             onClick={(event) => {

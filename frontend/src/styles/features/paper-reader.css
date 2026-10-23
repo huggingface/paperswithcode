@@ -96,6 +96,8 @@
 .pdf-outline-panel li.level-1 a { padding-left: 32px; font-size: 13px; color: var(--ink-soft); }
 .pdf-outline-panel a { display: block; padding: 7px 16px; border-radius: 6px; color: var(--ink-muted); text-decoration: none; overflow-wrap: anywhere; }
 .pdf-outline-panel a:hover { background: var(--bg-subtle); color: var(--ink); text-decoration: none; }
+/* The entry for the tick under the pointer, so sliding along the rail reads out the sections. */
+.pdf-outline-panel a.is-scrubbed { background: var(--bg-subtle); color: var(--ink); box-shadow: inset 3px 0 0 var(--accent); }
 .pdf-outline-panel a:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .pdf-outline-panel a[aria-current="location"] { color: var(--accent-text); font-weight: 600; }
 @media (hover: none) {
