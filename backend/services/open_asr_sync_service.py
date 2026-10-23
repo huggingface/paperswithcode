@@ -54,6 +54,7 @@ DEFAULT_COLUMNS = [
     "LS Clean",
     "LS Other",
     "SPGISpeech",
+    "URGENT24",
     "Voice Arena Monsoon",
     "Voxpopuli-AA-Cleaned",
     "Private (scripted)",
@@ -336,11 +337,14 @@ def fetch_open_asr_leaderboard(
 ) -> list[OpenAsrEntry]:
     """Fetch the Space's exact default English leaderboard table."""
     client = client_factory(SPACE_APP_URL, verbose=False)
+    # Keywords keep the call stable when the Space adds inputs; on 2026-10-22
+    # a new leading version_id input made positional arguments misalign.
     payload = client.predict(
-        "",
-        True,
-        False,
-        DEFAULT_COLUMNS,
+        version_id="latest",
+        search_query="",
+        show_proprietary=True,
+        show_llm=False,
+        selected_columns=DEFAULT_COLUMNS,
         api_name="/_main_table_update",
     )
     return parse_open_asr_leaderboard(_leaderboard_value(payload))
