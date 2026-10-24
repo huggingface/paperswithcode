@@ -227,7 +227,7 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
             </div>
             <div className="mb-5 grid gap-3 sm:grid-cols-5">
               <select aria-label="Trigger" className="rounded border px-2 py-1 text-sm" value={trigger} onChange={(event) => setTrigger(event.target.value)}>
-                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option>
+                <option value="">All triggers</option><option value="admin">Admin</option><option value="hf-daily-cron">HF daily cron</option><option value="hf-trending-cron">HF trending cron</option><option value="benchmark-gap-cron">Benchmark gap cron</option><option value="model-release-radar">Release radar</option>
               </select>
               <select aria-label="Status" className="rounded border px-2 py-1 text-sm" value={status} onChange={(event) => setStatus(event.target.value)}>
                 <option value="">All statuses</option>{Object.keys(statusStyles).map((value) => <option key={value}>{value}</option>)}
@@ -275,6 +275,11 @@ export function CodexJobQueue({ autoRefresh, refreshToken }: CodexJobQueueProps)
                             <>
                               <span className="font-medium">Benchmark candidate</span>
                               <div className="mt-1 text-xs cron-muted">{job.benchmark_candidate_id}</div>
+                            </>
+                          ) : job.release_signal_id ? (
+                            <>
+                              <span className="font-medium">Release radar signal</span>
+                              <div className="mt-1 text-xs cron-muted">Signal {job.release_signal_id}</div>
                             </>
                           ) : (
                             <>

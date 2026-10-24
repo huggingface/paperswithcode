@@ -8,10 +8,9 @@ Analysis leaderboard, and a web news search (for labs without a feed, such
 as Reflection's Beam or Aleph Alpha's Kolibri), keeps posts that announce a
 named model, and reports every recent release that no paper row covers yet.
 
-The radar is read-only. Automated jobs must not create external papers
-(scheduled resolution rejects them by policy), so unindexed releases are
-logged as a warning for an operator to index with the add-external-paper and
-add-evals skills.
+Scanning and catalog matching are read-only. The production entrypoint
+records unindexed releases as signals and queues scoped resolution jobs for
+them (see model_release_signal_service).
 """
 
 from __future__ import annotations

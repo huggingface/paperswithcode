@@ -222,9 +222,9 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 
 ## `scan_model_releases`
 
-- **Effect:** Read-only. Prints a JSON report of recent model releases from official lab feeds and unmapped Artificial Analysis models, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It writes no catalog rows; exit 1 only when every source failed.
-- **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`.
-- **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed; a long-lived unindexed release means nobody indexed it, which is a curation gap rather than a job failure.
+- **Effect:** Prints a JSON report of recent model releases from official lab feeds, unmapped Artificial Analysis models, and web news, and logs `model_release_radar_unindexed` / `model_release_radar_source_error` warnings. It upserts each unindexed feed or web release into `model_release_signals` and queues at most 6 `resolve-model-paper` jobs (trigger `model-release-radar`) per UTC day, logged as `model_release_radar_queued`. Exit 1 only when every source failed.
+- **Independent proof:** Open one or two lab news pages and confirm the newest model announcement within 14 days appears in the report with the right indexed/unindexed status and `paper_id`. For a queued signal, check its job in `paper_curation_jobs` (`release_signal_id`) and, once resolved, the signal's `paper_id` page.
+- **Correctness:** Recurring `source_error` for one lab means its feed or page layout changed. Signals stuck in `queued` mean scheduled curation is paused or saturated. A `rejected` signal with a news-page `source_url` refusal in its job's `validation_summary` means the curator could not find a first-party source; read its report before indexing by hand. A long-lived unindexed release that never becomes a signal is an Artificial Analysis slug (report-only) or a web hit seen only once.
 - **Dashboard evidence:** report-only, so a successful systemd exit (the job exits 1 only when every source failed) is the output proof. Read the radar JSON from `journalctl -u pwc-cron-scan-model-releases.service --since '6 hours ago' -o cat | grep '^{'` for `sources_checked` versus `errors`.
 
 ## `export_enrichment_dashboard`

@@ -96,6 +96,7 @@ from backend.models.database.conferences import (
 from backend.models.database.curation import (
     TrendingModelCandidate,
     TrendingModelCurationState,
+    ModelReleaseSignal,
     PaperCurationJob,
     PaperCurationWorkflow,
     BenchmarkCurationCandidate,
@@ -261,6 +262,7 @@ __all__ = [
     "PaperConference",
     "TrendingModelCandidate",
     "TrendingModelCurationState",
+    "ModelReleaseSignal",
     "PaperCurationJob",
     "PaperCurationWorkflow",
     "BenchmarkCurationCandidate",

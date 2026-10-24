@@ -1,4 +1,4 @@
-"""Paper, benchmark, and trending-model curation workflow persistence models."""
+"""Paper, benchmark, trending-model, and release-radar curation persistence models."""
 
 import uuid
 from datetime import date, datetime
@@ -98,6 +98,56 @@ class TrendingModelCurationState(Base):
     )
 
 
+class ModelReleaseSignal(Base):
+    """One model release the release radar reported with no covering paper.
+
+    ``signal_key`` is the normalized lab and model name, so repeated radar
+    runs update one row. A ``resolve-model-paper`` job scoped to the signal
+    finds the lab's own announcement and resolves it to a paper.
+    """
+
+    __tablename__ = "model_release_signals"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    signal_key: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    lab: Mapped[str] = mapped_column(String(255), nullable=False)
+    model_name: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    lead_url: Mapped[str] = mapped_column(Text, nullable=False)
+    # Feed URL of a vendor source, or "web-search".
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    published: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
+    sightings: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, server_default=text("1")
+    )
+    status: Mapped[str] = mapped_column(
+        String(24), nullable=False, default="discovered", server_default="discovered"
+    )
+    rejection_reason: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    paper_id: Mapped[Optional[int]] = mapped_column(
+        BigInteger, ForeignKey("papers.id", ondelete="SET NULL"), nullable=True
+    )
+    first_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    processed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('discovered', 'queued', 'resolving', 'resolved', 'rejected', 'failed')",
+            name="model_release_signals_status_check",
+        ),
+        Index("idx_model_release_signals_status", "status", "last_seen_at"),
+    )
+
+
 class PaperCurationJob(Base):
     """Durable request for a remote Codex paper-curation Job."""
 
@@ -116,6 +166,11 @@ class PaperCurationJob(Base):
     benchmark_candidate_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("benchmark_curation_candidates.id", ondelete="CASCADE"),
+        nullable=True,
+    )
+    release_signal_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("model_release_signals.id", ondelete="CASCADE"),
         nullable=True,
     )
     paper_route: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
@@ -245,14 +300,18 @@ class PaperCurationJob(Base):
             name="paper_curation_jobs_kind_check",
         ),
         CheckConstraint(
-            "(kind = 'resolve-model-paper' AND candidate_id IS NOT NULL "
-            "AND paper_id IS NULL AND benchmark_candidate_id IS NULL) "
+            "(kind = 'resolve-model-paper' AND paper_id IS NULL "
+            "AND benchmark_candidate_id IS NULL "
+            "AND (candidate_id IS NULL) <> (release_signal_id IS NULL)) "
             "OR (kind = 'add-benchmark' AND benchmark_candidate_id IS NOT NULL "
-            "AND paper_id IS NULL AND candidate_id IS NULL) "
+            "AND paper_id IS NULL AND candidate_id IS NULL "
+            "AND release_signal_id IS NULL) "
             "OR (kind = 'review-benchmark-gaps' AND paper_id IS NULL "
-            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL) "
+            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL "
+            "AND release_signal_id IS NULL) "
             "OR (kind IN ('add-evals', 'enrich-paper') AND paper_id IS NOT NULL "
-            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL)",
+            "AND candidate_id IS NULL AND benchmark_candidate_id IS NULL "
+            "AND release_signal_id IS NULL)",
             name="paper_curation_jobs_scope_check",
         ),
         CheckConstraint(
@@ -266,7 +325,7 @@ class PaperCurationJob(Base):
         ),
         CheckConstraint(
             "trigger IN ('admin', 'hf-daily-cron', 'hf-trending-cron', "
-            "'benchmark-promotion', 'benchmark-gap-cron')",
+            "'benchmark-promotion', 'benchmark-gap-cron', 'model-release-radar')",
             name="paper_curation_jobs_trigger_check",
         ),
         Index("idx_paper_curation_jobs_queue", "status", "created_at"),
@@ -304,6 +363,22 @@ class PaperCurationJob(Base):
             "uq_active_trending_model_resolution",
             "candidate_id",
             "policy_version",
+            unique=True,
+            postgresql_where=text(
+                "kind = 'resolve-model-paper' AND status IN ('queued', 'dispatching', 'running')"
+            ),
+            sqlite_where=text(
+                "kind = 'resolve-model-paper' AND status IN ('queued', 'dispatching', 'running')"
+            ),
+        ),
+        Index(
+            "idx_paper_curation_jobs_release_signal",
+            "release_signal_id",
+            "created_at",
+        ),
+        Index(
+            "uq_active_release_signal_resolution",
+            "release_signal_id",
             unique=True,
             postgresql_where=text(
                 "kind = 'resolve-model-paper' AND status IN ('queued', 'dispatching', 'running')"

@@ -1633,8 +1633,9 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         systemd_timer="pwc-cron-scan-model-releases.timer",
         systemd_service="pwc-cron-scan-model-releases.service",
         systemd_extra_units=(),
-        # Report-only: the radar JSON goes to the journal, and the job exits 1
-        # only when every source failed, so a clean exit proves the scan.
+        # The radar JSON goes to the journal and unindexed releases become
+        # queued resolution jobs. The job exits 1 only when every source
+        # failed, so a clean exit proves the scan.
         output_evaluator="report_only",
         display_name="Model Release Radar",
         category="hourly",

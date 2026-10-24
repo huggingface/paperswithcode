@@ -504,10 +504,10 @@ COMMANDS: dict[str, Job] = {
         "-m",
         "backend.scripts.scan_model_releases",
         timeout="30m",
-        mutates_shared_data=False,
         idempotency=(
-            "read-only scan of official lab news feeds and unmapped Artificial "
-            "Analysis models for releases without a paper row"
+            "scan lab news feeds, unmapped Artificial Analysis models, and web "
+            "news for releases without a paper row; upsert one signal per "
+            "release and queue at most 6 scoped resolution jobs per UTC day"
         ),
     ),
     "discover_x_threads": job(

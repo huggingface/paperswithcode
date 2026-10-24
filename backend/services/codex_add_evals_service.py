@@ -30,6 +30,7 @@ from backend.models.database import (
     BenchmarkCurationCandidate,
     BenchmarkCurationEvidence,
     ModelRelease,
+    ModelReleaseSignal,
     Paper,
     PaperCurationJob,
     PaperCurationSchedulerState,
@@ -56,10 +57,14 @@ JobKind = Literal[
 ]
 BENCHMARK_GAP_KINDS = frozenset({"review-benchmark-gaps", "add-benchmark"})
 BENCHMARK_GAP_TRIGGER = "benchmark-gap-cron"
+# Release-radar resolutions share the scheduled pause, capacity, and the
+# trending-model resolution lane.
+RADAR_TRIGGER = "model-release-radar"
+RADAR_POLICY_VERSION = "model-release-radar-v1"
 # Benchmark-gap work shares the scheduled pause and capacity, but gets its own
 # small lane so a constant daily backlog cannot starve it.
 SCHEDULED_TRIGGERS = frozenset(
-    {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER}
+    {"hf-daily-cron", "hf-trending-cron", BENCHMARK_GAP_TRIGGER, RADAR_TRIGGER}
 )
 BENCHMARK_GAP_MAX_ACTIVE = 2
 # Health breakers that count only daily/trending paper stages. The daily
@@ -130,6 +135,7 @@ class CodexPaperJob(BaseModel):
     paper_id: int | None
     candidate_id: uuid.UUID | None = None
     benchmark_candidate_id: uuid.UUID | None = None
+    release_signal_id: uuid.UUID | None = None
     paper_route: str | None
     paper_title: str | None
     requested_by: str
@@ -354,6 +360,7 @@ class CodexPaperJobService:
             paper_id=int(row.paper_id) if row.paper_id is not None else None,
             candidate_id=getattr(row, "candidate_id", None),
             benchmark_candidate_id=getattr(row, "benchmark_candidate_id", None),
+            release_signal_id=getattr(row, "release_signal_id", None),
             paper_route=row.paper_route,
             paper_title=row.paper_title,
             requested_by=row.requested_by,
@@ -511,6 +518,58 @@ class CodexPaperJobService:
             retry_of_id=retry_of_id,
         )
         candidate.status = "queued"
+        db.add(row)
+        if commit:
+            db.commit()
+            db.refresh(row)
+        else:
+            db.flush()
+        if dispatch:
+            self.dispatch_next(db, settings)
+        if commit:
+            db.refresh(row)
+        return self.serialize(row, settings)
+
+    def enqueue_signal_resolution(
+        self,
+        db: Session,
+        *,
+        signal: ModelReleaseSignal,
+        requested_by: str,
+        settings: Settings,
+        dispatch: bool = True,
+        commit: bool = True,
+        retry_of_id: uuid.UUID | None = None,
+    ) -> CodexPaperJob:
+        """Queue one release-radar signal for paper resolution."""
+        repository_sha = _git_revision()
+        row = PaperCurationJob(
+            id=uuid.uuid4(),
+            kind="resolve-model-paper",
+            paper_id=None,
+            release_signal_id=signal.id,
+            paper_route=None,
+            paper_title=None,
+            requested_by=requested_by,
+            status="queued",
+            trigger=RADAR_TRIGGER,
+            cohort_date=_now().date(),
+            policy_version=RADAR_POLICY_VERSION,
+            priority=25,
+            repository_sha=repository_sha if len(repository_sha) == 40 else None,
+            skill_sha256=_curator_skill_digest("resolve-model-paper"),
+            bootstrap_bundle=(
+                _curator_bootstrap_bundle(repository_sha)
+                if len(repository_sha) == 40
+                else None
+            ),
+            model=settings.codex_jobs_model,
+            reasoning_effort=settings.codex_jobs_reasoning_effort,
+            codex_cli_version=settings.codex_jobs_cli_version,
+            validator_version="release-radar-policy-v1",
+            retry_of_id=retry_of_id,
+        )
+        signal.status = "queued"
         db.add(row)
         if commit:
             db.commit()
@@ -771,7 +830,7 @@ class CodexPaperJobService:
         return (
             db.query(PaperCurationJob)
             .filter(
-                PaperCurationJob.trigger == "hf-trending-cron",
+                PaperCurationJob.trigger.in_({"hf-trending-cron", RADAR_TRIGGER}),
                 PaperCurationJob.status == "queued",
             )
             .order_by(
@@ -1022,6 +1081,9 @@ class CodexPaperJobService:
                 candidate = db.get(TrendingModelCandidate, row.candidate_id)
                 if candidate is not None:
                     candidate.status = "resolving"
+            signal = self._release_signal(db, row)
+            if signal is not None:
+                signal.status = "resolving"
             db.commit()
             image = self._verified_job_image(db, settings, row)
             image_name = image.rsplit("/", 1)[-1]
@@ -1051,6 +1113,7 @@ class CodexPaperJobService:
                     candidate.status = "failed"
                     candidate.rejection_reason = row.error
                     candidate.processed_at = _now()
+            self._fail_release_signal(db, row)
             self._advance_workflow(db, row, settings)
             db.commit()
 
@@ -1163,6 +1226,8 @@ class CodexPaperJobService:
                         if getattr(row, "candidate_id", None) is not None
                         else str(row.benchmark_candidate_id)
                         if getattr(row, "benchmark_candidate_id", None) is not None
+                        else str(row.release_signal_id)
+                        if getattr(row, "release_signal_id", None) is not None
                         else ""
                     ),
                     "kind": row.kind,
@@ -1410,6 +1475,18 @@ class CodexPaperJobService:
                 retry_of_id=row.id,
             )
             db.commit()
+        elif row.kind == "resolve-model-paper" and row.release_signal_id is not None:
+            signal = db.get(ModelReleaseSignal, row.release_signal_id)
+            if signal is None:
+                raise LookupError("Release signal no longer exists")
+            retried = self.enqueue_signal_resolution(
+                db,
+                signal=signal,
+                requested_by="admin-retry",
+                settings=settings,
+                retry_of_id=row.id,
+                dispatch=False,
+            )
         elif row.kind == "resolve-model-paper":
             candidate = db.get(TrendingModelCandidate, row.candidate_id)
             if candidate is None:
@@ -1647,6 +1724,8 @@ class CodexPaperJobService:
                     candidate.status = "failed"
                     candidate.rejection_reason = row.error
                     candidate.processed_at = _now()
+        if row.status != "completed":
+            self._fail_release_signal(db, row)
         self._advance_workflow(db, row, settings)
         db.flush()
         self._evaluate_scheduled_health(db, row)
@@ -1655,6 +1734,24 @@ class CodexPaperJobService:
         db.commit()
         self.dispatch_next(db, settings)
         return self.serialize(row, settings)
+
+    @staticmethod
+    def _release_signal(
+        db: Session, row: PaperCurationJob
+    ) -> ModelReleaseSignal | None:
+        signal_id = getattr(row, "release_signal_id", None)
+        if getattr(row, "kind", None) != "resolve-model-paper" or signal_id is None:
+            return None
+        return db.get(ModelReleaseSignal, signal_id)
+
+    @classmethod
+    def _fail_release_signal(cls, db: Session, row: PaperCurationJob) -> None:
+        """Mark an unresolved signal failed so a later sighting can retry it."""
+        signal = cls._release_signal(db, row)
+        if signal is not None and signal.status not in {"resolved", "rejected"}:
+            signal.status = "failed"
+            signal.rejection_reason = row.error
+            signal.processed_at = _now()
 
     @staticmethod
     def _awaits_markdown(row: PaperCurationJob) -> bool:
@@ -1905,6 +2002,7 @@ class CodexPaperJobService:
             )
         row.status = "canceled"
         row.finished_at = _now()
+        self._fail_release_signal(db, row)
         self._advance_workflow(db, row, settings)
         db.commit()
         self.dispatch_next(db, settings)

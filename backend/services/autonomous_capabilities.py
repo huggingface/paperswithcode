@@ -35,6 +35,7 @@ class ResourceKind(StrEnum):
     EVALUATION = "evaluation"
     EXTERNAL_PAPER = "external_paper"
     TRENDING_MODEL_CANDIDATE = "trending_model_candidate"
+    MODEL_RELEASE_SIGNAL = "model_release_signal"
     BENCHMARK_CANDIDATE = "benchmark_candidate"
     DECLARED_CRON = "declared_cron"
     SOURCE_REPAIR = "source_repair"
@@ -131,8 +132,13 @@ CAPABILITY_RESOURCE_KINDS: Mapping[Capability, frozenset[ResourceKind]] = (
             ),
             Capability.APPLY_PAPER_METADATA_EDIT: frozenset({ResourceKind.PAPER}),
             Capability.CREATE_EXTERNAL_PAPER: frozenset({ResourceKind.EXTERNAL_PAPER}),
+            # Release-radar resolutions may create an external paper; the
+            # resolution service requires a first-party, non-duplicate source.
             Capability.RESOLVE_MODEL_PAPER: frozenset(
-                {ResourceKind.TRENDING_MODEL_CANDIDATE}
+                {
+                    ResourceKind.TRENDING_MODEL_CANDIDATE,
+                    ResourceKind.MODEL_RELEASE_SIGNAL,
+                }
             ),
             Capability.CREATE_BENCHMARK_FROM_GAP: frozenset(
                 {ResourceKind.BENCHMARK_CANDIDATE}

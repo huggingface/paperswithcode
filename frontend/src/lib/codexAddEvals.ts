@@ -32,6 +32,7 @@ export interface CodexPaperJob {
   paper_id: number | null;
   candidate_id: string | null;
   benchmark_candidate_id: string | null;
+  release_signal_id?: string | null;
   paper_route: string | null;
   paper_title: string | null;
   requested_by: string;
@@ -49,7 +50,7 @@ export interface CodexPaperJob {
   attempt_count: number;
   thumbnail: CodexThumbnailResult | null;
   parent_workflow_id: string | null;
-  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion" | "benchmark-gap-cron";
+  trigger: "admin" | "hf-daily-cron" | "hf-trending-cron" | "benchmark-promotion" | "benchmark-gap-cron" | "model-release-radar";
   cohort_date: string | null;
   policy_version: string;
   repository_sha: string | null;

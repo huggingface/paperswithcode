@@ -280,7 +280,7 @@ Preview one kind with:
 uv run --env-file backend/keys.env python -m backend.scripts.post_x_insight --dry-run --kind new_sota --save-image /tmp/card.png
 ```
 
-`scan_model_releases.py` is a read-only radar for model releases that neither
+`scan_model_releases.py` is a radar for model releases that neither
 the daily-paper import (arXiv only) nor the trending-model curation (Hub
 weights only) can see, such as API-only or blog-first launches. Every three
 hours it reads the official news feeds of OpenAI and Google DeepMind (RSS) and
@@ -290,19 +290,36 @@ Artificial Analysis leaderboard models that are missing from the reviewed
 `MODEL_PAPER_IDENTITIES` map. Each release from the last 14 days is matched
 against `papers.source_url`, paper titles, `model_releases`, and
 `artificial-analysis` provider aliases. Unindexed releases are logged as a
-`model_release_radar_unindexed` warning for an operator to index with the
-`add-external-paper` and `add-evals` skills; scheduled jobs never create
-external papers. Releases from any other lab (for example Reflection's Beam,
+`model_release_radar_unindexed` warning. Releases from any other lab (for example Reflection's Beam,
 Aleph Alpha's Kolibri, or Meta's Muse Wonder) are found through a web news
 search: four Exa news queries over the last three days (`EXA_API_KEY`, about
 $0.09 per run) whose deduplicated headlines `gpt-5.6-luna` turns into
 (lab, model, date, cited hits) releases (`OPENAI_API_KEY`). A web signal links
 the lab's own announcement page when one of the hits is from the lab, and a
 news article otherwise. Pass `--skip-web-search` to scan only the feeds and
-the leaderboard. Run it by hand with:
+the leaderboard.
+
+Each unindexed feed or web release (not Artificial Analysis slugs, which have
+no announcement page) is upserted into `model_release_signals`, one row per
+normalized lab and model name. A signal qualifies for curation on its first
+sighting from a vendor feed, or on its second web-search sighting, because
+web extraction varies from run to run. Each qualifying signal gets one
+`resolve-model-paper` job (trigger `model-release-radar`, at most 6 per UTC
+day, on the scheduled curation pause and capacity). The curator finds the
+lab's own announcement and resolves the release to an existing paper (old news
+about an indexed release), an arXiv report, or a new external paper. The
+backend refuses an external paper whose source is not on the publisher's own
+site or Hub/GitHub organization, that reuses the news lead's host, or that
+duplicates an indexed paper's source, title, or model release. A new external
+paper gets the usual enrich-paper -> add-evals workflow, and the resolution
+records a `model_releases` row so later scans see the release as indexed. A
+failed resolution retries after two days if the radar still sees the release;
+rejected signals stay closed. Hugging Face trending-model resolutions still
+cannot create external papers. Run it by hand with (`--report-only` skips the
+signal table and queue):
 
 ```bash
-uv run --env-file backend/keys.env python -m backend.scripts.scan_model_releases --lookback-days 30
+uv run --env-file backend/keys.env python -m backend.scripts.scan_model_releases --lookback-days 30 --report-only
 ```
 
 `extract_urls.py` uses Gemini to find official GitHub repositories and project
