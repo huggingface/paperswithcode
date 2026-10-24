@@ -20,7 +20,7 @@ BEGIN
     IF (
         SELECT count(*) FROM tasks
         WHERE (id, slug) IN (
-            (308, 'document-understanding'), (8, 'image-understanding'),
+            (308, 'document-understanding'), (437, 'visual-grounding'),
             (917, 'composed-image-retrieval'), (865, 'code-generation'),
             (351, 'earth-observation')
         )
@@ -65,7 +65,7 @@ INSERT INTO submitted_benchmarks VALUES
  'LongDocURL evaluates large vision-language models on long, visually rich documents (average of about 86 pages). Its 2,325 human-verified question-answer pairs span 20 sub-tasks grouped into three primary tasks: long-document Understanding, numerical Reasoning, and cross-element Locating, with evidence drawn from text, layout, charts and images, and tables on single or multiple pages. The leaderboard reports the overall generalized accuracy score (0-100) on the full benchmark.'),
 ('refcoco-plus', 'RefCOCO+',
  'RefCOCO+ (Referring Expressions COCO+, val split)',
- 434, 8, 'Accuracy', 'https://github.com/lichengunc/refer', DATE '2016-07-31',
+ 434, 437, 'Accuracy', 'https://github.com/lichengunc/refer', DATE '2016-07-31',
  '["images", "text"]', 'judge', ARRAY['RefCOCO+', 'RefCOCO plus'],
  'A referring expression comprehension benchmark on MS COCO images whose expressions avoid absolute location words.',
  'RefCOCO+ contains 141,564 referring expressions for 49,856 objects in 19,992 MS COCO images, collected with the ReferIt game. Unlike RefCOCO, location words such as "left" or "right" were disallowed, so expressions describe objects by appearance. Referring expression comprehension models localize the described object, and a prediction counts as correct when its box has IoU of at least 0.5 with the ground truth. This leaderboard reports top-1 accuracy on the val split; testA (people) and testB (other objects) results are not mixed into it.'),

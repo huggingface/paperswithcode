@@ -2,6 +2,8 @@
 -- 2026-10-24 triage. Hero images are imported separately with
 -- import_entity_image.py; this migration only records the taxonomy rows.
 
+BEGIN;
+
 CREATE TEMP TABLE submitted_tasks (
     slug text PRIMARY KEY,
     name text NOT NULL,
@@ -114,3 +116,5 @@ SET parent_id = (SELECT id FROM tasks WHERE slug = 'image-quality-assessment'),
     level = 1,
     updated_at = CURRENT_TIMESTAMP
 WHERE slug = 'no-reference-image-quality-assessment';
+
+COMMIT;
