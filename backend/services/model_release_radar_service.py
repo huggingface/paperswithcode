@@ -216,6 +216,9 @@ class ReleaseSignal:
     status: Literal["indexed", "unindexed"] = "unindexed"
     paper_id: int | None = None
     matched_by: str | None = None
+    # A web signal's url is the lab's own page only when the extractor cited
+    # one; otherwise it is a news article.
+    official_url: bool = False
 
     def to_dict(self) -> dict:
         payload = asdict(self)
@@ -631,7 +634,8 @@ def web_search_signals(
         # The model must cite hits; uncited or invented ids are dropped.
         cited = [ordered[i] for i in release.hit_ids if 0 <= i < len(ordered)]
         official_id = release.official_hit_id
-        if official_id is not None and 0 <= official_id < len(ordered):
+        official = official_id is not None and 0 <= official_id < len(ordered)
+        if official:
             cited.insert(0, ordered[official_id])
         if not cited or not release.model_name.strip():
             continue
@@ -649,6 +653,7 @@ def web_search_signals(
                 title=cited[0].title,
                 url=cited[0].url,
                 published=published,
+                official_url=official,
             )
         )
     return signals

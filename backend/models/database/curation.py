@@ -118,6 +118,11 @@ class ModelReleaseSignal(Base):
     lead_url: Mapped[str] = mapped_column(Text, nullable=False)
     # Feed URL of a vendor source, or "web-search".
     source: Mapped[str] = mapped_column(Text, nullable=False)
+    # The lead is the lab's own page (a vendor feed, or a web hit the
+    # extractor cited as official), not a news article.
+    lead_is_official: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False, server_default=text("false")
+    )
     published: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     sightings: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default=text("1")

@@ -64,6 +64,9 @@ PAPER_CANDIDATE_LIMIT = 20
 
 # Hosts whose first path segment names the publishing organization.
 _ORGANIZATION_HOSTS = frozenset({"huggingface.co", "github.com", "modelscope.cn"})
+_ORGANIZATION_PATH_PREFIXES = frozenset(
+    {"models", "datasets", "spaces", "collections", "organizations"}
+)
 _GENERIC_TOKENS = frozenset(
     {
         "the",
@@ -124,6 +127,7 @@ def record_release_signals(
                 row.processed_at = now
             continue
         seen += 1
+        official = signal.source != WEB_SEARCH_PROVIDER or signal.official_url
         if row is None:
             db.add(
                 ModelReleaseSignal(
@@ -134,6 +138,7 @@ def record_release_signals(
                     title=signal.title,
                     lead_url=signal.url,
                     source=signal.source,
+                    lead_is_official=official,
                     published=signal.published,
                     first_seen_at=now,
                     last_seen_at=now,
@@ -142,11 +147,15 @@ def record_release_signals(
             continue
         row.sightings += 1
         row.last_seen_at = now
-        # A vendor feed is a better lead than a news page about the release.
-        if row.source == WEB_SEARCH_PROVIDER and signal.source != WEB_SEARCH_PROVIDER:
+        # The lab's own page is a better lead than a news page about the
+        # release, and a vendor feed outranks a web hit.
+        if (official and not row.lead_is_official) or (
+            row.source == WEB_SEARCH_PROVIDER and signal.source != WEB_SEARCH_PROVIDER
+        ):
             row.source = signal.source
             row.lead_url = signal.url
             row.title = signal.title
+            row.lead_is_official = official
     db.flush()
     return seen
 
@@ -287,11 +296,15 @@ def _host_tokens(url: str) -> tuple[set[str], bool]:
     parts = urlsplit(url)
     host = (parts.hostname or "").casefold().removeprefix("www.")
     if host in _ORGANIZATION_HOSTS:
-        owner = parts.path.strip("/").split("/", 1)[0]
-        return _identity_tokens(owner), True
+        segments = [segment for segment in parts.path.split("/") if segment]
+        # huggingface.co/collections/<org>/..., modelscope.cn/models/<org>/...
+        if segments and segments[0] in _ORGANIZATION_PATH_PREFIXES:
+            segments = segments[1:]
+        return _identity_tokens(segments[0] if segments else None), True
     labels = host.split(".")
-    # Drop the top-level domain ("kimi.com" -> "kimi", "deepmind.google").
-    return _identity_tokens(*labels[:-1]), False
+    # Brand TLDs and short names count too: "blog.google", "x.ai" -> "xai".
+    pairs = ["".join(labels[index : index + 2]) for index in range(len(labels) - 1)]
+    return _identity_tokens(*labels, *pairs), False
 
 
 def _names_match(token: str, name: str, *, account: bool) -> bool:
@@ -471,7 +484,7 @@ class ReleaseSignalResolutionService:
                 proposal.canonical_name,
                 *proposal.aliases,
             ],
-            lead_url=signal.lead_url if signal.source == WEB_SEARCH_PROVIDER else None,
+            lead_url=None if signal.lead_is_official else signal.lead_url,
         ):
             raise ValueError(
                 "An external paper's source_url must be the publisher's own "

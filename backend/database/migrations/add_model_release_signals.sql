@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS public.model_release_signals (
     title TEXT NOT NULL,
     lead_url TEXT NOT NULL,
     source TEXT NOT NULL,
+    lead_is_official BOOLEAN NOT NULL DEFAULT false,
     published DATE,
     sightings INTEGER NOT NULL DEFAULT 1,
     status VARCHAR(24) NOT NULL DEFAULT 'discovered',

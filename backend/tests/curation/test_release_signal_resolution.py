@@ -125,6 +125,7 @@ def _signal_row(db, model="Kimi K3.1 Pro", *, status="queued", lead=None):
         title=f"Moonshot AI launches {model}",
         lead_url=lead or "https://siliconangle.com/2026/10/23/kimi-k3-1-pro",
         source=WEB_SEARCH_PROVIDER,
+        lead_is_official=False,
         published=date(2026, 10, 23),
         sightings=2,
         status=status,
@@ -233,6 +234,31 @@ def fake_external(monkeypatch):
             True,
         ),
         ("https://mistralnews.com/voxtral-3", ["Mistral AI", "Voxtral 3"], None, False),
+        ("https://x.ai/news/grok-5", ["xAI", "Grok 5"], None, True),
+        (
+            "https://blog.google/technology/gemini-4",
+            ["Google DeepMind", "Gemini 4"],
+            None,
+            True,
+        ),
+        (
+            "https://research.google/blog/a-model",
+            ["Google Research", "A Model"],
+            None,
+            True,
+        ),
+        (
+            "https://modelscope.cn/models/Tencent-Hunyuan/Hy3",
+            ["Tencent", "Hunyuan Hy3"],
+            None,
+            True,
+        ),
+        (
+            "https://huggingface.co/collections/tencent/hy3",
+            ["Tencent", "Hunyuan Hy3"],
+            None,
+            True,
+        ),
         (
             "https://kimiupdates.com/b",
             ["Moonshot AI", "Kimi K3.1 Pro"],
@@ -576,3 +602,33 @@ def test_radar_jobs_dispatch_in_the_trending_resolution_lane(db):
     )
     picked = CodexPaperJobService._next_trending_row(db)
     assert picked is not None and picked.release_signal_id == row.id
+
+
+def test_official_web_lead_may_be_the_source(db, fake_external):
+    source = "https://www.kimi.com/blog/kimi-k3-1-pro"
+    row = _signal_row(db, lead=source)
+    row.lead_is_official = True
+    db.flush()
+    result = signals.ReleaseSignalResolutionService(db).apply(
+        row.id, _accept(source), commit=False
+    )
+    assert result["status"] == "resolved"
+    assert fake_external.created == [{"source_url": source}]
+
+
+def test_news_lead_is_upgraded_to_an_official_web_hit(db):
+    news = _radar_signal("Kimi K3.1 Pro")
+    signals.record_release_signals(db, RadarReport(14, [news]), now=NOW)
+    row = db.query(ModelReleaseSignal).one()
+    assert row.lead_is_official is False
+
+    official = _radar_signal(
+        "Kimi K3.1 Pro", url="https://www.kimi.com/blog/kimi-k3-1-pro"
+    )
+    official.official_url = True
+    signals.record_release_signals(db, RadarReport(14, [official]), now=NOW)
+    assert row.lead_url == "https://www.kimi.com/blog/kimi-k3-1-pro"
+    assert row.lead_is_official is True
+    # A later news-only sighting keeps the official lead.
+    signals.record_release_signals(db, RadarReport(14, [news]), now=NOW)
+    assert row.lead_url == "https://www.kimi.com/blog/kimi-k3-1-pro"

@@ -453,7 +453,9 @@ def test_web_search_reports_releases_from_any_lab():
         date(2026, 10, 9),
         "unindexed",
     )
+    assert beam.official_url is True
     assert by_name["Kolibri"].url == "https://news.example.com/kolibri"
+    assert by_name["Kolibri"].official_url is False
     assert (by_name["Odyssey-3"].matched_by, by_name["Odyssey-3"].paper_id) == (
         "title",
         700,

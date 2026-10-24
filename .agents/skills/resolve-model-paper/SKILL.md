@@ -67,8 +67,9 @@ benchmark scores, paper IDs, or URLs.
 A `model-release-radar` job's context has `release_signal` (lab, model name,
 headline, `lead_url`, publish date, sightings) and `paper_candidates`.
 `candidate.model_card_url` is the same lead URL, not a model card. When
-`lead_is_first_party` is false the lead is a news page: use it only to learn
-what was announced, never as a source.
+`lead_is_first_party` is true the lead is the lab's own page and may be the
+source once you confirm it. When it is false the lead is a news page: use it
+only to learn what was announced, never as a source.
 
 1. **Find the lab's own announcement.** Search the web for the release on the
    publisher's own site (blog, news post, tech report, docs page) and its

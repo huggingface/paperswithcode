@@ -300,7 +300,7 @@ class CodexCurationCallbackService:
                 "model_name": signal.model_name,
                 "title": signal.title,
                 "lead_url": signal.lead_url,
-                "lead_is_first_party": signal.source != "web-search",
+                "lead_is_first_party": signal.lead_is_official,
                 "published": (
                     signal.published.isoformat() if signal.published else None
                 ),
