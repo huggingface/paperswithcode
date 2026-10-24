@@ -235,6 +235,8 @@ def fake_external(monkeypatch):
         ),
         ("https://mistralnews.com/voxtral-3", ["Mistral AI", "Voxtral 3"], None, False),
         ("https://x.ai/news/grok-5", ["xAI", "Grok 5"], None, True),
+        # A public TLD is not a name: a ".pro" news site is not Kimi's.
+        ("https://ainews.pro/kimi-k3-1", ["Moonshot AI", "Kimi K3.1 Pro"], None, False),
         (
             "https://blog.google/technology/gemini-4",
             ["Google DeepMind", "Gemini 4"],

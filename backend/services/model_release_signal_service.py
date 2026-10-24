@@ -64,6 +64,10 @@ PAPER_CANDIDATE_LIMIT = 20
 
 # Hosts whose first path segment names the publishing organization.
 _ORGANIZATION_HOSTS = frozenset({"huggingface.co", "github.com", "modelscope.cn"})
+# Top-level domains owned by one company, so the TLD itself names it.
+_BRAND_TLDS = frozenset(
+    {"google", "microsoft", "nvidia", "amazon", "apple", "ibm", "baidu", "alibaba"}
+)
 _ORGANIZATION_PATH_PREFIXES = frozenset(
     {"models", "datasets", "spaces", "collections", "organizations"}
 )
@@ -302,9 +306,11 @@ def _host_tokens(url: str) -> tuple[set[str], bool]:
             segments = segments[1:]
         return _identity_tokens(segments[0] if segments else None), True
     labels = host.split(".")
-    # Brand TLDs and short names count too: "blog.google", "x.ai" -> "xai".
+    # A public TLD (".pro", ".news") never names the publisher; a brand TLD
+    # does ("blog.google"). Joined labels catch short names: "x.ai" -> "xai".
+    names = labels[:-1] + [label for label in labels[-1:] if label in _BRAND_TLDS]
     pairs = ["".join(labels[index : index + 2]) for index in range(len(labels) - 1)]
-    return _identity_tokens(*labels, *pairs), False
+    return _identity_tokens(*names, *pairs), False
 
 
 def _names_match(token: str, name: str, *, account: bool) -> bool:
