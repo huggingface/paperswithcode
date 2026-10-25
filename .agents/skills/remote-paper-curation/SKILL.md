@@ -27,6 +27,29 @@ the relevant body, experiment tables, and captions yourself before curating.
 If no substantive source can be read, report the failure rather than marking
 the source inspected or URL extraction complete.
 
+An external paper (`paper.source == "external"`) is a release page, model
+card, or report with no arXiv text, so its manifest usually has no
+`paper_markdown` or `paper_pdf`. Then the `paper_source` document is the paper:
+read it in full, together with the `model_card`, `github_readme`, and
+`project_page` documents, and curate from them exactly as you would from paper
+text. The missing Markdown or PDF is not missing evidence. For `enrich-paper`:
+
+- Tag the tasks and methods the release page states. Examples: a speech-only
+  conversation model is speech-to-speech or spoken dialogue, and an action
+  model for robots is robotics or robot manipulation. Use only existing
+  taxonomy entries and the same high-confidence bar as for paper text.
+- Add the official Hugging Face repositories the page links or is itself, to
+  `hf_models`, `hf_datasets`, or `hf_spaces`. A `paper.source_url` on
+  `huggingface.co/<org>/<repo>` is the release's own model card. Include the
+  publisher's official quantized or size variants of this release, never
+  community mirrors or fine-tunes.
+- Link the publisher as an organization when the page names it.
+- Set `urls_extracted=true` after this complete check, including a clean
+  no-result.
+
+Report a release page that cannot be read (blocked, empty, or a script shell
+with no text) as a source failure; do not tag from the title alone.
+
 For enrichment, search the existing task taxonomy for the actual contribution,
 including when the paper starts with no tasks. Accept an official artifact only
 when it belongs to this exact paper. Shared navigation links to sibling products,

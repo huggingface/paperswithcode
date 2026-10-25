@@ -373,6 +373,21 @@ def test_remote_runner_checks_markdown_before_both_curation_stages():
     assert preflight < awaiting_gate < enrich_only
 
 
+def test_remote_curation_reads_external_release_pages_as_the_paper():
+    skill = " ".join(
+        Path(".agents/skills/remote-paper-curation/SKILL.md")
+        .read_text(encoding="utf-8")
+        .split()
+    )
+
+    # Blog-only external papers have no Markdown/PDF; the release page is the
+    # paper, so enrichment must still tag tasks and add official Hub repos.
+    assert "the `paper_source` document is the paper" in skill
+    assert "The missing Markdown or PDF is not missing evidence." in skill
+    assert "is the release's own model card" in skill
+    assert "do not tag from the title alone" in skill
+
+
 def test_remote_add_evals_requires_configured_leaderboard_search():
     skill = Path(".agents/skills/remote-paper-curation/SKILL.md").read_text(
         encoding="utf-8"
