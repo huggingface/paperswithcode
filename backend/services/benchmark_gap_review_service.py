@@ -60,7 +60,7 @@ MIN_DISTINCT_PAPERS = 3
 ELIGIBLE_CONFIDENCE = ("high", "medium")
 # The remote runner gives Codex 20 minutes; this bounds the overseer's reading.
 REVIEW_BATCH_LIMIT = 150
-DAILY_CREATION_CAP = 20
+DAILY_CREATION_CAP = 40
 DEFER_DAYS = 14
 FAILURE_RETRY_DAYS = 3
 MAX_CREATION_FAILURES = 2

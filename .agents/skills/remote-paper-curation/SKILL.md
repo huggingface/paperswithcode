@@ -407,7 +407,7 @@ summaries in the context; do not research candidates one by one (the
 
 You are the quality gate, not a rubber stamp: three papers mentioning a name
 does not make it a benchmark worth a leaderboard. Every approval queues
-catalog writes (at most 20 a day), and a wrong one lands a leaderboard on the
+catalog writes (at most 40 a day), and a wrong one lands a leaderboard on the
 wrong task or metric. Read each candidate's `reported_tasks` and
 `reported_metrics` (distinct reporting papers per task and metric),
 `reported_splits`, `recommendations`, `evidence_papers`, and catalog matches

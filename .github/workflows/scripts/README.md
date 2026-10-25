@@ -220,7 +220,7 @@ agents report into configured leaderboards. Once per UTC day it queues one
 `review-benchmark-gaps` overseer job that sees every candidate reported by at
 least three distinct papers (high or medium confidence, up to 150 per run) and
 approves, merges, rejects, or defers each. Each approved candidate gets one
-`add-benchmark` job, at most 20 per UTC day, that finds the introducing paper,
+`add-benchmark` job, at most 40 per UTC day, that finds the introducing paper,
 the most specific task, and one to three metrics; the backend validates and
 writes the rows, then requeues add-evals for the papers that reported the gap.
 Rejected candidates return for review once their paper count doubles; deferred
