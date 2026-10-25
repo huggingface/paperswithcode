@@ -113,6 +113,23 @@ def read_paged_markdown_bounded(
         raise
 
 
+def drop_partial_marker(markdown: str) -> str:
+    """Cut a truncated prefix before a layout comment the byte limit split.
+
+    A whole marker rewrites to the same tag in the prefix and the full text, so
+    the prefix stays a byte-exact prefix of the full citable text.
+    """
+    start = markdown.rfind("<")
+    tail = markdown[start:]
+    if (
+        start != -1
+        and "-->" not in tail
+        and (tail.startswith("<!--") or "<!--".startswith(tail))
+    ):
+        return markdown[:start]
+    return markdown
+
+
 def citable_markdown(markdown: str) -> str:
     """Rewrite layout comments into compact plain-text tags the model can cite.
 

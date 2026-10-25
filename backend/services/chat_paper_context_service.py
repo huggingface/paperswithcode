@@ -34,6 +34,7 @@ from backend.services.chat_session_service import ChatServiceError
 from backend.services.paper_layout_service import (
     PaperLayoutNotFoundError,
     citable_markdown,
+    drop_partial_marker,
     read_paged_markdown_bounded,
 )
 from backend.services.paper_markdown_service import read_paper_markdown_bounded
@@ -385,6 +386,8 @@ class ChatPaperContextService:
                     token=self.settings.hf_token or None,
                     max_bytes=MARKDOWN_LIMIT_BYTES,
                 )
+                if truncated:
+                    markdown = drop_partial_marker(markdown)
                 markdown = citable_markdown(markdown.replace("\x00", " "))
                 available = True
                 origin = "layout_markdown"

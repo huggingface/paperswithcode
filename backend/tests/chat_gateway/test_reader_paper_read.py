@@ -224,3 +224,28 @@ def test_gateway_reports_a_stale_layout_cursor(monkeypatch):
             )
         )
     assert error.value.status_code == 409
+
+
+def test_unreadable_sidecar_still_returns_the_tagged_text(layout, monkeypatch):
+    def unreadable(*args, **kwargs):
+        raise OSError("bucket unavailable")
+
+    monkeypatch.setattr(reader_read, "read_paper_layout", unreadable)
+    page = read_reader_paper(FakeDb(CONTEXT), SETTINGS, "turn", {"paper": "131293"})[
+        "structuredContent"
+    ]
+
+    assert page["markdown"].startswith("[page 1]") and page["next_cursor"] is None
+
+
+def test_truncated_context_prefix_continues_byte_exactly_at_any_cut():
+    from backend.services.paper_layout_service import (
+        citable_markdown,
+        drop_partial_marker,
+    )
+
+    raw = layout_markdown(3)
+    full = citable_markdown(raw).encode()
+    for cut in range(len(raw)):
+        prefix = citable_markdown(drop_partial_marker(raw[:cut])).encode()
+        assert full.startswith(prefix), cut

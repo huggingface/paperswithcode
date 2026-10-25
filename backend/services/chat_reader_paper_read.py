@@ -139,12 +139,21 @@ def read_reader_paper(
     if end < len(data):
         return _result(paper, text, f"{CURSOR_PREFIX}{version}:{end}")
 
-    layout = read_paper_layout(
-        markdown_id,
-        source=source,
-        bucket_id=settings.paper_layout_hf_bucket_id,
-        token=settings.hf_token or None,
-    )
+    try:
+        layout = read_paper_layout(
+            markdown_id,
+            source=source,
+            bucket_id=settings.paper_layout_hf_bucket_id,
+            token=settings.hf_token or None,
+        )
+    except (ValueError, KeyError, OSError) as error:
+        # The sidecar only says whether pages are missing; keep the tagged text.
+        logger.warning(
+            "chat reader paper read outcome=sidecar_unavailable paper_id=%s error=%s",
+            context["paper_id"],
+            type(error).__name__,
+        )
+        return _result(paper, text, None)
     if layout["processed_pages"] >= layout["page_count"]:
         return _result(paper, text, None)
     text += (
