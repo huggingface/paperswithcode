@@ -44,6 +44,11 @@ merely because the card cites it. If no matching existing or arXiv paper documen
 the exact release, reject the candidate. A later cron run can resolve it after a
 genuine paper appears.
 
+The backend refuses a resolution whose paper title names the same model family
+with a different version (Nanbeige4.3-33B onto "Nanbeige4.2-3B: ...", Kimi K3.1
+onto "Kimi K3: ..."), unless the paper's abstract names this release's version.
+"Closest family paper" is never a resolution: reject the candidate instead.
+
 Prefer an existing paper candidate when it is the same canonical report or
 official source identity. Parameter-size siblings released together from the
 same source belong to one family paper; attach the later-discovered sibling to

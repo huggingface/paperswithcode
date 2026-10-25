@@ -16,6 +16,7 @@ from sqlalchemy.orm import Session
 from backend.config import get_settings
 from backend.models.curation import ApplyMutationRequest, ResolveModelPaperMutation
 from backend.models.database import (
+    Author,
     Base,
     Evaluation,
     HfArtifact,
@@ -61,6 +62,7 @@ from backend.services.hf_trending_model_discovery_service import (
     should_requeue_card,
 )
 from backend.services.trending_model_resolution_service import (
+    release_version_conflict,
     TrendingModelResolutionScopeError,
     TrendingModelResolutionService,
 )
@@ -336,6 +338,7 @@ def _resolution_session() -> Session:
         engine,
         tables=[
             Paper.__table__,
+            Author.__table__,
             HfArtifact.__table__,
             PaperHfArtifact.__table__,
             ModelRelease.__table__,
@@ -2159,3 +2162,145 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
     assert db.query(PaperCurationJob).count() == count
     assert db.get(PaperCurationWorkflow, old.id).status == "partial"
     assert not db.dirty
+
+
+@pytest.mark.parametrize(
+    ("names", "title", "abstract", "conflict"),
+    [
+        # 2026-10-25: Nanbeige4.3-33B was resolved to the 4.2-3B report.
+        (
+            ["Nanbeige/Nanbeige4.3-33B", "Nanbeige4.3"],
+            "Nanbeige4.2-3B: Unlocking Agentic Capabilities in a Compact Model",
+            "",
+            True,
+        ),
+        (
+            ["Nanbeige/Nanbeige4.2-3B-FP8"],
+            "Nanbeige4.2-3B: Unlocking Agentic Capabilities in a Compact Model",
+            "",
+            False,
+        ),
+        (["Kimi K3.1 Pro"], "Kimi K3: Open Frontier Intelligence", "", True),
+        (["Qwen/Qwen3.8-27B"], "Qwen3.8 Technical Report", "", False),
+        (["Qwen/Qwen3.8-27B"], "Qwen3 Technical Report", "", True),
+        (["MiniMaxAI/MiniMax-M3.1-Flash"], "MiniMax-M3: Scaling", "", True),
+        (["deepseek-ai/DeepSeek-V4.1-Flash"], "DeepSeek-V4: Towards", "", True),
+        (["google/gemma-4-31b-it"], "Gemma 4 Technical Report", "", False),
+        # Parameter counts are not versions; unnamed families are not checked.
+        (["openai/gpt-oss-120b"], "gpt-oss-120b & gpt-oss-20b Model Card", "", False),
+        (["org/Model-2"], "Attention Is All You Need", "", False),
+        # A report whose abstract covers the point release is accepted.
+        (
+            ["meta-llama/Llama-3.1-8B"],
+            "The Llama 3 Herd of Models",
+            "We present Llama 3.1, a herd of language models.",
+            False,
+        ),
+        (["meta-llama/Llama-3.1-8B"], "The Llama 3 Herd of Models", "", True),
+    ],
+)
+def test_release_version_conflict(names, title, abstract, conflict):
+    assert bool(release_version_conflict(names, title, abstract)) is conflict
+
+
+def test_resolution_refuses_another_versions_arxiv_report(monkeypatch):
+    db = _resolution_session()
+    candidate = TrendingModelCandidate(
+        repo_id="Nanbeige/Nanbeige4.3-33B",
+        author="Nanbeige",
+        readme_sha="7" * 64,
+        status="resolving",
+    )
+    db.add(candidate)
+    db.commit()
+
+    async def import_arxiv(_service, arxiv_id, *, commit=True):
+        paper = Paper(
+            title="Nanbeige4.2-3B: Unlocking Agentic Capabilities in a Compact Model",
+            source="arxiv",
+            arxiv_id=arxiv_id,
+            version="v1",
+            is_latest_version=True,
+        )
+        db.add(paper)
+        db.flush()
+        return paper, True
+
+    monkeypatch.setattr(
+        "backend.services.paper_ingestion_service.PaperIngestionService.get_or_import_arxiv_paper",
+        import_arxiv,
+    )
+    mutation = ResolveModelPaperMutation.model_validate(
+        {
+            "decision": "accept",
+            "reason": "The closest canonical Nanbeige paper is the 4.2-3B report.",
+            "novelty_kind": "new_release",
+            "evidence_urls": ["https://arxiv.org/abs/2607.22083"],
+            "arxiv_id": "2607.22083",
+            "model_release": {
+                "canonical_name": "Nanbeige4.3-33B",
+                "publisher": "Nanbeige",
+                "is_open": True,
+                "aliases": ["Nanbeige4.3"],
+            },
+        }
+    )
+    with pytest.raises(ValueError, match="not this release's nanbeige 4.3"):
+        TrendingModelResolutionService(db).apply(candidate.id, mutation, commit=False)
+    db.rollback()
+    assert db.query(ModelRelease).count() == 0
+    assert db.query(Paper).filter_by(arxiv_id="2607.22083").count() == 0
+
+
+def test_external_upgrade_moves_method_evidence_and_skips_same_name_authors():
+    db = _resolution_session()
+    external = Paper(
+        title="Model Release",
+        source="external",
+        source_url="https://org.example/model",
+        version="v1",
+        is_latest_version=True,
+    )
+    arxiv = Paper(
+        title="Model Technical Report",
+        source="arxiv",
+        arxiv_id="2607.22083",
+        version="v1",
+        is_latest_version=True,
+    )
+    alice_external, alice_arxiv, bob = (
+        Author(name="Alice Chen"),
+        Author(name="alice chen"),
+        Author(name="Bob Li"),
+    )
+    db.add_all([external, arxiv, alice_external, alice_arxiv, bob])
+    db.flush()
+    db.add_all(
+        [
+            PaperAuthor(
+                paper_id=external.id, author_id=alice_external.id, author_order=0
+            ),
+            PaperAuthor(paper_id=external.id, author_id=bob.id, author_order=1),
+            PaperAuthor(paper_id=arxiv.id, author_id=alice_arxiv.id, author_order=0),
+            PaperMethod(paper_id=external.id, method_id=7),
+            PaperMethodEvidence(
+                paper_id=external.id, method_id=7, evidence_type="curation"
+            ),
+        ]
+    )
+    db.commit()
+
+    TrendingModelResolutionService(db)._upgrade_external_paper(external, arxiv)
+    db.commit()
+
+    # The method link and its evidence move together; the old link is gone.
+    assert db.get(PaperMethod, (arxiv.id, 7)) is not None
+    assert db.get(PaperMethodEvidence, (arxiv.id, 7, "curation")) is not None
+    assert db.query(PaperMethod).filter_by(paper_id=external.id).count() == 0
+    # "Alice Chen" is already listed under another author record; Bob moves.
+    authors = {
+        row.author_id
+        for row in db.query(PaperAuthor).filter_by(paper_id=arxiv.id).all()
+    }
+    assert authors == {alice_arxiv.id, bob.id}
+    assert db.get(Paper, external.id).is_latest_version is False

@@ -634,3 +634,23 @@ def test_news_lead_is_upgraded_to_an_official_web_hit(db):
     # A later news-only sighting keeps the official lead.
     signals.record_release_signals(db, RadarReport(14, [news]), now=NOW)
     assert row.lead_url == "https://www.kimi.com/blog/kimi-k3-1-pro"
+
+
+def test_radar_resolution_refuses_another_versions_paper(db, fake_external):
+    row = _signal_row(db)
+    _paper(
+        db,
+        104584,
+        "Kimi K3: Open Frontier Intelligence",
+        "https://www.kimi.com/blog/kimi-k3",
+    )
+    with pytest.raises(ValueError, match="not this release's kimik 3.1"):
+        signals.ReleaseSignalResolutionService(db).apply(
+            row.id,
+            _accept(
+                "https://www.kimi.com/blog/kimi-k3",
+                external_paper=None,
+                existing_paper_id=104584,
+            ),
+            commit=False,
+        )

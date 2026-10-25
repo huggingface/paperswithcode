@@ -50,6 +50,7 @@ from backend.services.paper_ingestion_service import PaperIngestionService
 from backend.services.trending_model_resolution_service import (
     TrendingModelResolutionService,
     model_family_key,
+    release_version_conflict,
 )
 
 # Web-search extraction is nondeterministic, so a news-only signal must
@@ -460,6 +461,7 @@ class ReleaseSignalResolutionService:
                 raise ValueError(
                     "Existing paper resolution requires canonical source evidence"
                 )
+            self._check_release_version(signal, mutation, paper)
             return paper
         if mutation.arxiv_id is not None:
             if not any(
@@ -474,6 +476,7 @@ class ReleaseSignalResolutionService:
                     mutation.arxiv_id, commit=False
                 )
             )
+            self._check_release_version(signal, mutation, paper)
             return paper
         external = mutation.external_paper
         proposal = mutation.model_release
@@ -520,6 +523,20 @@ class ReleaseSignalResolutionService:
         if paper is None:
             raise RuntimeError("External paper ingestion returned no database row")
         return paper
+
+    @staticmethod
+    def _check_release_version(
+        signal: ModelReleaseSignal, mutation: ResolveModelPaperMutation, paper: Paper
+    ) -> None:
+        proposal = mutation.model_release
+        names = [signal.model_name]
+        if proposal is not None:
+            names += [proposal.canonical_name, *proposal.aliases]
+        conflict = release_version_conflict(
+            names, paper.title or "", paper.abstract or ""
+        )
+        if conflict:
+            raise ValueError(conflict)
 
     def _duplicate_paper(self, source_url: str, title: str, proposal) -> Paper | None:
         """An indexed paper with this source, title, or model release name."""
