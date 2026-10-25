@@ -4,7 +4,7 @@ import { gatewayPayloadLimit } from "./provider.js";
 
 const INPUT_MARGIN_TOKENS = 8000;
 const ESCAPES: Record<string, string> = { "&amp;": "&", "&lt;": "<", "&gt;": ">" };
-const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Each paper\'s included_bytes now counts the Markdown bytes kept here, so for a paper without content_origin use pwc_read_paper with its route_id as paper and its included_bytes as offset to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
+const NOTICE = '<paper_context_budget_notice>Paper evidence was shortened automatically to reserve room for the answer. Paper attributes describe the originally prepared source; the excerpts below may be shorter. Each paper\'s included_bytes now counts the Markdown bytes kept here, so for a paper without content_origin="pdf_text" use pwc_read_paper with its route_id as paper and its included_bytes as offset to retrieve omitted material. Preserve the user request and viewer orientation.</paper_context_budget_notice>\n';
 
 interface PaperBudget {
   model: Pick<Model<Api>, "contextWindow" | "maxTokens">;
