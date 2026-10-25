@@ -11,12 +11,14 @@ at the paper's existing thumbnail when it is already on disk.
 
 Nginx is responsible for forwarding ``/paper/{id}`` and the legacy
 ``/papers/{id}`` shape to the backend; all other static fall-through is
-unchanged.
+unchanged. arXiv-shaped ``/abs/{id}`` and ``/pdf/{id}.pdf`` URLs redirect to
+the paper page and the PDF reader, so swapping ``arxiv.org`` for our host works.
 """
 
 from __future__ import annotations
 
 import logging
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, Request
 from fastapi import Path as FastApiPath
@@ -208,6 +210,36 @@ def get_paper_page_legacy(
     Redirect the legacy plural shape directly to the resolved canonical route.
     """
     return _render_paper_html(paper_id, db, is_legacy_path=True, request=request)
+
+
+def _arxiv_alias_redirect(path: str) -> RedirectResponse:
+    return RedirectResponse(
+        url=path,
+        status_code=301,
+        headers={"Cache-Control": "public, max-age=3600"},
+    )
+
+
+@router.api_route(
+    "/abs/{arxiv_id}",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+def redirect_arxiv_abstract(arxiv_id: str) -> RedirectResponse:
+    """Swap ``arxiv.org`` for our host in an abstract URL to reach the paper page."""
+    paper_id = normalize_paper_route_identifier(arxiv_id)
+    return _arxiv_alias_redirect(f"/paper/{quote(paper_id, safe='')}")
+
+
+@router.api_route(
+    "/pdf/{arxiv_id}.pdf",
+    methods=["GET", "HEAD"],
+    include_in_schema=False,
+)
+def redirect_arxiv_pdf(arxiv_id: str) -> RedirectResponse:
+    """Swap ``arxiv.org`` for our host in a ``.pdf`` URL to reach the reader."""
+    paper_id = normalize_paper_route_identifier(arxiv_id)
+    return _arxiv_alias_redirect(f"/pdf/{quote(paper_id, safe='')}")
 
 
 @router.get(

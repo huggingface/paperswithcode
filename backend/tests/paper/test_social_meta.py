@@ -584,6 +584,22 @@ def test_versioned_alias_redirects_to_canonical_url(client, monkeypatch):
     assert response.headers["location"] == "/paper/2504.12516"
 
 
+@pytest.mark.parametrize(
+    ("path", "location"),
+    [
+        ("/abs/2504.12516", "/paper/2504.12516"),
+        ("/abs/2504.12516v3", "/paper/2504.12516"),
+        ("/pdf/2504.12516.pdf", "/pdf/2504.12516"),
+        ("/pdf/2504.12516v2.pdf", "/pdf/2504.12516"),
+    ],
+)
+def test_arxiv_host_swap_redirects_to_paper_and_reader(client, path, location):
+    response = client.get(path, follow_redirects=False)
+
+    assert response.status_code == 301
+    assert response.headers["location"] == location
+
+
 def test_database_failure_returns_index_safe_503(client, monkeypatch):
     def fake(self, identifier, include_resources=False):
         raise DatabaseError("database unavailable")
