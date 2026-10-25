@@ -99,23 +99,29 @@ def release_version_conflict(
     are left to the evidence checks, and an abstract that names the release's
     own version (a report covering a point release) is accepted.
     """
-    title_key = title.casefold()
-    mentioned: list[tuple[str, str, set[str]]] = []
+    # Judge each family by its most specific version: a coarse alias
+    # ("Nanbeige4") must not cancel the release's own version ("4.3").
+    specific: dict[str, str] = {}
     for name in release_names:
         match = _NAME_VERSION.match(_joined(name))
         if match is None:
             continue
         family, version = match.group(1), _version_key(match.group(2))
-        versions = _family_versions(family, title_key)
-        if versions:
-            mentioned.append((family, version, versions))
-    if not mentioned or any(version in versions for _, version, versions in mentioned):
-        return None
-    abstract_key = abstract.casefold()
-    if any(
-        version in _family_versions(family, abstract_key)
-        for family, version, _ in mentioned
-    ):
+        current = specific.get(family)
+        if current is None or (version.count("."), len(version)) > (
+            current.count("."),
+            len(current),
+        ):
+            specific[family] = version
+    title_key, abstract_key = title.casefold(), abstract.casefold()
+    mentioned = [
+        (family, version, versions)
+        for family, version in specific.items()
+        if (versions := _family_versions(family, title_key))
+        and version not in versions
+        and version not in _family_versions(family, abstract_key)
+    ]
+    if not mentioned:
         return None
     family, version, versions = mentioned[0]
     return (

@@ -2197,6 +2197,13 @@ def test_scheduled_retry_rejects_superseded_workflow_before_writes(
             False,
         ),
         (["meta-llama/Llama-3.1-8B"], "The Llama 3 Herd of Models", "", True),
+        # A coarse family alias does not cancel the release's own version.
+        (
+            ["Nanbeige/Nanbeige4.3-33B", "Nanbeige4"],
+            "Nanbeige4-3B Technical Report",
+            "",
+            True,
+        ),
     ],
 )
 def test_release_version_conflict(names, title, abstract, conflict):
