@@ -313,6 +313,7 @@ button { font-family: inherit; cursor: pointer; border: none; background: none; 
   transition: border-color 0.15s;
 }
 .icon-btn:hover { border-color: var(--hairline-strong); }
+.header-github-btn { flex: none; }
 
 .hf-signin-btn {
   display: inline-flex;
@@ -603,7 +604,8 @@ html { scroll-behavior: smooth; }
   .brand-name {
     font-size: 18px;
   }
-  .header-bookmark-btn {
+  .header-bookmark-btn,
+  .header-github-btn {
     display: none;
   }
   .app-header .hf-signin-btn {
