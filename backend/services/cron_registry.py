@@ -1311,6 +1311,44 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
         dashboard_group="leaderboard_sync",
     ),
     CronJobDefinition(
+        id="sync_frontiercs_2",
+        scheduler="systemd",
+        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=43),),
+        schedule_grace_minutes=20,
+        systemd_timer="pwc-cron-sync-frontiercs-2.timer",
+        systemd_service="pwc-cron-sync-frontiercs-2.service",
+        systemd_extra_units=(),
+        output_evaluator="generic",
+        display_name="Sync FrontierCS 2 Leaderboard",
+        category="hourly",
+        schedule="43 * * * * (hourly)",
+        script_path="hourly/sync_frontiercs_2.py",
+        log_name="sync_frontiercs_2",
+        process_patterns=("scripts.hourly.sync_frontiercs_2",),
+        lock_file=(
+            "/var/lib/paperswithcode/production/cron-locks/sync_frontiercs_2.lock"
+        ),
+        expected_runtime_minutes=5,
+        stale_after_minutes=150,
+        critical=False,
+        healthy_no_work_allowed=False,
+        db_freshness_query="""
+            SELECT max(e.updated_at) AS last_write,
+                   count(*) FILTER (
+                     WHERE e.updated_at > now() - interval '2 hours 30 minutes'
+                   ) AS recent_writes,
+                   count(*) AS matched_evaluations
+            FROM evaluations e
+            JOIN datasets d ON d.id = e.dataset_id
+            WHERE d.slug = 'frontiercs-2'
+              AND e.methodology LIKE
+                  'Managed by the Papers with Code FrontierCS 2 live sync.%'
+        """,
+        workflow_file="cron-sync-frontiercs-2.yml",
+        workflow_jobs=("run",),
+        dashboard_group="leaderboard_sync",
+    ),
+    CronJobDefinition(
         id="sync_frontiercode",
         scheduler="systemd",
         schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=45),),

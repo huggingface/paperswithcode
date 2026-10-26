@@ -443,6 +443,15 @@ COMMANDS: dict[str, Job] = {
             "from the validated Surge AI leaderboard; never creates papers"
         ),
     ),
+    "sync_frontiercs_2": job(
+        "-m",
+        "scripts.hourly.sync_frontiercs_2",
+        timeout="30m",
+        idempotency=(
+            "create or revise reviewed FrontierCS 2 evaluation rows from the "
+            "validated frontier-cs.org leaderboard data; never creates papers"
+        ),
+    ),
     "sync_physics_iq_verified": job(
         "-m",
         "scripts.hourly.sync_physics_iq_verified",

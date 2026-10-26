@@ -49,6 +49,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-sync-extractbench.timer` | `*-*-* *:32:00` | `sync_extractbench` | `.github/workflows/scripts/hourly/sync_extractbench.py` |
 | `pwc-cron-sync-vals-finance-agent.timer` | `*-*-* *:47:00` | `sync_vals_finance_agent` | `.github/workflows/scripts/hourly/sync_vals_finance_agent.py` |
 | `pwc-cron-sync-surge-chartography.timer` | `*-*-* *:38:00` | `sync_surge_chartography` | `.github/workflows/scripts/hourly/sync_surge_chartography.py` |
+| `pwc-cron-sync-frontiercs-2.timer` | `*-*-* *:43:00` | `sync_frontiercs_2` | `.github/workflows/scripts/hourly/sync_frontiercs_2.py` |
 | `pwc-cron-sync-physics-iq-verified.timer` | `*-*-* *:28:00` | `sync_physics_iq_verified` | `.github/workflows/scripts/hourly/sync_physics_iq_verified.py` |
 | `pwc-cron-sync-artificial-analysis.timer` | `*-*-* 00/2:35:00` | `sync_artificial_analysis` | `.github/workflows/scripts/hourly/sync_artificial_analysis.py` |
 | `pwc-cron-sync-mmteb-reranking.timer` | `*-*-* *:37:00` | `sync_mmteb_reranking` | `.github/workflows/scripts/hourly/sync_mmteb.py` reranking |
@@ -375,6 +376,20 @@ changes it (values that round to the published precision are unchanged),
 adopts matching hand-imported rows, and renames a mislabelled hand-imported
 row once (`renamed_from`, only when its score matches). Managed rows that drop
 off the leaderboard are reported, never deleted.
+
+`sync_frontiercs_2.py` reads the `MODELS`, `PASS`, `ECI`, and `UPDATED`
+constants from https://frontier-cs.org/assets/js/fcs2-data.js (the
+https://frontier-cs.org/#leaderboard page renders from them client-side) into
+the `frontiercs-2` benchmark on task `coding-agents`: Pass Rate (percent of the
+48 tasks whose run beats the human reference, checked against the pass count)
+and FCI (FrontierCS Capabilities Index, refitted upstream with Kimi K2.7 at 0).
+It fails on any layout change or an entry count outside 8–200. Exact model
+names map to reviewed `(paper, model_name)` identities in the service, and each
+entry's agent harness is stored in `harness`, so one model may appear once per
+harness (Gemini 4 Argon in Pi and Antigravity). The job never creates papers,
+so unreviewed names and unresolved papers are logged as warnings. It creates
+missing mapped rows and rewrites managed rows' scores and methodology every
+run; managed rows that drop off the leaderboard are reported, never deleted.
 
 `sync_surge_chartography.py` parses the server-rendered "Chartography
 Leaderboard" block on https://surgehq.ai/benchmarks/chartography (provider,
