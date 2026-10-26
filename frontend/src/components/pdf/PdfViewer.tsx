@@ -391,6 +391,7 @@ export function PdfViewer({
     retainLiveResizeScale.current = false;
     pagesRef.current?.style.setProperty("--pdf-live-scale", "1");
     setError("");
+    textIndex.current = undefined;
     setSearchQuery("");
     setHighlightQuery("");
     setMatches([]);

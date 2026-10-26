@@ -39,6 +39,18 @@ describe("createPdfTextIndex", () => {
   });
 });
 
+it("searches past an unreadable page", async () => {
+  const { pdf, getPage } = fakePdf([["Alpha"], ["Beta"], ["Alpha"]]);
+  getPage.mockImplementation(async (pageNumber: number) => {
+    if (pageNumber === 2) throw new Error("range request failed");
+    return { getTextContent: async () => ({ items: [{ str: pageNumber === 1 ? "Alpha" : "Gamma" }] }) };
+  });
+  const texts: [number, string][] = [];
+  for await (const entry of createPdfTextIndex(pdf).pages()) texts.push(entry);
+
+  expect(texts).toEqual([[1, "alpha"], [2, ""], [3, "gamma"]]);
+});
+
 describe("countMatches", () => {
   it("counts non-overlapping occurrences", () => {
     expect(countMatches("aaaa", "aa")).toBe(2);

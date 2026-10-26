@@ -7,7 +7,7 @@ const READ_AHEAD = 6;
 export interface PdfTextIndex {
   /** The page's lower-cased text, extracted once per document. */
   pageText: (pageNumber: number) => Promise<string>;
-  /** Yields each page's text in page order, extracting a few pages ahead. */
+  /** Yields each page's text in page order, extracting a few pages ahead; unreadable pages yield "". */
   pages: () => AsyncGenerator<[pageNumber: number, text: string]>;
 }
 
@@ -32,7 +32,8 @@ export function createPdfTextIndex(pdf: PDFDocumentProxy): PdfTextIndex {
     for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
       const last = Math.min(pdf.numPages, pageNumber + READ_AHEAD);
       for (let ahead = pageNumber + 1; ahead <= last; ahead += 1) void pageText(ahead).catch(() => undefined);
-      yield [pageNumber, await pageText(pageNumber)];
+      // An unreadable page is searched as empty rather than ending the scan.
+      yield [pageNumber, await pageText(pageNumber).catch(() => "")];
     }
   }
   return { pageText, pages };
