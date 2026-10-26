@@ -538,3 +538,82 @@ def test_monitor_is_unavailable_without_a_token(monkeypatch):
     assert result["jobs"] == []
     assert "not configured" in result["error"]
     monitor.clear_paper_markdown_job_monitor_cache()
+
+
+def test_fresh_lane_runs_read_progress_without_hiding_live_failures(monkeypatch):
+    settings = SimpleNamespace(
+        hf_token="private-token",
+        paper_markdown_hf_namespace="huggingface",
+        paper_markdown_hf_bucket_id="huggingface/pwc-papers-content",
+        paper_markdown_incremental_monthly_budget_usd=100.0,
+        paper_markdown_backfill_budget_usd=750.0,
+        paper_markdown_cost_policy="unmetered_hf",
+    )
+    now = datetime.now(timezone.utc)
+
+    def remote(job_id, run_id, *, lane=None, stage="COMPLETED"):
+        labels = {
+            "app": "pwc-paper-markdown",
+            "mode": "live",
+            "run_id": run_id,
+            "shard_id": "00000",
+        }
+        if lane:
+            labels["lane"] = lane
+        return SimpleNamespace(
+            id=job_id,
+            url=f"https://huggingface.co/jobs/huggingface/{job_id}",
+            status=SimpleNamespace(stage=stage, message=None),
+            labels=labels,
+            flavor=SimpleNamespace(name="l40sx1"),
+            created_at=now,
+            started_at=now,
+            finished_at=now,
+            durations=SimpleNamespace(total_secs=600),
+        )
+
+    fresh_run = "live-fresh-20261026T090000-a1b2c3d4"
+    jobs = [
+        remote("fresh", fresh_run, lane="fresh"),
+        remote("live", "live-20261026T081700-a1b2c3d4", stage="ERROR"),
+    ]
+    completed = {
+        "status": "completed",
+        "total_papers": 10,
+        "processed_papers": 10,
+        "succeeded_papers": 10,
+        "failed_papers": 0,
+        "already_existed_papers": 0,
+        "extracted_images": 0,
+        "omitted_images": 0,
+        "updated_at": now.isoformat(),
+    }
+
+    class FakeApi:
+        def __init__(self, *, token):
+            pass
+
+        def list_jobs(self, **_kwargs):
+            return iter(jobs)
+
+    class FakeFileSystem:
+        def __init__(self, *, token):
+            pass
+
+        def open(self, path, _mode, *, block_size):
+            if f"_jobs/progress/{fresh_run}/" in path:
+                return io.BytesIO(json.dumps(completed).encode())
+            raise FileNotFoundError(path)
+
+    monkeypatch.setattr(monitor, "get_settings", lambda: settings)
+    monkeypatch.setattr(monitor, "HfApi", FakeApi)
+    monkeypatch.setattr(monitor, "HfFileSystem", FakeFileSystem)
+    monitor.clear_paper_markdown_job_monitor_cache()
+
+    result = monitor.get_paper_markdown_job_monitor()
+
+    outcomes = {job["id"]: job["effective_outcome"] for job in result["jobs"]}
+    assert outcomes == {"fresh": "success", "live": "infrastructure_failure"}
+    assert result["summary"]["latest_run_failed_jobs"] == 1
+    assert result["blockers"]["live"] != "none"
+    monitor.clear_paper_markdown_job_monitor_cache()
