@@ -194,6 +194,21 @@ class Paper(BaseModel):
             "cards leave it null."
         ),
     )
+    evaluated_benchmarks: Optional[List[str]] = Field(
+        None,
+        description=(
+            "Names of the benchmarks this paper reports leaderboard results "
+            "on, most-populated leaderboard first. Detail responses only."
+        ),
+    )
+    page_title: Optional[str] = Field(
+        None,
+        description=(
+            "Search-facing HTML title of the paper page, e.g. "
+            "'Kimi K3.1 Pro benchmarks: … | Papers with Code'. Detail "
+            "responses only."
+        ),
+    )
 
     # Hugging Face artifact URLs explicitly linked to this paper. Populated
     # for `source='external'` rows because external rows have no reliable

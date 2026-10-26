@@ -17,6 +17,10 @@ from backend.utils.latex_text import latex_to_plain_text
 PRODUCTION_ORIGIN = "https://paperswithcode.co"
 SEARCH_DESCRIPTION_CHARS = 175
 SOCIAL_DESCRIPTION_CHARS = 280
+# Results pages rank for "<model> benchmarks" queries; keep the name and list
+# within what search engines show before " | Papers with Code".
+BENCHMARK_TITLE_NAME_CHARS = 40
+BENCHMARK_TITLE_CHARS = 75
 # Curated classification overrides are deliberately explicit and factual.
 # Move these into a normalized paper field when document types become editable.
 DOCUMENT_TYPE_OVERRIDES = {
@@ -102,7 +106,34 @@ def _description_source(paper: Paper) -> str:
     return "Trending AI research papers with code, datasets, methods, and evaluation leaderboards."
 
 
+def _benchmark_label(name: str) -> str:
+    """Drop a trailing qualifier: "RoboMME (5-task subset)" -> "RoboMME"."""
+    return re.sub(r"\s*\([^()]*\)$", "", _plain(name)) or _plain(name)
+
+
+def _benchmark_title(title: str, benchmark_names: Iterable[str]) -> Optional[str]:
+    """Return "<name> benchmarks: A, B, C" when the paper has a short name."""
+    prefix = re.sub(r"^Introducing\s+", "", title.split(":", 1)[0].strip())
+    if len(prefix) > BENCHMARK_TITLE_NAME_CHARS:
+        return None
+    labels = list(dict.fromkeys(filter(None, map(_benchmark_label, benchmark_names))))
+    heading = f"{prefix} benchmarks: "
+    chosen: list[str] = []
+    for label in labels:
+        # One entry per benchmark family: LIBERO covers LIBERO-Long etc.
+        if any(label.startswith(f"{parent}-") for parent in chosen):
+            continue
+        if len(heading + ", ".join([*chosen, label])) > BENCHMARK_TITLE_CHARS:
+            break
+        chosen.append(label)
+    return heading + ", ".join(chosen) if chosen else None
+
+
 def _search_title(paper: Paper, title: str, document_type: Optional[str]) -> str:
+    if not document_type:
+        benchmark_title = _benchmark_title(title, paper.evaluated_benchmarks or ())
+        if benchmark_title:
+            return f"{benchmark_title} | Papers with Code"
     if paper.source == "arxiv" and paper.arxiv_id:
         if document_type:
             concise_title = title.split(":", 1)[0].strip()

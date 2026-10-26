@@ -102,6 +102,7 @@ class PaperRelations:
     linked_hf_artifacts: dict[int, LinkedHfArtifacts] = field(default_factory=dict)
     x_threads: dict[int, list[XThread]] = field(default_factory=dict)
     suggested_questions: dict[int, list[str]] = field(default_factory=dict)
+    evaluated_benchmarks: dict[int, list[str]] = field(default_factory=dict)
     abstract_mentions: dict[int, list[AbstractMention]] = field(default_factory=dict)
 
 
@@ -178,6 +179,7 @@ class PaperRelationLoader:
         self._load_card_relations(unique_ids, relations, author_link_limit=None)
         self._load_detail_relations(unique_ids, relations)
         self._load_suggested_questions(unique_ids, relations)
+        self._load_evaluated_benchmarks(unique_ids, relations)
         self._load_abstract_mentions(unique_ids, relations)
         self._load_repository_coverage(unique_ids, relations)
         return relations
@@ -245,6 +247,33 @@ class PaperRelationLoader:
         )
         for paper_id, questions in rows:
             relations.suggested_questions[paper_id] = questions
+
+    def _load_evaluated_benchmarks(
+        self,
+        paper_ids: list[int],
+        relations: PaperRelations,
+    ) -> None:
+        """Benchmarks each paper has results on, most-populated leaderboard first."""
+        relations.evaluated_benchmarks = {paper_id: [] for paper_id in paper_ids}
+        rows = (
+            self.db.query(DBEvaluation.paper_id, DBDataset.id, DBDataset.name)
+            .join(DBDataset, DBEvaluation.dataset_id == DBDataset.id)
+            .filter(DBEvaluation.paper_id.in_(paper_ids))
+            .group_by(DBEvaluation.paper_id, DBDataset.id, DBDataset.name)
+            .all()
+        )
+        if not rows:
+            return
+        leaderboard_sizes = dict(
+            self.db.query(DBEvaluation.dataset_id, func.count(DBEvaluation.id))
+            .filter(DBEvaluation.dataset_id.in_({row[1] for row in rows}))
+            .group_by(DBEvaluation.dataset_id)
+            .all()
+        )
+        for paper_id, dataset_id, name in sorted(
+            rows, key=lambda row: (-leaderboard_sizes.get(row[1], 0), row[2])
+        ):
+            relations.evaluated_benchmarks[paper_id].append(name)
 
     @staticmethod
     def _family_join(requested, family):
