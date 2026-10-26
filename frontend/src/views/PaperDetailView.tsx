@@ -343,8 +343,15 @@ const PaperDetailView: React.FC = () => {
         <Link to="/">Trending</Link>
         <span className="sep">/</span>
         {paper.arxiv_id && safeAbstractUrl ? (
-          <a href={safeAbstractUrl} target="_blank" rel="noopener noreferrer">
+          <a
+            className="breadcrumb-external"
+            href={safeAbstractUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            title="Open on arXiv"
+          >
             {paperSourceLabel}
+            <span aria-hidden="true">↗</span>
           </a>
         ) : (
           <span>{paperSourceLabel}</span>
