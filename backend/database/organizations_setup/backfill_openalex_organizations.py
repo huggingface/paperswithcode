@@ -36,7 +36,8 @@ OPENALEX_WORKS = "https://api.openalex.org/works"
 OPENALEX_SOURCE = "openalex"
 BATCH_SIZE = 100
 ARXIV_LOCATION = re.compile(
-    r"arxiv(?:\.org/abs/|\.)(\d{4}\.\d{4,5})(?:v\d+)?$", re.IGNORECASE
+    r"arxiv(?:\.org/(?:abs|pdf)/|\.)(\d{4}\.\d{4,5})(?:v\d+)?(?:\.pdf)?(?:[/?#]|$)",
+    re.IGNORECASE,
 )
 
 
