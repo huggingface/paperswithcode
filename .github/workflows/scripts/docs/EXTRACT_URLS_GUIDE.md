@@ -15,7 +15,7 @@ At `45 * * * *`, `cron-extract-urls.yml` runs three isolated jobs:
 
 ## Requirements
 
-- GitHub repository secrets: `VPS_HOST`, `VPS_USER`,
+- `vps-operations` environment secrets: `VPS_HOST`, `VPS_USER`,
   `VPS_SSH_PRIVATE_KEY`, `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET`,
   `MODAL_TOKEN_ID`, and `MODAL_TOKEN_SECRET`.
 - Existing Modal secret `anthropic`, containing the HF Inference Providers

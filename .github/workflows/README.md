@@ -26,12 +26,14 @@ JavaScript/CSS MIME types, and the unauthenticated staging boundary. It is
 read-only and does not create an admin session.
 
 Other workflows retain their normal CI or Hugging Face Space responsibilities.
-The VPS credentials used by manually dispatched workflows are
-`VPS_SSH_PRIVATE_KEY`, `VPS_HOST`, and `VPS_USER`. Each SSH job first joins the
-tailnet as an ephemeral `tag:ci` node with the `TS_OAUTH_CLIENT_ID` and
-`TS_OAUTH_SECRET` OAuth client, so `VPS_HOST` can be the VPS's Tailscale
-address and public port 22 can stay closed. Inspect runs in GitHub Actions and inspect host-side
-execution with:
+Manually dispatched VPS workflows run in the `vps-operations` environment,
+which requires reviewer approval and holds `VPS_SSH_PRIVATE_KEY`, `VPS_HOST`,
+`VPS_USER`, `TS_OAUTH_CLIENT_ID`, and `TS_OAUTH_SECRET`. Public port 22 is
+closed, so each SSH job first joins the tailnet as an ephemeral `tag:pwc-ci`
+node and reaches the VPS at its Tailscale address. The tailnet ACL must allow
+`tag:pwc-ci` to reach the VPS on `tcp:22`. On the VPS, `VPS_USER` may only run
+`sudo /usr/local/sbin/pwc-cron`. Inspect runs in GitHub Actions and inspect
+host-side execution with:
 
 ```bash
 sudo pwc-cron status
