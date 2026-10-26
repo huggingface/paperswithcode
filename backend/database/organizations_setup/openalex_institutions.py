@@ -29,9 +29,9 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution(
         "I4405263052", "tsinghua", "Tsinghua Shenzhen International Graduate School"
     ),
-    OpenAlexInstitution("I20231570", "pekinguniversity", "Peking University"),
+    OpenAlexInstitution("I20231570", "pekingu", "Peking University"),
     OpenAlexInstitution("I183067930", "sjtu", "Shanghai Jiao Tong University"),
-    OpenAlexInstitution("I76130692", "zhejianguniversity", "Zhejiang University"),
+    OpenAlexInstitution("I76130692", "zju", "Zhejiang University"),
     OpenAlexInstitution(
         "I19820366", "chinese-academy-of-sciences", "Chinese Academy of Sciences"
     ),
@@ -56,14 +56,14 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I97018004", "stanforduniversity", "Stanford University"),
     OpenAlexInstitution(
         "I126520041",
-        "ustc-community",
+        "ustc",
         "University of Science and Technology of China",
     ),
     OpenAlexInstitution(
         "I4210165038", "ucas", "University of Chinese Academy of Sciences"
     ),
     OpenAlexInstitution(
-        "I157725225", "uiuc-cs", "University of Illinois Urbana-Champaign"
+        "I157725225", "illinois", "University of Illinois Urbana-Champaign"
     ),
     OpenAlexInstitution(
         "I4391012619", "shanghaiailab", "Shanghai Artificial Intelligence Laboratory"
@@ -71,7 +71,7 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I889458895", "hkuhk", "The University of Hong Kong"),
     OpenAlexInstitution("I63966007", "mit", "Massachusetts Institute of Technology"),
     OpenAlexInstitution("I95457486", "berkeley", "University of California, Berkeley"),
-    OpenAlexInstitution("I881766915", "nju", "Nanjing University"),
+    OpenAlexInstitution("I881766915", "nanjinguniv", "Nanjing University"),
     OpenAlexInstitution(
         "I157485424", "kaist-ai", "Korea Advanced Institute of Science and Technology"
     ),
@@ -95,7 +95,7 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I62916508", "tum", "Technical University of Munich"),
     OpenAlexInstitution("I78988378", "ruc", "Renmin University of China"),
     OpenAlexInstitution("I136199984", "harvard", "Harvard University"),
-    OpenAlexInstitution("I139264467", "seoulnatluniv", "Seoul National University"),
+    OpenAlexInstitution("I139264467", "snu", "Seoul National University"),
     OpenAlexInstitution(
         "I36258959", "ucsandiego", "University of California San Diego"
     ),
@@ -111,7 +111,7 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution("I161318765", "ucla", "University of California, Los Angeles"),
     OpenAlexInstitution(
         "I1174212",
-        "universityofsoutherncalifornia",
+        "usc",
         "University of Southern California",
     ),
     OpenAlexInstitution("I86519309", "utexas", "The University of Texas at Austin"),
@@ -129,14 +129,14 @@ OPENALEX_INSTITUTIONS: tuple[OpenAlexInstitution, ...] = (
     OpenAlexInstitution(
         "I1294671590", "cnrs", "Centre National de la Recherche Scientifique"
     ),
-    OpenAlexInstitution("I66946132", "umcp", "University of Maryland, College Park"),
+    OpenAlexInstitution(
+        "I66946132", "umaryland", "University of Maryland, College Park"
+    ),
     OpenAlexInstitution("I27837315", "umich", "University of Michigan"),
     OpenAlexInstitution(
         "I139759216", "bupt", "Beijing University of Posts and Telecommunications"
     ),
-    OpenAlexInstitution(
-        "I168719708", "cityuniversityofhongkong", "City University of Hong Kong"
-    ),
+    OpenAlexInstitution("I168719708", "cityu-hongkong", "City University of Hong Kong"),
     OpenAlexInstitution(
         "I87445476", "xianjiaotonguniversity", "Xi'an Jiaotong University"
     ),
