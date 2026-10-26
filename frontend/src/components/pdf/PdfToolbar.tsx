@@ -174,7 +174,7 @@ export function PdfToolbar({
         onChange={(event) => onSearchQuery(event.target.value)}
         placeholder="Search document"
       />
-      <span role="status">{searching ? "Searching…" : searchQuery ? `${searchCount ? searchMatch + 1 : 0} of ${searchCount}` : ""}</span>
+      <span role="status">{searching && !searchCount ? "Searching…" : searchQuery ? `${searchCount ? searchMatch + 1 : 0} of ${searchCount}${searching ? "+" : ""}` : ""}</span>
       <button type="button" onClick={() => onSearch(-1)} disabled={!searchCount} aria-label="Previous match">↑</button>
       <button type="button" onClick={() => onSearch(1)} disabled={!searchCount} aria-label="Next match">↓</button>
       <button type="button" onClick={onCloseSearch} aria-label="Close search" title="Close search">
