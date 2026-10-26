@@ -11,10 +11,13 @@ from backend.services import paper_markdown_job_monitor as monitor
 from backend.services.cron_registry import SchedulePolicy, get_cron_job
 
 
-def test_markdown_scheduler_contract_has_only_the_hourly_reconciliation():
+def test_markdown_scheduler_contract_has_hourly_reconciliation_and_fresh_lane():
     job = get_cron_job("paper_markdown_backfill")
 
-    assert job.schedule_policies == (SchedulePolicy.fixed(60, offset_minutes=17),)
+    assert job.schedule_policies == (
+        SchedulePolicy.fixed(60, offset_minutes=17),
+        SchedulePolicy.fixed(5),
+    )
     assert job.schedule_grace_minutes == 20
 
 

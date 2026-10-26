@@ -20,6 +20,10 @@ from cron_schedules import TIMERS, TimerSpec  # noqa: E402
 
 UNIT_DIR = Path(__file__).resolve().parent / "systemd" / "cron"
 THROTTLED = "/usr/local/sbin/pwc-cron-throttled"
+SHORT_REFRESH_UNITS = {
+    "pwc-cron-update-hot-github-trending",
+    "pwc-cron-paper-markdown-fresh",
+}
 
 
 def render_service(spec: TimerSpec) -> str:
@@ -36,9 +40,9 @@ def render_service(spec: TimerSpec) -> str:
         "[Service]",
         "Type=oneshot",
     ]
-    if spec.unit == "pwc-cron-update-hot-github-trending":
+    if spec.unit in SHORT_REFRESH_UNITS:
         lines += [
-            "# Slot 3 is reserved for this short refresh; bulk jobs use slots 0-2.",
+            "# Slot 3 is reserved for short refreshes; bulk jobs use slots 0-2.",
             "Environment=PWC_CRON_THROTTLE_SLOTS=4",
         ]
     for argv in spec.invocations:

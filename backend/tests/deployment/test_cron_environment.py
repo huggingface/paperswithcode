@@ -473,6 +473,20 @@ def test_lock_name_ignores_lanes_for_jobs_without_lane_arg():
     )
 
 
+def test_paper_markdown_fresh_lane_has_its_own_lock():
+    spec = cron_launcher.COMMANDS["paper_markdown_backfill"]
+    hourly = ["--execute", "--confirm"]
+    assert cron_launcher.lock_name("paper_markdown_backfill", spec, hourly) == (
+        "paper_markdown_backfill"
+    )
+    assert cron_launcher.lock_name(
+        "paper_markdown_backfill", spec, ["--full", *hourly]
+    ) == ("paper_markdown_backfill")
+    assert cron_launcher.lock_name(
+        "paper_markdown_backfill", spec, ["--lane", "fresh", *hourly]
+    ) == ("paper_markdown_backfill.fresh")
+
+
 def test_general_cron_environment_withholds_app_only_secrets():
     source = {
         "PATH": "/usr/bin",

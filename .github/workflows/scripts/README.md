@@ -27,6 +27,7 @@ Generated from `deploy/cron_schedules.py`; update this table when you change it.
 | `pwc-cron-import-hf-daily-papers.timer` | `*-*-* *:00:00` | `import_hf_daily_papers` | `.github/workflows/scripts/daily/import_hf_daily_papers.py` |
 | `pwc-cron-refresh-paper-embeddings.timer` | `*-*-* *:15:00` | `refresh_paper_embeddings` | `.github/workflows/scripts/hourly/refresh_paper_embeddings.py` |
 | `pwc-cron-paper-markdown-backfill.timer` | `*-*-* *:17:00` | `paper_markdown_backfill --execute --confirm`<br>`paper_markdown_backfill --full --execute --confirm` | `.github/workflows/scripts/hourly/backfill_paper_markdown.py` |
+| `pwc-cron-paper-markdown-fresh.timer` | `*-*-* *:00/5:00` | `paper_markdown_backfill --lane fresh --execute --confirm` | `.github/workflows/scripts/hourly/backfill_paper_markdown.py` (papers indexed in the last 24 h; two 10-paper slots and its own lock; the hourly live lane skips that window) |
 | `pwc-cron-enqueue-hf-daily-paper-curation.timer` | `*-*-* *:27:00` | `enqueue_hf_daily_paper_curation` | `backend/scripts/enqueue_hf_daily_paper_curation.py` |
 | `pwc-cron-enqueue-hf-trending-model-curation.timer` | `*-*-* *:42:00` | `enqueue_hf_trending_model_curation` | `backend/scripts/enqueue_hf_trending_model_curation.py` |
 | `pwc-cron-enqueue-benchmark-gap-review.timer` | `*-*-* 06:35:00` | `enqueue_benchmark_gap_review` | `backend/scripts/enqueue_benchmark_gap_review.py` |

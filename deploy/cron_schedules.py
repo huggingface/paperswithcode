@@ -121,6 +121,15 @@ TIMERS: tuple[TimerSpec, ...] = (
         ),
         after=("pwc-cron-import-hf-daily-papers",),
     ),
+    # Fresh lane: papers indexed in the last 24 hours get layout OCR on two
+    # dedicated small-shard slots within minutes, under their own lane lock.
+    TimerSpec(
+        job="paper_markdown_backfill",
+        unit_name="pwc-cron-paper-markdown-fresh",
+        on_calendar=("*-*-* *:00/5:00",),
+        description="Dispatch layout OCR for papers indexed in the last day",
+        args=("--lane", "fresh", "--execute", "--confirm"),
+    ),
     TimerSpec(
         job="enqueue_hf_daily_paper_curation",
         on_calendar=("*-*-* *:27:00",),

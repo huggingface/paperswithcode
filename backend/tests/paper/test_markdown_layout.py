@@ -299,3 +299,112 @@ def test_live_lane_queues_layout_after_missing_canonical_work(tmp_path, monkeypa
         (item["arxiv_id"], bool(item.get("layout_only")))
         for item in job._launch.call_args.args[0]
     ] == [("2607.00002", False), ("2607.00001", True)]
+
+
+def test_live_lane_leaves_papers_from_the_last_day_to_the_fresh_lane(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(4)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.repair_invalid_limit = 0
+    job._papers = Mock(return_value=papers)
+    job._fresh_paper_keys = Mock(return_value={"2607.00000", "2607.00001"})
+    canonical = {item["output_key"]: object() for item in papers[1:3]}
+    job._existing_paths = Mock(
+        side_effect=lambda bucket, _paths: {}
+        if bucket == "test/paper-pages"
+        else canonical
+    )
+    job._copy_upstream = Mock(return_value=([papers[0], papers[3]], 0))
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(return_value={})
+    job._launch = Mock(return_value=[])
+
+    job.run()
+
+    # Missing 00000 and layout-only 00001 are fresh; 00003 and 00002 are not.
+    assert [
+        (item["arxiv_id"], bool(item.get("layout_only")))
+        for item in job._launch.call_args.args[0]
+    ] == [("2607.00003", False), ("2607.00002", True)]
+    summary = json.loads(
+        next(
+            call.args[1]
+            for call in job.logger.info.call_args_list
+            if call.args[0] == "PAPER_MARKDOWN_SUMMARY %s"
+        )
+    )
+    assert summary["left_to_fresh_lane"] == 1
+    assert summary["previously_attempted"] == 0
+
+
+def test_fresh_lane_dispatches_recent_layout_on_its_own_slots(tmp_path, monkeypatch):
+    monkeypatch.setenv("PWC_CRON_LOG_DIR", str(tmp_path))
+    papers = _candidates(3)
+    job = _scheduler(execute=False, confirm=False, full=False)
+    job.fresh = True
+    job.repair_invalid_limit = 0
+    job._fresh_paper_keys = MODULE.PaperMarkdownBackfillJob._fresh_paper_keys.__get__(
+        job
+    )
+    job._prepare_external_pages = Mock(side_effect=AssertionError("Firecrawl"))
+    job._papers = Mock(return_value=papers)
+    canonical = {item["output_key"]: object() for item in papers[:2]}
+    job._existing_paths = Mock(
+        side_effect=lambda bucket, _paths: (
+            {"2607/2607.00000.md": object()}
+            if bucket == "test/paper-pages"
+            else canonical
+        )
+    )
+    job._copy_upstream = Mock(return_value=([papers[2]], 0))
+    job._status_records = Mock(return_value={})
+    job._semantic_records = Mock(return_value={})
+    job._launch = Mock(return_value=[])
+
+    job.run()
+
+    assert job.profile is MODULE.PAPER_MARKDOWN_FRESH_JOB_PROFILE
+    assert job.profile.mode == "live" and job.profile.max_papers == 10
+    assert [item["arxiv_id"] for item in job._launch.call_args.args[0]] == [
+        "2607.00002",
+        "2607.00001",
+    ]
+    # The 5-minute lane leaves hourly coverage history alone.
+    assert not (tmp_path / MODULE.COVERAGE_HISTORY_NAME).exists()
+
+
+def test_fresh_and_live_lanes_count_only_their_own_active_jobs():
+    def remote(lane=None):
+        labels = {"app": "pwc-paper-markdown", "mode": "live"}
+        if lane:
+            labels["lane"] = lane
+        return SimpleNamespace(status=SimpleNamespace(stage="RUNNING"), labels=labels)
+
+    jobs = [remote(), remote("fresh"), remote("fresh")]
+    live = _scheduler(execute=False, confirm=False, full=False)
+    fresh = _scheduler(execute=False, confirm=False, full=False)
+    fresh.fresh = True
+
+    assert live._active_jobs(jobs) == jobs[:1]
+    assert fresh._active_jobs(jobs) == jobs[1:]
+
+
+def test_fresh_lane_labels_its_ocr_jobs():
+    job = _scheduler(execute=True, confirm=True, full=False)
+    job.fresh = True
+    job.api = Mock()
+
+    job._run_ocr_job(
+        run_id="live-fresh-20261026T120000-12345678",
+        shard_id="00000",
+        manifest_key="_jobs/manifests/live-fresh/00000.jsonl",
+        provider_attempt=1,
+    )
+
+    kwargs = job.api.run_uv_job.call_args.kwargs
+    assert kwargs["labels"]["mode"] == "live"
+    assert kwargs["labels"]["lane"] == "fresh"
+    assert kwargs["labels"]["profile_id"] == "live-fresh-v1"
+    assert kwargs["timeout"] == "2h"

@@ -37,7 +37,10 @@ from backend.services.external_page_markdown_service import (
 from backend.services.paper_markdown_budget_service import (
     paper_markdown_budget_snapshot,
 )
-from backend.services.paper_markdown_job_profile import paper_markdown_job_profile
+from backend.services.paper_markdown_job_profile import (
+    PAPER_MARKDOWN_FRESH_JOB_PROFILE,
+    paper_markdown_job_profile,
+)
 from backend.services.paper_markdown_service import paper_markdown_bucket_key
 from scripts.utils.cron_helpers import CronJobBase
 
@@ -59,6 +62,11 @@ DISPATCH_SCHEMA_VERSION = 1
 MOUNT_PROBE_MAX_AGE = timedelta(hours=2)
 MOUNT_RETRY_DELAY = timedelta(minutes=10)
 LIVE_REPAIR_LIMIT = 20
+RECENT_WINDOW = timedelta(days=14)
+# The fresh lane (``--lane fresh``, every 5 minutes) owns papers indexed this
+# recently; the hourly live lane leaves them alone so a new paper never waits
+# behind a ~3h 100-paper live shard for its page-tagged reader layout.
+FRESH_WINDOW = timedelta(hours=24)
 # The full lane also validates canonical objects below this size from any month.
 # Failed arXiv HTML scrapes are a few hundred bytes, while a converted paper is
 # tens of kilobytes; objects rejected for a short body fall well below it.
@@ -265,6 +273,8 @@ def append_coverage_history(payload: dict[str, object]) -> None:
 
 
 class PaperMarkdownBackfillJob(CronJobBase):
+    fresh = False
+
     def __init__(
         self,
         *,
@@ -278,10 +288,12 @@ class PaperMarkdownBackfillJob(CronJobBase):
         paid_canary: bool = False,
         retry_only: bool = False,
         repair_invalid_limit: int = 0,
+        lane: str | None = None,
     ):
         super().__init__("paper_markdown_backfill")
         self.settings = get_settings()
         self.full = full
+        self.fresh = lane == "fresh"
         self.should_execute = execute
         self.confirm = confirm
         self.max_jobs = max_jobs
@@ -307,18 +319,22 @@ class PaperMarkdownBackfillJob(CronJobBase):
 
     @property
     def profile(self):
+        if self.fresh:
+            return PAPER_MARKDOWN_FRESH_JOB_PROFILE
         return paper_markdown_job_profile(self.mode)
 
-    def _papers(self, *, recent_only: bool = False) -> list[dict[str, object]]:
+    def _papers(
+        self, *, recent_only: bool = False, window: timedelta | None = None
+    ) -> list[dict[str, object]]:
+        if window is None and (not self.full or recent_only):
+            window = FRESH_WINDOW if self.fresh else RECENT_WINDOW
         with db_manager.session_local() as db:
             query = select(Paper).where(
                 Paper.is_latest_version,
                 Paper.source.in_(("arxiv", "external")),
             )
-            if not self.full or recent_only:
-                query = query.where(
-                    Paper.created_at >= datetime.now(UTC) - timedelta(days=14)
-                )
+            if window is not None:
+                query = query.where(Paper.created_at >= datetime.now(UTC) - window)
                 query = query.order_by(Paper.created_at.desc(), Paper.id.desc())
             else:
                 in_conference = or_(
@@ -339,6 +355,12 @@ class PaperMarkdownBackfillJob(CronJobBase):
                     continue
                 papers[entry_paper_key(entry)] = entry
             return list(papers.values())
+
+    def _fresh_paper_keys(self) -> set[str]:
+        """Papers the fresh lane owns, which the hourly live lane skips."""
+        if self.full or self.fresh:
+            return set()
+        return {entry_paper_key(item) for item in self._papers(window=FRESH_WINDOW)}
 
     def _prepare_external_pages(self) -> dict[str, int]:
         """Turn HTML-only external papers without Markdown into Markdown."""
@@ -628,6 +650,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
             for job in jobs
             if job_stage(job) in ACTIVE_STAGES
             and job_labels(job).get("mode") == self.mode
+            and (job_labels(job).get("lane") == "fresh") == self.fresh
         ]
 
     def _budget_decision(
@@ -726,6 +749,8 @@ class PaperMarkdownBackfillJob(CronJobBase):
         }
         if replacement_for:
             labels["replacement_for"] = replacement_for
+        if self.fresh:
+            labels["lane"] = "fresh"
         return self.api.run_uv_job(
             str(SCRIPT),
             script_args=[
@@ -1086,7 +1111,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         launched: list[dict[str, str]] = []
         remaining_external_downloads = EXTERNAL_PDF_ARCHIVE_LIMIT
         run_id = (
-            f"{'backfill' if self.full else 'live'}-"
+            f"{'backfill' if self.full else 'live'}-{'fresh-' if self.fresh else ''}"
             f"{datetime.now(UTC):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
         )
         for shard_number, entries in enumerate(candidate_plans):
@@ -1309,7 +1334,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         status_paths = [
             f"_jobs/status/{entry_paper_key(item)}.json" for item in remaining
         ]
-        automatic_repairs = not self.retry_only
+        automatic_repairs = not self.retry_only and not self.fresh
         if getattr(self, "repair_invalid_limit", 0) or automatic_repairs:
             status_paths.extend(
                 f"_jobs/status/{entry_paper_key(item)}.json"
@@ -1329,10 +1354,15 @@ class PaperMarkdownBackfillJob(CronJobBase):
             )
             for path, payload in status_records.items()
         }
+        fresh_keys = self._fresh_paper_keys()
+        left_to_fresh_lane = 0
         candidates = []
         for item in remaining:
             status_path = f"_jobs/status/{entry_paper_key(item)}.json"
             disposition = dispositions.get(status_path)
+            if entry_paper_key(item) in fresh_keys:
+                left_to_fresh_lane += 1
+                continue
             if disposition is None or disposition == "retryable_due":
                 candidates.append({**item, "retry": disposition == "retryable_due"})
         missing_candidate_count = len(candidates)
@@ -1399,6 +1429,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 for item in papers
                 if str(item["output_key"]) in has_canonical
                 and entry_paper_key(item) not in queued
+                and entry_paper_key(item) not in fresh_keys
                 and semantic_records.get(str(item["output_key"])) != "invalid"
                 and not (self.full and str(item["output_key"]) in recent_keys)
             ]
@@ -1409,7 +1440,9 @@ class PaperMarkdownBackfillJob(CronJobBase):
             candidates.extend(layout_candidates)
         if self.retry_only:
             candidates = [item for item in candidates if item["retry"]]
-        failed_or_completed = max(0, len(remaining) - missing_candidate_count)
+        failed_or_completed = max(
+            0, len(remaining) - missing_candidate_count - left_to_fresh_lane
+        )
         repair_candidates = sum(
             bool(item.get("replace_invalid_sha256")) for item in candidates
         )
@@ -1426,7 +1459,13 @@ class PaperMarkdownBackfillJob(CronJobBase):
         )
         coverage = {
             "observed_at": datetime.now(UTC).isoformat(),
-            "scope": "full" if self.full else "recent_14_days",
+            "scope": (
+                "full"
+                if self.full
+                else "fresh_24_hours"
+                if self.fresh
+                else "recent_14_days"
+            ),
             "eligible_papers": len(papers),
             "canonical_markdown_count": canonical_after_upstream,
             "usable_markdown_count": usable_markdown,
@@ -1452,7 +1491,7 @@ class PaperMarkdownBackfillJob(CronJobBase):
         # After OCR dispatch, so a web-page failure cannot hold up PDF papers.
         external_pages = (
             {}
-            if self.retry_only or getattr(self, "repair_invalid_limit", 0)
+            if self.retry_only or self.fresh or getattr(self, "repair_invalid_limit", 0)
             else self._prepare_external_pages()
         )
         retryable_due = sum(
@@ -1485,9 +1524,14 @@ class PaperMarkdownBackfillJob(CronJobBase):
                 "selected_profile": self.profile.as_dict(),
             }
         )
-        append_coverage_history(coverage)
+        # Coverage history tracks the hourly scopes; a 5-minute lane would
+        # only add noise to it.
+        if not self.fresh:
+            append_coverage_history(coverage)
         metrics = {
             "mode": self.mode,
+            "lane": "fresh" if self.fresh else self.mode,
+            "left_to_fresh_lane": left_to_fresh_lane,
             "execute": self.should_execute,
             "eligible_papers": len(papers),
             "canonical_markdown": len(canonical),
@@ -1543,6 +1587,11 @@ class PaperMarkdownBackfillJob(CronJobBase):
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--full", action="store_true")
+    parser.add_argument(
+        "--lane",
+        choices=("fresh",),
+        help="fresh: OCR papers indexed in the last 24 hours on dedicated slots",
+    )
     parser.add_argument("--execute", action="store_true")
     parser.add_argument("--confirm", action="store_true")
     parser.add_argument("--max-jobs", type=int)
@@ -1574,6 +1623,14 @@ def main() -> None:
         parser.error(
             "invalid-object repair must run separately from other recovery modes"
         )
+    if args.lane and (
+        args.full
+        or args.retry_only
+        or args.repair_invalid_limit
+        or args.probe_volume
+        or args.recover_mount_failures
+    ):
+        parser.error("--lane fresh runs separately from other modes")
     if args.max_jobs is not None and args.max_jobs < 1:
         parser.error("--max-jobs must be positive")
     if args.probe_volume and args.recover_mount_failures:
@@ -1593,6 +1650,7 @@ def main() -> None:
         paid_canary=args.paid_canary,
         retry_only=args.retry_only,
         repair_invalid_limit=args.repair_invalid_limit,
+        lane=args.lane,
     )
     raise SystemExit(0 if job.execute() else 1)
 

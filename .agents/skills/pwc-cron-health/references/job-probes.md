@@ -11,6 +11,7 @@ For every managed leaderboard sync, fetch the current upstream source read-only 
 ## `paper_markdown_backfill`
 
 - **Effect:** Creates/copies paper Markdown objects and `_jobs/status/*.json` plus coverage/progress records in the paper-Markdown Hugging Face bucket; may launch OCR jobs.
+- **Lanes:** hourly live (14 days, minus the last 24 h) and full lanes share the `paper_markdown_backfill` lock; the 5-minute fresh lane (`--lane fresh`, `pwc-cron-paper-markdown-fresh.timer`, lock `paper_markdown_backfill.fresh`) owns papers indexed in the last 24 h and labels its HF jobs `mode=live, lane=fresh`. A paper older than an hour with no layout in `huggingface/pwc-papers-pages` means the fresh lane is stuck (check its HF jobs for SCHEDULING stalls).
 - **Independent proof:** Anti-join all latest arXiv papers—and recent 14-day papers separately—against expected object keys. Classify missing, invalid, empty, oversized, failed, interrupted, and unresolved-volume-mount states. Inspect coverage-history movement and orphan keys.
 - **Correctness:** Decode a stratified sample and verify nontrivial text, title/arXiv identity, version, and absence of obvious OCR/error payloads. Key existence alone is insufficient.
 

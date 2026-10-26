@@ -680,6 +680,7 @@ COMMANDS: dict[str, Job] = {
             "copy immutable upstream Markdown or dispatch one manifest per "
             "missing arXiv identity"
         ),
+        lane_arg="--lane",
     ),
     "process_curation_thumbnails": job(
         "-m",

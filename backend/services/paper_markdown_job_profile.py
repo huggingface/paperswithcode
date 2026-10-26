@@ -93,12 +93,25 @@ PAPER_MARKDOWN_BACKFILL_JOB_PROFILE = PaperMarkdownJobProfile(
     soft_deadline_seconds=int(6.5 * 3600),
     concurrency=4,
 )
+# The fresh lane is a live-mode slot pair for papers indexed in the last day,
+# so reader chat gets page-tagged layout within minutes instead of waiting
+# behind a 100-paper live shard (~3h). A five-paper live shard ran 10 minutes
+# on 2026-10-25, model start-up included; 2h leaves ample margin at $3.60.
+PAPER_MARKDOWN_FRESH_JOB_PROFILE = PaperMarkdownJobProfile(
+    profile_id="live-fresh-v1",
+    mode="live",
+    max_papers=10,
+    hard_timeout_seconds=2 * 3600,
+    soft_deadline_seconds=int(1.5 * 3600),
+    concurrency=2,
+)
 
 _PROFILES = {
     profile.profile_id: profile
     for profile in (
         PAPER_MARKDOWN_LIVE_JOB_PROFILE,
         PAPER_MARKDOWN_BACKFILL_JOB_PROFILE,
+        PAPER_MARKDOWN_FRESH_JOB_PROFILE,
     )
 }
 

@@ -255,15 +255,26 @@ CRON_JOBS: Tuple[CronJobDefinition, ...] = (
     CronJobDefinition(
         id="paper_markdown_backfill",
         scheduler="systemd",
-        schedule_policies=(SchedulePolicy.fixed(60, offset_minutes=17),),
+        schedule_policies=(
+            SchedulePolicy.fixed(60, offset_minutes=17),
+            SchedulePolicy.fixed(5),
+        ),
         schedule_grace_minutes=20,
         systemd_timer="pwc-cron-paper-markdown-backfill.timer",
         systemd_service="pwc-cron-paper-markdown-backfill.service",
-        systemd_extra_units=(),
+        systemd_extra_units=(
+            (
+                "pwc-cron-paper-markdown-fresh.timer",
+                "pwc-cron-paper-markdown-fresh.service",
+            ),
+        ),
         output_evaluator="paper_markdown",
         display_name="Paper Markdown Backfill",
         category="hourly",
-        schedule="17 * * * * (live and full backfill reconciliation)",
+        schedule=(
+            "17 * * * * (live and full backfill reconciliation); "
+            "*/5 * * * * (fresh lane, papers indexed in the last day)"
+        ),
         script_path="hourly/backfill_paper_markdown.py",
         log_name="paper_markdown_backfill",
         process_patterns=("backfill_paper_markdown",),
